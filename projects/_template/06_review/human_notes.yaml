@@ -1,0 +1,11 @@
+version: 1
+project_id: ""
+notes: []
+# Each note:
+#   - id: HN_001
+#     timestamp: <ISO 8601>
+#     reviewer: ""
+#     clip_refs: []          # optional, e.g. ["SEG_0012", "SEG_0045"]
+#     timeline_tc: ""        # optional, e.g. "00:01:23:10"
+#     observation: ""        # free-form comment
+#     severity: observation  # observation | suggestion | concern

@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/release-safety-report.schema.json",
+  "title": "Video OS Release Safety Report",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "artifact_version",
+    "created_at",
+    "base_timeline_version",
+    "source_of_truth",
+    "mode",
+    "summary",
+    "checks",
+    "waivers",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": { "const": "enforce" },
+          "checks": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "severity": { "const": "fatal" },
+                "status": { "const": "fail" }
+              },
+              "required": ["severity", "status"]
+            }
+          }
+        },
+        "required": ["mode", "checks"]
+      },
+      "then": {
+        "properties": {
+          "summary": {
+            "type": "object",
+            "properties": {
+              "status": { "const": "blocked" }
+            },
+            "required": ["status"]
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "pattern": "^(release-safety|package)-v\\d+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "base_timeline_version": { "type": "string", "minLength": 1 },
+    "source_of_truth": { "type": "string", "enum": ["engine_render", "nle_finishing"] },
+    "mode": { "type": "string", "enum": ["dry_run", "report_only", "enforce"] },
+    "summary": {
+      "type": "object",
+      "required": ["status", "fatal_count", "blocker_count", "warning_count", "waived_count"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "blocked", "pass_with_waiver", "not_evaluated"] },
+        "fatal_count": { "type": "integer", "minimum": 0 },
+        "blocker_count": { "type": "integer", "minimum": 0 },
+        "warning_count": { "type": "integer", "minimum": 0 },
+        "waived_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "checks": { "type": "array", "items": { "$ref": "#/$defs/release-check" } },
+    "waivers": { "type": "array", "items": { "$ref": "#/$defs/release-waiver" } },
+    "provenance": { "$ref": "#/$defs/release-provenance" }
+  },
+  "$defs": {
+    "release-check": {
+      "type": "object",
+      "required": ["check_id", "category", "severity", "status", "message", "artifact_refs"],
+      "additionalProperties": false,
+      "properties": {
+        "check_id": { "type": "string", "pattern": "^RSCHK_[A-Za-z0-9_-]+$" },
+        "category": {
+          "type": "string",
+          "enum": [
+            "editorial_review",
+            "schema_validation",
+            "technical_qa",
+            "delivery_profile",
+            "rights",
+            "privacy",
+            "source_of_truth",
+            "caption_audio",
+            "music_audio",
+            "package_completeness",
+            "source_manifest"
+          ]
+        },
+        "severity": { "type": "string", "enum": ["info", "warning", "blocker", "fatal"] },
+        "status": { "type": "string", "enum": ["pass", "fail", "not_evaluated", "waived"] },
+        "message": { "type": "string", "minLength": 1 },
+        "artifact_refs": { "type": "array", "items": { "$ref": "#/$defs/artifact-ref" } }
+      }
+    },
+    "release-waiver": {
+      "type": "object",
+      "required": ["waiver_id", "approved_by", "approved_at", "scope", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "waiver_id": { "type": "string", "pattern": "^RSWVR_[A-Za-z0-9_-]+$" },
+        "approved_by": { "type": "string", "minLength": 1 },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "scope": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "expires_at": { "type": ["string", "null"], "format": "date-time" },
+        "applies_to_artifact_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "artifact-ref": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "release-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["/package", "/render"] },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/artifact-ref" } },
+        "hash_policy": {
+          "type": "object",
+          "required": ["algorithm", "canonicalization", "excluded_fields"],
+          "additionalProperties": false,
+          "properties": {
+            "algorithm": { "type": "string", "enum": ["sha256"] },
+            "canonicalization": { "type": "string", "enum": ["yaml-to-normalized-json-v1"] },
+            "excluded_fields": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    }
+  }
+}

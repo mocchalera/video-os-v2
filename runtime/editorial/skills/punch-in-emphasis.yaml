@@ -1,0 +1,16 @@
+id: punch_in_emphasis
+category: metadata
+primary_phase: export
+status: active
+required_signals:
+  - speech_intensity_score
+  - face_detected
+when:
+  - "speech_intensity_score >= 0.7"
+  - "face_detected == true"
+avoid_when:
+  - "visual_tags contains screen_demo"
+effects:
+  metadata_tags:
+    - zoom_emphasis
+    - high_intensity

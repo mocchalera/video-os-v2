@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-os.dev/schemas/public-projection-policy.schema.json",
+  "title": "Public Projection Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "verifier_version",
+    "include",
+    "exclude",
+    "transforms",
+    "secret_scan"
+  ],
+  "properties": {
+    "version": { "const": "public-projection-policy/v1" },
+    "verifier_version": { "const": "public-projection-verifier/v1" },
+    "include": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pattern" }
+    },
+    "exclude": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pattern", "reason"],
+        "properties": {
+          "pattern": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "transforms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pattern", "transform_id"],
+        "properties": {
+          "pattern": { "type": "string", "minLength": 1 },
+          "transform_id": { "enum": ["redact-local-user-paths-v1"] }
+        }
+      }
+    },
+    "secret_scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approved_producers", "approved_scanners"],
+      "properties": {
+        "approved_producers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "producer_id",
+              "wrapper_version",
+              "wrapper_sha256",
+              "verifier_sha256",
+              "key_id"
+            ],
+            "properties": {
+              "producer_id": { "type": "string", "minLength": 1 },
+              "wrapper_version": { "type": "string", "minLength": 1 },
+              "wrapper_sha256": { "$ref": "#/$defs/sha256" },
+              "verifier_sha256": { "$ref": "#/$defs/sha256" },
+              "key_id": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "approved_scanners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "version",
+              "binary_sha256",
+              "rules_sha256"
+            ],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "version": { "type": "string", "minLength": 1 },
+              "binary_sha256": { "$ref": "#/$defs/sha256" },
+              "rules_sha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pattern"],
+      "properties": {
+        "pattern": { "type": "string", "minLength": 1 }
+      }
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

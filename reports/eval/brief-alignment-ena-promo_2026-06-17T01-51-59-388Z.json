@@ -1,0 +1,178 @@
+{
+  "version": "1",
+  "project": "ena-promo",
+  "evaluated_at": "2026-06-17T01:51:59.388Z",
+  "brief_hash": "sha256:4fffa7c3115604e0f3a439f2f122bfea5010b82737d7e10e7b8ab945a87d5805",
+  "stages": {
+    "selects": {
+      "score": 0.623,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [],
+          "gaps": [
+            "must_avoid evidence found in SEG_AST_2458305F_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_E4C3E126_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_B28FF61E_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_BA264D3E_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_02352E6C_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_0CBD2398_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_8E177594_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_B5DD7EC5_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_FA6BF8D4_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_374B8454_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_7FFADD3B_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_0ABE9883_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_720960EC_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_842E9AB2_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_0C0DA029_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_5A089060_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_FCB9B51E_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_998D5C89_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_DB9645BB_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_0CBD2398_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_C96907DD_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_42069045_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_9C822C55_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_C2CE75D8_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_0B1ACF7D_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_ABC69F0E_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_54328ECB_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_47926EA2_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_ADFDD653_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_E1A9B641_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_6FEA8B0A_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_E98C7A35_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_5F18A179_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_45CAE530_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_36832BA5_0001: text-heavy information overlays",
+            "must_avoid evidence found in SEG_AST_09AA1D70_0001: text-heavy information overlays"
+          ]
+        },
+        "must_have_coverage": {
+          "score": 1,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/5 selectable must_have items matched",
+            "selection coverage analyzer score 100.0%"
+          ],
+          "gaps": []
+        },
+        "emotion_curve_alignment": {
+          "score": 0.426,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "0/100 active candidates carry emotion/peak signals"
+          ],
+          "gaps": [
+            "selects expose little deterministic emotion-curve evidence"
+          ]
+        },
+        "narrative_structure": {
+          "score": 0.675,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "3 role types represented in selects"
+          ],
+          "gaps": [
+            "selects do not expose a clear closing/payoff candidate"
+          ]
+        },
+        "pacing_coherence": {
+          "score": 1,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "selected source duration 173.3s for 230s target"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.865,
+          "confidence": 0.65,
+          "judge_source": "deterministic",
+          "evidence": [
+            "93/100 unique assets",
+            "3 active roles represented",
+            "semantic clusters unavailable; used segment diversity fallback"
+          ],
+          "gaps": []
+        }
+      }
+    },
+    "blueprint": {
+      "score": 0.725,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.85,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "blueprint text explicitly overlaps with brief message"
+          ],
+          "gaps": []
+        },
+        "must_have_coverage": {
+          "score": 0.7,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "6 blueprint beats available for must_have placement"
+          ],
+          "gaps": []
+        },
+        "emotion_curve_alignment": {
+          "score": 0.25,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "0/5 emotion_curve terms appear in blueprint",
+            "hook and closing beats are present"
+          ],
+          "gaps": [
+            "not all emotion_curve terms are explicit in blueprint"
+          ]
+        },
+        "narrative_structure": {
+          "score": 1,
+          "confidence": 0.85,
+          "judge_source": "deterministic",
+          "evidence": [
+            "story roles: hook -> setup -> experience -> experience -> experience -> closing",
+            "6 beats with 4 sequence goals"
+          ],
+          "gaps": []
+        },
+        "pacing_coherence": {
+          "score": 1,
+          "confidence": 0.82,
+          "judge_source": "deterministic",
+          "evidence": [
+            "brief target 230s; blueprint target 229.75s",
+            "6 beats planned",
+            "duration_policy mode=guide"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.65,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "6 beats define role requirements"
+          ],
+          "gaps": []
+        }
+      }
+    }
+  },
+  "composite": 0.5,
+  "notes": [
+    "composite capped at 0.50 because must_avoid evidence was found"
+  ]
+}

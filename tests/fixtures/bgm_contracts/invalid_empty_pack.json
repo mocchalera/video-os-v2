@@ -1,0 +1,24 @@
+{
+  "version": "1.0.0",
+  "pack_id": "video-os-test-bgm",
+  "pack_version": "1.0.0",
+  "title": "Invalid Empty Pack",
+  "created_at": "2026-07-16T00:00:00.000Z",
+  "catalog_license": "CC0-1.0",
+  "default_content_license": "CC0-1.0",
+  "compatible_video_os": {
+    "contract_min": "0.1.0",
+    "contract_max": "1.0.0"
+  },
+  "tracks": [],
+  "provenance": {
+    "producer": "video-os-contract-tests",
+    "source_type": "project_local",
+    "evidence_refs": []
+  },
+  "hash_policy": {
+    "algorithm": "sha256",
+    "canonicalization": "normalized-json-v1",
+    "excluded_fields": []
+  }
+}

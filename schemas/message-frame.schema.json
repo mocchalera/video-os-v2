@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/message-frame.schema.json",
+  "title": "Video OS Message Frame (Operational)",
+  "type": "object",
+  "required": ["story_promise", "hook_angle", "closing_intent", "beat_strategy"],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "story_promise": { "type": "string", "minLength": 1 },
+    "hook_angle": { "type": "string", "minLength": 1 },
+    "closing_intent": { "type": "string", "minLength": 1 },
+    "resolved_profile_candidate": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string" },
+        "rationale": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "resolved_policy_candidate": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string" },
+        "rationale": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "beat_strategy": {
+      "type": "object",
+      "required": ["beat_count", "role_sequence"],
+      "properties": {
+        "beat_count": { "type": "integer", "minimum": 1 },
+        "role_sequence": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["hook", "setup", "experience", "closing"] }
+        },
+        "chronology_bias": { "type": "string" },
+        "target_duration_window": {
+          "type": "object",
+          "properties": {
+            "min_sec": { "type": "number" },
+            "max_sec": { "type": "number" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "quality_targets": {
+      "type": "object",
+      "properties": {
+        "hook_density_min": { "type": "number" },
+        "novelty_rate_min": { "type": "number" },
+        "duration_pacing_tolerance_pct": { "type": "number" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/bgm-shortlist-review.schema.json",
+  "title": "Video OS BGM Shortlist Review Queue",
+  "description": "Hash-verified private audition queue. Promotion remains human- and rights-gated.",
+  "type": "object",
+  "required": [
+    "version", "artifact_kind", "created_at", "source", "catalog",
+    "status", "counts", "tracks", "issues"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "artifact_kind": { "const": "bgm-shortlist-review" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "required": ["shortlist_hash", "shortlist_created_at", "candidate_count_considered", "method_warning"],
+      "additionalProperties": false,
+      "properties": {
+        "shortlist_hash": { "$ref": "#/$defs/contentHash" },
+        "shortlist_created_at": { "type": "string", "format": "date-time" },
+        "candidate_count_considered": { "type": "integer", "minimum": 0 },
+        "method_warning": { "type": "string", "minLength": 1 }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "required": ["pack_id", "schema_version", "content_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "pack_id": { "type": "string", "minLength": 1 },
+        "schema_version": { "type": "string", "minLength": 1 },
+        "content_hash": { "$ref": "#/$defs/contentHash" }
+      }
+    },
+    "status": { "type": "string", "enum": ["ready_for_musical_review", "blocked"] },
+    "counts": {
+      "type": "object",
+      "required": ["tracks", "shortlisted_candidates", "source_verified", "promotion_eligible", "errors", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "tracks": { "type": "integer", "minimum": 0 },
+        "shortlisted_candidates": { "type": "integer", "minimum": 0 },
+        "source_verified": { "type": "integer", "minimum": 0 },
+        "promotion_eligible": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tracks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/track" }
+    },
+    "issues": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/issue" }
+    }
+  },
+  "$defs": {
+    "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "sourceRef": { "type": "string", "pattern": "^batch:[1-9][0-9]*/input/[^/\\\\]+$" },
+    "issue": {
+      "type": "object",
+      "required": ["code", "severity", "affected_ref", "message", "suggested_action"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "pattern": "^BGM_SHORTLIST_[A-Z0-9_]+$" },
+        "severity": { "type": "string", "enum": ["error", "warning"] },
+        "affected_ref": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "suggested_action": { "type": "string", "minLength": 1 }
+      }
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "musical_fit", "dialogue_bed", "artifact_quality", "originality",
+        "rights", "reviewer_ref", "reviewed_at", "notes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "musical_fit": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "dialogue_bed": { "type": "string", "enum": ["pending", "passed", "failed"] },
+        "artifact_quality": { "type": "string", "enum": ["pending", "passed", "failed"] },
+        "originality": { "type": "string", "enum": ["pending", "passed", "concern"] },
+        "rights": { "type": "string", "enum": ["pending", "operator_declared_ok", "licensed", "blocked"] },
+        "reviewer_ref": { "type": ["string", "null"], "minLength": 1 },
+        "reviewed_at": { "type": ["string", "null"], "format": "date-time" },
+        "notes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "candidate_id", "technical_rank", "batch", "filename", "source_ref",
+        "content_hash", "size_bytes", "source_verified", "target_duration_sec",
+        "duration_sec", "target_bpm", "measured_bpm", "normalized_bpm",
+        "technical_score", "source_comment", "recommended_for_audition", "review", "promotion_eligible"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*--b[1-9][0-9]*--[a-f0-9]{12}$" },
+        "technical_rank": { "type": "integer", "minimum": 1 },
+        "batch": { "type": "integer", "minimum": 1 },
+        "filename": { "type": "string", "minLength": 1 },
+        "source_ref": { "$ref": "#/$defs/sourceRef" },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "source_verified": { "type": "boolean" },
+        "target_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "target_bpm": { "type": "number", "exclusiveMinimum": 0 },
+        "measured_bpm": { "type": "number", "exclusiveMinimum": 0 },
+        "normalized_bpm": { "type": "number", "exclusiveMinimum": 0 },
+        "technical_score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "source_comment": { "type": "string", "minLength": 1 },
+        "recommended_for_audition": { "type": "boolean" },
+        "review": { "$ref": "#/$defs/review" },
+        "promotion_eligible": { "type": "boolean" }
+      }
+    },
+    "track": {
+      "type": "object",
+      "required": ["track_id", "working_title", "family", "intensity", "use_cases", "note", "candidates"],
+      "additionalProperties": false,
+      "properties": {
+        "track_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "working_title": { "type": "string", "minLength": 1 },
+        "family": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$" },
+        "intensity": { "type": "string", "enum": ["low", "high"] },
+        "use_cases": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "note": { "type": "string", "minLength": 1 },
+        "candidates": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/candidate" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+id: build_to_peak
+category: linear_sequence
+primary_phase: normalize
+status: active
+required_signals:
+  - speech_intensity_score
+when:
+  - "beat count >= 3"
+  - "story_arc.strategy != chronological or allow_time_reorder"
+avoid_when:
+  - "beat count < 3"
+effects:
+  score_bonus: 0.1
+  duration_bias_frames: 0
+  metadata_tags:
+    - intensity_gradient

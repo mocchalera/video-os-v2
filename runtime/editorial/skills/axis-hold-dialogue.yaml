@@ -1,0 +1,13 @@
+id: axis_hold_dialogue
+category: linear_sequence
+primary_phase: assemble
+status: active
+required_signals: []
+when:
+  - "speaker_topology in [solo_primary, interviewer_guest]"
+avoid_when:
+  - "dominant_visual_mode == event_broll"
+effects:
+  score_penalty: 0.2
+  metadata_tags:
+    - axis_continuity

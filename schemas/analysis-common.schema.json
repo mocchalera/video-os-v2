@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/analysis-common.schema.json",
+  "title": "Video OS Analysis Common Definitions",
+  "description": "Shared $defs for analysis artifact schemas (M2 Phase 1)",
+  "$defs": {
+    "confidence-record": {
+      "type": "object",
+      "required": ["score", "source", "status"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["raw", "calibrated", "human_verified", "low_signal", "unsupported", "ready", "partial", "confirmed", "provisional", "skipped"]
+        },
+        "label": { "type": "string" },
+        "calibration_model_id": {
+          "type": ["string", "null"],
+          "pattern": "^CALMOD_[A-Za-z0-9_-]+$"
+        },
+        "calibrated_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "confidence_bucket": {
+          "type": ["string", "null"],
+          "enum": ["very_low", "low", "medium", "high", "very_high", null]
+        },
+        "expected_error_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "eval_set_id": {
+          "type": ["string", "null"],
+          "pattern": "^EVALSET_[A-Za-z0-9_-]+$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "provenance-record": {
+      "type": "object",
+      "required": ["stage", "method", "connector_version", "policy_hash", "request_hash"],
+      "properties": {
+        "stage": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "connector_version": { "type": "string", "minLength": 1 },
+        "policy_hash": { "type": "string", "minLength": 1 },
+        "request_hash": { "type": "string", "minLength": 1 },
+        "model_alias": { "type": "string" },
+        "model_snapshot": { "type": "string" },
+        "prompt_template_id": { "type": "string" },
+        "prompt_hash": { "type": "string" },
+        "response_format": { "type": "string" },
+        "runtime": { "type": "string" },
+        "skipped_reason": { "type": "string" },
+        "chunking_strategy": { "type": "string" },
+        "ffmpeg_version": { "type": "string" },
+        "provider_request_id": { "type": "string" },
+        "frame_count": { "type": "integer", "minimum": 0 },
+        "sample_timestamps_us": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "requested_sample_timestamps_us": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "frame_cache_version": { "type": "string", "minLength": 1 },
+        "frame_producer_version": { "type": "string", "minLength": 1 },
+        "frame_cache_hits": { "type": "integer", "minimum": 0 },
+        "frame_content_sha256": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "asset_source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "segment_src_in_us": { "type": "integer", "minimum": 0 },
+        "segment_src_out_us": { "type": "integer", "minimum": 0 },
+        "cache_identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "cache_decision": { "type": "string", "enum": ["accepted", "refreshed", "miss"] },
+        "cache_decision_reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "provenance_schema_version": { "type": "string", "minLength": 1 },
+        "frame_extraction_failures": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "analysis-status": {
+      "type": "string",
+      "enum": ["pending", "ready", "partial", "skipped", "failed"]
+    }
+  }
+}

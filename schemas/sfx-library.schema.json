@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/sfx-library.schema.json",
+  "title": "Video OS SFX Library",
+  "description": "A local, versioned SFX library with hash-bound assets and explicit rights/provenance evidence.",
+  "type": "object",
+  "required": ["version", "library_id", "library_version", "assets"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "sfx-library/v1" },
+    "library_id": { "$ref": "#/$defs/stableId" },
+    "library_version": { "type": "string", "minLength": 1 },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/asset" }
+    }
+  },
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "opaqueRef": {
+      "type": "string",
+      "pattern": "^(?:evidence|rights|provenance|source|local|urn):[A-Za-z0-9][A-Za-z0-9._~/-]*$"
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001F\\u007F]).+$"
+    },
+    "asset": {
+      "type": "object",
+      "required": [
+        "asset_id",
+        "semantic_roles",
+        "path",
+        "content_hash",
+        "size_bytes",
+        "duration_us",
+        "rights",
+        "provenance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "$ref": "#/$defs/stableId" },
+        "semantic_roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/semanticRole" }
+        },
+        "path": { "$ref": "#/$defs/safeRelativePath" },
+        "content_hash": { "$ref": "#/$defs/hash" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "duration_us": { "type": "integer", "minimum": 1 },
+        "rights": {
+          "type": "object",
+          "required": ["status", "basis", "usage_scope", "evidence_ref"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "const": "confirmed" },
+            "basis": {
+              "type": "string",
+              "enum": ["local_rights_confirmation", "deterministic_synthesis"]
+            },
+            "usage_scope": {
+              "type": "string",
+              "enum": ["internal_audition", "project_render", "commercial", "public_release"]
+            },
+            "evidence_ref": { "$ref": "#/$defs/opaqueRef" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["origin", "source_ref", "generated_at"],
+          "additionalProperties": false,
+          "properties": {
+            "origin": {
+              "type": "string",
+              "enum": ["existing_generated_local", "deterministic_synthesis", "recorded_local"]
+            },
+            "source_ref": { "$ref": "#/$defs/opaqueRef" },
+            "generation_id": { "type": ["string", "null"], "minLength": 1 },
+            "generated_at": {
+              "anyOf": [
+                { "type": "string", "format": "date-time" },
+                { "type": "null" }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "semanticRole": {
+      "type": "string",
+      "enum": [
+        "hook_impact",
+        "transition_accent",
+        "claim_emphasis",
+        "achievement_reveal",
+        "simple_sound"
+      ]
+    }
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/confidence-calibration-report.schema.json",
+  "title": "Video OS Confidence Calibration Report",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "artifact_version",
+    "created_at",
+    "report_id",
+    "eval_set_id",
+    "calibration_model_id",
+    "artifact_versions",
+    "metrics",
+    "buckets",
+    "failures",
+    "recommendations",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "const": "calibration-report-v1" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "report_id": { "type": "string", "pattern": "^CALRPT_[A-Za-z0-9_-]+$" },
+    "eval_set_id": { "type": "string", "pattern": "^EVALSET_[A-Za-z0-9_-]+$" },
+    "calibration_model_id": { "type": "string", "pattern": "^CALMOD_[A-Za-z0-9_-]+$" },
+    "artifact_versions": {
+      "type": "object",
+      "required": ["audio_story_graph_version", "continuity_graph_version", "assets_version"],
+      "additionalProperties": { "$ref": "#/$defs/artifact-version-ref" },
+      "properties": {
+        "audio_story_graph_version": { "$ref": "#/$defs/artifact-version-ref" },
+        "continuity_graph_version": { "$ref": "#/$defs/artifact-version-ref" },
+        "assets_version": { "$ref": "#/$defs/artifact-version-ref" },
+        "release_safety_report_version": { "$ref": "#/$defs/artifact-version-ref" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "boundary_error_seconds",
+        "tag_precision",
+        "tag_recall",
+        "peak_timestamp_error_seconds",
+        "speaker_attribution_accuracy",
+        "continuity_match_precision",
+        "release_safety_false_negative_rate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "boundary_error_seconds": { "type": "number", "minimum": 0 },
+        "tag_precision": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tag_recall": { "type": "number", "minimum": 0, "maximum": 1 },
+        "peak_timestamp_error_seconds": { "type": "number", "minimum": 0 },
+        "speaker_attribution_accuracy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "continuity_match_precision": { "type": "number", "minimum": 0, "maximum": 1 },
+        "release_safety_false_negative_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "buckets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bucket" }
+    },
+    "failures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/failure" }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "provenance": { "$ref": "#/$defs/artifact-provenance" }
+  },
+  "$defs": {
+    "artifact-version-ref": {
+      "type": "object",
+      "required": ["version", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "bucket": {
+      "type": "object",
+      "required": ["bucket", "sample_count", "observed_accuracy", "expected_accuracy"],
+      "additionalProperties": false,
+      "properties": {
+        "bucket": { "type": "string", "enum": ["very_low", "low", "medium", "high", "very_high"] },
+        "sample_count": { "type": "integer", "minimum": 0 },
+        "observed_accuracy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_accuracy": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "required": ["failure_id", "severity", "message", "artifact_refs"],
+      "additionalProperties": false,
+      "properties": {
+        "failure_id": { "type": "string", "pattern": "^CALFAIL_[A-Za-z0-9_-]+$" },
+        "severity": { "type": "string", "enum": ["info", "warning", "blocker"] },
+        "message": { "type": "string", "minLength": 1 },
+        "artifact_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact-ref" }
+        }
+      }
+    },
+    "artifact-ref": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "artifact-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["scripts/eval-confidence-calibration.ts"] },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "hash"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+              "required": { "type": "boolean" }
+            }
+          }
+        },
+        "hash_policy": {
+          "type": "object",
+          "required": ["algorithm", "canonicalization", "excluded_fields"],
+          "additionalProperties": false,
+          "properties": {
+            "algorithm": { "type": "string", "const": "sha256" },
+            "canonicalization": { "type": "string", "const": "normalized-json-v1" },
+            "excluded_fields": {
+              "type": "array",
+              "contains": { "type": "string", "const": "created_at" },
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

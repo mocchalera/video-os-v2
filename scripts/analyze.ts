@@ -1,0 +1,430 @@
+#!/usr/bin/env npx tsx
+/**
+ * CLI entrypoint for the M2 analysis pipeline.
+ *
+ * Usage:
+ *   npx tsx scripts/analyze.ts <source-files...> --project <project-dir>
+ *   npx tsx scripts/analyze.ts video1.mp4 video2.mov --project projects/my-project
+ *   npx tsx scripts/analyze.ts video.mp4 --project projects/test --skip-stt --skip-vlm
+ *   npx tsx scripts/analyze.ts --project projects/test --vlm-only
+ */
+
+import { config as dotenvConfig } from "dotenv";
+dotenvConfig({ path: ".env.local" });
+dotenvConfig(); // fallback: .env
+
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+import { runPipeline, SourceReadinessError } from "../runtime/pipeline/ingest.js";
+import { createGeminiVlmFn } from "../runtime/connectors/gemini-vlm.js";
+import { DEFAULT_APPRAISER_MODEL } from "../runtime/connectors/gemini-appraiser.js";
+import { availableEditorialLlmRuntimes } from "../runtime/connectors/editorial-llm.js";
+import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
+import {
+  createMarlinFnFromEnvironment,
+  marlinModelFromEnvironment,
+  marlinQueriesFromEnvironment,
+  shouldRunMarlinAnalysis,
+} from "../runtime/pipeline/stages/marlin.js";
+import {
+  DEFAULT_VLM_CONCURRENCY,
+  type VlmProgressReporter,
+} from "../runtime/pipeline/vlm-analysis.js";
+import { runPreflight } from "./preflight.js";
+import {
+  normalizeSourceLocators,
+  type SourceDiscoveryResult,
+} from "../runtime/media/source-discovery.js";
+import { persistAnalyzeReadinessArtifacts } from "../runtime/commands/analyze.js";
+import { readProjectState } from "../runtime/state/reconcile.js";
+
+// ── Arg Parsing ────────────────────────────────────────────────────
+
+function parseArgs(argv: string[]): {
+  sourceFiles: string[];
+  projectDir: string;
+  skipStt: boolean;
+  skipVlm: boolean;
+  skipDiarize: boolean;
+  skipPeak: boolean;
+  skipMarlin: boolean;
+  skipAppraiser: boolean;
+  skipMediaLink: boolean;
+  skipPreflight: boolean;
+  vlmOnly: boolean;
+  language: string | undefined;
+  sttProvider: string | undefined;
+  sttStrategy: "full" | "skip" | "auto";
+  contentHint: string | undefined;
+  concurrency: number;
+  noCache: boolean;
+  clearCache: boolean;
+} {
+  const args = argv.slice(2); // skip node + script path
+  const sourceFiles: string[] = [];
+  let projectDir = "";
+  let skipStt = false;
+  let skipVlm = false;
+  let skipDiarize = false;
+  let skipPeak = false;
+  let skipMarlin = false;
+  let skipAppraiser = false;
+  let skipMediaLink = false;
+  let skipPreflight = false;
+  let vlmOnly = false;
+  let language: string | undefined;
+  let sttProvider: string | undefined;
+  let sttStrategy: "full" | "skip" | "auto" = "full";
+  let contentHint: string | undefined;
+  let concurrency = DEFAULT_VLM_CONCURRENCY;
+  let noCache = false;
+  let clearCache = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--project" || arg === "-p") {
+      projectDir = args[++i] ?? "";
+    } else if (arg === "--skip-stt") {
+      skipStt = true;
+      sttStrategy = "skip";
+    } else if (arg === "--skip-vlm") {
+      skipVlm = true;
+    } else if (arg === "--skip-diarize") {
+      skipDiarize = true;
+    } else if (arg === "--skip-peak") {
+      skipPeak = true;
+    } else if (arg === "--skip-marlin") {
+      skipMarlin = true;
+    } else if (arg === "--skip-appraiser") {
+      skipAppraiser = true;
+    } else if (arg === "--skip-media-link") {
+      skipMediaLink = true;
+    } else if (arg === "--skip-preflight") {
+      skipPreflight = true;
+    } else if (arg === "--vlm-only") {
+      vlmOnly = true;
+    } else if (arg === "--language" || arg === "-l") {
+      language = args[++i] ?? undefined;
+    } else if (arg === "--stt-provider") {
+      sttProvider = args[++i] ?? undefined;
+    } else if (arg === "--stt-strategy") {
+      const value = args[++i] ?? "";
+      if (!isSttStrategy(value)) {
+        console.error('Error: --stt-strategy must be one of "full", "skip", or "auto"');
+        process.exit(1);
+      }
+      sttStrategy = value;
+      if (sttStrategy === "skip") skipStt = true;
+    } else if (arg === "--content-hint") {
+      contentHint = args[++i] ?? undefined;
+    } else if (arg === "--concurrency") {
+      const value = Number.parseInt(args[++i] ?? "", 10);
+      if (!Number.isInteger(value) || value < 1) {
+        console.error("Error: --concurrency must be a positive integer");
+        process.exit(1);
+      }
+      concurrency = value;
+    } else if (arg === "--no-cache") {
+      noCache = true;
+    } else if (arg === "--clear-cache") {
+      clearCache = true;
+    } else if (arg === "--help" || arg === "-h") {
+      console.log(`Usage: npx tsx scripts/analyze.ts <source-files...> --project <project-dir>
+
+Options:
+  --project, -p      Project directory (required)
+  --concurrency      Concurrent VLM asset jobs (default: ${DEFAULT_VLM_CONCURRENCY})
+  --vlm-only         Re-run VLM enrichment and peak detection from existing assets/segments
+  --skip-stt         Skip speech-to-text stage
+  --stt-strategy     STT strategy: "full", "skip", or "auto" (default: "full")
+  --skip-vlm         Skip visual language model stage
+  --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
+  --skip-peak        Skip VLM peak detection stage
+  --skip-marlin      Skip Marlin-2B temporal semantic pass
+  --skip-appraiser   Skip Gemini single-frame appraiser pass
+  --skip-media-link  Skip 02_media symlink generation
+  --skip-preflight   Skip pre-flight environment checks
+  --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
+  --stt-provider     STT provider: "groq" or "openai" (auto-detected if omitted)
+  --content-hint     Content context for VLM (e.g. "子供の自転車練習")
+  --no-cache         Disable analysis cache (re-analyze everything)
+  --clear-cache      Clear existing cache, then re-analyze
+  --help, -h         Show this help
+`);
+      process.exit(0);
+    } else if (!arg.startsWith("-")) {
+      sourceFiles.push(arg);
+    }
+  }
+
+  if (!projectDir) {
+    console.error("Error: --project <project-dir> is required");
+    process.exit(1);
+  }
+
+  if (sourceFiles.length === 0 && !vlmOnly) {
+    console.error("Error: at least one source file is required");
+    process.exit(1);
+  }
+
+  return {
+    sourceFiles,
+    projectDir,
+    skipStt,
+    skipVlm,
+    skipDiarize,
+    skipPeak,
+    skipMarlin,
+    skipAppraiser,
+    skipMediaLink,
+    skipPreflight,
+    vlmOnly,
+    language,
+    sttProvider,
+    sttStrategy,
+    contentHint,
+    concurrency,
+    noCache,
+    clearCache,
+  };
+}
+
+function isSttStrategy(value: string): value is "full" | "skip" | "auto" {
+  return value === "full" || value === "skip" || value === "auto";
+}
+
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${totalSeconds}s`;
+  return `${minutes}m ${seconds}s`;
+}
+
+// ── Main ───────────────────────────────────────────────────────────
+
+export async function main(argv: string[] = process.argv): Promise<number> {
+  const repoRoot = path.resolve(import.meta.dirname, "..");
+  const {
+    sourceFiles,
+    projectDir,
+    skipStt,
+    skipVlm,
+    skipDiarize,
+    skipPeak,
+    skipMarlin,
+    skipAppraiser,
+    skipMediaLink,
+    skipPreflight,
+    vlmOnly,
+    language,
+    sttProvider,
+    sttStrategy,
+    contentHint,
+    concurrency,
+    noCache,
+    clearCache,
+  } = parseArgs(argv);
+  const absoluteProjectDir = path.resolve(projectDir);
+  const normalizedSourceFiles = normalizeSourceLocators(sourceFiles, process.cwd());
+  const projectId = readCliProjectId(absoluteProjectDir);
+
+  // ── Pre-flight checks ──────────────────────────────────────────
+  let sourceDiscovery: SourceDiscoveryResult | undefined;
+  if (!skipPreflight && !vlmOnly) {
+    console.log("[analyze] Running pre-flight checks...");
+    const preflight = runPreflight(normalizedSourceFiles);
+    sourceDiscovery = preflight.discovery;
+    for (const check of preflight.checks) {
+      const icon = check.status === "pass" ? "✓" : check.status === "warn" ? "⚠" : "✗";
+      console.log(`  ${icon} ${check.name}: ${check.detail}`);
+    }
+    if (!preflight.ok) {
+      persistAnalyzeReadinessArtifacts(
+        absoluteProjectDir,
+        projectId,
+        preflight.discovery,
+        undefined,
+        {
+          stage: "preflight",
+          reason: `preflight_failed:${preflight.checks
+            .filter((check) => check.status === "fail")
+            .map((check) => `${check.name}:${check.detail}`)
+            .join(" | ")}`,
+        },
+      );
+      console.error("[analyze] Pre-flight failed. Fix the issues above or use --skip-preflight.");
+      return 1;
+    }
+    console.log("[analyze] Pre-flight passed.\n");
+  }
+
+  console.log(`[analyze] Project: ${absoluteProjectDir}`);
+  console.log(`[analyze] Sources: ${normalizedSourceFiles.join(", ")}`);
+  if (vlmOnly) console.log("[analyze] Mode: VLM only");
+  if (skipStt) console.log("[analyze] STT: skipped");
+  if (!skipStt && sttStrategy !== "full") console.log(`[analyze] STT strategy: ${sttStrategy}`);
+  if (skipVlm) console.log("[analyze] VLM: skipped");
+  if (skipDiarize) console.log("[analyze] Diarization: skipped");
+  if (skipPeak) console.log("[analyze] Peak detection: skipped");
+  if (skipMarlin) console.log("[analyze] Marlin: skipped");
+  if (skipAppraiser) console.log("[analyze] Appraiser: skipped");
+  if (skipMediaLink) console.log("[analyze] Media links: skipped");
+  if (language) console.log(`[analyze] Language: ${language}`);
+  if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
+  if (contentHint) console.log(`[analyze] Content hint: ${contentHint}`);
+  if (!skipVlm) console.log(`[analyze] VLM concurrency: ${concurrency}`);
+  if (noCache) console.log("[analyze] Cache: disabled");
+  if (clearCache) console.log("[analyze] Cache: clearing");
+  if (!skipAppraiser) {
+    const appraiserRuntimes = availableEditorialLlmRuntimes({
+      images: [{ path: "__appraiser_frame__.jpg", mimeType: "image/jpeg" }],
+    });
+    if (appraiserRuntimes.length > 0) {
+      console.log(
+        `[analyze] Appraiser: using editorial LLM connector (${appraiserRuntimes.join(" -> ")}, Gemini model ${DEFAULT_APPRAISER_MODEL})`,
+      );
+    } else {
+      console.warn("[analyze] WARNING: no image-capable editorial LLM runtime available, appraiser stage will be skipped");
+    }
+  }
+
+  // Create live VLM function if not skipped and API key is available
+  let vlmFn;
+  if (!skipVlm) {
+    if (process.env.GEMINI_API_KEY) {
+      vlmFn = createGeminiVlmFn();
+      console.log("[analyze] VLM: using Gemini API");
+    } else {
+      console.warn("[analyze] WARNING: GEMINI_API_KEY not set, VLM stage will be skipped");
+    }
+  }
+
+  let marlinFn: MarlinFn | undefined;
+  if (!vlmOnly && !skipMarlin && shouldRunMarlinAnalysis(projectDir, repoRoot)) {
+    console.log("[analyze] Marlin: running before VLM as scene reporter");
+    marlinFn = createMarlinFnFromEnvironment(projectDir, repoRoot);
+  }
+
+  let result: Awaited<ReturnType<typeof runPipeline>>;
+  try {
+    result = await runPipeline({
+      sourceFiles: normalizedSourceFiles,
+      projectDir: absoluteProjectDir,
+      projectId,
+      repoRoot,
+      skipStt,
+      skipVlm,
+      skipDiarize,
+      skipPeak,
+      skipMarlin,
+      skipAppraiser,
+      vlmOnly,
+      vlmFn,
+      marlinFn,
+      marlinModel: marlinFn ? marlinModelFromEnvironment(projectDir, repoRoot) : undefined,
+      marlinQueries: marlinFn ? marlinQueriesFromEnvironment(projectDir, repoRoot) : undefined,
+      sttLanguageOverride: language,
+      sttProvider,
+      sttStrategy,
+      contentHint,
+      skipMediaLink,
+      vlmConcurrency: concurrency,
+      vlmProgressReporter: createVlmProgressReporter(),
+      noCache,
+      clearCache,
+      sourceDiscovery,
+    });
+  } catch (error) {
+    if (error instanceof SourceReadinessError) {
+      console.error(`[analyze] Source readiness failed: ${error.message}`);
+      return 1;
+    }
+    throw error;
+  } finally {
+    await marlinFn?.close?.();
+  }
+
+  if (result.vlmSummary) {
+    console.log(
+      `[analyze] Done: ${result.vlmSummary.totalAssets} assets, ` +
+      `${result.vlmSummary.cachedAssets} cached, ` +
+      `${result.vlmSummary.analyzedAssets} analyzed ` +
+      `(${formatDuration(result.vlmSummary.durationMs)})`,
+    );
+
+    if (result.vlmSummary.failedAssets.length > 0) {
+      console.log(`[analyze] Failure summary: ${result.vlmSummary.failedAssets.length} assets`);
+      for (const failure of result.vlmSummary.failedAssets) {
+        console.error(`[FAIL] ${failure.assetId}: ${failure.error}`);
+      }
+    }
+
+    const allLiveAssetsFailed =
+      result.vlmSummary.analyzedAssets > 0 &&
+      result.vlmSummary.failedAssets.length === result.vlmSummary.analyzedAssets &&
+      result.vlmSummary.cachedAssets === 0;
+    if (allLiveAssetsFailed) {
+      return 1;
+    }
+  }
+
+  console.log("\n[analyze] Pipeline complete");
+  console.log(`  Output: ${result.outputDir}`);
+  console.log(`  Assets: ${result.assetsJson.items.length}`);
+  console.log(`  Segments: ${result.segmentsJson.items.length}`);
+
+  const gapCount = result.gapReport.entries.length;
+  if (gapCount > 0) {
+    const errors = result.gapReport.entries.filter((e) => e.severity === "error").length;
+    const warnings = result.gapReport.entries.filter((e) => e.severity === "warning").length;
+    console.log(`  Gaps: ${gapCount} (${errors} errors, ${warnings} warnings)`);
+  } else {
+    console.log("  Gaps: none");
+  }
+
+  if (result.mediaSourceMapPath) {
+    console.log(`  Media links: ${result.mediaSourceMap?.items.length ?? 0} mapped`);
+    console.log(`  Source map: ${result.mediaSourceMapPath}`);
+  }
+  return 0;
+}
+
+function readCliProjectId(projectDir: string): string {
+  try {
+    return readProjectState(projectDir)?.project_id || path.basename(projectDir);
+  } catch {
+    return path.basename(projectDir);
+  }
+}
+
+function createVlmProgressReporter(): VlmProgressReporter {
+  return {
+    onAssetProgress(event) {
+      const label = event.status === "cached"
+        ? "Cached"
+        : event.status === "skipped"
+        ? "Skipping"
+        : "Analyzing";
+      console.log(`[${event.current}/${event.total}] ${label} ${event.filename}...`);
+    },
+    onAssetFailure(failure) {
+      console.error(`[FAIL] ${failure.assetId}: ${failure.error}`);
+    },
+  };
+}
+
+const isMain = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMain) {
+  main().then((code) => {
+    process.exitCode = code;
+  }).catch((err) => {
+    console.error("[analyze] Fatal error:", err);
+    process.exitCode = 1;
+  });
+}
+
+export { parseArgs };
