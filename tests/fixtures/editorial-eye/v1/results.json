@@ -1,0 +1,1787 @@
+{
+  "artifact_version": "editorial-eye-benchmark-results/v1",
+  "suite_id": "editorial-eye-v1",
+  "suite_version": "1.0.0",
+  "fixture_manifest_sha256": "454df2fd5fdc94a740990b1b5c5342b8f407dd379d973cc2854f40214a25824c",
+  "label_version": "labels-v2",
+  "generator": {
+    "id": "editorial-eye-lavfi-fixtures",
+    "version": "1.0.0",
+    "fixture_set_id": "editorial-eye-v1-7x5"
+  },
+  "provenance": {
+    "environment": {
+      "execution": "deterministic_generated_contract",
+      "platform": "portable",
+      "benchmark_scope": "metric_adapter_oracle_not_pipeline_or_model_quality"
+    },
+    "models": [],
+    "degraded": []
+  },
+  "cases": [
+    {
+      "case_id": "interview_dialogue--video",
+      "genre": "interview_dialogue",
+      "media_kind": "video",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "evidence_ref": "generated-video#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-video#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-video#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-video#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "video:mpeg4",
+        "duration_ms": 1000,
+        "generated_bytes_sha256": "ab8dba5b8320d5d9eebf55dd3626cdec1557463c1ae5c0c184f1a0b17ba16a22"
+      }
+    },
+    {
+      "case_id": "interview_dialogue--audio",
+      "genre": "interview_dialogue",
+      "media_kind": "audio",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "evidence_ref": "generated-audio#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-audio#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-audio#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "evidence_ref": "generated-audio#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "stream_topology": "audio:pcm_s16le",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.073778,
+        "generated_bytes_sha256": "2a5f163e85b4560e6d893bb2246b7f94a115d0df81ff40e5cce6c075b49ceb7f"
+      }
+    },
+    {
+      "case_id": "interview_dialogue--image",
+      "genre": "interview_dialogue",
+      "media_kind": "image",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 1,
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "evidence_ref": "generated-image#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "evidence_ref": "generated-image#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-image#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "evidence_ref": "generated-image#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+        "stream_topology": "video:png",
+        "duration_ms": 0,
+        "generated_bytes_sha256": "5fd400a3df4a35f8923a656889aa09874822cd54229b11c4bb81ca1d42e1f095"
+      }
+    },
+    {
+      "case_id": "interview_dialogue--sequence",
+      "genre": "interview_dialogue",
+      "media_kind": "sequence",
+      "status": "unsupported",
+      "supported": false,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [],
+      "observations": [],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      }
+    },
+    {
+      "case_id": "interview_dialogue--mixed",
+      "genre": "interview_dialogue",
+      "media_kind": "mixed",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "evidence_ref": "generated-mixed#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-mixed#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-mixed#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-mixed#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "evidence_ref": "generated-mixed#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "audio:aac+video:mpeg4",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.034799,
+        "generated_bytes_sha256": "3545384b06bef5183de259b55b3996cc2832be879e69bb5cb65eb07b59493021"
+      }
+    },
+    {
+      "case_id": "quiet_documentary--video",
+      "genre": "quiet_documentary",
+      "media_kind": "video",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "evidence_ref": "generated-video#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-video#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-video#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-video#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "video:mpeg4",
+        "duration_ms": 1000,
+        "generated_bytes_sha256": "ab8dba5b8320d5d9eebf55dd3626cdec1557463c1ae5c0c184f1a0b17ba16a22"
+      }
+    },
+    {
+      "case_id": "quiet_documentary--audio",
+      "genre": "quiet_documentary",
+      "media_kind": "audio",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "evidence_ref": "generated-audio#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-audio#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-audio#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "evidence_ref": "generated-audio#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "stream_topology": "audio:pcm_s16le",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.073778,
+        "generated_bytes_sha256": "2a5f163e85b4560e6d893bb2246b7f94a115d0df81ff40e5cce6c075b49ceb7f"
+      }
+    },
+    {
+      "case_id": "quiet_documentary--image",
+      "genre": "quiet_documentary",
+      "media_kind": "image",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 1,
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "evidence_ref": "generated-image#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "evidence_ref": "generated-image#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-image#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "evidence_ref": "generated-image#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+        "stream_topology": "video:png",
+        "duration_ms": 0,
+        "generated_bytes_sha256": "5fd400a3df4a35f8923a656889aa09874822cd54229b11c4bb81ca1d42e1f095"
+      }
+    },
+    {
+      "case_id": "quiet_documentary--sequence",
+      "genre": "quiet_documentary",
+      "media_kind": "sequence",
+      "status": "unsupported",
+      "supported": false,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [],
+      "observations": [],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      }
+    },
+    {
+      "case_id": "quiet_documentary--mixed",
+      "genre": "quiet_documentary",
+      "media_kind": "mixed",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "evidence_ref": "generated-mixed#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-mixed#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-mixed#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-mixed#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "evidence_ref": "generated-mixed#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "audio:aac+video:mpeg4",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.034799,
+        "generated_bytes_sha256": "3545384b06bef5183de259b55b3996cc2832be879e69bb5cb65eb07b59493021"
+      }
+    },
+    {
+      "case_id": "product_detail--video",
+      "genre": "product_detail",
+      "media_kind": "video",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "evidence_ref": "generated-video#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-video#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-video#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-video#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "video:mpeg4",
+        "duration_ms": 1000,
+        "generated_bytes_sha256": "ab8dba5b8320d5d9eebf55dd3626cdec1557463c1ae5c0c184f1a0b17ba16a22"
+      }
+    },
+    {
+      "case_id": "product_detail--audio",
+      "genre": "product_detail",
+      "media_kind": "audio",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "evidence_ref": "generated-audio#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-audio#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-audio#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "evidence_ref": "generated-audio#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "stream_topology": "audio:pcm_s16le",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.073778,
+        "generated_bytes_sha256": "2a5f163e85b4560e6d893bb2246b7f94a115d0df81ff40e5cce6c075b49ceb7f"
+      }
+    },
+    {
+      "case_id": "product_detail--image",
+      "genre": "product_detail",
+      "media_kind": "image",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 1,
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "evidence_ref": "generated-image#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "evidence_ref": "generated-image#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-image#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "evidence_ref": "generated-image#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+        "stream_topology": "video:png",
+        "duration_ms": 0,
+        "generated_bytes_sha256": "5fd400a3df4a35f8923a656889aa09874822cd54229b11c4bb81ca1d42e1f095"
+      }
+    },
+    {
+      "case_id": "product_detail--sequence",
+      "genre": "product_detail",
+      "media_kind": "sequence",
+      "status": "unsupported",
+      "supported": false,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [],
+      "observations": [],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      }
+    },
+    {
+      "case_id": "product_detail--mixed",
+      "genre": "product_detail",
+      "media_kind": "mixed",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "evidence_ref": "generated-mixed#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-mixed#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-mixed#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-mixed#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "evidence_ref": "generated-mixed#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "audio:aac+video:mpeg4",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.034799,
+        "generated_bytes_sha256": "3545384b06bef5183de259b55b3996cc2832be879e69bb5cb65eb07b59493021"
+      }
+    },
+    {
+      "case_id": "action_event--video",
+      "genre": "action_event",
+      "media_kind": "video",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "evidence_ref": "generated-video#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-video#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-video#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-video#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "video:mpeg4",
+        "duration_ms": 1000,
+        "generated_bytes_sha256": "ab8dba5b8320d5d9eebf55dd3626cdec1557463c1ae5c0c184f1a0b17ba16a22"
+      }
+    },
+    {
+      "case_id": "action_event--audio",
+      "genre": "action_event",
+      "media_kind": "audio",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "evidence_ref": "generated-audio#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-audio#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-audio#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "evidence_ref": "generated-audio#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "stream_topology": "audio:pcm_s16le",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.073778,
+        "generated_bytes_sha256": "2a5f163e85b4560e6d893bb2246b7f94a115d0df81ff40e5cce6c075b49ceb7f"
+      }
+    },
+    {
+      "case_id": "action_event--image",
+      "genre": "action_event",
+      "media_kind": "image",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 1,
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "evidence_ref": "generated-image#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "evidence_ref": "generated-image#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-image#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "evidence_ref": "generated-image#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+        "stream_topology": "video:png",
+        "duration_ms": 0,
+        "generated_bytes_sha256": "5fd400a3df4a35f8923a656889aa09874822cd54229b11c4bb81ca1d42e1f095"
+      }
+    },
+    {
+      "case_id": "action_event--sequence",
+      "genre": "action_event",
+      "media_kind": "sequence",
+      "status": "unsupported",
+      "supported": false,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [],
+      "observations": [],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      }
+    },
+    {
+      "case_id": "action_event--mixed",
+      "genre": "action_event",
+      "media_kind": "mixed",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "evidence_ref": "generated-mixed#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-mixed#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-mixed#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-mixed#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "evidence_ref": "generated-mixed#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "audio:aac+video:mpeg4",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.034799,
+        "generated_bytes_sha256": "3545384b06bef5183de259b55b3996cc2832be879e69bb5cb65eb07b59493021"
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--video",
+      "genre": "vertical_social_montage",
+      "media_kind": "video",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "evidence_ref": "generated-video#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-video#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-video#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-video#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "video:mpeg4",
+        "duration_ms": 1000,
+        "generated_bytes_sha256": "ab8dba5b8320d5d9eebf55dd3626cdec1557463c1ae5c0c184f1a0b17ba16a22"
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--audio",
+      "genre": "vertical_social_montage",
+      "media_kind": "audio",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "evidence_ref": "generated-audio#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-audio#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-audio#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "evidence_ref": "generated-audio#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "stream_topology": "audio:pcm_s16le",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.073778,
+        "generated_bytes_sha256": "2a5f163e85b4560e6d893bb2246b7f94a115d0df81ff40e5cce6c075b49ceb7f"
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--image",
+      "genre": "vertical_social_montage",
+      "media_kind": "image",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 1,
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "evidence_ref": "generated-image#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "evidence_ref": "generated-image#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-image#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "evidence_ref": "generated-image#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+        "stream_topology": "video:png",
+        "duration_ms": 0,
+        "generated_bytes_sha256": "5fd400a3df4a35f8923a656889aa09874822cd54229b11c4bb81ca1d42e1f095"
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--sequence",
+      "genre": "vertical_social_montage",
+      "media_kind": "sequence",
+      "status": "unsupported",
+      "supported": false,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [],
+      "observations": [],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--mixed",
+      "genre": "vertical_social_montage",
+      "media_kind": "mixed",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "evidence_ref": "generated-mixed#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-mixed#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-mixed#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-mixed#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "evidence_ref": "generated-mixed#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "audio:aac+video:mpeg4",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.034799,
+        "generated_bytes_sha256": "3545384b06bef5183de259b55b3996cc2832be879e69bb5cb65eb07b59493021"
+      }
+    },
+    {
+      "case_id": "chronological_longform--video",
+      "genre": "chronological_longform",
+      "media_kind": "video",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "evidence_ref": "generated-video#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-video#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-video#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-video#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "video:mpeg4",
+        "duration_ms": 1000,
+        "generated_bytes_sha256": "ab8dba5b8320d5d9eebf55dd3626cdec1557463c1ae5c0c184f1a0b17ba16a22"
+      }
+    },
+    {
+      "case_id": "chronological_longform--audio",
+      "genre": "chronological_longform",
+      "media_kind": "audio",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "evidence_ref": "generated-audio#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-audio#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-audio#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "evidence_ref": "generated-audio#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "stream_topology": "audio:pcm_s16le",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.073778,
+        "generated_bytes_sha256": "2a5f163e85b4560e6d893bb2246b7f94a115d0df81ff40e5cce6c075b49ceb7f"
+      }
+    },
+    {
+      "case_id": "chronological_longform--image",
+      "genre": "chronological_longform",
+      "media_kind": "image",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 1,
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "evidence_ref": "generated-image#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "evidence_ref": "generated-image#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-image#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "evidence_ref": "generated-image#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+        "stream_topology": "video:png",
+        "duration_ms": 0,
+        "generated_bytes_sha256": "5fd400a3df4a35f8923a656889aa09874822cd54229b11c4bb81ca1d42e1f095"
+      }
+    },
+    {
+      "case_id": "chronological_longform--sequence",
+      "genre": "chronological_longform",
+      "media_kind": "sequence",
+      "status": "unsupported",
+      "supported": false,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [],
+      "observations": [],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      }
+    },
+    {
+      "case_id": "chronological_longform--mixed",
+      "genre": "chronological_longform",
+      "media_kind": "mixed",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "evidence_ref": "generated-mixed#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-mixed#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-mixed#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-mixed#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "evidence_ref": "generated-mixed#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "audio:aac+video:mpeg4",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.034799,
+        "generated_bytes_sha256": "3545384b06bef5183de259b55b3996cc2832be879e69bb5cb65eb07b59493021"
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--video",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "video",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "evidence_ref": "generated-video#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-video#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-video#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-video#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "video:mpeg4",
+        "duration_ms": 1000,
+        "generated_bytes_sha256": "ab8dba5b8320d5d9eebf55dd3626cdec1557463c1ae5c0c184f1a0b17ba16a22"
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--audio",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "audio",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "evidence_ref": "generated-audio#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-audio#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-audio#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "evidence_ref": "generated-audio#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "stream_topology": "audio:pcm_s16le",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.073778,
+        "generated_bytes_sha256": "2a5f163e85b4560e6d893bb2246b7f94a115d0df81ff40e5cce6c075b49ceb7f"
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--image",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "image",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 1,
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "evidence_ref": "generated-image#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "evidence_ref": "generated-image#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "evidence_ref": "generated-image#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "evidence_ref": "generated-image#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "evidence_ref": null,
+          "confidence": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+        "stream_topology": "video:png",
+        "duration_ms": 0,
+        "generated_bytes_sha256": "5fd400a3df4a35f8923a656889aa09874822cd54229b11c4bb81ca1d42e1f095"
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--sequence",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "sequence",
+      "status": "unsupported",
+      "supported": false,
+      "grounded_frame_count": 0,
+      "ground_truth_ids": [],
+      "observations": [],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--mixed",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "mixed",
+      "status": "success",
+      "supported": true,
+      "grounded_frame_count": 2,
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observations": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "evidence_ref": "generated-mixed#stream_topology",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "evidence_ref": "generated-mixed#duration_ms",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "evidence_ref": "generated-mixed#audio_present",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "evidence_ref": "generated-mixed#decoded_frame_sha256",
+          "confidence": 1,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "evidence_ref": "generated-mixed#audio_rms_db",
+          "confidence": 1,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_relation_predictions": [],
+      "hard_fail": {
+        "decision": false,
+        "reasons": []
+      },
+      "decoded_fixture_fingerprints": {
+        "decoded_frame_sha256": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+        "stream_topology": "audio:aac+video:mpeg4",
+        "duration_ms": 1000,
+        "audio_rms_db": -21.034799,
+        "generated_bytes_sha256": "3545384b06bef5183de259b55b3996cc2832be879e69bb5cb65eb07b59493021"
+      }
+    }
+  ]
+}

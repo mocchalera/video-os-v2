@@ -1,0 +1,17 @@
+id: cooldown_resolve
+category: trim
+primary_phase: resolve
+status: active
+required_signals:
+  - afterglow_score
+when:
+  - "closing or release beat present"
+  - "afterglow_score >= 0.3"
+avoid_when:
+  - "total duration target < 30s"
+effects:
+  trim_bias: 0.2
+  duration_bias_frames: 18
+  metadata_tags:
+    - cooldown
+    - release_hold

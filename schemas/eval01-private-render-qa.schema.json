@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-os.local/schemas/eval01-private-render-qa.schema.json",
+  "title": "EVAL-01 private render targeted QA",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "created_at",
+    "source",
+    "caption",
+    "audio",
+    "decode",
+    "assembly_timing_valid",
+    "failures",
+    "body_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": "eval01-private-render-qa/v1" },
+    "status": { "enum": ["PASS", "NONPASS_STOP"] },
+    "created_at": { "type": "string", "minLength": 1 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["video_path", "caption_plan_sha256", "provenance_sha256"],
+      "properties": {
+        "video_path": { "type": "string", "minLength": 1 },
+        "caption_plan_sha256": { "$ref": "#/$defs/nullableSha256" },
+        "provenance_sha256": { "$ref": "#/$defs/nullableSha256" }
+      }
+    },
+    "caption": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/captionMetrics" }
+      ]
+    },
+    "audio": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/audioMetrics" }
+      ]
+    },
+    "decode": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/decodeMetrics" }
+      ]
+    },
+    "assembly_timing_valid": { "type": "boolean" },
+    "failures": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "body_sha256": { "$ref": "#/$defs/sha256" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "PASS" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "caption": { "$ref": "#/$defs/captionMetrics" },
+          "audio": { "$ref": "#/$defs/audioMetrics" },
+          "decode": { "$ref": "#/$defs/decodeMetrics" },
+          "assembly_timing_valid": { "const": true },
+          "failures": { "maxItems": 0 }
+        }
+      },
+      "else": {
+        "properties": {
+          "caption": { "type": "null" },
+          "audio": { "type": "null" },
+          "decode": { "type": "null" },
+          "assembly_timing_valid": { "const": false },
+          "failures": { "minItems": 1 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "nullableSha256": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/sha256" }
+      ]
+    },
+    "captionMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cue_count",
+        "burned_caption_count",
+        "raw_asr_overlap_count",
+        "display_source_overlap_count",
+        "display_timeline_overlap_count",
+        "max_lines_observed",
+        "safe_area_pass",
+        "caption_font_family",
+        "caption_font_sha256"
+      ],
+      "properties": {
+        "cue_count": { "const": 21 },
+        "burned_caption_count": { "const": 21 },
+        "raw_asr_overlap_count": { "const": 3 },
+        "display_source_overlap_count": { "const": 0 },
+        "display_timeline_overlap_count": { "const": 0 },
+        "max_lines_observed": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "safe_area_pass": { "const": true },
+        "caption_font_family": { "type": "string", "minLength": 1 },
+        "caption_font_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["integrated_lufs", "true_peak_dbtp"],
+      "properties": {
+        "integrated_lufs": { "type": "number" },
+        "true_peak_dbtp": { "type": "number" }
+      }
+    },
+    "audioMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stream_present",
+        "preset",
+        "before_measurement",
+        "after_measurement",
+        "target_integrated_lufs",
+        "audio_mix_policy_valid"
+      ],
+      "properties": {
+        "stream_present": { "const": true },
+        "preset": { "const": "dialogue-clean" },
+        "before_measurement": { "$ref": "#/$defs/measurement" },
+        "after_measurement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["integrated_lufs", "true_peak_dbtp"],
+          "properties": {
+            "integrated_lufs": { "type": "number", "minimum": -17, "maximum": -15 },
+            "true_peak_dbtp": { "type": "number", "maximum": -1.2 }
+          }
+        },
+        "target_integrated_lufs": { "const": -16 },
+        "audio_mix_policy_valid": { "const": true }
+      }
+    },
+    "representativeFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame", "path", "sha256"],
+      "properties": {
+        "frame": { "enum": [0, 1350, 2699] },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "decodeMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "full_decode",
+        "width",
+        "height",
+        "fps_num",
+        "fps_den",
+        "frame_count",
+        "duration_ms",
+        "audio_duration_ms",
+        "av_start_delta_ms",
+        "av_end_delta_ms",
+        "representative_frames"
+      ],
+      "properties": {
+        "full_decode": { "const": true },
+        "width": { "const": 1920 },
+        "height": { "const": 1080 },
+        "fps_num": { "const": 30 },
+        "fps_den": { "const": 1 },
+        "frame_count": { "const": 2700 },
+        "duration_ms": { "const": 90000 },
+        "audio_duration_ms": { "type": "integer", "minimum": 1 },
+        "av_start_delta_ms": { "type": "number", "minimum": 0, "exclusiveMaximum": 100 },
+        "av_end_delta_ms": { "type": "number", "minimum": 0, "exclusiveMaximum": 100 },
+        "representative_frames": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "prefixItems": [
+            { "allOf": [{ "$ref": "#/$defs/representativeFrame" }, { "properties": { "frame": { "const": 0 } } }] },
+            { "allOf": [{ "$ref": "#/$defs/representativeFrame" }, { "properties": { "frame": { "const": 1350 } } }] },
+            { "allOf": [{ "$ref": "#/$defs/representativeFrame" }, { "properties": { "frame": { "const": 2699 } } }] }
+          ],
+          "items": false
+        }
+      }
+    }
+  }
+}

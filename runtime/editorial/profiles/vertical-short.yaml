@@ -1,0 +1,23 @@
+id: vertical-short
+default_policy: highlight
+defaults:
+  target_duration_sec: 30
+  opening_cadence: "aggressive"
+  middle_cadence: "brisk"
+  ending_cadence: "punchy"
+  max_shot_length_frames: 48
+  default_transition: "cut"
+  crossfade_frames: 3
+  active_editing_skills:
+    - build_to_peak
+    - smash_cut_energy
+    - punch_in_emphasis
+    - reveal_then_payoff
+  quality_target_overrides:
+    hook_density_min: 0.8
+    novelty_rate_min: 0.85
+  trim_policy_overrides:
+    mode: adaptive
+    default_preferred_duration_frames: 36
+    default_min_duration_frames: 12
+    default_max_duration_frames: 72

@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/product-outcome-metrics.schema.json",
+  "title": "Video OS Product Outcome Metrics",
+  "description": "Read-only product outcome projection derived from canonical project artifacts.",
+  "type": "object",
+  "required": [
+    "version",
+    "artifact_version",
+    "project_id",
+    "created_at",
+    "report_id",
+    "timeline",
+    "metrics",
+    "degraded_run_flags",
+    "evidence_roles",
+    "provenance"
+  ],
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "artifact_version": { "const": "product-outcome-metrics-v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "report_id": { "type": "string", "pattern": "^POM_[a-f0-9]{16}$" },
+    "timeline": {
+      "type": "object",
+      "required": ["path", "version", "hash", "duration_sec", "video_clip_count"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "hash": { "$ref": "#/$defs/hash" },
+        "duration_sec": { "type": "number", "minimum": 0 },
+        "video_clip_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "time_to_first_usable_cut",
+        "human_intervention_minutes",
+        "kept_cut_ratio",
+        "accepted_proposal_ratio",
+        "post_export_edit_distance",
+        "review_issue_density",
+        "rerun_duration",
+        "rerun_cost"
+      ],
+      "properties": {
+        "time_to_first_usable_cut": { "$ref": "#/$defs/metric" },
+        "human_intervention_minutes": { "$ref": "#/$defs/metric" },
+        "kept_cut_ratio": { "$ref": "#/$defs/metric" },
+        "accepted_proposal_ratio": { "$ref": "#/$defs/metric" },
+        "post_export_edit_distance": { "$ref": "#/$defs/metric" },
+        "review_issue_density": { "$ref": "#/$defs/metric" },
+        "rerun_duration": { "$ref": "#/$defs/metric" },
+        "rerun_cost": { "$ref": "#/$defs/metric" }
+      },
+      "additionalProperties": false
+    },
+    "degraded_run_flags": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/degradedFlag" }
+    },
+    "evidence_roles": {
+      "type": "object",
+      "required": ["maker", "deterministic_validator", "checker", "human_preference"],
+      "properties": {
+        "maker": { "$ref": "#/$defs/pathList" },
+        "deterministic_validator": { "$ref": "#/$defs/pathList" },
+        "checker": { "$ref": "#/$defs/pathList" },
+        "human_preference": { "$ref": "#/$defs/pathList" }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "properties": {
+        "producer": { "const": "scripts/product-outcome-metrics.ts" },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "hash", "required"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "hash": { "$ref": "#/$defs/hash" },
+              "required": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "hash_policy": {
+          "type": "object",
+          "required": ["algorithm", "canonicalization", "excluded_fields"],
+          "properties": {
+            "algorithm": { "const": "sha256" },
+            "canonicalization": { "const": "normalized-json-v1" },
+            "excluded_fields": {
+              "type": "array",
+              "const": ["created_at", "report_id"]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "pathList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "metric": {
+      "type": "object",
+      "required": ["status", "value", "unit", "method", "evidence", "limitations"],
+      "properties": {
+        "status": { "type": "string", "enum": ["measured", "estimated", "unavailable"] },
+        "value": { "type": ["number", "object", "null"] },
+        "unit": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "numerator": { "type": "number", "minimum": 0 },
+        "denominator": { "type": "number", "minimum": 0 },
+        "evidence": { "$ref": "#/$defs/pathList" },
+        "limitations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "unavailable" } } },
+          "then": { "properties": { "value": { "type": "null" } } },
+          "else": { "properties": { "value": { "type": ["number", "object"] } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "degradedFlag": {
+      "type": "object",
+      "required": ["code", "severity", "message", "evidence"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+        "severity": { "type": "string", "enum": ["info", "warning", "blocker"] },
+        "message": { "type": "string", "minLength": 1 },
+        "evidence": { "$ref": "#/$defs/pathList" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

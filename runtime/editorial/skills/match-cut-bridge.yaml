@@ -1,0 +1,15 @@
+id: match_cut_bridge
+category: linear_sequence
+primary_phase: score
+status: active
+required_signals:
+  - visual_tags
+when:
+  - "visual similarity bridge candidates available"
+avoid_when:
+  - "all candidates from same asset"
+effects:
+  score_bonus: 0.04
+  transition_override: "match_cut"
+  metadata_tags:
+    - visual_match

@@ -1,0 +1,1511 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { compile } from "../runtime/compiler/index.js";
+import { applyPatch } from "../runtime/compiler/patch.js";
+import { writePreviewManifest } from "../runtime/compiler/export.js";
+import type { ReviewPatch } from "../runtime/compiler/patch.js";
+import type { Candidate, TimelineIR } from "../runtime/compiler/types.js";
+import { validateProject } from "../scripts/validate-schemas.js";
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+const SAMPLE_PROJECT = path.resolve("projects/sample");
+const FIXED_CREATED_AT = "2026-03-21T00:00:00Z";
+const GOLDEN_PATH = path.resolve("tests/golden/sample-timeline.json");
+
+function copyDirSync(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+function removeDirSync(dir: string): void {
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function createTempProject(): string {
+  const tmpDir = path.join("tests", `tmp_e2e_${Date.now()}`);
+  copyDirSync(SAMPLE_PROJECT, tmpDir);
+  // Remove existing output so tests start clean
+  const timelinePath = path.join(tmpDir, "05_timeline/timeline.json");
+  if (fs.existsSync(timelinePath)) fs.unlinkSync(timelinePath);
+  const manifestPath = path.join(tmpDir, "05_timeline/preview-manifest.json");
+  if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
+  return tmpDir;
+}
+
+function readCandidates(projectPath: string): Candidate[] {
+  const selectsPath = path.join(projectPath, "04_plan/selects_candidates.yaml");
+  const raw = fs.readFileSync(selectsPath, "utf-8");
+  const data = parseYaml(raw) as { candidates: Candidate[] };
+  return data.candidates;
+}
+
+// ── E2E: Full Editorial Loop ────────────────────────────────────────
+
+describe("E2E: Editorial Loop", () => {
+  let tmpDir: string;
+
+  beforeAll(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterAll(() => {
+    removeDirSync(tmpDir);
+  });
+
+  it("full loop: compile → validate → patch → validate v2", () => {
+    // 1. Compile
+    const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    expect(result.timeline.version).toBe("1");
+    expect(fs.existsSync(result.outputPath)).toBe(true);
+
+    // 2. Schema validate → pass
+    const validation1 = validateProject(tmpDir);
+    expect(validation1.gate2_timeline_valid).toBe(true);
+
+    // 3. Load fixture review patch
+    const patchPath = path.resolve("projects/sample/06_review/review_patch.json");
+    const patch: ReviewPatch = JSON.parse(fs.readFileSync(patchPath, "utf-8"));
+    const candidates = readCandidates(tmpDir);
+
+    // 4. Apply patch
+    const patchResult = applyPatch(result.timeline, patch, candidates);
+    expect(patchResult.errors).toEqual([]);
+    expect(patchResult.appliedOps).toBe(3);
+    expect(patchResult.timeline.version).toBe("2");
+
+    // 5. Write patched timeline
+    const patchedPath = path.join(tmpDir, "05_timeline/timeline.json");
+    fs.writeFileSync(patchedPath, JSON.stringify(patchResult.timeline, null, 2), "utf-8");
+
+    // 6. Validate v2 → pass
+    const validation2 = validateProject(tmpDir);
+    expect(validation2.gate2_timeline_valid).toBe(true);
+
+    // 7. Verify specific patches were applied
+    const v2 = patchResult.timeline;
+
+    // trim_segment on CLP_0001: src_in_us should be 2000000
+    const clp0001 = v2.tracks.video
+      .flatMap((t) => t.clips)
+      .find((c) => c.clip_id === "CLP_0001");
+    expect(clp0001).toBeDefined();
+    expect(clp0001!.src_in_us).toBe(2000000);
+    expect(clp0001!.src_out_us).toBe(5500000);
+
+    // replace_segment on CLP_0003: should now reference SEG_0014
+    const clp0003 = v2.tracks.video
+      .flatMap((t) => t.clips)
+      .find((c) => c.clip_id === "CLP_0003");
+    expect(clp0003).toBeDefined();
+    expect(clp0003!.segment_id).toBe("SEG_0014");
+    expect(clp0003!.asset_id).toBe("AST_003");
+
+    // add_marker: should have a review marker at frame 312
+    const reviewMarkers = v2.markers.filter((m) => m.kind === "review");
+    expect(reviewMarkers.length).toBe(1);
+    expect(reviewMarkers[0].frame).toBe(312);
+  });
+
+  it("determinism: same input produces identical output", () => {
+    const result1 = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    const result2 = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    expect(JSON.stringify(result1.timeline)).toBe(JSON.stringify(result2.timeline));
+  });
+
+  it("emits transition metadata for adjacent V1 clip boundaries when transition policy exists", () => {
+    const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    const v1 = result.timeline.tracks.video.find((track) => track.track_id === "V1");
+    const adjacentPairCount = Math.max(0, (v1?.clips.length ?? 0) - 1);
+
+    expect(result.timeline.transitions?.length).toBe(adjacentPairCount);
+    expect(result.timeline.transitions?.every((transition) => transition.track_id === "V1")).toBe(true);
+    expect(result.timeline.transitions?.every((transition) => transition.transition_type === "cut")).toBe(true);
+  });
+});
+
+// ── Gate Tests ──────────────────────────────────────────────────────
+
+describe("E2E: Gate Tests", () => {
+  it("compile gate blocks when unresolved_blockers has blocker status", () => {
+    const tmpDir = path.join("tests", `tmp_gate1_${Date.now()}`);
+    copyDirSync(SAMPLE_PROJECT, tmpDir);
+    try {
+      const blockersPath = path.join(tmpDir, "01_intent/unresolved_blockers.yaml");
+      const blockers = parseYaml(fs.readFileSync(blockersPath, "utf-8")) as Record<string, unknown>;
+      blockers.blockers = [
+        {
+          id: "BLK_TEST",
+          summary: "Test blocker for gate check",
+          status: "blocker",
+          raised_at: "2026-03-21T00:00:00Z",
+        },
+      ];
+      fs.writeFileSync(blockersPath, stringifyYaml(blockers), "utf-8");
+
+      const validation = validateProject(tmpDir);
+      expect(validation.compile_gate).toBe("blocked");
+    } finally {
+      removeDirSync(tmpDir);
+    }
+  });
+
+  it("review gate blocked when fatal_issues present", () => {
+    const tmpDir = path.join("tests", `tmp_gate3_${Date.now()}`);
+    copyDirSync(SAMPLE_PROJECT, tmpDir);
+    try {
+      // Create review_report with fatal_issues
+      const reviewDir = path.join(tmpDir, "06_review");
+      fs.mkdirSync(reviewDir, { recursive: true });
+
+      const fatalReport = {
+        version: "1",
+        project_id: "sample-mountain-reset",
+        timeline_version: "1",
+        summary_judgment: {
+          status: "blocked",
+          rationale: "Fatal issue found in timeline",
+          confidence: 0.95,
+        },
+        strengths: [],
+        weaknesses: [],
+        fatal_issues: [
+          {
+            summary: "Missing required hero shot in b02",
+            severity: "fatal",
+            affected_beat_ids: ["b02"],
+          },
+        ],
+        warnings: [],
+        mismatches_to_brief: [],
+        mismatches_to_blueprint: [],
+        recommended_next_pass: {
+          goal: "Fix fatal issues before proceeding",
+          actions: ["Add hero shot to b02"],
+        },
+      };
+
+      fs.writeFileSync(
+        path.join(reviewDir, "review_report.yaml"),
+        stringifyYaml(fatalReport),
+        "utf-8",
+      );
+
+      const validation = validateProject(tmpDir);
+      expect(validation.gate3_no_fatal_reviews).toBe(false);
+    } finally {
+      removeDirSync(tmpDir);
+    }
+  });
+});
+
+// ── Golden Test ─────────────────────────────────────────────────────
+
+describe("E2E: Golden Snapshot", () => {
+  let tmpDir: string;
+
+  beforeAll(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterAll(() => {
+    removeDirSync(tmpDir);
+  });
+
+  it("compile output matches golden snapshot", () => {
+    const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+
+    if (!fs.existsSync(GOLDEN_PATH)) {
+      // Auto-generate golden on first run
+      fs.mkdirSync(path.dirname(GOLDEN_PATH), { recursive: true });
+      fs.writeFileSync(
+        GOLDEN_PATH,
+        JSON.stringify(result.timeline, null, 2) + "\n",
+        "utf-8",
+      );
+      // Pass on first run — re-run will verify
+      return;
+    }
+
+    const golden: TimelineIR = JSON.parse(fs.readFileSync(GOLDEN_PATH, "utf-8"));
+    expect(result.timeline).toEqual(golden);
+  });
+});
+
+// ── Patch Unit Tests ────────────────────────────────────────────────
+
+describe("Patch Applicator", () => {
+  function makeMinimalTimeline(clips: { trackId: string; clip: Partial<import("../runtime/compiler/types.js").ClipOutput> }[] = []): TimelineIR {
+    const videoTracks: import("../runtime/compiler/types.js").TrackOutput[] = [
+      { track_id: "V1", kind: "video", clips: [] },
+      { track_id: "V2", kind: "video", clips: [] },
+    ];
+    const audioTracks: import("../runtime/compiler/types.js").TrackOutput[] = [
+      { track_id: "A1", kind: "audio", clips: [] },
+    ];
+
+    for (const { trackId, clip } of clips) {
+      const fullClip: import("../runtime/compiler/types.js").ClipOutput = {
+        clip_id: clip.clip_id ?? "CLP_0001",
+        segment_id: clip.segment_id ?? "SEG_001",
+        asset_id: clip.asset_id ?? "AST_001",
+        src_in_us: clip.src_in_us ?? 0,
+        src_out_us: clip.src_out_us ?? 1000000,
+        timeline_in_frame: clip.timeline_in_frame ?? 0,
+        timeline_duration_frames: clip.timeline_duration_frames ?? 24,
+        role: clip.role ?? "hero",
+        motivation: clip.motivation ?? "test",
+        beat_id: clip.beat_id ?? "b01",
+        fallback_segment_ids: clip.fallback_segment_ids ?? [],
+        confidence: clip.confidence ?? 0.9,
+        quality_flags: clip.quality_flags ?? [],
+      };
+      if (clip.captions) fullClip.captions = clip.captions;
+      if (clip.audio_policy) fullClip.audio_policy = clip.audio_policy;
+      if (clip.candidate_ref) fullClip.candidate_ref = clip.candidate_ref;
+      if (clip.fallback_candidate_refs) fullClip.fallback_candidate_refs = clip.fallback_candidate_refs;
+      if (clip.metadata) fullClip.metadata = clip.metadata;
+
+      const target = [...videoTracks, ...audioTracks].find((t) => t.track_id === trackId);
+      if (target) target.clips.push(fullClip);
+    }
+
+    return {
+      version: "1",
+      project_id: "test",
+      created_at: "2026-01-01T00:00:00Z",
+      sequence: { name: "test", fps_num: 24, fps_den: 1, width: 1920, height: 1080, start_frame: 0 },
+      tracks: { video: videoTracks, audio: audioTracks },
+      markers: [],
+      provenance: { brief_path: "", blueprint_path: "", selects_path: "", compiler_version: "1.0.0" },
+    };
+  }
+
+  it("rejects patch with mismatched timeline_version", () => {
+    const timeline = makeMinimalTimeline();
+    const patch: ReviewPatch = {
+      timeline_version: "99",
+      operations: [],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].op).toBe("version_check");
+    expect(result.appliedOps).toBe(0);
+    // Version should NOT be incremented on rejection
+    expect(result.timeline.version).toBe("1");
+  });
+
+  it("errors on nonexistent target_clip_id", () => {
+    const timeline = makeMinimalTimeline();
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "trim_segment", target_clip_id: "NONEXISTENT", reason: "test", new_src_in_us: 0, new_src_out_us: 100 },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain("NONEXISTENT");
+    // Version still increments (partial application allowed)
+    expect(result.timeline.version).toBe("2");
+  });
+
+  it("remove_segment removes the clip", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", segment_id: "SEG_001" } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "remove_segment", target_clip_id: "CLP_0001", reason: "removing test clip" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.appliedOps).toBe(1);
+    expect(result.timeline.tracks.video[0].clips.length).toBe(0);
+    expect(result.timeline.version).toBe("2");
+  });
+
+  it("trim_segment updates source range", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", src_in_us: 1000, src_out_us: 5000 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "trim_segment", target_clip_id: "CLP_0001", new_src_in_us: 2000, new_src_out_us: 4000, reason: "tighter trim" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    const clip = result.timeline.tracks.video[0].clips[0];
+    expect(clip.src_in_us).toBe(2000);
+    expect(clip.src_out_us).toBe(4000);
+    expect(clip.motivation).toContain("[patch:trim]");
+  });
+
+  it("move_segment updates timeline position", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "move_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 48, new_duration_frames: 36, reason: "move later" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    const clip = result.timeline.tracks.video[0].clips[0];
+    expect(clip.timeline_in_frame).toBe(48);
+    expect(clip.timeline_duration_frames).toBe(36);
+  });
+
+  it("move_segment keeps clip captions and its beat marker aligned", () => {
+    const timeline = makeMinimalTimeline([
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0001",
+          beat_id: "b01",
+          timeline_in_frame: 24,
+          timeline_duration_frames: 48,
+          captions: [{
+            text: "挑戦する",
+            in_frame: 30,
+            out_frame: 60,
+            style: "simple-shadow",
+          }],
+        },
+      },
+    ]);
+    timeline.markers = [{
+      frame: 24,
+      kind: "beat",
+      label: "b01: 挑戦",
+    }];
+
+    const result = applyPatch(timeline, {
+      timeline_version: "1",
+      operations: [{
+        op: "move_segment",
+        target_clip_id: "CLP_0001",
+        new_timeline_in_frame: 96,
+        reason: "ripple",
+      }],
+    }, []);
+
+    expect(result.errors).toEqual([]);
+    expect(result.timeline.tracks.video[0].clips[0].captions).toEqual([{
+      text: "挑戦する",
+      in_frame: 102,
+      out_frame: 132,
+      style: "simple-shadow",
+    }]);
+    expect(result.timeline.markers[0].frame).toBe(96);
+  });
+
+  it("move_segment can lift a clip to another video track", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0002",
+          asset_id: "AST_002",
+          src_in_us: 1000000,
+          src_out_us: 2000000,
+          timeline_in_frame: 24,
+          timeline_duration_frames: 24,
+        },
+      },
+    ]);
+    timeline.transitions = [
+      {
+        transition_id: "TRN_DROP",
+        from_clip_id: "CLP_0001",
+        to_clip_id: "CLP_0002",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: 12,
+      },
+      {
+        transition_id: "TRN_KEEP",
+        from_clip_id: "CLP_0002",
+        to_clip_id: "CLP_0003",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: 12,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "move_segment",
+          target_clip_id: "CLP_0001",
+          new_timeline_in_frame: 24,
+          target_track_id: "V2",
+          reason: "lift above overlap",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.timeline.tracks.video.find((track) => track.track_id === "V1")?.clips.map((clip) => clip.clip_id)).toEqual(["CLP_0002"]);
+    const lifted = result.timeline.tracks.video.find((track) => track.track_id === "V2")?.clips[0];
+    expect(lifted?.clip_id).toBe("CLP_0001");
+    expect(lifted?.timeline_in_frame).toBe(24);
+    expect(lifted?.timeline_duration_frames).toBe(24);
+    expect(result.timeline.transitions?.map((transition) => transition.transition_id)).toEqual(["TRN_KEEP"]);
+  });
+
+  it("move_segment can lift an audio clip to a newly created audio track", () => {
+    const timeline = makeMinimalTimeline([
+      {
+        trackId: "A1",
+        clip: {
+          clip_id: "ACL_0001",
+          segment_id: "ASEG_001",
+          asset_id: "AAST_001",
+          timeline_in_frame: 0,
+          timeline_duration_frames: 48,
+          role: "dialogue",
+        },
+      },
+      {
+        trackId: "A1",
+        clip: {
+          clip_id: "ACL_0002",
+          segment_id: "ASEG_002",
+          asset_id: "AAST_002",
+          timeline_in_frame: 48,
+          timeline_duration_frames: 48,
+          role: "dialogue",
+        },
+      },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "move_segment",
+          target_clip_id: "ACL_0001",
+          new_timeline_in_frame: 48,
+          target_track_id: "A2",
+          reason: "lift overlapping audio",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.timeline.tracks.audio.find((track) => track.track_id === "A1")?.clips.map((clip) => clip.clip_id)).toEqual(["ACL_0002"]);
+    const lifted = result.timeline.tracks.audio.find((track) => track.track_id === "A2")?.clips[0];
+    expect(lifted?.clip_id).toBe("ACL_0001");
+    expect(lifted?.timeline_in_frame).toBe(48);
+    expect(lifted?.timeline_duration_frames).toBe(48);
+    expect(lifted?.role).toBe("dialogue");
+  });
+
+  it("set_transition upserts transition metadata for an adjacent edit point", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+      { trackId: "V1", clip: { clip_id: "CLP_0002", timeline_in_frame: 24, timeline_duration_frames: 24 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "set_transition",
+          from_clip_id: "CLP_0001",
+          to_clip_id: "CLP_0002",
+          track_id: "V1",
+          transition_type: "crossfade",
+          transition_frames: 12,
+          applied_skill_id: "ui.crossfade_bridge",
+          reason: "drag transition",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.timeline.transitions).toEqual([
+      {
+        transition_id: "patch_tr_V1_CLP_0001_CLP_0002",
+        from_clip_id: "CLP_0001",
+        to_clip_id: "CLP_0002",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: 12,
+        applied_skill_id: "ui.crossfade_bridge",
+      },
+    ]);
+  });
+
+  it("set_transition with cut removes an existing transition", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+      { trackId: "V1", clip: { clip_id: "CLP_0002", timeline_in_frame: 24, timeline_duration_frames: 24 } },
+      { trackId: "V1", clip: { clip_id: "CLP_0003", timeline_in_frame: 48, timeline_duration_frames: 24 } },
+    ]);
+    timeline.transitions = [
+      {
+        transition_id: "TRN_REMOVE",
+        from_clip_id: "CLP_0001",
+        to_clip_id: "CLP_0002",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: 12,
+      },
+      {
+        transition_id: "TRN_KEEP",
+        from_clip_id: "CLP_0002",
+        to_clip_id: "CLP_0003",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: 12,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "set_transition",
+          from_clip_id: "CLP_0001",
+          to_clip_id: "CLP_0002",
+          track_id: "V1",
+          transition_type: "cut",
+          transition_frames: 1,
+          reason: "remove transition",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.appliedOps).toBe(1);
+    expect(result.timeline.transitions?.map((transition) => transition.transition_id)).toEqual(["TRN_KEEP"]);
+  });
+
+  it("split_segment splits a clip on the same track", () => {
+    const timeline = makeMinimalTimeline([
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0001",
+          segment_id: "SEG_SPLIT",
+          asset_id: "AST_SPLIT",
+          src_in_us: 1000,
+          src_out_us: 5000,
+          timeline_in_frame: 10,
+          timeline_duration_frames: 40,
+          role: "support",
+          beat_id: "b-split",
+          fallback_segment_ids: ["SEG_ALT"],
+          confidence: 0.77,
+          quality_flags: ["stable"],
+          captions: [
+            { text: "left", in_frame: 10, out_frame: 20, style: "simple-shadow" },
+            { text: "cross", in_frame: 25, out_frame: 35, style: "gentle-lower-third" },
+            { text: "right", in_frame: 35, out_frame: 45, style: "simple-shadow" },
+          ],
+          audio_policy: { preserve_nat_sound: true },
+          candidate_ref: "candidate:SEG_SPLIT:1000:5000",
+          fallback_candidate_refs: ["candidate:SEG_ALT:0:1000"],
+          metadata: { scene: "demo" },
+        },
+      },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "split_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 30, reason: "split at playhead" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.appliedOps).toBe(1);
+    const clips = result.timeline.tracks.video[0].clips;
+    expect(clips.length).toBe(2);
+
+    const [left, right] = clips;
+    expect(left.clip_id).toBe("CLP_0001");
+    expect(left.timeline_in_frame).toBe(10);
+    expect(left.timeline_duration_frames).toBe(20);
+    expect(left.src_in_us).toBe(1000);
+    expect(left.src_out_us).toBe(3000);
+    expect(left.motivation).toContain("[patch:split:left]");
+
+    expect(right.clip_id).toBe("CLP_0002");
+    expect(right.segment_id).toBe("SEG_SPLIT");
+    expect(right.asset_id).toBe("AST_SPLIT");
+    expect(right.timeline_in_frame).toBe(30);
+    expect(right.timeline_duration_frames).toBe(20);
+    expect(right.src_in_us).toBe(3000);
+    expect(right.src_out_us).toBe(5000);
+    expect(right.role).toBe("support");
+    expect(right.beat_id).toBe("b-split");
+    expect(right.fallback_segment_ids).toEqual(["SEG_ALT"]);
+    expect(right.confidence).toBe(0.77);
+    expect(right.quality_flags).toEqual(["stable"]);
+    expect(right.audio_policy).toEqual({ preserve_nat_sound: true });
+    expect(right.candidate_ref).toBe("candidate:SEG_SPLIT:1000:5000");
+    expect(right.fallback_candidate_refs).toEqual(["candidate:SEG_ALT:0:1000"]);
+    expect(right.metadata).toEqual({ scene: "demo" });
+    expect(right.motivation).toContain("[patch:split:right]");
+
+    expect(left.captions).toEqual([
+      { text: "left", in_frame: 10, out_frame: 20, style: "simple-shadow" },
+      { text: "cross", in_frame: 25, out_frame: 30, style: "gentle-lower-third" },
+    ]);
+    expect(right.captions).toEqual([
+      { text: "cross", in_frame: 30, out_frame: 35, style: "gentle-lower-third" },
+      { text: "right", in_frame: 35, out_frame: 45, style: "simple-shadow" },
+    ]);
+  });
+
+  it("split_segment rejects boundary playheads", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 10, timeline_duration_frames: 40 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "split_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 10, reason: "start boundary" },
+        { op: "split_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 50, reason: "end boundary" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.appliedOps).toBe(0);
+    expect(result.errors.length).toBe(2);
+    expect(result.errors.map((error) => error.op)).toEqual(["split_segment", "split_segment"]);
+    expect(result.timeline.tracks.video[0].clips.length).toBe(1);
+  });
+
+  it("replace_segment swaps clip data from candidate", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", segment_id: "SEG_OLD" } },
+    ]);
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_NEW",
+        asset_id: "AST_099",
+        src_in_us: 7000,
+        src_out_us: 8000,
+        role: "support",
+        why_it_matches: "replacement",
+        risks: [],
+        confidence: 0.85,
+        quality_flags: ["checked"],
+        candidate_id: "cand_new",
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "replace_segment",
+          target_clip_id: "CLP_0001",
+          with_segment_id: "SEG_NEW",
+          with_candidate_ref: "cand_new",
+          reason: "better candidate",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    const clip = result.timeline.tracks.video[0].clips[0];
+    expect(clip.segment_id).toBe("SEG_NEW");
+    expect(clip.asset_id).toBe("AST_099");
+    expect(clip.src_in_us).toBe(7000);
+    expect(clip.src_out_us).toBe(8000);
+    expect(clip.confidence).toBe(0.85);
+    expect(clip.role).toBe("support");
+    expect(clip.candidate_ref).toBe("cand_new");
+    expect(clip.fallback_candidate_refs).toEqual([]);
+  });
+
+  it("replace_segment applies marked source range overrides from candidate", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", segment_id: "SEG_OLD", timeline_duration_frames: 48 } },
+    ]);
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_MARKED",
+        asset_id: "AST_099",
+        src_in_us: 7000,
+        src_out_us: 12000,
+        role: "support",
+        why_it_matches: "replacement",
+        risks: [],
+        confidence: 0.85,
+        candidate_id: "cand_marked",
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "replace_segment",
+          target_clip_id: "CLP_0001",
+          with_segment_id: "SEG_MARKED",
+          with_candidate_ref: "cand_marked",
+          new_src_in_us: 8000,
+          new_src_out_us: 10000,
+          reason: "marked source replace",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    const clip = result.timeline.tracks.video[0].clips[0];
+    expect(clip.segment_id).toBe("SEG_MARKED");
+    expect(clip.src_in_us).toBe(8000);
+    expect(clip.src_out_us).toBe(10000);
+    expect(clip.timeline_duration_frames).toBe(48);
+    expect(clip.candidate_ref).toBe("cand_marked");
+  });
+
+  it("replace_segment rejects marked source ranges outside candidate", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", segment_id: "SEG_OLD" } },
+    ]);
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_MARKED",
+        asset_id: "AST_099",
+        src_in_us: 7000,
+        src_out_us: 12000,
+        role: "support",
+        why_it_matches: "replacement",
+        risks: [],
+        confidence: 0.85,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "replace_segment",
+          target_clip_id: "CLP_0001",
+          with_segment_id: "SEG_MARKED",
+          new_src_in_us: 6500,
+          new_src_out_us: 10000,
+          reason: "bad marked source replace",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.appliedOps).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].message).toContain("Invalid replacement source range");
+    expect(result.timeline.tracks.video[0].clips[0].segment_id).toBe("SEG_OLD");
+  });
+
+  it("insert_segment adds a new clip to the correct track", () => {
+    const timeline = makeMinimalTimeline();
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_INSERT",
+        asset_id: "AST_050",
+        src_in_us: 1000,
+        src_out_us: 5000,
+        role: "dialogue",
+        why_it_matches: "new line",
+        risks: [],
+        confidence: 0.88,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_INSERT",
+          new_timeline_in_frame: 96,
+          new_duration_frames: 48,
+          beat_id: "b02",
+          reason: "add dialogue line",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    expect(result.appliedOps).toBe(1);
+    // Dialogue should go to A1
+    const a1 = result.timeline.tracks.audio.find((t) => t.track_id === "A1");
+    expect(a1!.clips.length).toBe(1);
+    expect(a1!.clips[0].segment_id).toBe("SEG_INSERT");
+    expect(a1!.clips[0].timeline_in_frame).toBe(96);
+    expect(a1!.clips[0].beat_id).toBe("b02");
+  });
+
+  it("insert_segment creates the default support track when missing", () => {
+    const timeline = makeMinimalTimeline();
+    timeline.tracks.video = timeline.tracks.video.filter((track) => track.track_id !== "V2");
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_SUPPORT_INSERT",
+        asset_id: "AST_051",
+        src_in_us: 2_000,
+        src_out_us: 6_000,
+        role: "support",
+        why_it_matches: "cutaway option",
+        risks: [],
+        confidence: 0.81,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_SUPPORT_INSERT",
+          new_timeline_in_frame: 120,
+          new_duration_frames: 24,
+          beat_id: "b_support",
+          reason: "add cutaway",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    const v2 = result.timeline.tracks.video.find((track) => track.track_id === "V2");
+    expect(v2).toBeDefined();
+    expect(v2!.clips).toHaveLength(1);
+    expect(v2!.clips[0].segment_id).toBe("SEG_SUPPORT_INSERT");
+    expect(v2!.clips[0].timeline_in_frame).toBe(120);
+  });
+
+  it("insert_segment honors marked source range overrides", () => {
+    const timeline = makeMinimalTimeline();
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_MARKED_INSERT",
+        asset_id: "AST_054",
+        src_in_us: 1_000,
+        src_out_us: 9_000,
+        role: "support",
+        why_it_matches: "marked cutaway option",
+        risks: [],
+        confidence: 0.84,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_MARKED_INSERT",
+          new_timeline_in_frame: 132,
+          new_duration_frames: 12,
+          new_src_in_us: 3_000,
+          new_src_out_us: 7_000,
+          beat_id: "b_marked",
+          reason: "add marked source range",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    const inserted = result.timeline.tracks.video.flatMap((track) => track.clips).find((clip) => clip.segment_id === "SEG_MARKED_INSERT");
+    expect(inserted).toBeDefined();
+    expect(inserted!.src_in_us).toBe(3_000);
+    expect(inserted!.src_out_us).toBe(7_000);
+    expect(inserted!.timeline_duration_frames).toBe(12);
+  });
+
+  it("insert plus trim/remove operations can represent source overwrite", () => {
+    const timeline = makeMinimalTimeline([
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0001",
+          segment_id: "SEG_LEFT",
+          asset_id: "AST_LEFT",
+          src_in_us: 0,
+          src_out_us: 1_500_000,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 36,
+        },
+      },
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0002",
+          segment_id: "SEG_MID",
+          asset_id: "AST_MID",
+          src_in_us: 0,
+          src_out_us: 500_000,
+          timeline_in_frame: 36,
+          timeline_duration_frames: 12,
+        },
+      },
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0003",
+          segment_id: "SEG_RIGHT",
+          asset_id: "AST_RIGHT",
+          src_in_us: 0,
+          src_out_us: 1_500_000,
+          timeline_in_frame: 60,
+          timeline_duration_frames: 36,
+        },
+      },
+    ]);
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_OVER",
+        asset_id: "AST_OVER",
+        src_in_us: 0,
+        src_out_us: 2_000_000,
+        role: "support",
+        why_it_matches: "overwrite source",
+        risks: [],
+        confidence: 0.91,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_OVER",
+          new_timeline_in_frame: 24,
+          new_duration_frames: 48,
+          target_track_id: "V1",
+          beat_id: "b_over",
+          role: "support",
+          reason: "overwrite source range",
+        },
+        {
+          op: "trim_segment",
+          target_clip_id: "CLP_0001",
+          new_src_in_us: 0,
+          new_src_out_us: 1_000_000,
+          reason: "trim before overwrite",
+        },
+        {
+          op: "move_segment",
+          target_clip_id: "CLP_0001",
+          new_timeline_in_frame: 0,
+          new_duration_frames: 24,
+          reason: "trim before overwrite",
+        },
+        {
+          op: "remove_segment",
+          target_clip_id: "CLP_0002",
+          reason: "covered by overwrite",
+        },
+        {
+          op: "trim_segment",
+          target_clip_id: "CLP_0003",
+          new_src_in_us: 500_000,
+          new_src_out_us: 1_500_000,
+          reason: "trim after overwrite",
+        },
+        {
+          op: "move_segment",
+          target_clip_id: "CLP_0003",
+          new_timeline_in_frame: 72,
+          new_duration_frames: 24,
+          reason: "trim after overwrite",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    const clips = result.timeline.tracks.video[0].clips;
+    expect(clips.map((clip) => clip.clip_id)).toEqual(["CLP_0001", "CLP_0004", "CLP_0003"]);
+    expect(clips.map((clip) => [clip.timeline_in_frame, clip.timeline_duration_frames])).toEqual([
+      [0, 24],
+      [24, 48],
+      [72, 24],
+    ]);
+    expect(clips[1].segment_id).toBe("SEG_OVER");
+    expect(clips[2].src_in_us).toBe(500_000);
+  });
+
+  it("insert plus split/trim operations can overwrite the middle of a clip", () => {
+    const timeline = makeMinimalTimeline([
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0001",
+          segment_id: "SEG_LONG",
+          asset_id: "AST_LONG",
+          src_in_us: 0,
+          src_out_us: 4_000_000,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 96,
+        },
+      },
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "NEXT",
+          segment_id: "SEG_NEXT",
+          asset_id: "AST_NEXT",
+          src_in_us: 0,
+          src_out_us: 1_000_000,
+          timeline_in_frame: 96,
+          timeline_duration_frames: 24,
+        },
+      },
+    ]);
+    timeline.transitions = [
+      {
+        transition_id: "TRN_OUT",
+        from_clip_id: "CLP_0001",
+        to_clip_id: "NEXT",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: 6,
+      },
+    ];
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_OVER",
+        asset_id: "AST_OVER",
+        src_in_us: 0,
+        src_out_us: 2_000_000,
+        role: "support",
+        why_it_matches: "middle overwrite source",
+        risks: [],
+        confidence: 0.91,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_OVER",
+          new_timeline_in_frame: 24,
+          new_duration_frames: 48,
+          target_track_id: "V1",
+          beat_id: "b_over",
+          role: "support",
+          reason: "overwrite middle source range",
+        },
+        {
+          op: "split_segment",
+          target_clip_id: "CLP_0001",
+          new_timeline_in_frame: 72,
+          reason: "preserve trailing remainder",
+        },
+        {
+          op: "trim_segment",
+          target_clip_id: "CLP_0001",
+          new_src_in_us: 0,
+          new_src_out_us: 1_000_000,
+          reason: "trim middle span",
+        },
+        {
+          op: "move_segment",
+          target_clip_id: "CLP_0001",
+          new_timeline_in_frame: 0,
+          new_duration_frames: 24,
+          reason: "trim middle span",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    const clips = result.timeline.tracks.video[0].clips;
+    expect(clips.map((clip) => clip.clip_id)).toEqual(["CLP_0001", "CLP_0002", "CLP_0003", "NEXT"]);
+    expect(clips.map((clip) => [clip.segment_id, clip.timeline_in_frame, clip.timeline_duration_frames])).toEqual([
+      ["SEG_LONG", 0, 24],
+      ["SEG_OVER", 24, 48],
+      ["SEG_LONG", 72, 24],
+      ["SEG_NEXT", 96, 24],
+    ]);
+    expect(clips[0].src_out_us).toBe(1_000_000);
+    expect(clips[2].src_in_us).toBe(3_000_000);
+    expect(clips[2].src_out_us).toBe(4_000_000);
+    expect(result.timeline.transitions?.[0].from_clip_id).toBe("CLP_0003");
+    expect(result.timeline.transitions?.[0].to_clip_id).toBe("NEXT");
+  });
+
+  it("insert_segment rejects marked source ranges outside the candidate", () => {
+    const timeline = makeMinimalTimeline();
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_BAD_MARK",
+        asset_id: "AST_055",
+        src_in_us: 1_000,
+        src_out_us: 9_000,
+        role: "support",
+        why_it_matches: "bad marked cutaway",
+        risks: [],
+        confidence: 0.84,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_BAD_MARK",
+          new_timeline_in_frame: 132,
+          new_duration_frames: 12,
+          new_src_in_us: 0,
+          new_src_out_us: 7_000,
+          beat_id: "b_bad_mark",
+          reason: "bad marked source range",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.appliedOps).toBe(0);
+    expect(result.errors[0].message).toContain("Invalid insert source range");
+  });
+
+  it("remove_segment drops transition metadata for the deleted clip", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+      { trackId: "V1", clip: { clip_id: "CLP_0002", timeline_in_frame: 24, timeline_duration_frames: 24 } },
+    ]);
+    timeline.transitions = [
+      {
+        transition_id: "TRN_REMOVE",
+        from_clip_id: "CLP_0001",
+        to_clip_id: "CLP_0002",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: 6,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "remove_segment", target_clip_id: "CLP_0002", reason: "overwrite covered clip" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.timeline.tracks.video[0].clips.map((clip) => clip.clip_id)).toEqual(["CLP_0001"]);
+    expect(result.timeline.transitions).toEqual([]);
+  });
+
+  it("insert_segment honors target_track_id for source candidate timeline drops", () => {
+    const timeline = makeMinimalTimeline();
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_DROP_INSERT",
+        asset_id: "AST_052",
+        src_in_us: 1_000,
+        src_out_us: 5_000,
+        role: "support",
+        why_it_matches: "dragged cutaway option",
+        risks: [],
+        confidence: 0.82,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_DROP_INSERT",
+          new_timeline_in_frame: 144,
+          new_duration_frames: 24,
+          target_track_id: "V1",
+          beat_id: "b_drop",
+          role: "support",
+          reason: "drag source candidate onto V1",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.errors).toEqual([]);
+    const v1 = result.timeline.tracks.video.find((track) => track.track_id === "V1");
+    const v2 = result.timeline.tracks.video.find((track) => track.track_id === "V2");
+    expect(v1?.clips.map((clip) => clip.segment_id)).toContain("SEG_DROP_INSERT");
+    expect(v2?.clips.map((clip) => clip.segment_id)).not.toContain("SEG_DROP_INSERT");
+  });
+
+  it("insert_segment rejects target_track_id with incompatible track kind", () => {
+    const timeline = makeMinimalTimeline();
+
+    const candidates: Candidate[] = [
+      {
+        segment_id: "SEG_BAD_DROP",
+        asset_id: "AST_053",
+        src_in_us: 1_000,
+        src_out_us: 5_000,
+        role: "support",
+        why_it_matches: "bad target",
+        risks: [],
+        confidence: 0.82,
+      },
+    ];
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "insert_segment",
+          with_segment_id: "SEG_BAD_DROP",
+          new_timeline_in_frame: 144,
+          new_duration_frames: 24,
+          target_track_id: "A1",
+          beat_id: "b_drop",
+          role: "support",
+          reason: "drag video source candidate onto audio track",
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, candidates);
+    expect(result.appliedOps).toBe(0);
+    expect(result.errors[0].message).toContain("expected video");
+  });
+
+  it("add_marker and add_note insert markers", () => {
+    const timeline = makeMinimalTimeline();
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "add_marker", new_timeline_in_frame: 100, reason: "review this section", label: "Review: audio QA" },
+        { op: "add_note", new_timeline_in_frame: 200, reason: "Director note: extend pause" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    expect(result.appliedOps).toBe(2);
+    expect(result.timeline.markers.length).toBe(2);
+
+    const reviewMarker = result.timeline.markers.find((m) => m.kind === "review");
+    expect(reviewMarker!.frame).toBe(100);
+    expect(reviewMarker!.label).toBe("Review: audio QA");
+
+    const noteMarker = result.timeline.markers.find((m) => m.kind === "note");
+    expect(noteMarker!.frame).toBe(200);
+    expect(noteMarker!.label).toBe("Director note: extend pause");
+  });
+
+  it("change_audio_policy sets audio policy on clip", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "A1", clip: { clip_id: "CLP_0001", role: "dialogue" } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "change_audio_policy",
+          target_clip_id: "CLP_0001",
+          reason: "duck music under dialogue",
+          audio_policy: { duck_music_db: -12, preserve_nat_sound: true },
+        },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, []);
+    expect(result.errors).toEqual([]);
+    const clip = result.timeline.tracks.audio[0].clips[0];
+    expect(clip.audio_policy).toEqual({ duck_music_db: -12, preserve_nat_sound: true });
+  });
+
+  it("patch is deterministic: same inputs produce same output", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", segment_id: "SEG_001" } },
+      { trackId: "V2", clip: { clip_id: "CLP_0002", segment_id: "SEG_002" } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "trim_segment", target_clip_id: "CLP_0001", new_src_in_us: 500, new_src_out_us: 999000, reason: "trim" },
+        { op: "add_marker", new_timeline_in_frame: 50, reason: "mark" },
+      ],
+    };
+
+    const result1 = applyPatch(timeline, patch, []);
+    // Re-create fresh timeline for second run (applyPatch clones internally)
+    const result2 = applyPatch(timeline, patch, []);
+    expect(JSON.stringify(result1.timeline)).toBe(JSON.stringify(result2.timeline));
+  });
+
+  it("returns resolution report with duration_fit", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "trim_segment", target_clip_id: "CLP_0001", new_src_in_us: 100, new_src_out_us: 200, reason: "small trim" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, [], 100);
+    expect(result.resolution).toBeDefined();
+    expect(result.resolution.duration_fit).toBe(true);
+    expect(result.resolution.target_frames).toBe(100);
+  });
+
+  it("duration_fit=false when patch moves clip beyond target duration", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+    ]);
+
+    // Target is 50 frames, but we move the clip to frame 1000 with duration 300
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "move_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 1000, new_duration_frames: 300, reason: "extend" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, [], 50);
+    expect(result.resolution.duration_fit).toBe(false);
+    expect(result.resolution.total_frames).toBe(1300);
+    expect(result.resolution.target_frames).toBe(50);
+  });
+
+  it("duration_fit uses timeline extent when no target provided (backwards compat)", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "move_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 1000, new_duration_frames: 300, reason: "extend" },
+      ],
+    };
+
+    // No targetDurationFrames → falls back to maxFrame → always fits
+    const result = applyPatch(timeline, patch, []);
+    expect(result.resolution.duration_fit).toBe(true);
+  });
+});
+
+// ── Preview Manifest Regeneration After Patch ─────────────────────────
+
+describe("E2E: Preview Manifest Regeneration After Patch", () => {
+  let tmpDir: string;
+
+  beforeAll(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterAll(() => {
+    removeDirSync(tmpDir);
+  });
+
+  it("preview-manifest.json is updated after patch", () => {
+    // 1. Compile
+    const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    expect(fs.existsSync(result.previewManifestPath)).toBe(true);
+
+    // 2. Read original preview-manifest
+    const manifestBefore = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, "05_timeline/preview-manifest.json"), "utf-8"),
+    );
+
+    // 3. Apply patch (trim CLP_0001 src_in)
+    const patchPath = path.resolve("projects/sample/06_review/review_patch.json");
+    const patch: ReviewPatch = JSON.parse(fs.readFileSync(patchPath, "utf-8"));
+    const candidates = readCandidates(tmpDir);
+
+    const patchResult = applyPatch(result.timeline, patch, candidates, 720);
+    expect(patchResult.errors).toEqual([]);
+
+    // 4. Write patched timeline AND regenerate preview-manifest
+    const timelinePath = path.join(tmpDir, "05_timeline/timeline.json");
+    fs.writeFileSync(timelinePath, JSON.stringify(patchResult.timeline, null, 2), "utf-8");
+
+    // Regenerate preview-manifest (simulates what CLI now does after patch)
+    const newManifestPath = writePreviewManifest(patchResult.timeline, tmpDir);
+    expect(fs.existsSync(newManifestPath)).toBe(true);
+
+    // 5. Verify manifest reflects patched data
+    const manifestAfter = JSON.parse(fs.readFileSync(newManifestPath, "utf-8"));
+
+    // The patch trims CLP_0001 src_in_us from original to 2000000
+    const clp0001Before = manifestBefore.clips.find((c: { clip_id: string }) => c.clip_id === "CLP_0001");
+    const clp0001After = manifestAfter.clips.find((c: { clip_id: string }) => c.clip_id === "CLP_0001");
+    expect(clp0001After).toBeDefined();
+    expect(clp0001After.src_in_us).toBe(2000000);
+    expect(clp0001After.src_in_us).not.toBe(clp0001Before.src_in_us);
+    expect(clp0001After.track_id).toBe("V1");
+    expect(clp0001After.track_kind).toBe("video");
+    expect(manifestAfter.tracks.video[0].clips[0].clip_id).toBe("CLP_0001");
+    expect(manifestAfter.transitions).toEqual(patchResult.timeline.transitions ?? []);
+
+    // The patch replaces CLP_0003's segment (AST_003 via SEG_0014)
+    const clp0003After = manifestAfter.clips.find((c: { clip_id: string }) => c.clip_id === "CLP_0003");
+    expect(clp0003After).toBeDefined();
+    expect(clp0003After.asset_id).toBe("AST_003");
+  });
+});

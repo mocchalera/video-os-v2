@@ -1,0 +1,32 @@
+id: executor_smoke
+name: Executor Smoke Loop
+type: closed_loop
+version: "0.1.0"
+
+goal:
+  description: Verify that the guarded workflow executor can run local harness checks end to end.
+  completion:
+    - workflow_template_verifies
+    - sandbox_has_no_blocked_commands
+    - validation_passes
+    - dashboard_renders
+
+agents: {}
+
+steps:
+  - id: verify_template
+    command: pcl workflow verify --template executor_smoke
+  - id: validate_state
+    command: pcl validate
+  - id: render_dashboard
+    command: pcl render
+
+budget:
+  max_iterations: 1
+  max_parallel_jobs: 1
+  require_human_after_repeated_failure: true
+
+stop_conditions:
+  - command_failure
+  - validation_failure
+  - render_failure

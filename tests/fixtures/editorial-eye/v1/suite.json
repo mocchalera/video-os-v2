@@ -1,0 +1,640 @@
+{
+  "artifact_version": "editorial-eye-benchmark-suite/v1",
+  "suite_id": "editorial-eye-v1",
+  "version": "1.0.0",
+  "baseline_commit": "e431da43c7fe7f4f50a688c3e8fcb48b50511453",
+  "generator": {
+    "id": "editorial-eye-lavfi-fixtures",
+    "version": "1.0.0",
+    "fixture_set_id": "editorial-eye-v1-7x5"
+  },
+  "contract_provenance": {
+    "environment": {
+      "execution": "deterministic_generated_contract",
+      "platform": "portable",
+      "benchmark_scope": "metric_adapter_oracle_not_pipeline_or_model_quality"
+    },
+    "models": [],
+    "degraded": []
+  },
+  "cases": [
+    {
+      "case_id": "interview_dialogue--video",
+      "genre": "interview_dialogue",
+      "media_kind": "video",
+      "fixture_id": "generated-video",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Preserve speaker continuity, response timing, and conversational clarity.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "interview_dialogue--audio",
+      "genre": "interview_dialogue",
+      "media_kind": "audio",
+      "fixture_id": "generated-audio",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "audio_analysis"
+      ],
+      "genre_intent": "Preserve speaker continuity, response timing, and conversational clarity.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "interview_dialogue--image",
+      "genre": "interview_dialogue",
+      "media_kind": "image",
+      "fixture_id": "generated-image",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Preserve speaker continuity, response timing, and conversational clarity.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "interview_dialogue--sequence",
+      "genre": "interview_dialogue",
+      "media_kind": "sequence",
+      "fixture_id": "generated-sequence",
+      "evidence_tier": "unsupported_capability",
+      "required_lanes": [
+        "sequence_pipeline"
+      ],
+      "genre_intent": "Preserve speaker continuity, response timing, and conversational clarity.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": false,
+        "pair_relation": false,
+        "human_accuracy": false
+      }
+    },
+    {
+      "case_id": "interview_dialogue--mixed",
+      "genre": "interview_dialogue",
+      "media_kind": "mixed",
+      "fixture_id": "generated-mixed",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding",
+        "audio_analysis"
+      ],
+      "genre_intent": "Preserve speaker continuity, response timing, and conversational clarity.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "quiet_documentary--video",
+      "genre": "quiet_documentary",
+      "media_kind": "video",
+      "fixture_id": "generated-video",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Respect stillness, room tone, and observational pacing.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "quiet_documentary--audio",
+      "genre": "quiet_documentary",
+      "media_kind": "audio",
+      "fixture_id": "generated-audio",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "audio_analysis"
+      ],
+      "genre_intent": "Respect stillness, room tone, and observational pacing.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "quiet_documentary--image",
+      "genre": "quiet_documentary",
+      "media_kind": "image",
+      "fixture_id": "generated-image",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Respect stillness, room tone, and observational pacing.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "quiet_documentary--sequence",
+      "genre": "quiet_documentary",
+      "media_kind": "sequence",
+      "fixture_id": "generated-sequence",
+      "evidence_tier": "unsupported_capability",
+      "required_lanes": [
+        "sequence_pipeline"
+      ],
+      "genre_intent": "Respect stillness, room tone, and observational pacing.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": false,
+        "pair_relation": false,
+        "human_accuracy": false
+      }
+    },
+    {
+      "case_id": "quiet_documentary--mixed",
+      "genre": "quiet_documentary",
+      "media_kind": "mixed",
+      "fixture_id": "generated-mixed",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding",
+        "audio_analysis"
+      ],
+      "genre_intent": "Respect stillness, room tone, and observational pacing.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "product_detail--video",
+      "genre": "product_detail",
+      "media_kind": "video",
+      "fixture_id": "generated-video",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Keep the product legible and detail changes spatially coherent.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "product_detail--audio",
+      "genre": "product_detail",
+      "media_kind": "audio",
+      "fixture_id": "generated-audio",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "audio_analysis"
+      ],
+      "genre_intent": "Keep the product legible and detail changes spatially coherent.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "product_detail--image",
+      "genre": "product_detail",
+      "media_kind": "image",
+      "fixture_id": "generated-image",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Keep the product legible and detail changes spatially coherent.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "product_detail--sequence",
+      "genre": "product_detail",
+      "media_kind": "sequence",
+      "fixture_id": "generated-sequence",
+      "evidence_tier": "unsupported_capability",
+      "required_lanes": [
+        "sequence_pipeline"
+      ],
+      "genre_intent": "Keep the product legible and detail changes spatially coherent.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": false,
+        "pair_relation": false,
+        "human_accuracy": false
+      }
+    },
+    {
+      "case_id": "product_detail--mixed",
+      "genre": "product_detail",
+      "media_kind": "mixed",
+      "fixture_id": "generated-mixed",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding",
+        "audio_analysis"
+      ],
+      "genre_intent": "Keep the product legible and detail changes spatially coherent.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "action_event--video",
+      "genre": "action_event",
+      "media_kind": "video",
+      "fixture_id": "generated-video",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Track action peaks without losing event causality.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "action_event--audio",
+      "genre": "action_event",
+      "media_kind": "audio",
+      "fixture_id": "generated-audio",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "audio_analysis"
+      ],
+      "genre_intent": "Track action peaks without losing event causality.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "action_event--image",
+      "genre": "action_event",
+      "media_kind": "image",
+      "fixture_id": "generated-image",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Track action peaks without losing event causality.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "action_event--sequence",
+      "genre": "action_event",
+      "media_kind": "sequence",
+      "fixture_id": "generated-sequence",
+      "evidence_tier": "unsupported_capability",
+      "required_lanes": [
+        "sequence_pipeline"
+      ],
+      "genre_intent": "Track action peaks without losing event causality.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": false,
+        "pair_relation": false,
+        "human_accuracy": false
+      }
+    },
+    {
+      "case_id": "action_event--mixed",
+      "genre": "action_event",
+      "media_kind": "mixed",
+      "fixture_id": "generated-mixed",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding",
+        "audio_analysis"
+      ],
+      "genre_intent": "Track action peaks without losing event causality.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--video",
+      "genre": "vertical_social_montage",
+      "media_kind": "video",
+      "fixture_id": "generated-video",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Deliver an immediate vertical hook with readable rhythmic progression.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--audio",
+      "genre": "vertical_social_montage",
+      "media_kind": "audio",
+      "fixture_id": "generated-audio",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "audio_analysis"
+      ],
+      "genre_intent": "Deliver an immediate vertical hook with readable rhythmic progression.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--image",
+      "genre": "vertical_social_montage",
+      "media_kind": "image",
+      "fixture_id": "generated-image",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Deliver an immediate vertical hook with readable rhythmic progression.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--sequence",
+      "genre": "vertical_social_montage",
+      "media_kind": "sequence",
+      "fixture_id": "generated-sequence",
+      "evidence_tier": "unsupported_capability",
+      "required_lanes": [
+        "sequence_pipeline"
+      ],
+      "genre_intent": "Deliver an immediate vertical hook with readable rhythmic progression.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": false,
+        "pair_relation": false,
+        "human_accuracy": false
+      }
+    },
+    {
+      "case_id": "vertical_social_montage--mixed",
+      "genre": "vertical_social_montage",
+      "media_kind": "mixed",
+      "fixture_id": "generated-mixed",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding",
+        "audio_analysis"
+      ],
+      "genre_intent": "Deliver an immediate vertical hook with readable rhythmic progression.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "chronological_longform--video",
+      "genre": "chronological_longform",
+      "media_kind": "video",
+      "fixture_id": "generated-video",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Preserve chronology and long-form temporal orientation.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "chronological_longform--audio",
+      "genre": "chronological_longform",
+      "media_kind": "audio",
+      "fixture_id": "generated-audio",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "audio_analysis"
+      ],
+      "genre_intent": "Preserve chronology and long-form temporal orientation.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "chronological_longform--image",
+      "genre": "chronological_longform",
+      "media_kind": "image",
+      "fixture_id": "generated-image",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Preserve chronology and long-form temporal orientation.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "chronological_longform--sequence",
+      "genre": "chronological_longform",
+      "media_kind": "sequence",
+      "fixture_id": "generated-sequence",
+      "evidence_tier": "unsupported_capability",
+      "required_lanes": [
+        "sequence_pipeline"
+      ],
+      "genre_intent": "Preserve chronology and long-form temporal orientation.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": false,
+        "pair_relation": false,
+        "human_accuracy": false
+      }
+    },
+    {
+      "case_id": "chronological_longform--mixed",
+      "genre": "chronological_longform",
+      "media_kind": "mixed",
+      "fixture_id": "generated-mixed",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding",
+        "audio_analysis"
+      ],
+      "genre_intent": "Preserve chronology and long-form temporal orientation.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--video",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "video",
+      "fixture_id": "generated-video",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Recognize intentional jump, smash, and match transitions without false hard-fails.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--audio",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "audio",
+      "fixture_id": "generated-audio",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "audio_analysis"
+      ],
+      "genre_intent": "Recognize intentional jump, smash, and match transitions without false hard-fails.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--image",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "image",
+      "fixture_id": "generated-image",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding"
+      ],
+      "genre_intent": "Recognize intentional jump, smash, and match transitions without false hard-fails.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--sequence",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "sequence",
+      "fixture_id": "generated-sequence",
+      "evidence_tier": "unsupported_capability",
+      "required_lanes": [
+        "sequence_pipeline"
+      ],
+      "genre_intent": "Recognize intentional jump, smash, and match transitions without false hard-fails.",
+      "applicability": {
+        "grounded_visual_accuracy": false,
+        "observation_accuracy": false,
+        "pair_relation": false,
+        "human_accuracy": false
+      }
+    },
+    {
+      "case_id": "intentional_jump_smash_match--mixed",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "mixed",
+      "fixture_id": "generated-mixed",
+      "evidence_tier": "real_generated_pixel_audio",
+      "required_lanes": [
+        "visual_grounding",
+        "audio_analysis"
+      ],
+      "genre_intent": "Recognize intentional jump, smash, and match transitions without false hard-fails.",
+      "applicability": {
+        "grounded_visual_accuracy": true,
+        "observation_accuracy": true,
+        "pair_relation": false,
+        "human_accuracy": true
+      }
+    }
+  ],
+  "gate_policy": {
+    "grounded_visual_success": {
+      "gate_id": "grounded_visual_success",
+      "blocking": true
+    },
+    "human_accuracy": {
+      "metric_id": "human_accuracy",
+      "enforcement": "advisory",
+      "threshold": 0.8
+    },
+    "reserved_gate_ids": [
+      "source_freshness",
+      "rollback",
+      "preference_isolation"
+    ]
+  }
+}

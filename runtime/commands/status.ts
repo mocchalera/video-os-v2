@@ -1,0 +1,249 @@
+/**
+ * /status Command
+ *
+ * Reconciles project_state.yaml and returns current status:
+ * - Current state
+ * - Gate statuses
+ * - Stale artifact detection
+ * - Next command recommendation
+ *
+ * State is never changed by /status (read-only).
+ */
+
+import {
+  initCommand,
+  isCommandError,
+  type CommandError,
+} from "./shared.js";
+import type { ProjectState, GateStatus, ReconcileResult } from "../state/reconcile.js";
+import {
+  isP1ManifestCoverageEnabled,
+  readCoverageSummary,
+} from "../artifacts/p1-manifest-coverage.js";
+import {
+  isP4aReleaseSafetyEnabled,
+  readReleaseSafetySummary,
+} from "../artifacts/p4a-release-safety.js";
+import {
+  isP4bDeliveryProfilesEnabled,
+  readDeliveryProfileStatus,
+} from "../artifacts/p4b-delivery-profile.js";
+import {
+  isP4cConfidenceCalibrationEnabled,
+  readCalibrationReportStatus,
+} from "../artifacts/p4c-confidence-calibration.js";
+import {
+  isP4dSearchIndexEnabled,
+  readSearchIndexStatus,
+} from "../artifacts/p4d-segment-search-index.js";
+
+// ── Types ────────────────────────────────────────────────────────
+
+export interface StatusResult {
+  success: boolean;
+  error?: CommandError;
+  currentState?: ProjectState;
+  gates?: GateStatus;
+  coverage?: {
+    status: string;
+    requiredLaneCount: number;
+    readyLaneCount: number;
+    blockedLaneCount: number;
+    partialLaneCount: number;
+    reportPath: string;
+  };
+  releaseSafety?: {
+    exists: boolean;
+    reportPath?: string;
+    mode?: string;
+    summary?: {
+      status: string;
+      fatal_count: number;
+      blocker_count: number;
+      warning_count: number;
+      waived_count: number;
+    };
+    valid?: boolean;
+    error?: string;
+  };
+  deliveryProfiles?: {
+    enabled: boolean;
+    directory: string;
+    count: number;
+    malformed_count: number;
+    profiles: Array<{
+      profile_id: string;
+      profile_name: string;
+      platform: string;
+      release_mode: string;
+      path: string;
+    }>;
+    malformed: Array<{ path: string; errors: string[] }>;
+  };
+  confidenceCalibration?: {
+    enabled: boolean;
+    exists: boolean;
+    path: string;
+    eval_set_id?: string;
+    calibration_model_id?: string;
+    valid?: boolean;
+    errors?: string[];
+  };
+  searchIndex?: {
+    enabled: boolean;
+    exists: boolean;
+    path: string;
+    index_id?: string;
+    hash?: string;
+    stale?: boolean;
+    stale_reasons?: string[];
+    valid?: boolean;
+    errors?: string[];
+  };
+  staleArtifacts?: string[];
+  selfHealed?: boolean;
+  previousState?: ProjectState;
+  nextCommand?: string;
+  nextCommandReason?: string;
+}
+
+export interface PlanningGateInterpretation {
+  severity: "ok" | "warning" | "blocker";
+  blocksRuntime: boolean;
+  message: string;
+}
+
+export function interpretPlanningGate(planningGate: GateStatus["planning_gate"] | "partial_override" | string): PlanningGateInterpretation {
+  switch (planningGate) {
+    case "open":
+      return {
+        severity: "ok",
+        blocksRuntime: false,
+        message: "planning gate open",
+      };
+    case "partial_override":
+      return {
+        severity: "warning",
+        blocksRuntime: false,
+        message: "planning gate has partial operator override; continue with warning",
+      };
+    case "blocked":
+      return {
+        severity: "blocker",
+        blocksRuntime: true,
+        message: "planning gate blocked by unresolved uncertainty",
+      };
+    default:
+      return {
+        severity: "warning",
+        blocksRuntime: false,
+        message: `unknown planning gate '${planningGate}'; continue with warning`,
+      };
+  }
+}
+
+// ── Next Command Recommendation ──────────────────────────────────
+
+function recommendNextCommand(
+  state: ProjectState,
+  gates: GateStatus,
+  staleArtifacts: string[],
+): { command: string; reason: string } {
+  // If downstream artifacts are stale, recommend re-running the relevant command
+  if (staleArtifacts.includes("selects") || staleArtifacts.includes("blueprint")) {
+    if (staleArtifacts.includes("selects")) {
+      return { command: "/triage", reason: "selects are stale due to upstream changes" };
+    }
+    return { command: "/blueprint", reason: "blueprint is stale due to upstream changes" };
+  }
+
+  switch (state) {
+    case "intent_pending":
+      return { command: "/intent", reason: "project needs creative brief" };
+    case "intent_locked":
+      if (gates.analysis_gate === "ready" || gates.analysis_gate === "partial_override") {
+        return { command: "/triage", reason: "analysis ready — select footage candidates" };
+      }
+      return { command: "run analysis", reason: "analysis gate is blocked — run media analysis first" };
+    case "media_analyzed":
+      return { command: "/triage", reason: "media analyzed — select footage candidates" };
+    case "selects_ready":
+      return { command: "/blueprint", reason: "selects ready — create edit blueprint" };
+    case "blueprint_ready":
+      return { command: "/review", reason: "blueprint ready — compile timeline and review" };
+    case "blocked":
+      if (gates.compile_gate === "blocked") {
+        return { command: "resolve blockers", reason: "compile gate blocked — resolve unresolved_blockers" };
+      }
+      if (interpretPlanningGate(gates.planning_gate).blocksRuntime) {
+        return { command: "resolve uncertainties", reason: "planning gate blocked — resolve uncertainty_register" };
+      }
+      return { command: "resolve blockers", reason: "project is blocked" };
+    case "timeline_drafted":
+      return { command: "/review", reason: "timeline drafted — run review" };
+    case "critique_ready":
+      return { command: "/export or apply patch", reason: "review complete — export or apply patch and re-review" };
+    case "approved":
+      return { command: "/export", reason: "project approved — export deliverables" };
+    case "packaged":
+      return { command: "done", reason: "project is packaged" };
+    default:
+      return { command: "/status", reason: "unknown state" };
+  }
+}
+
+// ── Command Implementation ───────────────────────────────────────
+
+export function runStatus(projectDir: string): StatusResult {
+  // /status is allowed from any state
+  const ctx = initCommand(projectDir, "/status", []);
+  if (isCommandError(ctx)) {
+    return { success: false, error: ctx };
+  }
+
+  const { reconcileResult, doc } = ctx;
+  const { command, reason } = recommendNextCommand(
+    reconcileResult.reconciled_state,
+    reconcileResult.gates,
+    reconcileResult.stale_artifacts,
+  );
+
+  return {
+    success: true,
+    currentState: reconcileResult.reconciled_state,
+    gates: reconcileResult.gates,
+    coverage: isP1ManifestCoverageEnabled()
+      ? readCoverageSummary(ctx.projectDir)
+      : undefined,
+    releaseSafety: isP4aReleaseSafetyEnabled()
+      ? formatReleaseSafetyStatus(ctx.projectDir)
+      : undefined,
+    deliveryProfiles: isP4bDeliveryProfilesEnabled()
+      ? readDeliveryProfileStatus(ctx.projectDir)
+      : undefined,
+    confidenceCalibration: isP4cConfidenceCalibrationEnabled()
+      ? readCalibrationReportStatus(ctx.projectDir)
+      : undefined,
+    searchIndex: isP4dSearchIndexEnabled()
+      ? readSearchIndexStatus(ctx.projectDir)
+      : undefined,
+    staleArtifacts: reconcileResult.stale_artifacts,
+    selfHealed: reconcileResult.self_healed,
+    previousState: reconcileResult.persisted_state,
+    nextCommand: command,
+    nextCommandReason: reason,
+  };
+}
+
+function formatReleaseSafetyStatus(projectDir: string): NonNullable<StatusResult["releaseSafety"]> {
+  const summary = readReleaseSafetySummary(projectDir);
+  if (!summary) return { exists: false };
+  return {
+    exists: true,
+    reportPath: summary.path,
+    mode: summary.mode,
+    summary: summary.summary,
+    valid: summary.valid,
+    error: summary.error,
+  };
+}

@@ -1,0 +1,339 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/bgm-track-analysis.schema.json",
+  "title": "Video OS BGM Track Analysis",
+  "description": "Content-hash-addressed technical, structural, and semantic analysis for one library track.",
+  "type": "object",
+  "required": [
+    "version",
+    "track_id",
+    "input_content_hash",
+    "created_at",
+    "status",
+    "audio",
+    "loudness",
+    "tempo",
+    "structure",
+    "spectrum",
+    "semantics",
+    "analyzers",
+    "degraded_reasons",
+    "hash_policy",
+    "analysis_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "track_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "input_content_hash": { "$ref": "#/$defs/contentHash" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["ready", "degraded", "failed"] },
+    "audio": { "$ref": "#/$defs/audioFacts" },
+    "loudness": { "$ref": "#/$defs/loudnessFacts" },
+    "tempo": { "$ref": "#/$defs/tempoFacts" },
+    "structure": { "$ref": "#/$defs/structureFacts" },
+    "spectrum": { "$ref": "#/$defs/spectralFacts" },
+    "semantics": { "$ref": "#/$defs/semanticFacts" },
+    "analyzers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/analyzer" }
+    },
+    "degraded_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "hash_policy": { "$ref": "#/$defs/hashPolicy" },
+    "analysis_hash": { "$ref": "#/$defs/contentHash" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "ready" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "degraded_reasons": { "maxItems": 0 },
+          "loudness": {
+            "properties": {
+              "integrated_lufs": { "type": "number" },
+              "loudness_range_lu": { "type": "number", "minimum": 0 },
+              "true_peak_dbtp": { "type": "number" }
+            }
+          },
+          "tempo": {
+            "properties": {
+              "bpm": { "type": "number", "exclusiveMinimum": 0 },
+              "meter": { "type": "string", "minLength": 1 }
+            }
+          },
+          "semantics": { "properties": { "status": { "const": "ready" } } },
+          "analyzers": { "items": { "properties": { "status": { "const": "ready" } } } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "degraded" } }, "required": ["status"] },
+      "then": { "properties": { "degraded_reasons": { "minItems": 1 } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "degraded_reasons": { "minItems": 1 },
+          "analyzers": {
+            "contains": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+            "minContains": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "packRelativeRef": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*:)(?!.*//)(?!.*/$)(?!\\.{1,2}(?:/|$))(?!.*\\/\\.{1,2}(?:/|$))(?!.*[\\u0000-\\u001F\\u007F])[^\\\\]+$"
+    },
+    "hashPolicy": {
+      "description": "Deterministic analysis identity excludes the self hash and observation timestamp only.",
+      "type": "object",
+      "required": ["algorithm", "canonicalization", "excluded_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "const": "sha256" },
+        "canonicalization": { "const": "normalized-json-v1" },
+        "excluded_fields": { "const": ["analysis_hash", "created_at"] }
+      }
+    },
+    "audioFacts": {
+      "type": "object",
+      "required": ["duration_us", "sample_rate_hz", "channels", "codec"],
+      "additionalProperties": false,
+      "properties": {
+        "duration_us": { "type": "integer", "exclusiveMinimum": 0 },
+        "sample_rate_hz": { "type": "integer", "minimum": 1 },
+        "channels": { "type": "integer", "minimum": 1 },
+        "codec": { "type": "string", "minLength": 1 }
+      }
+    },
+    "loudnessFacts": {
+      "type": "object",
+      "required": [
+        "integrated_lufs",
+        "loudness_range_lu",
+        "true_peak_dbtp",
+        "clipping_sample_count",
+        "leading_silence_us",
+        "trailing_silence_us"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "integrated_lufs": { "type": ["number", "null"] },
+        "loudness_range_lu": { "type": ["number", "null"], "minimum": 0 },
+        "true_peak_dbtp": { "type": ["number", "null"] },
+        "clipping_sample_count": { "type": "integer", "minimum": 0 },
+        "leading_silence_us": { "type": "integer", "minimum": 0 },
+        "trailing_silence_us": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tempoFacts": {
+      "type": "object",
+      "required": ["bpm", "perceived_tempo", "meter", "key", "mode", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "bpm": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "perceived_tempo": { "type": "string", "enum": ["slow", "medium", "fast", "unknown"] },
+        "meter": { "type": ["string", "null"], "minLength": 1 },
+        "key": { "type": ["string", "null"], "minLength": 1 },
+        "mode": { "type": ["string", "null"], "minLength": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "timedPoint": {
+      "type": "object",
+      "required": ["at_us", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "at_us": { "type": "integer", "minimum": 0 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "section": {
+      "type": "object",
+      "required": ["section_id", "label", "in_us", "out_us", "energy"],
+      "additionalProperties": false,
+      "properties": {
+        "section_id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "in_us": { "type": "integer", "minimum": 0 },
+        "out_us": { "type": "integer", "exclusiveMinimum": 0 },
+        "energy": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "curvePoint": {
+      "type": "object",
+      "required": ["at_us", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "at_us": { "type": "integer", "minimum": 0 },
+        "value": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "loopCandidate": {
+      "type": "object",
+      "required": ["in_us", "out_us", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "in_us": { "type": "integer", "minimum": 0 },
+        "out_us": { "type": "integer", "exclusiveMinimum": 0 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "structureFacts": {
+      "type": "object",
+      "required": [
+        "beats",
+        "downbeats",
+        "sections",
+        "energy_curve",
+        "transient_density",
+        "safe_entry_points",
+        "safe_exit_points",
+        "loop_candidates"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "beats": { "type": "array", "items": { "$ref": "#/$defs/timedPoint" } },
+        "downbeats": { "type": "array", "items": { "$ref": "#/$defs/timedPoint" } },
+        "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },
+        "energy_curve": { "type": "array", "items": { "$ref": "#/$defs/curvePoint" } },
+        "transient_density": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safe_entry_points": { "type": "array", "items": { "$ref": "#/$defs/timedPoint" } },
+        "safe_exit_points": { "type": "array", "items": { "$ref": "#/$defs/timedPoint" } },
+        "loop_candidates": { "type": "array", "items": { "$ref": "#/$defs/loopCandidate" } }
+      }
+    },
+    "spectralFacts": {
+      "type": "object",
+      "required": ["spectral_density", "speech_band_masking_score"],
+      "additionalProperties": false,
+      "properties": {
+        "spectral_density": { "type": "number", "minimum": 0, "maximum": 1 },
+        "speech_band_masking_score": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "labelScore": {
+      "type": "object",
+      "required": ["label", "score"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "embeddingRef": {
+      "type": "object",
+      "required": ["path", "content_hash", "dimensions", "model_revision"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/$defs/packRelativeRef" },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "dimensions": { "type": "integer", "minimum": 1 },
+        "model_revision": { "type": "string", "minLength": 1 }
+      }
+    },
+    "semanticFacts": {
+      "type": "object",
+      "required": ["status", "clap_embedding", "mood_scores", "genre_scores", "editorial_axes", "degraded_reasons"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "degraded", "unavailable"] },
+        "clap_embedding": { "anyOf": [{ "$ref": "#/$defs/embeddingRef" }, { "type": "null" }] },
+        "mood_scores": { "type": "array", "items": { "$ref": "#/$defs/labelScore" } },
+        "genre_scores": { "type": "array", "items": { "$ref": "#/$defs/labelScore" } },
+        "editorial_axes": { "$ref": "#/$defs/analyzedEditorialAxes" },
+        "degraded_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ready" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "clap_embedding": { "$ref": "#/$defs/embeddingRef" },
+              "mood_scores": { "minItems": 1 },
+              "genre_scores": { "minItems": 1 },
+              "degraded_reasons": { "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "degraded" } }, "required": ["status"] },
+          "then": { "properties": { "degraded_reasons": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "unavailable" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "clap_embedding": { "type": "null" },
+              "mood_scores": { "maxItems": 0 },
+              "genre_scores": { "maxItems": 0 },
+              "degraded_reasons": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "analyzedAxis": {
+      "type": "object",
+      "required": ["value", "confidence", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source": { "const": "analyzed" }
+      }
+    },
+    "analyzedEditorialAxes": {
+      "type": "object",
+      "required": [
+        "energy",
+        "valence",
+        "tension",
+        "warmth",
+        "modernity",
+        "playfulness",
+        "sophistication",
+        "organic_electronic",
+        "density",
+        "speech_friendliness",
+        "beat_prominence",
+        "build_strength",
+        "ending_resolution"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "energy": { "$ref": "#/$defs/analyzedAxis" },
+        "valence": { "$ref": "#/$defs/analyzedAxis" },
+        "tension": { "$ref": "#/$defs/analyzedAxis" },
+        "warmth": { "$ref": "#/$defs/analyzedAxis" },
+        "modernity": { "$ref": "#/$defs/analyzedAxis" },
+        "playfulness": { "$ref": "#/$defs/analyzedAxis" },
+        "sophistication": { "$ref": "#/$defs/analyzedAxis" },
+        "organic_electronic": { "$ref": "#/$defs/analyzedAxis" },
+        "density": { "$ref": "#/$defs/analyzedAxis" },
+        "speech_friendliness": { "$ref": "#/$defs/analyzedAxis" },
+        "beat_prominence": { "$ref": "#/$defs/analyzedAxis" },
+        "build_strength": { "$ref": "#/$defs/analyzedAxis" },
+        "ending_resolution": { "$ref": "#/$defs/analyzedAxis" }
+      }
+    },
+    "analyzer": {
+      "type": "object",
+      "required": ["name", "version", "model_revision", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "model_revision": { "type": ["string", "null"], "minLength": 1 },
+        "status": { "type": "string", "enum": ["ready", "degraded", "unavailable", "failed"] }
+      }
+    }
+  }
+}

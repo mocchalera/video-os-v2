@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/premiere-export-ready.schema.json",
+  "title": "Ready Premiere export generation",
+  "type": "object",
+  "required": ["version", "project_id", "base_timeline_sha256", "roundtrip_id", "export_generation_id", "xml", "receipt", "bake_index", "hardware_verified"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "premiere-export-ready/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "base_timeline_sha256": { "$ref": "#/$defs/sha" },
+    "roundtrip_id": { "$ref": "#/$defs/sha" },
+    "export_generation_id": { "$ref": "#/$defs/sha" },
+    "xml": { "$ref": "#/$defs/ref" },
+    "receipt": { "$ref": "#/$defs/ref" },
+    "bake_index": { "$ref": "#/$defs/ref" },
+    "hardware_verified": { "const": false }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "ref": {
+      "type": "object", "required": ["path", "sha256"], "additionalProperties": false,
+      "properties": { "path": { "$ref": "#/$defs/relativePath" }, "sha256": { "$ref": "#/$defs/sha" } }
+    },
+    "relativePath": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*%2[eE]).+$" }
+  }
+}

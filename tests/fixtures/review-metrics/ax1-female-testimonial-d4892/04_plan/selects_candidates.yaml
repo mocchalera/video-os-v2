@@ -1,0 +1,26 @@
+version: "1"
+project_id: ax1-female-testimonial-d4892
+candidates:
+  - candidate_id: CAND_START
+    segment_id: SEG_SYNTH_B
+    asset_id: AST_SYNTH_B
+    src_in_us: 1800000
+    src_out_us: 4200000
+    role: hero
+    story_role: hook
+    confidence: 0.84
+    editorial_signals:
+      speech_intensity_score: 0.84
+      authenticity_score: 0.85
+      surprise_signal: 0.87
+  - candidate_id: CAND_END
+    segment_id: SEG_SYNTH_B
+    asset_id: AST_SYNTH_B
+    src_in_us: 22000000
+    src_out_us: 27000000
+    role: dialogue
+    story_role: closing
+    confidence: 0.85
+    editorial_signals:
+      speech_intensity_score: 0.84
+      authenticity_score: 0.85

@@ -1,0 +1,53 @@
+{
+  "version": "1.1.0",
+  "project_id": "planning-first-class",
+  "sequence_goals": ["Build a compact emotional arc."],
+  "beats": [
+    {
+      "id": "B01",
+      "label": "Hook",
+      "target_duration_frames": 72,
+      "required_roles": ["hero"],
+      "audio_story_role": {
+        "node_id": "UTTREF_UTT_intro_001",
+        "role": "hook",
+        "evidence_node_ids": ["UTTREF_UTT_intro_001"],
+        "graph_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "continuity_constraint": {
+        "chronology": "chronological",
+        "enforced_entity_ids": ["ENT_SUBJECT_child_001"],
+        "graph_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "applied_preferences": [
+        {
+          "entry_id": "EPM_pacing_active",
+          "preference_type": "pacing",
+          "consumed_offset": 180,
+          "consumed_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ]
+    }
+  ],
+  "pacing": {
+    "opening_cadence": "quick",
+    "middle_cadence": "steady",
+    "ending_cadence": "held"
+  },
+  "music_policy": {
+    "start_sparse": true,
+    "allow_release_late": true,
+    "entry_beat": "B01"
+  },
+  "dialogue_policy": {
+    "preserve_natural_breath": true,
+    "avoid_wall_to_wall_voiceover": true
+  },
+  "transition_policy": {
+    "prefer_match_texture_over_flashy_fx": true
+  },
+  "ending_policy": {
+    "should_feel": "resolved"
+  },
+  "rejection_rules": ["Avoid duplicate moments."]
+}

@@ -1,0 +1,53 @@
+{
+  "project_id": "togakushi-camp",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "asset_id": "AST_00725A11",
+      "filename": "NINJAV_S001_S001_T084.MOV",
+      "duration_us": 15281938,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_00725A11",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_00725A11_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "00725a1132fb6ca553f25b9152bdf5ab9ebc6015",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_00725A11_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "f8d69e637a7668e5",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_00725A11.jpg",
+      "waveform_path": "waveforms/WF_AST_00725A11.png",
+      "role_guess": "hybrid",
+      "display_name": "36_oct_a_person_is"
+    }
+  ]
+}

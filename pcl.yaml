@@ -1,0 +1,114 @@
+project_loop:
+  version: "0.1.0"
+  schema_version: 1
+
+project:
+  name: "video-os-v2-spec"
+  type: "artifact-driven-video-editing-agent"
+  root: "."
+
+commands:
+  install: "npm install"
+  typecheck: "npm run build"
+  test: "npm test"
+  e2e: "npm run verify"
+  build: "npm run build"
+
+discovery:
+  include:
+    - runtime/
+    - scripts/
+    - apps/
+    - editor/
+    - schemas/
+    - tests/
+    - docs/
+    - AGENTS.md
+    - ARCHITECTURE.md
+    - README.md
+    - goal.md
+  exclude:
+    - node_modules/
+    - editor/node_modules/
+    - editor/client/node_modules/
+    - dist/
+    - build/
+    - coverage/
+    - .venv/
+    - .build/
+    - .claude/
+    - .codex/
+    - .playwright-cli/
+    - .playwright-mcp/
+    - python/.venv-marlin/
+    - tmp/
+    - tmp-*/
+    - tests/tmp_*/
+    - projects/*/02_media/
+    - projects/*/03_analysis/search/
+    - projects/*/09_output/
+    - reports/eval/*/_scratch/
+
+loop:
+  max_iterations_per_workflow: 3
+  max_fix_attempts_per_defect: 2
+  max_parallel_jobs: 3
+  require_human_after_repeated_failure: true
+  stop_if_same_failure_repeats: true
+
+permissions:
+  agent_may_modify:
+    - runtime/
+    - scripts/
+    - apps/
+    - editor/
+    - schemas/
+    - tests/
+    - docs/
+    - reports/
+    - .github/
+    - Package.swift
+    - package.json
+    - .nvmrc
+    - .node-version
+    - vitest.config.ts
+    - vitest.integration.config.ts
+    - .agents/skills/
+    - .project-loop/workflows/
+    - AGENTS.md
+    - ARCHITECTURE.md
+    - README.md
+    - goal.md
+    - pcl.yaml
+  agent_may_not_modify:
+    - .env
+    - .env.*
+    - .env.local
+    - .project-loop/project.db
+    - .project-loop/project.db-*
+    - .project-loop/events.jsonl
+    - .project-loop/dashboard/
+    - .project-loop/evidence/
+    - .project-loop/tmp/
+    - .project-loop/cache/
+    - node_modules/
+    - editor/node_modules/
+    - editor/client/node_modules/
+    - projects/*/02_media/
+    - projects/*/03_analysis/search/footage.db
+    - projects/*/09_output/
+    - secrets/
+    - migrations/
+  require_human_approval:
+    - database_migration
+    - dependency_addition
+    - auth_or_billing_change
+    - production_config_change
+    - destructive_operation
+    - external_write
+    - public_release_or_push
+    - source_footage_or_rendered_media_commit
+
+dashboard:
+  output: ".project-loop/dashboard/dashboard.html"
+  auto_render: true

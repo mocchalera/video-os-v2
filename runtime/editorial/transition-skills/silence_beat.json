@@ -1,0 +1,62 @@
+{
+  "id": "silence_beat",
+  "version": "1",
+  "scope": "adjacent_pair",
+  "phase": "p0",
+  "intent": "意図的な無音で感情的重みと余韻を付与する",
+  "audience_effect": "沈黙の間に直前の言葉が反芻され、感情が深く浸透する",
+  "murch_weights": {
+    "emotion": 0.45,
+    "story": 0.20,
+    "rhythm": 0.25,
+    "eye_trace": 0.05,
+    "plane_2d": 0.05,
+    "space_3d": 0.0
+  },
+  "min_score_threshold": 0.30,
+  "when": {
+    "all": [
+      { "path": "outgoing_afterglow_score", "op": "gte", "value": 0.4 }
+    ],
+    "any": [
+      { "path": "outgoing_silence_ratio", "op": "gte", "value": 0.25 },
+      { "path": "left_story_role", "op": "in", "value": ["experience", "closing"] }
+    ]
+  },
+  "avoid_when": {
+    "any": [
+      { "path": "energy_delta_score", "op": "gte", "value": 0.5 },
+      { "path": "duration_mode", "op": "eq", "value": "strict" }
+    ]
+  },
+  "minimum_viable": [
+    {
+      "id": "afterglow_present",
+      "predicate": {
+        "all": [
+          { "path": "outgoing_afterglow_score", "op": "gte", "value": 0.3 }
+        ]
+      },
+      "failure_reason": "直前クリップに感情の余韻が不足"
+    }
+  ],
+  "fallback_order": [
+    {
+      "kind": "crossfade",
+      "lower_to": "transition",
+      "transition_type": "crossfade",
+      "crossfade_sec": 0.5
+    },
+    {
+      "kind": "hard_cut",
+      "lower_to": "transition",
+      "transition_type": "cut"
+    }
+  ],
+  "pipeline_effects": {
+    "transition_type": "fade_to_black",
+    "crossfade_sec": 0.5,
+    "beat_snap": "downbeat",
+    "snap_anchor": "transition_center"
+  }
+}

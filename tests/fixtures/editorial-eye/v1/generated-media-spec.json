@@ -1,0 +1,13 @@
+{
+  "artifact_version": "editorial-eye-generated-media-spec/v1",
+  "generator_id": "editorial-eye-lavfi-fixtures",
+  "generator_version": "1.0.0",
+  "deterministic_inputs": true,
+  "fixtures": [
+    { "fixture_id": "generated-video", "media_kind": "video", "output": "video.mp4", "ffmpeg_args": ["-f", "lavfi", "-i", "testsrc2=size=96x64:rate=10:duration=1", "-an", "-c:v", "mpeg4", "-q:v", "3", "-metadata", "creation_time=1970-01-01T00:00:00Z", "{output}"] },
+    { "fixture_id": "generated-audio", "media_kind": "audio", "output": "audio.wav", "ffmpeg_args": ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1", "-vn", "-c:a", "pcm_s16le", "{output}"] },
+    { "fixture_id": "generated-image", "media_kind": "image", "output": "still.png", "ffmpeg_args": ["-f", "lavfi", "-i", "color=c=0x336699:s=96x64:d=1", "-frames:v", "1", "-threads", "1", "{output}"] },
+    { "fixture_id": "generated-sequence", "media_kind": "sequence", "output": "sequence/frame-%03d.png", "ffmpeg_args": ["-f", "lavfi", "-i", "testsrc2=size=96x64:rate=3:duration=1", "-frames:v", "3", "-threads", "1", "{output}"] },
+    { "fixture_id": "generated-mixed", "media_kind": "mixed", "output": "mixed.mp4", "ffmpeg_args": ["-f", "lavfi", "-i", "testsrc2=size=96x64:rate=10:duration=1", "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=1", "-map", "0:v:0", "-map", "1:a:0", "-c:v", "mpeg4", "-q:v", "3", "-c:a", "aac", "-shortest", "-metadata", "creation_time=1970-01-01T00:00:00Z", "{output}"] }
+  ]
+}

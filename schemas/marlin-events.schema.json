@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/marlin-events.schema.json",
+  "title": "Video OS Marlin Events",
+  "description": "Timestamped temporal-semantic events produced by Marlin-2B caption/find passes.",
+  "type": "object",
+  "required": ["project_id", "artifact_version", "model", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "minLength": 1 },
+    "model": { "$ref": "#/$defs/model-record" },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/marlin-asset-events" }
+    }
+  },
+  "$defs": {
+    "model-record": {
+      "type": "object",
+      "required": ["provider", "model_alias", "model_snapshot"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "enum": ["marlin"] },
+        "model_alias": { "type": "string", "minLength": 1 },
+        "model_snapshot": { "type": "string", "minLength": 1 },
+        "connector_version": { "type": "string", "minLength": 1 },
+        "inference_mode": { "type": "string", "enum": ["live", "mock"] }
+      }
+    },
+    "marlin-event": {
+      "type": "object",
+      "required": ["event_id", "start_us", "end_us", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "type": "string", "pattern": "^MEV_[A-Za-z0-9_-]+_[0-9]{4}$" },
+        "start_us": { "type": "integer", "minimum": 0 },
+        "end_us": { "type": "integer", "minimum": 0 },
+        "description": { "type": "string", "minLength": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source_pass": {
+          "type": "string",
+          "enum": ["marlin_caption", "marlin_find"]
+        },
+        "chunk_index": { "type": "integer", "minimum": 0 },
+        "chunk_offset_us": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "find-result": {
+      "type": "object",
+      "required": ["query", "format_ok"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string", "minLength": 1 },
+        "span_start_us": { "type": ["integer", "null"], "minimum": 0 },
+        "span_end_us": { "type": ["integer", "null"], "minimum": 0 },
+        "format_ok": { "type": "boolean" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "raw": { "type": "string" }
+      }
+    },
+    "marlin-asset-events": {
+      "type": "object",
+      "required": ["asset_id", "source_path", "scene", "events", "find_results"],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "source_path": { "type": "string", "minLength": 1 },
+        "scene": { "type": "string" },
+        "caption": { "type": "string" },
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/marlin-event" }
+        },
+        "find_results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/find-result" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+PCL Goal: G-0009
+Task: T-0042
+Feature: F-0071
+Story: US-0041
+Acceptance test: TC-0127
+Integrated commit: 6954e54b
+Source task commit: 41398c62ace55214ec368e9ef9b307bbbae18ec4
+
+Outcome:
+- fps_num/fps_den is the canonical timebase across Remotion, FFmpeg, Studio preview, captions, and QA.
+- Remotion no longer rounds 24000/1001 or 30000/1001 to integer fps.
+- FFmpeg render arguments preserve the original rational expression.
+- Preview cache contract was advanced so old decimal-fps outputs cannot masquerade as exact outputs.
+- Thirty-minute boundary conversion remains within 0.5 frame.
+
+Verification on the integrated Dev checkout with Node 22.23.1:
+- Targeted rational/render/parity tests: 31 passed; one gated smoke skipped in the default run.
+- Explicit VOS_REMOTION_RENDER=1 smoke: passed; ffprobe reported 30000/1001.
+- TypeScript: npx tsc --noEmit passed.
+- TimelineDocumentTests: 10 passed.
+- ProjectTimelinePreviewDiagnosticsTests: 7 passed.
+- git diff --check passed.
+
+Commands:
+node node_modules/vitest/vitest.mjs run tests/rational-timebase.test.ts tests/rational-timebase-ffprobe.test.ts tests/remotion-timeline-to-props.test.ts tests/render-pipeline.test.ts tests/remotion-render-smoke.test.ts editor/tests/parity/preview-output-fps.test.ts --configLoader runner
+VOS_REMOTION_RENDER=1 node node_modules/vitest/vitest.mjs run tests/remotion-render-smoke.test.ts --configLoader runner
+npx tsc --noEmit
+swift test --filter TimelineDocumentTests
+swift test --filter ProjectTimelinePreviewDiagnosticsTests
+git diff --check

@@ -1,0 +1,10 @@
+version: "1"
+project_id: ax1-komatsu-testimonial-d4892
+project:
+  id: ax1-komatsu-testimonial-d4892
+  title: Public review-metrics fixture — two-beat talking head
+  strategy: Synthetic public fixture for hook density, adjacency, and cadence.
+  runtime_target_sec: 6
+message:
+  primary: Synthetic public fixture. No private source metadata.
+order_policy: editorial

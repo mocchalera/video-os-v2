@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "mode": "self",
+  "golden_project": "fumoto-growth",
+  "candidate_project": "fumoto-growth (recompiled)",
+  "evaluated_at": "2026-06-15T03:38:32.673Z",
+  "golden_approved_by": "operator",
+  "stages": {
+    "timeline": {
+      "golden_clip_count": 23,
+      "candidate_clip_count": 19,
+      "matched_clip_count": 10,
+      "clip_usage_f1": 0.47619047619047616,
+      "order_agreement": 0.9,
+      "mean_cut_in_deviation_us": 4163847.7,
+      "mean_duration_deviation_frames": 9,
+      "total_duration_deviation_pct": 0.021956087824351298,
+      "beat_structure_score": 0.9576846444915279,
+      "score": 0.6668413194282201
+    }
+  },
+  "llm_judge": null,
+  "overall_score": 66.7,
+  "min_score": null,
+  "pass": null
+}

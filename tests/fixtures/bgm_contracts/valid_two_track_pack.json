@@ -1,0 +1,155 @@
+{
+  "version": "1.0.0",
+  "pack_id": "video-os-test-bgm",
+  "pack_version": "1.0.0",
+  "title": "Video OS Synthetic Test BGM",
+  "created_at": "2026-07-16T00:00:00.000Z",
+  "catalog_license": "CC0-1.0",
+  "default_content_license": "CC0-1.0",
+  "compatible_video_os": {
+    "contract_min": "0.1.0",
+    "contract_max": "1.0.0"
+  },
+  "tracks": [
+    {
+      "track_id": "synthetic-calm-low-01",
+      "title": "Synthetic Calm",
+      "contributor_id": "video-os-test-fixtures",
+      "duration_us": 90000000,
+      "format": "wav",
+      "full_mix": {
+        "path": "audio/synthetic-calm-low-01.wav",
+        "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size_bytes": 128,
+        "format": "wav"
+      },
+      "preview": {
+        "path": "preview/synthetic-calm-low-01.mp3",
+        "content_hash": "sha256:abababababababababababababababababababababababababababababababab",
+        "size_bytes": 64,
+        "format": "mp3"
+      },
+      "rights_ref": {
+        "path": "rights/synthetic-calm-low-01.yaml",
+        "content_hash": "sha256:acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac",
+        "size_bytes": 256,
+        "format": "yaml"
+      },
+      "analysis_ref": {
+        "path": "analysis/synthetic-calm-low-01.json",
+        "content_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "size_bytes": 512,
+        "format": "json"
+      },
+      "family": "Trust / Clarity",
+      "intensity": "low",
+      "use_cases": ["interview", "explainer"],
+      "exclusions": ["lead vocal", "busy midrange"],
+      "instruments": ["felt piano", "soft pad"],
+      "edit_points_us": [0, 15000000, 30000000, 60000000, 90000000],
+      "loop_windows": [
+        { "in_us": 15000000, "out_us": 60000000, "label": "stable-bed", "max_repetitions": 4 }
+      ],
+      "axes": {
+        "energy": { "value": 0.25, "source": "authored" },
+        "valence": { "value": 0.65, "source": "authored" },
+        "tension": { "value": 0.1, "source": "authored" },
+        "warmth": { "value": 0.7, "source": "authored" },
+        "modernity": { "value": 0.55, "source": "authored" },
+        "playfulness": { "value": 0.15, "source": "authored" },
+        "sophistication": { "value": 0.7, "source": "authored" },
+        "organic_electronic": { "value": 0.45, "source": "authored" },
+        "density": { "value": 0.2, "source": "authored" },
+        "speech_friendliness": { "value": 0.95, "source": "authored" },
+        "beat_prominence": { "value": 0.2, "source": "authored" },
+        "build_strength": { "value": 0.3, "source": "authored" },
+        "ending_resolution": { "value": 0.9, "source": "authored" }
+      },
+      "vocal_presence": "none"
+    },
+    {
+      "track_id": "synthetic-progress-high-01",
+      "title": "Synthetic Progress",
+      "contributor_id": "video-os-test-fixtures",
+      "duration_us": 90000000,
+      "format": "wav",
+      "full_mix": {
+        "path": "audio/synthetic-progress-high-01.wav",
+        "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "size_bytes": 128,
+        "format": "wav"
+      },
+      "preview": {
+        "path": "preview/synthetic-progress-high-01.mp3",
+        "content_hash": "sha256:bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc",
+        "size_bytes": 64,
+        "format": "mp3"
+      },
+      "alternate_mixes": [
+        {
+          "mix_id": "no-lead",
+          "path": "audio/synthetic-progress-high-01-no-lead.wav",
+          "content_hash": "sha256:bdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbdbd",
+          "size_bytes": 120,
+          "format": "wav"
+        }
+      ],
+      "stems": [
+        {
+          "stem_id": "rhythm",
+          "path": "stems/synthetic-progress-high-01-rhythm.wav",
+          "content_hash": "sha256:bebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe",
+          "size_bytes": 100,
+          "format": "wav"
+        }
+      ],
+      "rights_ref": {
+        "path": "rights/synthetic-progress-high-01.yaml",
+        "content_hash": "sha256:adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+        "size_bytes": 256,
+        "format": "yaml"
+      },
+      "analysis_ref": {
+        "path": "analysis/synthetic-progress-high-01.json",
+        "content_hash": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "size_bytes": 512,
+        "format": "json"
+      },
+      "family": "Progress / Uplift",
+      "intensity": "high",
+      "use_cases": ["case study", "product launch"],
+      "exclusions": ["lead vocal", "anthemic cadence"],
+      "instruments": ["muted guitar", "compact drums"],
+      "edit_points_us": [0, 15000000, 30000000, 60000000, 90000000],
+      "loop_windows": [
+        { "in_us": 15000000, "out_us": 60000000, "label": "forward-bed", "max_repetitions": 4 }
+      ],
+      "axes": {
+        "energy": { "value": 0.8, "source": "authored" },
+        "valence": { "value": 0.8, "source": "authored" },
+        "tension": { "value": 0.25, "source": "authored" },
+        "warmth": { "value": 0.55, "source": "authored" },
+        "modernity": { "value": 0.75, "source": "authored" },
+        "playfulness": { "value": 0.45, "source": "authored" },
+        "sophistication": { "value": 0.65, "source": "authored" },
+        "organic_electronic": { "value": 0.6, "source": "authored" },
+        "density": { "value": 0.55, "source": "authored" },
+        "speech_friendliness": { "value": 0.8, "source": "authored" },
+        "beat_prominence": { "value": 0.7, "source": "authored" },
+        "build_strength": { "value": 0.75, "source": "authored" },
+        "ending_resolution": { "value": 0.9, "source": "authored" }
+      },
+      "vocal_presence": "none"
+    }
+  ],
+  "provenance": {
+    "producer": "video-os-contract-tests",
+    "source_type": "project_local",
+    "evidence_refs": ["README.md"]
+  },
+  "hash_policy": {
+    "algorithm": "sha256",
+    "canonicalization": "normalized-json-v1",
+    "excluded_fields": []
+  }
+}

@@ -1,0 +1,660 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/timeline-ir.schema.json",
+  "title": "Video OS Timeline IR",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "sequence",
+    "tracks",
+    "provenance"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sequence": {
+      "type": "object",
+      "required": [
+        "name",
+        "fps_num",
+        "fps_den",
+        "width",
+        "height",
+        "start_frame"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "fps_num": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_den": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timecode_format": {
+          "type": "string",
+          "enum": [
+            "NDF",
+            "DF",
+            "AUTO"
+          ]
+        },
+        "output_aspect_ratio": {
+          "type": "string",
+          "description": "Output aspect ratio string (e.g. 16:9, 9:16, 1:1, 4:5)"
+        },
+        "letterbox_policy": {
+          "type": "string",
+          "enum": ["none", "pillarbox", "letterbox"],
+          "description": "How to handle source/output aspect ratio mismatch"
+        }
+      },
+      "additionalProperties": false
+    },
+    "tracks": {
+      "type": "object",
+      "required": [
+        "video",
+        "audio"
+      ],
+      "properties": {
+        "video": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "audio": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "overlay": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "caption": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/marker"
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transition"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "audio_mix": {
+      "$ref": "#/$defs/audioMix"
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "brief_path",
+        "blueprint_path",
+        "selects_path"
+      ],
+      "properties": {
+        "brief_path": {
+          "type": "string"
+        },
+        "blueprint_path": {
+          "type": "string"
+        },
+        "selects_path": {
+          "type": "string"
+        },
+        "compiler_version": {
+          "type": "string"
+        },
+        "review_report_path": {
+          "type": "string"
+        },
+        "compiler_defaults_hash": {
+          "type": "string"
+        },
+        "editorial_registry_hash": {
+          "type": "string"
+        },
+        "editor_version": {
+          "type": "string"
+        },
+        "last_editor_save": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "duration_policy": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["strict", "guide"] },
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+            "target_source": { "type": "string", "enum": ["explicit_brief", "material_total"] },
+            "target_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "min_duration_sec": { "type": "number", "minimum": 0 },
+            "max_duration_sec": { "type": ["number", "null"], "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "audio_policy": {
+          "type": "object",
+          "required": ["mode", "source"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["ducking", "bgm_only", "original_only"] },
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+            "a1_loudnorm": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "caption_policy": {
+          "type": "object",
+          "required": ["mode", "source"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["auto", "manual", "off"] },
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] }
+          },
+          "additionalProperties": false
+        },
+        "still_duration_policy": {
+          "type": "object",
+          "required": ["source", "fps_num", "fps_den", "min_hold_frames", "default_hold_frames", "max_hold_frames", "motion_mode", "fit_mode", "background"],
+          "properties": {
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+            "fps_num": { "type": "integer", "minimum": 1 },
+            "fps_den": { "type": "integer", "minimum": 1 },
+            "min_hold_frames": { "type": "integer", "minimum": 1 },
+            "default_hold_frames": { "type": "integer", "minimum": 1 },
+            "max_hold_frames": { "type": "integer", "minimum": 1 },
+            "motion_mode": { "const": "static" },
+            "requested_motion_mode": { "const": "subtle_ken_burns" },
+            "motion_status": { "const": "pending_EYE-070C2B" },
+            "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+            "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "track": {
+      "type": "object",
+      "required": [
+        "track_id",
+        "kind",
+        "clips"
+      ],
+      "properties": {
+        "track_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "video",
+            "audio",
+            "overlay",
+            "caption"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "enum": ["dialogue", "music", "nat_sound", "ambient", "sfx"]
+        },
+        "clips": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/clip"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "clip": {
+      "type": "object",
+      "$comment": "JSON Schema enforces non-negative source times. The validator runner must also enforce src_in_us < src_out_us for every emitted clip.",
+      "required": [
+        "clip_id",
+        "segment_id",
+        "asset_id",
+        "src_in_us",
+        "src_out_us",
+        "timeline_in_frame",
+        "timeline_duration_frames",
+        "role",
+        "motivation"
+      ],
+      "properties": {
+        "clip_id": {
+          "type": "string"
+        },
+        "segment_id": {
+          "type": "string"
+        },
+        "asset_id": {
+          "type": "string"
+        },
+        "src_in_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "src_out_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "src_in_tc": {
+          "type": "string"
+        },
+        "src_out_tc": {
+          "type": "string"
+        },
+        "timeline_in_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_duration_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "hero",
+            "support",
+            "transition",
+            "texture",
+            "dialogue",
+            "music",
+            "nat_sound",
+            "ambient",
+            "sfx",
+            "bgm",
+            "title",
+            "caption"
+          ]
+        },
+        "motivation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "beat_id": {
+          "type": "string"
+        },
+        "fallback_segment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "media_kind": {
+          "type": "string",
+          "enum": ["video", "audio", "image", "sequence", "unknown"]
+        },
+        "source_capabilities": {
+          "type": "object",
+          "required": ["has_video", "has_audio"],
+          "properties": {
+            "has_video": { "type": "boolean" },
+            "has_audio": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "audio_role": {
+          "type": "string",
+          "enum": ["dialogue", "music", "nat_sound", "ambient", "sfx"]
+        },
+        "still_image": {
+          "type": "object",
+          "required": ["hold_frames", "min_hold_frames", "max_hold_frames", "hold_source", "policy_clamp", "motion_mode", "fit_mode", "background"],
+          "properties": {
+            "hold_frames": { "type": "integer", "minimum": 1 },
+            "min_hold_frames": { "type": "integer", "minimum": 1 },
+            "max_hold_frames": { "type": "integer", "minimum": 1 },
+            "hold_source": { "type": "string", "enum": ["candidate_override", "explicit_brief", "profile_default", "global_default"] },
+            "policy_clamp": { "type": "string", "enum": ["none", "min", "max", "beat_budget", "duration_cap"] },
+            "motion_mode": { "const": "static" },
+            "requested_motion_mode": { "const": "subtle_ken_burns" },
+            "motion_status": { "const": "pending_EYE-070C2B" },
+            "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+            "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+          },
+          "additionalProperties": false
+        },
+        "audio_policy": {
+          "type": "object",
+          "properties": {
+            "gain_unit": {
+              "type": "string",
+              "enum": ["linear", "db"]
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["ducking", "bgm_only", "original_only"]
+            },
+            "duck_music_db": {
+              "type": "number"
+            },
+            "nat_gain": {
+              "type": "number"
+            },
+            "nat_sound_gain": {
+              "type": "number"
+            },
+            "bgm_gain": {
+              "type": "number"
+            },
+            "a1_loudnorm": {
+              "type": "boolean"
+            },
+            "preserve_nat_sound": {
+              "type": "boolean"
+            },
+            "fade_in_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fade_out_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nat_sound_fade_in_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nat_sound_fade_out_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bgm_fade_in_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bgm_fade_out_frames": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "captions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "in_frame", "out_frame", "style"],
+            "properties": {
+              "text": { "type": "string", "minLength": 1 },
+              "in_frame": { "type": "integer", "minimum": 0 },
+              "out_frame": { "type": "integer", "minimum": 0 },
+              "style": { "type": "string", "enum": ["gentle-lower-third", "simple-shadow"] }
+            },
+            "additionalProperties": false
+          }
+        },
+        "candidate_ref": {
+          "type": "string"
+        },
+        "fallback_candidate_refs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "media_kind": { "const": "image" } }, "required": ["media_kind"] },
+          "then": {
+            "required": ["still_image"],
+            "properties": { "src_in_us": { "const": 0 }, "src_out_us": { "const": 1 } }
+          }
+        },
+        {
+          "if": { "required": ["still_image"] },
+          "then": { "required": ["media_kind"], "properties": { "media_kind": { "const": "image" } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "audioMix": {
+      "type": "object",
+      "properties": {
+        "gain_unit": {
+          "type": "string",
+          "enum": ["linear", "db"]
+        },
+        "nat_sound_gain": {
+          "type": "number"
+        },
+        "bgm_gain": {
+          "type": "number"
+        },
+        "duck_music_db": {
+          "type": "number"
+        },
+        "fade_in_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fade_out_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nat_sound_fade_in_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nat_sound_fade_out_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bgm_fade_in_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bgm_fade_out_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bgm_asset_id": {
+          "type": "string"
+        },
+        "bgm_clip_id": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "manual_mix",
+            "nat_under_bgm",
+            "dialogue_ducked_bgm"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "manualRender": {
+      "type": "object",
+      "properties": {
+        "spec_path": {
+          "type": "string"
+        },
+        "render_script_path": {
+          "type": "string"
+        },
+        "concat_list_path": {
+          "type": "string"
+        },
+        "title_manifest_path": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "transition": {
+      "type": "object",
+      "required": [
+        "transition_id",
+        "from_clip_id",
+        "to_clip_id",
+        "track_id",
+        "transition_type"
+      ],
+      "properties": {
+        "transition_id": { "type": "string" },
+        "from_clip_id": { "type": "string" },
+        "to_clip_id": { "type": "string" },
+        "track_id": { "type": "string" },
+        "transition_type": {
+          "type": "string",
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black", "dip_to_white", "match_cut_soft"]
+        },
+        "transition_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "transition_params": {
+          "type": "object",
+          "properties": {
+            "crossfade_sec": { "type": "number", "minimum": 0 },
+            "audio_overlap_sec": { "type": "number", "minimum": 0 },
+            "cut_frame_before_snap": { "type": "integer", "minimum": 0 },
+            "cut_frame_after_snap": { "type": "integer", "minimum": 0 },
+            "snap_delta_frames": { "type": "integer" },
+            "hold_side": { "type": "string", "enum": ["left", "right"] },
+            "hold_frames": { "type": "integer", "minimum": 0 },
+            "zoom": { "type": "object" },
+            "beat_snapped": { "type": "boolean" },
+            "beat_ref_sec": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "applied_skill_id": { "type": "string" },
+        "degraded_from_skill_id": { "type": ["string", "null"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fallback": {
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+            },
+            "reason": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "degraded_reason": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "marker": {
+      "type": "object",
+      "required": [
+        "frame",
+        "kind",
+        "label"
+      ],
+      "properties": {
+        "frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "note",
+            "warning",
+            "beat",
+            "caption",
+            "transition",
+            "review"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,107 @@
+name: Speech-led real-media regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_path:
+        description: "Absolute path to the rights-cleared speech-led project on the media runner"
+        required: false
+        type: string
+      min_score:
+        description: "Minimum verified Marlin score"
+        required: true
+        default: "70"
+        type: string
+  schedule:
+    - cron: "0 18 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: speech-led-real-media
+  cancel-in-progress: false
+
+jobs:
+  real-media:
+    runs-on: [self-hosted, macOS, video-os-media]
+    timeout-minutes: 90
+    env:
+      VOS_MARLIN_ENABLED: "1"
+      VOS_MARLIN_MOCK: "0"
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure optional Marlin paths
+        env:
+          MARLIN_PYTHON: ${{ vars.VOS_MARLIN_PYTHON }}
+          MARLIN_WORKER: ${{ vars.VOS_MARLIN_WORKER }}
+        run: |
+          if [ -n "$MARLIN_PYTHON" ]; then
+            echo "VOS_MARLIN_PYTHON=$MARLIN_PYTHON" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$MARLIN_WORKER" ]; then
+            echo "VOS_MARLIN_WORKER=$MARLIN_WORKER" >> "$GITHUB_ENV"
+          fi
+
+      - name: Resolve rights-cleared project mount
+        id: project
+        env:
+          INPUT_PROJECT_PATH: ${{ inputs.project_path }}
+          DEFAULT_PROJECT_PATH: ${{ vars.VIDEO_OS_SPEECH_LED_PROJECT_PATH }}
+        run: |
+          project_path="$INPUT_PROJECT_PATH"
+          if [ -z "$project_path" ]; then
+            project_path="$DEFAULT_PROJECT_PATH"
+          fi
+          if [ -z "$project_path" ]; then
+            echo "Set workflow input project_path or repository variable VIDEO_OS_SPEECH_LED_PROJECT_PATH."
+            exit 1
+          fi
+          if [ ! -d "$project_path" ]; then
+            echo "Speech-led project mount not found: $project_path"
+            exit 1
+          fi
+          echo "project_path=$project_path" >> "$GITHUB_OUTPUT"
+
+      - name: Verify runner media tools
+        run: |
+          ffmpeg -version
+          ffprobe -version
+
+      - name: Verify live model credentials
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN is required for the gated live Marlin model."
+            exit 1
+          fi
+
+      - name: Render and run fail-closed live Marlin regression
+        env:
+          PROJECT_PATH: ${{ steps.project.outputs.project_path }}
+          MIN_SCORE: ${{ inputs.min_score || '70' }}
+          OUTPUT_DIR: ${{ runner.temp }}/speech-led-real-media
+        run: npm run regression:speech-led:real -- --project "$PROJECT_PATH" --min-score "$MIN_SCORE" --output-dir "$OUTPUT_DIR"
+
+      - name: Upload regression evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-led-real-media-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/speech-led-real-media/*.json
+            !${{ runner.temp }}/speech-led-real-media/rough-cut.mp4
+          if-no-files-found: error
+          retention-days: 14

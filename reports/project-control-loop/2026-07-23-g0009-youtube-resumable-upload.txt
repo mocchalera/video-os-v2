@@ -1,0 +1,29 @@
+PCL Goal: G-0009
+Task: T-0046
+Feature: F-0075
+Story: US-0045
+Acceptance test: TC-0131
+Integrated commit: 64b95032
+Source task commit: 39a4e044007baa6e45e3e3e795fc73bb6dfb5f2d
+
+Outcome:
+- Large local videos stream directly to the YouTube resumable upload endpoint; GAS/connectors are not a binary transport.
+- 256 KiB-aligned chunks, 308 Range resume, 5xx probing/backoff, 404/410 session expiry, and final-chunk ambiguity are handled fail-closed.
+- Local artifact SHA-256, metadata, visibility, authenticated channel, and destination form the idempotency identity.
+- Session URLs stay in 0700/0600 state files and never appear in logs or final receipts.
+- Public uploads require the existing publication approval; unlisted is the default.
+- Processing and visibility are polled into a hash-bound receipt.
+
+Verification on the integrated Dev checkout with Node 22.23.1:
+- YouTube resumable upload Vitest: 9 tests passed, covering 12 behavior scenarios.
+- 512 MiB + 1 sparse-file offset path passed without materializing the full payload in memory.
+- TypeScript: npx tsc --noEmit passed.
+- npm run build passed.
+- git diff --check passed.
+- No external YouTube or Drive write was performed.
+
+Commands:
+node node_modules/vitest/vitest.mjs run tests/youtube-resumable-upload.test.ts --configLoader runner
+npx tsc --noEmit
+npm run build
+git diff --check
