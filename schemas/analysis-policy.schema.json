@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/analysis-policy.schema.json",
+  "title": "Video OS Analysis Policy",
+  "type": "object",
+  "required": [
+    "version", "policy_name", "classification", "sampling", "vlm", "marlin", "stt",
+    "quality_thresholds", "parallelism", "gap_policy", "cache"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string" },
+    "policy_name": { "type": "string", "minLength": 1 },
+    "image_sequence": {
+      "type": "object",
+      "required": ["frame_rate", "minimum_frame_count"],
+      "additionalProperties": false,
+      "properties": {
+        "frame_rate": {
+          "type": "object",
+          "required": ["fps_num", "fps_den"],
+          "additionalProperties": false,
+          "properties": {
+            "fps_num": { "type": "integer", "minimum": 1 },
+            "fps_den": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "minimum_frame_count": { "type": "integer", "minimum": 2 }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "required": ["dialogue", "music_driven", "action", "static", "general"],
+      "additionalProperties": false,
+      "properties": {
+        "dialogue": {
+          "type": "object",
+          "properties": {
+            "words_per_second_min": { "type": "number" },
+            "speech_ratio_min": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "music_driven": {
+          "type": "object",
+          "properties": {
+            "beat_strength_min": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "action": {
+          "type": "object",
+          "properties": {
+            "motion_score_min": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "static": {
+          "type": "object",
+          "properties": {
+            "motion_score_max": { "type": "number" }
+          },
+          "additionalProperties": false
+        },
+        "general": {
+          "type": "object",
+          "additionalProperties": false
+        }
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "required": ["static", "action", "dialogue", "music_driven", "general"],
+      "additionalProperties": false,
+      "properties": {
+        "static": {
+          "type": "object",
+          "properties": {
+            "sample_fps": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "action": {
+          "type": "object",
+          "properties": {
+            "sample_fps_default": { "type": "number", "minimum": 0 },
+            "sample_fps_min": { "type": "number", "minimum": 0 },
+            "sample_fps_max": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "dialogue": {
+          "type": "object",
+          "properties": {
+            "sample_fps": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "music_driven": {
+          "type": "object",
+          "properties": {
+            "sample_fps": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "general": {
+          "type": "object",
+          "properties": {
+            "sample_fps": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "vlm": {
+      "type": "object",
+      "required": [
+        "model_alias", "model_snapshot", "input_mode", "response_format",
+        "prompt_template_id", "max_frame_width_px", "segment_visual_token_budget_max",
+        "segment_visual_output_tokens_max", "segment_visual_frame_cap", "parse_retry_max"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model_alias": { "type": "string", "minLength": 1 },
+        "model_snapshot": { "type": "string" },
+        "input_mode": {
+          "type": "string",
+          "enum": ["frame_bundle_plus_text_context"]
+        },
+        "response_format": {
+          "type": "string",
+          "enum": ["json_schema_v1"]
+        },
+        "prompt_template_id": { "type": "string", "minLength": 1 },
+        "max_frame_width_px": { "type": "integer", "minimum": 1 },
+        "segment_visual_token_budget_max": { "type": "integer", "minimum": 1 },
+        "segment_visual_output_tokens_max": { "type": "integer", "minimum": 1 },
+        "segment_visual_frame_cap": { "type": "integer", "minimum": 1 },
+        "parse_retry_max": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "editorial_llm": {
+      "type": "object",
+      "required": ["runtime", "timeout_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "runtime": {
+          "type": "string",
+          "enum": ["auto", "codex_exec", "claude_cli", "gemini", "deterministic"]
+        },
+        "timeout_ms": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "marlin": {
+      "type": "object",
+      "required": [
+        "enabled", "model_alias", "model_snapshot", "connector_version", "mode",
+        "role", "worker_path", "mock", "output_artifact", "chunk_target_us",
+        "chunk_overlap_us", "default_find_queries"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "model_alias": { "type": "string", "minLength": 1 },
+        "model_snapshot": { "type": "string" },
+        "connector_version": { "type": "string", "minLength": 1 },
+        "mode": {
+          "type": "string",
+          "enum": ["hybrid", "primary", "fallback"]
+        },
+        "role": {
+          "type": "string",
+          "enum": ["temporal_semantics"]
+        },
+        "worker_path": { "type": "string", "minLength": 1 },
+        "mock": { "type": "boolean" },
+        "output_artifact": {
+          "type": "string",
+          "enum": ["03_analysis/marlin_events.json"]
+        },
+        "chunk_target_us": { "type": "integer", "minimum": 0 },
+        "chunk_overlap_us": { "type": "integer", "minimum": 0 },
+        "default_find_queries": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "stt": {
+      "type": "object",
+      "required": [
+        "model_alias", "model_snapshot", "endpoint", "response_format",
+        "chunk_target_us", "chunk_max_us", "chunk_overlap_us",
+        "chunk_boundary_silence_us", "chunking_strategy", "speaker_normalization",
+        "generate_words"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model_alias": { "type": "string", "minLength": 1 },
+        "model_snapshot": { "type": "string" },
+        "endpoint": {
+          "type": "string",
+          "enum": ["/v1/audio/transcriptions"]
+        },
+        "response_format": {
+          "type": "string",
+          "enum": ["diarized_json", "verbose_json"]
+        },
+        "language": {
+          "type": ["string", "null"]
+        },
+        "chunk_target_us": { "type": "integer", "minimum": 0 },
+        "chunk_max_us": { "type": "integer", "minimum": 0 },
+        "chunk_overlap_us": { "type": "integer", "minimum": 0 },
+        "chunk_boundary_silence_us": { "type": "integer", "minimum": 0 },
+        "chunking_strategy": {
+          "type": "string",
+          "enum": ["client_audio_chunks_v1"]
+        },
+        "speaker_normalization": {
+          "type": "string",
+          "enum": ["overlap_anchor_v1"]
+        },
+        "generate_words": { "type": "boolean" }
+      }
+    },
+    "quality_thresholds": {
+      "type": "object",
+      "required": [
+        "scene_threshold", "min_segment_duration_us", "merge_gap_us",
+        "blackdetect_pic_th", "blackdetect_pix_th", "blackdetect_duration_s",
+        "silencedetect_noise_db", "silencedetect_duration_s",
+        "freezedetect_noise_db", "freezedetect_duration_s",
+        "transcript_overlap_min_us", "transcript_overlap_fraction_min"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scene_threshold": { "type": "number" },
+        "min_segment_duration_us": { "type": "integer", "minimum": 0 },
+        "merge_gap_us": { "type": "integer", "minimum": 0 },
+        "blackdetect_pic_th": { "type": "number" },
+        "blackdetect_pix_th": { "type": "number" },
+        "blackdetect_duration_s": { "type": "number", "minimum": 0 },
+        "silencedetect_noise_db": { "type": "number" },
+        "silencedetect_duration_s": { "type": "number", "minimum": 0 },
+        "freezedetect_noise_db": { "type": "number" },
+        "freezedetect_duration_s": { "type": "number", "minimum": 0 },
+        "transcript_overlap_min_us": { "type": "integer", "minimum": 0 },
+        "transcript_overlap_fraction_min": { "type": "number" }
+      }
+    },
+    "quality_gate": {
+      "type": "object",
+      "required": [
+        "shake_reject_above",
+        "shake_warn_above",
+        "sharpness_reject_below",
+        "sharpness_warn_below",
+        "exposure_crush_reject_above",
+        "exposure_crush_warn_above",
+        "exposure_clip_reject_above",
+        "exposure_clip_warn_above",
+        "appraiser_composition_reject_below",
+        "appraiser_subject_prominence_reject_below",
+        "appraiser_composition_warn_below",
+        "appraiser_subject_prominence_warn_below"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "shake_reject_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "shake_warn_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sharpness_reject_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sharpness_warn_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_crush_reject_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_crush_warn_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_clip_reject_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_clip_warn_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_composition_reject_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_subject_prominence_reject_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_composition_warn_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_subject_prominence_warn_below": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "required": [
+        "min_candidates_per_cluster",
+        "cluster_sampling_scale",
+        "max_candidates_per_cluster"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "min_candidates_per_cluster": { "type": "integer", "minimum": 1 },
+        "cluster_sampling_scale": {
+          "type": "string",
+          "enum": ["none", "sqrt"]
+        },
+        "max_candidates_per_cluster": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "parallelism": {
+      "type": "object",
+      "required": ["ffmpeg_jobs", "stt_jobs", "vlm_jobs", "marlin_jobs"],
+      "additionalProperties": false,
+      "properties": {
+        "ffmpeg_jobs": { "type": "integer", "minimum": 1 },
+        "stt_jobs": { "type": "integer", "minimum": 1 },
+        "vlm_jobs": { "type": "integer", "minimum": 1 },
+        "marlin_jobs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "gap_policy": {
+      "type": "object",
+      "required": ["max_retries", "block_on_missing_segments", "block_on_missing_transcript_for_dialogue"],
+      "additionalProperties": false,
+      "properties": {
+        "max_retries": { "type": "integer", "minimum": 0 },
+        "block_on_missing_segments": { "type": "boolean" },
+        "block_on_missing_transcript_for_dialogue": { "type": "boolean" }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "required": ["reuse_successful_stage_outputs", "request_hash_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "reuse_successful_stage_outputs": { "type": "boolean" },
+        "request_hash_fields": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

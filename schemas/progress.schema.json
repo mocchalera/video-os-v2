@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/progress.schema.json",
+  "title": "Video OS Pipeline Progress Report",
+  "type": "object",
+  "required": [
+    "project_id",
+    "phase",
+    "gate",
+    "status",
+    "completed",
+    "total",
+    "artifacts_created",
+    "errors",
+    "started_at",
+    "updated_at"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "analysis",
+        "intent",
+        "triage",
+        "blueprint",
+        "compile",
+        "review",
+        "render",
+        "package"
+      ]
+    },
+    "gate": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "blocked"]
+    },
+    "completed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "eta_sec": {
+      "type": ["integer", "null"]
+    },
+    "artifacts_created": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/progressError"
+      }
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "progressError": {
+      "type": "object",
+      "required": ["stage", "message", "timestamp", "retriable"],
+      "properties": {
+        "stage": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "retriable": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

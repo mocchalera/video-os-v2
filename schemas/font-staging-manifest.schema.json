@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/font-staging-manifest.schema.json",
+  "title": "Font Staging Manifest",
+  "type": "object",
+  "required": ["version", "font_id", "family", "fallback_used", "assets", "license"],
+  "properties": {
+    "version": { "enum": ["font-staging-manifest/v1", "font-staging-manifest/v2", "font-staging-manifest/v3"] },
+    "font_id": { "type": "string", "minLength": 1 },
+    "family": { "type": "string", "minLength": 1 },
+    "selected_family": { "type": "string", "minLength": 1 },
+    "selected_asset": { "$ref": "#/$defs/selected_asset" },
+    "fallback_used": { "type": "boolean" },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/asset" }
+    },
+    "license": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "version": { "const": "font-staging-manifest/v2" } } },
+      "then": {
+        "required": ["selected_family", "selected_asset"],
+        "properties": { "assets": { "minItems": 2 } }
+      }
+    },
+    {
+      "if": { "properties": { "version": { "const": "font-staging-manifest/v3" } } },
+      "then": {
+        "required": ["selected_family", "selected_asset"],
+        "properties": { "assets": { "minItems": 3 } }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "asset": {
+      "type": "object",
+      "required": ["role", "path", "sha256"],
+      "properties": {
+        "role": { "enum": ["primary", "ass_bold", "ass_heavy", "web"] },
+        "family": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "selected_asset": {
+      "type": "object",
+      "required": ["role", "family", "path", "sha256", "weight"],
+      "properties": {
+        "role": { "enum": ["primary", "ass_bold", "ass_heavy"] },
+        "family": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "weight": { "type": "integer", "minimum": 100, "maximum": 900 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

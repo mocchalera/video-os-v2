@@ -1,0 +1,366 @@
+{
+  "project_id": "sample-mountain-reset",
+  "artifact_version": "analysis-v1",
+  "items": [
+    {
+      "segment_id": "SEG_0001",
+      "asset_id": "AST_001",
+      "src_in_us": 1200000,
+      "src_out_us": 5800000,
+      "summary": "subject looks out cabin window before speaking",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["window", "breath", "morning_light"]
+    },
+    {
+      "segment_id": "SEG_0002",
+      "asset_id": "AST_001",
+      "src_in_us": 6400000,
+      "src_out_us": 11000000,
+      "summary": "interview line about getting quiet again",
+      "transcript_excerpt": "I came up here to get quiet again.",
+      "quality_flags": [],
+      "tags": ["interview", "quiet", "message"]
+    },
+    {
+      "segment_id": "SEG_0003",
+      "asset_id": "AST_001",
+      "src_in_us": 12200000,
+      "src_out_us": 16100000,
+      "summary": "small smile and visible breath in soft light",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["portrait", "breath", "soft_light"]
+    },
+    {
+      "segment_id": "SEG_0004",
+      "asset_id": "AST_001",
+      "src_in_us": 18000000,
+      "src_out_us": 23700000,
+      "summary": "interview line about the week getting loud fast",
+      "transcript_excerpt": "The week gets loud fast.",
+      "quality_flags": [],
+      "tags": ["interview", "contrast", "work_fatigue"]
+    },
+    {
+      "segment_id": "SEG_0005",
+      "asset_id": "AST_001",
+      "src_in_us": 29000000,
+      "src_out_us": 34800000,
+      "summary": "hands wrapped around warm mug near the window",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["hands", "mug", "warmth"]
+    },
+    {
+      "segment_id": "SEG_0006",
+      "asset_id": "AST_001",
+      "src_in_us": 41200000,
+      "src_out_us": 47600000,
+      "summary": "interview line about the air telling the subject to slow down",
+      "transcript_excerpt": "Up here the air tells me to slow down.",
+      "quality_flags": [],
+      "tags": ["interview", "slow_down", "message"]
+    },
+    {
+      "segment_id": "SEG_0007",
+      "asset_id": "AST_002",
+      "src_in_us": 800000,
+      "src_out_us": 4100000,
+      "summary": "kettle steam rising in cold kitchen light",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["steam", "kitchen", "texture"]
+    },
+    {
+      "segment_id": "SEG_0008",
+      "asset_id": "AST_002",
+      "src_in_us": 4500000,
+      "src_out_us": 8000000,
+      "summary": "pouring water into enamel mug",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["mug", "pour", "ritual"]
+    },
+    {
+      "segment_id": "SEG_0009",
+      "asset_id": "AST_002",
+      "src_in_us": 8400000,
+      "src_out_us": 12600000,
+      "summary": "spoon moving through breakfast bowl close-up",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["breakfast", "detail", "ritual"]
+    },
+    {
+      "segment_id": "SEG_0010",
+      "asset_id": "AST_002",
+      "src_in_us": 13000000,
+      "src_out_us": 17800000,
+      "summary": "boots waiting beside the doorway",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["boots", "doorway", "anticipation"]
+    },
+    {
+      "segment_id": "SEG_0011",
+      "asset_id": "AST_002",
+      "src_in_us": 18400000,
+      "src_out_us": 22900000,
+      "summary": "jacket zipper pulled up against the cold",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["jacket", "prep", "hands"]
+    },
+    {
+      "segment_id": "SEG_0012",
+      "asset_id": "AST_002",
+      "src_in_us": 24000000,
+      "src_out_us": 29600000,
+      "summary": "cabin door opens into pale exterior light",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["door", "transition", "exterior"]
+    },
+    {
+      "segment_id": "SEG_0013",
+      "asset_id": "AST_003",
+      "src_in_us": 1000000,
+      "src_out_us": 4800000,
+      "summary": "close-up of hands lacing boots",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["hands", "boots", "texture"]
+    },
+    {
+      "segment_id": "SEG_0014",
+      "asset_id": "AST_003",
+      "src_in_us": 5200000,
+      "src_out_us": 9400000,
+      "summary": "hands tightening a pack strap",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["hands", "pack", "prep"]
+    },
+    {
+      "segment_id": "SEG_0015",
+      "asset_id": "AST_003",
+      "src_in_us": 10000000,
+      "src_out_us": 14200000,
+      "summary": "wool hat pulled down over ears",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["hat", "cold", "prep"]
+    },
+    {
+      "segment_id": "SEG_0016",
+      "asset_id": "AST_003",
+      "src_in_us": 15000000,
+      "src_out_us": 19700000,
+      "summary": "quick phone map check before leaving",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["map", "phone", "prep"]
+    },
+    {
+      "segment_id": "SEG_0017",
+      "asset_id": "AST_003",
+      "src_in_us": 20200000,
+      "src_out_us": 25600000,
+      "summary": "backpack swings onto shoulder",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["pack", "movement", "support"]
+    },
+    {
+      "segment_id": "SEG_0018",
+      "asset_id": "AST_003",
+      "src_in_us": 28400000,
+      "src_out_us": 33100000,
+      "summary": "gloved hand brushes pine railing",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["pine", "glove", "texture"]
+    },
+    {
+      "segment_id": "SEG_0019",
+      "asset_id": "AST_004",
+      "src_in_us": 2000000,
+      "src_out_us": 7400000,
+      "summary": "boots crunch across a frosty trail",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["boots", "frost", "trail"]
+    },
+    {
+      "segment_id": "SEG_0020",
+      "asset_id": "AST_004",
+      "src_in_us": 8000000,
+      "src_out_us": 13800000,
+      "summary": "profile walk with visible breath",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["walk", "breath", "hero"]
+    },
+    {
+      "segment_id": "SEG_0021",
+      "asset_id": "AST_004",
+      "src_in_us": 14500000,
+      "src_out_us": 20200000,
+      "summary": "interview line about not needing a summit",
+      "transcript_excerpt": "I do not need a summit to feel reset.",
+      "quality_flags": [],
+      "tags": ["interview", "anti_triumph", "message"]
+    },
+    {
+      "segment_id": "SEG_0022",
+      "asset_id": "AST_004",
+      "src_in_us": 21000000,
+      "src_out_us": 26500000,
+      "summary": "pause on trail, inhale, look up into the trees",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["pause", "trees", "breath"]
+    },
+    {
+      "segment_id": "SEG_0023",
+      "asset_id": "AST_004",
+      "src_in_us": 27000000,
+      "src_out_us": 32800000,
+      "summary": "uphill wide from behind with measured pace",
+      "transcript_excerpt": "",
+      "quality_flags": ["slight_wind"],
+      "tags": ["wide", "climb", "support"]
+    },
+    {
+      "segment_id": "SEG_0024",
+      "asset_id": "AST_004",
+      "src_in_us": 33600000,
+      "src_out_us": 39400000,
+      "summary": "interview line about needing space to hear oneself think",
+      "transcript_excerpt": "I just need enough space to hear myself think.",
+      "quality_flags": ["slight_wind"],
+      "tags": ["interview", "space", "thought"]
+    },
+    {
+      "segment_id": "SEG_0025",
+      "asset_id": "AST_005",
+      "src_in_us": 1400000,
+      "src_out_us": 6000000,
+      "summary": "sunrise flare lands across the subject's face",
+      "transcript_excerpt": "",
+      "quality_flags": ["minor_highlight_clip"],
+      "tags": ["sunrise", "hero", "release"]
+    },
+    {
+      "segment_id": "SEG_0026",
+      "asset_id": "AST_005",
+      "src_in_us": 6800000,
+      "src_out_us": 11300000,
+      "summary": "hand warms around mug outdoors",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["hands", "mug", "warmth"]
+    },
+    {
+      "segment_id": "SEG_0027",
+      "asset_id": "AST_005",
+      "src_in_us": 12000000,
+      "src_out_us": 17600000,
+      "summary": "interview line about carrying the pace back down",
+      "transcript_excerpt": "When I head back down, I carry that pace with me.",
+      "quality_flags": [],
+      "tags": ["interview", "ending", "message"]
+    },
+    {
+      "segment_id": "SEG_0028",
+      "asset_id": "AST_005",
+      "src_in_us": 18200000,
+      "src_out_us": 23000000,
+      "summary": "soft exhale and a restrained half smile",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["portrait", "exhale", "release"]
+    },
+    {
+      "segment_id": "SEG_0029",
+      "asset_id": "AST_005",
+      "src_in_us": 23600000,
+      "src_out_us": 28500000,
+      "summary": "quiet glance across the valley",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["valley", "wide", "warmth"]
+    },
+    {
+      "segment_id": "SEG_0030",
+      "asset_id": "AST_005",
+      "src_in_us": 29000000,
+      "src_out_us": 34200000,
+      "summary": "short final line stating that the pace is enough",
+      "transcript_excerpt": "That is enough.",
+      "quality_flags": [],
+      "tags": ["interview", "ending", "minimal"]
+    },
+    {
+      "segment_id": "SEG_0031",
+      "asset_id": "AST_006",
+      "src_in_us": 600000,
+      "src_out_us": 4400000,
+      "summary": "pine needles shifting in a light wind",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["pine", "wind", "texture"]
+    },
+    {
+      "segment_id": "SEG_0032",
+      "asset_id": "AST_006",
+      "src_in_us": 5000000,
+      "src_out_us": 9700000,
+      "summary": "stream moving over dark rocks",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["water", "texture", "reset"]
+    },
+    {
+      "segment_id": "SEG_0033",
+      "asset_id": "AST_006",
+      "src_in_us": 10100000,
+      "src_out_us": 14600000,
+      "summary": "boots move through a shallow puddle",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["boots", "puddle", "trail"]
+    },
+    {
+      "segment_id": "SEG_0034",
+      "asset_id": "AST_006",
+      "src_in_us": 15000000,
+      "src_out_us": 19400000,
+      "summary": "sunlight breaks through branches",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["light", "branches", "transition"]
+    },
+    {
+      "segment_id": "SEG_0035",
+      "asset_id": "AST_006",
+      "src_in_us": 20000000,
+      "src_out_us": 24700000,
+      "summary": "condensation gathers on the rim of the mug",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["mug", "detail", "texture"]
+    },
+    {
+      "segment_id": "SEG_0036",
+      "asset_id": "AST_006",
+      "src_in_us": 25200000,
+      "src_out_us": 30800000,
+      "summary": "empty trail bend reveals the path ahead",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": ["trail", "reveal", "transition"]
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "version": "1",
+  "project_id": "ena-promo-ai",
+  "video_path": "/Users/operator/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_duration_sec": 62.5,
+  "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 2 warnings.",
+  "scene_descriptions": [
+    {
+      "start_sec": 0,
+      "end_sec": 1.5,
+      "description": "A man in a red shirt smiles and looks around."
+    },
+    {
+      "start_sec": 8,
+      "end_sec": 11.5,
+      "description": "A worker on a ladder reaches for a grape vine."
+    },
+    {
+      "start_sec": 16.5,
+      "end_sec": 18.5,
+      "description": "A worker uses a tool to move chestnuts on a belt."
+    },
+    {
+      "start_sec": 24,
+      "end_sec": 26.5,
+      "description": "A worker slides a tray of chestnuts into a brick oven."
+    },
+    {
+      "start_sec": 26.5,
+      "end_sec": 30,
+      "description": "A man in a white shirt looks down at the oven."
+    },
+    {
+      "start_sec": 30.5,
+      "end_sec": 35.5,
+      "description": "A woman sits by a train window."
+    },
+    {
+      "start_sec": 35.5,
+      "end_sec": 40.5,
+      "description": "A path between tall hedges is shown."
+    },
+    {
+      "start_sec": 40.5,
+      "end_sec": 44.5,
+      "description": "A woman looks out of a train window."
+    },
+    {
+      "start_sec": 45.5,
+      "end_sec": 50,
+      "description": "Two people stand on a train station platform."
+    },
+    {
+      "start_sec": 54,
+      "end_sec": 56.5,
+      "description": "The man pours hot water into a white tea cup."
+    },
+    {
+      "start_sec": 56.5,
+      "end_sec": 58.5,
+      "description": "The man sets the kettle down and adjusts the cups."
+    },
+    {
+      "start_sec": 58.5,
+      "end_sec": 61.5,
+      "description": "The man reaches for and picks up a small container."
+    },
+    {
+      "start_sec": 61.5,
+      "end_sec": 62.5,
+      "description": "The man pours liquid from the container into the cup."
+    }
+  ],
+  "issues": [
+    {
+      "timestamp_sec": 40.5,
+      "duration_sec": 4,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 30.5s: A woman looks out of a train window.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 58.5,
+      "duration_sec": 3,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 8s: The man reaches for and picks up a small container.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    }
+  ],
+  "pacing_assessment": {
+    "too_fast": false,
+    "too_slow": false,
+    "notes": "Average Marlin event duration is 3.1s across 13 events over 62.5s; pacing reads as within expected range."
+  },
+  "emotion_arc_assessment": {
+    "follows_brief": true,
+    "notes": "Marlin detected 13 distinct scene types, so the emotion arc is treated as partial without exact term matching."
+  },
+  "score": 84
+}

@@ -1,0 +1,122 @@
+{
+  "version": "1.0.0",
+  "project_id": "mixed",
+  "artifact_version": "manifest-v1",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_root": {
+    "locator": "projects/mixed/02_media/source",
+    "locator_kind": "mixed"
+  },
+  "items": [
+    {
+      "asset_id": "AST_video",
+      "source_locator": "source/a.mov",
+      "filename": "a.mov",
+      "content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "fingerprint": null,
+      "size_bytes": 2000,
+      "mtime": "2026-04-25T12:00:00Z",
+      "media_kind": "video",
+      "ingest_status": "ready",
+      "rights_status": "licensed",
+      "privacy_status": "operator_declared_ok",
+      "analysis_policy_ref": "APOL_default",
+      "capture_started_at": "2026-04-25T10:00:00Z",
+      "capture_timezone": "Asia/Tokyo",
+      "timecode_start": "00:00:00:00",
+      "timecode_format": "non_drop",
+      "sample_rate": 48000,
+      "duration_us": 1000000,
+      "frame_rate_mode": "cfr",
+      "rotation": 90,
+      "audio_video_offset_ms": 0,
+      "clock_source": "file_metadata"
+    },
+    {
+      "asset_id": "AST_audio",
+      "source_locator": "source/b.wav",
+      "filename": "b.wav",
+      "content_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "fingerprint": null,
+      "size_bytes": 3000,
+      "mtime": "2026-04-25T12:01:00Z",
+      "media_kind": "audio",
+      "ingest_status": "ready",
+      "rights_status": "operator_declared_ok",
+      "privacy_status": "unknown",
+      "analysis_policy_ref": "APOL_audio",
+      "capture_started_at": null,
+      "capture_timezone": null,
+      "timecode_start": null,
+      "timecode_format": "none",
+      "sample_rate": 48000,
+      "duration_us": 2000000,
+      "frame_rate_mode": "audio_only",
+      "rotation": null,
+      "audio_video_offset_ms": null,
+      "clock_source": "unknown"
+    },
+    {
+      "asset_id": "AST_image",
+      "source_locator": "source/c.jpg",
+      "filename": "c.jpg",
+      "content_hash": null,
+      "fingerprint": "image-phash:0123456789abcdef",
+      "size_bytes": 4000,
+      "mtime": "2026-04-25T12:02:00Z",
+      "media_kind": "image",
+      "ingest_status": "ready",
+      "rights_status": "unknown",
+      "privacy_status": "contains_people",
+      "analysis_policy_ref": "APOL_image",
+      "capture_started_at": null,
+      "capture_timezone": null,
+      "timecode_start": null,
+      "timecode_format": "none",
+      "sample_rate": null,
+      "duration_us": null,
+      "frame_rate_mode": "unknown",
+      "rotation": 0,
+      "audio_video_offset_ms": null,
+      "clock_source": "file_metadata"
+    },
+    {
+      "asset_id": "AST_unsupported",
+      "source_locator": "source/readme.txt",
+      "filename": "readme.txt",
+      "content_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "fingerprint": null,
+      "size_bytes": 50,
+      "mtime": "2026-04-25T12:03:00Z",
+      "media_kind": "unknown",
+      "ingest_status": "excluded",
+      "rights_status": "unknown",
+      "privacy_status": "unknown",
+      "analysis_policy_ref": "APOL_excluded",
+      "capture_started_at": null,
+      "capture_timezone": null,
+      "timecode_start": null,
+      "timecode_format": "none",
+      "sample_rate": null,
+      "duration_us": null,
+      "frame_rate_mode": "unknown",
+      "rotation": null,
+      "audio_video_offset_ms": null,
+      "clock_source": "unknown"
+    }
+  ],
+  "provenance": {
+    "producer": "analysis-ingest",
+    "inputs": [
+      {
+        "path": "projects/mixed/02_media/source",
+        "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": ["created_at"]
+    }
+  }
+}

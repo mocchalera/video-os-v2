@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/transition-skill-card.schema.json",
+  "title": "Transition Skill Card",
+  "description": "Defines a transition editing skill with Murch weights, predicates, and pipeline effects",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "scope",
+    "phase",
+    "intent",
+    "audience_effect",
+    "murch_weights",
+    "min_score_threshold",
+    "when",
+    "minimum_viable",
+    "fallback_order",
+    "pipeline_effects"
+  ],
+  "properties": {
+    "id": { "type": "string" },
+    "version": { "type": "string", "const": "1" },
+    "scope": { "type": "string", "enum": ["adjacent_pair", "scene_span"] },
+    "phase": { "type": "string", "enum": ["p0", "p1"] },
+    "intent": { "type": "string", "minLength": 1 },
+    "audience_effect": { "type": "string", "minLength": 1 },
+    "murch_weights": { "$ref": "#/$defs/murch_weights" },
+    "min_score_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+    "when": { "$ref": "#/$defs/predicate_group" },
+    "avoid_when": { "$ref": "#/$defs/predicate_group" },
+    "minimum_viable": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/viability_gate" }
+    },
+    "fallback_order": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/fallback_step" }
+    },
+    "pipeline_effects": { "$ref": "#/$defs/transition_effects" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "murch_weights": {
+      "type": "object",
+      "required": ["emotion", "story", "rhythm", "eye_trace", "plane_2d", "space_3d"],
+      "properties": {
+        "emotion": { "type": "number", "minimum": 0, "maximum": 1 },
+        "story": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rhythm": { "type": "number", "minimum": 0, "maximum": 1 },
+        "eye_trace": { "type": "number", "minimum": 0, "maximum": 1 },
+        "plane_2d": { "type": "number", "minimum": 0, "maximum": 1 },
+        "space_3d": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "predicate": {
+      "type": "object",
+      "required": ["path", "op", "value"],
+      "properties": {
+        "path": { "type": "string" },
+        "op": { "type": "string", "enum": ["eq", "neq", "gt", "gte", "lt", "lte", "in", "contains"] },
+        "value": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "number" },
+            { "type": "boolean" },
+            { "type": "array", "items": { "type": "string" } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "predicate_group": {
+      "type": "object",
+      "properties": {
+        "all": { "type": "array", "items": { "$ref": "#/$defs/predicate" } },
+        "any": { "type": "array", "items": { "$ref": "#/$defs/predicate" } }
+      },
+      "additionalProperties": false
+    },
+    "viability_gate": {
+      "type": "object",
+      "required": ["id", "predicate", "failure_reason"],
+      "properties": {
+        "id": { "type": "string" },
+        "predicate": { "$ref": "#/$defs/predicate_group" },
+        "failure_reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "fallback_step": {
+      "type": "object",
+      "required": ["kind", "lower_to"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["same_asset_punch_in", "crossfade", "freeze_hold", "hard_cut", "skip_skill"]
+        },
+        "lower_to": {
+          "type": "string",
+          "enum": ["transition", "clip_effect", "marker_only"]
+        },
+        "transition_type": {
+          "type": "string",
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+        },
+        "crossfade_sec": { "type": "number", "minimum": 0 },
+        "hold_side": { "type": "string", "enum": ["left", "right"] },
+        "hold_frames": { "type": "integer", "minimum": 0 },
+        "punch_in_scale": { "type": "number", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "transition_effects": {
+      "type": "object",
+      "required": ["transition_type"],
+      "properties": {
+        "transition_type": {
+          "type": "string",
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+        },
+        "crossfade_sec": { "type": "number", "minimum": 0 },
+        "audio_overlap_sec": { "type": "number", "minimum": 0 },
+        "zoom": {
+          "type": "object",
+          "required": ["enabled", "start_scale", "end_scale"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "start_scale": { "type": "number", "minimum": 0 },
+            "end_scale": { "type": "number", "minimum": 0 },
+            "anchor": { "type": "string", "enum": ["face", "center"] }
+          },
+          "additionalProperties": false
+        },
+        "beat_snap": { "type": "string", "enum": ["none", "beat", "downbeat"] },
+        "snap_anchor": { "type": "string", "enum": ["cut_frame", "transition_center"] }
+      },
+      "additionalProperties": false
+    }
+  }
+}

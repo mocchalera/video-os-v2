@@ -1,0 +1,29 @@
+PCL Goal: G-0009
+Task: T-0044
+Feature: F-0073
+Story: US-0043
+Acceptance test: TC-0129
+Integrated commit: dd826d30
+Source task commit: d37eed4e71b2226b2aa0d9f7b779755b5d509c1f
+
+Outcome:
+- package-preflight/v2 exposes decision, project_identity, structured issue codes, and next_action.
+- TypeScript is the semantic oracle for CLI and Studio.
+- Swift validates the v2 projection and process exit-code consistency without adding independent project-id business rules.
+- Empty legacy project identity is inferred only from a single consistent source; mismatched evidence blocks.
+
+Verification on the integrated Dev checkout with Node 22.23.1:
+- Vitest package/preflight fixture suite: 19 passed.
+- TypeScript: npx tsc --noEmit passed.
+- MacOSStudioCrossLanguageContractTests: 4 passed.
+- ProjectRenderRunnerTests: 11 passed.
+- swift build --target VideoOSStudio passed.
+- git diff --check passed.
+
+Commands:
+node node_modules/vitest/vitest.mjs run tests/package-cli.test.ts tests/macos-studio-contract-fixture.test.ts --configLoader runner
+npx tsc --noEmit
+swift test --filter MacOSStudioCrossLanguageContractTests
+swift test --filter ProjectRenderRunnerTests
+swift build --target VideoOSStudio
+git diff --check

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Finish Interview"
+  short_description: "Apply repeatable interview MA, reframing, and finishing QA"
+  default_prompt: "Use $finish-interview to improve dialogue clarity, portrait framing, and finishing QA for this interview cut."

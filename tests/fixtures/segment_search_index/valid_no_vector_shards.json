@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "project_id": "p4d-fixture",
+  "artifact_version": "search-index-v1",
+  "created_at": "2026-04-27T00:00:00Z",
+  "index_id": "SIDX_no_vectors",
+  "inputs": {
+    "source_media_manifest_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "assets_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "segments_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "transcripts_hashes": [],
+    "audio_story_graph_hash": null,
+    "continuity_graph_hash": null,
+    "editorial_preference_memory_hash": null,
+    "coverage_report_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "structure": [
+    { "field": "visual_tags", "source_prefix": "AST_", "indexed": true, "tokenizer": "raw_token" }
+  ],
+  "text_index": {
+    "path": "03_analysis/search/segment_text_index.json",
+    "hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "vector_shards": [],
+  "provenance": {
+    "producer": "scripts/rebuild-segment-search-index.ts",
+    "inputs": [],
+    "hash_policy": { "algorithm": "sha256", "canonicalization": "normalized-json-v1", "excluded_fields": ["created_at"] }
+  }
+}

@@ -1,0 +1,1253 @@
+{
+  "artifact_version": "editorial-eye-benchmark-report/v1",
+  "suite_id": "editorial-eye-v1",
+  "suite_version": "1.0.0",
+  "baseline_commit": "e431da43c7fe7f4f50a688c3e8fcb48b50511453",
+  "candidate_commit": "e431da43c7fe7f4f50a688c3e8fcb48b50511453",
+  "baseline_report_sha256": null,
+  "fixture_manifest_sha256": "454df2fd5fdc94a740990b1b5c5342b8f407dd379d973cc2854f40214a25824c",
+  "label_version": "labels-v2",
+  "generator": {
+    "id": "editorial-eye-lavfi-fixtures",
+    "version": "1.0.0",
+    "fixture_set_id": "editorial-eye-v1-7x5"
+  },
+  "provenance": {
+    "environment": {
+      "execution": "deterministic_generated_contract",
+      "platform": "portable",
+      "benchmark_scope": "metric_adapter_oracle_not_pipeline_or_model_quality"
+    },
+    "models": [],
+    "degraded": []
+  },
+  "metrics": {
+    "automatic_binary": {
+      "grounded_visual_success": {
+        "status": "measured",
+        "value": 1,
+        "numerator": 21,
+        "denominator": 21
+      },
+      "observation_field_coverage": {
+        "status": "measured",
+        "value": 1,
+        "numerator": 119,
+        "denominator": 119
+      },
+      "observation_agreement_accuracy": {
+        "status": "measured",
+        "value": 1,
+        "numerator": 119,
+        "denominator": 119
+      },
+      "confidence_calibration": {
+        "status": "measured",
+        "ece": 0,
+        "sample_count": 119,
+        "minimum_sample_count": 5,
+        "bins": [
+          {
+            "lower": 0,
+            "upper": 0.2,
+            "count": 0,
+            "mean_confidence": null,
+            "accuracy": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.4,
+            "count": 0,
+            "mean_confidence": null,
+            "accuracy": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.6,
+            "count": 0,
+            "mean_confidence": null,
+            "accuracy": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.8,
+            "count": 0,
+            "mean_confidence": null,
+            "accuracy": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 1,
+            "count": 119,
+            "mean_confidence": 1,
+            "accuracy": 1
+          }
+        ]
+      },
+      "pair_relation": {
+        "status": "unmeasured",
+        "macro_f1": null,
+        "sample_count": 0,
+        "labels": [],
+        "confusion_matrix": {}
+      },
+      "false_hard_fail_rate": {
+        "status": "unmeasured",
+        "value": null,
+        "numerator": 0,
+        "denominator": 0
+      }
+    },
+    "human": {
+      "human_accuracy": {
+        "status": "unmeasured",
+        "value": null,
+        "numerator": 0,
+        "denominator": 0
+      },
+      "human_f1": {
+        "status": "unmeasured",
+        "macro_f1": null,
+        "sample_count": 0,
+        "labels": [],
+        "confusion_matrix": {}
+      }
+    },
+    "legacy_artifact_agreement": {
+      "status": "unmeasured",
+      "score": null
+    }
+  },
+  "breakdowns": {
+    "by_genre": {
+      "interview_dialogue": {
+        "applicable": 4,
+        "unsupported": 1,
+        "unmeasured": 0,
+        "success": 4,
+        "failure": 0
+      },
+      "quiet_documentary": {
+        "applicable": 4,
+        "unsupported": 1,
+        "unmeasured": 0,
+        "success": 4,
+        "failure": 0
+      },
+      "product_detail": {
+        "applicable": 4,
+        "unsupported": 1,
+        "unmeasured": 0,
+        "success": 4,
+        "failure": 0
+      },
+      "action_event": {
+        "applicable": 4,
+        "unsupported": 1,
+        "unmeasured": 0,
+        "success": 4,
+        "failure": 0
+      },
+      "vertical_social_montage": {
+        "applicable": 4,
+        "unsupported": 1,
+        "unmeasured": 0,
+        "success": 4,
+        "failure": 0
+      },
+      "chronological_longform": {
+        "applicable": 4,
+        "unsupported": 1,
+        "unmeasured": 0,
+        "success": 4,
+        "failure": 0
+      },
+      "intentional_jump_smash_match": {
+        "applicable": 4,
+        "unsupported": 1,
+        "unmeasured": 0,
+        "success": 4,
+        "failure": 0
+      }
+    },
+    "by_media_kind": {
+      "video": {
+        "applicable": 7,
+        "unsupported": 0,
+        "unmeasured": 0,
+        "success": 7,
+        "failure": 0
+      },
+      "audio": {
+        "applicable": 7,
+        "unsupported": 0,
+        "unmeasured": 0,
+        "success": 7,
+        "failure": 0
+      },
+      "image": {
+        "applicable": 7,
+        "unsupported": 0,
+        "unmeasured": 0,
+        "success": 7,
+        "failure": 0
+      },
+      "sequence": {
+        "applicable": 0,
+        "unsupported": 7,
+        "unmeasured": 0,
+        "success": 0,
+        "failure": 0
+      },
+      "mixed": {
+        "applicable": 7,
+        "unsupported": 0,
+        "unmeasured": 0,
+        "success": 7,
+        "failure": 0
+      }
+    },
+    "metrics_by_genre": {
+      "interview_dialogue": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 17,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 17,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "quiet_documentary": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 17,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 17,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "product_detail": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 17,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 17,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "action_event": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 17,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 17,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "vertical_social_montage": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 17,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 17,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "chronological_longform": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 17,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 17,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "intentional_jump_smash_match": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 3,
+          "denominator": 3
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 17,
+          "denominator": 17
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 17,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 17,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      }
+    },
+    "metrics_by_media_kind": {
+      "video": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 7,
+          "denominator": 7
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 28,
+          "denominator": 28
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 28,
+          "denominator": 28
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 28,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 28,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "audio": {
+        "grounded_visual_success": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 28,
+          "denominator": 28
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 28,
+          "denominator": 28
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 28,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 28,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "image": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 7,
+          "denominator": 7
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 28,
+          "denominator": 28
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 28,
+          "denominator": 28
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 28,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 28,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "sequence": {
+        "grounded_visual_success": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        },
+        "observation_field_coverage": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        },
+        "observation_agreement_accuracy": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        },
+        "confidence_calibration": {
+          "status": "unmeasured",
+          "ece": null,
+          "sample_count": 0,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      },
+      "mixed": {
+        "grounded_visual_success": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 7,
+          "denominator": 7
+        },
+        "observation_field_coverage": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 35,
+          "denominator": 35
+        },
+        "observation_agreement_accuracy": {
+          "status": "measured",
+          "value": 1,
+          "numerator": 35,
+          "denominator": 35
+        },
+        "confidence_calibration": {
+          "status": "measured",
+          "ece": 0,
+          "sample_count": 35,
+          "minimum_sample_count": 5,
+          "bins": [
+            {
+              "lower": 0,
+              "upper": 0.2,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.2,
+              "upper": 0.4,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.4,
+              "upper": 0.6,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.6,
+              "upper": 0.8,
+              "count": 0,
+              "mean_confidence": null,
+              "accuracy": null
+            },
+            {
+              "lower": 0.8,
+              "upper": 1,
+              "count": 35,
+              "mean_confidence": 1,
+              "accuracy": 1
+            }
+          ]
+        },
+        "pair_relation": {
+          "status": "unmeasured",
+          "macro_f1": null,
+          "sample_count": 0,
+          "labels": [],
+          "confusion_matrix": {}
+        },
+        "false_hard_fail_rate": {
+          "status": "unmeasured",
+          "value": null,
+          "numerator": 0,
+          "denominator": 0
+        }
+      }
+    }
+  },
+  "binary_gates": [
+    {
+      "gate_id": "grounded_visual_success",
+      "namespace": "automatic_binary",
+      "status": "measured",
+      "blocking": true,
+      "passed": true,
+      "details": [
+        "21/21 applicable visual cases grounded"
+      ]
+    },
+    {
+      "gate_id": "human_accuracy",
+      "namespace": "human",
+      "status": "unmeasured",
+      "blocking": false,
+      "passed": null,
+      "details": [
+        "human_labels_unapproved"
+      ]
+    },
+    {
+      "gate_id": "source_freshness",
+      "namespace": "automatic_binary",
+      "status": "unmeasured",
+      "blocking": false,
+      "passed": null,
+      "details": [
+        "reserved_not_measured_in_v1"
+      ]
+    },
+    {
+      "gate_id": "rollback",
+      "namespace": "automatic_binary",
+      "status": "unmeasured",
+      "blocking": false,
+      "passed": null,
+      "details": [
+        "reserved_not_measured_in_v1"
+      ]
+    },
+    {
+      "gate_id": "preference_isolation",
+      "namespace": "automatic_binary",
+      "status": "unmeasured",
+      "blocking": false,
+      "passed": null,
+      "details": [
+        "reserved_not_measured_in_v1"
+      ]
+    }
+  ],
+  "regressions": [
+    {
+      "id": "unsupported_capability:action_event--sequence",
+      "severity": "advisory",
+      "message": "Editorial Eye case did not produce a measured success",
+      "case_id": "action_event--sequence",
+      "genre": "action_event",
+      "media_kind": "sequence",
+      "reason": "unsupported_capability"
+    },
+    {
+      "id": "unsupported_capability:chronological_longform--sequence",
+      "severity": "advisory",
+      "message": "Editorial Eye case did not produce a measured success",
+      "case_id": "chronological_longform--sequence",
+      "genre": "chronological_longform",
+      "media_kind": "sequence",
+      "reason": "unsupported_capability"
+    },
+    {
+      "id": "unsupported_capability:intentional_jump_smash_match--sequence",
+      "severity": "advisory",
+      "message": "Editorial Eye case did not produce a measured success",
+      "case_id": "intentional_jump_smash_match--sequence",
+      "genre": "intentional_jump_smash_match",
+      "media_kind": "sequence",
+      "reason": "unsupported_capability"
+    },
+    {
+      "id": "unsupported_capability:interview_dialogue--sequence",
+      "severity": "advisory",
+      "message": "Editorial Eye case did not produce a measured success",
+      "case_id": "interview_dialogue--sequence",
+      "genre": "interview_dialogue",
+      "media_kind": "sequence",
+      "reason": "unsupported_capability"
+    },
+    {
+      "id": "unsupported_capability:product_detail--sequence",
+      "severity": "advisory",
+      "message": "Editorial Eye case did not produce a measured success",
+      "case_id": "product_detail--sequence",
+      "genre": "product_detail",
+      "media_kind": "sequence",
+      "reason": "unsupported_capability"
+    },
+    {
+      "id": "unsupported_capability:quiet_documentary--sequence",
+      "severity": "advisory",
+      "message": "Editorial Eye case did not produce a measured success",
+      "case_id": "quiet_documentary--sequence",
+      "genre": "quiet_documentary",
+      "media_kind": "sequence",
+      "reason": "unsupported_capability"
+    },
+    {
+      "id": "unsupported_capability:vertical_social_montage--sequence",
+      "severity": "advisory",
+      "message": "Editorial Eye case did not produce a measured success",
+      "case_id": "vertical_social_montage--sequence",
+      "genre": "vertical_social_montage",
+      "media_kind": "sequence",
+      "reason": "unsupported_capability"
+    }
+  ],
+  "resources": {
+    "model_runs": 0,
+    "generated_media_bytes": 0,
+    "wall_time_ms": 0
+  },
+  "verdict": {
+    "status": "pass",
+    "blocking_failures": []
+  }
+}

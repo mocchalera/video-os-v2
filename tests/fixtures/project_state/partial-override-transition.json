@@ -1,0 +1,9 @@
+{
+  "from": {
+    "planning_gate": "blocked"
+  },
+  "to": {
+    "planning_gate": "partial_override"
+  },
+  "reason": "Operator resolved or waived only part of the planning uncertainty register; remaining uncertainty is warning-level and does not block runtime commands."
+}

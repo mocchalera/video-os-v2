@@ -1,0 +1,85 @@
+{
+  "version": "1",
+  "project": "togakushi-camp",
+  "evaluated_at": "2026-06-17T07:21:49.502Z",
+  "brief_hash": "sha256:ac03754ffbce4668e750cd0129155b5e7d9e5ec0028c552be458c6ff7a95f579",
+  "stages": {
+    "selects": {
+      "score": 0.752,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.813,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "3/4 brief message items represented across active candidates"
+          ],
+          "gaps": [
+            "not all brief message items are represented by active candidate evidence"
+          ]
+        },
+        "must_have_coverage": {
+          "score": 0.833,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/6 selectable must_have items matched",
+            "selection coverage analyzer score 88.9%",
+            "4 must_have items matched by local semantic evidence",
+            "1 production directive must_have items deferred"
+          ],
+          "gaps": [
+            "missing explicit candidate evidence for must_have: 星空"
+          ]
+        },
+        "emotion_curve_alignment": {
+          "score": 0.583,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "36/36 active candidates carry emotion/peak signals"
+          ],
+          "gaps": []
+        },
+        "narrative_structure": {
+          "score": 0.533,
+          "confidence": 0.75,
+          "judge_source": "deterministic",
+          "evidence": [
+            "4 role types represented in selects",
+            "eligible_beats present on 36/36 candidates",
+            "hook/opening function detected"
+          ],
+          "gaps": [
+            "selects do not expose experience/development candidates",
+            "selects do not expose a clear closing/payoff candidate"
+          ]
+        },
+        "pacing_coherence": {
+          "score": 0.919,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "selected source duration 610.3s for 120s target"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.881,
+          "confidence": 0.8,
+          "judge_source": "deterministic",
+          "evidence": [
+            "29/36 unique assets",
+            "4 active roles represented",
+            "11 semantic clusters represented"
+          ],
+          "gaps": []
+        }
+      }
+    }
+  },
+  "composite": 0.752,
+  "notes": [
+    "blueprint stage skipped: 04_plan/edit_blueprint.yaml not found"
+  ]
+}

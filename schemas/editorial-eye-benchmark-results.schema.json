@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-os.local/schemas/editorial-eye-benchmark-results.schema.json",
+  "title": "Editorial Eye Benchmark Results v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["artifact_version", "suite_id", "suite_version", "fixture_manifest_sha256", "label_version", "generator", "provenance", "cases"],
+  "properties": {
+    "artifact_version": { "const": "editorial-eye-benchmark-results/v1" }, "suite_id": { "const": "editorial-eye-v1" }, "suite_version": { "const": "1.0.0" },
+    "fixture_manifest_sha256": { "$ref": "#/$defs/sha256" }, "label_version": { "type": "string", "pattern": "^labels-v[0-9]+$" },
+    "generator": { "$ref": "#/$defs/generator" }, "provenance": { "$ref": "#/$defs/provenance" },
+    "cases": { "type": "array", "minItems": 35, "maxItems": 35, "items": { "$ref": "#/$defs/case" } }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "generator": { "type": "object", "additionalProperties": false, "required": ["id", "version", "fixture_set_id"], "properties": { "id": { "type": "string", "minLength": 1 }, "version": { "type": "string", "minLength": 1 }, "fixture_set_id": { "type": "string", "minLength": 1 } } },
+    "provenance": { "type": "object", "additionalProperties": false, "required": ["environment", "models", "degraded"], "properties": { "environment": { "type": "object", "minProperties": 1, "additionalProperties": { "type": ["string", "number", "boolean", "null"] } }, "models": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "version"], "properties": { "id": { "type": "string" }, "version": { "type": "string" } } } }, "degraded": { "type": "array", "items": { "type": "string" } } } },
+    "observation": { "type": "object", "additionalProperties": false, "required": ["field", "value", "evidence_ref", "confidence", "applicability"], "properties": { "field": { "type": "string", "minLength": 1 }, "value": { "type": ["string", "number", "boolean", "null"] }, "evidence_ref": { "type": ["string", "null"] }, "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }, "applicability": { "enum": ["applicable", "not_applicable"] } } },
+    "pairPrediction": { "type": "object", "additionalProperties": false, "required": ["pair_id", "relation", "confidence"], "properties": { "pair_id": { "type": "string", "minLength": 1 }, "relation": { "type": "string", "minLength": 1 }, "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 } } },
+    "fingerprints": { "type": "object", "additionalProperties": false, "properties": { "decoded_frame_sha256": { "$ref": "#/$defs/sha256" }, "stream_topology": { "type": "string", "minLength": 1 }, "duration_ms": { "type": "number", "minimum": 0 }, "audio_rms_db": { "type": "number" }, "generated_bytes_sha256": { "$ref": "#/$defs/sha256" } } },
+    "case": {
+      "type": "object", "additionalProperties": false, "required": ["case_id", "genre", "media_kind", "status", "supported", "grounded_frame_count", "observations", "pair_relation_predictions", "hard_fail"],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 }, "genre": { "enum": ["interview_dialogue", "quiet_documentary", "product_detail", "action_event", "vertical_social_montage", "chronological_longform", "intentional_jump_smash_match"] }, "media_kind": { "enum": ["video", "audio", "image", "sequence", "mixed"] },
+        "status": { "enum": ["success", "failure", "unsupported", "unmeasured"] }, "supported": { "type": "boolean" }, "grounded_frame_count": { "type": "integer", "minimum": 0 },
+        "ground_truth_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }, "observations": { "type": "array", "items": { "$ref": "#/$defs/observation" } }, "pair_relation_predictions": { "type": "array", "items": { "$ref": "#/$defs/pairPrediction" } },
+        "hard_fail": { "type": "object", "additionalProperties": false, "required": ["decision", "reasons"], "properties": { "decision": { "type": "boolean" }, "reasons": { "type": "array", "items": { "type": "string" } } } },
+        "degraded_reason": { "type": "string", "minLength": 1 }, "decoded_fixture_fingerprints": { "$ref": "#/$defs/fingerprints" }
+      }
+    }
+  }
+}

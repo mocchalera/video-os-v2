@@ -1,0 +1,552 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/package-qa-report.schema.json",
+  "title": "Video OS Package QA Report",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "source_of_truth",
+    "qa_profile",
+    "passed",
+    "checks"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "source_of_truth": {
+      "type": "string",
+      "enum": ["engine_render", "nle_finishing"]
+    },
+    "qa_profile": {
+      "type": "string",
+      "enum": ["engine_render", "nle_finishing"]
+    },
+    "passed": { "type": "boolean" },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/qaCheck" }
+    },
+    "metrics": { "$ref": "#/$defs/qaMetrics" },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "final_video": { "type": "string" },
+        "final_mix": { "type": "string" },
+        "audio_mix_report": { "type": "string" },
+        "layout_snapshot": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "source_inputs_freshness": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["fresh", "stale"] },
+        "reason": { "type": "string" },
+        "source_inputs_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "attestation_status": {
+          "type": "string",
+          "enum": ["verified", "live_only", "not_applicable"]
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "qaCheck": {
+      "type": "object",
+      "required": ["name", "passed", "details"],
+      "properties": {
+        "name": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "details": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "qaMetrics": {
+      "type": "object",
+      "properties": {
+        "caption_max_density": { "type": "number" },
+        "dialogue_occupancy_ratio": { "type": "number" },
+        "dialogue_outside_expected_ms": { "type": "number", "minimum": 0 },
+        "dialogue_first_signal_ms": { "type": "number", "minimum": 0 },
+        "dialogue_last_signal_ms": { "type": "number", "minimum": 0 },
+        "expected_dialogue_start_ms": { "type": "number", "minimum": 0 },
+        "expected_dialogue_end_ms": { "type": "number", "minimum": 0 },
+        "av_duration_delta_ms": { "type": "number", "minimum": 0 },
+        "av_drift_ms": { "type": "number" },
+        "integrated_lufs": { "type": "number" },
+        "true_peak_dbtp": { "type": "number" },
+        "resolution_check": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped", "blocked"]
+        },
+        "actual_video_frame": { "$ref": "#/$defs/videoFrame" },
+        "expected_video_frame": { "$ref": "#/$defs/expectedVideoFrame" },
+        "resolution_mismatches": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "deterministic_output_qa": {
+          "$ref": "#/$defs/deterministicOutputQA"
+        },
+        "deterministic_layout_qa": {
+          "$ref": "#/$defs/deterministicLayoutQA"
+        },
+        "speech_cadence_qa": {
+          "$ref": "#/$defs/speechCadenceQA"
+        },
+        "caption_delivery_qa": {
+          "$ref": "#/$defs/captionDeliveryQA"
+        }
+      },
+      "additionalProperties": false
+    },
+    "captionDeliveryQA": {
+      "type": "object",
+      "required": [
+        "version",
+        "status",
+        "mode",
+        "checked_caption_count",
+        "evidence_caption_count",
+        "incomplete_caption_count",
+        "intentional_reveal_count",
+        "thresholds",
+        "review_items"
+      ],
+      "properties": {
+        "version": { "const": "caption-delivery-qa/v1" },
+        "status": {
+          "enum": [
+            "verified",
+            "review_required",
+            "incomplete",
+            "not_applicable"
+          ]
+        },
+        "mode": {
+          "enum": ["off", "standard", "aggressive", "credibility_first"]
+        },
+        "checked_caption_count": { "type": "integer", "minimum": 0 },
+        "evidence_caption_count": { "type": "integer", "minimum": 0 },
+        "incomplete_caption_count": { "type": "integer", "minimum": 0 },
+        "intentional_reveal_count": { "type": "integer", "minimum": 0 },
+        "thresholds": { "$ref": "#/$defs/captionDeliveryThresholds" },
+        "reason": { "type": "string", "minLength": 1 },
+        "review_items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/captionDeliveryReviewItem" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "captionDeliveryThresholds": {
+      "type": "object",
+      "required": [
+        "ordinary_lead_frames",
+        "question_audio_first_frames",
+        "max_lag_ms",
+        "speech_end_tolerance_frames",
+        "min_dwell_ms",
+        "cps_limit",
+        "source"
+      ],
+      "properties": {
+        "ordinary_lead_frames": { "type": "integer", "minimum": 0 },
+        "question_audio_first_frames": { "type": "integer", "minimum": 0 },
+        "max_lag_ms": { "type": "integer", "minimum": 0 },
+        "speech_end_tolerance_frames": { "type": "integer", "minimum": 0 },
+        "min_dwell_ms": { "type": "integer", "minimum": 0 },
+        "cps_limit": { "type": "number", "exclusiveMinimum": 0 },
+        "source": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "captionDeliveryReviewItem": {
+      "type": "object",
+      "required": [
+        "issue_id",
+        "code",
+        "severity",
+        "caption_id",
+        "asset_id",
+        "segment_id",
+        "text_excerpt",
+        "caption_start_frame",
+        "caption_end_frame",
+        "audio_start_frame",
+        "audio_end_frame",
+        "timeline_start_frame",
+        "timeline_end_frame",
+        "start_timecode",
+        "end_timecode",
+        "measured_ms",
+        "threshold_ms",
+        "suggested_action",
+        "title_ja",
+        "remediation_ja"
+      ],
+      "properties": {
+        "issue_id": {
+          "type": "string",
+          "pattern": "^CAPTIONQA_[A-F0-9]{16}$"
+        },
+        "code": {
+          "enum": [
+            "premature_caption_lead",
+            "caption_lag",
+            "caption_ends_before_speech",
+            "insufficient_read_time"
+          ]
+        },
+        "severity": { "const": "review" },
+        "caption_id": { "type": "string", "pattern": "^SC_" },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "segment_id": { "type": "string", "minLength": 1 },
+        "text_excerpt": { "type": "string", "minLength": 1 },
+        "caption_start_frame": { "type": "integer", "minimum": 0 },
+        "caption_end_frame": { "type": "integer", "minimum": 1 },
+        "audio_start_frame": { "type": "integer", "minimum": 0 },
+        "audio_end_frame": { "type": "integer", "minimum": 1 },
+        "timeline_start_frame": { "type": "integer", "minimum": 0 },
+        "timeline_end_frame": { "type": "integer", "minimum": 1 },
+        "start_timecode": {
+          "type": "string",
+          "pattern": "^\\d{2,}:\\d{2}:\\d{2}\\.\\d{3}$"
+        },
+        "end_timecode": {
+          "type": "string",
+          "pattern": "^\\d{2,}:\\d{2}:\\d{2}\\.\\d{3}$"
+        },
+        "measured_ms": { "type": "integer", "minimum": 0 },
+        "threshold_ms": { "type": "integer", "minimum": 0 },
+        "suggested_action": {
+          "enum": [
+            "delay_in",
+            "advance_in",
+            "extend_out",
+            "extend_read_time"
+          ]
+        },
+        "title_ja": { "type": "string", "minLength": 1 },
+        "remediation_ja": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "speechCadenceQA": {
+      "type": "object",
+      "required": [
+        "version",
+        "status",
+        "mode",
+        "checked_clip_count",
+        "silence_event_count",
+        "intentional_hold_count",
+        "thresholds",
+        "review_items"
+      ],
+      "properties": {
+        "version": { "const": "speech-cadence-qa/v1" },
+        "status": {
+          "enum": [
+            "verified",
+            "review_required",
+            "incomplete",
+            "not_applicable"
+          ]
+        },
+        "mode": {
+          "enum": ["off", "standard", "aggressive", "credibility_first"]
+        },
+        "checked_clip_count": { "type": "integer", "minimum": 0 },
+        "silence_event_count": { "type": "integer", "minimum": 0 },
+        "intentional_hold_count": { "type": "integer", "minimum": 0 },
+        "thresholds": { "$ref": "#/$defs/speechCadenceThresholds" },
+        "reason": { "type": "string", "minLength": 1 },
+        "review_items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/speechCadenceReviewItem" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "speechCadenceThresholds": {
+      "type": "object",
+      "required": [
+        "head_silence_max_ms",
+        "internal_silence_max_ms",
+        "tail_silence_max_ms",
+        "source"
+      ],
+      "properties": {
+        "head_silence_max_ms": { "type": "integer", "minimum": 0 },
+        "internal_silence_max_ms": { "type": "integer", "minimum": 0 },
+        "tail_silence_max_ms": { "type": "integer", "minimum": 0 },
+        "source": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "speechCadenceReviewItem": {
+      "type": "object",
+      "required": [
+        "issue_id",
+        "code",
+        "severity",
+        "clip_id",
+        "asset_id",
+        "silence_event_id",
+        "source_start_us",
+        "source_end_us",
+        "timeline_start_frame",
+        "timeline_end_frame",
+        "start_timecode",
+        "end_timecode",
+        "duration_ms",
+        "suggested_action",
+        "title_ja",
+        "remediation_ja"
+      ],
+      "properties": {
+        "issue_id": {
+          "type": "string",
+          "pattern": "^CADENCEQA_[A-F0-9]{16}$"
+        },
+        "code": {
+          "enum": [
+            "excessive_head_silence",
+            "excessive_internal_silence",
+            "excessive_tail_silence"
+          ]
+        },
+        "severity": { "const": "review" },
+        "clip_id": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "silence_event_id": { "type": "string", "minLength": 1 },
+        "source_start_us": { "type": "integer", "minimum": 0 },
+        "source_end_us": { "type": "integer", "minimum": 1 },
+        "timeline_start_frame": { "type": "integer", "minimum": 0 },
+        "timeline_end_frame": { "type": "integer", "minimum": 1 },
+        "start_timecode": {
+          "type": "string",
+          "pattern": "^\\d{2,}:\\d{2}:\\d{2}\\.\\d{3}$"
+        },
+        "end_timecode": {
+          "type": "string",
+          "pattern": "^\\d{2,}:\\d{2}:\\d{2}\\.\\d{3}$"
+        },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "suggested_action": {
+          "enum": ["trim_in", "jump_cut", "trim_out"]
+        },
+        "title_ja": { "type": "string", "minLength": 1 },
+        "remediation_ja": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "deterministicOutputQA": {
+      "type": "object",
+      "required": ["status", "issues"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["verified", "blocked", "incomplete"]
+        },
+        "duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "scanned_duration_sec": { "type": "number", "minimum": 0 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "issues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deterministicOutputQAIssue" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "deterministicOutputQAIssue": {
+      "type": "object",
+      "required": ["kind", "severity", "detail"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["black", "freeze", "inset", "dimensions", "decode"]
+        },
+        "severity": { "const": "blocking" },
+        "detail": { "type": "string", "minLength": 1 },
+        "start_sec": { "type": "number", "minimum": 0 },
+        "end_sec": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "deterministicLayoutQA": {
+      "type": "object",
+      "required": ["version", "status", "snapshot_version", "issues"],
+      "properties": {
+        "version": {
+          "enum": [
+            "deterministic-layout-qa/v1",
+            "deterministic-layout-qa/v2"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["verified", "blocked", "incomplete"]
+        },
+        "snapshot_version": { "const": "render-layout-snapshot/v1" },
+        "snapshot_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "issues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deterministicLayoutQAIssue" }
+        },
+        "review_items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/deterministicLayoutQAReviewItem" }
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "version": { "const": "deterministic-layout-qa/v2" }
+            }
+          },
+          "then": {
+            "required": ["review_items"]
+          }
+        }
+      ]
+    },
+    "deterministicLayoutQAIssue": {
+      "type": "object",
+      "required": ["code", "severity", "detail"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "renderer_evidence_incomplete",
+            "caption_outside_safe_area",
+            "glyph_clipped",
+            "font_fallback",
+            "missing_glyph",
+            "duplicate_speech_caption_layer",
+            "caption_visual_collision",
+            "end_card_hold_invalid",
+            "final_frame_state_invalid"
+          ]
+        },
+        "severity": { "const": "blocking" },
+        "detail": { "type": "string", "minLength": 1 },
+        "layer_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "start_frame": { "type": "integer", "minimum": 0 },
+        "end_frame": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "deterministicLayoutQAReviewItem": {
+      "type": "object",
+      "required": [
+        "issue_id",
+        "code",
+        "severity",
+        "title_ja",
+        "remediation_ja",
+        "layer_ids"
+      ],
+      "properties": {
+        "issue_id": {
+          "type": "string",
+          "pattern": "^LAYOUTQA_[A-F0-9]{16}$"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "renderer_evidence_incomplete",
+            "caption_outside_safe_area",
+            "glyph_clipped",
+            "font_fallback",
+            "missing_glyph",
+            "duplicate_speech_caption_layer",
+            "caption_visual_collision",
+            "end_card_hold_invalid",
+            "final_frame_state_invalid"
+          ]
+        },
+        "severity": { "const": "blocking" },
+        "title_ja": { "type": "string", "minLength": 1 },
+        "remediation_ja": { "type": "string", "minLength": 1 },
+        "layer_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "start_frame": { "type": "integer", "minimum": 0 },
+        "end_frame": { "type": "integer", "minimum": 1 },
+        "start_timecode": {
+          "type": "string",
+          "pattern": "^\\d{2,}:\\d{2}:\\d{2}\\.\\d{3}$"
+        },
+        "end_timecode": {
+          "type": "string",
+          "pattern": "^\\d{2,}:\\d{2}:\\d{2}\\.\\d{3}$"
+        }
+      },
+      "additionalProperties": false,
+      "dependentRequired": {
+        "start_frame": ["end_frame"],
+        "end_frame": ["start_frame"],
+        "start_timecode": ["end_timecode", "start_frame", "end_frame"],
+        "end_timecode": ["start_timecode", "start_frame", "end_frame"]
+      }
+    },
+    "videoFrame": {
+      "type": "object",
+      "required": ["width", "height", "sar", "dar", "fps_num", "fps_den", "fps"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "sar": { "type": ["string", "null"] },
+        "dar": { "type": ["string", "null"] },
+        "fps_num": { "type": ["integer", "null"], "minimum": 1 },
+        "fps_den": { "type": ["integer", "null"], "minimum": 1 },
+        "fps": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "expectedVideoFrame": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["package_settings", "timeline", "creative_brief"]
+        },
+        "source_detail": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "sar": { "type": ["string", "null"] },
+        "dar": { "type": ["string", "null"] },
+        "fps_num": { "type": ["integer", "null"], "minimum": 1 },
+        "fps_den": { "type": ["integer", "null"], "minimum": 1 },
+        "fps": { "type": ["number", "null"] },
+        "aspect_ratio": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

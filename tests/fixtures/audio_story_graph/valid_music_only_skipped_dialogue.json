@@ -1,0 +1,73 @@
+{
+  "version": "1.0.0",
+  "project_id": "asg-fixtures",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "inputs": {
+    "transcript_hashes": [],
+    "audio_events_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "bgm_analysis_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "coverage_report_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "nodes": [
+    {
+      "node_id": "BGMREF_section_001",
+      "node_type": "music_section",
+      "asset_id": "AST_music_001",
+      "start_us": 0,
+      "end_us": 12000000,
+      "text": null,
+      "story_role": "hook",
+      "refs": {
+        "transcript_ref": null,
+        "speaker_ref": null,
+        "audio_event_ref": null,
+        "bgm_ref": "BGM_section_001"
+      },
+      "confidence": { "score": 0.94, "source": "fixture", "status": "ready" }
+    },
+    {
+      "node_id": "AEREF_ambient_001",
+      "node_type": "ambient_shift",
+      "asset_id": "AST_music_001",
+      "start_us": 12000000,
+      "end_us": 15000000,
+      "text": null,
+      "story_role": "experience",
+      "refs": {
+        "transcript_ref": null,
+        "speaker_ref": null,
+        "audio_event_ref": "AE_ambient_001",
+        "bgm_ref": null
+      },
+      "confidence": { "score": 0.78, "source": "fixture", "status": "ready" }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "ASGEDGE_music_under_001",
+      "from_node_id": "BGMREF_section_001",
+      "to_node_id": "AEREF_ambient_001",
+      "type": "music_under"
+    }
+  ],
+  "coverage": {
+    "status": "ready",
+    "dialogue_lane": "skipped",
+    "audio_event_lane": "ready",
+    "music_lane": "ready",
+    "missing_inputs": []
+  },
+  "provenance": {
+    "producer": "analysis-pipeline",
+    "inputs": [
+      { "path": "projects/demo/03_analysis/bgm-analysis.json", "hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444" }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": ["created_at"]
+    }
+  }
+}

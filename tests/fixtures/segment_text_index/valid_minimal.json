@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "project_id": "p4d-fixture",
+  "artifact_version": "text-index-v1",
+  "created_at": "2026-04-27T00:00:00Z",
+  "index_id": "SIDX_minimal",
+  "segments": [
+    {
+      "segment_id": "SEG_AST_001_0001",
+      "asset_id": "AST_001",
+      "normalized_text": "hello world",
+      "token_refs": [
+        { "token": "hello", "source_field": "transcript_text", "source_id": "TR_001" },
+        { "token": "world", "source_field": "transcript_text", "source_id": "TR_001" }
+      ],
+      "source_artifact_ref": {
+        "path": "03_analysis/transcripts/AST_001.json",
+        "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "type": "transcript"
+      }
+    }
+  ],
+  "provenance": {
+    "producer": "scripts/rebuild-segment-search-index.ts",
+    "inputs": [
+      { "path": "03_analysis/transcripts/AST_001.json", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "required": false }
+    ],
+    "hash_policy": { "algorithm": "sha256", "canonicalization": "normalized-json-v1", "excluded_fields": ["created_at"] }
+  }
+}

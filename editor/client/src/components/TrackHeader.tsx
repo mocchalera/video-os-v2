@@ -1,0 +1,155 @@
+import type {
+  EditorLane,
+  EditorTrackKind,
+  TrackHeaderState,
+  TrackHeight,
+} from '../types';
+import { TRACK_HEIGHT_PX } from '../types';
+
+interface TrackHeaderProps {
+  lane: EditorLane;
+  state: TrackHeaderState;
+  onToggleLock: () => void;
+  onToggleMute: () => void;
+  onToggleSolo: () => void;
+  onToggleSyncLock: () => void;
+  onCycleHeight: () => void;
+}
+
+const HEIGHT_LABELS: Record<TrackHeight, string> = { S: 'S', M: 'M', L: 'L' };
+const TRACK_APPEARANCE: Record<EditorTrackKind, { label: string; color: string }> = {
+  video: {
+    color: 'rgba(56, 189, 248, 0.8)',
+    label: 'Pic',
+  },
+  audio: {
+    color: 'rgba(251, 191, 36, 0.8)',
+    label: 'Aud',
+  },
+  caption: {
+    color: 'rgba(45, 212, 191, 0.8)',
+    label: 'Cap',
+  },
+};
+
+function IconButton({
+  active,
+  label,
+  title,
+  ariaLabel,
+  activeColor,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  title: string;
+  ariaLabel: string;
+  activeColor: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={ariaLabel}
+      className="flex h-[18px] w-[18px] items-center justify-center rounded-sm text-[9px] font-bold uppercase leading-none transition-colors"
+      style={{
+        background: active ? activeColor : 'rgba(148, 163, 184, 0.08)',
+        color: active ? '#fff' : 'rgba(148, 163, 184, 0.5)',
+      }}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+    >
+      {label}
+    </button>
+  );
+}
+
+export default function TrackHeader({
+  lane,
+  state,
+  onToggleLock,
+  onToggleMute,
+  onToggleSolo,
+  onToggleSyncLock,
+  onCycleHeight,
+}: TrackHeaderProps) {
+  const heightPx = TRACK_HEIGHT_PX[state.height];
+  const isCompact = state.height === 'S';
+  const appearance = TRACK_APPEARANCE[lane.trackKind];
+  const trackLabel = lane.label || lane.laneId;
+
+  return (
+    <div
+      className="flex items-center border-t border-white/[0.05] px-2"
+      style={{
+        height: heightPx,
+        opacity: state.muted ? 0.5 : 1,
+      }}
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        {/* Track label + kind */}
+        <div className="flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: appearance.color }}
+          />
+          <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.24em] text-neutral-100">
+            {lane.label}
+          </span>
+          {!isCompact && (
+            <span className="text-[9px] uppercase tracking-[0.16em] text-[color:var(--text-subtle)]">
+              {appearance.label}
+            </span>
+          )}
+        </div>
+
+        {/* Controls row */}
+        <div className="flex items-center gap-0.5">
+          <IconButton
+            active={state.locked}
+            label="L"
+            title="Lock track"
+            ariaLabel={`${trackLabel} lock track`}
+            activeColor="#dc2626"
+            onClick={onToggleLock}
+          />
+          <IconButton
+            active={state.muted}
+            label="M"
+            title="Mute track"
+            ariaLabel={`${trackLabel} mute track`}
+            activeColor="#6b7280"
+            onClick={onToggleMute}
+          />
+          <IconButton
+            active={state.solo}
+            label="S"
+            title="Solo track"
+            ariaLabel={`${trackLabel} solo track`}
+            activeColor="#eab308"
+            onClick={onToggleSolo}
+          />
+          {!isCompact && (
+            <IconButton
+              active={state.syncLock}
+              label="⚡"
+              title="Sync lock"
+              ariaLabel={`${trackLabel} sync lock`}
+              activeColor="#3b82f6"
+              onClick={onToggleSyncLock}
+            />
+          )}
+          <button
+            type="button"
+            title={`Track height: ${state.height} (click to cycle)`}
+            aria-label={`${trackLabel} track height ${state.height}`}
+            className="ml-auto flex h-[18px] items-center justify-center rounded-sm bg-white/[0.06] px-1.5 text-[8px] font-bold uppercase tracking-wider text-[color:var(--text-subtle)] transition-colors hover:bg-white/[0.12] hover:text-neutral-300"
+            onClick={(e) => { e.stopPropagation(); onCycleHeight(); }}
+          >
+            {HEIGHT_LABELS[state.height]}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

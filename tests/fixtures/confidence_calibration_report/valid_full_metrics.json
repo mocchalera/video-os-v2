@@ -1,0 +1,63 @@
+{
+  "version": "1.0.0",
+  "project_id": "p4c-fixture",
+  "artifact_version": "calibration-report-v1",
+  "created_at": "2026-04-27T01:00:00Z",
+  "report_id": "CALRPT_full_metrics",
+  "eval_set_id": "EVALSET_release_review",
+  "calibration_model_id": "CALMOD_baseline_v1",
+  "artifact_versions": {
+    "audio_story_graph_version": {
+      "version": "analysis-v1",
+      "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "continuity_graph_version": {
+      "version": "analysis-v1",
+      "hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "assets_version": {
+      "version": "assets-v1",
+      "hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    "release_safety_report_version": {
+      "version": "release-safety-v1",
+      "hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    }
+  },
+  "metrics": {
+    "boundary_error_seconds": 0.11,
+    "tag_precision": 0.93,
+    "tag_recall": 0.88,
+    "peak_timestamp_error_seconds": 0.19,
+    "speaker_attribution_accuracy": 0.94,
+    "continuity_match_precision": 0.91,
+    "release_safety_false_negative_rate": 0.01
+  },
+  "buckets": [
+    { "bucket": "very_low", "sample_count": 6, "observed_accuracy": 0.18, "expected_accuracy": 0.2 },
+    { "bucket": "low", "sample_count": 12, "observed_accuracy": 0.41, "expected_accuracy": 0.4 },
+    { "bucket": "medium", "sample_count": 24, "observed_accuracy": 0.69, "expected_accuracy": 0.7 },
+    { "bucket": "high", "sample_count": 30, "observed_accuracy": 0.83, "expected_accuracy": 0.85 },
+    { "bucket": "very_high", "sample_count": 14, "observed_accuracy": 0.94, "expected_accuracy": 0.95 }
+  ],
+  "failures": [],
+  "recommendations": [
+    "Collect more low-confidence speaker attribution examples.",
+    "Re-run release safety false-negative checks after P4d index work."
+  ],
+  "provenance": {
+    "producer": "scripts/eval-confidence-calibration.ts",
+    "inputs": [
+      {
+        "path": "tests/fixtures/confidence_calibration_report/ground_truth.json",
+        "hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "required": true
+      }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": ["created_at"]
+    }
+  }
+}

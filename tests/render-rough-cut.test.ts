@@ -1,0 +1,1150 @@
+import { afterAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  buildAudioDelaySecByClipId,
+  buildClipVideoFilters,
+  buildHardCutGroupFfmpegArgs,
+  buildRenderGroups,
+  buildRenderAudioClips,
+  buildRenderClips,
+  buildTimelineAudioMixFilter,
+  buildTimelineAudioMuxArgs,
+  buildXfadeFilterGraph,
+  computeRenderDurationAccounting,
+  extractAudioClips,
+  extractCrossfadeTransitions,
+  extractVideoClips,
+  findTimelineAudioVideoSyncIssues,
+  findBgmCandidates,
+  generateSourceMapFromAssets,
+  parseArgs,
+  selectBgmCandidate,
+  validateRenderDurationAccounting,
+  writeConcatList,
+  writeVideoAssemblyTimingManifest,
+  type BgmCandidate,
+  type RenderClip,
+} from "../scripts/render-rough-cut.js";
+import { applyAdaptiveTrim } from "../runtime/compiler/trim.js";
+import type {
+  Candidate,
+  EditBlueprint,
+  NormalizedBeat,
+  TimelineClip as CompilerTimelineClip,
+} from "../runtime/compiler/types.js";
+import { loadSourceMap } from "../runtime/media/source-map.js";
+
+const tempDirs: string[] = [];
+
+describe("parseArgs", () => {
+  it("accepts an existing video assembly for audio-mux resume", () => {
+    expect(parseArgs([
+      "node",
+      "render-rough-cut.ts",
+      "--project",
+      "projects/demo",
+      "--reuse-video",
+      "05_timeline/assembly.mp4",
+    ])).toMatchObject({
+      projectPath: "projects/demo",
+      reuseVideoPath: "05_timeline/assembly.mp4",
+      noAudio: false,
+      deferEndingFade: false,
+    });
+  });
+
+  it("accepts deferred ending fade for overlay-safe finishing", () => {
+    expect(parseArgs([
+      "node",
+      "render-rough-cut.ts",
+      "--project",
+      "projects/demo",
+      "--defer-ending-fade",
+    ])).toMatchObject({
+      projectPath: "projects/demo",
+      deferEndingFade: true,
+    });
+  });
+});
+
+afterAll(() => {
+  for (const dir of tempDirs) {
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe("clip video filters", () => {
+  it("uses the canonical vertical sequence dimensions", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_vertical",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 0,
+      durationSec: 5,
+      timelineInFrame: 0,
+      timelineOutFrame: 120,
+      timelineDurationSec: 5,
+      sourceRangeDurationSec: 5,
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 24, {
+      outputWidth: 1080,
+      outputHeight: 1920,
+    });
+
+    expect(filters).toContain("scale=1080:1920:force_original_aspect_ratio=decrease");
+    expect(filters).toContain("pad=1080:1920");
+    expect(filters).not.toContain("1920:1080");
+  });
+
+  it("normalizes clip timestamps before applying a relative ending fade", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_ending",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 120,
+      durationSec: 10,
+      timelineInFrame: 0,
+      timelineOutFrame: 240,
+      timelineDurationSec: 10,
+      sourceRangeDurationSec: 10,
+      metadata: {
+        ending_treatment: {
+          video_fade_color: "black",
+          video_fade_out_frames: 36,
+        },
+      },
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 24);
+
+    expect(filters).toMatch(/^setpts=PTS-STARTPTS,/);
+    expect(filters).toContain("fade=t=out:st=8.5:d=1.5:color=black");
+  });
+
+  it("applies timeline zoom and position metadata before overlays are burned", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_reframed",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 120,
+      durationSec: 10,
+      timelineInFrame: 0,
+      timelineOutFrame: 240,
+      timelineDurationSec: 10,
+      sourceRangeDurationSec: 10,
+      metadata: {
+        zoom: 1.15,
+        position: { x: -135, y: -55 },
+      },
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 30);
+
+    expect(filters).toContain("scale=2208:1242:force_original_aspect_ratio=increase");
+    expect(filters).toContain(
+      "crop=1920:1080:max(0\\,min(iw-1920\\,(iw-1920)/2--135)):" +
+        "max(0\\,min(ih-1080\\,(ih-1080)/2--55))",
+    );
+    expect(filters).not.toContain("pad=1920:1080");
+  });
+
+  it("can defer the ending fade until after captions are burned", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_ending_deferred",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 120,
+      durationSec: 10,
+      timelineInFrame: 0,
+      timelineOutFrame: 300,
+      timelineDurationSec: 10,
+      sourceRangeDurationSec: 10,
+      metadata: {
+        ending_treatment: {
+          video_fade_color: "black",
+          video_fade_out_frames: 30,
+        },
+      },
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 30, { applyEndingFade: false });
+
+    expect(filters).not.toContain("fade=t=out");
+  });
+});
+
+function createTempProject(name: string): string {
+  const tmpDir = path.resolve(`tests/tmp_render_rough_cut_${name}_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  tempDirs.push(tmpDir);
+  return tmpDir;
+}
+
+describe("video assembly timing provenance", () => {
+  it("stores the full SHA-256 of timeline.json", () => {
+    const projectDir = createTempProject("assembly_timing_hash");
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const timelineBytes = '{"version":"1","project_id":"hash-regression"}\n';
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(timelinePath, timelineBytes, "utf8");
+
+    const clip: RenderClip = {
+      assetId: "AST_001",
+      clipId: "CLP_001",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 0,
+      durationSec: 1,
+      timelineInFrame: 0,
+      timelineDurationSec: 1,
+      sourceRangeDurationSec: 1,
+      timelineOutFrame: 30,
+    };
+    writeVideoAssemblyTimingManifest(
+      projectDir,
+      timelinePath,
+      30,
+      1,
+      [clip],
+      new Map([[clip.clipId, 1]]),
+    );
+
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(projectDir, "05_timeline", "video-assembly-timing.json"), "utf8"),
+    ) as { timeline_hash: string };
+    const expected = createHash("sha256").update(timelineBytes).digest("hex");
+    expect(manifest.timeline_hash).toBe(expected);
+    expect(manifest.timeline_hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe("generateSourceMapFromAssets", () => {
+  it("creates 02_media/source_map.json by matching assets.json filenames", () => {
+    const projectDir = createTempProject("source_map");
+    const mediaDir = path.join(projectDir, "02_media");
+    const analysisDir = path.join(projectDir, "03_analysis");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    fs.mkdirSync(analysisDir, { recursive: true });
+    fs.writeFileSync(path.join(mediaDir, "clip_a.MOV"), "video-a");
+    fs.writeFileSync(path.join(mediaDir, "clip_b.mp4"), "video-b");
+    fs.writeFileSync(path.join(mediaDir, "unmatched.mov"), "unused");
+    fs.writeFileSync(
+      path.join(analysisDir, "assets.json"),
+      JSON.stringify({
+        project_id: "test-project",
+        items: [
+          { asset_id: "AST_001", filename: "clip_a.mov", display_name: "Clip A" },
+          { asset_id: "AST_002", filename: "clip_b.MP4" },
+          { asset_id: "AST_003", filename: "missing.mov" },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const doc = generateSourceMapFromAssets(projectDir);
+
+    expect(doc.items).toHaveLength(2);
+    expect(doc.items.map((item) => item.asset_id)).toEqual(["AST_001", "AST_002"]);
+    expect(doc.items[0]).toMatchObject({
+      asset_id: "AST_001",
+      display_name: "Clip A",
+      kind: "asset",
+      link_path: "02_media/clip_a.MOV",
+    });
+
+    const loaded = loadSourceMap(projectDir);
+    expect(loaded.entryMap.get("AST_002")?.source_locator).toBe(path.join(mediaDir, "clip_b.mp4"));
+  });
+});
+
+describe("BGM selection", () => {
+  it("probes bgm files and selects the closest candidate that is not shorter", async () => {
+    const projectDir = createTempProject("bgm");
+    const mediaDir = path.join(projectDir, "02_media");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    fs.writeFileSync(path.join(mediaDir, "bgm_short.mp3"), "short");
+    fs.writeFileSync(path.join(mediaDir, "bgm_exact.wav"), "exact");
+    fs.writeFileSync(path.join(mediaDir, "bgm_long.mp3"), "long");
+    fs.writeFileSync(path.join(mediaDir, "theme.mp3"), "ignored");
+
+    const durations = new Map([
+      [path.join(mediaDir, "bgm_short.mp3"), 9],
+      [path.join(mediaDir, "bgm_exact.wav"), 12],
+      [path.join(mediaDir, "bgm_long.mp3"), 20],
+    ]);
+    const candidates = await findBgmCandidates(projectDir, async (filePath) => durations.get(filePath) ?? 0);
+
+    expect(candidates.map((candidate) => path.basename(candidate.path))).toEqual([
+      "bgm_exact.wav",
+      "bgm_long.mp3",
+      "bgm_short.mp3",
+    ]);
+    expect(selectBgmCandidate(candidates, 11)?.path).toBe(path.join(mediaDir, "bgm_exact.wav"));
+    expect(selectBgmCandidate(candidates, 13)?.path).toBe(path.join(mediaDir, "bgm_long.mp3"));
+    expect(selectBgmCandidate(candidates, 21)).toBeUndefined();
+  });
+
+  it("ignores broken media symlinks while scanning BGM candidates", async () => {
+    const projectDir = createTempProject("bgm_broken_symlink");
+    const mediaDir = path.join(projectDir, "02_media");
+    fs.mkdirSync(mediaDir, { recursive: true });
+    fs.symlinkSync(path.join(projectDir, "missing.mp4"), path.join(mediaDir, "old-clip.mp4"));
+    fs.writeFileSync(path.join(mediaDir, "bgm_theme.mp3"), "theme");
+
+    const candidates = await findBgmCandidates(projectDir, async () => 12);
+
+    expect(candidates.map((candidate) => path.basename(candidate.path))).toEqual(["bgm_theme.mp3"]);
+  });
+});
+
+describe("timeline clip extraction", () => {
+  it("extracts video clips in timeline order across tracks", () => {
+    const timeline = {
+      sequence: { fps_num: 24, fps_den: 1 },
+      tracks: {
+        video: [
+          {
+            clips: [
+              { clip_id: "late", asset_id: "AST_003", src_in_us: 3_000_000, src_out_us: 4_000_000, timeline_in_frame: 48, timeline_duration_frames: 24 },
+              {
+                clip_id: "first-v1",
+                asset_id: "AST_001",
+                src_in_us: 0,
+                src_out_us: 1_000_000,
+                timeline_in_frame: 0,
+                timeline_duration_frames: 24,
+                metadata: { zoom: 1.15, position: { x: -135, y: -55 } },
+              },
+            ],
+          },
+          {
+            clips: [
+              { clip_id: "first-v2", asset_id: "AST_002", src_in_us: 1_000_000, src_out_us: 3_000_000, timeline_in_frame: 0, timeline_duration_frames: 48 },
+              { clip_id: "invalid", asset_id: "AST_004", src_in_us: 0, src_out_us: 1_000_000, timeline_in_frame: 1, timeline_duration_frames: 0 },
+            ],
+          },
+        ],
+        audio: [
+          {
+            clips: [
+              { clip_id: "audio", asset_id: "AST_A", src_in_us: 0, timeline_in_frame: 0, timeline_duration_frames: 24 },
+            ],
+          },
+        ],
+      },
+    };
+
+    expect(extractVideoClips(timeline).map((clip) => clip.clip_id)).toEqual([
+      "first-v1",
+      "first-v2",
+      "late",
+    ]);
+    expect(extractVideoClips(timeline)[0].metadata).toEqual({
+      zoom: 1.15,
+      position: { x: -135, y: -55 },
+    });
+  });
+
+  it("extracts audio clips in timeline order and preserves audio policy", () => {
+    const timeline = {
+      sequence: { fps_num: 24, fps_den: 1 },
+      tracks: {
+        video: [],
+        audio: [
+          {
+            clips: [
+              {
+                clip_id: "late-audio",
+                asset_id: "AST_002",
+                src_in_us: 5_000_000,
+                src_out_us: 7_000_000,
+                timeline_in_frame: 72,
+                timeline_duration_frames: 48,
+                role: "nat_sound",
+                audio_policy: { nat_gain: 1.8 },
+              },
+              {
+                clip_id: "first-audio",
+                asset_id: "AST_001",
+                src_in_us: 1_000_000,
+                src_out_us: 2_000_000,
+                timeline_in_frame: 0,
+                timeline_duration_frames: 24,
+                role: "dialogue",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    expect(extractAudioClips(timeline).map((clip) => clip.clip_id)).toEqual([
+      "first-audio",
+      "late-audio",
+    ]);
+    expect(extractAudioClips(timeline)[1].audio_policy).toEqual({ nat_gain: 1.8 });
+  });
+
+  it("builds render clips from timeline clips and source_map entries", () => {
+    const projectDir = createTempProject("render_clips");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const warnings: string[] = [];
+    const renderClips = buildRenderClips(
+      [
+        { clip_id: "c1", asset_id: "AST_001", src_in_us: 1_500_000, src_out_us: 4_000_000, timeline_in_frame: 12, timeline_duration_frames: 48 },
+        { clip_id: "missing", asset_id: "AST_404", src_in_us: 0, src_out_us: 1_000_000, timeline_duration_frames: 24 },
+      ],
+      new Map([
+        [
+          "AST_001",
+          {
+            asset_id: "AST_001",
+            source_locator: sourcePath,
+            local_source_path: sourcePath,
+            link_path: "source.mov",
+          },
+        ],
+      ]),
+      24,
+      (message) => warnings.push(message),
+    );
+
+    expect(renderClips).toEqual([
+      {
+        clipId: "c1",
+        assetId: "AST_001",
+        sourcePath,
+        startSec: 1.5,
+        durationSec: 2,
+        timelineInFrame: 12,
+        timelineDurationSec: 2,
+        sourceRangeDurationSec: 2.5,
+        timelineOutFrame: 60,
+      },
+    ]);
+    expect(warnings[0]).toContain("missing source_map entry");
+  });
+
+  it("clamps render duration to the source in/out range", () => {
+    const projectDir = createTempProject("render_clips_clamp");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const renderClips = buildRenderClips(
+      [
+        {
+          clip_id: "c1",
+          asset_id: "AST_001",
+          src_in_us: 2_000_000,
+          src_out_us: 7_000_000,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 240,
+        },
+      ],
+      new Map([
+        [
+          "AST_001",
+          {
+            asset_id: "AST_001",
+            source_locator: sourcePath,
+            local_source_path: sourcePath,
+            link_path: "source.mov",
+          },
+        ],
+      ]),
+      24,
+    );
+
+    expect(renderClips[0].durationSec).toBe(5);
+  });
+
+  it("reads moving source postroll for a final video clip with ending treatment", () => {
+    const projectDir = createTempProject("render_clips_moving_postroll");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const renderClips = buildRenderClips(
+      [{
+        clip_id: "final",
+        asset_id: "AST_001",
+        src_in_us: 10_000_000,
+        src_out_us: 20_000_000,
+        timeline_in_frame: 0,
+        timeline_duration_frames: 340,
+        metadata: {
+          ending_treatment: {
+            video_fade_color: "black",
+            video_fade_out_frames: 30,
+          },
+        },
+      }],
+      new Map([["AST_001", {
+        asset_id: "AST_001",
+        source_locator: sourcePath,
+        local_source_path: sourcePath,
+        link_path: "source.mov",
+      }]]),
+      30,
+      console.warn,
+      { allowEndingPostroll: true },
+    );
+
+    expect(renderClips[0].sourceRangeDurationSec).toBe(10);
+    expect(renderClips[0].timelineDurationSec).toBeCloseTo(11.333333, 6);
+    expect(renderClips[0].durationSec).toBeCloseTo(11.333333, 6);
+  });
+
+  it("keeps render duration aligned when adaptive trim shortens a source range", () => {
+    const projectDir = createTempProject("adaptive_trim_render");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const candidate: Candidate = {
+      segment_id: "SEG_001",
+      asset_id: "AST_001",
+      src_in_us: 0,
+      src_out_us: 10_000_000,
+      role: "hero",
+      why_it_matches: "test",
+      risks: [],
+      confidence: 0.9,
+      trim_hint: {
+        source_center_us: 5_000_000,
+        preferred_duration_us: 5_000_000,
+      },
+    };
+    const clip: CompilerTimelineClip = {
+      clip_id: "c1",
+      segment_id: candidate.segment_id,
+      asset_id: candidate.asset_id,
+      src_in_us: candidate.src_in_us,
+      src_out_us: candidate.src_out_us,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 240,
+      role: "hero",
+      motivation: "test",
+      beat_id: "B01",
+      fallback_segment_ids: [],
+      confidence: 0.9,
+      quality_flags: [],
+    };
+    const blueprint = { trim_policy: { mode: "adaptive" } } as EditBlueprint;
+    const beat: NormalizedBeat = {
+      beat_id: "B01",
+      label: "Beat 1",
+      target_duration_frames: 240,
+      required_roles: ["hero"],
+      preferred_roles: [],
+      purpose: "test",
+    };
+
+    applyAdaptiveTrim([clip], [candidate], blueprint, [beat], 1_000_000 / 24);
+
+    expect(clip.src_in_us).toBe(2_500_000);
+    expect(clip.src_out_us).toBe(7_500_000);
+    expect(clip.timeline_duration_frames).toBe(120);
+
+    const renderClips = buildRenderClips(
+      [clip],
+      new Map([
+        [
+          "AST_001",
+          {
+            asset_id: "AST_001",
+            source_locator: sourcePath,
+            local_source_path: sourcePath,
+            link_path: "source.mov",
+          },
+        ],
+      ]),
+      24,
+    );
+
+    expect(renderClips[0]).toMatchObject({
+      startSec: 2.5,
+      durationSec: 5,
+    });
+  });
+
+  it("builds render audio clips with source ranges and timeline placement", () => {
+    const projectDir = createTempProject("render_audio_clips");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const renderClips = buildRenderAudioClips(
+      [
+        {
+          clip_id: "a1",
+          asset_id: "AST_001",
+          src_in_us: 2_000_000,
+          src_out_us: 6_000_000,
+          timeline_in_frame: 48,
+          timeline_duration_frames: 72,
+          role: "dialogue",
+          audio_policy: { nat_gain: 1.4 },
+        },
+      ],
+      new Map([
+        [
+          "AST_001",
+          {
+            asset_id: "AST_001",
+            source_locator: sourcePath,
+            local_source_path: sourcePath,
+            link_path: "source.mov",
+          },
+        ],
+      ]),
+      24,
+    );
+
+    expect(renderClips[0]).toMatchObject({
+      clipId: "a1",
+      startSec: 2,
+      durationSec: 3,
+      timelineInFrame: 48,
+      role: "dialogue",
+      audioPolicy: { nat_gain: 1.4 },
+    });
+  });
+});
+
+describe("timeline audio mixing", () => {
+  it("builds atrim/adelay/amix graph for timeline audio clips", () => {
+    const filter = buildTimelineAudioMixFilter(
+      [
+        {
+          ...renderClip("audio_a", 2, 0, 2, 2),
+          sourcePath: "/tmp/source-a.mov",
+          startSec: 5,
+        },
+        {
+          ...renderClip("audio_b", 3, 48, 3, 3),
+          sourcePath: "/tmp/source-b.mov",
+          startSec: 20,
+          audioPolicy: { nat_gain: 1.8 },
+        },
+      ],
+      8,
+      24,
+    );
+
+    expect(filter?.outputLabel).toBe("aout");
+    expect(filter?.filterComplex).toContain("[1:a]atrim=start=0:duration=8,asetpts=PTS-STARTPTS[a_silent]");
+    expect(filter?.filterComplex).toContain("[2:a]atrim=start=5:duration=2,asetpts=PTS-STARTPTS");
+    expect(filter?.filterComplex).toContain("[3:a]atrim=start=20:duration=3,asetpts=PTS-STARTPTS,volume=1.8");
+    expect(filter?.filterComplex).toContain("adelay=2000|2000[a1]");
+    expect(filter?.filterComplex).toContain("[a_silent][a0][a1]amix=inputs=3:duration=longest:dropout_transition=0:normalize=0");
+    expect(filter?.filterComplex).toContain("atrim=start=0:duration=8[aout]");
+  });
+
+  it("uses render-time audio delays when clips are shifted by visual transitions", () => {
+    const filter = buildTimelineAudioMixFilter(
+      [
+        {
+          ...renderClip("audio_b", 3, 48, 3, 3),
+          sourcePath: "/tmp/source-b.mov",
+        },
+      ],
+      8,
+      24,
+      { audioDelaySecByClipId: new Map([["audio_b", 1.5]]) },
+    );
+
+    expect(filter?.filterComplex).toContain("adelay=1500|1500[a0]");
+  });
+
+  it("applies the final clip audio fade from timeline policy", () => {
+    const filter = buildTimelineAudioMixFilter(
+      [{
+        ...renderClip("audio_end", 6, 0, 6, 6),
+        sourcePath: "/tmp/source-end.mov",
+        audioPolicy: { fade_out_frames: 48 },
+      }],
+      6,
+      24,
+    );
+
+    expect(filter?.filterComplex).toContain("afade=t=out:st=4:d=2");
+  });
+
+  it("builds mux args that map rendered video and mixed timeline audio", () => {
+    const args = buildTimelineAudioMuxArgs(
+      "/tmp/video.mp4",
+      "/tmp/out.mp4",
+      [
+        {
+          ...renderClip("audio_a", 2, 0, 2, 2),
+          sourcePath: "/tmp/source-a.mov",
+          startSec: 5,
+        },
+      ],
+      8,
+      24,
+    );
+
+    expect(args.slice(0, 8)).toEqual([
+      "-i",
+      "/tmp/video.mp4",
+      "-f",
+      "lavfi",
+      "-t",
+      "8",
+      "-i",
+      "anullsrc=channel_layout=stereo:sample_rate=48000",
+    ]);
+    expect(args).toContain("/tmp/source-a.mov");
+    expect(args).toEqual(expect.arrayContaining([
+      "-ss",
+      "5",
+      "-t",
+      "2",
+      "-i",
+      "/tmp/source-a.mov",
+    ]));
+    const filterGraph = args[args.indexOf("-filter_complex") + 1];
+    expect(filterGraph).toContain("[2:a]atrim=start=0:duration=2");
+    expect(args).toContain("-filter_complex");
+    expect(args).toContain("-map");
+    expect(args).toContain("0:v:0");
+    expect(args).toContain("[aout]");
+    expect(args).toContain("-c:a");
+    expect(args[args.length - 1]).toBe("/tmp/out.mp4");
+  });
+});
+
+describe("writeConcatList", () => {
+  it("writes ffmpeg concat list entries with absolute escaped paths", () => {
+    const projectDir = createTempProject("concat");
+    const listPath = path.join(projectDir, "concat.txt");
+    const clipA = path.join(projectDir, "clip one.mp4");
+    const clipB = path.join(projectDir, "clip's two.mp4");
+
+    writeConcatList(listPath, [clipA, clipB]);
+
+    expect(fs.readFileSync(listPath, "utf-8")).toBe(
+      [
+        `file '${clipA}'`,
+        `file '${clipB.replace(/'/g, "'\\''")}'`,
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("selects undefined for an empty BGM candidate list", () => {
+    const candidates: BgmCandidate[] = [];
+    expect(selectBgmCandidate(candidates, 10)).toBeUndefined();
+  });
+});
+
+describe("crossfade render planning", () => {
+  it("extracts crossfade transitions by destination clip id", () => {
+    const timeline = {
+      sequence: { fps_num: 24, fps_den: 1 },
+      transitions: [
+        {
+          transition_id: "TR_001",
+          from_clip_id: "clip_a",
+          to_clip_id: "clip_b",
+          track_id: "V1",
+          transition_type: "crossfade",
+          transition_params: { crossfade_sec: 0.5 },
+        },
+        {
+          transition_id: "TR_002",
+          from_clip_id: "clip_b",
+          to_clip_id: "clip_c",
+          track_id: "V1",
+          transition_type: "cut",
+        },
+      ],
+    };
+
+    const transitions = extractCrossfadeTransitions(timeline, 24);
+
+    expect(transitions.get("clip_b")).toEqual({
+      fromClipId: "clip_a",
+      toClipId: "clip_b",
+      durationSec: 0.5,
+    });
+    expect(transitions.has("clip_c")).toBe(false);
+  });
+
+  it("groups hard cuts and separates adjacent clips that need xfade", () => {
+    const clips: RenderClip[] = [
+      renderClip("clip_a", 2),
+      renderClip("clip_b", 3),
+      renderClip("clip_c", 4),
+    ];
+    const transitions = new Map([
+      ["clip_c", { fromClipId: "clip_b", toClipId: "clip_c", durationSec: 0.5 }],
+    ]);
+
+    const groups = buildRenderGroups(clips, ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.mp4"], transitions);
+
+    expect(groups).toEqual([
+      { clipPaths: ["/tmp/a.mp4", "/tmp/b.mp4"], durationSec: 5 },
+      {
+        clipPaths: ["/tmp/c.mp4"],
+        durationSec: 4,
+        transitionIn: { fromClipId: "clip_b", toClipId: "clip_c", durationSec: 0.5 },
+      },
+    ]);
+  });
+
+  it("builds an iterative xfade filter graph with cumulative offsets", () => {
+    const graph = buildXfadeFilterGraph([
+      { path: "/tmp/a.mp4", durationSec: 2 },
+      {
+        path: "/tmp/b.mp4",
+        durationSec: 3,
+        transitionIn: { fromClipId: "a", toClipId: "b", durationSec: 0.5 },
+      },
+      {
+        path: "/tmp/c.mp4",
+        durationSec: 4,
+        transitionIn: { fromClipId: "b", toClipId: "c", durationSec: 0.5 },
+      },
+    ]);
+
+    expect(graph?.outputLabel).toBe("vout");
+    expect(graph?.xfadeCount).toBe(2);
+    expect(graph?.durationSec).toBe(8);
+    expect(graph?.filterComplex).toContain("[0:v]settb=AVTB,setpts=PTS-STARTPTS[v0]");
+    expect(graph?.filterComplex).toContain("[v0][v1]xfade=transition=fade:duration=0.5:offset=1.5[xf1]");
+    expect(graph?.filterComplex).toContain("[xf1][v2]xfade=transition=fade:duration=0.5:offset=4[vout]");
+  });
+
+  it("aligns mirrored audio delays to xfade-collapsed video starts", () => {
+    const videoClips: RenderClip[] = [
+      renderClip("clip_a", 2, 0, 2, 2),
+      renderClip("clip_b", 3, 48, 3, 3),
+      renderClip("clip_c", 4, 120, 4, 4),
+    ];
+    const audioClips: RenderClip[] = videoClips.map((clip) => ({
+      ...clip,
+      clipId: `audio_${clip.clipId}`,
+    }));
+    const transitions = new Map([
+      ["clip_b", { fromClipId: "clip_a", toClipId: "clip_b", durationSec: 0.5 }],
+      ["clip_c", { fromClipId: "clip_b", toClipId: "clip_c", durationSec: 0.5 }],
+    ]);
+
+    const delays = buildAudioDelaySecByClipId(audioClips, videoClips, transitions);
+
+    expect(delays.get("audio_clip_a")).toBe(0);
+    expect(delays.get("audio_clip_b")).toBe(1.5);
+    expect(delays.get("audio_clip_c")).toBe(4);
+  });
+
+  it("scales cumulative audio starts to the measured video assembly duration", () => {
+    const videoClips: RenderClip[] = [
+      renderClip("clip_a", 10),
+      renderClip("clip_b", 10, 240),
+      renderClip("clip_c", 10, 480),
+    ];
+    const audioClips = videoClips.map((clip) => ({
+      ...clip,
+      clipId: `audio_${clip.clipId}`,
+    }));
+
+    const delays = buildAudioDelaySecByClipId(audioClips, videoClips, new Map(), 0.99);
+
+    expect(delays.get("audio_clip_a")).toBe(0);
+    expect(delays.get("audio_clip_b")).toBeCloseTo(9.9);
+    expect(delays.get("audio_clip_c")).toBeCloseTo(19.8);
+  });
+
+  it("uses exact rendered clip durations when an assembly timing map is available", () => {
+    const videoClips: RenderClip[] = [
+      renderClip("clip_a", 10),
+      renderClip("clip_b", 10, 240),
+      renderClip("clip_c", 10, 480),
+    ];
+    const audioClips = videoClips.map((clip) => ({
+      ...clip,
+      clipId: `audio_${clip.clipId}`,
+    }));
+    const renderedDurations = new Map([
+      ["clip_a", 9.875],
+      ["clip_b", 9.75],
+      ["clip_c", 9.875],
+    ]);
+
+    const delays = buildAudioDelaySecByClipId(
+      audioClips,
+      videoClips,
+      new Map(),
+      1,
+      renderedDurations,
+    );
+
+    expect(delays.get("audio_clip_a")).toBe(0);
+    expect(delays.get("audio_clip_b")).toBe(9.875);
+    expect(delays.get("audio_clip_c")).toBe(19.625);
+  });
+
+  it("detects same-cut audio clips whose source in-point does not match visible video", () => {
+    const videoClip: RenderClip = {
+      ...renderClip("video_dialogue", 3, 560, 3, 3),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 18.872531,
+    };
+    const badAudioClip: RenderClip = {
+      ...renderClip("audio_dialogue", 3, 560, 3, 3),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 0,
+      role: "dialogue",
+    };
+
+    const issues = findTimelineAudioVideoSyncIssues([videoClip], [badAudioClip], 30);
+
+    expect(issues).toEqual([
+      {
+        videoClipId: "video_dialogue",
+        audioClipId: "audio_dialogue",
+        assetId: "AST_TALK",
+        timelineInFrame: 560,
+        videoStartSec: 18.872531,
+        audioStartSec: 0,
+        deltaSec: -18.872531,
+      },
+    ]);
+  });
+
+  it("accepts exact original-audio mirrors even when clip ids differ", () => {
+    const videoClip: RenderClip = {
+      ...renderClip("video_dialogue", 3, 560, 3, 3),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 18.872531,
+    };
+    const mirroredAudioClip: RenderClip = {
+      ...videoClip,
+      clipId: "audio_dialogue",
+      role: "nat_sound",
+    };
+
+    expect(findTimelineAudioVideoSyncIssues([videoClip], [mirroredAudioClip], 30)).toEqual([]);
+  });
+
+  it("accepts independent visual pre-roll and post-roll when source and timeline offsets match", () => {
+    const videoClip: RenderClip = {
+      ...renderClip("video_breathing", 12.533333, 267, 12.533333, 12.533333),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 178.976031,
+      timelineOutFrame: 643,
+    };
+    const audioClip: RenderClip = {
+      ...renderClip("audio_breathing", 12.033333, 273, 12.033333, 12.02),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 179.176031,
+      timelineOutFrame: 634,
+      role: "dialogue",
+    };
+
+    expect(findTimelineAudioVideoSyncIssues([videoClip], [audioClip], 30)).toEqual([]);
+  });
+
+  it("accepts a longer final video when the extra duration is moving ending postroll", () => {
+    const videoClip: RenderClip = {
+      ...renderClip("video_ending", 4.5, 560, 4.5, 3),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 18.872531,
+      metadata: {
+        ending_treatment: {
+          video_fade_color: "black",
+          video_fade_out_frames: 30,
+        },
+      },
+    };
+    const audioClip: RenderClip = {
+      ...renderClip("audio_ending", 3, 560, 3, 3),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 18.872531,
+      role: "dialogue",
+    };
+
+    expect(findTimelineAudioVideoSyncIssues([videoClip], [audioClip], 30)).toEqual([]);
+  });
+});
+
+describe("duration accounting", () => {
+  it("computes collapsed gaps, source clamps, and crossfade overlap", () => {
+    const clips: RenderClip[] = [
+      renderClip("clip_a", 2, 0, 2, 2),
+      renderClip("clip_b", 2.8, 72, 3, 2.8),
+      renderClip("clip_c", 4, 144, 4, 4),
+    ];
+    const transitions = new Map([
+      ["clip_c", { fromClipId: "clip_b", toClipId: "clip_c", durationSec: 0.5 }],
+    ]);
+    const groups = buildRenderGroups(clips, ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.mp4"], transitions);
+
+    const accounting = computeRenderDurationAccounting(clips, groups, 24);
+
+    expect(accounting).toEqual({
+      timeline_span_sec: 10,
+      timeline_content_sec: 9,
+      gap_sec: 1,
+      gap_count: 1,
+      crossfade_overlap_sec: 0.5,
+      source_clamp_sec: 0.2,
+      expected_rendered_sec: 8.3,
+    });
+  });
+
+  it("sets expected rendered duration to content minus crossfade overlaps and source clamps", () => {
+    const clips: RenderClip[] = [
+      renderClip("clip_a", 1.75, 0, 2, 1.75),
+      renderClip("clip_b", 2, 48, 2, 2),
+    ];
+    const groups = buildRenderGroups(
+      clips,
+      ["/tmp/a.mp4", "/tmp/b.mp4"],
+      new Map([["clip_b", { fromClipId: "clip_a", toClipId: "clip_b", durationSec: 0.25 }]]),
+    );
+
+    const accounting = computeRenderDurationAccounting(clips, groups, 24);
+
+    expect(accounting.timeline_content_sec).toBe(4);
+    expect(accounting.source_clamp_sec).toBe(0.25);
+    expect(accounting.crossfade_overlap_sec).toBe(0.25);
+    expect(accounting.expected_rendered_sec).toBe(3.5);
+  });
+
+  it("passes duration parity when actual duration is within threshold", () => {
+    const warnings: string[] = [];
+
+    const accounting = validateRenderDurationAccounting(
+      {
+        timeline_span_sec: 10,
+        timeline_content_sec: 9,
+        gap_sec: 1,
+        gap_count: 1,
+        crossfade_overlap_sec: 0.5,
+        source_clamp_sec: 0.2,
+        expected_rendered_sec: 8.3,
+      },
+      8,
+      (message) => warnings.push(message),
+    );
+
+    expect(accounting.actual_rendered_sec).toBe(8);
+    expect(accounting.parity_delta_sec).toBe(-0.3);
+    expect(accounting.parity_pass).toBe(true);
+    expect(warnings).toEqual([]);
+  });
+
+  it("warns when duration parity diverges beyond threshold", () => {
+    const warnings: string[] = [];
+
+    const accounting = validateRenderDurationAccounting(
+      {
+        timeline_span_sec: 10,
+        timeline_content_sec: 9,
+        gap_sec: 1,
+        gap_count: 1,
+        crossfade_overlap_sec: 0.5,
+        source_clamp_sec: 0.2,
+        expected_rendered_sec: 8.3,
+      },
+      7,
+      (message) => warnings.push(message),
+    );
+
+    expect(accounting.actual_rendered_sec).toBe(7);
+    expect(accounting.parity_delta_sec).toBe(-1.3);
+    expect(accounting.parity_pass).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("render duration parity delta -1.300s exceeds 0.500s");
+  });
+
+  it("uses a proportional tolerance for hour-long renders", () => {
+    const accounting = validateRenderDurationAccounting(
+      {
+        timeline_span_sec: 3762.375,
+        timeline_content_sec: 3762.375,
+        gap_sec: 0,
+        gap_count: 0,
+        crossfade_overlap_sec: 0,
+        source_clamp_sec: 3.644,
+        expected_rendered_sec: 3758.731,
+      },
+      3757.625,
+    );
+
+    expect(accounting.parity_delta_sec).toBe(-1.106);
+    expect(accounting.parity_tolerance_sec).toBe(1.879);
+    expect(accounting.parity_pass).toBe(true);
+  });
+});
+
+describe("hard-cut group concat command", () => {
+  it("re-encodes groups that will feed an xfade graph", () => {
+    const args = buildHardCutGroupFfmpegArgs("/tmp/list.txt", "/tmp/group.mp4", {
+      fps: 24,
+      normalizeTimestamps: true,
+    });
+
+    expect(args).toContain("-c:v");
+    expect(args).toContain("libx264");
+    expect(args).toContain("-crf");
+    expect(args).toContain("18");
+    expect(args).toContain("-pix_fmt");
+    expect(args).toContain("yuv420p");
+    expect(args).toContain("-r");
+    expect(args[args.indexOf("-r") + 1]).toBe("24");
+    expect(args).toContain("-an");
+    expect(args.join(" ")).not.toContain("-c copy");
+  });
+
+  it("keeps copy concat for hard-cut-only renders", () => {
+    const args = buildHardCutGroupFfmpegArgs("/tmp/list.txt", "/tmp/group.mp4", {
+      fps: 24,
+      normalizeTimestamps: false,
+    });
+
+    expect(args).toEqual([
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      "/tmp/list.txt",
+      "-c",
+      "copy",
+      "/tmp/group.mp4",
+    ]);
+  });
+});
+
+function renderClip(
+  clipId: string,
+  durationSec: number,
+  timelineInFrame = 0,
+  timelineDurationSec = durationSec,
+  sourceRangeDurationSec = durationSec,
+): RenderClip {
+  return {
+    clipId,
+    assetId: `AST_${clipId}`,
+    sourcePath: `/tmp/${clipId}.mov`,
+    startSec: 0,
+    durationSec,
+    timelineInFrame,
+    timelineDurationSec,
+    sourceRangeDurationSec,
+    timelineOutFrame: timelineInFrame + Math.round(timelineDurationSec * 24),
+  };
+}
