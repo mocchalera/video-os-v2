@@ -1,0 +1,26 @@
+{
+  "project_id": "sample-mountain-reset",
+  "artifact_version": "analysis-v1",
+  "transcript_ref": "TR_AST_001",
+  "asset_id": "AST_001",
+  "items": [
+    {
+      "speaker": "S1",
+      "start_us": 6600000,
+      "end_us": 10700000,
+      "text": "I came up here to get quiet again."
+    },
+    {
+      "speaker": "S1",
+      "start_us": 18200000,
+      "end_us": 23200000,
+      "text": "The week gets loud fast."
+    },
+    {
+      "speaker": "S1",
+      "start_us": 41600000,
+      "end_us": 47200000,
+      "text": "Up here the air tells me to slow down."
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+id: exposition_release
+category: linear_sequence
+primary_phase: score
+status: active
+required_signals:
+  - speech_intensity_score
+when:
+  - "transcript_density in [dense, medium]"
+avoid_when:
+  - "all candidates are non-dialogue"
+effects:
+  score_bonus: 0.06
+  metadata_tags:
+    - lighter_bridge

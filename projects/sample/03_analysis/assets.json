@@ -1,0 +1,148 @@
+{
+  "project_id": "sample-mountain-reset",
+  "artifact_version": "analysis-v1",
+  "items": [
+    {
+      "asset_id": "AST_001",
+      "filename": "ast_001_cabin_interview.mov",
+      "role_guess": "interview",
+      "duration_us": 58400000,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_001",
+      "segments": 6,
+      "segment_ids": [
+        "SEG_0001",
+        "SEG_0002",
+        "SEG_0003",
+        "SEG_0004",
+        "SEG_0005",
+        "SEG_0006"
+      ],
+      "quality_flags": [],
+      "tags": [
+        "interview",
+        "window",
+        "morning_light"
+      ]
+    },
+    {
+      "asset_id": "AST_002",
+      "filename": "ast_002_kitchen_broll.mov",
+      "role_guess": "b-roll",
+      "duration_us": 36000000,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segments": 6,
+      "segment_ids": [
+        "SEG_0007",
+        "SEG_0008",
+        "SEG_0009",
+        "SEG_0010",
+        "SEG_0011",
+        "SEG_0012"
+      ],
+      "quality_flags": [],
+      "tags": [
+        "ritual",
+        "kitchen",
+        "prep"
+      ]
+    },
+    {
+      "asset_id": "AST_003",
+      "filename": "ast_003_hands_prep.mov",
+      "role_guess": "b-roll",
+      "duration_us": 42500000,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segments": 6,
+      "segment_ids": [
+        "SEG_0013",
+        "SEG_0014",
+        "SEG_0015",
+        "SEG_0016",
+        "SEG_0017",
+        "SEG_0018"
+      ],
+      "quality_flags": [],
+      "tags": [
+        "hands",
+        "gear",
+        "detail"
+      ]
+    },
+    {
+      "asset_id": "AST_004",
+      "filename": "ast_004_trail_walk.mov",
+      "role_guess": "hybrid",
+      "duration_us": 64200000,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_004",
+      "segments": 6,
+      "segment_ids": [
+        "SEG_0019",
+        "SEG_0020",
+        "SEG_0021",
+        "SEG_0022",
+        "SEG_0023",
+        "SEG_0024"
+      ],
+      "quality_flags": [
+        "slight_wind"
+      ],
+      "tags": [
+        "trail",
+        "breath",
+        "wide"
+      ]
+    },
+    {
+      "asset_id": "AST_005",
+      "filename": "ast_005_summit_release.mov",
+      "role_guess": "hybrid",
+      "duration_us": 40300000,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_005",
+      "segments": 6,
+      "segment_ids": [
+        "SEG_0025",
+        "SEG_0026",
+        "SEG_0027",
+        "SEG_0028",
+        "SEG_0029",
+        "SEG_0030"
+      ],
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "sunrise",
+        "release",
+        "warmth"
+      ]
+    },
+    {
+      "asset_id": "AST_006",
+      "filename": "ast_006_forest_textures.mov",
+      "role_guess": "texture",
+      "duration_us": 32700000,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segments": 6,
+      "segment_ids": [
+        "SEG_0031",
+        "SEG_0032",
+        "SEG_0033",
+        "SEG_0034",
+        "SEG_0035",
+        "SEG_0036"
+      ],
+      "quality_flags": [],
+      "tags": [
+        "forest",
+        "texture",
+        "light"
+      ]
+    }
+  ]
+}

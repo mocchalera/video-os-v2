@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-os.local/schemas/eval01-private-render-receipt.schema.json",
+  "title": "EVAL-01 bounded private render receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "created_at",
+    "authority",
+    "invocation_count",
+    "invocation",
+    "input_hashes",
+    "symlink_proof",
+    "privacy",
+    "exit_records",
+    "output_hashes",
+    "metrics",
+    "nonpass_stop",
+    "self_check"
+  ],
+  "properties": {
+    "schema_version": { "const": "eval01-private-render-receipt/v2" },
+    "status": { "enum": ["PASS", "NONPASS_STOP"] },
+    "created_at": { "type": "string", "minLength": 1 },
+    "authority": { "$ref": "#/$defs/authority" },
+    "invocation_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+    "invocation": { "$ref": "#/$defs/invocation" },
+    "input_hashes": { "$ref": "#/$defs/inputHashes" },
+    "symlink_proof": { "$ref": "#/$defs/symlinkProof" },
+    "privacy": { "$ref": "#/$defs/privacy" },
+    "exit_records": { "$ref": "#/$defs/exitRecords" },
+    "output_hashes": { "$ref": "#/$defs/outputHashes" },
+    "metrics": { "$ref": "#/$defs/metrics" },
+    "nonpass_stop": { "$ref": "#/$defs/nonpassStop" },
+    "self_check": { "$ref": "#/$defs/selfCheck" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "PASS" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "invocation_count": { "const": 1 },
+          "input_hashes": {
+            "items": {
+              "allOf": [
+                { "$ref": "#/$defs/inputHash" },
+                { "properties": { "verified_before": { "const": true }, "verified_after": { "const": true } } }
+              ]
+            }
+          },
+          "nonpass_stop": {
+            "properties": {
+              "active": { "const": false },
+              "failure_reasons": { "maxItems": 0 },
+              "success_claimed": { "const": true }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "nonpass_stop": {
+            "properties": {
+              "active": { "const": true },
+              "failure_reasons": { "minItems": 1 },
+              "success_claimed": { "const": false }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_plan_sha256", "overlay_sha256", "pcl_task_id", "pcl_evidence_id", "human_render_ask_id", "human_render_decision_sha256"],
+      "properties": {
+        "base_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "overlay_sha256": { "$ref": "#/$defs/sha256" },
+        "pcl_task_id": { "type": "string", "minLength": 1 },
+        "pcl_evidence_id": { "type": "string", "minLength": 1 },
+        "human_render_ask_id": { "type": "string", "minLength": 1 },
+        "human_render_decision_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["CI", "NODE_ENV", "NO_COLOR", "PATH"],
+      "properties": {
+        "CI": { "const": "1" },
+        "NODE_ENV": { "const": "production" },
+        "NO_COLOR": { "const": "1" },
+        "PATH": { "type": "string", "minLength": 1 }
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cwd", "executable", "argv", "env", "started_at", "ended_at", "timed_out", "signal", "retry_count", "workaround_count"],
+      "properties": {
+        "cwd": { "type": "string", "minLength": 1 },
+        "executable": { "type": "string", "minLength": 1 },
+        "argv": { "type": "array", "items": { "type": "string" } },
+        "env": { "$ref": "#/$defs/env" },
+        "started_at": { "type": "string", "minLength": 1 },
+        "ended_at": { "type": "string", "minLength": 1 },
+        "timed_out": { "type": "boolean" },
+        "signal": { "type": ["string", "null"] },
+        "retry_count": { "const": 0 },
+        "workaround_count": { "const": 0 }
+      }
+    },
+    "inputHash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "bytes", "sha256", "verified_before", "verified_after"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "verified_before": { "type": "boolean" },
+        "verified_after": { "type": "boolean" }
+      }
+    },
+    "inputHashes": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "prefixItems": [
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "base_plan" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "timeline_current" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "caption_plan_v2" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "caption_provenance_v2" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "authoring_receipt_v2" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "independent_authoring_audit_v2" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "source_media" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "render_social_review_source" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "render_rough_cut_source" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/inputHash" }, { "properties": { "id": { "const": "future_v2_native_runner_source" } } }] }
+      ],
+      "items": false
+    },
+    "absentProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "state"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["absent", "present"] }
+      }
+    },
+    "duringProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "lstat_type", "mode_octal", "nlink", "readlink_target", "realpath_target", "tsx_cli_sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "lstat_type": { "const": "symlink" },
+        "mode_octal": { "type": "string", "pattern": "^0[0-7]{3,4}$" },
+        "nlink": { "const": 1 },
+        "readlink_target": { "type": "string", "minLength": 1 },
+        "realpath_target": { "type": "string", "minLength": 1 },
+        "tsx_cli_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "symlinkProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pre", "during", "post"],
+      "properties": {
+        "pre": { "$ref": "#/$defs/absentProof" },
+        "during": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/duringProof" }] },
+        "post": { "$ref": "#/$defs/absentProof" }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visibility", "network_call_count", "external_write_count", "source_upload_count", "public_share_count", "git_command_count", "pcl_mutation_count", "dashboard_read_or_render_count"],
+      "properties": {
+        "visibility": { "const": "private" },
+        "network_call_count": { "const": 0 },
+        "external_write_count": { "const": 0 },
+        "source_upload_count": { "const": 0 },
+        "public_share_count": { "const": 0 },
+        "git_command_count": { "const": 0 },
+        "pcl_mutation_count": { "const": 0 },
+        "dashboard_read_or_render_count": { "const": 0 }
+      }
+    },
+    "exitRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "invoked", "exit_code", "not_invoked_reason"],
+      "properties": {
+        "stage": { "enum": ["pre_render_project_schema", "render", "post_render_targeted_media_qa", "receipt_publication"] },
+        "invoked": { "type": "boolean" },
+        "exit_code": { "type": ["integer", "null"] },
+        "not_invoked_reason": { "type": ["string", "null"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "invoked": { "const": true } }, "required": ["invoked"] },
+          "then": { "properties": { "exit_code": { "type": "integer" }, "not_invoked_reason": { "type": "null" } } },
+          "else": { "properties": { "exit_code": { "type": "null" }, "not_invoked_reason": { "type": "string", "minLength": 1 } } }
+        }
+      ]
+    },
+    "exitRecords": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "prefixItems": [
+        { "allOf": [{ "$ref": "#/$defs/exitRecord" }, { "properties": { "stage": { "const": "pre_render_project_schema" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/exitRecord" }, { "properties": { "stage": { "const": "render" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/exitRecord" }, { "properties": { "stage": { "const": "post_render_targeted_media_qa" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/exitRecord" }, { "properties": { "stage": { "const": "receipt_publication" } } }] }
+      ],
+      "items": false
+    },
+    "outputHash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "state", "regular_file", "bytes", "sha256", "mode_octal", "nlink"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["present", "absent"] },
+        "regular_file": { "type": ["boolean", "null"] },
+        "bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "sha256": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/sha256" }] },
+        "mode_octal": { "type": ["string", "null"] },
+        "nlink": { "type": ["integer", "null"], "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "absent" } }, "required": ["state"] },
+          "then": { "properties": { "regular_file": { "type": "null" }, "bytes": { "type": "null" }, "sha256": { "type": "null" }, "mode_octal": { "type": "null" }, "nlink": { "type": "null" } } },
+          "else": { "properties": { "regular_file": { "type": "boolean" }, "bytes": { "type": "integer", "minimum": 0 }, "mode_octal": { "type": "string", "pattern": "^0[0-7]{3,4}$" }, "nlink": { "type": "integer", "minimum": 1 } } }
+        }
+      ]
+    },
+    "outputHashes": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "prefixItems": [
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/05_timeline/video-assembly-timing.json" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2.mp4" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-work/base-dialogue.mp4" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-work/captions.ass" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-work/mastered-dialogue.wav" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-work/render-report.json" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-work/social-review-report.json" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-work/visual.mp4" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-qa.json" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-representative-frames/frame-000000.png" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-representative-frames/frame-001350.png" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "project/06_review/useful-private-v2-representative-frames/frame-002699.png" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "logs/private-render-v2-render.stdout.log" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "logs/private-render-v2-render.stderr.log" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "logs/private-render-v2-qa.stdout.log" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/outputHash" }, { "properties": { "path": { "const": "logs/private-render-v2-qa.stderr.log" } } }] }
+      ],
+      "items": false
+    },
+    "captionMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cue_count", "burned_caption_count", "raw_asr_overlap_count", "display_source_overlap_count", "display_timeline_overlap_count", "max_lines_observed", "safe_area_pass", "caption_font_family", "caption_font_sha256"],
+      "properties": {
+        "cue_count": { "const": 21 }, "burned_caption_count": { "const": 21 }, "raw_asr_overlap_count": { "const": 3 },
+        "display_source_overlap_count": { "const": 0 }, "display_timeline_overlap_count": { "const": 0 },
+        "max_lines_observed": { "type": "integer", "minimum": 1, "maximum": 2 }, "safe_area_pass": { "const": true },
+        "caption_font_family": { "type": "string", "minLength": 1 }, "caption_font_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "measurement": {
+      "type": "object", "additionalProperties": false, "required": ["integrated_lufs", "true_peak_dbtp"],
+      "properties": { "integrated_lufs": { "type": "number" }, "true_peak_dbtp": { "type": "number" } }
+    },
+    "audioMetrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stream_present", "preset", "before_measurement", "after_measurement", "target_integrated_lufs", "audio_mix_policy_valid"],
+      "properties": {
+        "stream_present": { "const": true }, "preset": { "const": "dialogue-clean" },
+        "before_measurement": { "$ref": "#/$defs/measurement" }, "after_measurement": { "$ref": "#/$defs/measurement" },
+        "target_integrated_lufs": { "const": -16 }, "audio_mix_policy_valid": { "const": true }
+      }
+    },
+    "representativeFrame": {
+      "type": "object", "additionalProperties": false, "required": ["frame", "path", "sha256"],
+      "properties": { "frame": { "enum": [0, 1350, 2699] }, "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "decodeMetrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["full_decode", "width", "height", "fps_num", "fps_den", "frame_count", "duration_ms", "audio_duration_ms", "av_start_delta_ms", "av_end_delta_ms", "representative_frames"],
+      "properties": {
+        "full_decode": { "const": true }, "width": { "const": 1920 }, "height": { "const": 1080 },
+        "fps_num": { "const": 30 }, "fps_den": { "const": 1 }, "frame_count": { "const": 2700 }, "duration_ms": { "const": 90000 },
+        "audio_duration_ms": { "type": "integer", "minimum": 1 }, "av_start_delta_ms": { "type": "number", "minimum": 0, "exclusiveMaximum": 100 },
+        "av_end_delta_ms": { "type": "number", "minimum": 0, "exclusiveMaximum": 100 },
+        "representative_frames": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "$ref": "#/$defs/representativeFrame" } }
+      }
+    },
+    "metrics": {
+      "type": "object", "additionalProperties": false, "required": ["caption", "audio", "decode"],
+      "properties": {
+        "caption": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/captionMetrics" }] },
+        "audio": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/audioMetrics" }] },
+        "decode": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/decodeMetrics" }] }
+      }
+    },
+    "nonpassStop": {
+      "type": "object", "additionalProperties": false, "required": ["active", "failure_reasons", "retry_allowed", "success_claimed"],
+      "properties": {
+        "active": { "type": "boolean" }, "failure_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "retry_allowed": { "const": false }, "success_claimed": { "type": "boolean" }
+      }
+    },
+    "selfCheck": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_closed_valid", "hash_order_valid", "owned_paths_valid", "pass_equivalence_valid", "domain_separated_body_sha256"],
+      "properties": {
+        "schema_closed_valid": { "const": true }, "hash_order_valid": { "type": "boolean" }, "owned_paths_valid": { "type": "boolean" },
+        "pass_equivalence_valid": { "const": true }, "domain_separated_body_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

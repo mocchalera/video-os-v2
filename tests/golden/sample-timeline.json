@@ -1,0 +1,483 @@
+{
+  "version": "1",
+  "project_id": "sample-mountain-reset",
+  "created_at": "2026-03-21T00:00:00Z",
+  "sequence": {
+    "name": "Mountain Reset",
+    "fps_num": 24,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0,
+    "output_aspect_ratio": "16:9"
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_0001",
+            "segment_id": "SEG_0025",
+            "asset_id": "AST_005",
+            "src_in_us": 1400000,
+            "src_out_us": 6000000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 96,
+            "role": "hero",
+            "motivation": "sunrise flare provides a restrained reveal of warmth without reading as conquest",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.93,
+            "quality_flags": [
+              "minor_highlight_clip"
+            ],
+            "candidate_ref": "legacy:SEG_0025:1400000:6000000"
+          },
+          {
+            "clip_id": "CLP_0002",
+            "segment_id": "SEG_0002",
+            "asset_id": "AST_001",
+            "src_in_us": 6400000,
+            "src_out_us": 11000000,
+            "timeline_in_frame": 96,
+            "timeline_duration_frames": 111,
+            "role": "dialogue",
+            "motivation": "the line cleanly states the need for quiet without sounding like copy",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.95,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0002:6400000:11000000"
+          },
+          {
+            "clip_id": "CLP_0003",
+            "segment_id": "SEG_0006",
+            "asset_id": "AST_001",
+            "src_in_us": 41200000,
+            "src_out_us": 47600000,
+            "timeline_in_frame": 207,
+            "timeline_duration_frames": 105,
+            "role": "dialogue",
+            "motivation": "explicitly names slowing down and pairs well with breath-focused visuals",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.92,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0006:41200000:47600000"
+          },
+          {
+            "clip_id": "CLP_0004",
+            "segment_id": "SEG_0020",
+            "asset_id": "AST_004",
+            "src_in_us": 8000000,
+            "src_out_us": 13800000,
+            "timeline_in_frame": 312,
+            "timeline_duration_frames": 140,
+            "role": "hero",
+            "motivation": "profile movement with visible breath widens the film while keeping the pace measured",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.89,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0020:8000000:13800000"
+          },
+          {
+            "clip_id": "CLP_0005",
+            "segment_id": "SEG_0021",
+            "asset_id": "AST_004",
+            "src_in_us": 14500000,
+            "src_out_us": 20200000,
+            "timeline_in_frame": 452,
+            "timeline_duration_frames": 100,
+            "role": "dialogue",
+            "motivation": "explicitly rejects summit rhetoric and protects the brief from drifting into achievement language",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.88,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0021:14500000:20200000"
+          },
+          {
+            "clip_id": "CLP_0006",
+            "segment_id": "SEG_0028",
+            "asset_id": "AST_005",
+            "src_in_us": 18200000,
+            "src_out_us": 23000000,
+            "timeline_in_frame": 552,
+            "timeline_duration_frames": 116,
+            "role": "hero",
+            "motivation": "the restrained exhale gives the release beat a human ending without overplaying emotion",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0028:18200000:23000000"
+          },
+          {
+            "clip_id": "CLP_0007",
+            "segment_id": "SEG_0027",
+            "asset_id": "AST_005",
+            "src_in_us": 12000000,
+            "src_out_us": 17600000,
+            "timeline_in_frame": 668,
+            "timeline_duration_frames": 52,
+            "role": "dialogue",
+            "motivation": "this line lands the central message and turns the ending toward lived carryover instead of achievement",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.94,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0027:12000000:17600000"
+          }
+        ]
+      },
+      {
+        "track_id": "V2",
+        "kind": "video",
+        "clips": []
+      }
+    ],
+    "audio": [
+      {
+        "track_id": "A1",
+        "kind": "audio",
+        "clips": [
+          {
+            "clip_id": "ACL_0008",
+            "segment_id": "SEG_0025",
+            "asset_id": "AST_005",
+            "src_in_us": 1400000,
+            "src_out_us": 6000000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 96,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.93,
+            "quality_flags": [
+              "minor_highlight_clip"
+            ],
+            "candidate_ref": "legacy:SEG_0025:1400000:6000000",
+            "audio_policy": {
+              "mode": "ducking",
+              "gain_unit": "linear",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            }
+          },
+          {
+            "clip_id": "ACL_0009",
+            "segment_id": "SEG_0002",
+            "asset_id": "AST_001",
+            "src_in_us": 6400000,
+            "src_out_us": 11000000,
+            "timeline_in_frame": 96,
+            "timeline_duration_frames": 111,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.95,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0002:6400000:11000000",
+            "audio_policy": {
+              "mode": "ducking",
+              "gain_unit": "linear",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            }
+          },
+          {
+            "clip_id": "ACL_0010",
+            "segment_id": "SEG_0006",
+            "asset_id": "AST_001",
+            "src_in_us": 41200000,
+            "src_out_us": 47600000,
+            "timeline_in_frame": 207,
+            "timeline_duration_frames": 105,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.92,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0006:41200000:47600000",
+            "audio_policy": {
+              "mode": "ducking",
+              "gain_unit": "linear",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            }
+          },
+          {
+            "clip_id": "ACL_0011",
+            "segment_id": "SEG_0020",
+            "asset_id": "AST_004",
+            "src_in_us": 8000000,
+            "src_out_us": 13800000,
+            "timeline_in_frame": 312,
+            "timeline_duration_frames": 140,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0020:8000000:13800000",
+            "audio_policy": {
+              "mode": "ducking",
+              "gain_unit": "linear",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            }
+          },
+          {
+            "clip_id": "ACL_0012",
+            "segment_id": "SEG_0021",
+            "asset_id": "AST_004",
+            "src_in_us": 14500000,
+            "src_out_us": 20200000,
+            "timeline_in_frame": 452,
+            "timeline_duration_frames": 100,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0021:14500000:20200000",
+            "audio_policy": {
+              "mode": "ducking",
+              "gain_unit": "linear",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            }
+          },
+          {
+            "clip_id": "ACL_0013",
+            "segment_id": "SEG_0028",
+            "asset_id": "AST_005",
+            "src_in_us": 18200000,
+            "src_out_us": 23000000,
+            "timeline_in_frame": 552,
+            "timeline_duration_frames": 116,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0028:18200000:23000000",
+            "audio_policy": {
+              "mode": "ducking",
+              "gain_unit": "linear",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            }
+          },
+          {
+            "clip_id": "ACL_0014",
+            "segment_id": "SEG_0027",
+            "asset_id": "AST_005",
+            "src_in_us": 12000000,
+            "src_out_us": 17600000,
+            "timeline_in_frame": 668,
+            "timeline_duration_frames": 52,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.94,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0027:12000000:17600000",
+            "audio_policy": {
+              "mode": "ducking",
+              "gain_unit": "linear",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            }
+          }
+        ]
+      },
+      {
+        "track_id": "A2",
+        "kind": "audio",
+        "clips": []
+      },
+      {
+        "track_id": "A3",
+        "kind": "audio",
+        "clips": []
+      }
+    ]
+  },
+  "markers": [
+    {
+      "frame": 0,
+      "kind": "beat",
+      "label": "b01: hook"
+    },
+    {
+      "frame": 96,
+      "kind": "beat",
+      "label": "b02: settle"
+    },
+    {
+      "frame": 312,
+      "kind": "beat",
+      "label": "b03: climb"
+    },
+    {
+      "frame": 552,
+      "kind": "beat",
+      "label": "b04: release"
+    }
+  ],
+  "transitions": [
+    {
+      "transition_id": "tr_0000",
+      "from_clip_id": "CLP_0001",
+      "to_clip_id": "CLP_0002",
+      "track_id": "V1",
+      "transition_type": "cut",
+      "transition_params": {
+        "cut_frame_before_snap": 96,
+        "cut_frame_after_snap": 96,
+        "snap_delta_frames": 0
+      }
+    },
+    {
+      "transition_id": "tr_0001",
+      "from_clip_id": "CLP_0002",
+      "to_clip_id": "CLP_0003",
+      "track_id": "V1",
+      "transition_type": "cut",
+      "transition_params": {
+        "cut_frame_before_snap": 207,
+        "cut_frame_after_snap": 207,
+        "snap_delta_frames": 0
+      }
+    },
+    {
+      "transition_id": "tr_0002",
+      "from_clip_id": "CLP_0003",
+      "to_clip_id": "CLP_0004",
+      "track_id": "V1",
+      "transition_type": "cut",
+      "transition_params": {
+        "cut_frame_before_snap": 312,
+        "cut_frame_after_snap": 312,
+        "snap_delta_frames": 0
+      }
+    },
+    {
+      "transition_id": "tr_0003",
+      "from_clip_id": "CLP_0004",
+      "to_clip_id": "CLP_0005",
+      "track_id": "V1",
+      "transition_type": "cut",
+      "transition_params": {
+        "cut_frame_before_snap": 452,
+        "cut_frame_after_snap": 452,
+        "snap_delta_frames": 0
+      }
+    },
+    {
+      "transition_id": "tr_0004",
+      "from_clip_id": "CLP_0005",
+      "to_clip_id": "CLP_0006",
+      "track_id": "V1",
+      "transition_type": "cut",
+      "transition_params": {
+        "cut_frame_before_snap": 552,
+        "cut_frame_after_snap": 552,
+        "snap_delta_frames": 0
+      }
+    },
+    {
+      "transition_id": "tr_0005",
+      "from_clip_id": "CLP_0006",
+      "to_clip_id": "CLP_0007",
+      "track_id": "V1",
+      "transition_type": "cut",
+      "transition_params": {
+        "cut_frame_before_snap": 668,
+        "cut_frame_after_snap": 668,
+        "snap_delta_frames": 0
+      }
+    }
+  ],
+  "metadata": {
+    "continuity": {
+      "policy": {
+        "same_asset_repeat": "reorder_or_fail",
+        "same_cluster_repeat": "warn"
+      },
+      "scope": "video_tracks",
+      "reorders": [],
+      "exemptions": [
+        {
+          "code": "allow_revisit",
+          "beat_id": "b02",
+          "clip_ids": [
+            "CLP_0002",
+            "CLP_0003"
+          ],
+          "asset_ids": [
+            "AST_003"
+          ],
+          "reason": "prep motif carryover from hook into the first spoken beat"
+        },
+        {
+          "code": "allow_revisit",
+          "beat_id": "b04",
+          "clip_ids": [
+            "CLP_0006",
+            "CLP_0007"
+          ],
+          "asset_ids": [
+            "AST_005",
+            "AST_006"
+          ],
+          "reason": "sunrise and water visual callbacks resolve the release beat"
+        }
+      ],
+      "warnings": [],
+      "errors": []
+    }
+  },
+  "provenance": {
+    "brief_path": "01_intent/creative_brief.yaml",
+    "blueprint_path": "04_plan/edit_blueprint.yaml",
+    "selects_path": "04_plan/selects_candidates.yaml",
+    "compiler_version": "1.0.0",
+    "duration_policy": {
+      "mode": "guide",
+      "source": "global_default",
+      "target_source": "explicit_brief",
+      "target_duration_sec": 28,
+      "min_duration_sec": 19.599999999999998,
+      "max_duration_sec": 36.4
+    },
+    "audio_policy": {
+      "mode": "ducking",
+      "source": "global_default",
+      "a1_loudnorm": true
+    },
+    "caption_policy": {
+      "mode": "off",
+      "source": "global_default"
+    },
+    "compiler_defaults_hash": "344092492159de21"
+  }
+}

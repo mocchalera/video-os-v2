@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-os.local/schemas/editorial-eye-benchmark-labels.schema.json",
+  "title": "Editorial Eye Benchmark Labels v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["artifact_version", "suite_id", "suite_version", "label_version", "fixture_manifest_sha256", "automatic_ground_truth", "human_evaluation"],
+  "properties": {
+    "artifact_version": { "const": "editorial-eye-benchmark-labels/v1" }, "suite_id": { "const": "editorial-eye-v1" }, "suite_version": { "const": "1.0.0" },
+    "label_version": { "type": "string", "pattern": "^labels-v[0-9]+$" }, "fixture_manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "automatic_ground_truth": { "type": "array", "minItems": 35, "maxItems": 35, "items": { "$ref": "#/$defs/automatic" } },
+    "human_evaluation": {
+      "type": "object", "additionalProperties": false, "required": ["status", "annotations", "annotator_disagreement"],
+      "properties": {
+        "status": { "enum": ["unapproved", "approved"] }, "approval_record": { "$ref": "#/$defs/humanApproval" },
+        "annotations": { "type": "array", "items": { "$ref": "#/$defs/annotation" } },
+        "annotator_disagreement": { "type": "array", "items": { "$ref": "#/$defs/disagreement" } }
+      },
+      "allOf": [{
+        "if": { "properties": { "status": { "const": "approved" } }, "required": ["status"] },
+        "then": {
+          "required": ["approval_record"],
+          "properties": { "annotator_disagreement": { "not": { "contains": { "type": "object", "properties": { "resolution": { "const": "unresolved" } }, "required": ["resolution"] } } } }
+        }
+      }]
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fact": { "type": "object", "additionalProperties": false, "required": ["field", "value", "applicability"], "properties": { "field": { "type": "string", "minLength": 1 }, "value": { "type": ["string", "number", "boolean", "null"] }, "applicability": { "enum": ["applicable", "not_applicable"] } } },
+    "pair": { "type": "object", "additionalProperties": false, "required": ["pair_id", "relation"], "properties": { "pair_id": { "type": "string", "minLength": 1 }, "relation": { "type": "string", "minLength": 1 } } },
+    "automatic": {
+      "type": "object", "additionalProperties": false, "required": ["case_id", "ground_truth_ids"],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 }, "ground_truth_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "observation_expected_facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } }, "pair_labels": { "type": "array", "items": { "$ref": "#/$defs/pair" } },
+        "intentional_transition_labels": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["pair_id", "transition"], "properties": { "pair_id": { "type": "string", "minLength": 1 }, "transition": { "enum": ["jump", "smash", "match"] } } } }
+      }
+    },
+    "humanApproval": { "type": "object", "additionalProperties": false, "required": ["record_id", "approved_by", "approved_at", "label_version"], "properties": { "record_id": { "type": "string", "minLength": 1 }, "approved_by": { "type": "string", "minLength": 1 }, "approved_at": { "type": "string", "minLength": 1 }, "label_version": { "type": "string", "pattern": "^labels-v[0-9]+$" } } },
+    "annotation": { "type": "object", "additionalProperties": false, "required": ["case_id", "annotator_id"], "properties": { "case_id": { "type": "string", "minLength": 1 }, "annotator_id": { "type": "string", "minLength": 1 }, "labels": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "observation_facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } }, "pair_labels": { "type": "array", "items": { "$ref": "#/$defs/pair" } } } },
+    "disagreement": { "type": "object", "additionalProperties": false, "required": ["case_id", "field_or_pair_id", "annotator_ids", "values", "resolution"], "properties": { "case_id": { "type": "string", "minLength": 1 }, "field_or_pair_id": { "type": "string", "minLength": 1 }, "annotator_ids": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string" } }, "values": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "type": "string" } }, "resolution": { "enum": ["unresolved", "resolved"] } } }
+  }
+}

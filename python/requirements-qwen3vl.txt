@@ -1,0 +1,8 @@
+transformers>=4.57.0
+sentence-transformers
+torch
+torchvision
+qwen-vl-utils>=0.0.14
+pillow
+accelerate
+psutil

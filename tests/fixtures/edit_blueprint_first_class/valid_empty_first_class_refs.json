@@ -1,0 +1,35 @@
+{
+  "version": "1.1.0",
+  "project_id": "planning-first-class-empty",
+  "sequence_goals": ["Keep the sequence clear."],
+  "beats": [
+    {
+      "id": "B01",
+      "label": "Opening",
+      "target_duration_frames": 72,
+      "required_roles": ["hero"],
+      "applied_preferences": []
+    }
+  ],
+  "pacing": {
+    "opening_cadence": "quick",
+    "middle_cadence": "steady",
+    "ending_cadence": "held"
+  },
+  "music_policy": {
+    "start_sparse": true,
+    "allow_release_late": true,
+    "entry_beat": "B01"
+  },
+  "dialogue_policy": {
+    "preserve_natural_breath": true,
+    "avoid_wall_to_wall_voiceover": true
+  },
+  "transition_policy": {
+    "prefer_match_texture_over_flashy_fx": true
+  },
+  "ending_policy": {
+    "should_feel": "resolved"
+  },
+  "rejection_rules": ["Avoid duplicate moments."]
+}

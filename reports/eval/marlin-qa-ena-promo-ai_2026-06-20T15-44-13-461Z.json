@@ -1,0 +1,97 @@
+{
+  "version": "1",
+  "project_id": "ena-promo-ai",
+  "video_path": "/Users/operator/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_duration_sec": 75.417,
+  "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 2 warnings.",
+  "scene_descriptions": [
+    {
+      "start_sec": 2,
+      "end_sec": 8.5,
+      "description": "A person rakes the ground in a field."
+    },
+    {
+      "start_sec": 9.5,
+      "end_sec": 11.5,
+      "description": "A hand reaches out to pluck olives."
+    },
+    {
+      "start_sec": 12.5,
+      "end_sec": 15,
+      "description": "A woman carries a bag of olives."
+    },
+    {
+      "start_sec": 15.5,
+      "end_sec": 19,
+      "description": "A woman looks out of a window."
+    },
+    {
+      "start_sec": 20.5,
+      "end_sec": 24,
+      "description": "A woman walks away from the camera."
+    },
+    {
+      "start_sec": 24.5,
+      "end_sec": 30,
+      "description": "Two men talk in a market."
+    },
+    {
+      "start_sec": 27,
+      "end_sec": 29.5,
+      "description": "Two men talk to each other in a tea house."
+    },
+    {
+      "start_sec": 30,
+      "end_sec": 42,
+      "description": "An elderly man speaks and gestures with his hands."
+    },
+    {
+      "start_sec": 42.5,
+      "end_sec": 46.5,
+      "description": "A woman wearing a headscarf smiles while looking out."
+    },
+    {
+      "start_sec": 54,
+      "end_sec": 69.5,
+      "description": "A woman walks away down a traditional Japanese street."
+    },
+    {
+      "start_sec": 69.5,
+      "end_sec": 74.5,
+      "description": "A woman stands still while looking out a window."
+    },
+    {
+      "start_sec": 74.5,
+      "end_sec": 75.417,
+      "description": "A woman with a headscarf looks down."
+    }
+  ],
+  "issues": [
+    {
+      "timestamp_sec": 69.5,
+      "duration_sec": 5,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 42.5s: A woman stands still while looking out a window.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 74.5,
+      "duration_sec": 0.917,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 42.5s: A woman with a headscarf looks down.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    }
+  ],
+  "pacing_assessment": {
+    "too_fast": false,
+    "too_slow": false,
+    "notes": "Average Marlin event duration is 5.3s across 12 events over 75.4s; pacing reads as within expected range."
+  },
+  "emotion_arc_assessment": {
+    "follows_brief": true,
+    "notes": "Marlin detected 12 distinct scene types, so the emotion arc is treated as partial without exact term matching."
+  },
+  "score": 84
+}

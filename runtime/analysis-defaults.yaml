@@ -1,0 +1,140 @@
+version: "1"
+policy_name: "m2-canonical-defaults"
+
+classification:
+  dialogue:
+    words_per_second_min: 1.5
+    speech_ratio_min: 0.35
+  music_driven:
+    beat_strength_min: 0.60
+  action:
+    motion_score_min: 0.45
+  static:
+    motion_score_max: 0.15
+  general: {}
+
+image_sequence:
+  frame_rate:
+    fps_num: 24
+    fps_den: 1
+  minimum_frame_count: 2
+
+sampling:
+  static:
+    sample_fps: 0.5
+  action:
+    sample_fps_default: 4
+    sample_fps_min: 3
+    sample_fps_max: 5
+  dialogue:
+    sample_fps: 0.5
+  music_driven:
+    sample_fps: 1
+  general:
+    sample_fps: 1
+
+vlm:
+  # Cost-effective vision model for high-volume frame analysis.
+  # (gemini-2.0-flash was sunset; "latest" aliases track pricier tiers.)
+  model_alias: gemini-2.5-flash-lite
+  model_snapshot: "required_for_canonical_runs"
+  input_mode: frame_bundle_plus_text_context
+  response_format: json_schema_v1
+  prompt_template_id: m2-segment-grounded-v3
+  max_frame_width_px: 1024
+  segment_visual_token_budget_max: 8192
+  segment_visual_output_tokens_max: 512
+  segment_visual_frame_cap: 90
+  parse_retry_max: 1
+
+editorial_llm:
+  runtime: auto
+  timeout_ms: 180000
+
+marlin:
+  enabled: true
+  model_alias: NemoStation/Marlin-2B
+  model_snapshot: "required_for_canonical_runs"
+  connector_version: marlin-local-v1
+  mode: primary
+  role: temporal_semantics
+  worker_path: python/marlin_worker.py
+  mock: false
+  output_artifact: 03_analysis/marlin_events.json
+  chunk_target_us: 120000000
+  chunk_overlap_us: 5000000
+  default_find_queries:
+    - "the strongest action moment"
+    - "the strongest emotional reaction"
+    - "a clear visual reveal"
+    - "a person enters or exits"
+
+stt:
+  model_alias: whisper-large-v3-turbo
+  model_snapshot: "required_for_canonical_runs"
+  endpoint: /v1/audio/transcriptions
+  response_format: verbose_json
+  language: ja
+  chunk_target_us: 20000000
+  chunk_max_us: 25000000
+  chunk_overlap_us: 500000
+  chunk_boundary_silence_us: 350000
+  chunking_strategy: client_audio_chunks_v1
+  speaker_normalization: overlap_anchor_v1
+  generate_words: true
+
+quality_thresholds:
+  scene_threshold: 0.30
+  min_segment_duration_us: 750000
+  merge_gap_us: 200000
+  blackdetect_pic_th: 0.98
+  blackdetect_pix_th: 0.10
+  blackdetect_duration_s: 0.15
+  silencedetect_noise_db: -35
+  silencedetect_duration_s: 0.35
+  freezedetect_noise_db: -50
+  freezedetect_duration_s: 0.50
+  transcript_overlap_min_us: 250000
+  transcript_overlap_fraction_min: 0.25
+
+quality_gate:
+  # Conservative defaults: reject only obvious unusable footage from deterministic
+  # measurements; boundary values warn/fail open rather than hard-drop.
+  shake_reject_above: 0.45
+  shake_warn_above: 0.35
+  sharpness_reject_below: 0.20
+  sharpness_warn_below: 0.35
+  exposure_crush_reject_above: 0.80
+  exposure_crush_warn_above: 0.30
+  exposure_clip_reject_above: 0.80
+  exposure_clip_warn_above: 0.30
+  appraiser_composition_reject_below: 0.20
+  appraiser_subject_prominence_reject_below: 0.20
+  appraiser_composition_warn_below: 0.35
+  appraiser_subject_prominence_warn_below: 0.35
+
+selection:
+  min_candidates_per_cluster: 1
+  cluster_sampling_scale: sqrt
+  max_candidates_per_cluster: 4
+
+parallelism:
+  ffmpeg_jobs: 4
+  stt_jobs: 2
+  vlm_jobs: 2
+  marlin_jobs: 1
+
+gap_policy:
+  max_retries: 2
+  block_on_missing_segments: true
+  block_on_missing_transcript_for_dialogue: true
+
+cache:
+  reuse_successful_stage_outputs: true
+  request_hash_fields:
+    - connector_version
+    - model_snapshot
+    - prompt_hash
+    - response_format
+    - chunking_strategy
+    - ffmpeg_version

@@ -1,0 +1,54 @@
+{
+  "version": "1",
+  "project_id": "ena-promo",
+  "video_path": "/Users/operator/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_duration_sec": 201.372,
+  "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 1 warning.",
+  "scene_descriptions": [
+    {
+      "start_sec": 13,
+      "end_sec": 14,
+      "description": "A person's hand reaches for a wooden spoon on a tray."
+    },
+    {
+      "start_sec": 14.5,
+      "end_sec": 18.5,
+      "description": "A person in black boots walks past a wooden crate."
+    },
+    {
+      "start_sec": 132.5,
+      "end_sec": 151.5,
+      "description": "A man in a red shirt places a soap block."
+    },
+    {
+      "start_sec": 156,
+      "end_sec": 192.5,
+      "description": "A woman in a kimono walks down a street."
+    },
+    {
+      "start_sec": 192.5,
+      "end_sec": 201.372,
+      "description": "A woman on a train looks out the window."
+    }
+  ],
+  "issues": [
+    {
+      "timestamp_sec": 0,
+      "duration_sec": 201.372,
+      "category": "pacing",
+      "severity": "warning",
+      "description": "Average Marlin event duration is over 8s, so the edit may hold shots too long.",
+      "suggestion": "Shorten long holds or introduce more progression through action, reaction, or place-setting shots."
+    }
+  ],
+  "pacing_assessment": {
+    "too_fast": false,
+    "too_slow": true,
+    "notes": "Average Marlin event duration is 13.9s across 5 events over 201.4s; pacing reads as too slow."
+  },
+  "emotion_arc_assessment": {
+    "follows_brief": false,
+    "notes": "Missing or out-of-order emotion curve points: wonder, discovery, immersion, warmth, serenity. Matched in order: none."
+  },
+  "score": 82
+}

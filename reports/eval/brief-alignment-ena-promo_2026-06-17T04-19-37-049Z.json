@@ -1,0 +1,81 @@
+{
+  "version": "1",
+  "project": "ena-promo",
+  "evaluated_at": "2026-06-17T04:19:37.049Z",
+  "brief_hash": "sha256:4fffa7c3115604e0f3a439f2f122bfea5010b82737d7e10e7b8ab945a87d5805",
+  "stages": {
+    "selects": {
+      "score": 0.613,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.25,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "0/17 active candidates mention primary/secondary message terms"
+          ],
+          "gaps": [
+            "candidate evidence does not explicitly echo the brief message"
+          ]
+        },
+        "must_have_coverage": {
+          "score": 1,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/5 selectable must_have items matched",
+            "selection coverage analyzer score 35.2%"
+          ],
+          "gaps": []
+        },
+        "emotion_curve_alignment": {
+          "score": 0.113,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "1/17 active candidates carry emotion/peak signals"
+          ],
+          "gaps": []
+        },
+        "narrative_structure": {
+          "score": 0.692,
+          "confidence": 0.75,
+          "judge_source": "deterministic",
+          "evidence": [
+            "3 role types represented in selects",
+            "eligible_beats present on 17/17 candidates",
+            "hook/opening function detected",
+            "experience/development function detected"
+          ],
+          "gaps": [
+            "selects do not expose a clear closing/payoff candidate"
+          ]
+        },
+        "pacing_coherence": {
+          "score": 1,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "selected source duration 262.7s for 230s target"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.867,
+          "confidence": 0.8,
+          "judge_source": "deterministic",
+          "evidence": [
+            "17/17 unique assets",
+            "3 active roles represented",
+            "6 semantic clusters represented"
+          ],
+          "gaps": []
+        }
+      }
+    }
+  },
+  "composite": 0.613,
+  "notes": [
+    "blueprint stage skipped: 04_plan/edit_blueprint.yaml not found"
+  ]
+}

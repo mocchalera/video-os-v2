@@ -1,0 +1,44 @@
+G-0009 / F-0076 — read-only aggregate verification
+Date: 2026-07-23 JST
+Node: v22.23.1 (ABI 127)
+Implementation commit: 732d9c14
+
+Problem
+-------
+`npm run verify` invoked the demo review-metrics generator in write mode.
+That replaced `projects/demo/06_review/review_metrics.json` during a PCL
+completion check, so PCL correctly rejected the completion packet for
+repository drift even though every configured check passed.
+
+Fix
+---
+- Added `--no-write` to `scripts/review-metrics.ts`.
+- No-write mode still computes and schema-validates the complete artifact.
+- Kept normal CLI and runtime review generation write behavior unchanged.
+- Changed `scripts/verify.ts` to use the explicit no-write mode.
+- Added CLI and aggregate-gate regression coverage.
+
+Verification
+------------
+1. `npx vitest run tests/review-metrics-cli.test.ts tests/review-metrics.test.ts`
+   - 2 files passed
+   - 41 tests passed
+2. `npx tsc --noEmit`
+   - passed
+3. `npm run build`
+   - passed
+4. `npm run verify` with stdout/stderr captured as PCL does
+   - typecheck passed
+   - unit tests passed
+   - demo schema validation passed
+   - demo review metrics passed
+5. `projects/demo/06_review/review_metrics.json` before/after SHA-256
+   - before: b509029198e040fd1d8096c33c19dc1716613466d5b4fb99e61cf91a19fe24fd
+   - after:  b509029198e040fd1d8096c33c19dc1716613466d5b4fb99e61cf91a19fe24fd
+
+Observation
+-----------
+One terminal-inherited-output run encountered a non-deterministic Vitest
+worker `Channel closed` error. The same Node 22 suite passed in the preceding
+PCL captured run and in the immediate captured rerun above. No product test
+failure reproduced.

@@ -1,0 +1,68 @@
+version: "1"
+project_id: sample-mountain-reset
+created_at: "2026-03-21T03:00:00Z"
+
+project:
+  id: sample-mountain-reset
+  title: Mountain Reset
+  strategy: message-first
+  client: Internal fixture
+  format: short-brand-film
+  runtime_target_sec: 28
+
+message:
+  primary: Recovery is an intentional slowing down, not a performance.
+  secondary:
+    - quiet can be active
+    - warmth matters more than conquest
+    - small rituals make the place feel human
+
+audience:
+  primary: urban adults 30-45 who are mentally overloaded and outdoor-curious
+  secondary:
+    - lifestyle brand teams seeking a restorative tone
+    - viewers who respond to tactile morning rituals more than athletic aspiration
+  excluded:
+    - viewers expecting a performance-driven adventure edit
+
+emotion_curve:
+  - curiosity
+  - grounding
+  - breath
+  - release
+  - warmth
+
+must_have:
+  - morning light
+  - hands detail
+  - audible breathing
+  - at least one spoken line about slowing down
+
+must_avoid:
+  - over-sportified framing
+  - hard-sell advertising feel
+  - triumphal summit rhetoric
+  - hyperactive montage pacing
+
+autonomy:
+  may_decide:
+    - b-roll substitution within the same emotional meaning
+    - exact cut position within a beat
+    - whether the ending breath lands before or after the final line
+  must_ask:
+    - replacing the final spoken line with silence only
+    - introducing product-forward copy
+    - changing the message from restorative to achievement-oriented
+
+resolved_assumptions:
+  - the protagonist is alone by choice, not lonely
+  - the film should feel observed rather than narrated at the viewer
+  - the environment is cold and quiet, but not harsh or hostile
+
+hypotheses:
+  - viewers will accept a sparse narrative if the tactile detail is strong
+  - a single reflective line near the end will be more effective than continuous voiceover
+
+forbidden_interpretations:
+  - mountain escape as conquest or domination
+  - wellness as luxury consumption theater

@@ -1,0 +1,326 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-os.dev/schemas/promotion-envelope.schema.json",
+  "title": "Private Stage B Promotion Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "stage_a_receipt_sha256",
+    "stage_a_public_path_ledger_sha256",
+    "stage_a_verification",
+    "public_commit_sha",
+    "public_tree_sha",
+    "public_path_count",
+    "destination",
+    "workflow",
+    "ci",
+    "approval"
+  ],
+  "properties": {
+    "version": { "const": "promotion-envelope/v1" },
+    "stage_a_receipt_sha256": { "$ref": "#/$defs/sha256" },
+    "stage_a_public_path_ledger_sha256": { "$ref": "#/$defs/sha256" },
+    "stage_a_verification": { "$ref": "#/$defs/stageAVerification" },
+    "public_commit_sha": { "$ref": "#/$defs/gitObjectId" },
+    "public_tree_sha": { "$ref": "#/$defs/gitObjectId" },
+    "public_path_count": { "type": "integer", "minimum": 1 },
+    "destination": { "$ref": "#/$defs/destination" },
+    "workflow": { "$ref": "#/$defs/workflow" },
+    "ci": { "$ref": "#/$defs/ci" },
+    "approval": { "$ref": "#/$defs/approval" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitObjectId": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "destination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "repository_id", "repository_full_name", "branch"],
+      "properties": {
+        "provider": { "const": "github" },
+        "repository_id": { "type": "string", "minLength": 1 },
+        "repository_full_name": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/[^/\\s]+$"
+        },
+        "branch": { "type": "string", "minLength": 1 }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "blob_sha"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "blob_sha": { "$ref": "#/$defs/gitObjectId" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mechanism", "verifier_id", "evidence_sha256"],
+      "properties": {
+        "mechanism": {
+          "enum": [
+            "provider-api-execution-receipt",
+            "cockpit-approval-event",
+            "detached-signature"
+          ]
+        },
+        "verifier_id": { "type": "string", "minLength": 1 },
+        "evidence_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "stageAVerification": {
+      "allOf": [
+        { "$ref": "#/$defs/verification" },
+        {
+          "properties": {
+            "mechanism": { "const": "detached-signature" }
+          }
+        }
+      ]
+    },
+    "ciVerification": {
+      "allOf": [
+        { "$ref": "#/$defs/verification" },
+        {
+          "properties": {
+            "mechanism": { "const": "provider-api-execution-receipt" }
+          }
+        }
+      ]
+    },
+    "approvalVerification": {
+      "allOf": [
+        { "$ref": "#/$defs/verification" },
+        {
+          "properties": {
+            "mechanism": { "const": "cockpit-approval-event" }
+          }
+        }
+      ]
+    },
+    "externalApprovalVerification": {
+      "allOf": [
+        { "$ref": "#/$defs/verification" },
+        {
+          "properties": {
+            "mechanism": { "const": "detached-signature" }
+          }
+        }
+      ]
+    },
+    "jobResult": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "neutral",
+        "timed_out",
+        "action_required",
+        "stale"
+      ]
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "repository",
+        "workflow",
+        "run",
+        "required_jobs",
+        "product_gate",
+        "verification"
+      ],
+      "properties": {
+        "version": { "const": "public-ci-evidence/v1" },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "repository_id", "repository_full_name"],
+          "properties": {
+            "provider": { "const": "github" },
+            "repository_id": { "type": "string", "minLength": 1 },
+            "repository_full_name": {
+              "type": "string",
+              "pattern": "^[^/\\s]+/[^/\\s]+$"
+            }
+          }
+        },
+        "workflow": { "$ref": "#/$defs/workflow" },
+        "run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "attempt",
+            "event",
+            "head_sha",
+            "head_branch",
+            "url",
+            "conclusion"
+          ],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "attempt": { "type": "integer", "minimum": 1 },
+            "event": { "type": "string", "minLength": 1 },
+            "head_sha": { "$ref": "#/$defs/gitObjectId" },
+            "head_branch": { "type": "string", "minLength": 1 },
+            "url": { "type": "string", "format": "uri" },
+            "conclusion": { "$ref": "#/$defs/jobResult" }
+          }
+        },
+        "required_jobs": {
+          "type": "array",
+          "minItems": 9,
+          "maxItems": 9,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "result"],
+            "properties": {
+              "name": {
+                "enum": [
+                  "node-runtime",
+                  "schema-contract",
+                  "speech-led-contract",
+                  "event-recap-contract",
+                  "repo-hygiene",
+                  "editor-server",
+                  "agent-definitions",
+                  "macos-studio",
+                  "render-integration"
+                ]
+              },
+              "result": { "const": "success" }
+            }
+          }
+        },
+        "product_gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "result"],
+          "properties": {
+            "name": { "const": "product-gate" },
+            "result": { "const": "success" }
+          }
+        },
+        "verification": { "$ref": "#/$defs/ciVerification" }
+      }
+    },
+    "approval": {
+      "oneOf": [
+        { "$ref": "#/$defs/cockpitApproval" },
+        { "$ref": "#/$defs/externalSignedApproval" }
+      ]
+    },
+    "cockpitApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "approval_id",
+        "approver",
+        "approved_at",
+        "stage_a_receipt_sha256",
+        "destination",
+        "operation_scope",
+        "cockpit_source",
+        "verification"
+      ],
+      "properties": {
+        "version": { "const": "promotion-approval-receipt/v1" },
+        "approval_id": { "type": "string", "minLength": 1 },
+        "approver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["identity"],
+          "properties": {
+            "identity": { "type": "string", "minLength": 1 }
+          }
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:[0-5]\\d(?:\\.\\d+)?(?:[Zz]|[+-]\\d{2}:\\d{2})$"
+        },
+        "stage_a_receipt_sha256": { "$ref": "#/$defs/sha256" },
+        "destination": { "$ref": "#/$defs/destination" },
+        "operation_scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "event", "workflow_path"],
+          "properties": {
+            "operation": { "const": "push-exact-projection" },
+            "event": { "type": "string", "minLength": 1 },
+            "workflow_path": { "type": "string", "minLength": 1 }
+          }
+        },
+        "cockpit_source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["task_id", "event_id"],
+          "properties": {
+            "task_id": { "type": "string", "minLength": 1 },
+            "event_id": { "type": "string", "minLength": 1 }
+          }
+        },
+        "verification": { "$ref": "#/$defs/approvalVerification" }
+      }
+    },
+    "externalSignedApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "approval_id",
+        "approver",
+        "approved_at",
+        "stage_a_receipt_sha256",
+        "destination",
+        "operation_scope",
+        "verification"
+      ],
+      "properties": {
+        "version": { "const": "external-signed-promotion-approval/v1" },
+        "approval_id": { "type": "string", "minLength": 1 },
+        "approver": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["identity"],
+          "properties": {
+            "identity": { "type": "string", "minLength": 1 }
+          }
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:[0-5]\\d(?:\\.\\d+)?(?:[Zz]|[+-]\\d{2}:\\d{2})$"
+        },
+        "stage_a_receipt_sha256": { "$ref": "#/$defs/sha256" },
+        "destination": { "$ref": "#/$defs/destination" },
+        "operation_scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["operation", "event", "workflow_path"],
+          "properties": {
+            "operation": { "const": "push-exact-projection" },
+            "event": { "type": "string", "minLength": 1 },
+            "workflow_path": { "type": "string", "minLength": 1 }
+          }
+        },
+        "verification": { "$ref": "#/$defs/externalApprovalVerification" }
+      }
+    }
+  }
+}

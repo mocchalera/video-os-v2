@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/sfx-cues.schema.json",
+  "title": "Video OS SFX Cues",
+  "description": "Hash-pinned, rights-bound SFX placements for the A3 lane.",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "base_timeline_version",
+    "timeline_fps",
+    "required",
+    "library",
+    "cues"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "sfx-cues/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "base_timeline_version": { "type": "string", "minLength": 1 },
+    "timeline_fps": { "$ref": "#/$defs/rationalFps" },
+    "required": { "type": "boolean" },
+    "library": { "$ref": "#/$defs/libraryPin" },
+    "decision_ref": { "$ref": "#/$defs/decisionRef" },
+    "cues": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/cue" }
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "opaqueRef": {
+      "type": "string",
+      "pattern": "^(?:evidence|rights|provenance|source|local|urn):[A-Za-z0-9][A-Za-z0-9._~/-]*$"
+    },
+    "rationalFps": {
+      "type": "object",
+      "required": ["num", "den"],
+      "additionalProperties": false,
+      "properties": {
+        "num": { "type": "integer", "minimum": 1 },
+        "den": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "libraryPin": {
+      "type": "object",
+      "required": [
+        "manifest_path",
+        "library_id",
+        "library_version",
+        "manifest_hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "manifest_path": { "type": "string", "minLength": 1 },
+        "library_id": { "$ref": "#/$defs/stableId" },
+        "library_version": { "type": "string", "minLength": 1 },
+        "manifest_hash": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "sourceRange": {
+      "type": "object",
+      "required": ["in_us", "out_us"],
+      "additionalProperties": false,
+      "properties": {
+        "in_us": { "type": "integer", "minimum": 0 },
+        "out_us": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "decisionRef": {
+      "type": "object",
+      "required": [
+        "path",
+        "content_hash",
+        "decision_hash",
+        "solver_id",
+        "solver_version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "content_hash": { "$ref": "#/$defs/hash" },
+        "decision_hash": { "$ref": "#/$defs/hash" },
+        "solver_id": { "const": "semantic-first-tempo-secondary" },
+        "solver_version": { "const": "1.0.0" }
+      }
+    },
+    "decisionPin": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "decision_hash",
+        "resolved_frame",
+        "semantic_role",
+        "asset_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/stableId" },
+        "decision_hash": { "$ref": "#/$defs/hash" },
+        "resolved_frame": { "type": "integer", "minimum": 0 },
+        "semantic_role": { "$ref": "#/$defs/semanticRole" },
+        "asset_id": { "$ref": "#/$defs/stableId" }
+      }
+    },
+    "tail": {
+      "type": "object",
+      "required": ["max_frames", "policy"],
+      "additionalProperties": false,
+      "properties": {
+        "max_frames": { "type": "integer", "minimum": 0 },
+        "policy": { "const": "trim_or_pad_to_limit" }
+      }
+    },
+    "ducking": {
+      "type": "object",
+      "required": ["duck_gain_db", "attack_ms", "release_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "duck_gain_db": { "type": "number" },
+        "attack_ms": { "type": "number", "minimum": 0 },
+        "release_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "assetPin": {
+      "type": "object",
+      "required": [
+        "library_id",
+        "library_version",
+        "library_manifest_hash",
+        "asset_content_hash",
+        "asset_size_bytes",
+        "rights_evidence_ref",
+        "provenance_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "library_id": { "$ref": "#/$defs/stableId" },
+        "library_version": { "type": "string", "minLength": 1 },
+        "library_manifest_hash": { "$ref": "#/$defs/hash" },
+        "asset_content_hash": { "$ref": "#/$defs/hash" },
+        "asset_size_bytes": { "type": "integer", "minimum": 1 },
+        "rights_evidence_ref": { "$ref": "#/$defs/opaqueRef" },
+        "provenance_ref": { "$ref": "#/$defs/opaqueRef" }
+      }
+    },
+    "semanticRole": {
+      "type": "string",
+      "enum": [
+        "hook_impact",
+        "transition_accent",
+        "claim_emphasis",
+        "achievement_reveal",
+        "simple_sound"
+      ]
+    },
+    "cue": {
+      "type": "object",
+      "required": [
+        "cue_id",
+        "semantic_role",
+        "asset_id",
+        "trigger_frame",
+        "duration_frames",
+        "source_range",
+        "gain_db",
+        "fade_in_ms",
+        "fade_out_ms",
+        "tail",
+        "duck_group",
+        "ducking",
+        "asset_pin",
+        "intent"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cue_id": {
+          "type": "string",
+          "pattern": "^SFX_[A-Z0-9]+(?:_[A-Z0-9]+)*$"
+        },
+        "semantic_role": { "$ref": "#/$defs/semanticRole" },
+        "asset_id": { "$ref": "#/$defs/stableId" },
+        "trigger_frame": { "type": "integer", "minimum": 0 },
+        "duration_frames": { "type": "integer", "minimum": 1 },
+        "source_range": { "$ref": "#/$defs/sourceRange" },
+        "gain_db": { "type": "number" },
+        "fade_in_ms": { "type": "number", "minimum": 0 },
+        "fade_out_ms": { "type": "number", "minimum": 0 },
+        "tail": { "$ref": "#/$defs/tail" },
+        "duck_group": { "type": "string", "enum": ["dialogue", "none"] },
+        "ducking": { "$ref": "#/$defs/ducking" },
+        "asset_pin": { "$ref": "#/$defs/assetPin" },
+        "intent": { "type": "string", "minLength": 1 },
+        "decision_pin": { "$ref": "#/$defs/decisionPin" }
+      }
+    }
+  }
+}
