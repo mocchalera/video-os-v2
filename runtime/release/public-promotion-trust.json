@@ -1,0 +1,19 @@
+{
+  "version": "public-promotion-trust/v1",
+  "destination": {
+    "provider": "github",
+    "repository_id": "1188541623",
+    "repository_full_name": "mocchalera/video-os-v2",
+    "branch": "main"
+  },
+  "workflow": {
+    "path": ".github/workflows/ci.yml",
+    "candidate_branch_prefix": "public-candidate/"
+  },
+  "stage_a_authentication": {
+    "configured": false,
+    "key_id": null,
+    "public_key_path": null,
+    "public_key_sha256": null
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ビジネスSNSショート仕上げ"
+  short_description: "講演・インタビューを信頼感ある縦型ショートに仕上げる"
+  default_prompt: "$finish-business-short を使って、既存の講演・インタビュー粗編集をSNS向け縦型ショートへ仕上げてください。"

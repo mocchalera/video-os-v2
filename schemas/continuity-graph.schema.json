@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/continuity-graph.schema.json",
+  "title": "Video OS Continuity Graph",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "artifact_version",
+    "created_at",
+    "source_media_manifest_hash",
+    "entities",
+    "segments",
+    "edges",
+    "risks",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "pattern": "^(analysis|projection)-v\\d+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_media_manifest_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "entities": { "type": "array", "items": { "$ref": "#/$defs/entity" } },
+    "segments": { "type": "array", "items": { "$ref": "#/$defs/segment-ref" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/continuity-edge" } },
+    "risks": { "type": "array", "items": { "$ref": "#/$defs/continuity-risk" } },
+    "provenance": { "$ref": "#/$defs/artifact-provenance" }
+  },
+  "$defs": {
+    "entity": {
+      "type": "object",
+      "required": ["entity_id", "entity_type", "status", "evidence_segment_ids", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "entity_id": { "type": "string", "pattern": "^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_[A-Za-z0-9_-]+$" },
+        "entity_type": { "type": "string", "enum": ["subject_cluster", "location", "prop", "motif", "action"] },
+        "status": { "type": "string", "enum": ["hypothesis", "confirmed_editing_continuity", "human_confirmed", "redacted"] },
+        "label": { "type": ["string", "null"] },
+        "evidence_segment_ids": { "type": "array", "items": { "type": "string", "pattern": "^SEG_[A-Za-z0-9_-]+$" } },
+        "confidence": { "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record" }
+      }
+    },
+    "segment-ref": {
+      "type": "object",
+      "required": ["segment_id", "asset_id", "src_in_us", "src_out_us", "entity_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "segment_id": { "type": "string", "pattern": "^SEG_[A-Za-z0-9_-]+$" },
+        "asset_id": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" },
+        "src_in_us": { "type": "integer", "minimum": 0 },
+        "src_out_us": { "type": "integer", "minimum": 0 },
+        "capture_basis": { "type": "string", "enum": ["manifest_timecode", "file_metadata", "inferred", "unknown"] },
+        "entity_ids": { "type": "array", "items": { "type": "string", "pattern": "^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_[A-Za-z0-9_-]+$" } }
+      }
+    },
+    "continuity-edge": {
+      "type": "object",
+      "required": ["edge_id", "from_ref", "to_ref", "type", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "edge_id": { "type": "string", "pattern": "^CONEDGE_[A-Za-z0-9_-]+$" },
+        "from_ref": { "type": "string", "pattern": "^(SEG|ENT_[A-Z]+)_[A-Za-z0-9_-]+$" },
+        "to_ref": { "type": "string", "pattern": "^(SEG|ENT_[A-Z]+)_[A-Za-z0-9_-]+$" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "same_subject",
+            "same_location",
+            "chronologically_before",
+            "action_continues",
+            "screen_direction_consistent",
+            "screen_direction_break",
+            "visual_match",
+            "visual_contrast",
+            "duplicate_semantic_content"
+          ]
+        },
+        "confidence": { "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record" }
+      }
+    },
+    "continuity-risk": {
+      "type": "object",
+      "required": ["risk_id", "severity", "type", "refs", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "risk_id": { "type": "string", "pattern": "^CONRISK_[A-Za-z0-9_-]+$" },
+        "severity": { "type": "string", "enum": ["info", "warning", "blocker"] },
+        "type": { "type": "string", "enum": ["identity_uncertain", "chronology_uncertain", "axis_break", "duplicate_content", "privacy_sensitive", "missing_evidence"] },
+        "refs": { "type": "array", "items": { "type": "string" } },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifact-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["analysis-pipeline", "triage-projection"] },
+        "inputs": { "type": "array", "items": { "type": "object" } },
+        "hash_policy": { "type": "object" }
+      }
+    }
+  }
+}

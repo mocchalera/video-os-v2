@@ -1,0 +1,92 @@
+{
+  "version": "1",
+  "project": "togakushi-camp",
+  "evaluated_at": "2026-06-17T07:54:22.898Z",
+  "brief_hash": "sha256:ac03754ffbce4668e750cd0129155b5e7d9e5ec0028c552be458c6ff7a95f579",
+  "stages": {
+    "selects": {
+      "score": 0.845,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.813,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "3/4 brief message items represented across active candidates"
+          ],
+          "gaps": [
+            "not all brief message items are represented by active candidate evidence"
+          ]
+        },
+        "must_have_coverage": {
+          "score": 0.833,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/6 selectable must_have items matched",
+            "selection coverage analyzer score 26.6%",
+            "5 must_have items matched by local semantic evidence",
+            "1 production directive must_have items deferred"
+          ],
+          "gaps": [
+            "missing explicit candidate evidence for must_have: 星空"
+          ]
+        },
+        "emotion_curve_alignment": {
+          "score": 1,
+          "confidence": 0.7,
+          "judge_source": "deterministic",
+          "evidence": [
+            "6/6 brief emotion_curve terms found in candidate beats/evidence",
+            "9/9 active candidates carry emotion/peak signals",
+            "9/9 active candidates carry eligible_beats"
+          ],
+          "gaps": []
+        },
+        "narrative_structure": {
+          "score": 0.575,
+          "confidence": 0.8,
+          "judge_source": "deterministic",
+          "evidence": [
+            "1 role types represented in selects",
+            "story_role present on 9/9 candidates",
+            "eligible_beats present on 9/9 candidates",
+            "setup/context function detected",
+            "experience/development function detected",
+            "closing/payoff function detected",
+            "story_role sequence is partially available"
+          ],
+          "gaps": [
+            "selects do not expose a clear hook/opening candidate"
+          ]
+        },
+        "pacing_coherence": {
+          "score": 0.988,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "selected source duration 175.2s for 120s target"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.813,
+          "confidence": 0.8,
+          "judge_source": "deterministic",
+          "evidence": [
+            "9/9 unique assets",
+            "1 active roles represented",
+            "6 semantic clusters represented"
+          ],
+          "gaps": [
+            "role distribution is narrow"
+          ]
+        }
+      }
+    }
+  },
+  "composite": 0.845,
+  "notes": [
+    "blueprint stage skipped: 04_plan/edit_blueprint.yaml not found"
+  ]
+}

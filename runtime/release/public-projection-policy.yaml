@@ -1,0 +1,109 @@
+version: public-projection-policy/v1
+verifier_version: public-projection-verifier/v1
+
+# This is an allowlist. A newly tracked top-level path fails projection until it
+# is reviewed and added explicitly.
+include:
+  - pattern: .agents/**
+  - pattern: .claude/**
+  - pattern: .codex/**
+  - pattern: .github/**
+  - pattern: .project-loop/workflows/**
+  - pattern: agent-src/**
+  - pattern: apps/**
+  - pattern: contracts/**
+  - pattern: docs/**
+  - pattern: editor/**
+  - pattern: premiere-plugin/**
+  - pattern: projects/_template/**
+  - pattern: projects/demo/**
+  - pattern: projects/sample/**
+  - pattern: python/**
+  - pattern: reports/**
+  - pattern: runtime/**
+  - pattern: schemas/**
+  - pattern: script/**
+  - pattern: scripts/**
+  - pattern: tests/**
+  - pattern: .env.example
+  - pattern: .gitignore
+  - pattern: .node-version
+  - pattern: .nvmrc
+  - pattern: AGENTS.md
+  - pattern: ARCHITECTURE.md
+  - pattern: CLAUDE.md
+  - pattern: CODE_OF_CONDUCT.md
+  - pattern: CONTRIBUTING.md
+  - pattern: LICENSE
+  - pattern: Package.swift
+  - pattern: README.md
+  - pattern: SECURITY.md
+  - pattern: goal.md
+  - pattern: note-draft-ai-eye.md
+  - pattern: package-lock.json
+  - pattern: package.json
+  - pattern: pcl.yaml
+  - pattern: tsconfig.json
+  - pattern: tsconfig.remotion.json
+  - pattern: vitest.config.ts
+  - pattern: vitest.integration.config.ts
+
+exclude:
+  - pattern: .project-loop/project.db
+    reason: canonical PCL database is private state
+  - pattern: .project-loop/events.jsonl
+    reason: canonical PCL event log is private state
+  - pattern: .project-loop/dashboard/**
+    reason: generated PCL dashboard and evidence are private state
+  - pattern: p4d-triage-search-rPQLtk/**
+    reason: local triage progress is generated operator state
+  - pattern: projects/ax1-female-testimonial-d4892/**
+    reason: real-media project artifact is not a public fixture
+  - pattern: projects/ax1-komatsu-testimonial-d4892/**
+    reason: real-media project artifact is not a public fixture
+  - pattern: projects/ax1-participant-voices-20260401/**
+    reason: participant project artifact is not a public fixture
+  - pattern: projects/marlin-mv-doc-smoke-20260522/**
+    reason: local model smoke project is not a public fixture
+
+# These deterministic transforms only redact workstation user components.
+# They do not make a secret-scan claim and do not authorize semantic rewrites.
+transforms:
+  - pattern: "**/*.md"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.json"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.yaml"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.yml"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.ts"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.swift"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.py"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.toml"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.xml"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.txt"
+    transform_id: redact-local-user-paths-v1
+  - pattern: "**/*.sh"
+    transform_id: redact-local-user-paths-v1
+
+# The repository-owned scanner is accepted only through an exact execution
+# receipt that the finalizer authenticates by re-running these pinned bytes
+# against the same immutable staging payload. This is not a manual assertion.
+secret_scan:
+  approved_producers:
+    - producer_id: video-os-repository-secret-scan-wrapper
+      wrapper_version: 1.0.0
+      wrapper_sha256: 25844d35c787cb3ff5407dd15aff468678225f5c2ee7aac00fd4348483d261e6
+      verifier_sha256: 13324c11306b952b93fbdf900fc96cc4051435125d47e336fa28d5a41e42379c
+      key_id: repository-owned-rerun-v1
+  approved_scanners:
+    - name: video-os-repository-secret-scanner
+      version: video-os-public-secret-scanner/v1
+      binary_sha256: 7cf264774b3edb102916c8bb6b4e29d3197e8759bd1fd2e853990196ef525204
+      rules_sha256: ccaa74ed6f5508f6cd10ead9051664d93a71477327f86e8594f9a8b5989edca1

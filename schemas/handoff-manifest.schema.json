@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/handoff-manifest.schema.json",
+  "title": "Video OS Handoff Manifest",
+  "description": "Contract ledger for an OTIO handoff session. Import side must read this before processing.",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "handoff_id",
+    "exported_at",
+    "base_timeline",
+    "approval_snapshot",
+    "capability_profile",
+    "bridge",
+    "source_map"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_id": {
+      "type": "string",
+      "pattern": "^HND_.+$"
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "base_timeline": {
+      "$ref": "#/$defs/baseTimeline"
+    },
+    "approval_snapshot": {
+      "$ref": "#/$defs/approvalSnapshot"
+    },
+    "review_bundle_ref": {
+      "$ref": "#/$defs/reviewBundleRef"
+    },
+    "capability_profile": {
+      "$ref": "#/$defs/capabilityProfileRef"
+    },
+    "bridge": {
+      "$ref": "#/$defs/bridgeFingerprint"
+    },
+    "nle_session": {
+      "$ref": "#/$defs/nleSession"
+    },
+    "verified_roundtrip_surfaces": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "provisional_roundtrip_surfaces": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "report_only_surfaces": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "lossy_surfaces": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source_map": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceMapEntry" }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "baseTimeline": {
+      "type": "object",
+      "required": ["path", "version", "hash", "sequence"],
+      "properties": {
+        "path": { "type": "string" },
+        "version": { "type": "string" },
+        "hash": { "type": "string", "pattern": "^sha256:" },
+        "sequence": {
+          "type": "object",
+          "required": ["fps_num", "fps_den", "width", "height"],
+          "properties": {
+            "fps_num": { "type": "integer", "minimum": 1 },
+            "fps_den": { "type": "integer", "minimum": 1 },
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "approvalSnapshot": {
+      "type": "object",
+      "required": ["status", "approved_by", "approved_at"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["clean", "creative_override"]
+        },
+        "approved_by": { "type": "string" },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "artifact_versions": {
+          "type": "object",
+          "properties": {
+            "timeline_version": { "type": "string" },
+            "review_report_version": { "type": "string" },
+            "review_patch_hash": { "type": "string" },
+            "human_notes_hash": { "type": "string" },
+            "style_hash": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "reviewBundleRef": {
+      "type": "object",
+      "properties": {
+        "export_manifest_path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "capabilityProfileRef": {
+      "type": "object",
+      "required": ["profile_id"],
+      "properties": {
+        "profile_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "bridgeFingerprint": {
+      "type": "object",
+      "required": [
+        "bridge_version",
+        "python_version",
+        "opentimelineio_version",
+        "bridge_script_hash"
+      ],
+      "properties": {
+        "bridge_version": { "type": "string" },
+        "python_version": { "type": "string" },
+        "opentimelineio_version": { "type": "string" },
+        "bridge_script_hash": { "type": "string", "pattern": "^sha256:" },
+        "loaded_adapter_modules": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "nleSession": {
+      "type": "object",
+      "required": ["vendor", "product"],
+      "properties": {
+        "vendor": { "type": "string" },
+        "product": { "type": "string" },
+        "expected_version": { "type": "string" },
+        "expected_import_options": { "type": "object" },
+        "expected_export_options": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "sourceMapEntry": {
+      "type": "object",
+      "required": ["asset_id", "source_locator"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "source_locator": { "type": "string" },
+        "local_source_path": { "type": "string" },
+        "relink_required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

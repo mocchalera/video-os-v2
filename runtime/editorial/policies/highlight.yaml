@@ -1,0 +1,15 @@
+id: highlight
+story_arc_strategy: peak_first
+chronology_bias: "flexible"
+allow_time_reorder: true
+preserve_natural_breath: false
+avoid_wall_to_wall_voiceover: false
+skill_suppressions:
+  - crosscut_suspense
+  - montage_compress
+  - j_cut_lead_in
+  - l_cut_reaction_hold
+  - cutaway_repair
+  - talking_head_pacing
+skill_enforcements:
+  - build_to_peak

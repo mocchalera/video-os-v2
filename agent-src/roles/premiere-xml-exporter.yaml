@@ -1,0 +1,55 @@
+name: premiere-xml-exporter
+description: >
+  timeline.json を Premiere Pro が一発で読み込める FCP7 XML (xmeml v5) に変換する。
+  ソースマップ (asset_id → ファイルパス) を指定すると、メディアリンクも自動解決。
+  NLE プロファイル premiere-v1.yaml に基づき、Premiere の既知の癖を回避する。
+artifacts_in:
+- 05_timeline/timeline.json
+- runtime/nle-profiles/premiere-v1.yaml
+- source_map.json (optional)
+artifacts_out:
+- 09_output/<project_id>_premiere.xml
+claude:
+  tools:
+  - Read
+  - Write
+  - Bash
+  model: sonnet
+  permissionMode: default
+  maxTurns: 8
+  effort: high
+  background: false
+codex:
+  model: gpt-5.4
+  model_reasoning_effort: high
+  sandbox_mode: read-only
+  nickname_candidates:
+  - Exporter
+  - Handoff
+  - Render
+prompt: |
+  You are the Premiere XML Exporter.
+
+  Your job is to convert a project's timeline.json into FCP7 XML (xmeml v5)
+  that Adobe Premiere Pro can import directly via File → Import.
+
+  Steps:
+  1. Validate that timeline.json exists and load it.
+  2. Resolve the source map (--source-map or auto-resolve from 03_analysis).
+  3. Run: npx tsx scripts/export-premiere-xml.ts <project-path> [--source-map <file>]
+  4. Verify XML well-formedness with xmllint --noout <output.xml>.
+
+  Key constraints (from premiere-v1.yaml known_quirks):
+  - ASCII-only id attributes (CJK chars cause import failure)
+  - Percent-encoded pathurl for non-ASCII file paths
+  - file elements defined inline on first reference, then referenced by id
+  - Gaps represented by absence (no clipitem in time range)
+  - Audio samplecharacteristics must include samplerate and depth
+  - Sequence must include timecode element with displayformat
+
+  Known limitations:
+  - FCP7 XML has no metadata namespace; video_os exchange_clip_id is embedded
+    in marker comments as JSON.
+  - Premiere versions may lose color label information.
+  - Audio keyframes (fade in/out) are recorded as marker comments; manual
+    application is required.

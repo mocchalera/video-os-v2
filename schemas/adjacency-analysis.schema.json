@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/adjacency-analysis.schema.json",
+  "title": "Adjacency Analysis",
+  "description": "Skill selection rationale for each adjacent clip pair",
+  "type": "object",
+  "required": ["version", "project_id", "pairs"],
+  "properties": {
+    "version": { "type": "string", "enum": ["1", "2"] },
+    "project_id": { "type": "string" },
+    "pairs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pair_result" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "pair_result": {
+      "type": "object",
+      "required": [
+        "pair_id",
+        "left_candidate_ref",
+        "right_candidate_ref",
+        "selected_skill_id",
+        "selected_skill_score",
+        "min_score_threshold",
+        "transition_type",
+        "confidence",
+        "below_threshold"
+      ],
+      "properties": {
+        "pair_id": { "type": "string" },
+        "left_clip_id": { "type": "string", "minLength": 1 },
+        "right_clip_id": { "type": "string", "minLength": 1 },
+        "left_candidate_ref": { "type": "string" },
+        "right_candidate_ref": { "type": "string" },
+        "selected_skill_id": { "type": ["string", "null"] },
+        "selected_skill_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "min_score_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "transition_type": {
+          "type": "string",
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "below_threshold": { "type": "boolean" },
+        "evidence": { "type": "object" },
+        "degraded_from_skill_id": { "type": ["string", "null"] },
+        "selection_rationale": { "$ref": "#/$defs/selection_rationale" },
+        "cut_relation": { "$ref": "#/$defs/cut_relation" }
+      },
+      "additionalProperties": false
+    },
+    "cut_relation_axis": {
+      "type": "string",
+      "enum": [
+        "shot_scale",
+        "composition",
+        "gaze_axis",
+        "motion_flow",
+        "luma",
+        "dominant_color",
+        "asset_identity",
+        "visual_coherence",
+        "visual_tags",
+        "subject_type",
+        "text_presence",
+        "story_boundary"
+      ]
+    },
+    "coverage_status": {
+      "type": "string",
+      "enum": ["known", "unknown", "not_applicable", "missing"]
+    },
+    "field_coverage": {
+      "type": "object",
+      "required": ["left", "right", "pair"],
+      "properties": {
+        "left": { "$ref": "#/$defs/coverage_status" },
+        "right": { "$ref": "#/$defs/coverage_status" },
+        "pair": { "$ref": "#/$defs/coverage_status" }
+      },
+      "additionalProperties": false
+    },
+    "cut_relation_signal": {
+      "type": "object",
+      "required": [
+        "coverage",
+        "evaluation",
+        "major_discontinuity",
+        "raw",
+        "raw_coverage",
+        "source_refs",
+        "confidence",
+        "reason_codes"
+      ],
+      "properties": {
+        "coverage": {
+          "type": "string",
+          "enum": ["known", "unknown", "not_applicable", "missing", "low_confidence"]
+        },
+        "evaluation": {
+          "type": "string",
+          "enum": ["match", "contrast", "neutral", "unknown"]
+        },
+        "major_discontinuity": { "type": "boolean" },
+        "raw": {
+          "type": "object",
+          "required": ["left", "right"],
+          "properties": {
+            "left": {},
+            "right": {},
+            "pair": {}
+          },
+          "additionalProperties": false
+        },
+        "raw_coverage": { "$ref": "#/$defs/field_coverage" },
+        "source_refs": {
+          "type": "object",
+          "required": ["left", "right"],
+          "properties": {
+            "left": { "type": "array", "items": { "type": "string" } },
+            "right": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "confidence": {
+          "type": "object",
+          "required": ["left", "right"],
+          "properties": {
+            "left": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "right": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "reason_codes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "cut_relation": {
+      "type": "object",
+      "required": [
+        "relationship",
+        "confidence",
+        "coverage",
+        "reason_codes",
+        "explicit_intent_evidence",
+        "signals"
+      ],
+      "properties": {
+        "relationship": {
+          "type": "string",
+          "enum": ["continuous", "intentional_contrast", "risky_jump", "unknown"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "coverage": {
+          "type": "object",
+          "required": [
+            "total_axes",
+            "comparable_axes",
+            "comparable_axis_ids",
+            "missing_axis_ids",
+            "unknown_axis_ids",
+            "not_applicable_axis_ids",
+            "low_confidence_axis_ids"
+          ],
+          "properties": {
+            "total_axes": { "type": "integer", "minimum": 0 },
+            "comparable_axes": { "type": "integer", "minimum": 0 },
+            "comparable_axis_ids": { "type": "array", "items": { "$ref": "#/$defs/cut_relation_axis" } },
+            "missing_axis_ids": { "type": "array", "items": { "$ref": "#/$defs/cut_relation_axis" } },
+            "unknown_axis_ids": { "type": "array", "items": { "$ref": "#/$defs/cut_relation_axis" } },
+            "not_applicable_axis_ids": { "type": "array", "items": { "$ref": "#/$defs/cut_relation_axis" } },
+            "low_confidence_axis_ids": { "type": "array", "items": { "$ref": "#/$defs/cut_relation_axis" } }
+          },
+          "additionalProperties": false
+        },
+        "reason_codes": { "type": "array", "items": { "type": "string" } },
+        "explicit_intent_evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["source", "source_ref", "intent"],
+            "properties": {
+              "source": { "type": "string", "enum": ["beat_craft", "human_annotation"] },
+              "source_ref": { "type": "string", "minLength": 1 },
+              "intent": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "signals": {
+          "type": "object",
+          "required": [
+            "shot_scale",
+            "composition",
+            "gaze_axis",
+            "motion_flow",
+            "luma",
+            "dominant_color",
+            "asset_identity",
+            "visual_coherence",
+            "visual_tags",
+            "subject_type",
+            "text_presence",
+            "story_boundary"
+          ],
+          "properties": {
+            "shot_scale": { "$ref": "#/$defs/cut_relation_signal" },
+            "composition": { "$ref": "#/$defs/cut_relation_signal" },
+            "gaze_axis": { "$ref": "#/$defs/cut_relation_signal" },
+            "motion_flow": { "$ref": "#/$defs/cut_relation_signal" },
+            "luma": { "$ref": "#/$defs/cut_relation_signal" },
+            "dominant_color": { "$ref": "#/$defs/cut_relation_signal" },
+            "asset_identity": { "$ref": "#/$defs/cut_relation_signal" },
+            "visual_coherence": { "$ref": "#/$defs/cut_relation_signal" },
+            "visual_tags": { "$ref": "#/$defs/cut_relation_signal" },
+            "subject_type": { "$ref": "#/$defs/cut_relation_signal" },
+            "text_presence": { "$ref": "#/$defs/cut_relation_signal" },
+            "story_boundary": { "$ref": "#/$defs/cut_relation_signal" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "selection_rationale": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "reason_codes",
+        "active_cards",
+        "applied_skill_id",
+        "fallback_from_skill_id"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "selected",
+            "below_threshold_fallback",
+            "viability_fallback",
+            "no_eligible",
+            "craft_override",
+            "visual_override"
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "active_cards": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/card_evaluation" }
+        },
+        "applied_skill_id": { "type": ["string", "null"] },
+        "fallback_from_skill_id": { "type": ["string", "null"] },
+        "override": { "$ref": "#/$defs/selection_override" }
+      },
+      "additionalProperties": false
+    },
+    "card_evaluation": {
+      "type": "object",
+      "required": [
+        "skill_id",
+        "when_passed",
+        "avoid_matched",
+        "viability_passed",
+        "viability_gates",
+        "score",
+        "threshold",
+        "threshold_passed",
+        "reason_code"
+      ],
+      "properties": {
+        "skill_id": { "type": "string" },
+        "when_passed": { "type": "boolean" },
+        "avoid_matched": { "type": "boolean" },
+        "viability_passed": { "type": "boolean" },
+        "viability_gates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["gate_id", "passed", "failure_reason"],
+            "properties": {
+              "gate_id": { "type": "string" },
+              "passed": { "type": "boolean" },
+              "failure_reason": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "threshold_passed": { "type": "boolean" },
+        "reason_code": {
+          "type": "string",
+          "enum": ["eligible", "avoid_matched", "when_failed", "viability_failed", "below_threshold"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "selection_override": {
+      "type": "object",
+      "required": ["kind", "selected_skill_id", "replaced_outcome"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["craft", "visual"] },
+        "selected_skill_id": { "type": "string" },
+        "replaced_outcome": {
+          "type": "string",
+          "enum": ["selected", "below_threshold_fallback", "viability_fallback", "no_eligible"]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "version": "1",
+  "project": "ena-promo",
+  "evaluated_at": "2026-06-17T01:56:24.821Z",
+  "brief_hash": "sha256:4fffa7c3115604e0f3a439f2f122bfea5010b82737d7e10e7b8ab945a87d5805",
+  "stages": {
+    "selects": {
+      "score": 0.745,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.8,
+          "confidence": 0.9,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "Primary message 'Ena is a place where nature, culture, and food create quiet, lasting impressions' is supported by clips showing landscapes, people in nature, and food preparation.",
+            "Secondary message 'seasonal beauty in mountain landscapes' is addressed by clips with outdoor scenes and trees.",
+            "Secondary message 'traditional crafts and local food' is implied by clips showing people interacting with objects and food preparation.",
+            "Secondary message 'aerial perspectives reveal the scale and serenity' is partially addressed by 'DJI_0011', 'DJI_0023', 'DJI_0021', 'DJI_0008' which are drone shots."
+          ],
+          "gaps": [
+            "The 'quiet, lasting impressions' aspect is not strongly conveyed by the current selection of clips, which are mostly generic B-roll.",
+            "Specific examples of 'traditional crafts' are not explicitly identified in the provided clip descriptions."
+          ]
+        },
+        "must_have_coverage": {
+          "score": 1,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/5 selectable must_have items matched",
+            "selection coverage analyzer score 100.0%"
+          ],
+          "gaps": []
+        },
+        "emotion_curve_alignment": {
+          "score": 0.6,
+          "confidence": 0.8,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The opening clips (cand_ena_001 to cand_ena_005) seem to aim for 'wonder' and 'discovery' with hero shots.",
+            "Later clips suggest 'immersion' and 'warmth' through scenes of people in nature and potentially food-related activities.",
+            "The closing clips aim for 'serenity'."
+          ],
+          "gaps": [
+            "The transition between emotional beats is not clear from the candidate list alone.",
+            "The 'discovery' and 'immersion' phases lack specific indicators in the clip descriptions.",
+            "The overall emotional arc is difficult to fully assess without the full edit and audio."
+          ]
+        },
+        "narrative_structure": {
+          "score": 0.6,
+          "confidence": 0.8,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The clips are broadly categorized into beats like 'Opening - Ena Place Hook' (b01), 'Landscape - Arrival And Scale' (b02), 'Local Texture - Food And Craft' (b03), 'Experience - Streets And People' (b04), 'Lift - Scenic Emotion' (b05), and 'Closing - Memory And Resolve' (b06).",
+            "This suggests a planned narrative flow from introduction to conclusion."
+          ],
+          "gaps": [
+            "The specific 'hook/setup', 'experience', and 'payoff/closing' elements are not explicitly detailed for each candidate clip, making it hard to judge their role in the narrative.",
+            "The 'visual-first' strategy is mentioned, but the narrative structure itself is inferred from beat assignments rather than explicit story beats."
+          ]
+        },
+        "pacing_coherence": {
+          "score": 0.7,
+          "confidence": 0.8,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The runtime target is 230s, and the decoded export duration is 229.75s, indicating the overall length is met.",
+            "The 'motion_profile: high' and 'transcript_density: sparse' suggest a visual-first approach with minimal dialogue, aligning with the brief.",
+            "The brief explicitly states 'fast commercial pacing' is to be avoided, and the clip durations (mostly under 5s) suggest a moderate to slow pace."
+          ],
+          "gaps": [
+            "The artifact does not provide information on audio or specific cut density, which are crucial for pacing coherence.",
+            "The 'fast commercial pacing' avoidance is inferred; actual pacing needs to be evaluated in context."
+          ]
+        },
+        "visual_variety_and_focus": {
+          "score": 0.7,
+          "confidence": 0.9,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "A variety of shots are present, including landscapes, people, close-ups (implied by 'texture' and 'support' roles), and drone footage.",
+            "The 'role' attribute (hero, support, texture) suggests an attempt at visual hierarchy and variety.",
+            "The motif tags indicate a focus on 'ena' and 'tourism_pv'."
+          ],
+          "gaps": [
+            "The descriptions of many clips are generic (e.g., 'outdoor_scene', 'person_standing') and do not strongly convey specific visual themes like 'seasonal beauty' or 'traditional crafts'.",
+            "The 'focus' on the primary message is not strongly evident from the individual clip descriptions alone; it relies heavily on the overall assembly."
+          ]
+        }
+      }
+    },
+    "blueprint": {
+      "score": 0.88,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.8,
+          "confidence": 0.8,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The primary message 'Ena is a place where nature, culture, and food create quiet, lasting impressions' is supported by the beat labels and purposes (e.g., 'Local Texture - Food And Craft', 'Experience - Streets And People', 'Lift - Scenic Emotion').",
+            "The secondary messages about seasonal beauty, traditional crafts, local food, and aerial perspectives are also reflected in the beat descriptions and purposes."
+          ],
+          "gaps": [
+            "The artifact focuses on planning the structure and clip selection, but the actual expression of 'quiet, lasting impressions' would depend heavily on the final execution of the selected clips and pacing, which are not fully detailed here."
+          ]
+        },
+        "must_have_coverage": {
+          "score": 0.9,
+          "confidence": 0.9,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "Aerial/drone landscape shots are explicitly mentioned in beat b02 ('Landscape - Arrival And Scale') and implied in other scenic beats.",
+            "Traditional craft close-ups are covered in beat b03 ('Local Texture - Food And Craft').",
+            "Local food preparation is also covered in beat b03.",
+            "Seasonal nature scenery is implied in beats b02 and b05.",
+            "Human presence in landscape is covered in beat b04 ('Experience - Streets And People')."
+          ],
+          "gaps": [
+            "While the categories are covered, the artifact does not specify *which* specific clips will fulfill these requirements, only candidate references."
+          ]
+        },
+        "emotion_curve_alignment": {
+          "score": 0.8,
+          "confidence": 0.7,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The beats are structured to follow a progression: 'Opening - Ena Place Hook' (wonder), 'Landscape - Arrival And Scale' (discovery), 'Local Texture - Food And Craft' and 'Experience - Streets And People' (immersion), 'Lift - Scenic Emotion' (warmth), and 'Closing - Memory And Resolve' (serenity).",
+            "The music policy also mentions 'brisk promotional lift, textured middle detail, warm closing release', aligning with the emotion curve."
+          ],
+          "gaps": [
+            "The artifact outlines the intended emotional arc through beat purposes and music policy, but the actual emotional impact is dependent on the specific clips chosen and their editing, which is not fully defined."
+          ]
+        },
+        "narrative_structure": {
+          "score": 1,
+          "confidence": 0.85,
+          "judge_source": "deterministic",
+          "evidence": [
+            "story roles: hook -> setup -> experience -> experience -> experience -> closing",
+            "6 beats with 4 sequence goals"
+          ],
+          "gaps": []
+        },
+        "pacing_coherence": {
+          "score": 1,
+          "confidence": 0.82,
+          "judge_source": "deterministic",
+          "evidence": [
+            "brief target 230s; blueprint target 229.75s",
+            "6 beats planned",
+            "duration_policy mode=guide"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.8,
+          "confidence": 0.7,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The beat descriptions call for a variety of shots: scenic, drone, town-establishing, tactile details (food, craft), human presence, and atmospheric shots.",
+            "The 'required_roles' and 'preferred_roles' (hero, support, texture) suggest a deliberate approach to visual composition and focus.",
+            "The 'visual-first' strategy in the brief is supported by the emphasis on concrete destination imagery in the sequence goals."
+          ],
+          "gaps": [
+            "The artifact lists candidate clips and roles, but the specific visual variety and focus will depend on the final selection and how these elements are combined, which is not fully specified."
+          ]
+        }
+      }
+    }
+  },
+  "composite": 0.806,
+  "notes": [
+    "The artifact is a list of candidate clips, heavily referencing a human-generated FCP timeline. This means it's a reflection of an existing edit rather than a novel AI plan.",
+    "The descriptions of the clips are often generic and lack specific details that would strongly tie them to the brief's nuanced requirements (e.g., 'traditional crafts', 'quiet, lasting impressions').",
+    "Key requirements like 'aerial perspectives reveal the scale and serenity' and 'traditional craft close-ups' are only partially met or not clearly identifiable from the provided data.",
+    "The artifact provides a good overview of the *types* of shots used but lacks the granular detail to fully assess alignment with the creative brief's specific messaging and emotional goals without seeing the final edit.",
+    "The artifact is a strong planning document that aligns well with the creative brief's intent, structure, and emotional goals. It effectively breaks down the video into logical beats that correspond to the desired narrative and emotional arc.",
+    "The coverage of 'must-have' elements is good, with clear indications of where these will be incorporated.",
+    "The pacing and visual variety are addressed through policy and beat descriptions, indicating a thoughtful approach.",
+    "The main limitation is that this is a *plan* for an edit, and the ultimate success of the creative brief will depend on the execution of this plan with specific visual assets, which are only referenced as candidates here.",
+    "Confidence scores are generally high (0.7-0.9) because the artifact clearly outlines the *intent* and *structure* to meet the brief. Evidence is drawn directly from beat labels, purposes, and policy statements. Gaps reflect the inherent limitation of a planning artifact versus a final edit."
+  ]
+}

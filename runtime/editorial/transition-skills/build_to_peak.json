@@ -1,0 +1,62 @@
+{
+  "id": "build_to_peak",
+  "version": "1",
+  "scope": "adjacent_pair",
+  "phase": "p0",
+  "intent": "感情強度を漸増させクライマックスへ導く（P0: pair-bias subset）",
+  "audience_effect": "感情が段階的に高まり、ピーク到達時の感動・衝撃が最大化される",
+  "murch_weights": {
+    "emotion": 0.45,
+    "story": 0.30,
+    "rhythm": 0.15,
+    "eye_trace": 0.05,
+    "plane_2d": 0.05,
+    "space_3d": 0.0
+  },
+  "min_score_threshold": 0.30,
+  "when": {
+    "all": [
+      { "path": "energy_delta_score", "op": "gt", "value": 0.0 },
+      { "path": "effective_peak_strength_score", "op": "gte", "value": 0.3 }
+    ],
+    "any": [
+      { "path": "right_story_role", "op": "in", "value": ["experience", "closing"] },
+      { "path": "effective_peak_type", "op": "in", "value": ["emotional_peak", "action_peak"] }
+    ]
+  },
+  "avoid_when": {
+    "any": [
+      { "path": "energy_delta_score", "op": "lt", "value": -0.2 },
+      { "path": "left_story_role", "op": "eq", "value": "closing" }
+    ]
+  },
+  "minimum_viable": [
+    {
+      "id": "has_energy_increase",
+      "predicate": {
+        "all": [
+          { "path": "energy_delta_score", "op": "gt", "value": 0.0 }
+        ]
+      },
+      "failure_reason": "隣接ペア間でエネルギー増加が見られない"
+    }
+  ],
+  "fallback_order": [
+    {
+      "kind": "crossfade",
+      "lower_to": "transition",
+      "transition_type": "crossfade",
+      "crossfade_sec": 0.3
+    },
+    {
+      "kind": "hard_cut",
+      "lower_to": "transition",
+      "transition_type": "cut"
+    }
+  ],
+  "pipeline_effects": {
+    "transition_type": "cut",
+    "beat_snap": "beat",
+    "snap_anchor": "cut_frame"
+  }
+}

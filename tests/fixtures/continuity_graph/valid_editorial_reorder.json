@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "project_id": "p3-fixture",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "entities": [
+    { "entity_id": "ENT_ACTION_jump", "entity_type": "action", "status": "confirmed_editing_continuity", "label": "jump", "evidence_segment_ids": ["SEG_b_payoff", "SEG_a_intro"], "confidence": { "score": 0.86, "source": "vlm_tags", "status": "ready" } },
+    { "entity_id": "ENT_MOTIF_red_ball", "entity_type": "motif", "status": "confirmed_editing_continuity", "label": "red ball", "evidence_segment_ids": ["SEG_b_payoff"], "confidence": { "score": 0.77, "source": "vlm_tags", "status": "ready" } }
+  ],
+  "segments": [
+    { "segment_id": "SEG_b_payoff", "asset_id": "AST_b", "src_in_us": 3000000, "src_out_us": 5000000, "capture_basis": "manifest_timecode", "entity_ids": ["ENT_ACTION_jump", "ENT_MOTIF_red_ball"] },
+    { "segment_id": "SEG_a_intro", "asset_id": "AST_a", "src_in_us": 0, "src_out_us": 2000000, "capture_basis": "manifest_timecode", "entity_ids": ["ENT_ACTION_jump"] }
+  ],
+  "edges": [
+    { "edge_id": "CONEDGE_reorder_001", "from_ref": "SEG_a_intro", "to_ref": "SEG_b_payoff", "type": "chronologically_before", "confidence": { "score": 0.91, "source": "manifest_timecode", "status": "ready" } },
+    { "edge_id": "CONEDGE_action_001", "from_ref": "SEG_b_payoff", "to_ref": "SEG_a_intro", "type": "action_continues", "confidence": { "score": 0.67, "source": "vlm_tags", "status": "partial" } }
+  ],
+  "risks": [],
+  "provenance": { "producer": "analysis-pipeline", "inputs": [{ "path": "03_analysis/segments.json", "hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }], "hash_policy": { "algorithm": "sha256", "canonicalization": "normalized-json-v1", "excluded_fields": ["created_at"] } }
+}

@@ -1,0 +1,85 @@
+{
+  "version": "1.0.0",
+  "project_id": "demo",
+  "artifact_version": "analysis-v1",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "summary": {
+    "status": "ready",
+    "required_lane_count": 4,
+    "ready_lane_count": 4,
+    "blocked_lane_count": 0,
+    "partial_lane_count": 0
+  },
+  "lanes": [
+    {
+      "lane_id": "source_manifest",
+      "status": "ready",
+      "required": true,
+      "reason": null,
+      "consumer_impact": "none",
+      "asset_ids": ["AST_001"],
+      "artifact_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "lane_id": "ffprobe",
+      "status": "ready",
+      "required": true,
+      "reason": null,
+      "consumer_impact": "none",
+      "asset_ids": ["AST_001"],
+      "artifact_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "lane_id": "segments",
+      "status": "ready",
+      "required": true,
+      "reason": null,
+      "consumer_impact": "none",
+      "asset_ids": ["AST_001"],
+      "artifact_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "lane_id": "contact_sheets",
+      "status": "ready",
+      "required": true,
+      "reason": null,
+      "consumer_impact": "none",
+      "asset_ids": ["AST_001"],
+      "artifact_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "assets": [
+    {
+      "asset_id": "AST_001",
+      "status": "ready",
+      "lanes": [
+        {
+          "lane_id": "source_manifest",
+          "status": "ready",
+          "required": true,
+          "reason": null,
+          "consumer_impact": "none",
+          "asset_ids": ["AST_001"],
+          "artifact_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  ],
+  "blockers": [],
+  "overrides": [],
+  "provenance": {
+    "producer": "scripts/analyze.ts",
+    "inputs": [
+      {
+        "path": "projects/demo/02_media/source_media_manifest.json",
+        "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": ["created_at"]
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "project_id": "p3-fixture",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "entities": [
+    { "entity_id": "ENT_LOCATION_unknown", "entity_type": "location", "status": "hypothesis", "label": "unknown", "evidence_segment_ids": ["SEG_missing_asset"], "confidence": { "score": 0.4, "source": "vlm_tags", "status": "partial" } }
+  ],
+  "segments": [
+    { "segment_id": "SEG_missing_asset", "asset_id": "BAD_missing", "src_in_us": 0, "src_out_us": 1000000, "capture_basis": "unknown", "entity_ids": ["ENT_LOCATION_unknown"] }
+  ],
+  "edges": [],
+  "risks": [],
+  "provenance": { "producer": "analysis-pipeline", "inputs": [], "hash_policy": { "algorithm": "sha256", "canonicalization": "normalized-json-v1", "excluded_fields": ["created_at"] } }
+}

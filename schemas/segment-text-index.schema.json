@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/segment-text-index.schema.json",
+  "title": "Video OS Segment Text Index",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "artifact_version",
+    "created_at",
+    "index_id",
+    "segments",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "const": "text-index-v1" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "index_id": { "type": "string", "pattern": "^SIDX_[A-Za-z0-9_-]+$" },
+    "segments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/segment-entry" }
+    },
+    "provenance": { "$ref": "#/$defs/artifact-provenance" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "segment-entry": {
+      "type": "object",
+      "required": ["segment_id", "asset_id", "normalized_text", "token_refs", "source_artifact_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "segment_id": { "type": "string", "pattern": "^SEG_[A-Za-z0-9_-]+$" },
+        "asset_id": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" },
+        "normalized_text": { "type": "string" },
+        "token_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/token-ref" }
+        },
+        "source_artifact_ref": { "$ref": "#/$defs/source-artifact-ref" }
+      }
+    },
+    "token-ref": {
+      "type": "object",
+      "required": ["token", "source_field", "source_id"],
+      "additionalProperties": false,
+      "properties": {
+        "token": { "type": "string", "minLength": 1 },
+        "source_field": { "type": "string", "minLength": 1 },
+        "source_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "source-artifact-ref": {
+      "type": "object",
+      "required": ["path", "hash", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "$ref": "#/$defs/sha256" },
+        "type": { "type": "string", "enum": ["transcript", "audio_story_node", "continuity_entity"] }
+      }
+    },
+    "artifact-ref": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "$ref": "#/$defs/sha256" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "hash-policy": {
+      "type": "object",
+      "required": ["algorithm", "canonicalization", "excluded_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "type": "string", "const": "sha256" },
+        "canonicalization": { "type": "string", "const": "normalized-json-v1" },
+        "excluded_fields": {
+          "type": "array",
+          "contains": { "type": "string", "const": "created_at" },
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "artifact-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["scripts/rebuild-segment-search-index.ts"] },
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/artifact-ref" }
+        },
+        "hash_policy": { "$ref": "#/$defs/hash-policy" }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+transformers>=4.57.0
+torch
+torchaudio
+librosa
+soundfile
+psutil

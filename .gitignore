@@ -1,0 +1,102 @@
+# Dependency directories
+node_modules/
+dist/
+build/
+.venv/
+python/.venv-marlin/
+.tsbuildinfo
+
+# Temporary files
+tmp/
+tmp-*/
+tests/tmp_*/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.settings/
+.classpath
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+
+# Tool-specific directories
+.claude/
+.codex/
+.build/
+.playwright-cli/
+.playwright-mcp/
+
+# Project-specific results
+outputs/
+reports/generated/
+*.inspect.ndjson
+*.render.json
+*.qa.json
+projects/*
+!projects/_template/
+!projects/demo/
+!projects/sample/
+!projects/sample/**
+projects/demo/project_state.yaml
+projects/*/03_analysis/search/
+projects/*/09_output/
+
+# Local runtime locks and interpreter caches
+.project-loop/*.lock
+**/__pycache__/
+
+# Generated evaluation runs are local evidence unless explicitly promoted.
+reports/eval/marlin-qa-*.json
+reports/eval/self-*_recompiled_-*.json
+reports/eval/self-*_recompiled_-*.md
+reports/eval/regen-scratch/
+reports/eval/*/_scratch/
+
+# Local screenshots and visual debugging captures
+/editor-*.png
+
+# Large binary media files (even in tracked projects)
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.aac
+*.mxf
+*.avi
+*.mkv
+
+# Project Loop Harness local state
+.project-loop/project.db
+.project-loop/project.db-*
+.project-loop/events.jsonl
+.project-loop/evidence/
+.project-loop/worktrees/
+.project-loop/tmp/
+.project-loop/cache/
+
+# Generated Project Loop Harness review surfaces.
+.project-loop/dashboard/
+.project-loop/reports/
+.project-loop/exports/

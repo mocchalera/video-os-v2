@@ -1,0 +1,51 @@
+version: 1
+
+reasoning:
+  strategy: local-agent-first
+  interactive:
+    enabled: true
+    main_runtimes:
+      - claude-code
+      - codex
+    subagents_from_repo: true
+  automation:
+    claude:
+      mode: agent-sdk
+      enabled: true
+    codex:
+      mode: sdk
+      enabled: true
+    codex_exec:
+      enabled: true
+  api_fallback:
+    enabled: false
+    note: >
+      Keep disabled until there is a concrete automation need for remote-only textual reasoning.
+      The repository should not normalize direct provider calls for generic reasoning.
+
+connectors:
+  video_understanding:
+    provider: gemini
+    enabled: true
+  transcription:
+    provider: openai-audio
+    diarization: true
+    enabled: true
+  embeddings:
+    provider: gemini-embedding-2-preview
+    enabled: true
+
+engines:
+  media_analysis:
+    provider: ffmpeg
+  timeline_exchange:
+    provider: otio
+  packaging:
+    provider: remotion
+
+policies:
+  no_reasoning_provider_layer: true
+  timeline_canonical_format: timeline.json
+  otio_export_only: true
+  block_render_on_unresolved_blockers: true
+  block_render_on_fatal_review_findings: true

@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/caption-review-queue.schema.json",
+  "title": "Video OS Caption Review Queue",
+  "type": "object",
+  "required": ["version", "project", "status", "approval_readiness", "safe_bulk_review", "total_caption_count", "matched_caption_count", "exported_caption_count", "items"],
+  "properties": {
+    "version": { "const": "caption-review-queue/v2" },
+    "project": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["ready", "needs_recovery"] },
+    "base_caption_draft_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "fps": { "type": "number", "exclusiveMinimum": 0 },
+    "caption_style": { "type": "object" },
+    "can_undo": { "type": "boolean" },
+    "undo_depth": { "type": "integer", "minimum": 0 },
+    "glossary_proposals": { "type": "array" },
+    "recovery_action": {
+      "type": "object",
+      "required": ["code", "label", "command", "safe_to_run", "message"],
+      "properties": {
+        "code": { "enum": ["prepare_caption_draft", "protected_existing_review"] },
+        "label": { "type": "string", "minLength": 1 },
+        "command": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "safe_to_run": { "type": "boolean" },
+        "message": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "approval_readiness": {
+      "type": "object",
+      "required": ["can_approve", "blockers", "warning_issue_count", "warnings_acknowledged"],
+      "properties": {
+        "can_approve": { "type": "boolean" },
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "enum": ["reviewer_required", "unreviewed_captions", "flagged_captions", "blocking_issues", "stale_review", "font_contract_mismatch"] },
+              "message": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "warning_issue_count": { "type": "integer", "minimum": 0 },
+        "warnings_acknowledged": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "safe_bulk_review": {
+      "type": "object",
+      "required": ["eligible_caption_ids", "eligible_count", "excluded", "exclusion_reason_counts"],
+      "properties": {
+        "eligible_caption_ids": { "type": "array", "items": { "type": "string" } },
+        "eligible_count": { "type": "integer", "minimum": 0 },
+        "excluded": { "type": "array" },
+        "exclusion_reason_counts": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } }
+      },
+      "additionalProperties": false
+    },
+    "font_contract": {
+      "type": "object",
+      "required": ["status", "font_id", "family", "fallback_used", "diagnostics"],
+      "properties": {
+        "status": { "enum": ["ready", "blocked"] },
+        "font_id": { "type": "string", "minLength": 1 },
+        "family": { "type": "string", "minLength": 1 },
+        "fallback_used": { "type": "boolean" },
+        "primary": { "$ref": "#/$defs/font_asset" },
+        "ass_bold": { "$ref": "#/$defs/font_asset" },
+        "ass_heavy": { "$ref": "#/$defs/font_asset" },
+        "selected_family": { "type": "string", "minLength": 1 },
+        "selected_asset": { "$ref": "#/$defs/selected_font_asset" },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "type": "string", "minLength": 1 },
+              "message": { "type": "string", "minLength": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ready" } } },
+          "then": {
+            "required": ["primary", "ass_heavy", "selected_family", "selected_asset"],
+            "properties": { "fallback_used": { "const": false } }
+          },
+          "else": { "properties": { "fallback_used": { "const": true } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "current_approval": {
+      "type": "object",
+      "required": ["status", "hash"],
+      "properties": {
+        "status": { "const": "approved" },
+        "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "approval_warning": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "stale_approval" },
+        "message": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "total_caption_count": { "type": "integer", "minimum": 0 },
+    "matched_caption_count": { "type": "integer", "minimum": 0 },
+    "exported_caption_count": { "type": "integer", "minimum": 0 },
+    "items": { "type": "array" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "ready" } } },
+      "then": { "required": ["base_caption_draft_hash", "fps", "caption_style", "font_contract"] },
+      "else": { "required": ["recovery_action"] }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "font_asset": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "family": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "selected_font_asset": {
+      "type": "object",
+      "required": ["role", "family", "path", "sha256", "weight"],
+      "properties": {
+        "role": { "enum": ["primary", "ass_bold", "ass_heavy"] },
+        "family": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "weight": { "type": "integer", "minimum": 100, "maximum": 900 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

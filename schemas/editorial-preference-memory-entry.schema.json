@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/editorial-preference-memory-entry.schema.json",
+  "title": "Video OS Editorial Preference Memory Entry",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "entry_id",
+    "created_at",
+    "actor",
+    "source_event",
+    "preference_type",
+    "value",
+    "scope",
+    "confidence",
+    "status",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "entry_id": { "type": "string", "pattern": "^EPM_[A-Za-z0-9_-]+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "actor": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["human", "runtime_command", "import_premiere", "package_preflight"] },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "source_event": {
+      "type": "object",
+      "required": ["event_type", "event_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "event_type": { "type": "string", "enum": ["operator_command", "blueprint_acceptance", "review_patch_acceptance", "review_patch_rejection", "premiere_import", "package_approval", "redaction"] },
+        "event_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "preference_type": {
+      "type": "string",
+      "enum": ["pacing", "chronology", "transition_style", "repetition_tolerance", "bgm_loudness", "caption_density", "override_rationale", "delivery_preference", "redaction"]
+    },
+    "value": {
+      "type": "object",
+      "required": ["kind", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["string", "number", "boolean", "enum", "json"] },
+        "data": {}
+      }
+    },
+    "scope": { "type": "string", "enum": ["project", "series", "profile", "delivery", "temporary"] },
+    "scope_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "confidence": { "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record" },
+    "status": { "type": "string", "enum": ["active", "superseded", "rejected", "expired", "redacted"] },
+    "supersedes_entry_id": { "type": ["string", "null"], "pattern": "^EPM_[A-Za-z0-9_-]+$" },
+    "expires_at": { "type": ["string", "null"], "format": "date-time" },
+    "provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["operator-command", "blueprint", "review", "import-premiere", "package"] },
+        "inputs": { "type": "array", "items": { "type": "object" } },
+        "hash_policy": { "type": "object" }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "短尺SNSサウンドデザイン"
+  short_description: "意味優先でBGMと効果音を設計し内部試写まで検証する"
+  default_prompt: "$short-sound-design を使って、既存rough cutへ意味優先のBGM・効果音設計を適用し、内部試写とQAまで進めてください。"

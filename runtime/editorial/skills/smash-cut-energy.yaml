@@ -1,0 +1,15 @@
+id: smash_cut_energy
+category: linear_sequence
+primary_phase: assemble
+status: active
+required_signals:
+  - speech_intensity_score
+when:
+  - "large energy contrast between adjacent beats"
+avoid_when:
+  - "policy.preserve_natural_breath == true"
+effects:
+  transition_override: "hard_cut"
+  metadata_tags:
+    - energy_contrast
+    - hard_cut

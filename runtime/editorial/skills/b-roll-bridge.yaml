@@ -1,0 +1,13 @@
+id: b_roll_bridge
+category: linear_sequence
+primary_phase: score
+status: active
+required_signals: []
+when:
+  - "support or texture candidates available"
+avoid_when:
+  - "all beats require only hero"
+effects:
+  score_bonus: 0.05
+  metadata_tags:
+    - bridge_transition

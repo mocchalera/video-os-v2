@@ -1,0 +1,18 @@
+{
+  "version": "1.1.0",
+  "project_id": "planning-first-class-empty",
+  "candidates": [
+    {
+      "segment_id": "SEG_intro_001",
+      "asset_id": "AST_intro_001",
+      "src_in_us": 0,
+      "src_out_us": 2000000,
+      "role": "support",
+      "why_it_matches": "Schema-valid candidate with explicit empty first-class arrays.",
+      "risks": [],
+      "confidence": 0.7,
+      "audio_story_refs": [],
+      "continuity_refs": []
+    }
+  ]
+}

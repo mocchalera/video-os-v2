@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "cases": [
+    {
+      "id": "clean-full-frame",
+      "width": 1080,
+      "height": 1920,
+      "log": "[Parsed_cropdetect_2] x1:0 x2:1079 y1:0 y2:1919 w:1080 h:1920 x:0 y:0 pts:1 t:0.033 crop:1080:1920:0:0",
+      "expected_status": "verified"
+    },
+    {
+      "id": "black-inset-550ms",
+      "width": 1080,
+      "height": 1920,
+      "log": "[Parsed_cropdetect_2] t:7.000 crop:1000:1840:40:40\n[Parsed_cropdetect_2] t:7.100 crop:1000:1840:40:40\n[Parsed_cropdetect_2] t:7.200 crop:1000:1840:40:40\n[Parsed_cropdetect_2] t:7.300 crop:1000:1840:40:40\n[Parsed_cropdetect_2] t:7.400 crop:1000:1840:40:40\n[Parsed_cropdetect_2] t:7.550 crop:1000:1840:40:40",
+      "expected_status": "blocked"
+    },
+    {
+      "id": "freeze-800ms",
+      "width": 1080,
+      "height": 1920,
+      "log": "[freezedetect] lavfi.freezedetect.freeze_start: 10.000\n[freezedetect] lavfi.freezedetect.freeze_duration: 0.800\n[freezedetect] lavfi.freezedetect.freeze_end: 10.800",
+      "expected_status": "blocked"
+    }
+  ]
+}

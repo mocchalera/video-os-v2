@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/active-delivery.schema.json",
+  "title": "Video OS Active Delivery Pointer",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "generation_id",
+    "generation_path",
+    "activated_at",
+    "approval_intent",
+    "inputs",
+    "artifacts"
+  ],
+  "properties": {
+    "version": { "const": "active-delivery/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "generation_id": { "type": "string", "pattern": "^[a-f0-9]{24}$" },
+    "generation_path": { "type": "string", "pattern": "^07_package/caption-finalize/generations/[a-f0-9]{24}$" },
+    "activated_at": { "type": "string", "format": "date-time" },
+    "approval_intent": { "$ref": "#/$defs/artifact" },
+    "inputs": {
+      "type": "object",
+      "required": ["approval_sha256", "timeline_sha256", "generation_key"],
+      "properties": {
+        "approval_sha256": { "$ref": "#/$defs/sha256" },
+        "timeline_sha256": { "$ref": "#/$defs/sha256" },
+        "final_render_approval_sha256": { "$ref": "#/$defs/sha256" },
+        "generation_key": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "caption_ass",
+        "caption_srt",
+        "final_video",
+        "qa_report",
+        "package_manifest",
+        "preview",
+        "preview_receipt",
+        "receipt"
+      ],
+      "properties": {
+        "caption_ass": { "$ref": "#/$defs/artifact" },
+        "caption_srt": { "$ref": "#/$defs/artifact" },
+        "final_video": { "$ref": "#/$defs/video_artifact" },
+        "qa_report": { "$ref": "#/$defs/artifact" },
+        "package_manifest": { "$ref": "#/$defs/artifact" },
+        "preview": { "$ref": "#/$defs/video_artifact" },
+        "preview_receipt": { "$ref": "#/$defs/artifact" },
+        "receipt": { "$ref": "#/$defs/artifact" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "artifact": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "video_artifact": {
+      "type": "object",
+      "required": ["path", "sha256", "size_bytes", "mtime_ms"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "mtime_ms": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

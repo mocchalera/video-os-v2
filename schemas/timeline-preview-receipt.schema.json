@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/timeline-preview-receipt.schema.json",
+  "type": "object",
+  "required": ["version", "preview_path", "preview_sha256", "preview_size_bytes", "preview_mtime_ms", "timeline_path", "timeline_sha256", "caption_input", "created_at"],
+  "properties": {
+    "version": { "const": "timeline-preview-receipt/v1" },
+    "preview_path": { "type": "string", "minLength": 1 },
+    "preview_sha256": { "$ref": "#/$defs/hash" },
+    "preview_size_bytes": { "type": "integer", "minimum": 0 },
+    "preview_mtime_ms": { "type": "integer", "minimum": 0 },
+    "timeline_path": { "type": "string", "minLength": 1 },
+    "timeline_sha256": { "$ref": "#/$defs/hash" },
+    "caption_input": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "$ref": "#/$defs/hash" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false,
+  "$defs": { "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } }
+}
