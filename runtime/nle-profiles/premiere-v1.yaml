@@ -1,0 +1,77 @@
+version: 1
+profile_id: adobe_premiere_fcp7xml_v1
+nle:
+  vendor: Adobe
+  product: Premiere Pro
+  version_range: ">=23.0"
+otio:
+  interchange_format: otio
+  metadata_namespace: video_os.premiere
+stable_id:
+  primary_paths:
+    clip: clipitem/@id
+    track: track (positional)
+  fallback_paths:
+    - clipitem/name
+  require_exact_metadata: false
+surfaces:
+  trim:
+    mode: verified_roundtrip
+    tolerance_frames: 1
+  reorder:
+    mode: verified_roundtrip
+    detect_after: ripple_normalized_peer_order
+  enable_disable:
+    mode: provisional_roundtrip
+  track_move:
+    mode: provisional_roundtrip
+  simple_transition:
+    mode: report_only
+    allowed_types:
+      - dissolve
+      - dip_to_color
+  timeline_marker_add:
+    mode: provisional_roundtrip
+  clip_marker_add:
+    mode: provisional_roundtrip
+  note_text_add:
+    mode: report_only
+  text_overlay:
+    mode: report_only
+    export_mode: blocked
+  audio_levels:
+    mode: provisional_roundtrip
+    allowed_effect_ids:
+      - audiolevels
+    mapped_unsupported_effects: reject_on_apply
+    unmapped_effects: report_only_manual
+    hardware_verified: false
+  visual_effect_bake:
+    version: visual-effect-bake/v1
+    mode: derived_video_replacement
+    treatment_schema: premiere-visual-treatment/v1
+    manifest_schema: premiere-effect-bake-manifest/v1
+    codec_policy: h264_crf14_near_lossless
+    consent: explicit_cli_flag
+    cache_root: 09_output/premiere-bakes
+    output_sar: "1:1"
+    media_topology: video_only_with_independent_original_audio
+    supported_baked_edits:
+      - unchanged
+      - reorder
+      - delete
+    blocked_baked_edits:
+      - trim
+      - track_move
+      - relink
+      - source_replace
+      - speed
+      - rate
+      - filter
+    hardware_verified: false
+  color_finish:
+    mode: lossy
+import_policy:
+  provisional_mapping_requires_review: true
+  unmapped_edit_requires_review: true
+  one_to_many_requires_review: true

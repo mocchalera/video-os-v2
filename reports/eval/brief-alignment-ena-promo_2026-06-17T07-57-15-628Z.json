@@ -1,0 +1,89 @@
+{
+  "version": "1",
+  "project": "ena-promo",
+  "evaluated_at": "2026-06-17T07:57:15.628Z",
+  "brief_hash": "sha256:4fffa7c3115604e0f3a439f2f122bfea5010b82737d7e10e7b8ab945a87d5805",
+  "stages": {
+    "selects": {
+      "score": 0.833,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.813,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "3/4 brief message items represented across active candidates"
+          ],
+          "gaps": [
+            "not all brief message items are represented by active candidate evidence"
+          ]
+        },
+        "must_have_coverage": {
+          "score": 1,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/5 selectable must_have items matched",
+            "selection coverage analyzer score 100.0%"
+          ],
+          "gaps": []
+        },
+        "emotion_curve_alignment": {
+          "score": 0.803,
+          "confidence": 0.7,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/5 brief emotion_curve terms found in candidate beats/evidence",
+            "1/61 active candidates carry emotion/peak signals",
+            "61/61 active candidates carry eligible_beats"
+          ],
+          "gaps": []
+        },
+        "narrative_structure": {
+          "score": 0.538,
+          "confidence": 0.8,
+          "judge_source": "deterministic",
+          "evidence": [
+            "2 role types represented in selects",
+            "story_role present on 61/61 candidates",
+            "eligible_beats present on 61/61 candidates",
+            "hook/opening function detected",
+            "experience/development function detected",
+            "closing/payoff function detected",
+            "story_role semantic_rank order is not hook -> experience -> closing"
+          ],
+          "gaps": [
+            "selects do not expose setup/context candidates",
+            "story_role sequence is not ordered hook -> experience -> closing by semantic_rank"
+          ]
+        },
+        "pacing_coherence": {
+          "score": 0.954,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "selected source duration 1060.7s for 230s target"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.865,
+          "confidence": 0.8,
+          "judge_source": "deterministic",
+          "evidence": [
+            "59/61 unique assets",
+            "2 active roles represented",
+            "6 semantic clusters represented"
+          ],
+          "gaps": [
+            "role distribution is narrow"
+          ]
+        }
+      }
+    }
+  },
+  "composite": 0.833,
+  "notes": [
+    "blueprint stage skipped: 04_plan/edit_blueprint.yaml not found"
+  ]
+}

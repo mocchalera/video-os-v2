@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "project_id": "q10-planning-partial-override",
+  "current_state": "blueprint_ready",
+  "gates": {
+    "analysis_gate": "ready",
+    "compile_gate": "open",
+    "planning_gate": "partial_override",
+    "timeline_gate": "open",
+    "review_gate": "blocked",
+    "packaging_gate": "blocked"
+  },
+  "history": []
+}

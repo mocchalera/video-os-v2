@@ -1,0 +1,13 @@
+id: human_golden_order
+category: linear_sequence
+primary_phase: assemble
+status: active
+required_signals: []
+when:
+  - "candidate_plan encodes an approved human edit order"
+avoid_when:
+  - "candidate_plan is a soft retrieval hint rather than an authored sequence"
+effects:
+  metadata_tags:
+    - human_golden_order
+    - exact_candidate_plan_order

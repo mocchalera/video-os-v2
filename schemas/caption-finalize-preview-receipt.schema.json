@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/caption-finalize-preview-receipt.schema.json",
+  "type": "object",
+  "required": ["version", "source_final_path", "source_final_sha256", "source_final_size_bytes", "source_final_mtime_ms", "preview_path", "preview_sha256", "preview_size_bytes", "preview_mtime_ms", "created_at"],
+  "properties": {
+    "version": { "enum": ["caption-finalize-preview-receipt/v1", "caption-finalize-preview-receipt/v2"] },
+    "source_final_path": { "type": "string", "minLength": 1 },
+    "source_final_sha256": { "$ref": "#/$defs/hash" },
+    "source_final_size_bytes": { "type": "integer", "minimum": 0 },
+    "source_final_mtime_ms": { "type": "integer", "minimum": 0 },
+    "preview_path": { "type": "string", "minLength": 1 },
+    "preview_sha256": { "$ref": "#/$defs/hash" },
+    "preview_size_bytes": { "type": "integer", "minimum": 0 },
+    "preview_mtime_ms": { "type": "integer", "minimum": 0 },
+    "approval_sha256": { "$ref": "#/$defs/hash" },
+    "timeline_sha256": { "$ref": "#/$defs/hash" },
+    "font_manifest_sha256": { "$ref": "#/$defs/hash" },
+    "created_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [{
+    "if": { "properties": { "version": { "const": "caption-finalize-preview-receipt/v2" } } },
+    "then": { "required": ["approval_sha256", "timeline_sha256", "font_manifest_sha256"] }
+  }],
+  "additionalProperties": false,
+  "$defs": { "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } }
+}

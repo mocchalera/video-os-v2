@@ -1,0 +1,52 @@
+# Deferred skills — require editorial IR expansion (within-beat multi-clip,
+# thread/section, audio lead/lag). Registry presence only; not compiler-activated.
+
+- id: crosscut_suspense
+  category: linear_sequence
+  primary_phase: assemble
+  status: deferred_ir_required
+  required_signals: []
+  when: []
+  avoid_when: []
+  effects: {}
+
+- id: montage_compress
+  category: linear_sequence
+  primary_phase: assemble
+  status: deferred_ir_required
+  required_signals: []
+  when: []
+  avoid_when: []
+  effects: {}
+
+- id: j_cut_lead_in
+  category: trim
+  primary_phase: resolve
+  status: deferred_ir_required
+  required_signals: []
+  when: []
+  avoid_when: []
+  effects: {}
+
+- id: l_cut_reaction_hold
+  category: trim
+  primary_phase: resolve
+  status: deferred_ir_required
+  required_signals: []
+  when: []
+  avoid_when: []
+  effects: {}
+
+- id: cutaway_repair
+  category: linear_sequence
+  primary_phase: assemble
+  status: deferred_ir_required
+  required_signals: []
+  when: []
+  avoid_when: []
+  effects: {}
+
+# talking_head_pacing graduated from this file. Increment 1 (utterance-boundary
+# snapping) ships as an active trim skill in talking-head-pacing.yaml. The
+# remaining within-beat parts (filler excision, pause tightening) still need the
+# multi-clip IR expansion described above and are tracked there.

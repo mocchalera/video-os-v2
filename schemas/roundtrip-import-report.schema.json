@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/roundtrip-import-report.schema.json",
+  "title": "Video OS Roundtrip Import Report",
+  "description": "Operational report for OTIO import success/failure and lossiness assessment.",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "handoff_id",
+    "imported_at",
+    "capability_profile_id",
+    "status",
+    "base_timeline",
+    "bridge",
+    "mapping_summary"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_id": {
+      "type": "string",
+      "pattern": "^HND_.+$"
+    },
+    "imported_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "capability_profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["success", "partial", "failed"]
+    },
+    "base_timeline": {
+      "type": "object",
+      "required": ["version", "hash"],
+      "properties": {
+        "version": { "type": "string" },
+        "hash": { "type": "string", "pattern": "^sha256:" }
+      },
+      "additionalProperties": false
+    },
+    "bridge": {
+      "$ref": "#/$defs/bridgeFingerprint"
+    },
+    "nle_session": {
+      "$ref": "#/$defs/nleSessionObserved"
+    },
+    "mapping_summary": {
+      "$ref": "#/$defs/mappingSummary"
+    },
+    "one_to_many_items": {
+      "$ref": "#/$defs/oneToManyItems"
+    },
+    "loss_summary": {
+      "$ref": "#/$defs/lossSummary"
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "bridgeFingerprint": {
+      "type": "object",
+      "required": [
+        "bridge_version",
+        "python_version",
+        "opentimelineio_version",
+        "bridge_script_hash"
+      ],
+      "properties": {
+        "bridge_version": { "type": "string" },
+        "python_version": { "type": "string" },
+        "opentimelineio_version": { "type": "string" },
+        "bridge_script_hash": { "type": "string", "pattern": "^sha256:" },
+        "loaded_adapter_modules": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "nleSessionObserved": {
+      "type": "object",
+      "properties": {
+        "vendor": { "type": "string" },
+        "product": { "type": "string" },
+        "observed_version": { "type": "string" },
+        "import_options_snapshot": { "type": "object" },
+        "export_options_snapshot": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "mappingSummary": {
+      "type": "object",
+      "required": ["exported_clip_count", "imported_clip_count"],
+      "properties": {
+        "exported_clip_count": { "type": "integer", "minimum": 0 },
+        "imported_clip_count": { "type": "integer", "minimum": 0 },
+        "exact_matches": { "type": "integer", "minimum": 0 },
+        "fallback_matches": { "type": "integer", "minimum": 0 },
+        "provisional_matches": { "type": "integer", "minimum": 0 },
+        "split_items": { "type": "integer", "minimum": 0 },
+        "duplicate_id_items": { "type": "integer", "minimum": 0 },
+        "ambiguous_one_to_many_items": { "type": "integer", "minimum": 0 },
+        "unmapped_items": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "oneToManyItems": {
+      "type": "object",
+      "properties": {
+        "split_entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/splitEntry" }
+        },
+        "duplicate_entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/duplicateEntry" }
+        },
+        "ambiguous_entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ambiguousEntry" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "splitEntry": {
+      "type": "object",
+      "required": ["parent_exchange_clip_id", "child_ids", "review_required"],
+      "properties": {
+        "parent_exchange_clip_id": { "type": "string" },
+        "child_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "review_required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "duplicateEntry": {
+      "type": "object",
+      "required": ["parent_exchange_clip_id", "retained_exchange_clip_id", "copy_ids", "review_required"],
+      "properties": {
+        "parent_exchange_clip_id": { "type": "string" },
+        "retained_exchange_clip_id": { "type": "string" },
+        "copy_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "basis": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "review_required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "ambiguousEntry": {
+      "type": "object",
+      "required": ["parent_exchange_clip_id", "candidates", "reason"],
+      "properties": {
+        "parent_exchange_clip_id": { "type": "string" },
+        "candidates": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "reason": { "type": "string" },
+        "review_required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "lossSummary": {
+      "type": "object",
+      "required": ["review_required"],
+      "properties": {
+        "review_required": { "type": "boolean" },
+        "lossy_items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lossItem" }
+        },
+        "unmapped_items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lossItem" }
+        },
+        "unsupported_items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/lossItem" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "lossItem": {
+      "type": "object",
+      "required": ["classification", "item_ref", "reason"],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": [
+            "complex_title",
+            "plugin_effect",
+            "color_finish",
+            "advanced_audio_finish",
+            "speed_change",
+            "nested_sequence",
+            "deleted_clip_without_disable",
+            "missing_stable_id",
+            "split_clip",
+            "duplicated_clip",
+            "ambiguous_one_to_many",
+            "track_reorder",
+            "clip_marker_add",
+            "note_text_add",
+            "ambiguous_mapping",
+            "unknown_vendor_extension"
+          ]
+        },
+        "item_ref": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/delivery-profile.schema.json",
+  "title": "Video OS Delivery Profile",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "artifact_version",
+    "created_at",
+    "profile_id",
+    "profile_name",
+    "platform",
+    "release_mode",
+    "video_constraints",
+    "audio_constraints",
+    "caption_constraints",
+    "duration_constraints",
+    "file_naming",
+    "metadata_requirements",
+    "privacy_strictness",
+    "rights_strictness",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "const": "delivery-profile-v1" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "profile_id": { "type": "string", "pattern": "^DPROF_[A-Za-z0-9_-]+$" },
+    "profile_name": { "type": "string", "minLength": 1 },
+    "platform": {
+      "type": "string",
+      "enum": ["youtube", "shorts", "instagram_reel", "instagram_feed", "tiktok", "internal_review", "client_handoff", "custom"]
+    },
+    "release_mode": { "type": "string", "enum": ["public", "external", "internal"] },
+    "video_constraints": { "$ref": "#/$defs/video-constraints" },
+    "audio_constraints": { "$ref": "#/$defs/audio-constraints" },
+    "caption_constraints": { "$ref": "#/$defs/caption-constraints" },
+    "duration_constraints": { "$ref": "#/$defs/duration-constraints" },
+    "file_naming": { "$ref": "#/$defs/file-naming" },
+    "metadata_requirements": { "$ref": "#/$defs/metadata-requirements" },
+    "privacy_strictness": { "type": "string", "enum": ["strict_public", "external", "internal_only"] },
+    "rights_strictness": { "type": "string", "enum": ["strict_public", "external", "internal_only"] },
+    "requires_calibrated_confidence": { "type": "boolean", "default": false },
+    "provenance": { "$ref": "#/$defs/artifact-provenance" }
+  },
+  "$defs": {
+    "video-constraints": {
+      "type": "object",
+      "required": ["aspect_ratio", "resolution", "frame_rate_mode", "color_space"],
+      "additionalProperties": false,
+      "properties": {
+        "aspect_ratio": { "type": "string", "enum": ["16:9", "9:16", "1:1", "4:5", "21:9", "custom"] },
+        "resolution": {
+          "type": "object",
+          "required": ["width", "height"],
+          "additionalProperties": false,
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "frame_rate_mode": {
+          "type": "string",
+          "enum": ["cfr_29.97", "cfr_30", "cfr_24", "cfr_25", "cfr_60", "vfr_disallowed", "custom"]
+        },
+        "color_space": { "type": "string", "enum": ["rec709", "sRGB", "rec2020", "custom"] }
+      }
+    },
+    "audio-constraints": {
+      "type": "object",
+      "required": ["loudness_lufs", "true_peak_dbtp", "sample_rate_hz", "channel_layout"],
+      "additionalProperties": false,
+      "properties": {
+        "loudness_lufs": { "type": "number" },
+        "true_peak_dbtp": { "type": "number" },
+        "sample_rate_hz": { "type": "integer", "minimum": 1 },
+        "channel_layout": { "type": "string", "enum": ["stereo", "mono", "5.1", "custom"] }
+      }
+    },
+    "caption-constraints": {
+      "type": "object",
+      "required": ["mode", "sidecar_format", "language_required"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "type": "string", "enum": ["burned_in", "sidecar", "both", "none"] },
+        "sidecar_format": { "type": ["string", "null"], "enum": ["srt", "vtt", "scc", null] },
+        "language_required": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$" }
+        }
+      }
+    },
+    "duration-constraints": {
+      "type": "object",
+      "required": ["min_seconds", "max_seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "min_seconds": { "type": ["number", "null"], "minimum": 0 },
+        "max_seconds": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "file-naming": {
+      "type": "object",
+      "required": ["pattern", "allowed_extensions"],
+      "additionalProperties": false,
+      "properties": {
+        "pattern": { "type": "string", "minLength": 1 },
+        "allowed_extensions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^\\.[A-Za-z0-9]+$" }
+        }
+      }
+    },
+    "metadata-requirements": {
+      "type": "object",
+      "required": ["title_required", "description_required", "tags_required", "thumbnail_required", "custom_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "title_required": { "type": "boolean" },
+        "description_required": { "type": "boolean" },
+        "tags_required": { "type": "boolean" },
+        "thumbnail_required": { "type": "boolean" },
+        "custom_fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/custom-field" }
+        }
+      }
+    },
+    "custom-field": {
+      "type": "object",
+      "required": ["field_id", "label", "required", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "field_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+        "label": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["string", "number", "boolean", "url", "date", "custom"] }
+      }
+    },
+    "artifact-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["operator-command", "/package"] },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/input-ref" } },
+        "hash_policy": { "$ref": "#/$defs/hash-policy" }
+      }
+    },
+    "input-ref": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "required": { "type": "boolean" }
+      }
+    },
+    "hash-policy": {
+      "type": "object",
+      "required": ["algorithm", "canonicalization", "excluded_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "type": "string", "enum": ["sha256"] },
+        "canonicalization": { "type": "string", "enum": ["yaml-to-normalized-json-v1"] },
+        "excluded_fields": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

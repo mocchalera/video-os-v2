@@ -1,0 +1,570 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/audio-mix-report.schema.json",
+  "title": "Video OS Audio Mix Report",
+  "description": "Backward-compatible audio mix evidence. v2 binds a shared AudioRenderPlan to A1-only finishing, applied A2/A3 cue values, waveform sidechain evidence, and one final mastering pass.",
+  "oneOf": [
+    { "$ref": "#/$defs/v1" },
+    { "$ref": "#/$defs/v2" }
+  ],
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "measurement": {
+      "type": "object",
+      "required": ["input_i", "input_tp", "input_lra", "input_thresh", "target_offset"],
+      "additionalProperties": false,
+      "properties": {
+        "input_i": { "type": "string", "minLength": 1 },
+        "input_tp": { "type": "string", "minLength": 1 },
+        "input_lra": { "type": "string", "minLength": 1 },
+        "input_thresh": { "type": "string", "minLength": 1 },
+        "target_offset": { "type": "string", "minLength": 1 }
+      }
+    },
+    "mastering": {
+      "type": "object",
+      "required": [
+        "applied",
+        "loudness_target_lufs",
+        "lra_target",
+        "true_peak_target_dbtp",
+        "premaster_measurement",
+        "output_measurement"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "applied": { "type": "boolean" },
+        "loudness_target_lufs": { "type": "number" },
+        "lra_target": { "type": "number", "exclusiveMinimum": 0 },
+        "true_peak_target_dbtp": { "type": "number" },
+        "premaster_measurement": { "$ref": "#/$defs/measurement" },
+        "output_measurement": { "$ref": "#/$defs/measurement" }
+      }
+    },
+    "sidechain": {
+      "type": "object",
+      "required": [
+        "detector",
+        "threshold",
+        "ratio",
+        "attack_ms",
+        "release_ms",
+        "base_gain_db",
+        "requested_duck_gain_db"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "detector": { "const": "dialogue_waveform_rms" },
+        "threshold": { "type": "number", "exclusiveMinimum": 0 },
+        "ratio": { "type": "number", "minimum": 1 },
+        "attack_ms": { "type": "number", "minimum": 0 },
+        "release_ms": { "type": "number", "minimum": 0 },
+        "base_gain_db": { "type": "number" },
+        "requested_duck_gain_db": { "type": "number" }
+      }
+    },
+    "v1": {
+      "type": "object",
+      "required": ["version", "has_bgm", "strategy", "final_mastering"],
+      "properties": {
+        "version": { "const": "audio-mix-report/v1" },
+        "has_bgm": { "type": "boolean" },
+        "strategy": {
+          "enum": [
+            "dialogue_only_mastering_v1",
+            "original_passthrough_v1",
+            "waveform_sidechain_v1",
+            "timeline_embedded_bgm_mastering_v1"
+          ]
+        },
+        "final_mastering": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "v2": {
+      "type": "object",
+      "required": [
+        "version",
+        "project_id",
+        "plan_hash",
+        "has_bgm",
+        "strategy",
+        "input_hashes",
+        "output",
+        "stems",
+        "cues",
+        "dialogue_finish_scope",
+        "mastering_count",
+        "execution_strategy",
+        "final_mastering",
+        "warnings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": "audio-mix-report/v2" },
+        "project_id": { "type": "string", "minLength": 1 },
+        "plan_hash": { "$ref": "#/$defs/hash" },
+        "has_bgm": { "type": "boolean" },
+        "has_sfx": { "type": "boolean" },
+        "strategy": { "const": "shared_audio_render_plan_v1" },
+        "input_hashes": {
+          "type": "object",
+          "required": ["timeline", "dialogue_sources", "cue_sources"],
+          "additionalProperties": false,
+          "properties": {
+            "timeline": { "$ref": "#/$defs/hash" },
+            "music_cues": { "$ref": "#/$defs/hash" },
+            "sfx_cues": { "$ref": "#/$defs/hash" },
+            "sfx_library_manifest": { "$ref": "#/$defs/hash" },
+            "sound_design_decision": { "$ref": "#/$defs/hash" },
+            "dialogue_sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["clip_id", "content_hash", "size_bytes"],
+                "additionalProperties": false,
+                "properties": {
+                  "clip_id": { "type": "string", "minLength": 1 },
+                  "content_hash": { "$ref": "#/$defs/hash" },
+                  "size_bytes": { "type": "integer", "minimum": 1 }
+                }
+              }
+            },
+            "cue_sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["cue_id", "content_hash", "size_bytes"],
+                "additionalProperties": false,
+                "properties": {
+                  "cue_id": { "type": "string", "minLength": 1 },
+                  "content_hash": { "$ref": "#/$defs/hash" },
+                  "size_bytes": { "type": "integer", "minimum": 1 }
+                }
+              }
+            },
+            "sfx_sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["cue_id", "asset_id", "content_hash", "size_bytes"],
+                "additionalProperties": false,
+                "properties": {
+                  "cue_id": { "type": "string", "minLength": 1 },
+                  "asset_id": { "type": "string", "minLength": 1 },
+                  "content_hash": { "$ref": "#/$defs/hash" },
+                  "size_bytes": { "type": "integer", "minimum": 1 }
+                }
+              }
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": ["content_hash", "size_bytes", "sample_rate_hz", "channels"],
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": { "$ref": "#/$defs/hash" },
+            "size_bytes": { "type": "integer", "minimum": 1 },
+            "sample_rate_hz": { "const": 48000 },
+            "channels": { "enum": [1, 2] }
+          }
+        },
+        "stems": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "stem_id",
+              "role",
+              "source_track_id",
+              "content_hash",
+              "size_bytes",
+              "finish_applied"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "stem_id": { "type": "string", "minLength": 1 },
+              "role": { "enum": ["dialogue", "music", "sfx"] },
+              "source_track_id": { "enum": ["A1", "A2", "A3"] },
+              "content_hash": { "$ref": "#/$defs/hash" },
+              "size_bytes": { "type": "integer", "minimum": 1 },
+              "finish_applied": { "type": "boolean" }
+            }
+          }
+        },
+        "cues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "cue_id",
+              "track_id",
+              "timeline_range",
+              "source_range_us",
+              "applied",
+              "pins",
+              "rendered_content_hash",
+              "sidechain_content_hash"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "cue_id": { "type": "string", "minLength": 1 },
+              "track_id": { "type": "string", "minLength": 1 },
+              "timeline_range": { "$ref": "#/$defs/frameRange" },
+              "source_range_us": { "$ref": "#/$defs/microsecondRange" },
+              "applied": { "$ref": "#/$defs/appliedCue" },
+              "pins": { "$ref": "#/$defs/pins" },
+              "rendered_content_hash": { "$ref": "#/$defs/hash" },
+              "sidechain_content_hash": { "$ref": "#/$defs/hash" }
+            }
+          }
+        },
+        "sfx_cues": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sfxCueEvidence" }
+        },
+        "dialogue_finish_scope": {
+          "enum": ["a1_only", "none", "none_original_passthrough", "none_mixed_legacy"]
+        },
+        "mastering_count": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "execution_strategy": {
+          "type": "object",
+          "required": ["id", "stages", "deterministic_input_order"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "const": "shared_audio_render_plan_executor_v1" },
+            "stages": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "deterministic_input_order": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "sidechain_evidence": {
+          "type": "object",
+          "required": ["detector", "dialogue_stem_content_hash", "threshold", "per_cue"],
+          "additionalProperties": false,
+          "properties": {
+            "detector": { "const": "dialogue_waveform_rms" },
+            "dialogue_stem_content_hash": { "$ref": "#/$defs/hash" },
+            "threshold": { "type": "number", "exclusiveMinimum": 0 },
+            "per_cue": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "cue_id",
+                  "ratio",
+                  "attack_ms",
+                  "release_ms",
+                  "requested_duck_gain_db",
+                  "sidechain_output_content_hash"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "cue_id": { "type": "string", "minLength": 1 },
+                  "ratio": { "type": "number", "minimum": 1 },
+                  "attack_ms": { "type": "number", "minimum": 0 },
+                  "release_ms": { "type": "number", "minimum": 0 },
+                  "requested_duck_gain_db": { "type": "number" },
+                  "sidechain_output_content_hash": { "$ref": "#/$defs/hash" }
+                }
+              }
+            }
+          }
+        },
+        "sfx_sidechain_evidence": {
+          "type": "object",
+          "required": ["detector", "dialogue_stem_content_hash", "threshold", "per_cue"],
+          "additionalProperties": false,
+          "properties": {
+            "detector": { "const": "dialogue_waveform_rms" },
+            "dialogue_stem_content_hash": { "$ref": "#/$defs/hash" },
+            "threshold": { "type": "number", "exclusiveMinimum": 0 },
+            "per_cue": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "cue_id",
+                  "duck_group",
+                  "ratio",
+                  "attack_ms",
+                  "release_ms",
+                  "requested_duck_gain_db",
+                  "dialogue_overlap_frames",
+                  "sidechain_applied",
+                  "a3_output_content_hash"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "cue_id": { "type": "string", "minLength": 1 },
+                  "duck_group": { "enum": ["dialogue", "none"] },
+                  "ratio": { "type": "number", "minimum": 1 },
+                  "attack_ms": { "type": "number", "minimum": 0 },
+                  "release_ms": { "type": "number", "minimum": 0 },
+                  "requested_duck_gain_db": { "type": "number" },
+                  "dialogue_overlap_frames": { "type": "integer", "minimum": 0 },
+                  "sidechain_applied": { "type": "boolean" },
+                  "a3_output_content_hash": { "$ref": "#/$defs/hash" }
+                }
+              }
+            }
+          }
+        },
+        "sfx_peak": {
+          "type": "object",
+          "required": ["maximum_peak_dbtp", "minimum_headroom_db"],
+          "additionalProperties": false,
+          "properties": {
+            "maximum_peak_dbtp": { "type": ["number", "null"] },
+            "minimum_headroom_db": { "type": ["number", "null"] }
+          }
+        },
+        "sidechain": { "$ref": "#/$defs/sidechain" },
+        "final_mastering": { "$ref": "#/$defs/mastering" },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["has_sfx"],
+            "properties": { "has_sfx": { "const": true } }
+          },
+          "then": {
+            "required": [
+              "sfx_cues",
+              "sfx_sidechain_evidence",
+              "sfx_peak"
+            ],
+            "properties": {
+              "input_hashes": {
+                "required": [
+                  "sfx_cues",
+                  "sfx_library_manifest",
+                  "sfx_sources"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "sfxCueEvidence": {
+      "type": "object",
+      "required": [
+        "cue_id",
+        "semantic_role",
+        "asset_id",
+        "timeline_range",
+        "source_range_us",
+        "dialogue_overlap_frames",
+        "applied",
+        "tail_processing",
+        "pins",
+        "rendered_content_hash",
+        "a3_output_content_hash",
+        "peak_dbtp",
+        "headroom_db"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cue_id": { "type": "string", "minLength": 1 },
+        "semantic_role": {
+          "enum": [
+            "hook_impact",
+            "transition_accent",
+            "claim_emphasis",
+            "achievement_reveal",
+            "simple_sound"
+          ]
+        },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "timeline_range": { "$ref": "#/$defs/frameRange" },
+        "source_range_us": { "$ref": "#/$defs/microsecondRange" },
+        "dialogue_overlap_frames": { "type": "integer", "minimum": 0 },
+        "applied": {
+          "type": "object",
+          "required": [
+            "gain_db",
+            "fade_in_ms",
+            "fade_out_ms",
+            "duck_group",
+            "duck_gain_db",
+            "attack_ms",
+            "release_ms"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "gain_db": { "type": "number" },
+            "fade_in_ms": { "type": "number", "minimum": 0 },
+            "fade_out_ms": { "type": "number", "minimum": 0 },
+            "duck_group": { "enum": ["dialogue", "none"] },
+            "duck_gain_db": { "type": "number" },
+            "attack_ms": { "type": "number", "minimum": 0 },
+            "release_ms": { "type": "number", "minimum": 0 }
+          }
+        },
+        "tail_processing": {
+          "type": "object",
+          "required": [
+            "requested_tail_frames",
+            "applied_tail_frames",
+            "timeline_action",
+            "source_action",
+            "render_duration_frames",
+            "render_duration_us"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "requested_tail_frames": { "type": "integer", "minimum": 0 },
+            "applied_tail_frames": { "type": "integer", "minimum": 0 },
+            "timeline_action": { "enum": ["kept", "trimmed_to_timeline"] },
+            "source_action": { "enum": ["exact", "trimmed", "padded"] },
+            "render_duration_frames": { "type": "integer", "minimum": 1 },
+            "render_duration_us": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "pins": {
+          "type": "object",
+          "required": [
+            "library_id",
+            "library_version",
+            "library_manifest_hash",
+            "asset_content_hash",
+            "asset_size_bytes",
+            "rights_evidence_ref",
+            "provenance_ref",
+            "rights_basis",
+            "rights_usage_scope",
+            "provenance_origin",
+            "generated_at"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "library_id": { "type": "string", "minLength": 1 },
+            "library_version": { "type": "string", "minLength": 1 },
+            "library_manifest_hash": { "$ref": "#/$defs/hash" },
+            "asset_content_hash": { "$ref": "#/$defs/hash" },
+            "asset_size_bytes": { "type": "integer", "minimum": 1 },
+            "rights_evidence_ref": { "type": "string", "minLength": 1 },
+            "provenance_ref": { "type": "string", "minLength": 1 },
+            "rights_basis": { "type": "string", "minLength": 1 },
+            "rights_usage_scope": { "type": "string", "minLength": 1 },
+            "provenance_origin": { "type": "string", "minLength": 1 },
+            "generated_at": { "type": ["string", "null"] },
+            "generation_id": { "type": ["string", "null"] }
+          }
+        },
+        "decision_pin": { "$ref": "#/$defs/soundDesignDecisionPin" },
+        "rendered_content_hash": { "$ref": "#/$defs/hash" },
+        "a3_output_content_hash": { "$ref": "#/$defs/hash" },
+        "peak_dbtp": { "type": ["number", "null"] },
+        "headroom_db": { "type": ["number", "null"] }
+      }
+    },
+    "soundDesignDecisionPin": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "decision_hash",
+        "resolved_frame",
+        "semantic_role",
+        "asset_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "decision_hash": { "$ref": "#/$defs/hash" },
+        "resolved_frame": { "type": "integer", "minimum": 0 },
+        "semantic_role": {
+          "enum": [
+            "hook_impact",
+            "transition_accent",
+            "claim_emphasis",
+            "achievement_reveal",
+            "simple_sound"
+          ]
+        },
+        "asset_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "frameRange": {
+      "type": "object",
+      "required": ["in_frame", "out_frame"],
+      "additionalProperties": false,
+      "properties": {
+        "in_frame": { "type": "integer", "minimum": 0 },
+        "out_frame": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "microsecondRange": {
+      "type": "object",
+      "required": ["in_us", "out_us"],
+      "additionalProperties": false,
+      "properties": {
+        "in_us": { "type": "integer", "minimum": 0 },
+        "out_us": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "appliedCue": {
+      "type": "object",
+      "required": [
+        "base_gain_db",
+        "duck_gain_db",
+        "fade_in_ms",
+        "fade_out_ms",
+        "attack_ms",
+        "release_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "base_gain_db": { "type": "number" },
+        "duck_gain_db": { "type": "number" },
+        "fade_in_ms": { "type": "number", "minimum": 0 },
+        "fade_out_ms": { "type": "number", "minimum": 0 },
+        "attack_ms": { "type": "number", "minimum": 0 },
+        "release_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "pins": {
+      "type": "object",
+      "required": [
+        "pack_id",
+        "pack_version",
+        "pack_manifest_hash",
+        "full_mix_content_hash",
+        "full_mix_size_bytes",
+        "analysis_content_hash",
+        "analysis_size_bytes",
+        "analysis_status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pack_id": { "type": "string", "minLength": 1 },
+        "pack_version": { "type": "string", "minLength": 1 },
+        "pack_manifest_hash": { "$ref": "#/$defs/hash" },
+        "full_mix_content_hash": { "$ref": "#/$defs/hash" },
+        "full_mix_size_bytes": { "type": "integer", "minimum": 1 },
+        "analysis_content_hash": { "$ref": "#/$defs/hash" },
+        "analysis_size_bytes": { "type": "integer", "minimum": 1 },
+        "analysis_status": { "enum": ["ready", "degraded", "failed", "unavailable"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "version": "1.0.0",
+  "project_id": "p4c-fixture",
+  "artifact_version": "calibration-report-v1",
+  "created_at": "2026-04-27T00:00:00Z",
+  "report_id": "CALRPT_bad_bucket",
+  "eval_set_id": "EVALSET_smoke",
+  "calibration_model_id": "CALMOD_baseline_v1",
+  "artifact_versions": {
+    "audio_story_graph_version": {
+      "version": "analysis-v1",
+      "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "continuity_graph_version": {
+      "version": "analysis-v1",
+      "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "assets_version": {
+      "version": "assets-v1",
+      "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  "metrics": {
+    "boundary_error_seconds": 0.18,
+    "tag_precision": 0.86,
+    "tag_recall": 0.81,
+    "peak_timestamp_error_seconds": 0.24,
+    "speaker_attribution_accuracy": 0.9,
+    "continuity_match_precision": 0.84,
+    "release_safety_false_negative_rate": 0.02
+  },
+  "buckets": [
+    {
+      "bucket": "medium",
+      "sample_count": 20,
+      "observed_accuracy": 1.2,
+      "expected_accuracy": 0.7
+    }
+  ],
+  "failures": [],
+  "recommendations": [],
+  "provenance": {
+    "producer": "scripts/eval-confidence-calibration.ts",
+    "inputs": [],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": ["created_at"]
+    }
+  }
+}

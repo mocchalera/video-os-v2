@@ -1,0 +1,1043 @@
+{
+  "artifact_version": "editorial-eye-benchmark-labels/v1",
+  "suite_id": "editorial-eye-v1",
+  "suite_version": "1.0.0",
+  "label_version": "labels-v2",
+  "fixture_manifest_sha256": "454df2fd5fdc94a740990b1b5c5342b8f407dd379d973cc2854f40214a25824c",
+  "automatic_ground_truth": [
+    {
+      "case_id": "interview_dialogue--video",
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "interview_dialogue--audio",
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "interview_dialogue--image",
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "interview_dialogue--sequence",
+      "ground_truth_ids": [],
+      "observation_expected_facts": [],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "interview_dialogue--mixed",
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "quiet_documentary--video",
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "quiet_documentary--audio",
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "quiet_documentary--image",
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "quiet_documentary--sequence",
+      "ground_truth_ids": [],
+      "observation_expected_facts": [],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "quiet_documentary--mixed",
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "product_detail--video",
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "product_detail--audio",
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "product_detail--image",
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "product_detail--sequence",
+      "ground_truth_ids": [],
+      "observation_expected_facts": [],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "product_detail--mixed",
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "action_event--video",
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "action_event--audio",
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "action_event--image",
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "action_event--sequence",
+      "ground_truth_ids": [],
+      "observation_expected_facts": [],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "action_event--mixed",
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "vertical_social_montage--video",
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "vertical_social_montage--audio",
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "vertical_social_montage--image",
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "vertical_social_montage--sequence",
+      "ground_truth_ids": [],
+      "observation_expected_facts": [],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "vertical_social_montage--mixed",
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "chronological_longform--video",
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "chronological_longform--audio",
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "chronological_longform--image",
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "chronological_longform--sequence",
+      "ground_truth_ids": [],
+      "observation_expected_facts": [],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "chronological_longform--mixed",
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "intentional_jump_smash_match--video",
+      "ground_truth_ids": [
+        "generated-video--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "intentional_jump_smash_match--audio",
+      "ground_truth_ids": [
+        "generated-audio--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:pcm_s16le",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": null,
+          "applicability": "not_applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.073778,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "intentional_jump_smash_match--image",
+      "ground_truth_ids": [
+        "generated-image--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "video:png",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 0,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": false,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "5a2ef15b2de878638e3aa7c20727e77371351cf47708135c4b1f4e3ea9327280",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": null,
+          "applicability": "not_applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "intentional_jump_smash_match--sequence",
+      "ground_truth_ids": [],
+      "observation_expected_facts": [],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    },
+    {
+      "case_id": "intentional_jump_smash_match--mixed",
+      "ground_truth_ids": [
+        "generated-mixed--probe"
+      ],
+      "observation_expected_facts": [
+        {
+          "field": "stream_topology",
+          "value": "audio:aac+video:mpeg4",
+          "applicability": "applicable"
+        },
+        {
+          "field": "duration_ms",
+          "value": 1000,
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_present",
+          "value": true,
+          "applicability": "applicable"
+        },
+        {
+          "field": "decoded_frame_sha256",
+          "value": "d936b2cf67e826607ba7e3a3f643fc6b18bb6e3b4051cc3ca99d85d90b8257a9",
+          "applicability": "applicable"
+        },
+        {
+          "field": "audio_rms_db",
+          "value": -21.034799,
+          "applicability": "applicable"
+        }
+      ],
+      "pair_labels": [],
+      "intentional_transition_labels": []
+    }
+  ],
+  "human_evaluation": {
+    "status": "unapproved",
+    "annotations": [],
+    "annotator_disagreement": []
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/render-layout-snapshot.schema.json",
+  "title": "Video OS Render Layout Snapshot v1",
+  "type": "object",
+  "required": ["version", "frame", "layers", "ending"],
+  "properties": {
+    "version": { "const": "render-layout-snapshot/v1" },
+    "frame": {
+      "type": "object",
+      "required": [
+        "width",
+        "height",
+        "fps_num",
+        "fps_den",
+        "total_frames",
+        "safe_area"
+      ],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps_num": { "type": "integer", "minimum": 1 },
+        "fps_den": { "type": "integer", "minimum": 1 },
+        "total_frames": { "type": "integer", "minimum": 0 },
+        "safe_area": { "$ref": "#/$defs/safeArea" }
+      },
+      "additionalProperties": false
+    },
+    "layers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/layer" }
+    },
+    "ending": {
+      "type": "object",
+      "required": ["final_frame_state"],
+      "properties": {
+        "final_frame_state": {
+          "type": "string",
+          "enum": [
+            "moving_source",
+            "natural_speaker",
+            "meaningful_end_card",
+            "intentional_still",
+            "not_applicable",
+            "static_source",
+            "black",
+            "frozen",
+            "unknown"
+          ]
+        },
+        "end_card_layer_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "safeArea": {
+      "type": "object",
+      "required": ["top", "right", "bottom", "left"],
+      "properties": {
+        "top": { "type": "number", "minimum": 0 },
+        "right": { "type": "number", "minimum": 0 },
+        "bottom": { "type": "number", "minimum": 0 },
+        "left": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "bounds": {
+      "type": "object",
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "font": {
+      "type": "object",
+      "required": ["status", "requested_family", "missing_glyphs"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["verified", "fallback", "missing"]
+        },
+        "requested_family": { "type": "string", "minLength": 1 },
+        "resolved_family": { "type": "string", "minLength": 1 },
+        "missing_glyphs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "layer": {
+      "type": "object",
+      "required": [
+        "layer_id",
+        "semantic_role",
+        "source",
+        "start_frame",
+        "end_frame",
+        "bounds"
+      ],
+      "properties": {
+        "layer_id": { "type": "string", "minLength": 1 },
+        "semantic_role": {
+          "type": "string",
+          "enum": ["speech_caption", "title", "cta"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["ffmpeg-libass", "remotion", "hyperframes"]
+        },
+        "start_frame": { "type": "integer", "minimum": 0 },
+        "end_frame": { "type": "integer", "minimum": 1 },
+        "bounds": { "$ref": "#/$defs/bounds" },
+        "font": { "$ref": "#/$defs/font" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

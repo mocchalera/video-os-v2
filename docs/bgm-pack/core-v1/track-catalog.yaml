@@ -1,0 +1,419 @@
+schema_version: "1.0"
+pack_id: video-os-core-bgm-v1
+status: technical_candidate_pack_promoted
+audio_generated: true
+catalog_notes:
+  - "One technically verified candidate per family can be materialized outside Git; musical audition and release approval remain pending."
+  - "Durations and bar counts are targets; the accepted master must update actual values without changing the track ID."
+  - "Edit points are counted from bar 1 and must be validated against the final bounce."
+  - "Cutdown descriptions identify source modules, not literal concatenation lengths; the music editor may replace/overlap a cadence and must deliver 15/30/60/90 seconds to within one audio sample."
+  - "All tracks are instrumental, dialogue-first, and must avoid recognizable imitation."
+delivery_baseline:
+  master_format: "WAV 48 kHz / 24-bit"
+  target_loudness: "-18 LUFS integrated +/- 1 LU"
+  max_true_peak: "-1.0 dBTP"
+  required_cutdowns_seconds: [15, 30, 60, 90]
+  clean_handles: "At least 2 bars clean intro and 2 bars clean outro; no dialogue-like pickup or unresolved tail."
+  stem_alignment: "All stems start at 00:00, share master duration, and include tails."
+
+tracks:
+  - id: trust-clarity-low-01
+    family: "Trust / Clarity"
+    energy: low
+    working_title: "Clear Ground"
+    use_cases: ["executive interview", "customer proof", "explainer", "public-service information"]
+    bpm: 84
+    meter: "4/4"
+    key_mode_direction: "D major with restrained add2/add6 color; avoid triumphant dominant motion"
+    instrumentation: ["felt piano", "muted electric piano", "soft marimba pulses", "round electric bass", "brush kit", "subtle air pad"]
+    energy_curve: "1/5 open; rise to 2/5 at bar 17; brief 3/5 proof point at bars 33-40; return to 1/5 close"
+    speech_affinity: "Very high; sparse attacks, narrow midrange occupancy, no lead during primary narration zones"
+    avoid: ["corporate ukulele", "anthemic strings", "busy arpeggios", "vocal chops", "logo-like three-note hook"]
+    structure_90_150s:
+      target_duration_seconds: 149
+      form: ["bars 1-8 clean premise", "9-20 stable bed", "21-28 lift", "29-36 proof-point peak", "37-44 reduced bed", "45-52 resolved clean close"]
+    edit_points_bars: [1, 5, 9, 13, 21, 29, 37, 45, 49, 53]
+    cutdowns:
+      15s: "bars 1-4 plus authored 2-bar cadence"
+      30s: "bars 1-8 plus authored 2-bar cadence"
+      60s: "bars 1-24 plus authored 4-bar close"
+      90s: "bars 1-40 plus authored 2-bar close"
+    loop: "bars 9-24; tail-free alternate loop bounce"
+    clean_intro_outro: "4-bar piano/pulse intro; 4-bar tonic outro with final transient clear of tail"
+    stems: ["piano_keys", "mallet_pulse", "bass", "drums_percussion", "pads_fx"]
+
+  - id: trust-clarity-high-01
+    family: "Trust / Clarity"
+    energy: high
+    working_title: "Confident Path"
+    use_cases: ["product launch", "case-study result", "strategy presentation", "brand overview"]
+    bpm: 112
+    meter: "4/4"
+    key_mode_direction: "A major / mixolydian shading; confident without stadium cadence"
+    instrumentation: ["clean muted guitar", "piano stabs", "tight acoustic-electronic drums", "warm bass", "short string pad", "light shaker"]
+    energy_curve: "2/5 start; 3/5 at bar 9; 4/5 at bars 25-40; breakdown at 41; concise 4/5 final lift"
+    speech_affinity: "High; syncopation lives below narration density and accent stems can be muted"
+    avoid: ["arena claps", "four-on-floor festival kick", "soaring lead guitar", "brass fanfare", "vocal hey chants"]
+    structure_90_150s:
+      target_duration_seconds: 146
+      form: ["bars 1-8 clean setup", "9-24 forward bed", "25-40 confident lift", "41-48 breakdown", "49-64 final statement", "65-68 clean close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 57, 65, 69]
+    cutdowns:
+      15s: "bars 1-6 plus 1-bar hit"
+      30s: "bars 1-12 plus 2-bar close"
+      60s: "bars 1-24 plus 4-bar close"
+      90s: "bars 1-40 plus 2-bar close"
+    loop: "bars 9-24 or 25-40 with separate downbeat-safe bounces"
+    clean_intro_outro: "4 bars without full drums; 4-bar cadence with no cymbal wash past endpoint"
+    stems: ["guitar_piano", "bass", "drums", "percussion", "strings_pads", "accents_fx"]
+
+  - id: warm-human-low-01
+    family: "Warm / Human"
+    energy: low
+    working_title: "Near Enough"
+    use_cases: ["personal interview", "community story", "care/service narrative", "behind the scenes"]
+    bpm: 76
+    meter: "4/4"
+    key_mode_direction: "G major with occasional E minor color; gentle imperfect cadences"
+    instrumentation: ["fingerpicked nylon guitar", "felt piano", "soft upright bass", "brushes", "very light hand percussion", "warm room texture"]
+    energy_curve: "1/5 intimate opening; 2/5 from bar 17; small 2.5/5 bloom at 33; back to solo-scale close"
+    speech_affinity: "Very high; leave one-beat air around phrase changes and keep guitar above/below speech pocket"
+    avoid: ["sentimental glockenspiel", "whistling", "handclap folk trope", "audible fret squeaks", "melodramatic strings"]
+    structure_90_150s:
+      target_duration_seconds: 139
+      form: ["bars 1-8 intimate intro", "9-20 conversational bed", "21-28 variation", "29-36 warm bloom", "37-40 reflection", "41-44 clean close"]
+    edit_points_bars: [1, 5, 9, 13, 21, 29, 37, 41, 45]
+    cutdowns:
+      15s: "bars 1-4 plus 1-bar natural resolve"
+      30s: "bars 1-8 plus 1-bar resolve"
+      60s: "bars 1-16 plus 3-bar resolve"
+      90s: "bars 1-32 plus 2-bar resolve"
+    loop: "bars 9-24; room texture continuous but supplied separately"
+    clean_intro_outro: "4-bar guitar-only opening; 4-bar guitar/piano cadence ending dry"
+    stems: ["guitar", "piano", "bass", "brushes_percussion", "room_pad"]
+
+  - id: warm-human-high-01
+    family: "Warm / Human"
+    energy: high
+    working_title: "Made Together"
+    use_cases: ["team culture", "community activation", "maker story", "positive recruitment"]
+    bpm: 104
+    meter: "4/4"
+    key_mode_direction: "C major with suspended voicings and brief A minor contrast"
+    instrumentation: ["muted acoustic guitar", "upright piano", "electric bass", "compact live kit", "tambourine", "subtle organ"]
+    energy_curve: "2/5 friendly start; 3/5 groove; 4/5 ensemble at bar 33; short reset; 4/5 final section"
+    speech_affinity: "High; rhythm steady, hooks limited to gaps, tambourine and piano accents stemmed"
+    avoid: ["stomp-clap cliché", "gang vocals", "banjo", "overbright ukulele", "rock crash every 4 bars"]
+    structure_90_150s:
+      target_duration_seconds: 148
+      form: ["bars 1-8 human-scale intro", "9-24 groove", "25-32 pre-lift", "33-44 ensemble lift", "45-52 reset", "53-60 final lift", "61-64 close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 37, 45, 53, 61, 65]
+    cutdowns:
+      15s: "bars 1-6 plus 1-bar close"
+      30s: "bars 1-12 plus 2-bar close"
+      60s: "bars 1-24 plus 2-bar close"
+      90s: "bars 1-36 plus 3-bar close"
+    loop: "bars 9-24; alternate no-tambourine loop"
+    clean_intro_outro: "4 bars guitar/piano only; 4 bars decelerando-free resolved ending"
+    stems: ["guitars", "piano_organ", "bass", "drums", "percussion", "accents_fx"]
+
+  - id: reflective-emotional-low-01
+    family: "Reflective / Emotional"
+    energy: low
+    working_title: "Held Light"
+    use_cases: ["memoir", "quiet documentary", "careful testimony", "end-of-chapter reflection"]
+    bpm: 68
+    meter: "4/4"
+    key_mode_direction: "B minor / D major ambiguity; open fifths, no tragic leading-tone insistence"
+    instrumentation: ["felt piano", "soft cello harmonics", "granular air pad", "low warm synth", "rare soft mallet"]
+    energy_curve: "0.5/5 near-silence; 1.5/5 at bar 13; 2/5 emotional crest at 29-36; dissolve to 0.5/5"
+    speech_affinity: "Very high; long notes, low event density, melody only in narration gaps"
+    avoid: ["sad solo violin", "cinematic boom", "heartbeat effect", "minor-key melodrama", "wordless vocal"]
+    structure_90_150s:
+      target_duration_seconds: 141
+      form: ["bars 1-8 spacious intro", "9-16 reflective bed", "17-24 gentle movement", "25-32 restrained crest", "33-36 release", "37-40 dry close"]
+    edit_points_bars: [1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41]
+    cutdowns:
+      15s: "bars 1-4 plus 1-bar resolve"
+      30s: "bars 1-8 plus 1-bar resolve"
+      60s: "bars 1-16 plus 2-bar resolve"
+      90s: "bars 1-28 plus 2-bar resolve"
+    loop: "bars 9-20; pad tail rendered as loop-aware alternate"
+    clean_intro_outro: "4 bars piano-only with silence before first note; 4-bar dry piano fifth"
+    stems: ["piano", "strings", "pads", "low_synth", "mallet_fx"]
+
+  - id: reflective-emotional-high-01
+    family: "Reflective / Emotional"
+    energy: high
+    working_title: "After the Turn"
+    use_cases: ["documentary resolution", "human achievement", "mission film", "emotional reveal"]
+    bpm: 92
+    bpm_unit: "quarter note"
+    meter: "6/8"
+    key_mode_direction: "E minor moving toward G major color; earned hope without full heroic modulation"
+    instrumentation: ["piano ostinato", "chamber strings", "deep toms", "soft bass synth", "bowed texture", "restrained cymbal swells"]
+    energy_curve: "1/5 start; 2/5 at bar 9; 4/5 crest at 25-40; drop to 2/5; final 3/5 resolution"
+    speech_affinity: "Medium-high; ostinato simplified under speech and strings delivered in sectional stems"
+    avoid: ["trailer braams", "huge taiko", "sweeping romantic theme", "choir", "constant cymbal wash"]
+    structure_90_150s:
+      target_duration_seconds: 125
+      form: ["bars 1-8 piano premise", "9-24 build", "25-40 emotional crest", "41-48 release", "49-60 resolved perspective", "61-64 clean close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 57, 61, 65]
+    cutdowns:
+      15s: "bars 1-6 plus 2-bar cadence"
+      30s: "bars 1-12 plus 2-bar cadence"
+      60s: "bars 1-28 with alternate 4-bar resolution"
+      90s: "bars 1-44 with alternate 4-bar resolution"
+    loop: "bars 9-24; no-swell and no-tom alternate"
+    clean_intro_outro: "4 bars piano only; 4-bar string/piano resolution with controlled tail"
+    stems: ["piano", "high_strings", "low_strings", "bass", "toms_percussion", "textures_fx"]
+
+  - id: problem-tension-low-01
+    family: "Problem / Tension"
+    energy: low
+    working_title: "Open Question"
+    use_cases: ["problem statement", "investigation", "risk explanation", "before-state montage"]
+    bpm: 80
+    meter: "4/4"
+    key_mode_direction: "F Dorian with unresolved suspended intervals; avoid horror chromaticism"
+    instrumentation: ["muted piano", "low pizzicato synth", "soft tick percussion", "filtered noise bed", "sub bass pulses"]
+    energy_curve: "1/5 uneasy baseline; 2/5 at bar 17; 2.5/5 question peak at 33; thin out without false resolution"
+    speech_affinity: "Very high; tension from spacing and harmony, not volume or dense rhythm"
+    avoid: ["horror drones", "clock cliché", "alarm beeps", "riser every 8 bars", "detective pizzicato comedy"]
+    structure_90_150s:
+      target_duration_seconds: 144
+      form: ["bars 1-8 clean uncertainty", "9-20 measured bed", "21-28 pressure rise", "29-36 question peak", "37-44 reduced tension", "45-48 neutral stop"]
+    edit_points_bars: [1, 5, 9, 13, 21, 29, 37, 41, 45, 49]
+    cutdowns:
+      15s: "bars 1-4 plus 1-bar neutral stop"
+      30s: "bars 1-8 plus 2-bar stop"
+      60s: "bars 1-24 plus 2-bar stop"
+      90s: "bars 1-40 plus 2-bar stop"
+    loop: "bars 9-24; noise bed and pulses loop independently"
+    clean_intro_outro: "4-bar sparse motif; 4-bar neutral unresolved stop with no riser"
+    stems: ["piano", "pulses_bass", "percussion_ticks", "noise_texture", "accents_fx"]
+
+  - id: problem-tension-high-01
+    family: "Problem / Tension"
+    energy: high
+    working_title: "Pressure Map"
+    use_cases: ["urgent challenge", "systems failure", "deadline sequence", "conflict-to-solution transition"]
+    bpm: 124
+    meter: "4/4"
+    key_mode_direction: "C minor with modal flat-second used only as texture; stable tonal center"
+    instrumentation: ["tight electronic drums", "muted low strings", "pulsing synth bass", "metallic percussion", "short processed piano", "controlled risers"]
+    energy_curve: "2/5 immediate pulse; 3/5 at bar 9; 4/5 at 25; 4.5/5 at 41; hard reduction and neutral handoff"
+    speech_affinity: "Medium-high; impact and riser stems optional, pulse kept simple under narration"
+    avoid: ["action trailer", "gunshot-like hits", "dubstep drop", "sirens", "relentless sixteenth-note ostinato"]
+    structure_90_150s:
+      target_duration_seconds: 116
+      form: ["bars 1-8 pulse intro", "9-24 pressure bed", "25-40 escalation", "41-48 peak", "49-56 stripped handoff", "57-60 clean stop"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 57, 61]
+    cutdowns:
+      15s: "bars 1-7 plus 1-bar stop"
+      30s: "bars 1-14 plus 2-bar stop"
+      60s: "bars 1-28 plus 3-bar stop"
+      90s: "bars 1-44 plus 3-bar handoff"
+    loop: "bars 9-24 and 25-40; versions without risers/impacts"
+    clean_intro_outro: "4-bar pulse-only intro; 4-bar deconstructed stop without sub tail"
+    stems: ["drums", "percussion_impacts", "bass_pulse", "strings_piano", "synths", "risers_fx"]
+
+  - id: future-technology-low-01
+    family: "Future / Technology"
+    energy: low
+    working_title: "Quiet Systems"
+    use_cases: ["AI explainer", "data visualization", "research story", "product interface demo"]
+    bpm: 88
+    meter: "4/4"
+    key_mode_direction: "E Lydian color over stable major center; consonant and curious"
+    instrumentation: ["soft modular plucks", "glassless digital mallet", "warm sub bass", "minimal rim percussion", "evolving pad", "tiny granular accents"]
+    energy_curve: "1/5 clean interface; 2/5 at bar 17; 2.5/5 discovery at 33; return to 1/5"
+    speech_affinity: "Very high; short plucks, slow pad motion, no bright notification-like notes"
+    avoid: ["retro sci-fi", "8-bit sounds", "notification pings", "cyberpunk aggression", "busy sequencer"]
+    structure_90_150s:
+      target_duration_seconds: 142
+      form: ["bars 1-8 minimal boot", "9-20 stable system", "21-28 new layer", "29-36 discovery", "37-44 simplified bed", "45-52 clean close"]
+    edit_points_bars: [1, 5, 9, 13, 21, 29, 37, 45, 49, 53]
+    cutdowns:
+      15s: "bars 1-5 plus 1-bar close"
+      30s: "bars 1-10 plus 2-bar close"
+      60s: "bars 1-24 plus 2-bar close"
+      90s: "bars 1-40 plus 2-bar close"
+    loop: "bars 9-24; granular accents excluded from loop-safe version"
+    clean_intro_outro: "4 bars pluck/pad only; 4-bar filtered resolution ending dry"
+    stems: ["plucks_mallets", "bass", "percussion", "pads", "granular_fx"]
+
+  - id: future-technology-high-01
+    family: "Future / Technology"
+    energy: high
+    working_title: "Adaptive Motion"
+    use_cases: ["technology launch", "automation montage", "innovation reel", "fast UI showcase"]
+    bpm: 120
+    meter: "4/4"
+    key_mode_direction: "F-sharp minor with Dorian lift; sleek rather than dystopian"
+    instrumentation: ["precise synth pulse", "rounded electronic bass", "hybrid drum kit", "muted guitar harmonics", "wide soft chords", "micro-percussion"]
+    energy_curve: "2/5 start; 3/5 at bar 9; 4/5 at 25; 3/5 breakdown; 4.5/5 final controlled drive"
+    speech_affinity: "High; pulse has rests, top-line absent, micro-percussion and FX separately mutable"
+    avoid: ["EDM drop", "supersaw lead", "glitch overload", "robot voice", "cinematic impacts"]
+    structure_90_150s:
+      target_duration_seconds: 136
+      form: ["bars 1-8 system start", "9-24 forward bed", "25-40 innovation lift", "41-48 breakdown", "49-64 final drive", "65-68 close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 57, 65, 69]
+    cutdowns:
+      15s: "bars 1-6 plus 2-bar close"
+      30s: "bars 1-14 plus 2-bar close"
+      60s: "bars 1-28 plus 2-bar close"
+      90s: "bars 1-44 plus 2-bar close"
+    loop: "bars 9-24 and 49-64; no-transition-FX alternates"
+    clean_intro_outro: "4 bars pulse/chords only; 4-bar tonal close without long uplifter"
+    stems: ["synth_pulse", "bass", "drums", "micro_percussion", "guitar_chords", "fx"]
+
+  - id: progress-uplift-low-01
+    family: "Progress / Uplift"
+    energy: low
+    working_title: "Steady Forward"
+    use_cases: ["learning progress", "process improvement", "recovery story", "calm call to action"]
+    bpm: 90
+    meter: "4/4"
+    key_mode_direction: "B-flat major with suspended fourths; incremental rather than celebratory"
+    instrumentation: ["soft piano", "muted guitar", "warm bass", "light kick/rim", "subtle strings", "shaker"]
+    energy_curve: "1/5 start; add one layer every 8 bars; 3/5 at bars 33-40; settle at 2/5"
+    speech_affinity: "Very high; predictable phrasing, no dominant melody, strings removable"
+    avoid: ["inspirational crescendo cliché", "corporate whistles", "massive claps", "victory fanfare", "constant eighth-note piano"]
+    structure_90_150s:
+      target_duration_seconds: 149
+      form: ["bars 1-8 first step", "9-24 steady bed", "25-32 added momentum", "33-40 uplift", "41-52 sustained progress", "53-56 clean close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 53, 57]
+    cutdowns:
+      15s: "bars 1-5 plus 1-bar cadence"
+      30s: "bars 1-10 plus 2-bar cadence"
+      60s: "bars 1-24 plus 2-bar cadence"
+      90s: "bars 1-40 plus 2-bar cadence"
+    loop: "bars 9-24; no-shaker alternate"
+    clean_intro_outro: "4 bars piano/guitar; 4-bar warm resolved close without cymbal"
+    stems: ["piano_guitar", "bass", "drums", "percussion", "strings_pads"]
+
+  - id: progress-uplift-high-01
+    family: "Progress / Uplift"
+    energy: high
+    working_title: "Momentum Earned"
+    use_cases: ["results montage", "launch close", "achievement recap", "energetic call to action"]
+    bpm: 126
+    meter: "4/4"
+    key_mode_direction: "D major with mixolydian touches; forward harmonic rhythm, no heroic key change"
+    instrumentation: ["tight piano chords", "muted electric guitar", "live/electronic drums", "solid bass", "short strings", "hand percussion"]
+    energy_curve: "2/5 clean start; 3/5 at 9; 4/5 at 25; 3/5 reset; 5/5 but controlled final 16 bars"
+    speech_affinity: "Medium-high; accents live on separate stems and full-energy section supports sparse VO"
+    avoid: ["festival EDM", "stadium chant", "endless snare build", "heroic brass", "overcompressed wall"]
+    structure_90_150s:
+      target_duration_seconds: 130
+      form: ["bars 1-8 start", "9-24 momentum", "25-40 uplift", "41-48 reset", "49-64 result peak", "65-68 clean close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 57, 65, 69]
+    cutdowns:
+      15s: "bars 1-7 plus 1-bar logo-neutral close"
+      30s: "bars 1-15 plus 1-bar close"
+      60s: "bars 1-28 plus 4-bar result close"
+      90s: "bars 1-48 plus 2-bar result close"
+    loop: "bars 9-24 and 49-64; impact-free alternates"
+    clean_intro_outro: "4 bars without full kit; 4-bar decisive but non-logo ending"
+    stems: ["piano_guitar", "bass", "drums", "percussion", "strings", "accents_fx"]
+
+  - id: premium-minimal-low-01
+    family: "Premium / Minimal"
+    energy: low
+    working_title: "Measured Detail"
+    use_cases: ["luxury product detail", "architecture", "premium service", "minimal title sequence"]
+    bpm: 72
+    meter: "4/4"
+    key_mode_direction: "A minor with added ninths and open voicings; poised, not dark"
+    instrumentation: ["close felt piano", "soft analog bass", "single muted pluck", "brushed texture", "low air pad"]
+    energy_curve: "0.5/5 start; 1.5/5 at 17; 2/5 at 33; return to near-silence"
+    speech_affinity: "Very high; extreme restraint, long gaps, no bright detail competing with consonants"
+    avoid: ["fashion-house imitation", "jazz lounge", "sparkle chimes", "sub-heavy drops", "sensual breath vocals"]
+    structure_90_150s:
+      target_duration_seconds: 147
+      form: ["bars 1-8 negative space", "9-20 minimal bed", "21-28 material change", "29-36 refined lift", "37-40 reduction", "41-44 dry close"]
+    edit_points_bars: [1, 5, 9, 13, 21, 29, 37, 41, 45]
+    cutdowns:
+      15s: "bars 1-4 plus 1-bar dry close"
+      30s: "bars 1-8 plus 1-bar dry close"
+      60s: "bars 1-20 plus 2-bar close"
+      90s: "bars 1-32 plus 2-bar close"
+    loop: "bars 9-24; no random texture events"
+    clean_intro_outro: "4 bars piano/air only; isolated 2-bar final voicing plus silence"
+    stems: ["piano", "pluck", "bass", "brush_texture", "pad_fx"]
+
+  - id: premium-minimal-high-01
+    family: "Premium / Minimal"
+    energy: high
+    working_title: "Precise Form"
+    use_cases: ["design launch", "automotive/product reveal", "premium reel", "confident typography montage"]
+    bpm: 110
+    meter: "4/4"
+    key_mode_direction: "C-sharp minor with clean modal major-sixth color; controlled sophistication"
+    instrumentation: ["dry analog pulse", "muted piano", "deep clean bass", "tight kick/snare", "short string harmonics", "sparse metallic accents"]
+    energy_curve: "1.5/5 start; 3/5 groove at 9; 4/5 reveal at 25; minimal break; 4/5 final form"
+    speech_affinity: "High; dry mix, intentional rests, metallic accents and pulse separately stemmed"
+    avoid: ["luxury-brand sound-alike", "techno club kick", "trap hats", "sensational risers", "showy solo"]
+    structure_90_150s:
+      target_duration_seconds: 148
+      form: ["bars 1-8 precise intro", "9-24 controlled groove", "25-40 reveal", "41-48 negative-space break", "49-64 final form", "65-68 dry close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 57, 65, 69]
+    cutdowns:
+      15s: "bars 1-6 plus 1-bar dry hit"
+      30s: "bars 1-12 plus 2-bar dry close"
+      60s: "bars 1-24 plus 4-bar close"
+      90s: "bars 1-40 plus 2-bar close"
+    loop: "bars 9-24 and 49-64; metallic-accent-free versions"
+    clean_intro_outro: "4 bars pulse/piano only; 4 bars with dry final hit and no branded sonic logo"
+    stems: ["pulse_piano", "bass", "drums", "strings", "metallic_accents", "fx"]
+
+  - id: playful-bold-low-01
+    family: "Playful / Bold"
+    energy: low
+    working_title: "Curious Shape"
+    use_cases: ["friendly tutorial", "creative process", "light product demo", "quirky explainer"]
+    bpm: 96
+    meter: "4/4"
+    key_mode_direction: "F major with mixolydian color and occasional chromatic passing tone; never childish"
+    instrumentation: ["muted marimba", "pizzicato bass", "dry hand percussion", "small keyboard", "soft guitar pops", "paper-like Foley texture"]
+    energy_curve: "1/5 curious start; 2/5 groove at 9; 3/5 reveal at 33; playful subtraction before close"
+    speech_affinity: "High; call-and-response only in VO gaps, Foley and mallet layers removable"
+    avoid: ["children's cartoon", "comedy bassoon", "xylophone overload", "whistling", "random boings"]
+    structure_90_150s:
+      target_duration_seconds: 140
+      form: ["bars 1-8 curious intro", "9-24 light bed", "25-32 variation", "33-40 playful reveal", "41-52 reduced groove", "53-56 clean close"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 53, 57]
+    cutdowns:
+      15s: "bars 1-6 plus 1-bar close"
+      30s: "bars 1-12 plus 2-bar close"
+      60s: "bars 1-24 plus 2-bar close"
+      90s: "bars 1-40 plus 2-bar close"
+    loop: "bars 9-24; Foley-free and mallet-light variants"
+    clean_intro_outro: "4 bars keyboard/percussion; 4-bar witty but non-logo cadence"
+    stems: ["mallets_keys", "guitar_pops", "bass", "percussion", "foley_fx"]
+
+  - id: playful-bold-high-01
+    family: "Playful / Bold"
+    energy: high
+    working_title: "Bright Move"
+    use_cases: ["fast social edit", "creative launch", "feature montage", "bold youth-oriented explainer"]
+    bpm: 132
+    meter: "4/4"
+    key_mode_direction: "E-flat major / mixolydian; punchy chord color with no borrowed pop hook"
+    instrumentation: ["clipped electric guitar", "punchy synth bass", "tight drums", "brass-like synth stabs", "hand percussion", "short mallet accents"]
+    energy_curve: "2/5 immediate hookless groove; 4/5 at 17; 3/5 break at 41; 5/5 final montage section"
+    speech_affinity: "Medium-high; stabs restricted to phrase ends and supplied on separate stem"
+    avoid: ["pop-punk sound-alike", "horn-section cliché", "vocal shouts", "meme sounds", "hyperactive fills"]
+    structure_90_150s:
+      target_duration_seconds: 124
+      form: ["bars 1-8 clean groove", "9-24 bold bed", "25-40 feature lift", "41-48 break", "49-64 final montage", "65-68 clean stop"]
+    edit_points_bars: [1, 5, 9, 17, 25, 33, 41, 49, 57, 65, 69]
+    cutdowns:
+      15s: "bars 1-8 plus 1-bar stop"
+      30s: "bars 1-16 plus 1-bar stop"
+      60s: "bars 1-32 plus 2-bar stop"
+      90s: "bars 1-48 plus 2-bar launch close"
+    loop: "bars 9-24 and 49-64; no-stab and no-fill alternates"
+    clean_intro_outro: "4 bars guitar/bass groove without fills; 4-bar hard musical stop without shout or logo"
+    stems: ["guitars_keys", "bass", "drums", "hand_percussion", "stabs_mallets", "fx"]

@@ -1,0 +1,75 @@
+{
+  "version": "1.0.0",
+  "project_id": "bad",
+  "artifact_version": "analysis-v1",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "summary": {
+    "status": "ready",
+    "required_lane_count": 2,
+    "ready_lane_count": 1,
+    "blocked_lane_count": 1,
+    "partial_lane_count": 0
+  },
+  "lanes": [
+    {
+      "lane_id": "source_manifest",
+      "status": "ready",
+      "required": true,
+      "reason": null,
+      "consumer_impact": "none",
+      "asset_ids": ["AST_001"],
+      "artifact_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "lane_id": "stt",
+      "status": "failed",
+      "required": true,
+      "reason": "provider failed",
+      "consumer_impact": "planning_block",
+      "asset_ids": ["AST_001"],
+      "artifact_hash": null
+    }
+  ],
+  "assets": [
+    {
+      "asset_id": "AST_001",
+      "status": "blocked",
+      "lanes": [
+        {
+          "lane_id": "stt",
+          "status": "failed",
+          "required": true,
+          "reason": "provider failed",
+          "consumer_impact": "planning_block",
+          "asset_ids": ["AST_001"],
+          "artifact_hash": null
+        }
+      ]
+    }
+  ],
+  "blockers": [
+    {
+      "blocker_id": "COVBLK_stt_failed",
+      "severity": "blocker",
+      "lane_id": "stt",
+      "asset_ids": ["AST_001"],
+      "message": "Required STT lane failed"
+    }
+  ],
+  "overrides": [],
+  "provenance": {
+    "producer": "scripts/analyze.ts",
+    "inputs": [
+      {
+        "path": "projects/bad/02_media/source_media_manifest.json",
+        "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": ["created_at"]
+    }
+  }
+}

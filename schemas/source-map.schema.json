@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/source-map.schema.json",
+  "title": "Project Media Source Map",
+  "type": "object",
+  "required": ["version", "project_id", "media_dir", "generated_at", "items"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "media_dir": {
+      "type": "string",
+      "const": "02_media"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sourceMapEntry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sourceMapEntry": {
+      "type": "object",
+      "required": ["asset_id", "source_locator", "local_source_path", "link_path"],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "local_source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "link_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["asset", "bgm"]
+        },
+        "link_type": {
+          "type": "string",
+          "enum": ["symlink", "generated", "direct"]
+        },
+        "media_kind": {
+          "type": "string",
+          "enum": ["video", "audio", "image", "sequence", "unknown"]
+        },
+        "source_content_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source_fingerprint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_mtime_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_origin": {
+          "type": "string",
+          "enum": [
+            "original_source",
+            "rendered_output",
+            "verified_caption_free_proxy"
+          ]
+        },
+        "clean_base_attestation": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "image_sequence": {
+          "$ref": "#/$defs/imageSequenceSourceSet"
+        }
+      },
+      "additionalProperties": false
+    },
+    "artifactRef": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "imageSequenceSourceSet": {
+      "type": "object",
+      "required": ["frame_set_content_sha256", "frame_count", "frames"],
+      "properties": {
+        "frame_set_content_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "frame_count": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "frames": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["frame_number", "frame_link_path", "content_sha256", "size_bytes"],
+            "properties": {
+              "frame_number": { "type": "integer", "minimum": 0 },
+              "frame_link_path": { "type": "string", "pattern": "^02_media/" },
+              "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "size_bytes": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

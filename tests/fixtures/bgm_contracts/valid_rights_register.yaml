@@ -1,0 +1,90 @@
+version: "1.0.0"
+project_id: synthetic-bgm-contract
+created_at: "2026-07-16T00:00:00.000Z"
+items:
+  - record_id: RIGHTS_synthetic_calm_low_01
+    item_type: bgm
+    asset_id: synthetic-calm-low-01
+    content_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    source_type: project_local
+    source_ref: tests/fixtures/bgm_contracts/valid_two_track_pack.json
+    contributor_declaration_id: DECL_video_os_test_fixture
+    generator: null
+    creation_date: "2026-07-16"
+    evidence_refs:
+      - evidence_id: EVIDENCE_fixture_declaration
+        kind: declaration
+        locator: tests/fixtures/bgm_contracts/README.md
+      - evidence_id: EVIDENCE_cc0
+        kind: license_text
+        locator: license:cc0-1.0
+    license:
+      identifier: CC0-1.0
+      text_ref: license:cc0-1.0
+      permitted_scopes:
+        - preview_internal
+        - external
+        - public_redistribution
+        - commercial
+        - modification
+        - sublicensing
+      attribution_rule: No attribution required for the synthetic fixture.
+    similarity_review:
+      status: not_required
+      reviewer_ref: null
+      reviewed_at: null
+    integrity:
+      status: verified
+      verified_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      verified_at: "2026-07-16T00:00:00.000Z"
+    rights_status: licensed
+    waivers: []
+    reviewer_ref: test-fixture-owner
+    reviewed_at: "2026-07-16T00:00:00.000Z"
+    expires_at: null
+  - record_id: RIGHTS_synthetic_progress_high_01
+    item_type: bgm
+    asset_id: synthetic-progress-high-01
+    content_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    source_type: project_local
+    source_ref: tests/fixtures/bgm_contracts/valid_two_track_pack.json
+    contributor_declaration_id: DECL_video_os_test_fixture
+    generator: null
+    creation_date: "2026-07-16"
+    evidence_refs:
+      - evidence_id: EVIDENCE_fixture_declaration_progress
+        kind: declaration
+        locator: tests/fixtures/bgm_contracts/README.md
+    license:
+      identifier: CC0-1.0
+      text_ref: license:cc0-1.0
+      permitted_scopes:
+        - preview_internal
+        - external
+        - public_redistribution
+        - commercial
+        - modification
+        - sublicensing
+      attribution_rule: No attribution required for the synthetic fixture.
+    similarity_review:
+      status: not_required
+      reviewer_ref: null
+      reviewed_at: null
+    integrity:
+      status: verified
+      verified_hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      verified_at: "2026-07-16T00:00:00.000Z"
+    rights_status: licensed
+    waivers: []
+    reviewer_ref: test-fixture-owner
+    reviewed_at: "2026-07-16T00:00:00.000Z"
+    expires_at: null
+provenance:
+  producer: video-os-contract-tests
+  inputs:
+    - path: tests/fixtures/bgm_contracts/valid_two_track_pack.json
+      hash: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  hash_policy:
+    algorithm: sha256
+    canonicalization: normalized-json-v1
+    excluded_fields: []

@@ -1,0 +1,26 @@
+version: "1"
+project_id: ax1-komatsu-testimonial-d4892
+candidates:
+  - candidate_id: CAND_OPEN
+    segment_id: SEG_SYNTH_A
+    asset_id: AST_SYNTH_A
+    src_in_us: 2500000
+    src_out_us: 5000000
+    role: hero
+    story_role: hook
+    confidence: 0.8
+    editorial_signals:
+      speech_intensity_score: 0.8
+      authenticity_score: 0.81
+      surprise_signal: 0.83
+  - candidate_id: CAND_CLOSE
+    segment_id: SEG_SYNTH_A
+    asset_id: AST_SYNTH_A
+    src_in_us: 15000000
+    src_out_us: 19000000
+    role: dialogue
+    story_role: closing
+    confidence: 0.82
+    editorial_signals:
+      speech_intensity_score: 0.8
+      authenticity_score: 0.81

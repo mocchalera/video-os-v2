@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "mode": "self",
+  "golden_project": "rokutaro-namae-no-nai-saka-20260425",
+  "candidate_project": "rokutaro-namae-no-nai-saka-20260425 (recompiled)",
+  "evaluated_at": "2026-06-15T03:38:33.071Z",
+  "golden_approved_by": "codex",
+  "stages": {
+    "timeline": {
+      "golden_clip_count": 29,
+      "candidate_clip_count": 29,
+      "matched_clip_count": 29,
+      "clip_usage_f1": 1,
+      "order_agreement": 1,
+      "mean_cut_in_deviation_us": 0,
+      "mean_duration_deviation_frames": 0,
+      "total_duration_deviation_pct": 0,
+      "beat_structure_score": 1,
+      "score": 1
+    }
+  },
+  "llm_judge": null,
+  "overall_score": 100,
+  "min_score": null,
+  "pass": null
+}

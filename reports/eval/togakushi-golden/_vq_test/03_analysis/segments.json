@@ -1,0 +1,168 @@
+{
+  "project_id": "togakushi-camp",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "segment_id": "SEG_AST_00725A11_0001",
+      "asset_id": "AST_00725A11",
+      "src_in_us": 0,
+      "src_out_us": 15281938,
+      "duration_us": 15281938,
+      "rep_frame_us": 7640969,
+      "summary": "A person with dark hair, wearing a black t-shirt, is holding a white smartphone in their right hand, looking at the screen while standing in front of a blurred background of trees and a building.",
+      "transcript_excerpt": "ここは遠いです こういう顔をしています あ、難しいのがあった おー、わかりますね そっちは遠いですか? うん",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "holding_phone",
+        "looking_at_phone",
+        "outdoor_scene",
+        "blurred_background",
+        "trees",
+        "building"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_00725A11",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.85,
+          "source": "gemini-2.5-flash-lite",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.5-flash-lite",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.5-flash-lite",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "14383a79e232dd6c",
+          "request_hash": "864ff39f921f1f8c",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "3bf92ae6fc0d6673",
+          "request_hash": "9eaae7f5c55e8940",
+          "model_alias": "gemini-2.5-flash-lite",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_template_id": "m2-segment-v2",
+          "prompt_hash": "794027663f2b2105",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "3bf92ae6fc0d6673",
+          "request_hash": "9eaae7f5c55e8940",
+          "model_alias": "gemini-2.5-flash-lite",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_template_id": "m2-segment-v2",
+          "prompt_hash": "794027663f2b2105",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "3bf92ae6fc0d6673",
+          "request_hash": "9eaae7f5c55e8940",
+          "model_alias": "gemini-2.5-flash-lite",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_template_id": "m2-segment-v2",
+          "prompt_hash": "794027663f2b2105",
+          "response_format": "json_schema_v1"
+        },
+        "visual_quality": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "3bf92ae6fc0d6673",
+          "request_hash": "9eaae7f5c55e8940",
+          "model_alias": "gemini-2.5-flash-lite",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_template_id": "m2-segment-v2",
+          "prompt_hash": "794027663f2b2105",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_00725A11_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 1000000,
+          "label": "person holding smartphone",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 1200000,
+          "label": "filming distant landscape",
+          "confidence": 0.85
+        },
+        {
+          "frame_us": 1500000,
+          "label": "mountain range visible",
+          "confidence": 0.75
+        }
+      ],
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "PK_SEG_AST_00725A11_0001_degraded",
+            "timestamp_us": 7640969,
+            "type": "action_peak",
+            "confidence": 0.85,
+            "description": "degraded fallback peak from local motion/audio/speech heuristics",
+            "source_pass": "degraded_ffmpeg_signals"
+          }
+        ],
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.6,
+            "source": "degraded_motion_proxy"
+          },
+          {
+            "timestamp_us": 7640969,
+            "energy": 1,
+            "source": "degraded_motion_proxy"
+          },
+          {
+            "timestamp_us": 15281938,
+            "energy": 0.6,
+            "source": "degraded_motion_proxy"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 1,
+          "audio_support_score": 0,
+          "fused_peak_score": 1
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "degraded-fallback",
+          "refine_prompt_template_id": "degraded-fallback",
+          "precision_mode": "never",
+          "fusion_version": "degraded-peak-fusion-v1",
+          "support_signal_version": "ffmpeg-sad-rms-v1"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+G-0009 / T-0043 / F-0072 / US-0042 / TC-0128
+Atomic caption delivery finalization evidence
+Date: 2026-07-23
+
+Integrated commit:
+- 43d46b77 Implement atomic caption delivery finalization
+
+Implemented contract:
+- Added explicit caption-finalize CLI and editor job phase without changing the existing render phase semantics.
+- Stores immutable, content-addressed approval intents and generation-scoped ASS/SRT, final video, QA, package manifest, preview, and receipts.
+- Activates only a fully verified generation by fsync-backed temporary-file rename of 07_package/active_delivery.json.
+- Keeps the previous active generation on stage, verification, preflight, or activation failure and supports idempotent reuse.
+- Uses active generation paths in package/publication/Studio consumers, with legacy fallback only when the pointer is absent and fail-closed behavior when it is invalid.
+- Stages direct/NLE render outputs with a hash-bound receipt before finalization.
+- Uses the shared rational-FPS ASS builder; package outputs and legacy project inputs remain separated.
+
+Independent integration verification on Node 22.23.1:
+- npx vitest run tests/caption-finalize.test.ts tests/ai-jobs-caption-finalize-contract.test.ts tests/package-cli.test.ts tests/publication-preflight.test.ts tests/caption-style-config.test.ts tests/m45-schema-compat.test.ts tests/package-verification.test.ts tests/macos-studio-contract-fixture.test.ts --configLoader runner
+  Result: PASS, 7 files / 68 tests.
+- npx tsc --noEmit
+  Result: PASS.
+- npm run build
+  Result: PASS.
+- editor/client npm run build
+  Result: PASS (TypeScript and Vite production build).
+
+Independent macOS Studio verification:
+- swift test --filter 'Project(ActiveDelivery|RenderRunner|RenderPackageStatus|MediaResolver|PackageVerificationStatus)Tests'
+  Result: PASS, 64 tests.
+- swift build --target VideoOSStudio
+  Result: PASS.
+- git diff --check
+  Result: PASS.
+
+Known baseline limitation:
+- editor npm run typecheck still reports the pre-existing TS6059 rootDir boundary errors in the main checkout; root TypeScript validation and the changed client build pass.
+
+Scope protection:
+- Existing user changes in projects/demo/06_review/review_metrics.json and reports/eval/suite-* were not modified or committed.
+- No generated project media, rendered media, PCL database files, external publication, or push was performed.

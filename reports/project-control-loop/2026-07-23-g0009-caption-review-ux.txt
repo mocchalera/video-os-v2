@@ -1,0 +1,35 @@
+Goal: G-0009
+Task: T-0045
+Feature: F-0074
+Story: US-0044
+Test case: TC-0130
+Integrated commit: 1e8f1953 feat: harden caption review operational flow
+
+Outcome
+- Missing caption_draft.json now returns a machine-readable recovery action and can regenerate in isolation without overwriting a mismatched review or approval.
+- Safe bulk verification is hash-bound and excludes content/timing risk while allowing layout-only warnings.
+- Long-line warnings no longer block explicit human approval.
+- Approval status survives reload, and approved captions expose an explicit finalization/re-render action.
+- Preview playback exposes loading/ready/error states, retries safely, and avoids synchronous full-video hashing in Studio.
+- clean-lower-third uses the verified 900-weight heavy font consistently across review, ASS, staging, and finalization.
+
+Verification (Node 22.23.1)
+- Targeted Vitest: 6 files, 96 tests passed.
+- npx tsc --noEmit: passed.
+- npm run build: passed.
+- npm --prefix editor/client run build: passed.
+
+Verification (macOS Studio)
+- CaptionReviewDocumentTests: 12 passed.
+- ProjectActiveDeliveryTests: 7 passed.
+- ProjectMediaResolverTests: 40 passed.
+- swift build --package-path apps/macos-studio --target VideoOSStudio: passed.
+
+Real-project read-only regression
+- ax1-speech-led-proof-20260710: queue v2 schema valid, 15 captions, font ready.
+- ax1-komatsu-testimonial-d4892: queue v2 schema valid, 16 captions, font ready.
+- ax1-female-testimonial-d4892: queue v2 schema valid, 14 captions, font ready.
+- ai-reboot-corporate-naruse-20260226: needs_recovery/prepare_caption_draft returned; 07_package file count remained 0 before and after.
+
+Residual manual coverage
+- A real approximately 1 GB media file was not interactively played in this non-UI verification run. The implementation avoids synchronous video-body hashing, and loading/reselection/receipt behavior is covered by automated tests.

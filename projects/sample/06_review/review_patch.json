@@ -1,0 +1,29 @@
+{
+  "timeline_version": "1",
+  "operations": [
+    {
+      "op": "trim_segment",
+      "target_clip_id": "CLP_0001",
+      "new_src_in_us": 2000000,
+      "new_src_out_us": 5500000,
+      "reason": "Reduce highlight clipping exposure in hook hero shot",
+      "confidence": 0.85,
+      "evidence": ["review_report weakness: minor highlight clipping"]
+    },
+    {
+      "op": "replace_segment",
+      "target_clip_id": "CLP_0003",
+      "with_segment_id": "SEG_0014",
+      "reason": "Swap passive water texture for active strap-tightening support to strengthen b02 transition",
+      "confidence": 0.8,
+      "evidence": ["review_report weakness: CLP_0003 feels passive"]
+    },
+    {
+      "op": "add_marker",
+      "new_timeline_in_frame": 312,
+      "reason": "Audio QA needed: check wind competition with dialogue in b03",
+      "confidence": 0.9,
+      "evidence": ["review_report warning: slight_wind quality flag"]
+    }
+  ]
+}

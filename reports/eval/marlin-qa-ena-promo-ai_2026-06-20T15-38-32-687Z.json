@@ -1,0 +1,120 @@
+{
+  "version": "1",
+  "project_id": "ena-promo-ai",
+  "video_path": "/Users/operator/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_duration_sec": 76.667,
+  "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 3 warnings.",
+  "scene_descriptions": [
+    {
+      "start_sec": 0,
+      "end_sec": 1.5,
+      "description": "A man in a red shirt smiles while looking off-camera."
+    },
+    {
+      "start_sec": 2,
+      "end_sec": 8.5,
+      "description": "A woman walks away from the camera toward a building."
+    },
+    {
+      "start_sec": 9,
+      "end_sec": 12.5,
+      "description": "A man in a plaid shirt reaches for grapes on a trellis."
+    },
+    {
+      "start_sec": 13,
+      "end_sec": 17,
+      "description": "The man in the plaid shirt turns his head to look around."
+    },
+    {
+      "start_sec": 17.5,
+      "end_sec": 19.5,
+      "description": "A hand reaches into a plastic bag filled with grapes."
+    },
+    {
+      "start_sec": 20.5,
+      "end_sec": 23.5,
+      "description": "A woman looks out of a moving train window."
+    },
+    {
+      "start_sec": 24.5,
+      "end_sec": 30,
+      "description": "Two men talk in a workshop as the camera pans."
+    },
+    {
+      "start_sec": 27,
+      "end_sec": 29.5,
+      "description": "A man in a green shirt speaks to another man."
+    },
+    {
+      "start_sec": 30,
+      "end_sec": 42.5,
+      "description": "An older man in a cap talks and gestures outdoors."
+    },
+    {
+      "start_sec": 43.5,
+      "end_sec": 46.5,
+      "description": "A woman wearing a headscarf smiles and looks off-camera."
+    },
+    {
+      "start_sec": 47,
+      "end_sec": 50,
+      "description": "A woman in a kimono stands in a doorway."
+    },
+    {
+      "start_sec": 50.5,
+      "end_sec": 55,
+      "description": "Hands reach out to pick red tomatoes from a vine."
+    },
+    {
+      "start_sec": 55.5,
+      "end_sec": 57,
+      "description": "A woman on a train platform watches a train."
+    },
+    {
+      "start_sec": 64.5,
+      "end_sec": 73.5,
+      "description": "A person rakes the ground in an olive grove."
+    },
+    {
+      "start_sec": 74.5,
+      "end_sec": 76.667,
+      "description": "A woman stands still in profile."
+    }
+  ],
+  "issues": [
+    {
+      "timestamp_sec": 17.5,
+      "duration_sec": 2,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 9s: A hand reaches into a plastic bag filled with grapes.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 43.5,
+      "duration_sec": 3,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 0s: A woman wearing a headscarf smiles and looks off-camera.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 74.5,
+      "duration_sec": 2.167,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 47s: A woman stands still in profile.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    }
+  ],
+  "pacing_assessment": {
+    "too_fast": false,
+    "too_slow": false,
+    "notes": "Average Marlin event duration is 4.3s across 15 events over 76.7s; pacing reads as within expected range."
+  },
+  "emotion_arc_assessment": {
+    "follows_brief": true,
+    "notes": "Marlin detected 15 distinct scene types, so the emotion arc is treated as partial without exact term matching."
+  },
+  "score": 76
+}

@@ -1,0 +1,52 @@
+id: feature_coverage
+name: Feature Coverage Loop
+type: closed_loop
+version: "0.1.0"
+
+goal:
+  description: Discover user-facing features and ensure each has stories and tests.
+  completion:
+    - every_detected_feature_has_id
+    - every_feature_has_user_story
+    - every_user_story_has_expected_behavior
+    - every_expected_behavior_has_test_case_or_waiver
+
+agents:
+  mapper:
+    mode: read_only
+    purpose: Map routes, APIs, jobs, commands, forms, permissions, and integrations.
+  story_writer:
+    mode: read_only
+    purpose: Convert features into user stories and expected behavior.
+  test_designer:
+    mode: read_only
+    purpose: Propose happy, error, boundary, permission, and regression tests.
+  dashboard_reporter:
+    mode: workspace_write
+    purpose: Update loop state through pcl and render the dashboard.
+
+steps:
+  - id: map_surfaces
+    agent: mapper
+    output_schema: feature_surface_report
+  - id: register_features
+    command: pcl feature add
+    mutation: true
+  - id: generate_stories
+    agent: story_writer
+  - id: generate_tests
+    agent: test_designer
+  - id: validate_and_render
+    commands:
+      - pcl validate
+      - pcl render
+
+budget:
+  max_iterations: 2
+  max_parallel_jobs: 3
+  require_human_after_repeated_failure: true
+
+stop_conditions:
+  - same_missing_surface_repeats
+  - material_ambiguity_blocks_acceptance_criteria
+  - max_iterations_reached
