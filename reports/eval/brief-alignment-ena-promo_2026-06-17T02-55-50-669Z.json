@@ -1,0 +1,98 @@
+{
+  "version": "1",
+  "project": "ena-promo",
+  "evaluated_at": "2026-06-17T02:55:50.669Z",
+  "brief_hash": "sha256:4fffa7c3115604e0f3a439f2f122bfea5010b82737d7e10e7b8ab945a87d5805",
+  "stages": {
+    "selects": {
+      "score": 0.817,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.8,
+          "confidence": 0.7,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "Segments focus on nature, human presence in landscapes, and quiet moments, aligning with the primary message of 'quiet, lasting impressions' from nature, culture, and food.",
+            "The 'human presence in landscape' must-have is consistently addressed.",
+            "The avoidance of urban/industrial imagery and fast commercial pacing is respected."
+          ],
+          "gaps": [
+            "Direct representation of 'food' is missing.",
+            "Specific 'traditional crafts' are not explicitly shown, only implied through activities like gardening."
+          ]
+        },
+        "must_have_coverage": {
+          "score": 1,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "5/5 selectable must_have items matched",
+            "selection coverage analyzer score 35.2%"
+          ],
+          "gaps": []
+        },
+        "emotion_curve_alignment": {
+          "score": 0.8,
+          "confidence": 0.7,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "Opening segments like 'person walking in a park' (SEG_AST_0C0DA029_0001) can evoke 'wonder' and 'discovery'.",
+            "Segments like 'person by a campfire' (SEG_AST_08C8D4B7_0001) and 'person by a fireplace' (SEG_AST_51371FAF_0001) strongly support 'warmth' and 'serenity'.",
+            "Segments showing outdoor activities and nature interaction (e.g., SEG_AST_867607E9_0001, SEG_AST_C401279B_0001) can contribute to 'immersion'."
+          ],
+          "gaps": [
+            "The transition between emotions is not explicitly defined by the selects alone.",
+            "A clear peak/release moment is not evident from the current selection."
+          ]
+        },
+        "narrative_structure": {
+          "score": 0.6,
+          "confidence": 0.7,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The 'hook' beat is addressed by the initial segment of a person walking (SEG_AST_0C0DA029_0001).",
+            "The 'experience' and 'immersion' beats are covered by various outdoor and indoor quiet moments.",
+            "The 'warmth' and 'serenity' beats are well-represented by campfire and fireplace scenes."
+          ],
+          "gaps": [
+            "A clear 'payoff' or 'closing' beat is not evident from the selected segments.",
+            "The overall narrative flow from hook to closing is not fully established with these selects."
+          ]
+        },
+        "pacing_coherence": {
+          "score": 0.8,
+          "confidence": 0.7,
+          "judge_source": "llm_artifact",
+          "evidence": [
+            "The 'pacing approach: mixed, with some slower holds for emotional impact and faster cuts for montages' is supported by the variety of segment durations and editorial signals.",
+            "The 'motion_energy_score' is generally moderate (0.5-0.7), suggesting a pace that avoids being too fast.",
+            "The 'must_avoid: fast commercial pacing' is respected."
+          ],
+          "gaps": [
+            "Specific audio policies and caption policies are not addressed by the artifact.",
+            "The exact cut density for montages versus slower moments needs further definition."
+          ]
+        },
+        "visual_variety_and_focus": {
+          "score": 0.867,
+          "confidence": 0.8,
+          "judge_source": "deterministic",
+          "evidence": [
+            "17/17 unique assets",
+            "3 active roles represented",
+            "6 semantic clusters represented"
+          ],
+          "gaps": []
+        }
+      }
+    }
+  },
+  "composite": 0.817,
+  "notes": [
+    "The artifact provides a solid foundation for the 'human presence in landscape' and 'serenity/warmth' aspects of the brief.",
+    "Significant gaps exist in covering 'seasonal beauty', 'traditional crafts', 'local food', and 'aerial perspectives'.",
+    "The narrative structure and emotion curve are partially addressed but require more definition for a complete arc.",
+    "The artifact leans heavily on human-centric shots in nature, which aligns with the primary message but misses key secondary messages and must-haves.",
+    "blueprint stage skipped: 04_plan/edit_blueprint.yaml not found"
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/caption-review-patch.schema.json",
+  "title": "Video OS Caption Review Patch",
+  "type": "object",
+  "required": ["version", "project_id", "base_caption_draft_hash", "base_timeline_hash", "operations", "session"],
+  "properties": {
+    "version": { "const": "caption-review-patch/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "base_caption_draft_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "base_timeline_hash": { "type": "string", "minLength": 1 },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "session": {
+      "type": "object",
+      "required": ["reviewer", "started_at", "updated_at"],
+      "properties": {
+        "reviewer": { "type": "string", "minLength": 1 },
+        "started_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "last_action_operation_count": { "type": "integer", "minimum": 0 },
+        "action_operation_counts": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "captionId": { "type": "string", "pattern": "^SC_" },
+    "textHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "timedPart": {
+      "type": "object",
+      "required": ["caption_id", "text", "start_frame", "end_frame"],
+      "properties": {
+        "caption_id": { "$ref": "#/$defs/captionId" },
+        "text": { "type": "string", "minLength": 1 },
+        "start_frame": { "type": "integer", "minimum": 0 },
+        "end_frame": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "caption_id", "base_text_hash", "text", "category"],
+          "properties": {
+            "op": { "const": "replace_text" },
+            "caption_id": { "$ref": "#/$defs/captionId" },
+            "base_text_hash": { "$ref": "#/$defs/textHash" },
+            "text": { "type": "string", "minLength": 1 },
+            "category": { "enum": ["stt", "proper_noun", "kanji", "punctuation", "other"] }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "caption_id", "base_text_hash", "lines"],
+          "properties": {
+            "op": { "const": "set_line_break" },
+            "caption_id": { "$ref": "#/$defs/captionId" },
+            "base_text_hash": { "$ref": "#/$defs/textHash" },
+            "lines": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "caption_id", "base_text_hash", "parts"],
+          "properties": {
+            "op": { "const": "split_caption" },
+            "caption_id": { "$ref": "#/$defs/captionId" },
+            "base_text_hash": { "$ref": "#/$defs/textHash" },
+            "parts": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "$ref": "#/$defs/timedPart" }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "caption_ids", "base_text_hashes", "result"],
+          "properties": {
+            "op": { "const": "merge_captions" },
+            "caption_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "$ref": "#/$defs/captionId" }
+            },
+            "base_text_hashes": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "$ref": "#/$defs/textHash" }
+            },
+            "result": { "$ref": "#/$defs/timedPart" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "caption_id", "start_frame", "end_frame"],
+          "properties": {
+            "op": { "const": "adjust_timing" },
+            "caption_id": { "$ref": "#/$defs/captionId" },
+            "start_frame": { "type": "integer", "minimum": 0 },
+            "end_frame": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "caption_id", "state"],
+          "properties": {
+            "op": { "const": "set_review_state" },
+            "caption_id": { "$ref": "#/$defs/captionId" },
+            "base_text_hash": { "$ref": "#/$defs/textHash" },
+            "state": { "enum": ["unreviewed", "verified", "flagged"] },
+            "note": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "canonical", "variants", "source_caption_ids"],
+          "properties": {
+            "op": { "const": "propose_glossary_term" },
+            "canonical": { "type": "string", "minLength": 1 },
+            "variants": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "source_caption_ids": { "type": "array", "items": { "$ref": "#/$defs/captionId" } }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,42 @@
+version: "1.0.0"
+project_id: "p4a-fixture"
+artifact_version: "release-safety-v1"
+created_at: "2026-04-26T00:00:00Z"
+base_timeline_version: "tl_fixture_001"
+source_of_truth: "engine_render"
+mode: "dry_run"
+summary:
+  status: "pass_with_waiver"
+  fatal_count: 0
+  blocker_count: 0
+  warning_count: 0
+  waived_count: 1
+checks:
+  - check_id: "RSCHK_fatal_review_creative_override"
+    category: "editorial_review"
+    severity: "fatal"
+    status: "waived"
+    message: "fatal review issue waived by creative override for beat_opening"
+    artifact_refs:
+      - path: "projects/p4a-fixture/06_review/review_report.yaml"
+        hash: "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+        required: true
+waivers:
+  - waiver_id: "RSWVR_creative_override_opening"
+    approved_by: "director"
+    approved_at: "2026-04-26T00:10:00Z"
+    scope: "creative_override:beat_opening"
+    reason: "Director intentionally keeps this beat despite review fatal."
+    expires_at: null
+    applies_to_artifact_hash: "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+provenance:
+  producer: "/render"
+  inputs:
+    - path: "projects/p4a-fixture/06_review/review_report.yaml"
+      hash: "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+      required: true
+  hash_policy:
+    algorithm: "sha256"
+    canonicalization: "yaml-to-normalized-json-v1"
+    excluded_fields:
+      - "created_at"

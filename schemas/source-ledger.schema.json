@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/source-ledger.schema.json",
+  "title": "Video OS Canonical Source Ledger",
+  "type": "object",
+  "required": ["version", "artifact_version", "project_id", "created_at", "hidden_sidecar_policy", "summary", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "artifact_version": { "const": "source-ledger-v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "hidden_sidecar_policy": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "object",
+      "required": ["requested", "ready", "unsupported", "failed"],
+      "additionalProperties": false,
+      "properties": {
+        "requested": { "type": "integer", "minimum": 0 },
+        "ready": { "type": "integer", "minimum": 0 },
+        "unsupported": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id", "requested_locator", "canonical_locator", "media_kind", "status", "stage", "reason",
+          "consumer_impact", "content_hash", "fingerprint", "canonical_asset_id", "size_bytes", "mtime",
+          "canonical_request_source_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "source_id": { "type": "string", "pattern": "^SRC_[A-F0-9]{16}$" },
+          "requested_locator": { "type": "string", "minLength": 1 },
+          "canonical_locator": { "type": ["string", "null"] },
+          "media_kind": { "enum": ["video", "audio", "image", "sequence", "unknown"] },
+          "status": { "enum": ["ready", "unsupported", "failed"] },
+          "stage": { "type": "string", "minLength": 1 },
+          "reason": { "type": ["string", "null"] },
+          "consumer_impact": { "enum": ["none", "status_only", "triage_warn", "planning_warn", "planning_block", "compile_block", "package_block"] },
+          "content_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+          "fingerprint": { "type": ["string", "null"], "minLength": 1 },
+          "canonical_asset_id": { "type": ["string", "null"], "pattern": "^AST_[A-Za-z0-9_-]+$" },
+          "size_bytes": { "type": ["integer", "null"], "minimum": 0 },
+          "mtime": { "type": ["string", "null"], "format": "date-time" },
+          "canonical_request_source_id": { "type": ["string", "null"], "pattern": "^SRC_[A-F0-9]{16}$" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "summary": { "properties": { "requested": { "const": 0 } } } } },
+      "then": { "properties": { "summary": { "properties": { "ready": { "const": 0 }, "unsupported": { "const": 0 }, "failed": { "const": 0 } } } } }
+    }
+  ],
+  "$comment": "JSON Schema cannot express requested = ready + unsupported + failed; validateSourceLedger enforces the equation at runtime."
+}

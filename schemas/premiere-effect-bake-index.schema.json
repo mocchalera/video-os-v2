@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/premiere-effect-bake-index.schema.json",
+  "title": "Premiere visual-effect bake index",
+  "type": "object",
+  "required": ["version", "project_id", "base_timeline_sha256", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "premiere-effect-bake-index/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "base_timeline_sha256": { "$ref": "#/$defs/sha" },
+    "entries": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "entry": {
+      "type": "object",
+      "required": ["clip_id", "canonical_asset_id", "derived_asset_id", "bake_request_id", "manifest_path", "manifest_sha256", "media_path", "media_sha256", "media_video_stream_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "clip_id": { "type": "string", "minLength": 1 },
+        "canonical_asset_id": { "type": "string", "minLength": 1 },
+        "derived_asset_id": { "type": "string", "pattern": "^AST_BAKE_[0-9A-F]{24}$" },
+        "bake_request_id": { "$ref": "#/$defs/sha" },
+        "manifest_path": { "$ref": "#/$defs/relativePath" },
+        "manifest_sha256": { "$ref": "#/$defs/sha" },
+        "media_path": { "$ref": "#/$defs/relativePath" },
+        "media_sha256": { "$ref": "#/$defs/sha" },
+        "media_video_stream_sha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "relativePath": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*%2[eE]).+$" }
+  }
+}

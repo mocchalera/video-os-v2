@@ -1,0 +1,594 @@
+/**
+ * ffmpeg derivatives — contact sheets, posters, filmstrips, waveforms.
+ *
+ * Per milestone-2-design.md §Contact Sheets, §Posters, §Filmstrips, §Waveforms
+ */
+
+import { execFile } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { AssetItem } from "./ffprobe.js";
+import type { SegmentItem } from "./ffmpeg-segmenter.js";
+
+// ── Types ──────────────────────────────────────────────────────────
+
+export interface ContactSheetManifest {
+  contact_sheet_id: string;
+  asset_id: string;
+  image_path: string;
+  mode: "shot_keyframes" | "overview" | "still_image";
+  sample_fps?: number;
+  tile_map: Array<{
+    tile_index: number;
+    segment_id?: string;
+    rep_frame_us: number;
+    src_in_us?: number;
+    src_out_us?: number;
+  }>;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+
+function execFilePromise(
+  cmd: string,
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) return reject(err);
+      resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+    });
+  });
+}
+
+function ensureDir(dirPath: string): void {
+  fs.mkdirSync(dirPath, { recursive: true });
+}
+
+// ── Contact Sheets ─────────────────────────────────────────────────
+
+const TILES_PER_PAGE = 16;
+const TILE_COLS = 4;
+const OVERVIEW_SAMPLE_FPS = 0.5;
+const OVERVIEW_TILE_WIDTH = 320;
+
+/**
+ * Generate paginated contact sheets for an asset.
+ * Each page has up to 16 tiles (4x4 grid) of segment representative frames.
+ */
+export async function generateContactSheets(
+  filePath: string,
+  asset: AssetItem,
+  segments: SegmentItem[],
+  outputDir: string,
+): Promise<ContactSheetManifest[]> {
+  const csDir = path.join(outputDir, "contact_sheets");
+  ensureDir(csDir);
+
+  const manifests: ContactSheetManifest[] = [];
+  const pageCount = Math.ceil(segments.length / TILES_PER_PAGE);
+
+  for (let page = 0; page < pageCount; page++) {
+    const pageSegments = segments.slice(
+      page * TILES_PER_PAGE,
+      (page + 1) * TILES_PER_PAGE,
+    );
+    const pageStr = String(page + 1).padStart(2, "0");
+    const csId = `CS_${asset.asset_id}_${pageStr}`;
+    const imagePath = `contact_sheets/${csId}.png`;
+    const absImagePath = path.join(outputDir, imagePath);
+
+    // Extract representative frames and tile them
+    const tmpFrames: string[] = [];
+    for (let i = 0; i < pageSegments.length; i++) {
+      const seg = pageSegments[i];
+      const timeSec = seg.rep_frame_us / 1_000_000;
+      const tmpPath = path.join(csDir, `_tmp_${csId}_tile_${i}.png`);
+      tmpFrames.push(tmpPath);
+
+      await execFilePromise("ffmpeg", [
+        "-y",
+        "-ss", String(timeSec),
+        "-i", path.resolve(filePath),
+        "-vframes", "1",
+        "-vf", "scale=240:-1",
+        tmpPath,
+      ]);
+    }
+
+    // Tile frames into a grid using ffmpeg
+    if (tmpFrames.length > 0) {
+      const cols = Math.min(TILE_COLS, tmpFrames.length);
+      const rows = Math.ceil(tmpFrames.length / cols);
+
+      // Build filter_complex for tiling
+      const inputs: string[] = [];
+      const filterParts: string[] = [];
+
+      for (let i = 0; i < tmpFrames.length; i++) {
+        inputs.push("-i", tmpFrames[i]);
+      }
+
+      // Pad to fill the grid if needed
+      const totalTiles = rows * cols;
+      const padCount = totalTiles - tmpFrames.length;
+
+      if (tmpFrames.length === 1) {
+        // Single tile — just copy
+        await execFilePromise("ffmpeg", [
+          "-y", "-i", tmpFrames[0], absImagePath,
+        ]);
+      } else {
+        // Use xstack for tiling
+        const layoutParts: string[] = [];
+        const inputLabels: string[] = [];
+
+        for (let i = 0; i < tmpFrames.length; i++) {
+          inputLabels.push(`[${i}:v]`);
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          layoutParts.push(`${col * 240}_${row * 240}`);
+        }
+
+        // For padding, duplicate the last frame
+        for (let i = 0; i < padCount; i++) {
+          inputLabels.push(`[${tmpFrames.length - 1}:v]`);
+          const idx = tmpFrames.length + i;
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+          layoutParts.push(`${col * 240}_${row * 240}`);
+        }
+
+        // xstack needs all inputs
+        const filterStr = `${inputLabels.join("")}xstack=inputs=${totalTiles}:layout=${layoutParts.join("|")}`;
+
+        try {
+          await execFilePromise("ffmpeg", [
+            "-y",
+            ...inputs,
+            // Re-add last input for pad tiles
+            ...Array(padCount).fill(null).flatMap(() => ["-i", tmpFrames[tmpFrames.length - 1]]),
+            "-filter_complex", filterStr,
+            "-frames:v", "1",
+            absImagePath,
+          ]);
+        } catch {
+          // Fallback: just use the first frame as the contact sheet
+          await execFilePromise("ffmpeg", [
+            "-y", "-i", tmpFrames[0], absImagePath,
+          ]);
+        }
+      }
+    }
+
+    // Clean up tmp frames
+    for (const tmp of tmpFrames) {
+      try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    }
+
+    const manifest: ContactSheetManifest = {
+      contact_sheet_id: csId,
+      asset_id: asset.asset_id,
+      image_path: imagePath,
+      mode: "shot_keyframes",
+      tile_map: pageSegments.map((seg, i) => ({
+        tile_index: i,
+        segment_id: seg.segment_id,
+        rep_frame_us: seg.rep_frame_us,
+        src_in_us: seg.src_in_us,
+        src_out_us: seg.src_out_us,
+      })),
+    };
+
+    manifests.push(manifest);
+
+    // Write manifest JSON
+    const manifestPath = path.join(csDir, `${csId}.json`);
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  }
+
+  return manifests;
+}
+
+/**
+ * Generate an overview contact sheet for an asset.
+ * Uniform low-frequency sampling (~0.5 fps) across the full duration,
+ * independent of segment boundaries. Used for rapid full-asset visual scan.
+ */
+export async function generateOverviewContactSheet(
+  filePath: string,
+  asset: AssetItem,
+  outputDir: string,
+): Promise<ContactSheetManifest[]> {
+  const csDir = path.join(outputDir, "contact_sheets");
+  ensureDir(csDir);
+
+  const durationSec = asset.duration_us / 1_000_000;
+  const totalFrames = Math.max(1, Math.ceil(durationSec * OVERVIEW_SAMPLE_FPS));
+  const stepUs = totalFrames > 1 ? asset.duration_us / totalFrames : asset.duration_us;
+
+  // Compute all sample timestamps
+  const allTimestamps: number[] = [];
+  for (let i = 0; i < totalFrames; i++) {
+    allTimestamps.push(Math.round(stepUs * i + stepUs / 2));
+  }
+
+  const manifests: ContactSheetManifest[] = [];
+  const pageCount = Math.ceil(allTimestamps.length / TILES_PER_PAGE);
+
+  for (let page = 0; page < pageCount; page++) {
+    const pageTimestamps = allTimestamps.slice(
+      page * TILES_PER_PAGE,
+      (page + 1) * TILES_PER_PAGE,
+    );
+    const pageStr = String(page + 1).padStart(2, "0");
+    const ovId = `OV_${asset.asset_id}_${pageStr}`;
+    const imagePath = `contact_sheets/${ovId}.png`;
+    const absImagePath = path.join(outputDir, imagePath);
+
+    // Extract frames
+    const tmpFrames: string[] = [];
+    for (let i = 0; i < pageTimestamps.length; i++) {
+      const timeSec = pageTimestamps[i] / 1_000_000;
+      const tmpPath = path.join(csDir, `_tmp_${ovId}_tile_${i}.png`);
+      tmpFrames.push(tmpPath);
+
+      await execFilePromise("ffmpeg", [
+        "-y",
+        "-ss", String(timeSec),
+        "-i", path.resolve(filePath),
+        "-vframes", "1",
+        "-vf", `scale=${OVERVIEW_TILE_WIDTH}:-1`,
+        tmpPath,
+      ]);
+    }
+
+    // Tile frames into grid (same logic as shot_keyframes)
+    if (tmpFrames.length > 0) {
+      const cols = Math.min(TILE_COLS, tmpFrames.length);
+      const rows = Math.ceil(tmpFrames.length / cols);
+
+      if (tmpFrames.length === 1) {
+        await execFilePromise("ffmpeg", [
+          "-y", "-i", tmpFrames[0], absImagePath,
+        ]);
+      } else {
+        const totalTiles = rows * cols;
+        const padCount = totalTiles - tmpFrames.length;
+        const inputArgs = tmpFrames.flatMap((f) => ["-i", f]);
+        const layoutParts: string[] = [];
+        const inputLabels: string[] = [];
+
+        for (let i = 0; i < tmpFrames.length; i++) {
+          inputLabels.push(`[${i}:v]`);
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 240}`);
+        }
+
+        for (let i = 0; i < padCount; i++) {
+          inputLabels.push(`[${tmpFrames.length - 1}:v]`);
+          const idx = tmpFrames.length + i;
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 240}`);
+        }
+
+        const filterStr = `${inputLabels.join("")}xstack=inputs=${totalTiles}:layout=${layoutParts.join("|")}`;
+
+        try {
+          await execFilePromise("ffmpeg", [
+            "-y",
+            ...inputArgs,
+            ...Array(padCount).fill(null).flatMap(() => ["-i", tmpFrames[tmpFrames.length - 1]]),
+            "-filter_complex", filterStr,
+            "-frames:v", "1",
+            absImagePath,
+          ]);
+        } catch {
+          await execFilePromise("ffmpeg", [
+            "-y", "-i", tmpFrames[0], absImagePath,
+          ]);
+        }
+      }
+    }
+
+    // Clean up
+    for (const tmp of tmpFrames) {
+      try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    }
+
+    const manifest: ContactSheetManifest = {
+      contact_sheet_id: ovId,
+      asset_id: asset.asset_id,
+      image_path: imagePath,
+      mode: "overview",
+      sample_fps: OVERVIEW_SAMPLE_FPS,
+      tile_map: pageTimestamps.map((ts, i) => ({
+        tile_index: i,
+        rep_frame_us: ts,
+      })),
+    };
+
+    manifests.push(manifest);
+
+    const manifestPath = path.join(csDir, `${ovId}.json`);
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  }
+
+  return manifests;
+}
+
+// ── Posters ────────────────────────────────────────────────────────
+
+/**
+ * Select the best segment for the poster based on ranking rules:
+ * 1. Filter out hard-rejected segments (black_segment, frozen_frame)
+ * 2. If all segments are hard-rejected, fallback to asset midpoint
+ * 3. Among non-rejected: longer duration_us → higher confidence → earlier src_in_us
+ */
+export function selectPosterSegment(
+  segments: SegmentItem[],
+  assetDurationUs: number,
+): { rep_frame_us: number } {
+  if (segments.length === 0) {
+    return { rep_frame_us: Math.round(assetDurationUs / 2) };
+  }
+
+  const hardRejectFlags = new Set(["black_segment", "frozen_frame"]);
+
+  // First: filter to non-rejected segments
+  const nonRejected = segments.filter(
+    (s) => !s.quality_flags.some((f) => hardRejectFlags.has(f)),
+  );
+
+  // If ALL segments are hard-rejected, fallback to asset midpoint
+  if (nonRejected.length === 0) {
+    return { rep_frame_us: Math.round(assetDurationUs / 2) };
+  }
+
+  // Rank non-rejected segments
+  const ranked = [...nonRejected].sort((a, b) => {
+    if (a.duration_us !== b.duration_us) return b.duration_us - a.duration_us;
+
+    const aScore = a.confidence?.boundary?.score ?? 0;
+    const bScore = b.confidence?.boundary?.score ?? 0;
+    if (aScore !== bScore) return bScore - aScore;
+
+    return a.src_in_us - b.src_in_us;
+  });
+
+  return { rep_frame_us: ranked[0].rep_frame_us };
+}
+
+/**
+ * Generate a poster image for an asset.
+ */
+export async function generatePoster(
+  filePath: string,
+  asset: AssetItem,
+  segments: SegmentItem[],
+  outputDir: string,
+): Promise<string> {
+  const posterDir = path.join(outputDir, "posters");
+  ensureDir(posterDir);
+
+  const posterPath = `posters/${asset.asset_id}.jpg`;
+  const absPosterPath = path.join(outputDir, posterPath);
+
+  const best = selectPosterSegment(segments, asset.duration_us);
+  const timeSec = best.rep_frame_us / 1_000_000;
+
+  await execFilePromise("ffmpeg", [
+    "-y",
+    "-ss", String(timeSec),
+    "-i", path.resolve(filePath),
+    "-vframes", "1",
+    "-q:v", "2",
+    absPosterPath,
+  ]);
+
+  return posterPath;
+}
+
+// ── Filmstrips ─────────────────────────────────────────────────────
+
+const FILMSTRIP_FRAMES = 6;
+const FILMSTRIP_TILE_WIDTH = 320;
+const EDGE_TRIM_FRACTION = 0.05;
+
+/**
+ * Generate a filmstrip image for a segment.
+ * Sample 6 evenly spaced frames inside the segment after trimming 5% from each edge.
+ */
+export async function generateFilmstrip(
+  filePath: string,
+  segment: SegmentItem,
+  outputDir: string,
+): Promise<string> {
+  const filmstripDir = path.join(outputDir, "filmstrips");
+  ensureDir(filmstripDir);
+
+  const filmstripPath = `filmstrips/${segment.segment_id}.png`;
+  const absFilmstripPath = path.join(outputDir, filmstripPath);
+
+  const segDuration = segment.src_out_us - segment.src_in_us;
+  const trimUs = Math.round(segDuration * EDGE_TRIM_FRACTION);
+  const usableStart = segment.src_in_us + trimUs;
+  const usableEnd = segment.src_out_us - trimUs;
+  const usableDuration = usableEnd - usableStart;
+
+  // Calculate sample timestamps
+  const timestamps: number[] = [];
+  if (usableDuration <= 0 || FILMSTRIP_FRAMES <= 1) {
+    // Segment too short for distinct samples
+    const mid = Math.round((segment.src_in_us + segment.src_out_us) / 2);
+    for (let i = 0; i < FILMSTRIP_FRAMES; i++) {
+      timestamps.push(mid);
+    }
+  } else {
+    const step = usableDuration / (FILMSTRIP_FRAMES - 1);
+    for (let i = 0; i < FILMSTRIP_FRAMES; i++) {
+      timestamps.push(Math.round(usableStart + step * i));
+    }
+  }
+
+  // Extract frames
+  const tmpFrames: string[] = [];
+  for (let i = 0; i < timestamps.length; i++) {
+    const timeSec = timestamps[i] / 1_000_000;
+    const tmpPath = path.join(filmstripDir, `_tmp_fs_${segment.segment_id}_${i}.png`);
+    tmpFrames.push(tmpPath);
+
+    await execFilePromise("ffmpeg", [
+      "-y",
+      "-ss", String(timeSec),
+      "-i", path.resolve(filePath),
+      "-vframes", "1",
+      "-vf", `scale=${FILMSTRIP_TILE_WIDTH}:-1`,
+      tmpPath,
+    ]);
+  }
+
+  // Stitch horizontally using hstack
+  if (tmpFrames.length === 1) {
+    fs.renameSync(tmpFrames[0], absFilmstripPath);
+  } else {
+    const inputArgs = tmpFrames.flatMap((f) => ["-i", f]);
+    const filterStr = tmpFrames.map((_, i) => `[${i}:v]`).join("") +
+      `hstack=inputs=${tmpFrames.length}`;
+
+    try {
+      await execFilePromise("ffmpeg", [
+        "-y",
+        ...inputArgs,
+        "-filter_complex", filterStr,
+        "-frames:v", "1",
+        absFilmstripPath,
+      ]);
+    } catch {
+      // Fallback: use first frame
+      fs.copyFileSync(tmpFrames[0], absFilmstripPath);
+    }
+
+    // Clean up
+    for (const tmp of tmpFrames) {
+      try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    }
+  }
+
+  return filmstripPath;
+}
+
+// ── Waveforms ──────────────────────────────────────────────────────
+
+/**
+ * Generate a waveform master image for an asset.
+ */
+export async function generateWaveform(
+  filePath: string,
+  asset: AssetItem,
+  outputDir: string,
+): Promise<string | null> {
+  if (!asset.audio_stream) return null;
+
+  const waveformDir = path.join(outputDir, "waveforms");
+  ensureDir(waveformDir);
+
+  const wfId = `WF_${asset.asset_id}`;
+  const waveformPath = `waveforms/${wfId}.png`;
+  const absWaveformPath = path.join(outputDir, waveformPath);
+
+  try {
+    await execFilePromise("ffmpeg", [
+      "-y",
+      "-i", path.resolve(filePath),
+      "-filter_complex", "aformat=channel_layouts=mono,showwavespic=s=1200x120:colors=0x3388ff",
+      "-frames:v", "1",
+      absWaveformPath,
+    ]);
+    return waveformPath;
+  } catch {
+    // Audio extraction failed
+    return null;
+  }
+}
+
+// ── Batch Derivative Generation ────────────────────────────────────
+
+export interface DerivativeResults {
+  contactSheets: ContactSheetManifest[];
+  posterPath: string | null;
+  filmstripPaths: Map<string, string>;
+  waveformPath: string | null;
+}
+
+/**
+ * Generate all derivatives for an asset and its segments.
+ */
+export async function generateAllDerivatives(
+  filePath: string,
+  asset: AssetItem,
+  segments: SegmentItem[],
+  outputDir: string,
+): Promise<DerivativeResults> {
+  if (asset.media_kind === "image") {
+    if (!asset.still_image) {
+      throw new Error(`still_image_metadata_missing:${asset.asset_id}`);
+    }
+    const normalizedPath = path.resolve(outputDir, asset.still_image.normalized_frame_path);
+    const stat = fs.statSync(normalizedPath);
+    if (!stat.isFile() || stat.size <= 0) {
+      throw new Error(`still_image_normalized_frame_missing_or_empty:${asset.asset_id}`);
+    }
+    const contactSheetId = `CS_${asset.asset_id}_STILL`;
+    const manifest: ContactSheetManifest = {
+      contact_sheet_id: contactSheetId,
+      asset_id: asset.asset_id,
+      image_path: asset.still_image.normalized_frame_path,
+      mode: "still_image",
+      tile_map: [{
+        tile_index: 0,
+        segment_id: segments[0]?.segment_id,
+        rep_frame_us: 0,
+        src_in_us: 0,
+        src_out_us: 1,
+      }],
+    };
+    const manifestPath = path.join(outputDir, "contact_sheets", `${contactSheetId}.json`);
+    ensureDir(path.dirname(manifestPath));
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    return {
+      contactSheets: [manifest],
+      posterPath: asset.still_image.normalized_frame_path,
+      filmstripPaths: new Map(),
+      waveformPath: null,
+    };
+  }
+
+  // Visual derivatives are not applicable without a video stream. rep_frame_us
+  // remains a timeline representative timestamp, never image evidence.
+  const contactSheets = asset.video_stream
+    ? await generateContactSheets(filePath, asset, segments, outputDir)
+    : [];
+
+  // Poster
+  let posterPath: string | null = null;
+  if (asset.video_stream) {
+    posterPath = await generatePoster(filePath, asset, segments, outputDir);
+  }
+
+  // Filmstrips
+  const filmstripPaths = new Map<string, string>();
+  for (const seg of segments) {
+    if (asset.video_stream) {
+      const fPath = await generateFilmstrip(filePath, seg, outputDir);
+      filmstripPaths.set(seg.segment_id, fPath);
+    }
+  }
+
+  // Waveform
+  const waveformPath = await generateWaveform(filePath, asset, outputDir);
+
+  return { contactSheets, posterPath, filmstripPaths, waveformPath };
+}

@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/editorial-pipeline-status.schema.json",
+  "title": "Video OS Editorial Pipeline Status",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "entrypoint",
+    "created_at",
+    "preview",
+    "qa",
+    "final_render",
+    "package",
+    "blocking_issues"
+  ],
+  "properties": {
+    "version": { "type": "string", "const": "1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "entrypoint": {
+      "type": "string",
+      "enum": ["editorial-pipeline", "editorial-agent-task"]
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "preview": {
+      "type": "object",
+      "required": ["status", "render_skipped"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["available", "skipped", "missing"]
+        },
+        "artifact_path": { "type": "string", "minLength": 1 },
+        "render_skipped": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "qa": {
+      "type": "object",
+      "required": ["status", "stage"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped"]
+        },
+        "stage": { "type": "string", "const": "QA" },
+        "iterations": { "type": "integer", "minimum": 0 },
+        "fixes_applied_total": { "type": "integer", "minimum": 0 },
+        "initial_score": { "type": "number" },
+        "final_score": { "type": "number" },
+        "warnings_count": { "type": "integer", "minimum": 0 },
+        "visual_qa": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["verified", "blocked", "not_applicable"]
+            },
+            "reason": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "message": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "final_render": { "$ref": "#/$defs/terminalStatus" },
+    "package": { "$ref": "#/$defs/terminalStatus" },
+    "blocking_issues": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/blockingIssue" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "preview": {
+            "properties": {
+              "status": { "const": "available" }
+            },
+            "required": ["status"]
+          }
+        },
+        "required": ["preview"]
+      },
+      "then": {
+        "properties": {
+          "preview": {
+            "required": ["artifact_path"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "blocking_issues": {
+            "minItems": 1
+          }
+        },
+        "required": ["blocking_issues"]
+      },
+      "then": {
+        "properties": {
+          "final_render": {
+            "properties": {
+              "status": { "const": "blocked" }
+            },
+            "required": ["status", "reason"]
+          },
+          "package": {
+            "properties": {
+              "status": { "const": "blocked" }
+            },
+            "required": ["status", "reason"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "terminalStatus": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_requested", "blocked"]
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["QA_LOOP_FAILED", "QA_SKIPPED", "QA_RENDER_MISSING"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "blockingIssue": {
+      "type": "object",
+      "required": ["code", "severity", "stage", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["QA_LOOP_FAILED", "QA_SKIPPED", "QA_RENDER_MISSING"]
+        },
+        "severity": { "type": "string", "const": "fatal" },
+        "stage": { "type": "string", "const": "QA" },
+        "message": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

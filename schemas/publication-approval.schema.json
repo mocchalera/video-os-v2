@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/publication-approval.schema.json",
+  "title": "Video OS Publication Approval",
+  "type": "object",
+  "required": ["version", "project_id", "created_at", "canonical_video", "approvals", "destinations"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "enum": ["publication-approval/v1", "publication-approval/v2"]
+    },
+    "project_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "canonical_video": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "const": "09_output/final.mp4" },
+        "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "approvals": {
+      "type": "object",
+      "required": ["creative", "rights", "privacy"],
+      "additionalProperties": false,
+      "properties": {
+        "creative": { "$ref": "#/$defs/approval" },
+        "rights": { "$ref": "#/$defs/approval" },
+        "privacy": { "$ref": "#/$defs/approval" }
+      }
+    },
+    "destinations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/destination" }
+    }
+  },
+  "allOf": [{
+    "if": {
+      "properties": {
+        "version": { "const": "publication-approval/v2" }
+      }
+    },
+    "then": {
+      "properties": {
+        "destinations": {
+          "items": { "$ref": "#/$defs/destinationV2" }
+        }
+      }
+    }
+  }],
+  "$defs": {
+    "approval": {
+      "type": "object",
+      "required": ["status", "approved_by", "approved_at", "scope", "artifact_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "const": "approved" },
+        "approved_by": { "type": "string", "minLength": 1 },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "scope": { "type": "string", "minLength": 1 },
+        "artifact_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "destination": {
+      "type": "object",
+      "required": ["platform", "visibility"],
+      "additionalProperties": false,
+      "properties": {
+        "platform": { "type": "string", "enum": ["youtube", "vimeo", "instagram", "tiktok", "internal"] },
+        "visibility": { "type": "string", "enum": ["private", "unlisted", "public", "workspace_only"] },
+        "account": { "type": "string", "minLength": 1 },
+        "channel_id": { "type": "string", "minLength": 1 },
+        "metadata_sha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "destinationV2": {
+      "allOf": [
+        { "$ref": "#/$defs/destination" },
+        {
+          "if": {
+            "required": ["platform"],
+            "properties": {
+              "platform": { "const": "youtube" }
+            }
+          },
+          "then": {
+            "required": ["channel_id", "metadata_sha256"]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,361 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/creative-brief.schema.json",
+  "title": "Video OS Creative Brief",
+  "type": "object",
+  "required": [
+    "project",
+    "message",
+    "audience",
+    "emotion_curve",
+    "must_have",
+    "must_avoid",
+    "autonomy",
+    "resolved_assumptions"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "project": {
+      "type": "object",
+      "required": [
+        "title",
+        "strategy"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strategy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "client": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "runtime_target_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "duration_mode": {
+          "type": "string",
+          "enum": ["strict", "guide"],
+          "default": "guide"
+        }
+      },
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "primary"
+      ],
+      "properties": {
+        "primary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secondary": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "audience": {
+      "type": "object",
+      "required": [
+        "primary"
+      ],
+      "properties": {
+        "primary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secondary": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "emotion_curve": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "order_policy": {
+      "type": "string",
+      "enum": ["chronological", "editorial"],
+      "description": "Default clip order when the blueprint does not specify timeline_order. Keepsake and family-growth-recap projects should use chronological."
+    },
+    "subject": {
+      "type": "object",
+      "properties": {
+        "birth_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Subject birth date used to derive age captions for family-growth/keepsake edits."
+        }
+      },
+      "additionalProperties": false
+    },
+    "caption_policy": {
+      "type": "string",
+      "enum": ["auto", "manual", "off"],
+      "description": "Whether the rough cut should auto-propose date/age/milestone captions, expect manual captions, or keep captions off."
+    },
+    "audio_policy": {
+      "type": "string",
+      "enum": ["ducking", "bgm_only", "original_only"],
+      "description": "Default final audio policy. If omitted, profile/template defaults may apply."
+    },
+    "a1_loudnorm": {
+      "type": "boolean",
+      "description": "When true, normalize the original audio stem before ducking so family voices and ambient sound remain audible. Defaults may come from the selected profile."
+    },
+    "still_image_intent": {
+      "type": "object",
+      "properties": {
+        "min_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "default_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "max_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "motion_mode": { "type": "string", "enum": ["static", "subtle_ken_burns"] },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+        "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+      },
+      "additionalProperties": false
+    },
+    "must_have": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "must_avoid": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "required": [
+        "may_decide",
+        "must_ask"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["full", "collaborative"]
+        },
+        "may_decide": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "must_ask": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "skip_confirmations": {
+          "type": "boolean",
+          "description": "When true, pipeline confirmation prompts are completely skipped."
+        }
+      },
+      "additionalProperties": false
+    },
+    "confirmation_provenance": {
+      "type": "object",
+      "properties": {
+        "confirmed_at": { "type": "string", "format": "date-time" },
+        "source": { "type": "string", "enum": ["interactive_prompt", "non_interactive_default"] },
+        "caption_policy": { "type": "string", "enum": ["auto", "manual", "off"] },
+        "audio_policy": { "type": "string", "enum": ["ducking", "bgm_only", "original_only"] },
+        "questions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "resolved_assumptions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "forbidden_interpretations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "content_hint": {
+      "type": "string",
+      "description": "Free-text hint describing what the footage contains, used to improve VLM recognition accuracy (e.g. 'child learning to ride a bicycle')"
+    },
+    "context_knowledge": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "object",
+          "properties": {
+            "primary_location": { "type": "string" },
+            "specific_places": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "role": { "type": "string" },
+              "appearance": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "key_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "significance": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "cultural_context": { "type": "string" },
+        "terminology": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "term": { "type": "string" },
+              "meaning": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "editorial": {
+      "type": "object",
+      "properties": {
+        "distribution_channel": {
+          "type": "string",
+          "enum": ["web_lp", "social_feed", "product_page", "presentation", "event_recap", "unknown"]
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": ["16:9", "9:16", "1:1", "4:5", "unknown"]
+        },
+        "embed_context": {
+          "type": "string",
+          "enum": ["standalone", "lp_embed", "deck_insert", "kiosk", "unknown"]
+        },
+        "hook_priority": {
+          "type": "string",
+          "enum": ["credibility_first", "balanced", "aggressive"]
+        },
+        "credibility_bias": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "profile_hint": { "type": "string" },
+        "policy_hint": { "type": "string" },
+        "allow_inference": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "longform": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string", "enum": ["reduction"] },
+        "source_selection": {
+          "type": "string",
+          "enum": ["auto_primary_lane", "all", "explicit"]
+        },
+        "primary_asset_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "min_window_sec": { "type": "number", "minimum": 2, "maximum": 30 },
+        "max_window_sec": { "type": "number", "minimum": 10, "maximum": 180 },
+        "silence_gap_cut_sec": { "type": "number", "minimum": 0.5, "maximum": 30 },
+        "chapter_max_sec": { "type": "number", "minimum": 60, "maximum": 3600 },
+        "coverage_interval_sec": { "type": "number", "minimum": 30, "maximum": 900 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "project_id": "p3-fixture",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "entities": [
+    { "entity_id": "ENT_SUBJECT_named_child", "entity_type": "subject_cluster", "status": "confirmed_editing_continuity", "label": "Taro Yamada", "evidence_segment_ids": ["SEG_a_intro"], "confidence": { "score": 0.9, "source": "operator", "status": "ready" } }
+  ],
+  "segments": [
+    { "segment_id": "SEG_a_intro", "asset_id": "AST_a", "src_in_us": 0, "src_out_us": 2000000, "capture_basis": "file_metadata", "entity_ids": ["ENT_SUBJECT_named_child"] }
+  ],
+  "edges": [],
+  "risks": [],
+  "provenance": { "producer": "analysis-pipeline", "inputs": [], "hash_policy": { "algorithm": "sha256", "canonicalization": "normalized-json-v1", "excluded_fields": ["created_at"] } }
+}

@@ -1,0 +1,390 @@
+import XCTest
+@testable import VideoOSStudioCore
+
+final class CaptionReviewDocumentTests: XCTestCase {
+    func testLegacyQueueWithoutCaptionStyleUsesBackwardCompatibleDefault() throws {
+        let json = """
+        {
+          "version": "caption-review-queue/v1",
+          "project": "/tmp/project",
+          "fps": 24,
+          "can_undo": false,
+          "total_caption_count": 0,
+          "matched_caption_count": 0,
+          "exported_caption_count": 0,
+          "items": []
+        }
+        """
+
+        let document = try JSONDecoder().decode(
+            CaptionReviewQueueDocument.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(document.captionStyle, .default)
+        XCTAssertEqual(document.captionStyle.fontID, "noto-sans-jp")
+        XCTAssertEqual(document.captionStyle.fontFamily, "VideoOS Noto Sans JP Bold")
+        XCTAssertEqual(document.captionStyle.fontWeight, 700)
+    }
+
+    func testCleanLowerThirdUsesVerifiedHeavyFamilyAndNumericPreviewWeight() throws {
+        let json = """
+        {
+          "version": "caption-review-queue/v2",
+          "project": "/tmp/project",
+          "status": "ready",
+          "base_caption_draft_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fps": 24,
+          "caption_style": {
+            "preset_id": "clean-lower-third",
+            "font_id": "noto-sans-jp",
+            "font_family": "VideoOS Noto Sans JP Black",
+            "font_weight": 900,
+            "font_size_px_1080": 60,
+            "line_height_px_1080": 74,
+            "outline_px_1080": 3,
+            "margin_v_1080": 36,
+            "max_width_ratio": 0.9,
+            "alignment": "bottom_center"
+          },
+          "font_contract": {
+            "status": "ready",
+            "font_id": "noto-sans-jp",
+            "family": "VideoOS Noto Sans JP Black",
+            "fallback_used": false,
+            "diagnostics": []
+          },
+          "can_undo": false,
+          "total_caption_count": 0,
+          "matched_caption_count": 0,
+          "exported_caption_count": 0,
+          "items": []
+        }
+        """
+
+        let document = try JSONDecoder().decode(
+            CaptionReviewQueueDocument.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(document.captionStyle.fontFamily, "VideoOS Noto Sans JP Black")
+        XCTAssertEqual(document.captionStyle.fontWeight, 900)
+        XCTAssertEqual(document.captionStyle.previewFontWeight, .black)
+        XCTAssertEqual(CaptionReviewPreviewStyle.previewFontWeight(for: 800), .heavy)
+        XCTAssertEqual(CaptionReviewPreviewStyle.previewFontWeight(for: 700), .bold)
+    }
+
+    func testUnregisteredHeavyFamilyFailsClosedInsteadOfUsingSystemFallback() {
+        let status = CaptionFontRuntimeStatus(assets: [
+            .init(
+                role: "primary",
+                family: "Noto Sans JP",
+                resource: "NotoSansJP-Variable",
+                state: .ready
+            ),
+            .init(
+                role: "heavy",
+                family: "VideoOS Noto Sans JP Black",
+                resource: "VideoOSNotoSansJPBlack",
+                state: .blocked,
+                diagnostic: "missing_resource: VideoOSNotoSansJPBlack.ttf"
+            ),
+        ])
+
+        XCTAssertFalse(status.canRenderCustomFont(family: "VideoOS Noto Sans JP Black"))
+        XCTAssertEqual(status.blocker(requiredFamily: "VideoOS Noto Sans JP Black")?.code, "font_contract_mismatch")
+        XCTAssertTrue(status.blocker(requiredFamily: "VideoOS Noto Sans JP Black")?.message.contains("missing_resource") == true)
+    }
+
+    func testDecodesSharedCLIQueueContractAndSummaries() throws {
+        let json = """
+        {
+          "version": "caption-review-queue/v1",
+          "project": "/tmp/project",
+          "fps": 24,
+          "caption_style": {
+            "preset_id": "longform-event",
+            "font_family": "Hiragino Sans",
+            "font_weight": 700,
+            "font_size_px_1080": 56,
+            "line_height_px_1080": 70,
+            "outline_px_1080": 4,
+            "margin_v_1080": 48,
+            "max_width_ratio": 0.9,
+            "alignment": "bottom_center"
+          },
+          "can_undo": true,
+          "undo_depth": 3,
+          "glossary_proposals": [
+            {
+              "canonical": "Tomy",
+              "variants": ["富井"],
+              "source_caption_ids": ["SC_001"]
+            }
+          ],
+          "total_caption_count": 3,
+          "matched_caption_count": 3,
+          "exported_caption_count": 3,
+          "items": [
+            {
+              "caption_id": "SC_001",
+              "timeline_in_frame": 24,
+              "timeline_duration_frames": 48,
+              "text": "聞きたいことが\\nあります",
+              "text_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "review_state": "unreviewed",
+              "risk_score": 100,
+              "issues": [
+                {
+                  "code": "unnatural_line_break",
+                  "severity": "block",
+                  "message": "日本語の語境界を確認してください"
+                }
+              ]
+            },
+            {
+              "caption_id": "SC_002",
+              "timeline_in_frame": 72,
+              "timeline_duration_frames": 48,
+              "text": "確認済みです",
+              "text_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "review_state": "verified",
+              "risk_score": 0,
+              "issues": []
+            },
+            {
+              "caption_id": "SC_003",
+              "timeline_in_frame": 120,
+              "timeline_duration_frames": 48,
+              "text": "タイミングを確認",
+              "text_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "review_state": "flagged",
+              "risk_score": 120,
+              "issues": [
+                {
+                  "code": "timing_fallback",
+                  "severity": "warn",
+                  "message": "word timing fallback"
+                }
+              ]
+            }
+          ]
+        }
+        """
+
+        let document = try JSONDecoder().decode(
+            CaptionReviewQueueDocument.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(document.items.count, 3)
+        XCTAssertEqual(document.fps, 24)
+        XCTAssertEqual(document.captionStyle.presetID, "longform-event")
+        XCTAssertEqual(document.captionStyle.fontID, "noto-sans-jp")
+        XCTAssertEqual(document.captionStyle.fontSizePx1080, 56)
+        XCTAssertTrue(document.canUndo)
+        XCTAssertEqual(document.undoDepth, 3)
+        XCTAssertEqual(document.glossaryProposals.first?.canonical, "Tomy")
+        XCTAssertEqual(document.glossaryProposals.first?.variants, ["富井"])
+        XCTAssertEqual(document.blockingCount, 1)
+        XCTAssertEqual(document.warningCount, 1)
+        XCTAssertEqual(document.verifiedCount, 1)
+        XCTAssertEqual(document.flaggedCount, 1)
+        XCTAssertEqual(document.items[0].text, "聞きたいことが\nあります")
+        XCTAssertTrue(document.items[0].hasBlockingIssue)
+    }
+
+    func testStudioRunnerUsesTheSharedCaptionReviewCLIForQueueAndEdit() {
+        let projectURL = URL(fileURLWithPath: "/tmp/video project")
+
+        XCTAssertEqual(CaptionReviewRunner.queueArguments(projectURL: projectURL), [
+            "npx", "tsx", "scripts/caption-review.ts", "queue",
+            "--project", "/tmp/video project",
+            "--format", "json",
+            "--severity", "all",
+        ])
+        XCTAssertEqual(CaptionReviewRunner.editArguments(
+            projectURL: projectURL,
+            captionID: "SC_001",
+            text: "修正後\n二行目",
+            startFrame: 24,
+            endFrame: 72,
+            expectedTextHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            state: .verified
+        ), [
+            "npx", "tsx", "scripts/caption-review.ts", "edit",
+            "--project", "/tmp/video project",
+            "--caption-id", "SC_001",
+            "--text", "修正後\n二行目",
+            "--start-frame", "24",
+            "--end-frame", "72",
+            "--base-text-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--state", "verified",
+            "--category", "other",
+        ])
+    }
+
+    func testQueueV2RestoresApprovalAndOperationalControlsAfterReload() throws {
+        let hash = "sha256:" + String(repeating: "a", count: 64)
+        let json = """
+        {
+          "version":"caption-review-queue/v2","project":"/tmp/project","status":"ready","fps":24,
+          "base_caption_draft_hash":"\(hash)","can_undo":false,"undo_depth":0,
+          "approval_readiness":{"can_approve":true,"blockers":[],"warning_issue_count":1,"warnings_acknowledged":true},
+          "safe_bulk_review":{"eligible_caption_ids":[],"eligible_count":0,"excluded":[],"exclusion_reason_counts":{}},
+          "font_contract":{"status":"ready","font_id":"noto-sans-jp","family":"Noto Sans JP","fallback_used":false,"diagnostics":[]},
+          "current_approval":{"status":"approved","hash":"\(hash)"},
+          "total_caption_count":0,"matched_caption_count":0,"exported_caption_count":0,"items":[]
+        }
+        """
+        let document = try JSONDecoder().decode(CaptionReviewQueueDocument.self, from: Data(json.utf8))
+        XCTAssertTrue(document.approvalReadiness.canApprove)
+        XCTAssertEqual(document.currentApproval?.status, "approved")
+        XCTAssertEqual(document.currentApproval?.hash, hash)
+        XCTAssertEqual(document.fontContract?.fallbackUsed, false)
+    }
+
+    func testFinalizeArgumentsAndSuccessPayloadUseExplicitCLIContract() {
+        let projectURL = URL(fileURLWithPath: "/tmp/video project")
+        XCTAssertEqual(CaptionReviewRunner.finalizeArguments(projectURL: projectURL), [
+            "npx", "tsx", "scripts/caption-finalize.ts", "run",
+            "--project", "/tmp/video project", "--json",
+        ])
+        let result = CaptionReviewRunner.decodeSuccessPayload("""
+        {"generation_id":"gen-123","active_delivery":{"artifacts":{"final_video":{"path":"07_package/generations/gen-123/video/final.mp4"}}}}
+        """, successMessage: "done")
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.generationID, "gen-123")
+        XCTAssertEqual(result.finalPath, "07_package/generations/gen-123/video/final.mp4")
+    }
+
+    func testReviewerReadinessRefreshDoesNotRequireEnter() {
+        XCTAssertTrue(CaptionReviewerRefreshPolicy.shouldRefresh(from: "", to: "Editor"))
+        XCTAssertFalse(CaptionReviewerRefreshPolicy.shouldRefresh(from: "Editor", to: " Editor "))
+        XCTAssertLessThan(CaptionReviewerRefreshPolicy.delayNanoseconds, 1_000_000_000)
+    }
+
+    func testPreviewTransportPreservesPlayLoopAndRejectsStaleReselectCompletion() {
+        var transport = CaptionPreviewTransportState()
+        let first = transport.reselect(loopStart: 1, loopEnd: 3)
+        transport.itemBecameReady(generation: first)
+        XCTAssertEqual(transport.readiness, .loading)
+        transport.initialSeekCompleted(generation: first, success: true)
+        transport.play()
+        XCTAssertTrue(transport.isPlaying)
+        XCTAssertTrue(transport.tick(3.1))
+        XCTAssertEqual(transport.currentSeconds, 1)
+
+        let second = transport.reselect(loopStart: 5, loopEnd: 7)
+        transport.initialSeekCompleted(generation: first, success: false)
+        XCTAssertEqual(transport.readiness, .loading)
+        transport.itemBecameReady(generation: second)
+        XCTAssertEqual(transport.readiness, .loading)
+        transport.initialSeekCompleted(generation: second, success: true)
+        XCTAssertEqual(transport.readiness, .ready)
+        XCTAssertEqual(transport.currentSeconds, 5)
+    }
+
+    func testRunnerRoutesSplitMergeAndUndoThroughSharedCLI() {
+        let projectURL = URL(fileURLWithPath: "/tmp/project")
+        let first = CaptionReviewQueueItem(
+            captionID: "SC_001",
+            timelineInFrame: 24,
+            timelineDurationFrames: 48,
+            text: "前半",
+            textHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            reviewState: .unreviewed,
+            riskScore: 0,
+            issues: []
+        )
+        let second = CaptionReviewQueueItem(
+            captionID: "SC_002",
+            timelineInFrame: 72,
+            timelineDurationFrames: 48,
+            text: "後半",
+            textHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            reviewState: .unreviewed,
+            riskScore: 0,
+            issues: []
+        )
+
+        XCTAssertEqual(CaptionReviewRunner.splitArguments(
+            projectURL: projectURL,
+            captionID: first.captionID,
+            splitFrame: 48,
+            expectedTextHash: first.textHash
+        ).suffix(6), [
+            "--caption-id", "SC_001",
+            "--split-frame", "48",
+            "--base-text-hash", first.textHash,
+        ])
+        XCTAssertEqual(CaptionReviewRunner.mergeArguments(
+            projectURL: projectURL,
+            first: first,
+            second: second
+        ).suffix(8), [
+            "--caption-id", "SC_001",
+            "--next-caption-id", "SC_002",
+            "--base-text-hash", first.textHash,
+            "--next-base-text-hash", second.textHash,
+        ])
+        XCTAssertEqual(CaptionReviewRunner.undoArguments(projectURL: projectURL).suffix(3), [
+            "undo", "--project", "/tmp/project",
+        ])
+        XCTAssertEqual(CaptionReviewRunner.glossaryProposalArguments(
+            projectURL: projectURL,
+            captionID: "SC_001",
+            canonical: "Tomy",
+            variants: ["富井"]
+        ).suffix(6), [
+            "--caption-id", "SC_001",
+            "--canonical", "Tomy",
+            "--variant", "富井",
+        ])
+    }
+
+    func testConflictPreservesLoadedCurrentAndWorkingVersions() {
+        let loaded = CaptionReviewQueueItem(
+            captionID: "SC_001",
+            timelineInFrame: 24,
+            timelineDurationFrames: 48,
+            text: "読み込み時",
+            textHash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            reviewState: .unreviewed,
+            riskScore: 0,
+            issues: []
+        )
+        let current = CaptionReviewQueueItem(
+            captionID: "SC_001",
+            timelineInFrame: 25,
+            timelineDurationFrames: 49,
+            text: "現在版",
+            textHash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            reviewState: .unreviewed,
+            riskScore: 0,
+            issues: []
+        )
+        let conflict = CaptionReviewConflict(
+            loaded: loaded,
+            current: current,
+            workingText: "作業案",
+            workingStartFrame: 26,
+            workingEndFrame: 76
+        )
+
+        XCTAssertEqual(conflict.loaded.text, "読み込み時")
+        XCTAssertEqual(conflict.current.text, "現在版")
+        XCTAssertEqual(conflict.workingText, "作業案")
+        XCTAssertEqual(conflict.workingStartFrame, 26)
+        XCTAssertEqual(conflict.workingEndFrame, 76)
+    }
+
+    func testApprovalArgumentsAlwaysCarryTheHumanReviewer() {
+        let arguments = CaptionReviewRunner.approveArguments(
+            projectURL: URL(fileURLWithPath: "/tmp/project"),
+            reviewer: "Human Editor"
+        )
+
+        XCTAssertEqual(arguments.suffix(2), ["--reviewer", "Human Editor"])
+    }
+}

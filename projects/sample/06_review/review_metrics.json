@@ -1,0 +1,286 @@
+{
+  "version": "1",
+  "project_id": "sample-mountain-reset",
+  "timeline_version": "2",
+  "summary": {
+    "total_checks": 10,
+    "by_status": {
+      "pass": 4,
+      "warn": 1,
+      "fail": 2,
+      "skipped": 3
+    },
+    "by_tier": {
+      "emotion": {
+        "pass": 0,
+        "warn": 0,
+        "fail": 0,
+        "skipped": 2
+      },
+      "story": {
+        "pass": 0,
+        "warn": 0,
+        "fail": 1,
+        "skipped": 1
+      },
+      "rhythm": {
+        "pass": 1,
+        "warn": 1,
+        "fail": 1,
+        "skipped": 0
+      },
+      "eye_trace": {
+        "pass": 1,
+        "warn": 0,
+        "fail": 0,
+        "skipped": 0
+      },
+      "plane_2d": {
+        "pass": 1,
+        "warn": 0,
+        "fail": 0,
+        "skipped": 0
+      },
+      "audio": {
+        "pass": 1,
+        "warn": 0,
+        "fail": 0,
+        "skipped": 0
+      }
+    }
+  },
+  "checks": [
+    {
+      "id": "rhythm.beat_duration_deviation",
+      "tier": "rhythm",
+      "status": "warn",
+      "measured": {
+        "max_deviation_pct": 19.643,
+        "beats": [
+          {
+            "beat_id": "b01",
+            "target_frames": 96,
+            "actual_frames": 96,
+            "deviation_pct": 0
+          },
+          {
+            "beat_id": "b02",
+            "target_frames": 216,
+            "actual_frames": 216,
+            "deviation_pct": 0
+          },
+          {
+            "beat_id": "b03",
+            "target_frames": 240,
+            "actual_frames": 240,
+            "deviation_pct": 0
+          },
+          {
+            "beat_id": "b04",
+            "target_frames": 168,
+            "actual_frames": 135,
+            "deviation_pct": 19.643
+          }
+        ]
+      },
+      "threshold": {
+        "warn_pct": 10,
+        "fail_pct": 20
+      },
+      "evidence": [
+        "b04: actual 135f vs target 168f (19.643% deviation)"
+      ]
+    },
+    {
+      "id": "rhythm.max_shot_length",
+      "tier": "rhythm",
+      "status": "fail",
+      "measured": {
+        "max_shot_length_frames": 140,
+        "clips_over_threshold": [
+          {
+            "clip_id": "CLP_0007",
+            "beat_id": "b02",
+            "duration_frames": 135
+          },
+          {
+            "clip_id": "CLP_0008",
+            "beat_id": "b03",
+            "duration_frames": 140
+          },
+          {
+            "clip_id": "CLP_0009",
+            "beat_id": "b03",
+            "duration_frames": 140
+          },
+          {
+            "clip_id": "CLP_0014",
+            "beat_id": "b04",
+            "duration_frames": 135
+          }
+        ]
+      },
+      "threshold": {
+        "max_shot_length_frames": 120
+      },
+      "evidence": [
+        "CLP_0007: 135f exceeds max 120f",
+        "CLP_0008: 140f exceeds max 120f",
+        "CLP_0009: 140f exceeds max 120f",
+        "CLP_0014: 135f exceeds max 120f"
+      ]
+    },
+    {
+      "id": "rhythm.cadence_distribution",
+      "tier": "rhythm",
+      "status": "pass",
+      "measured": {
+        "average_shot_length_frames": {
+          "opening": 96,
+          "middle": 140,
+          "ending": 116
+        },
+        "section_clip_counts": {
+          "opening": 1,
+          "middle": 1,
+          "ending": 1
+        },
+        "cadence_rank": {
+          "opening": 1,
+          "middle": 3,
+          "ending": 3
+        }
+      },
+      "threshold": {
+        "opening_cadence": "brisk",
+        "middle_cadence": "spacious",
+        "ending_cadence": "warm",
+        "comparison_tolerance_pct": 5
+      },
+      "evidence": [
+        "Average V1 shot length order is consistent with cadence policy."
+      ]
+    },
+    {
+      "id": "story.required_roles",
+      "tier": "story",
+      "status": "fail",
+      "measured": {
+        "missing_required_roles": [
+          {
+            "beat_id": "b02",
+            "missing_role": "texture",
+            "present_roles": [
+              "dialogue",
+              "support",
+              "transition"
+            ]
+          }
+        ]
+      },
+      "threshold": {
+        "required_roles_source": "edit_blueprint.beats[].required_roles"
+      },
+      "evidence": [
+        "b02: missing required role \"texture\" (present: dialogue,support,transition)"
+      ]
+    },
+    {
+      "id": "story.chronology",
+      "tier": "story",
+      "status": "skipped",
+      "measured": null,
+      "threshold": null,
+      "evidence": [
+        "brief.order_policy is not chronological."
+      ]
+    },
+    {
+      "id": "emotion.peak_retention",
+      "tier": "emotion",
+      "status": "skipped",
+      "measured": null,
+      "threshold": null,
+      "evidence": [
+        "segments.json has no peak_analysis.peak_moments."
+      ]
+    },
+    {
+      "id": "emotion.hook_density",
+      "tier": "emotion",
+      "status": "skipped",
+      "measured": null,
+      "threshold": null,
+      "evidence": [
+        "Hook clips have no peak_analysis or candidate peak editorial signals."
+      ]
+    },
+    {
+      "id": "eye_trace.same_asset_adjacency",
+      "tier": "eye_trace",
+      "status": "pass",
+      "measured": {
+        "adjacent_pairs": 2,
+        "same_asset_pairs": []
+      },
+      "threshold": {
+        "max_same_asset_adjacent_pairs": 0,
+        "scope": "V1"
+      },
+      "evidence": [
+        "No adjacent V1 clips reuse the same asset."
+      ]
+    },
+    {
+      "id": "plane_2d.motif_overuse",
+      "tier": "plane_2d",
+      "status": "pass",
+      "measured": {
+        "motif_counts": {
+          "breath": 1,
+          "exhale": 1,
+          "exterior": 1,
+          "hands": 2,
+          "light": 1,
+          "movement": 1,
+          "path": 1,
+          "prep": 1,
+          "release": 2,
+          "reset": 1,
+          "ritual": 1,
+          "scale": 1,
+          "sunrise": 1,
+          "threshold": 1,
+          "trail": 1,
+          "transition": 1,
+          "warmth": 1,
+          "water": 1
+        },
+        "overused_motifs": [],
+        "unresolved_clip_ids": []
+      },
+      "threshold": {
+        "motif_reuse_max": 2,
+        "allow_intentional_repetition": false
+      },
+      "evidence": [
+        "No selected motif exceeds reuse max 2."
+      ]
+    },
+    {
+      "id": "audio.speech_cut",
+      "tier": "audio",
+      "status": "pass",
+      "measured": {
+        "checked_clip_count": 8,
+        "speech_cut_violations": []
+      },
+      "threshold": {
+        "speech_cut_guard_us": 80000
+      },
+      "evidence": [
+        "No clip boundary cuts through transcript utterances (checked 8 clips)."
+      ]
+    }
+  ]
+}

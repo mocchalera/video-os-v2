@@ -1,0 +1,61 @@
+id: defect_repair
+name: Defect Repair Closed Loop
+type: closed_loop
+version: "0.1.0"
+
+goal:
+  description: Fix one open defect and verify no regression.
+  completion:
+    - defect_status_is_closed_or_waived
+    - linked_tests_are_passing_or_waived
+    - verifier_approved_or_human_decision_recorded
+
+agents:
+  explorer:
+    mode: read_only
+    purpose: Identify root cause and affected files.
+  implementer:
+    mode: workspace_write
+    worktree: true
+    purpose: Make the smallest safe fix.
+  verifier:
+    mode: read_only
+    separate_context: true
+    purpose: Adversarially verify the fix against expected behavior.
+
+steps:
+  - id: inspect_defect
+    agent: explorer
+    output_schema: root_cause_report
+  - id: implement_fix
+    agent: implementer
+    input: root_cause_report
+    output_schema: patch_summary
+  - id: run_targeted_tests
+    command: project.commands.test
+    capture: evidence/test-results
+  - id: verify_fix
+    agent: verifier
+    input:
+      - patch_summary
+      - test_results
+      - defect.expected
+      - defect.actual
+    output_schema: verification_report
+  - id: decide
+    rules:
+      - if: verification_report.result == approved
+        then: close_defect
+      - if: "loop.iteration >= 2"
+        then: escalate_to_human
+      - else: retry
+
+budget:
+  max_iterations: 2
+  max_parallel_jobs: 2
+  require_human_after_repeated_failure: true
+
+stop_conditions:
+  - same_failure_repeats
+  - fix_requires_forbidden_file
+  - max_iterations_reached

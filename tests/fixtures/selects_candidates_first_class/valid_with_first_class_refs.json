@@ -1,0 +1,37 @@
+{
+  "version": "1.1.0",
+  "project_id": "planning-first-class",
+  "created_at": "2026-04-27T00:00:00Z",
+  "candidates": [
+    {
+      "segment_id": "SEG_intro_001",
+      "asset_id": "AST_intro_001",
+      "src_in_us": 0,
+      "src_out_us": 2000000,
+      "role": "hero",
+      "why_it_matches": "Opening hook with clear dialogue.",
+      "risks": [],
+      "confidence": 0.82,
+      "audio_story_refs": [
+        {
+          "node_id": "UTTREF_UTT_intro_001",
+          "role": "hook",
+          "confidence": {
+            "score": 0.88,
+            "source": "audio_story_graph",
+            "status": "ready"
+          },
+          "graph_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "continuity_refs": [
+        {
+          "entity_id": "ENT_SUBJECT_child_001",
+          "risk_id": "CONRISK_axis_001",
+          "severity": "warning",
+          "graph_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/derived-video-provenance.schema.json",
+  "title": "Derived Video Provenance",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "created_at",
+    "source_inputs",
+    "transformation_chain",
+    "captions",
+    "final_output",
+    "verification"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "derived-video-provenance/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_inputs": {
+      "type": "object",
+      "required": ["attestation_version", "attestation_status", "aggregate_sha256", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "attestation_version": { "type": "string", "minLength": 1 },
+        "attestation_status": {
+          "type": "string",
+          "enum": ["verified", "live_only", "not_applicable"]
+        },
+        "aggregate_sha256": { "$ref": "#/$defs/sha256" },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceInput" }
+        }
+      }
+    },
+    "transformation_chain": {
+      "type": "object",
+      "required": ["producer", "timeline", "chain_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["engine_render", "nle_finishing"] },
+        "timeline": { "$ref": "#/$defs/artifactRef" },
+        "render_route_receipt": { "$ref": "#/$defs/artifactRef" },
+        "handoff_id": { "type": "string", "minLength": 1 },
+        "chain_sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "producer": { "const": "engine_render" } },
+            "required": ["producer"]
+          },
+          "then": { "required": ["render_route_receipt"] },
+          "else": { "required": ["handoff_id"] }
+        }
+      ]
+    },
+    "captions": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["burn_in", "sidecar", "both", "none"]
+        },
+        "approval": { "$ref": "#/$defs/artifactRef" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "mode": { "const": "none" } },
+            "required": ["mode"]
+          },
+          "else": { "required": ["approval"] }
+        }
+      ]
+    },
+    "final_output": { "$ref": "#/$defs/artifactRef" },
+    "verification": {
+      "type": "object",
+      "required": ["status", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["verified", "live_only"] },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "artifactRef": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "sourceInput": {
+      "type": "object",
+      "required": [
+        "asset_id",
+        "media_kind",
+        "content_sha256",
+        "identity_status",
+        "render_input_identity",
+        "source_origin",
+        "caption_cleanliness",
+        "generated_output_detected",
+        "technical"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "media_kind": { "type": "string", "minLength": 1 },
+        "content_sha256": { "$ref": "#/$defs/sha256" },
+        "identity_status": { "type": "string", "enum": ["verified", "live_only"] },
+        "render_input_identity": { "type": "object" },
+        "source_origin": {
+          "type": "string",
+          "enum": ["original_source", "verified_caption_free_proxy"]
+        },
+        "caption_cleanliness": {
+          "type": "string",
+          "enum": [
+            "original_source",
+            "independently_attested_caption_free",
+            "not_applicable"
+          ]
+        },
+        "generated_output_detected": { "type": "boolean" },
+        "clean_base_attestation": { "$ref": "#/$defs/artifactRef" },
+        "technical": { "$ref": "#/$defs/technical" }
+      }
+    },
+    "technical": {
+      "type": "object",
+      "required": ["metadata_status", "duration_us", "dimensions", "audio_layout"],
+      "additionalProperties": false,
+      "properties": {
+        "metadata_status": { "type": "string", "enum": ["complete", "incomplete"] },
+        "duration_us": { "type": ["integer", "null"], "minimum": 0 },
+        "dimensions": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["width", "height"],
+              "additionalProperties": false,
+              "properties": {
+                "width": { "type": "integer", "minimum": 1 },
+                "height": { "type": "integer", "minimum": 1 }
+              }
+            }
+          ]
+        },
+        "audio_layout": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["kind"],
+              "additionalProperties": false,
+              "properties": { "kind": { "const": "none" } }
+            },
+            {
+              "type": "object",
+              "required": ["kind", "channels", "sample_rate", "codec"],
+              "additionalProperties": false,
+              "properties": {
+                "kind": { "const": "channels" },
+                "channels": { "type": "integer", "minimum": 1 },
+                "sample_rate": { "type": "integer", "minimum": 1 },
+                "codec": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

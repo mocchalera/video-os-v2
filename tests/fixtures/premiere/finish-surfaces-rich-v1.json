@@ -1,0 +1,52 @@
+{
+  "fixture_kind": "synthetic_not_premiere_hardware_proof",
+  "timeline": {
+    "version": "1",
+    "project_id": "finish-surfaces-rich-v1",
+    "created_at": "2026-08-16T00:00:00Z",
+    "sequence": {
+      "name": "Synthetic Premiere finish surfaces",
+      "fps_num": 24,
+      "fps_den": 1,
+      "width": 1920,
+      "height": 1080,
+      "start_frame": 0,
+      "timecode_format": "NDF"
+    },
+    "tracks": {
+      "video": [{
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          { "clip_id": "video-a", "segment_id": "segment-a", "asset_id": "asset-a", "src_in_us": 1000000, "src_out_us": 5000000, "timeline_in_frame": 0, "timeline_duration_frames": 48, "role": "hero", "motivation": "opening", "beat_id": "beat-a", "fallback_segment_ids": [], "confidence": 1, "quality_flags": [] },
+          { "clip_id": "video-b", "segment_id": "segment-b", "asset_id": "asset-b", "src_in_us": 1000000, "src_out_us": 5000000, "timeline_in_frame": 48, "timeline_duration_frames": 48, "role": "support", "motivation": "middle", "beat_id": "beat-b", "fallback_segment_ids": [], "confidence": 1, "quality_flags": [] },
+          { "clip_id": "video-c", "segment_id": "segment-c", "asset_id": "asset-c", "src_in_us": 1000000, "src_out_us": 5000000, "timeline_in_frame": 96, "timeline_duration_frames": 48, "role": "hero", "motivation": "close", "beat_id": "beat-c", "fallback_segment_ids": [], "confidence": 1, "quality_flags": [] }
+        ]
+      }],
+      "audio": [{
+        "track_id": "A1",
+        "kind": "audio",
+        "clips": [{ "clip_id": "audio-bgm", "segment_id": "segment-audio", "asset_id": "asset-audio", "src_in_us": 0, "src_out_us": 6000000, "timeline_in_frame": 0, "timeline_duration_frames": 144, "role": "music", "motivation": "bed", "beat_id": "beat-audio", "fallback_segment_ids": [], "confidence": 1, "quality_flags": [], "audio_policy": { "gain_unit": "db", "bgm_gain": -6, "bgm_fade_in_frames": 12, "bgm_fade_out_frames": 18 } }]
+      }],
+      "overlay": [{
+        "track_id": "O1",
+        "kind": "overlay",
+        "clips": [
+          { "clip_id": "overlay-title", "segment_id": "overlay-title", "asset_id": "generated-overlay", "src_in_us": 0, "src_out_us": 1000000, "timeline_in_frame": 6, "timeline_duration_frames": 30, "role": "title", "motivation": "title", "beat_id": "beat-title", "fallback_segment_ids": [], "confidence": 1, "quality_flags": [], "metadata": { "overlay": { "overlay_id": "title-1", "text": "Synthetic\nTitle", "styling_class": "vos:overlay.title-card", "writing_mode": "horizontal_tb", "anchor": "center", "source": "authored" } } },
+          { "clip_id": "overlay-lower-third", "segment_id": "overlay-lower-third", "asset_id": "generated-overlay", "src_in_us": 0, "src_out_us": 1000000, "timeline_in_frame": 54, "timeline_duration_frames": 30, "role": "title", "motivation": "lower third", "beat_id": "beat-lower-third", "fallback_segment_ids": [], "confidence": 1, "quality_flags": [], "metadata": { "overlay": { "overlay_id": "lower-third-1", "text": "Synthetic Person", "styling_class": "vos:overlay.lower-third", "writing_mode": "horizontal_tb", "anchor": "bottom_left", "source": "authored" } } }
+        ]
+      }],
+      "caption": [{
+        "track_id": "C1",
+        "kind": "caption",
+        "clips": [{ "clip_id": "caption-1", "segment_id": "caption-1", "asset_id": "caption-sidecar-only", "src_in_us": 0, "src_out_us": 1000000, "timeline_in_frame": 12, "timeline_duration_frames": 24, "role": "caption", "motivation": "approved sidecar only", "beat_id": "beat-caption", "fallback_segment_ids": [], "confidence": 1, "quality_flags": [], "metadata": { "text": "Caption must not become a generator" } }]
+      }]
+    },
+    "transitions": [
+      { "transition_id": "transition-ab", "from_clip_id": "video-a", "to_clip_id": "video-b", "track_id": "V1", "transition_type": "crossfade", "transition_frames": 12 },
+      { "transition_id": "transition-bc", "from_clip_id": "video-b", "to_clip_id": "video-c", "track_id": "V1", "transition_type": "match_cut", "applied_skill_id": "match_cut_bridge", "transition_frames": 8 }
+    ],
+    "markers": [],
+    "provenance": { "brief_path": "synthetic/brief.yaml", "blueprint_path": "synthetic/blueprint.yaml", "selects_path": "synthetic/selects.yaml", "compiler_version": "synthetic-fixture" }
+  }
+}

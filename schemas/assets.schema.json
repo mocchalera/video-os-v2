@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/assets.schema.json",
+  "title": "Video OS Assets",
+  "type": "object",
+  "required": ["project_id", "artifact_version", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "minLength": 1 },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset-item" }
+    }
+  },
+  "$defs": {
+    "asset-item": {
+      "type": "object",
+      "required": [
+        "asset_id", "filename", "duration_us", "has_transcript",
+        "transcript_ref", "segments", "segment_ids", "quality_flags", "tags"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string", "minLength": 1 },
+        "media_kind": { "type": "string", "enum": ["video", "audio", "image", "sequence", "unknown"] },
+        "display_name": { "type": "string" },
+        "role_guess": { "type": "string" },
+        "duration_us": { "type": "integer", "minimum": 0 },
+        "duration_semantics": { "type": "string", "enum": ["physical_media_duration", "single_frame_zero_duration"] },
+        "has_transcript": { "type": "boolean" },
+        "transcript_ref": { "type": ["string", "null"] },
+        "segments": { "type": "integer", "minimum": 0 },
+        "segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "source_fingerprint": { "type": "string" },
+        "source_locator": { "type": "string" },
+        "video_stream": { "$ref": "#/$defs/video-stream" },
+        "frame_rate_mode": { "type": "string", "enum": ["cfr", "vfr", "audio_only", "still_image", "unknown"] },
+        "rotation": { "type": ["integer", "null"], "enum": [0, 90, 180, 270, null] },
+        "audio_stream": { "$ref": "#/$defs/audio-stream" },
+        "contact_sheet_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "poster_path": { "type": "string" },
+        "waveform_path": { "type": "string" },
+        "analysis_status": {
+          "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/analysis-status"
+        },
+        "source_content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "source_size_bytes": { "type": "integer", "minimum": 0 },
+        "source_mtime_ms": { "type": "integer", "minimum": 0 },
+        "still_image": { "$ref": "#/$defs/still-image" },
+        "image_sequence": { "$ref": "#/$defs/image-sequence" },
+        "confidence": {
+          "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+        },
+        "provenance": {
+          "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "media_kind": { "const": "image" } }, "required": ["media_kind"] },
+          "then": {
+            "required": ["duration_semantics", "still_image", "source_content_sha256", "source_size_bytes", "source_mtime_ms"],
+            "properties": {
+              "duration_us": { "const": 0 },
+              "duration_semantics": { "const": "single_frame_zero_duration" },
+              "frame_rate_mode": { "const": "still_image" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["still_image"] },
+              {
+                "properties": { "duration_semantics": { "const": "single_frame_zero_duration" } },
+                "required": ["duration_semantics"]
+              },
+              {
+                "properties": { "frame_rate_mode": { "const": "still_image" } },
+                "required": ["frame_rate_mode"]
+              }
+            ]
+          },
+          "then": {
+            "required": ["media_kind"],
+            "properties": { "media_kind": { "const": "image" } }
+          }
+        },
+        {
+          "if": { "properties": { "media_kind": { "const": "sequence" } }, "required": ["media_kind"] },
+          "then": {
+            "required": ["duration_semantics", "image_sequence", "source_content_sha256", "source_size_bytes", "source_mtime_ms", "video_stream", "frame_rate_mode"],
+            "properties": {
+              "duration_semantics": { "const": "physical_media_duration" },
+              "frame_rate_mode": { "const": "cfr" }
+            }
+          }
+        },
+        {
+          "if": { "required": ["image_sequence"] },
+          "then": {
+            "required": ["media_kind"],
+            "properties": { "media_kind": { "const": "sequence" } }
+          }
+        }
+      ]
+    },
+    "image-sequence": {
+      "type": "object",
+      "required": [
+        "grouping_producer", "grouping_producer_version", "normalization_producer", "normalization_producer_version",
+        "pattern_basename", "start_number", "end_number", "frame_count", "padding", "fps_num", "fps_den",
+        "frame_set_content_sha256", "frame_content_sha256", "analysis_proxy_path", "analysis_proxy_content_sha256",
+        "analysis_proxy_frame_count", "source_width", "source_height", "decoded_width", "decoded_height", "normalized_pixel_format"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "grouping_producer": { "const": "image-sequence-grouper" },
+        "grouping_producer_version": { "const": "1" },
+        "normalization_producer": { "const": "ffmpeg-image-sequence-normalizer" },
+        "normalization_producer_version": { "const": "1" },
+        "pattern_basename": { "type": "string", "minLength": 1 },
+        "start_number": { "type": "integer", "minimum": 0 },
+        "end_number": { "type": "integer", "minimum": 0 },
+        "frame_count": { "type": "integer", "minimum": 2 },
+        "padding": { "type": "integer", "minimum": 1 },
+        "fps_num": { "type": "integer", "minimum": 1 },
+        "fps_den": { "type": "integer", "minimum": 1 },
+        "frame_set_content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "frame_content_sha256": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        },
+        "analysis_proxy_path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "analysis_proxy_content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "analysis_proxy_frame_count": { "type": "integer", "minimum": 2 },
+        "source_width": { "type": "integer", "minimum": 1 },
+        "source_height": { "type": "integer", "minimum": 1 },
+        "decoded_width": { "type": "integer", "minimum": 1 },
+        "decoded_height": { "type": "integer", "minimum": 1 },
+        "normalized_pixel_format": { "type": "string", "minLength": 1 }
+      }
+    },
+    "still-image": {
+      "type": "object",
+      "required": [
+        "normalization_producer", "normalization_producer_version",
+        "normalized_frame_path", "normalized_frame_content_sha256", "source_width", "source_height",
+        "decoded_width", "decoded_height", "source_pixel_format", "normalized_pixel_format",
+        "source_has_alpha", "normalized_has_alpha", "source_rotation", "orientation_normalization", "color_profile"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "normalization_producer": {
+          "type": "string",
+          "enum": [
+            "ffmpeg-still-normalizer",
+            "macos-sips-heif-normalizer"
+          ]
+        },
+        "normalization_producer_version": { "const": "1" },
+        "normalized_frame_path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
+        "normalized_frame_content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "source_width": { "type": "integer", "minimum": 1 },
+        "source_height": { "type": "integer", "minimum": 1 },
+        "decoded_width": { "type": "integer", "minimum": 1 },
+        "decoded_height": { "type": "integer", "minimum": 1 },
+        "source_pixel_format": { "type": ["string", "null"] },
+        "normalized_pixel_format": { "type": "string", "minLength": 1 },
+        "source_has_alpha": { "type": ["boolean", "null"] },
+        "normalized_has_alpha": { "type": "boolean" },
+        "source_rotation": { "type": ["integer", "null"], "enum": [0, 90, 180, 270, null] },
+        "orientation_normalization": {
+          "type": "object",
+          "required": ["status", "method", "transform", "orientation_source"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "type": "string", "enum": ["applied", "not_needed", "unknown"] },
+            "method": { "type": "string", "enum": ["ffmpeg_explicit_transform", "none", "unknown"] },
+            "transform": { "type": "string", "enum": ["transpose_clockwise", "transpose_counterclockwise", "rotate_180", "none", "unknown"] },
+            "orientation_source": { "type": "string", "enum": ["display_matrix_or_tag", "exif", "none", "unknown"] }
+          }
+        },
+        "color_profile": {
+          "type": "object",
+          "required": ["icc_profile", "color_range", "color_space", "color_transfer", "color_primaries"],
+          "additionalProperties": false,
+          "properties": {
+            "icc_profile": { "type": "string", "enum": ["present", "absent", "unknown"] },
+            "color_range": { "type": ["string", "null"] },
+            "color_space": { "type": ["string", "null"] },
+            "color_transfer": { "type": ["string", "null"] },
+            "color_primaries": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "video-stream": {
+      "type": "object",
+      "required": ["width", "height", "fps_num", "fps_den", "codec"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps_num": { "type": "integer", "minimum": 1 },
+        "fps_den": { "type": "integer", "minimum": 1 },
+        "codec": { "type": "string", "minLength": 1 }
+      }
+    },
+    "audio-stream": {
+      "type": "object",
+      "required": ["sample_rate", "channels", "codec"],
+      "additionalProperties": false,
+      "properties": {
+        "sample_rate": { "type": "integer", "minimum": 1 },
+        "channels": { "type": "integer", "minimum": 1 },
+        "codec": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

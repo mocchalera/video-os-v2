@@ -1,0 +1,48 @@
+version: "1.0.0"
+project_id: "delivery-fixture"
+artifact_version: "delivery-profile-v1"
+created_at: "2026-04-27T00:00:00Z"
+profile_id: "DPROF_bad_aspect_ratio"
+profile_name: "Bad Aspect Ratio"
+platform: "youtube"
+release_mode: "public"
+video_constraints:
+  aspect_ratio: "16x9"
+  resolution:
+    width: 1920
+    height: 1080
+  frame_rate_mode: "cfr_24"
+  color_space: "rec709"
+audio_constraints:
+  loudness_lufs: -14
+  true_peak_dbtp: -1
+  sample_rate_hz: 48000
+  channel_layout: "stereo"
+caption_constraints:
+  mode: "none"
+  sidecar_format: null
+  language_required: []
+duration_constraints:
+  min_seconds: null
+  max_seconds: null
+file_naming:
+  pattern: "{project_id}_{profile_id}_{date}.mp4"
+  allowed_extensions:
+    - ".mp4"
+metadata_requirements:
+  title_required: true
+  description_required: true
+  tags_required: true
+  thumbnail_required: true
+  custom_fields: []
+privacy_strictness: "strict_public"
+rights_strictness: "strict_public"
+requires_calibrated_confidence: false
+provenance:
+  producer: "/package"
+  inputs: []
+  hash_policy:
+    algorithm: "sha256"
+    canonicalization: "yaml-to-normalized-json-v1"
+    excluded_fields:
+      - "created_at"

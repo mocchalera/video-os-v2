@@ -1,0 +1,40 @@
+{
+  "version": "1",
+  "status": "pass",
+  "project_id": "ax1-participant-voices-20260401",
+  "captured_at": "2026-05-22T11:07:00+09:00",
+  "app": "VideoOSStudio",
+  "window_title": "Video OS Studio",
+  "screenshot_path": "reports/native-editor-visual-qa-2026-05-22.png",
+  "surfaces": [
+    {
+      "id": "viewer",
+      "status": "pass",
+      "evidence": "Black program monitor surface remains stable and does not instantiate the removed SwiftUI AVKit video player path."
+    },
+    {
+      "id": "inspector",
+      "status": "pass",
+      "evidence": "Right inspector is visible with Codex App Server transport, status, workspace, command, and session controls."
+    },
+    {
+      "id": "timeline",
+      "status": "pass",
+      "evidence": "Bottom multi-lane timeline is visible with clip blocks, labels, marker rail, and stable lane heights."
+    },
+    {
+      "id": "transport",
+      "status": "pass",
+      "evidence": "Playback controls, timecode, selected media label, volume, and settings control are visible below the viewer."
+    },
+    {
+      "id": "audio_lanes",
+      "status": "pass",
+      "evidence": "Dialogue and caption lanes are visible; lower dialogue lane includes waveform-style beat/tick marks for audio timing."
+    }
+  ],
+  "notes": [
+    "Captured after ./script/build_and_run.sh --verify passed.",
+    "No new VideoOSStudio crash report appeared during this visual QA pass."
+  ]
+}

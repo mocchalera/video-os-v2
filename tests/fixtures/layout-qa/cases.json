@@ -1,0 +1,140 @@
+{
+  "version": "layout-qa-fixtures/v1",
+  "cases": [
+    {
+      "id": "clean_vertical_short",
+      "expected_status": "verified",
+      "expected_issue_codes": [],
+      "snapshot": {
+        "version": "render-layout-snapshot/v1",
+        "frame": {
+          "width": 1080,
+          "height": 1920,
+          "fps_num": 30,
+          "fps_den": 1,
+          "total_frames": 150,
+          "safe_area": { "top": 96, "right": 48, "bottom": 112, "left": 48 }
+        },
+        "layers": [
+          {
+            "layer_id": "CAP_1",
+            "semantic_role": "speech_caption",
+            "source": "ffmpeg-libass",
+            "start_frame": 0,
+            "end_frame": 90,
+            "bounds": { "x": 90, "y": 1450, "width": 900, "height": 220 },
+            "font": {
+              "status": "verified",
+              "requested_family": "Noto Sans JP",
+              "resolved_family": "Noto Sans JP",
+              "missing_glyphs": []
+            }
+          },
+          {
+            "layer_id": "CTA_1",
+            "semantic_role": "cta",
+            "source": "remotion",
+            "start_frame": 90,
+            "end_frame": 150,
+            "bounds": { "x": 48, "y": 96, "width": 984, "height": 1712 }
+          }
+        ],
+        "ending": {
+          "final_frame_state": "meaningful_end_card",
+          "end_card_layer_id": "CTA_1"
+        }
+      }
+    },
+    {
+      "id": "caption_outside_safe_area",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["caption_outside_safe_area"],
+      "patch": {
+        "layer_id": "CAP_1",
+        "bounds": { "x": 90, "y": 1680, "width": 900, "height": 180 }
+      }
+    },
+    {
+      "id": "caption_glyph_clipped_by_frame",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["glyph_clipped"],
+      "patch": {
+        "layer_id": "CAP_1",
+        "bounds": { "x": -8, "y": 1450, "width": 900, "height": 220 }
+      }
+    },
+    {
+      "id": "font_fallback",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["font_fallback"],
+      "patch": {
+        "layer_id": "CAP_1",
+        "font": {
+          "status": "fallback",
+          "requested_family": "Noto Sans JP",
+          "resolved_family": "Arial",
+          "missing_glyphs": []
+        }
+      }
+    },
+    {
+      "id": "missing_glyph",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["missing_glyph"],
+      "patch": {
+        "layer_id": "CAP_1",
+        "font": {
+          "status": "verified",
+          "requested_family": "Noto Sans JP",
+          "resolved_family": "Noto Sans JP",
+          "missing_glyphs": ["𠮷"]
+        }
+      }
+    },
+    {
+      "id": "duplicate_speech_caption_layer",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["duplicate_speech_caption_layer"],
+      "append_layer": {
+        "layer_id": "CAP_DUPLICATE",
+        "semantic_role": "speech_caption",
+        "source": "remotion",
+        "start_frame": 20,
+        "end_frame": 70,
+        "bounds": { "x": 90, "y": 1450, "width": 900, "height": 220 },
+        "font": {
+          "status": "verified",
+          "requested_family": "Noto Sans JP",
+          "resolved_family": "Noto Sans JP",
+          "missing_glyphs": []
+        }
+      }
+    },
+    {
+      "id": "caption_cta_collision",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["caption_visual_collision"],
+      "patch": {
+        "layer_id": "CTA_1",
+        "start_frame": 60
+      }
+    },
+    {
+      "id": "end_card_too_short",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["end_card_hold_invalid"],
+      "patch": {
+        "layer_id": "CTA_1",
+        "start_frame": 125
+      }
+    },
+    {
+      "id": "unknown_final_frame_state",
+      "expected_status": "blocked",
+      "expected_issue_codes": ["final_frame_state_invalid"],
+      "ending_patch": {
+        "final_frame_state": "unknown"
+      }
+    }
+  ]
+}
