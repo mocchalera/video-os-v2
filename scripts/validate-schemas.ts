@@ -2,11 +2,13 @@ import { parse as parseYaml } from "yaml";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
+import { resolvePolicy } from "../runtime/policy-resolver.js";
 
 // CJS packages — use createRequire for clean interop with NodeNext
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
   compile(schema: object): { (data: unknown): boolean; errors?: Array<{ instancePath: string; message?: string }> | null };
+  addSchema(schema: object): void;
 };
 const addFormats = require("ajv-formats") as (ajv: unknown) => void;
 
@@ -111,6 +113,29 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     optional: true,
     runnerChecks: [],
   },
+  // 03_analysis — analysis artifacts (M2 Phase 1)
+  {
+    artifactPath: "03_analysis/assets.json",
+    schemaFile: "assets.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "03_analysis/segments.json",
+    schemaFile: "segments.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["segment_src_time_check"],
+  },
+  // analysis_policy — optional project-level override
+  {
+    artifactPath: "analysis_policy.yaml",
+    schemaFile: "analysis-policy.schema.json",
+    format: "yaml",
+    optional: true,
+    runnerChecks: [],
+  },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -155,6 +180,20 @@ export function validateProject(projectPath: string): ValidationResult {
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   addFormats(ajv);
 
+  // Pre-load shared schemas for cross-file $ref resolution
+  const SHARED_SCHEMAS = ["analysis-common.schema.json"];
+  for (const shared of SHARED_SCHEMAS) {
+    const sharedPath = path.join(schemasDir, shared);
+    if (fs.existsSync(sharedPath)) {
+      try {
+        const raw = fs.readFileSync(sharedPath, "utf-8");
+        ajv.addSchema(JSON.parse(raw));
+      } catch {
+        // Non-fatal: schemas using $ref will fail with clear errors
+      }
+    }
+  }
+
   const violations: Violation[] = [];
   let artifactsChecked = 0;
 
@@ -191,8 +230,26 @@ export function validateProject(projectPath: string): ValidationResult {
       continue;
     }
 
-    const parsed = safeParse(artifactPath, entry.format, violations, entry.artifactPath);
+    let parsed = safeParse(artifactPath, entry.format, violations, entry.artifactPath);
     if (!parsed.ok) continue; // parse_error already recorded
+
+    // FATAL fix: for analysis_policy.yaml, validate the resolved (merged) policy
+    // instead of the raw partial override. Design requires defaults + override merge
+    // before schema validation.
+    if (entry.artifactPath === "analysis_policy.yaml") {
+      try {
+        const { resolved } = resolvePolicy(absProject, repoRoot);
+        parsed = { ok: true, data: resolved };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        violations.push({
+          artifact: entry.artifactPath,
+          rule: "policy_resolve",
+          message: `Failed to resolve policy: ${msg}`,
+        });
+        continue;
+      }
+    }
 
     const validate = getValidator(entry.schemaFile);
     if (!validate) continue;
@@ -239,6 +296,9 @@ export function validateProject(projectPath: string): ValidationResult {
           break;
         case "gate3_fatal_issues":
           runGate3FatalIssues(parsed.data, entry.artifactPath, violations);
+          break;
+        case "segment_src_time_check":
+          runSegmentSrcTimeCheck(parsed.data, entry.artifactPath, violations);
           break;
       }
     }
@@ -296,7 +356,41 @@ export function validateProject(projectPath: string): ValidationResult {
     }
   }
 
-  // ── 3. Compile gate (blocker-based, from gate1 runner) ────────────
+  // ── 3. Transcript files (03_analysis/transcripts/TR_*.json) ─────────
+
+  const transcriptsDir = path.join(absProject, "03_analysis/transcripts");
+  if (fs.existsSync(transcriptsDir)) {
+    const validate = getValidator("transcript.schema.json");
+    if (validate) {
+      for (const file of fs.readdirSync(transcriptsDir)) {
+        if (!file.startsWith("TR_") || !file.endsWith(".json")) continue;
+        const relPath = `03_analysis/transcripts/${file}`;
+        const filePath = path.join(transcriptsDir, file);
+
+        const parsed = safeParse(filePath, "json", violations, relPath);
+        if (!parsed.ok) continue;
+
+        const valid = validate(parsed.data);
+        artifactsChecked++;
+
+        if (!valid && validate.errors) {
+          for (const err of validate.errors) {
+            violations.push({
+              artifact: relPath,
+              rule: "schema",
+              message: `${err.instancePath || "/"} ${err.message}`,
+              details: err,
+            });
+          }
+        }
+
+        // W3 fix: cross-check filename ↔ transcript_ref ↔ asset_id
+        runTranscriptPathInvariants(parsed.data, file, relPath, violations);
+      }
+    }
+  }
+
+  // ── 4. Compile gate (blocker-based, from gate1 runner) ────────────
 
   const hasBlockerViolation = violations.some(
     (v) => v.rule === "compile_gate",
@@ -539,6 +633,69 @@ function checkTimelineClipTimes(
         }
       }
     }
+  }
+}
+
+// ── Runner: src_in_us < src_out_us (segments) ────────────────────────
+
+function runSegmentSrcTimeCheck(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const doc = data as Record<string, unknown>;
+  const items = doc?.items;
+  if (!Array.isArray(items)) return;
+
+  for (const item of items) {
+    const seg = item as Record<string, unknown>;
+    const inUs = seg.src_in_us as number;
+    const outUs = seg.src_out_us as number;
+    if (typeof inUs === "number" && typeof outUs === "number" && inUs >= outUs) {
+      violations.push({
+        artifact: artifactPath,
+        rule: "src_in_us_lt_src_out_us",
+        message: `Segment ${seg.segment_id}: src_in_us (${inUs}) must be < src_out_us (${outUs})`,
+      });
+    }
+  }
+}
+
+// ── Runner: transcript path invariants (W3 fix) ─────────────────────
+//
+// Design requires: filename TR_<asset_id>.json must match content's
+// transcript_ref and asset_id fields.
+
+function runTranscriptPathInvariants(
+  data: unknown,
+  filename: string,
+  relPath: string,
+  violations: Violation[],
+): void {
+  const doc = data as Record<string, unknown>;
+  const transcriptRef = doc?.transcript_ref as string | undefined;
+  const assetId = doc?.asset_id as string | undefined;
+
+  // Extract expected asset_id from filename: TR_<asset_id>.json
+  const filenameMatch = filename.match(/^TR_(.+)\.json$/);
+  if (!filenameMatch) return;
+  const expectedAssetId = filenameMatch[1];
+  const expectedTranscriptRef = `TR_${expectedAssetId}`;
+
+  if (transcriptRef && transcriptRef !== expectedTranscriptRef) {
+    violations.push({
+      artifact: relPath,
+      rule: "transcript_ref_matches_filename",
+      message: `transcript_ref "${transcriptRef}" does not match filename expectation "${expectedTranscriptRef}"`,
+    });
+  }
+
+  if (assetId && assetId !== expectedAssetId) {
+    violations.push({
+      artifact: relPath,
+      rule: "asset_id_matches_filename",
+      message: `asset_id "${assetId}" does not match filename expectation "${expectedAssetId}"`,
+    });
   }
 }
 

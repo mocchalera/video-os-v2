@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/assets.schema.json",
+  "title": "Video OS Assets",
+  "type": "object",
+  "required": ["project_id", "artifact_version", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "minLength": 1 },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset-item" }
+    }
+  },
+  "$defs": {
+    "asset-item": {
+      "type": "object",
+      "required": [
+        "asset_id", "filename", "duration_us", "has_transcript",
+        "transcript_ref", "segments", "segment_ids", "quality_flags", "tags"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string", "minLength": 1 },
+        "role_guess": { "type": "string" },
+        "duration_us": { "type": "integer", "minimum": 0 },
+        "has_transcript": { "type": "boolean" },
+        "transcript_ref": { "type": ["string", "null"] },
+        "segments": { "type": "integer", "minimum": 0 },
+        "segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "source_fingerprint": { "type": "string" },
+        "source_locator": { "type": "string" },
+        "video_stream": { "$ref": "#/$defs/video-stream" },
+        "audio_stream": { "$ref": "#/$defs/audio-stream" },
+        "contact_sheet_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "poster_path": { "type": "string" },
+        "waveform_path": { "type": "string" },
+        "analysis_status": {
+          "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/analysis-status"
+        },
+        "confidence": {
+          "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+        },
+        "provenance": {
+          "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+        }
+      }
+    },
+    "video-stream": {
+      "type": "object",
+      "required": ["width", "height", "fps_num", "fps_den", "codec"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps_num": { "type": "integer", "minimum": 1 },
+        "fps_den": { "type": "integer", "minimum": 1 },
+        "codec": { "type": "string", "minLength": 1 }
+      }
+    },
+    "audio-stream": {
+      "type": "object",
+      "required": ["sample_rate", "channels", "codec"],
+      "additionalProperties": false,
+      "properties": {
+        "sample_rate": { "type": "integer", "minimum": 1 },
+        "channels": { "type": "integer", "minimum": 1 },
+        "codec": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

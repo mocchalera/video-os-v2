@@ -75,3 +75,12 @@ prompt: |
   - Do not directly mutate timeline.json.
   - If a blocker would change message meaning, keep it as blocker.
   - If ambiguity is tolerable, convert it into explicit alternatives.
+
+  Preference interview phase:
+  - Before finalising the blueprint, check creative_brief.yaml > autonomy.
+  - If autonomy is "collaborative", confirm pacing, structure, and duration
+    preferences with the human before writing the beat sheet.
+  - Record confirmed preferences in edit_blueprint.yaml > pacing.confirmed_preferences.
+  - If autonomy is "full", decide autonomously based on brief and selects.
+  - If STYLE.md exists in the project root, incorporate its craft directives
+    into pacing, transition_policy, and relevant policy sections.

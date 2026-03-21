@@ -72,6 +72,13 @@ video-os/
       footage-triager.md
       blueprint-planner.md
       roughcut-critic.md
+    commands/
+      intent.md
+      triage.md
+      blueprint.md
+      review.md
+      status.md
+      export.md
 
   .codex/
     config.toml
@@ -80,6 +87,13 @@ video-os/
       footage_triager.toml
       blueprint_planner.toml
       roughcut_critic.toml
+    commands/
+      intent.md
+      triage.md
+      blueprint.md
+      review.md
+      status.md
+      export.md
 
   runtime/
     project.runtime.yaml
@@ -95,10 +109,14 @@ video-os/
 
   projects/
     _template/
+      STYLE.md
+      project_state.yaml
       01_intent/
         unresolved_blockers.yaml
       04_plan/
       05_timeline/
+      06_review/
+        human_notes.yaml
 
   scripts/
     generate_agents.py
@@ -147,6 +165,8 @@ The repository should treat these as the only source of truth:
 - `uncertainty_register.yaml`
 - `timeline.json`
 - `review_report.yaml`
+- `project_state.yaml`
+- `human_notes.yaml`
 
 Agents may propose edits.
 Engines apply them.
@@ -175,6 +195,10 @@ stateDiagram-v2
     approved --> packaged: master render + captions + package manifest
     packaged --> [*]
 ```
+
+Project state is persisted to `projects/*/project_state.yaml` so that
+multi-session workflows can resume from the correct phase.
+Each slash command reads this file on startup and advances it on completion.
 
 ## Non-negotiable gates
 
@@ -360,6 +384,13 @@ Must not:
 May write:
 - `edit_blueprint.yaml`
 - `uncertainty_register.yaml`
+
+Preference interview phase:
+- When `creative_brief.yaml > autonomy` is `collaborative`, the planner must
+  confirm pacing, structure, and duration preferences with the human before
+  finalising the blueprint.
+- Confirmed preferences are recorded in `edit_blueprint.yaml > pacing.confirmed_preferences`.
+- When `autonomy` is `full`, the planner decides autonomously.
 
 Must not:
 - emit ffmpeg commands

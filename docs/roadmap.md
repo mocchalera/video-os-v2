@@ -1,7 +1,7 @@
 # Video OS v2 — 全体ロードマップ
 
 作成日: 2026-03-21
-最終更新: 2026-03-21（OTIO round-trip 設計統合）
+最終更新: 2026-03-21（公開リポジトリ調査に基づく設計ブラッシュアップ統合）
 
 ## 定義
 
@@ -77,6 +77,7 @@ Intent -> Analysis -> Blueprint -> timeline.json <-> OTIO exchange boundary <-> 
 | timeline.json | compiler (engine) | タイムラインの canonical 表現 |
 | review_report.yaml | roughcut-critic | 批評レポート |
 | review_patch.json | roughcut-critic | パッチ操作の提案 |
+| project_state.yaml | state-machine runtime | プロジェクト状態の永続化（multi-session 復帰用） |
 
 ### Human round-trip 由来
 
@@ -87,6 +88,7 @@ Intent -> Analysis -> Blueprint -> timeline.json <-> OTIO exchange boundary <-> 
 | imported_handoff.otio | roundtrip-importer | GUI 編集後に戻された OTIO |
 | roundtrip_import_report.yaml | roundtrip-importer | 読み戻し成功/失敗、lossy 項目、未対応変更 |
 | human_revision_diff.yaml | roundtrip-diff-analyzer | 人間が何をどう変えたかの構造的要約 |
+| human_notes.yaml | human reviewer | 人間レビュアーの自由形式コメント（タイムスタンプ付き） |
 | nle_capability_profile.yaml | adapters | NLE ごとの保持可能/不可情報の定義 |
 
 ## Human GUI 編集の許可範囲
@@ -171,13 +173,33 @@ full finishing まで含むなら NLE を source of truth にする one-way hand
 
 ### Milestone 3: Product Agents + Interactive Loop
 
-**ゴール**: 4つの product-plane agents を interactive mode で運用する
+**ゴール**: 4つの product-plane agents を interactive mode で運用し、operator UX を整備する
 
 **動かすもの**:
 - intent-interviewer: human → creative_brief.yaml
 - footage-triager: analysis → selects_candidates.yaml
 - blueprint-planner: brief + selects → blueprint + uncertainty register
 - roughcut-critic: timeline + preview → review_report + patch
+
+**Slash command による対話的起動**:
+- `.claude/commands/` と `.codex/commands/` に agent 起動コマンドを定義
+- `/intent`, `/triage`, `/blueprint`, `/review`, `/status`, `/export`
+- 各コマンドは `project_state.yaml` を読み、適切な state から開始する
+- 参考: claude-code-video-toolkit の command 設計
+
+**blueprint-planner の preference interview フェーズ**:
+- rough cut 前に pacing / structure / duration の preference を人間から明示的に取得する
+- `creative_brief.yaml > autonomy` 設定と連動:
+  - `autonomy: full` → AI が自律決定
+  - `autonomy: collaborative` → preference を確認してから blueprint を固定
+- `edit_blueprint.yaml > pacing` に confirmed_preferences フィールドを追加
+- 参考: ButterCut の preference interview パターン
+
+**Project state 永続化（multi-session lifecycle）**:
+- `projects/*/project_state.yaml` でプロジェクト状態を永続化
+- セッション復帰時に state machine の現在位置を自動検出
+- 各 slash command 起動時にこれを読んで適切なフェーズから開始
+- 参考: HarnessGG/studio の project contract 設計
 
 **実素材で E2E**:
 - sample-bicycle `/path/to/downloads/子ども自転車`（成長記録ムービー）
@@ -205,6 +227,15 @@ full finishing まで含むなら NLE を source of truth にする one-way hand
 - 保持可能: clip ID (metadata), trim, reorder, transitions, markers
 - lossy: color grades, Fusion effects, Fairlight advanced audio
 
+**人間レビューの受け皿**:
+- `projects/*/06_review/human_notes.yaml` — 人間レビュアーの自由形式コメント
+  - タイムスタンプ・クリップ参照付きの observation 配列
+  - roughcut-critic が次パスで参照し、patch 提案に反映する
+- `projects/*/STYLE.md` — プロジェクト固有の制作スタイルガイド
+  - creative_brief が「何を作るか」を定義するのに対し、STYLE.md は「どう作るか」を定義
+  - カット率の傾向、色温度のトーン、フォント指定、トランジション方針など
+  - 参考: HarnessGG/studio の STYLE.md パターン
+
 ### Milestone 4: Caption + Audio + Packaging
 
 **ゴール**: 完成品質のメディア出力
@@ -216,6 +247,12 @@ full finishing まで含むなら NLE を source of truth にする one-way hand
 - music cue 契約を追加し、A2 track の entry 条件・cue timing・ducking 前提を machine-readable にする
 - 音声マスタリング: loudnorm, 2-pass
 - Remotion rendering: assembly.mp4 → ffmpeg post → final.mp4
+
+**マルチステップ Render Pipeline**:
+- `runtime/render-pipeline-defaults.yaml` でフェーズ定義を導入
+- assembly（Remotion）→ caption_burn（ffmpeg）→ audio_master（ffmpeg）→ package（ffmpeg）
+- フェーズごとに skip 条件を持つ（例: sidecar 字幕なら caption_burn をスキップ）
+- 参考: proj の stepwise FFmpeg export pipeline
 
 **Source of truth 宣言**（Gate 10）:
 - engine render path: AI → compile → render → final.mp4 が正

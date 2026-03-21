@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/transcript.schema.json",
+  "title": "Video OS Transcript",
+  "type": "object",
+  "required": ["project_id", "artifact_version", "transcript_ref", "asset_id", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "minLength": 1 },
+    "transcript_ref": { "type": "string", "minLength": 1 },
+    "asset_id": { "type": "string", "minLength": 1 },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/transcript-item" }
+    },
+    "language": { "type": "string" },
+    "language_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "analysis_status": {
+      "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/analysis-status"
+    },
+    "word_timing_mode": {
+      "type": "string",
+      "enum": ["none", "word", "char"]
+    },
+    "provenance": {
+      "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+    }
+  },
+  "if": {
+    "properties": {
+      "analysis_status": { "enum": ["ready", "partial"] }
+    },
+    "required": ["analysis_status"]
+  },
+  "then": {
+    "required": ["word_timing_mode"]
+  },
+  "$defs": {
+    "transcript-item": {
+      "type": "object",
+      "required": ["speaker", "start_us", "end_us", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "speaker": { "type": "string" },
+        "start_us": { "type": "integer", "minimum": 0 },
+        "end_us": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "item_id": { "type": "string" },
+        "speaker_key": { "type": "string" },
+        "speaker_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "language": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "words": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/word-timing" }
+        }
+      }
+    },
+    "word-timing": {
+      "type": "object",
+      "required": ["word", "start_us", "end_us"],
+      "additionalProperties": false,
+      "properties": {
+        "word": { "type": "string" },
+        "start_us": { "type": "integer", "minimum": 0 },
+        "end_us": { "type": "integer", "minimum": 0 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

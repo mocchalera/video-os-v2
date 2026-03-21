@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/segments.schema.json",
+  "title": "Video OS Segments",
+  "type": "object",
+  "required": ["project_id", "artifact_version", "items"],
+  "additionalProperties": false,
+  "properties": {
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "minLength": 1 },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/segment-item" }
+    }
+  },
+  "$defs": {
+    "interest-point": {
+      "type": "object",
+      "required": ["frame_us", "label", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "frame_us": { "type": "integer", "minimum": 0 },
+        "label": { "type": "string", "minLength": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "segment-item": {
+      "type": "object",
+      "$comment": "Runner-level check enforces src_in_us < src_out_us for every segment item.",
+      "required": [
+        "segment_id", "asset_id", "src_in_us", "src_out_us",
+        "summary", "transcript_excerpt", "quality_flags", "tags"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "segment_id": { "type": "string", "minLength": 1 },
+        "asset_id": { "type": "string", "minLength": 1 },
+        "src_in_us": { "type": "integer", "minimum": 0 },
+        "src_out_us": { "type": "integer", "minimum": 0 },
+        "summary": { "type": "string" },
+        "transcript_excerpt": { "type": "string" },
+        "quality_flags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "duration_us": { "type": "integer", "minimum": 0 },
+        "rep_frame_us": { "type": "integer", "minimum": 0 },
+        "segment_type": {
+          "type": "string",
+          "enum": ["dialogue", "music_driven", "action", "static", "general"]
+        },
+        "interest_points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/interest-point" }
+        },
+        "filmstrip_path": { "type": "string" },
+        "waveform_path": { "type": "string" },
+        "transcript_ref": { "type": ["string", "null"] },
+        "confidence": {
+          "type": "object",
+          "properties": {
+            "boundary": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+            },
+            "summary": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+            },
+            "tags": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+            },
+            "quality_flags": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+            }
+          },
+          "additionalProperties": false
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "boundary": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+            },
+            "summary": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+            },
+            "transcript_excerpt": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+            },
+            "tags": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+            },
+            "quality_flags": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}
