@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/uncertainty-register.schema.json",
+  "title": "Video OS Uncertainty Register",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "uncertainties"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/uncertainty"
+      }
+    }
+  },
+  "$defs": {
+    "uncertainty": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "question",
+        "status",
+        "evidence",
+        "alternatives",
+        "escalation_required"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "message",
+            "structure",
+            "coverage",
+            "pacing",
+            "audio",
+            "music",
+            "ending",
+            "brand",
+            "continuity",
+            "technical",
+            "legal",
+            "other"
+          ]
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "monitoring",
+            "resolved",
+            "waived",
+            "blocker"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/alternative"
+          }
+        },
+        "escalation_required": {
+          "type": "boolean"
+        },
+        "resolution_note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "alternative": {
+      "type": "object",
+      "required": [
+        "label",
+        "description"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

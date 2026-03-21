@@ -83,17 +83,20 @@ video-os/
 
   runtime/
     project.runtime.yaml
+    compiler-defaults.yaml
 
   contracts/
     media-mcp.md
 
   schemas/
+    unresolved-blockers.schema.json
     timeline-ir.schema.json
     review-patch.schema.json
 
   projects/
     _template/
       01_intent/
+        unresolved_blockers.yaml
       04_plan/
       05_timeline/
 
@@ -149,6 +152,11 @@ Agents may propose edits.
 Engines apply them.
 Artifacts persist them.
 
+## Schema strictness policy
+
+- `timeline.json` keeps `clip.metadata` and `marker.metadata` as intentional extension points.
+- All other canonical artifacts should use `additionalProperties: false`.
+
 ## Project state machine
 
 ```mermaid
@@ -203,6 +211,10 @@ Human-readable derived fields:
 - `src_out_tc`
 - `timeline_in_tc`
 
+Validation contract:
+- JSON Schema keeps `src_in_us` and `src_out_us` as non-negative integer fields.
+- The validator runner must also enforce `src_in_us < src_out_us` for `selects_candidates.yaml` candidates and `timeline.json` clips.
+
 Why:
 - source frame rates can vary
 - drop-frame / non-drop-frame string parsing is brittle
@@ -220,6 +232,10 @@ Output:
 - normalized beat sheet
 - role quotas (`hero`, `support`, `transition`, `texture`, `dialogue`)
 
+Notes:
+- `reject` remains a triage-only classification and is not a beat quota.
+- music and title treatment belong to `music_policy` / overlay-track directives, not `beats[].required_roles`.
+
 ### Phase 2. Candidate scoring
 Deterministic scoring only.
 Inputs:
@@ -233,6 +249,11 @@ Inputs:
 Output:
 - ranked candidate table per beat
 
+Scoring policy:
+- `motif_reuse_max`, `adjacency_penalty`, `beat_alignment_tolerance_frames`, and related deterministic scoring defaults are compiler-owned constants.
+- Those values live in `runtime/compiler-defaults.yaml`.
+- `creative_brief.yaml` and `edit_blueprint.yaml` may not override them.
+
 ### Phase 3. Assembly
 Construct track layout:
 - V1: primary narrative
@@ -240,6 +261,9 @@ Construct track layout:
 - A1: dialogue / nat sound
 - A2: music
 - A3: texture / room tone
+
+Milestone 1 note:
+- `A2` may be empty in Milestone 1 while music cue contracts are still deferred.
 
 ### Phase 4. Constraint resolution
 Resolve:

@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/review-report.schema.json",
+  "title": "Video OS Review Report",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "timeline_version",
+    "summary_judgment",
+    "strengths",
+    "weaknesses",
+    "fatal_issues",
+    "warnings",
+    "mismatches_to_brief",
+    "mismatches_to_blueprint",
+    "recommended_next_pass"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "timeline_version": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "summary_judgment": {
+      "$ref": "#/$defs/summaryJudgment"
+    },
+    "strengths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "weaknesses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
+    },
+    "fatal_issues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/fatalFinding"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/warningFinding"
+      }
+    },
+    "mismatches_to_brief": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/mismatch"
+      }
+    },
+    "mismatches_to_blueprint": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/mismatch"
+      }
+    },
+    "recommended_next_pass": {
+      "$ref": "#/$defs/recommendedNextPass"
+    }
+  },
+  "$defs": {
+    "summaryJudgment": {
+      "type": "object",
+      "required": [
+        "status",
+        "rationale"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "approved",
+            "needs_revision",
+            "blocked"
+          ]
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "summary"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "affected_beat_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "affected_clip_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "findingBase": {
+      "type": "object",
+      "required": [
+        "summary",
+        "severity"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "warning",
+            "fatal"
+          ]
+        },
+        "details": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "affected_beat_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "affected_clip_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "fatalFinding": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/findingBase"
+        },
+        {
+          "properties": {
+            "severity": {
+              "const": "fatal"
+            }
+          }
+        }
+      ]
+    },
+    "warningFinding": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/findingBase"
+        },
+        {
+          "properties": {
+            "severity": {
+              "const": "warning"
+            }
+          }
+        }
+      ]
+    },
+    "mismatch": {
+      "type": "object",
+      "required": [
+        "expected_ref",
+        "observed_issue",
+        "why_it_matters"
+      ],
+      "properties": {
+        "expected_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_issue": {
+          "type": "string",
+          "minLength": 1
+        },
+        "why_it_matters": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "affected_beat_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "affected_clip_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "recommendedNextPass": {
+      "type": "object",
+      "required": [
+        "goal",
+        "actions"
+      ],
+      "properties": {
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "preserve": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "alternative_directions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

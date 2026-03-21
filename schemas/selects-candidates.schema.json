@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/selects-candidates.schema.json",
+  "title": "Video OS Selects Candidates",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "candidates"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "analysis_artifact_version": {
+      "type": "string"
+    },
+    "selection_notes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/candidate"
+      }
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "$comment": "JSON Schema enforces non-negative source times. The validator runner must also enforce src_in_us < src_out_us for every candidate.",
+      "required": [
+        "segment_id",
+        "asset_id",
+        "src_in_us",
+        "src_out_us",
+        "role",
+        "why_it_matches",
+        "risks",
+        "confidence"
+      ],
+      "properties": {
+        "segment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "src_in_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "src_out_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "hero",
+            "support",
+            "transition",
+            "texture",
+            "dialogue",
+            "reject"
+          ]
+        },
+        "why_it_matches": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "semantic_rank": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "eligible_beats": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "transcript_excerpt": {
+          "type": "string"
+        },
+        "motif_tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rejection_reason": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "role": {
+                "const": "reject"
+              }
+            },
+            "required": [
+              "role"
+            ]
+          },
+          "then": {
+            "required": [
+              "rejection_reason"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

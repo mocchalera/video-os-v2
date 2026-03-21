@@ -169,6 +169,7 @@
     },
     "clip": {
       "type": "object",
+      "$comment": "JSON Schema enforces non-negative source times. The validator runner must also enforce src_in_us < src_out_us for every emitted clip.",
       "required": [
         "clip_id",
         "segment_id",
@@ -272,33 +273,6 @@
           "type": "object"
         }
       },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "src_out_us": {
-                "type": "integer"
-              },
-              "src_in_us": {
-                "type": "integer"
-              }
-            }
-          },
-          "then": {
-            "properties": {},
-            "not": {
-              "properties": {
-                "src_out_us": {
-                  "const": 0
-                },
-                "src_in_us": {
-                  "const": 1
-                }
-              }
-            }
-          }
-        }
-      ],
       "additionalProperties": false
     },
     "marker": {

@@ -1,0 +1,8 @@
+version: "1"
+
+scoring:
+  motif_reuse_max: 2
+  adjacency_penalty: 0.15
+  beat_alignment_tolerance_frames: 24
+  duration_fit_tolerance_frames: 12
+  quality_flag_penalty: 0.1

@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/edit-blueprint.schema.json",
+  "title": "Video OS Edit Blueprint",
+  "type": "object",
+  "required": [
+    "sequence_goals",
+    "beats",
+    "pacing",
+    "music_policy",
+    "dialogue_policy",
+    "transition_policy",
+    "ending_policy",
+    "rejection_rules"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sequence_goals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "beats": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/beat"
+      }
+    },
+    "pacing": {
+      "$ref": "#/$defs/pacing"
+    },
+    "music_policy": {
+      "$ref": "#/$defs/musicPolicy"
+    },
+    "caption_policy": {
+      "$ref": "#/$defs/captionPolicy"
+    },
+    "dialogue_policy": {
+      "$ref": "#/$defs/dialoguePolicy"
+    },
+    "transition_policy": {
+      "$ref": "#/$defs/transitionPolicy"
+    },
+    "ending_policy": {
+      "$ref": "#/$defs/endingPolicy"
+    },
+    "rejection_rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "beat": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "target_duration_frames",
+        "required_roles"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "target_duration_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "required_roles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/beatRole"
+          }
+        },
+        "preferred_roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/beatRole"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "beatRole": {
+      "type": "string",
+      "enum": [
+        "hero",
+        "support",
+        "transition",
+        "texture",
+        "dialogue"
+      ]
+    },
+    "pacing": {
+      "type": "object",
+      "required": [
+        "opening_cadence",
+        "middle_cadence",
+        "ending_cadence"
+      ],
+      "properties": {
+        "opening_cadence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "middle_cadence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ending_cadence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "max_shot_length_frames": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "musicPolicy": {
+      "type": "object",
+      "required": [
+        "start_sparse",
+        "allow_release_late",
+        "entry_beat"
+      ],
+      "properties": {
+        "start_sparse": {
+          "type": "boolean"
+        },
+        "allow_release_late": {
+          "type": "boolean"
+        },
+        "entry_beat": {
+          "type": "string",
+          "minLength": 1
+        },
+        "avoid_anthemic_lift": {
+          "type": "boolean"
+        },
+        "permitted_energy_curve": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "captionPolicy": {
+      "type": "object",
+      "required": [
+        "language",
+        "delivery_mode",
+        "source",
+        "styling_class"
+      ],
+      "properties": {
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "delivery_mode": {
+          "type": "string",
+          "enum": [
+            "burn_in",
+            "sidecar",
+            "both"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "transcript",
+            "authored",
+            "none"
+          ]
+        },
+        "styling_class": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "dialoguePolicy": {
+      "type": "object",
+      "required": [
+        "preserve_natural_breath",
+        "avoid_wall_to_wall_voiceover"
+      ],
+      "properties": {
+        "preserve_natural_breath": {
+          "type": "boolean"
+        },
+        "avoid_wall_to_wall_voiceover": {
+          "type": "boolean"
+        },
+        "prioritize_lines": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "transitionPolicy": {
+      "type": "object",
+      "required": [
+        "prefer_match_texture_over_flashy_fx"
+      ],
+      "properties": {
+        "prefer_match_texture_over_flashy_fx": {
+          "type": "boolean"
+        },
+        "allow_hard_cuts": {
+          "type": "boolean"
+        },
+        "avoid_speed_ramps": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "endingPolicy": {
+      "type": "object",
+      "required": [
+        "should_feel"
+      ],
+      "properties": {
+        "should_feel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "final_line_strategy": {
+          "type": "string"
+        },
+        "avoid_cta": {
+          "type": "boolean"
+        },
+        "final_hold_min_frames": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

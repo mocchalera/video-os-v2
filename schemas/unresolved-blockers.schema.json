@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/unresolved-blockers.schema.json",
+  "title": "Video OS Unresolved Blockers",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "blockers"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/blocker"
+      }
+    }
+  },
+  "$defs": {
+    "blocker": {
+      "type": "object",
+      "required": [
+        "id",
+        "question",
+        "status",
+        "why_it_matters",
+        "allowed_temporary_assumption"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "blocker",
+            "hypothesis",
+            "resolved",
+            "waived"
+          ]
+        },
+        "why_it_matters": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowed_temporary_assumption": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

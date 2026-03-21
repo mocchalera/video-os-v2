@@ -25,6 +25,7 @@ pacing:
 music_policy:
   start_sparse: true
   allow_release_late: true
+  entry_beat: b02
 
 dialogue_policy:
   preserve_natural_breath: true
@@ -35,3 +36,7 @@ transition_policy:
 
 ending_policy:
   should_feel: restorative
+
+rejection_rules:
+  - reject repeated hero shots that flatten the arc
+  - reject clips whose quality issues distract from the message

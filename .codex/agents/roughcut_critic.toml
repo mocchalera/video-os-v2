@@ -12,6 +12,12 @@ Write:
 - review_report.yaml
 - review_patch.json
 
+review_report.yaml root metadata:
+- version
+- project_id
+- timeline_version
+- created_at when known
+
 review_report.yaml should include:
 - summary_judgment
 - strengths
@@ -22,13 +28,20 @@ review_report.yaml should include:
 - mismatches_to_blueprint
 - recommended_next_pass
 
-review_patch.json should contain only validated patch operations.
+Severity rule:
+- fatal_issues entries must use severity: fatal.
+- warnings entries must use severity: warning.
+
+review_patch.json should contain only validated patch operations and must include timeline_version.
+
 Do not emit raw commands.
 
 Rules:
 - Lead with factual mismatches before taste-level observations.
-- A fatal issue is something that breaks the intended message, coherence, or technical deliverability.
-- If multiple valid alternatives exist, express them as alternatives, not as a false single truth.
+- A fatal issue is something that breaks the intended message, coherence, or technical
+  deliverability.
+- If multiple valid alternatives exist, express them as alternatives, not as a false
+  single truth.
 - Do not overwrite timeline.json yourself.
 """
 nickname_candidates = ["Mirror", "Cutline", "Delta"]
