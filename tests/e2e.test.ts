@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { compile } from "../runtime/compiler/index.js";
 import { applyPatch } from "../runtime/compiler/patch.js";
+import { writePreviewManifest } from "../runtime/compiler/export.js";
 import type { ReviewPatch } from "../runtime/compiler/patch.js";
 import type { Candidate, TimelineIR } from "../runtime/compiler/types.js";
 import { validateProject } from "../scripts/validate-schemas.js";
@@ -510,5 +511,115 @@ describe("Patch Applicator", () => {
     // Re-create fresh timeline for second run (applyPatch clones internally)
     const result2 = applyPatch(timeline, patch, []);
     expect(JSON.stringify(result1.timeline)).toBe(JSON.stringify(result2.timeline));
+  });
+
+  it("returns resolution report with duration_fit", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "trim_segment", target_clip_id: "CLP_0001", new_src_in_us: 100, new_src_out_us: 200, reason: "small trim" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, [], 100);
+    expect(result.resolution).toBeDefined();
+    expect(result.resolution.duration_fit).toBe(true);
+    expect(result.resolution.target_frames).toBe(100);
+  });
+
+  it("duration_fit=false when patch moves clip beyond target duration", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+    ]);
+
+    // Target is 50 frames, but we move the clip to frame 1000 with duration 300
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "move_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 1000, new_duration_frames: 300, reason: "extend" },
+      ],
+    };
+
+    const result = applyPatch(timeline, patch, [], 50);
+    expect(result.resolution.duration_fit).toBe(false);
+    expect(result.resolution.total_frames).toBe(1300);
+    expect(result.resolution.target_frames).toBe(50);
+  });
+
+  it("duration_fit uses timeline extent when no target provided (backwards compat)", () => {
+    const timeline = makeMinimalTimeline([
+      { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },
+    ]);
+
+    const patch: ReviewPatch = {
+      timeline_version: "1",
+      operations: [
+        { op: "move_segment", target_clip_id: "CLP_0001", new_timeline_in_frame: 1000, new_duration_frames: 300, reason: "extend" },
+      ],
+    };
+
+    // No targetDurationFrames → falls back to maxFrame → always fits
+    const result = applyPatch(timeline, patch, []);
+    expect(result.resolution.duration_fit).toBe(true);
+  });
+});
+
+// ── Preview Manifest Regeneration After Patch ─────────────────────────
+
+describe("E2E: Preview Manifest Regeneration After Patch", () => {
+  let tmpDir: string;
+
+  beforeAll(() => {
+    tmpDir = createTempProject();
+  });
+
+  afterAll(() => {
+    removeDirSync(tmpDir);
+  });
+
+  it("preview-manifest.json is updated after patch", () => {
+    // 1. Compile
+    const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    expect(fs.existsSync(result.previewManifestPath)).toBe(true);
+
+    // 2. Read original preview-manifest
+    const manifestBefore = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, "05_timeline/preview-manifest.json"), "utf-8"),
+    );
+
+    // 3. Apply patch (trim CLP_0001 src_in)
+    const patchPath = path.resolve("projects/sample/06_review/review_patch.json");
+    const patch: ReviewPatch = JSON.parse(fs.readFileSync(patchPath, "utf-8"));
+    const candidates = readCandidates(tmpDir);
+
+    const patchResult = applyPatch(result.timeline, patch, candidates, 720);
+    expect(patchResult.errors).toEqual([]);
+
+    // 4. Write patched timeline AND regenerate preview-manifest
+    const timelinePath = path.join(tmpDir, "05_timeline/timeline.json");
+    fs.writeFileSync(timelinePath, JSON.stringify(patchResult.timeline, null, 2), "utf-8");
+
+    // Regenerate preview-manifest (simulates what CLI now does after patch)
+    const newManifestPath = writePreviewManifest(patchResult.timeline, tmpDir);
+    expect(fs.existsSync(newManifestPath)).toBe(true);
+
+    // 5. Verify manifest reflects patched data
+    const manifestAfter = JSON.parse(fs.readFileSync(newManifestPath, "utf-8"));
+
+    // The patch trims CLP_0001 src_in_us from original to 2000000
+    const clp0001Before = manifestBefore.clips.find((c: { clip_id: string }) => c.clip_id === "CLP_0001");
+    const clp0001After = manifestAfter.clips.find((c: { clip_id: string }) => c.clip_id === "CLP_0001");
+    expect(clp0001After).toBeDefined();
+    expect(clp0001After.src_in_us).toBe(2000000);
+    expect(clp0001After.src_in_us).not.toBe(clp0001Before.src_in_us);
+
+    // The patch replaces CLP_0003's segment (AST_003 via SEG_0014)
+    const clp0003After = manifestAfter.clips.find((c: { clip_id: string }) => c.clip_id === "CLP_0003");
+    expect(clp0003After).toBeDefined();
+    expect(clp0003After.asset_id).toBe("AST_003");
   });
 });

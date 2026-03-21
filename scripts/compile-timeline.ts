@@ -7,8 +7,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { compile, applyPatch } from "../runtime/compiler/index.js";
+import { writePreviewManifest } from "../runtime/compiler/export.js";
 import type { ReviewPatch } from "../runtime/compiler/patch.js";
-import type { Candidate } from "../runtime/compiler/types.js";
+import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
 import { validateProject } from "./validate-schemas.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
@@ -111,8 +112,16 @@ function runPatch(projectPath: string, patchPath: string): void {
   const selectsRaw = fs.readFileSync(selectsPath, "utf-8");
   const selects = parseYaml(selectsRaw) as { candidates: Candidate[] };
 
-  // Apply patch
-  const result = applyPatch(timeline, patch, selects.candidates);
+  // Read edit_blueprint to get target duration for Phase 4 re-evaluation
+  const blueprintPath = path.join(absProject, "04_plan/edit_blueprint.yaml");
+  const blueprint = parseYaml(fs.readFileSync(blueprintPath, "utf-8")) as EditBlueprint;
+  const targetDurationFrames = blueprint.beats.reduce(
+    (sum, b) => sum + b.target_duration_frames,
+    0,
+  );
+
+  // Apply patch with blueprint target duration
+  const result = applyPatch(timeline, patch, selects.candidates, targetDurationFrames);
 
   if (result.errors.length > 0) {
     console.error("Patch errors:");
@@ -127,9 +136,21 @@ function runPatch(projectPath: string, patchPath: string): void {
   // Write patched timeline
   fs.writeFileSync(timelinePath, JSON.stringify(result.timeline, null, 2), "utf-8");
 
+  // Regenerate preview-manifest from patched timeline
+  const manifestPath = writePreviewManifest(result.timeline, absProject);
+
   console.log(`Patch applied: ${result.appliedOps}/${patch.operations.length} ops`);
   console.log(`  Version: ${timeline.version} → ${result.timeline.version}`);
   console.log(`  Markers: ${result.timeline.markers.length}`);
+  console.log(`  Preview manifest: ${manifestPath}`);
+  console.log(`  Resolution: ${JSON.stringify(result.resolution)}`);
+
+  // Warn if post-patch duration exceeds blueprint target
+  if (!result.resolution.duration_fit) {
+    console.error(
+      `WARNING: Post-patch duration (${result.resolution.total_frames} frames) exceeds target (${result.resolution.target_frames} frames)`,
+    );
+  }
 
   // Post-patch validation: check Gate 2
   const postCheck = validateProject(projectPath);

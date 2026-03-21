@@ -3,7 +3,7 @@
 // After all ops, re-runs Phase 4 constraint resolution.
 // Deterministic: same patch + same timeline = same output.
 
-import { resolve } from "./resolve.js";
+import { resolve, type ResolutionReport } from "./resolve.js";
 import type {
   AssembledTimeline,
   AudioPolicy,
@@ -60,6 +60,7 @@ export interface PatchResult {
   timeline: TimelineIR;
   appliedOps: number;
   errors: PatchError[];
+  resolution: ResolutionReport;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -114,6 +115,7 @@ export function applyPatch(
   timeline: TimelineIR,
   patch: ReviewPatch,
   candidates: Candidate[],
+  targetDurationFrames?: number,
 ): PatchResult {
   // 1. Version check — reject if patch targets a different version
   if (patch.timeline_version !== timeline.version) {
@@ -127,6 +129,14 @@ export function applyPatch(
           message: `Patch targets version "${patch.timeline_version}" but timeline is version "${timeline.version}"`,
         },
       ],
+      resolution: {
+        resolved_overlaps: 0,
+        resolved_duplicates: 0,
+        resolved_invalid_ranges: 0,
+        duration_fit: true,
+        total_frames: 0,
+        target_frames: 0,
+      },
     };
   }
 
@@ -153,14 +163,14 @@ export function applyPatch(
     }
   }
 
-  // 5. Re-run Phase 4 constraint resolution
-  reRunPhase4(patched, candidates);
+  // 5. Re-run Phase 4 constraint resolution with blueprint target
+  const resolution = reRunPhase4(patched, candidates, targetDurationFrames);
 
   // 6. Increment version
   const currentVersion = parseInt(patched.version, 10);
   patched.version = isNaN(currentVersion) ? "2" : String(currentVersion + 1);
 
-  return { timeline: patched, appliedOps, errors };
+  return { timeline: patched, appliedOps, errors, resolution };
 }
 
 // ── Operation dispatcher ────────────────────────────────────────────
@@ -403,8 +413,15 @@ function opAddMarker(
 //
 // Convert TimelineIR tracks to AssembledTimeline, run resolve(),
 // mutations propagate back to the IR via shared array references.
+// When targetDurationFrames is provided (from edit_blueprint.yaml),
+// it is used as the duration target so post-patch duration violations
+// are correctly detected.
 
-function reRunPhase4(timeline: TimelineIR, candidates: Candidate[]): void {
+function reRunPhase4(
+  timeline: TimelineIR,
+  candidates: Candidate[],
+  targetDurationFrames?: number,
+): ResolutionReport {
   const assembled: AssembledTimeline = {
     tracks: {
       video: timeline.tracks.video.map((t) => ({
@@ -421,14 +438,20 @@ function reRunPhase4(timeline: TimelineIR, candidates: Candidate[]): void {
     markers: timeline.markers as Marker[],
   };
 
-  // Calculate total target frames from timeline extent
-  let maxFrame = 0;
-  for (const track of [...timeline.tracks.video, ...timeline.tracks.audio]) {
-    for (const clip of track.clips) {
-      const end = clip.timeline_in_frame + clip.timeline_duration_frames;
-      if (end > maxFrame) maxFrame = end;
+  // Use blueprint target if provided; otherwise fall back to timeline extent
+  let target: number;
+  if (targetDurationFrames !== undefined && targetDurationFrames > 0) {
+    target = targetDurationFrames;
+  } else {
+    let maxFrame = 0;
+    for (const track of [...timeline.tracks.video, ...timeline.tracks.audio]) {
+      for (const clip of track.clips) {
+        const end = clip.timeline_in_frame + clip.timeline_duration_frames;
+        if (end > maxFrame) maxFrame = end;
+      }
     }
+    target = maxFrame;
   }
 
-  resolve(assembled, maxFrame, candidates);
+  return resolve(assembled, target, candidates);
 }

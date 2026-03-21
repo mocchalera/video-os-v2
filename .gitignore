@@ -1,6 +1,7 @@
 node_modules/
 dist/
 tmp-*/
+tests/tmp_*/
 .claude/state/
 .claude/sessions/
 .claude/memory/
