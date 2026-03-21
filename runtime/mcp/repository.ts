@@ -107,13 +107,15 @@ export interface ContactSheetResponse {
   project_id: string;
   artifact_version: string;
   contact_sheet_id: string;
+  mode: "shot_keyframes" | "overview";
   image_path: string;
+  sample_fps?: number;
   tile_map: Array<{
     tile_index: number;
-    segment_id: string;
+    segment_id?: string;
     rep_frame_us: number;
-    src_in_us: number;
-    src_out_us: number;
+    src_in_us?: number;
+    src_out_us?: number;
     summary?: string;
   }>;
 }
@@ -339,17 +341,17 @@ export class LiveAnalysisRepository implements AnalysisRepository {
       duration_us: asset.duration_us,
       video_stream: asset.video_stream
         ? {
-            width: asset.video_stream.width,
-            height: asset.video_stream.height,
-            fps_num: asset.video_stream.fps_num,
-            fps_den: asset.video_stream.fps_den,
-          }
+          width: asset.video_stream.width,
+          height: asset.video_stream.height,
+          fps_num: asset.video_stream.fps_num,
+          fps_den: asset.video_stream.fps_den,
+        }
         : undefined,
       audio_stream: asset.audio_stream
         ? {
-            sample_rate: asset.audio_stream.sample_rate,
-            channels: asset.audio_stream.channels,
-          }
+          sample_rate: asset.audio_stream.sample_rate,
+          channels: asset.audio_stream.channels,
+        }
         : undefined,
       transcript_ref: asset.transcript_ref,
       contact_sheet_ids: asset.contact_sheet_ids ?? [],
@@ -409,7 +411,20 @@ export class LiveAnalysisRepository implements AnalysisRepository {
     const manifest = this.readContactSheetManifest(contactSheetId);
     if (!manifest) throw new Error(`Contact sheet not found: ${contactSheetId}`);
 
-    // Enrich tile_map with segment summaries
+    // Overview mode: no segment enrichment needed
+    if (manifest.mode === "overview") {
+      return {
+        project_id: projectId,
+        artifact_version: "analysis-v1",
+        contact_sheet_id: manifest.contact_sheet_id,
+        mode: "overview",
+        image_path: manifest.image_path,
+        sample_fps: manifest.sample_fps,
+        tile_map: manifest.tile_map,
+      };
+    }
+
+    // Shot keyframes mode: enrich tile_map with segment summaries
     const segments = this.readSegmentsFile();
     const segmentMap = new Map(segments.items.map((s) => [s.segment_id, s]));
 
@@ -417,10 +432,11 @@ export class LiveAnalysisRepository implements AnalysisRepository {
       project_id: projectId,
       artifact_version: segments.artifact_version,
       contact_sheet_id: manifest.contact_sheet_id,
+      mode: "shot_keyframes",
       image_path: manifest.image_path,
       tile_map: manifest.tile_map.map((tile) => ({
         ...tile,
-        summary: segmentMap.get(tile.segment_id)?.summary,
+        summary: tile.segment_id ? segmentMap.get(tile.segment_id)?.summary : undefined,
       })),
     };
   }

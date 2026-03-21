@@ -16,12 +16,14 @@ export interface ContactSheetManifest {
   contact_sheet_id: string;
   asset_id: string;
   image_path: string;
+  mode: "shot_keyframes" | "overview";
+  sample_fps?: number;
   tile_map: Array<{
     tile_index: number;
-    segment_id: string;
+    segment_id?: string;
     rep_frame_us: number;
-    src_in_us: number;
-    src_out_us: number;
+    src_in_us?: number;
+    src_out_us?: number;
   }>;
 }
 
@@ -47,6 +49,8 @@ function ensureDir(dirPath: string): void {
 
 const TILES_PER_PAGE = 16;
 const TILE_COLS = 4;
+const OVERVIEW_SAMPLE_FPS = 0.5;
+const OVERVIEW_TILE_WIDTH = 240;
 
 /**
  * Generate paginated contact sheets for an asset.
@@ -166,6 +170,7 @@ export async function generateContactSheets(
       contact_sheet_id: csId,
       asset_id: asset.asset_id,
       image_path: imagePath,
+      mode: "shot_keyframes",
       tile_map: pageSegments.map((seg, i) => ({
         tile_index: i,
         segment_id: seg.segment_id,
@@ -179,6 +184,135 @@ export async function generateContactSheets(
 
     // Write manifest JSON
     const manifestPath = path.join(csDir, `${csId}.json`);
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+  }
+
+  return manifests;
+}
+
+/**
+ * Generate an overview contact sheet for an asset.
+ * Uniform low-frequency sampling (~0.5 fps) across the full duration,
+ * independent of segment boundaries. Used for rapid full-asset visual scan.
+ */
+export async function generateOverviewContactSheet(
+  filePath: string,
+  asset: AssetItem,
+  outputDir: string,
+): Promise<ContactSheetManifest[]> {
+  const csDir = path.join(outputDir, "contact_sheets");
+  ensureDir(csDir);
+
+  const durationSec = asset.duration_us / 1_000_000;
+  const totalFrames = Math.max(1, Math.ceil(durationSec * OVERVIEW_SAMPLE_FPS));
+  const stepUs = totalFrames > 1 ? asset.duration_us / totalFrames : asset.duration_us;
+
+  // Compute all sample timestamps
+  const allTimestamps: number[] = [];
+  for (let i = 0; i < totalFrames; i++) {
+    allTimestamps.push(Math.round(stepUs * i + stepUs / 2));
+  }
+
+  const manifests: ContactSheetManifest[] = [];
+  const pageCount = Math.ceil(allTimestamps.length / TILES_PER_PAGE);
+
+  for (let page = 0; page < pageCount; page++) {
+    const pageTimestamps = allTimestamps.slice(
+      page * TILES_PER_PAGE,
+      (page + 1) * TILES_PER_PAGE,
+    );
+    const pageStr = String(page + 1).padStart(2, "0");
+    const ovId = `OV_${asset.asset_id}_${pageStr}`;
+    const imagePath = `contact_sheets/${ovId}.png`;
+    const absImagePath = path.join(outputDir, imagePath);
+
+    // Extract frames
+    const tmpFrames: string[] = [];
+    for (let i = 0; i < pageTimestamps.length; i++) {
+      const timeSec = pageTimestamps[i] / 1_000_000;
+      const tmpPath = path.join(csDir, `_tmp_${ovId}_tile_${i}.png`);
+      tmpFrames.push(tmpPath);
+
+      await execFilePromise("ffmpeg", [
+        "-y",
+        "-ss", String(timeSec),
+        "-i", path.resolve(filePath),
+        "-vframes", "1",
+        "-vf", `scale=${OVERVIEW_TILE_WIDTH}:-1`,
+        tmpPath,
+      ]);
+    }
+
+    // Tile frames into grid (same logic as shot_keyframes)
+    if (tmpFrames.length > 0) {
+      const cols = Math.min(TILE_COLS, tmpFrames.length);
+      const rows = Math.ceil(tmpFrames.length / cols);
+
+      if (tmpFrames.length === 1) {
+        await execFilePromise("ffmpeg", [
+          "-y", "-i", tmpFrames[0], absImagePath,
+        ]);
+      } else {
+        const totalTiles = rows * cols;
+        const padCount = totalTiles - tmpFrames.length;
+        const inputArgs = tmpFrames.flatMap((f) => ["-i", f]);
+        const layoutParts: string[] = [];
+        const inputLabels: string[] = [];
+
+        for (let i = 0; i < tmpFrames.length; i++) {
+          inputLabels.push(`[${i}:v]`);
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 180}`);
+        }
+
+        for (let i = 0; i < padCount; i++) {
+          inputLabels.push(`[${tmpFrames.length - 1}:v]`);
+          const idx = tmpFrames.length + i;
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 180}`);
+        }
+
+        const filterStr = `${inputLabels.join("")}xstack=inputs=${totalTiles}:layout=${layoutParts.join("|")}`;
+
+        try {
+          await execFilePromise("ffmpeg", [
+            "-y",
+            ...inputArgs,
+            ...Array(padCount).fill(null).flatMap(() => ["-i", tmpFrames[tmpFrames.length - 1]]),
+            "-filter_complex", filterStr,
+            "-frames:v", "1",
+            absImagePath,
+          ]);
+        } catch {
+          await execFilePromise("ffmpeg", [
+            "-y", "-i", tmpFrames[0], absImagePath,
+          ]);
+        }
+      }
+    }
+
+    // Clean up
+    for (const tmp of tmpFrames) {
+      try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+    }
+
+    const manifest: ContactSheetManifest = {
+      contact_sheet_id: ovId,
+      asset_id: asset.asset_id,
+      image_path: imagePath,
+      mode: "overview",
+      sample_fps: OVERVIEW_SAMPLE_FPS,
+      tile_map: pageTimestamps.map((ts, i) => ({
+        tile_index: i,
+        rep_frame_us: ts,
+      })),
+    };
+
+    manifests.push(manifest);
+
+    const manifestPath = path.join(csDir, `${ovId}.json`);
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
   }
 

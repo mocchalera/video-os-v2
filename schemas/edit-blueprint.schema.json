@@ -143,6 +143,42 @@
         "max_shot_length_frames": {
           "type": "integer",
           "minimum": 1
+        },
+        "confirmed_preferences": {
+          "$ref": "#/$defs/confirmedPreferences"
+        }
+      },
+      "additionalProperties": false
+    },
+    "confirmedPreferences": {
+      "type": "object",
+      "required": [
+        "mode",
+        "source",
+        "duration_target_sec",
+        "confirmed_at"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["full", "collaborative"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["human_confirmed", "ai_autonomous"]
+        },
+        "duration_target_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "confirmed_at": {
+          "type": "string"
+        },
+        "structure_choice": {
+          "type": "string"
+        },
+        "pacing_notes": {
+          "type": "string"
         }
       },
       "additionalProperties": false

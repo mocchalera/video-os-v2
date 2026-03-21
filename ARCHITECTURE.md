@@ -167,6 +167,7 @@ The repository should treat these as the only source of truth:
 - `review_report.yaml`
 - `project_state.yaml`
 - `human_notes.yaml`
+- `STYLE.md`
 
 Agents may propose edits.
 Engines apply them.
@@ -175,7 +176,7 @@ Artifacts persist them.
 ## Schema strictness policy
 
 - `timeline.json` keeps `clip.metadata` and `marker.metadata` as intentional extension points.
-- All other canonical artifacts should use `additionalProperties: false`.
+- All other structured canonical artifacts should use `additionalProperties: false`.
 
 ## Project state machine
 
@@ -199,6 +200,25 @@ stateDiagram-v2
 Project state is persisted to `projects/*/project_state.yaml` so that
 multi-session workflows can resume from the correct phase.
 Each slash command reads this file on startup and advances it on completion.
+Because clean approval, creative override, and partial-analysis debug override
+cannot be reconstructed from filesystem state alone, `project_state.yaml` must
+also persist canonical operator records:
+
+- `approval_record`
+  - `approved_by`
+  - `approved_at`
+  - `override_reason`
+  - `artifact_versions`
+- `analysis_override`
+  - `approved_by`
+  - `approved_at`
+  - `reason`
+  - `scope`
+  - `artifact_version`
+
+`project_state.yaml` must also snapshot `style_hash` and `human_notes_hash` so
+reconcile can invalidate stale blueprint / review / approved states after
+`STYLE.md` or `human_notes.yaml` changes.
 
 ## Non-negotiable gates
 

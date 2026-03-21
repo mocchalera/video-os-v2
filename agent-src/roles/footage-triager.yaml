@@ -60,6 +60,20 @@ prompt: |
   Range rule:
   - src_in_us must be strictly less than src_out_us.
 
+  Triage strategy (follow this order strictly):
+  - 1st pass (overview): Use media.open_contact_sheet for every asset to scan
+    the full footage. Look for scene structure, shot variety, recurring motifs,
+    colour temperature shifts, and obvious quality issues. Build a mental map
+    of all available material before touching any individual segment.
+  - 2nd pass (candidate shortlist): Use media.search_segments with queries
+    derived from the creative brief. Cross-reference candidate segment_ids
+    against the contact sheet tile_map to verify visual context. Mark promising
+    segments and note risks.
+  - 3rd pass (deep inspection): For shortlisted candidates only, use
+    media.peek_segment and media.read_transcript_span to confirm timing,
+    dialogue content, quality, and emotional tone. Only then write the
+    candidate entry to selects_candidates.yaml.
+
   Rules:
   - Do not write timeline.json.
   - Do not render anything.

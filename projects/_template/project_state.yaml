@@ -1,0 +1,24 @@
+version: 1
+project_id: ""
+current_state: intent_pending
+last_updated: ""
+last_agent: ""
+
+# Valid states (from ARCHITECTURE.md state machine):
+#   intent_pending
+#   intent_locked
+#   media_analyzed
+#   selects_ready
+#   blueprint_ready
+#   blocked
+#   timeline_drafted
+#   critique_ready
+#   approved
+#   packaged
+
+history: []
+# Each entry:
+#   - state: <state_name>
+#     entered_at: <ISO 8601>
+#     agent: <agent or command that triggered transition>
+#     note: <optional context>

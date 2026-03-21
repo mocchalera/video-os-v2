@@ -117,16 +117,22 @@ This MCP is the AI-facing evidence layer for video projects.
 ```json
 {
   "project_id": "mountain-brand-film",
-  "contact_sheet_id": "CS_AST_001_01"
+  "contact_sheet_id": "CS_AST_001_01",
+  "mode": "shot_keyframes"
 }
 ```
 
-### Response
+`mode` (optional, default `"shot_keyframes"`):
+- `"shot_keyframes"` — one tile per detected segment boundary (default, current behaviour)
+- `"overview"` — uniform low-frequency sampling (≈0.5 fps) across the full asset for rapid visual scan
+
+### Response (shot_keyframes mode)
 ```json
 {
   "project_id": "mountain-brand-film",
   "artifact_version": "analysis-v3",
   "contact_sheet_id": "CS_AST_001_01",
+  "mode": "shot_keyframes",
   "image_path": "projects/.../contact_sheets/CS_AST_001_01.png",
   "tile_map": [
     {
@@ -140,6 +146,30 @@ This MCP is the AI-facing evidence layer for video projects.
   ]
 }
 ```
+
+### Response (overview mode)
+```json
+{
+  "project_id": "mountain-brand-film",
+  "artifact_version": "analysis-v3",
+  "contact_sheet_id": "OV_AST_001_01",
+  "mode": "overview",
+  "image_path": "projects/.../contact_sheets/OV_AST_001_01.png",
+  "sample_fps": 0.5,
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "rep_frame_us": 1000000
+    },
+    {
+      "tile_index": 1,
+      "rep_frame_us": 3000000
+    }
+  ]
+}
+```
+
+Note: in overview mode, `segment_id`, `src_in_us`, and `src_out_us` are omitted from tiles.
 
 ---
 
@@ -336,3 +366,45 @@ This is a deterministic engine wrapper, not an LLM tool.
   "warnings": ["audio peak close to threshold"]
 }
 ```
+
+---
+
+## 12. `media.get_audio_events`
+
+### Request
+```json
+{
+  "project_id": "mountain-brand-film",
+  "asset_id": "AST_001",
+  "types": ["silence", "music_onset", "laughter"]
+}
+```
+
+`types` (optional): filter to only these event types. Omit to return all events.
+
+### Response
+```json
+{
+  "project_id": "mountain-brand-film",
+  "artifact_version": "analysis-v3",
+  "items": [
+    {
+      "event_id": "AE_AST_001_0001",
+      "asset_id": "AST_001",
+      "type": "silence",
+      "start_us": 5200000,
+      "end_us": 6800000,
+      "label": "inter-sentence pause"
+    },
+    {
+      "event_id": "AE_AST_001_0002",
+      "asset_id": "AST_001",
+      "type": "music_onset",
+      "start_us": 12000000,
+      "end_us": 12500000,
+      "label": "BGM fade-in"
+    }
+  ]
+}
+```
+

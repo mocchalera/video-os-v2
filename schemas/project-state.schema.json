@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/project-state.schema.json",
+  "title": "Video OS Project State",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "current_state"
+  ],
+  "properties": {
+    "version": {
+      "type": ["string", "integer"]
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "current_state": {
+      "type": "string",
+      "enum": [
+        "intent_pending",
+        "intent_locked",
+        "media_analyzed",
+        "selects_ready",
+        "blueprint_ready",
+        "blocked",
+        "timeline_drafted",
+        "critique_ready",
+        "approved",
+        "packaged"
+      ]
+    },
+    "last_updated": {
+      "type": "string"
+    },
+    "last_agent": {
+      "type": "string"
+    },
+    "last_command": {
+      "type": "string"
+    },
+    "last_runtime": {
+      "type": "string"
+    },
+    "artifact_hashes": {
+      "$ref": "#/$defs/artifactHashes"
+    },
+    "approval_record": {
+      "$ref": "#/$defs/approvalRecord"
+    },
+    "analysis_override": {
+      "$ref": "#/$defs/analysisOverride"
+    },
+    "gates": {
+      "$ref": "#/$defs/gates"
+    },
+    "resume": {
+      "$ref": "#/$defs/resume"
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/historyEntry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "artifactHashes": {
+      "type": "object",
+      "properties": {
+        "brief_hash": { "type": "string" },
+        "blockers_hash": { "type": "string" },
+        "analysis_artifact_version": { "type": "string" },
+        "selects_hash": { "type": "string" },
+        "blueprint_hash": { "type": "string" },
+        "uncertainty_hash": { "type": "string" },
+        "timeline_version": { "type": "string" },
+        "review_report_version": { "type": "string" },
+        "review_patch_hash": { "type": "string" },
+        "human_notes_hash": { "type": "string" },
+        "style_hash": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "approvalRecord": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pending", "clean", "creative_override", "stale"]
+        },
+        "approved_by": { "type": "string" },
+        "approved_at": { "type": "string" },
+        "override_reason": { "type": "string" },
+        "artifact_versions": {
+          "type": "object",
+          "properties": {
+            "timeline_version": { "type": "string" },
+            "review_report_version": { "type": "string" },
+            "review_patch_hash": { "type": "string" },
+            "human_notes_hash": { "type": "string" },
+            "style_hash": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "analysisOverride": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["none", "active", "stale"]
+        },
+        "approved_by": { "type": "string" },
+        "approved_at": { "type": "string" },
+        "reason": { "type": "string" },
+        "scope": { "type": "string" },
+        "artifact_version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "gates": {
+      "type": "object",
+      "properties": {
+        "analysis_gate": {
+          "type": "string",
+          "enum": ["ready", "partial_override", "blocked"]
+        },
+        "compile_gate": {
+          "type": "string",
+          "enum": ["open", "blocked"]
+        },
+        "planning_gate": {
+          "type": "string",
+          "enum": ["open", "blocked"]
+        },
+        "timeline_gate": {
+          "type": "string",
+          "enum": ["open", "blocked"]
+        },
+        "review_gate": {
+          "type": "string",
+          "enum": ["open", "blocked"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "resume": {
+      "type": "object",
+      "properties": {
+        "pending_human_step": { "type": "string" },
+        "pending_questions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "resume_command": { "type": "string" },
+        "last_error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "historyEntry": {
+      "type": "object",
+      "required": ["from_state", "to_state", "trigger", "timestamp"],
+      "properties": {
+        "from_state": { "type": "string" },
+        "to_state": { "type": "string" },
+        "trigger": { "type": "string" },
+        "actor": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

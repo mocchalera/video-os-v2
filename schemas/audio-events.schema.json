@@ -1,0 +1,84 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.com/schemas/audio-events.schema.json",
+    "title": "Video OS Audio Events",
+    "description": "Semantic audio events detected from source assets (M2 forward-definition). Captures silence boundaries, speech transitions, laughter, applause, music onsets, impacts, and ambient shifts.",
+    "type": "object",
+    "required": [
+        "project_id",
+        "artifact_version",
+        "items"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "project_id": {
+            "type": "string",
+            "minLength": 1
+        },
+        "artifact_version": {
+            "type": "string",
+            "minLength": 1
+        },
+        "items": {
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/audio-event"
+            }
+        }
+    },
+    "$defs": {
+        "audio-event": {
+            "type": "object",
+            "$comment": "Runner-level check enforces start_us < end_us for every audio event.",
+            "required": [
+                "event_id",
+                "asset_id",
+                "type",
+                "start_us",
+                "end_us"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "event_id": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "asset_id": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "silence",
+                        "speech_start",
+                        "speech_end",
+                        "laughter",
+                        "applause",
+                        "music_onset",
+                        "music_end",
+                        "impact",
+                        "ambient_shift"
+                    ]
+                },
+                "start_us": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "end_us": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "label": {
+                    "type": "string"
+                },
+                "confidence": {
+                    "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+                },
+                "provenance": {
+                    "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+                }
+            }
+        }
+    }
+}

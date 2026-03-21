@@ -133,6 +133,10 @@
         "must_ask"
       ],
       "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["full", "collaborative"]
+        },
         "may_decide": {
           "type": "array",
           "items": {

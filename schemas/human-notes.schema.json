@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/human-notes.schema.json",
+  "title": "Video OS Human Notes",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "notes"
+  ],
+  "properties": {
+    "version": {
+      "type": ["string", "integer"]
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/noteItem"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "noteItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "timestamp",
+        "reviewer",
+        "observation",
+        "severity"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["observation", "suggestion", "concern"]
+        },
+        "directive_type": {
+          "type": "string",
+          "enum": [
+            "observation",
+            "replace_segment",
+            "insert_segment",
+            "remove_segment",
+            "move_segment",
+            "trim_segment"
+          ]
+        },
+        "clip_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "clip_refs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "approved_segment_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "timeline_in_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_tc": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
