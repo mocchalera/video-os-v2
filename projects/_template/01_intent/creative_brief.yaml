@@ -1,0 +1,40 @@
+project:
+  title: Example Project
+  strategy: message-first
+
+message:
+  primary: Mountain time is recovery, not competition
+  secondary:
+    - quiet
+    - breath
+    - warmth
+
+audience:
+  primary: urban adults 30-45
+
+emotion_curve:
+  - intrigue
+  - breath
+  - release
+  - warmth
+
+must_have:
+  - morning light
+  - hands detail
+  - audible breathing
+
+must_avoid:
+  - over-sportified framing
+  - hard-sell advertising feel
+
+autonomy:
+  may_decide:
+    - b-roll substitution within the same meaning
+    - exact cut position within a beat
+  must_ask:
+    - ending line
+    - music replacement
+    - message inversion
+
+resolved_assumptions:
+  - subject is solitary but not lonely

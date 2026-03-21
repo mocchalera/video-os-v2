@@ -1,0 +1,337 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/timeline-ir.schema.json",
+  "title": "Video OS Timeline IR",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "sequence",
+    "tracks",
+    "provenance"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sequence": {
+      "type": "object",
+      "required": [
+        "name",
+        "fps_num",
+        "fps_den",
+        "width",
+        "height",
+        "start_frame"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "fps_num": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_den": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sample_rate": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timecode_format": {
+          "type": "string",
+          "enum": [
+            "NDF",
+            "DF",
+            "AUTO"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "tracks": {
+      "type": "object",
+      "required": [
+        "video",
+        "audio"
+      ],
+      "properties": {
+        "video": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "audio": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "overlay": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        },
+        "caption": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/track"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/marker"
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "brief_path",
+        "blueprint_path",
+        "selects_path"
+      ],
+      "properties": {
+        "brief_path": {
+          "type": "string"
+        },
+        "blueprint_path": {
+          "type": "string"
+        },
+        "selects_path": {
+          "type": "string"
+        },
+        "compiler_version": {
+          "type": "string"
+        },
+        "review_report_path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "track": {
+      "type": "object",
+      "required": [
+        "track_id",
+        "kind",
+        "clips"
+      ],
+      "properties": {
+        "track_id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "video",
+            "audio",
+            "overlay",
+            "caption"
+          ]
+        },
+        "clips": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/clip"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "clip": {
+      "type": "object",
+      "required": [
+        "clip_id",
+        "segment_id",
+        "asset_id",
+        "src_in_us",
+        "src_out_us",
+        "timeline_in_frame",
+        "timeline_duration_frames",
+        "role",
+        "motivation"
+      ],
+      "properties": {
+        "clip_id": {
+          "type": "string"
+        },
+        "segment_id": {
+          "type": "string"
+        },
+        "asset_id": {
+          "type": "string"
+        },
+        "src_in_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "src_out_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "src_in_tc": {
+          "type": "string"
+        },
+        "src_out_tc": {
+          "type": "string"
+        },
+        "timeline_in_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_duration_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "hero",
+            "support",
+            "transition",
+            "texture",
+            "dialogue",
+            "music",
+            "title"
+          ]
+        },
+        "motivation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "beat_id": {
+          "type": "string"
+        },
+        "fallback_segment_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "quality_flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "audio_policy": {
+          "type": "object",
+          "properties": {
+            "duck_music_db": {
+              "type": "number"
+            },
+            "preserve_nat_sound": {
+              "type": "boolean"
+            },
+            "fade_in_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fade_out_frames": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "src_out_us": {
+                "type": "integer"
+              },
+              "src_in_us": {
+                "type": "integer"
+              }
+            }
+          },
+          "then": {
+            "properties": {},
+            "not": {
+              "properties": {
+                "src_out_us": {
+                  "const": 0
+                },
+                "src_in_us": {
+                  "const": 1
+                }
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "marker": {
+      "type": "object",
+      "required": [
+        "frame",
+        "kind",
+        "label"
+      ],
+      "properties": {
+        "frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "note",
+            "warning",
+            "beat",
+            "transition",
+            "review"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,37 @@
+sequence_goals:
+  - open with curiosity
+  - settle into breath and texture
+  - release into warmth
+
+beats:
+  - id: b01
+    label: hook
+    target_duration_frames: 96
+    required_roles: [hero, texture]
+  - id: b02
+    label: settle
+    target_duration_frames: 240
+    required_roles: [support, dialogue, texture]
+  - id: b03
+    label: release
+    target_duration_frames: 192
+    required_roles: [hero, transition]
+
+pacing:
+  opening_cadence: brisk
+  middle_cadence: spacious
+  ending_cadence: warm
+
+music_policy:
+  start_sparse: true
+  allow_release_late: true
+
+dialogue_policy:
+  preserve_natural_breath: true
+  avoid_wall_to_wall_voiceover: true
+
+transition_policy:
+  prefer_match_texture_over_flashy_fx: true
+
+ending_policy:
+  should_feel: restorative

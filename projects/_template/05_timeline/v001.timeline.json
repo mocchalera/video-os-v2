@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "project_id": "example-project",
+  "sequence": {
+    "name": "main",
+    "fps_num": 24,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0,
+    "sample_rate": 48000,
+    "timecode_format": "AUTO"
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLIP_001",
+            "segment_id": "SEG_0143",
+            "asset_id": "AST_007",
+            "src_in_us": 11200000,
+            "src_out_us": 15850000,
+            "src_in_tc": "00:00:11:06",
+            "src_out_tc": "00:00:15:20",
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 96,
+            "role": "hero",
+            "motivation": "Open on intimate preparation detail before broader landscape context.",
+            "beat_id": "b01",
+            "fallback_segment_ids": [
+              "SEG_0148",
+              "SEG_0194"
+            ],
+            "confidence": 0.87,
+            "quality_flags": [],
+            "audio_policy": {
+              "duck_music_db": -4.0,
+              "preserve_nat_sound": true,
+              "fade_in_frames": 6,
+              "fade_out_frames": 8
+            },
+            "metadata": {
+              "selection_reason": "hands + soft light + prep motif"
+            }
+          }
+        ]
+      }
+    ],
+    "audio": [
+      {
+        "track_id": "A1",
+        "kind": "audio",
+        "clips": []
+      }
+    ]
+  },
+  "markers": [
+    {
+      "frame": 0,
+      "kind": "beat",
+      "label": "b01 hook",
+      "metadata": {}
+    }
+  ],
+  "provenance": {
+    "brief_path": "projects/_template/01_intent/creative_brief.yaml",
+    "blueprint_path": "projects/_template/04_plan/edit_blueprint.yaml",
+    "selects_path": "projects/_template/04_plan/selects_candidates.yaml",
+    "compiler_version": "0.1.0",
+    "review_report_path": ""
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/review-patch.schema.json",
+  "title": "Review Patch Operations",
+  "type": "object",
+  "required": [
+    "timeline_version",
+    "operations"
+  ],
+  "properties": {
+    "timeline_version": {
+      "type": "string"
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "op",
+          "reason"
+        ],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "replace_segment",
+              "trim_segment",
+              "move_segment",
+              "insert_segment",
+              "remove_segment",
+              "change_audio_policy",
+              "add_marker",
+              "add_note"
+            ]
+          },
+          "target_clip_id": {
+            "type": "string"
+          },
+          "with_segment_id": {
+            "type": "string"
+          },
+          "new_src_in_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "new_src_out_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "new_timeline_in_frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "new_duration_frames": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
