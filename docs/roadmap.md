@@ -1,6 +1,7 @@
 # Video OS v2 — 全体ロードマップ
 
 作成日: 2026-03-21
+最終更新: 2026-03-21（OTIO round-trip 設計統合）
 
 ## 定義
 
@@ -14,13 +15,27 @@
 4. 実行可能なタイムラインへ落とす層
 5. レンダリングと批評で閉じる層
 
+そしてこの5層は **一方向パイプラインではない**。
+AIが構造を作る ↔ 人間がGUIで最終編集判断をする ↔ その差分をAI系に戻す、
+という **往復可能な交換層** が中心にある。
+
+```text
+Intent -> Analysis -> Blueprint -> timeline.json <-> OTIO exchange boundary <-> Human GUI edit
+                                            \                               /
+                                             -> diff / import / recompile --
+                                                      |
+                                                      -> preview / render
+```
+
 ## 設計原則
 
 ### 中心に置くもの（モデルに依存しない）
 - **Evidence Graph** — 素材から得られた事実の構造化
 - **Uncertainty Management** — 迷いを構造化して gate で止める
 - **Editorial Blueprint** — 編集意図の明示的な記述
-- **Timeline IR** — 内部表現としての timeline.json（OTIO は handoff export）
+- **Timeline IR** — 内部正本は `timeline.json`。
+  **OTIO は handoff export/import を担う exchange boundary** とする。
+  round-trip は loss-aware / diffable / stable-id-based で扱う。
 
 ### モデルの位置づけ
 - **Gemini** = 素材読解エンジン（ラッシュの一次理解・区間特定・粗い意味把握）
@@ -43,8 +58,14 @@
 5. render は engine だけが行う
 6. timeline.json の変更は compiler だけが行う
 7. agent は review_patch[] を発行する（ffmpeg コマンドではなく）
+8. OTIO export 前に、すべての clip / segment / track に stable ID が付与されていること
+9. round-trip import で unmapped edit が出た場合は、自動確定せず review 必須
+10. final render 前に source of truth を宣言すること（engine render 正 or NLE finishing 正）
+11. NLE handoff は capability profile で許可された編集面に限定すること
 
 ## Canonical Artifacts
+
+### AI 由来
 
 | ファイル | 書き手 | 用途 |
 |---------|--------|------|
@@ -57,11 +78,43 @@
 | review_report.yaml | roughcut-critic | 批評レポート |
 | review_patch.json | roughcut-critic | パッチ操作の提案 |
 
+### Human round-trip 由来
+
+| ファイル | 書き手 | 用途 |
+|---------|--------|------|
+| handoff_manifest.yaml | compiler | handoff 対象 NLE、許容編集面、source map、注意事項 |
+| handoff_timeline.otio | compiler | 人間編集者に渡す交換ファイル |
+| imported_handoff.otio | roundtrip-importer | GUI 編集後に戻された OTIO |
+| roundtrip_import_report.yaml | roundtrip-importer | 読み戻し成功/失敗、lossy 項目、未対応変更 |
+| human_revision_diff.yaml | roundtrip-diff-analyzer | 人間が何をどう変えたかの構造的要約 |
+| nle_capability_profile.yaml | adapters | NLE ごとの保持可能/不可情報の定義 |
+
+## Human GUI 編集の許可範囲
+
+### 最初に許可する編集（round-trip 可能）
+- trim（in/out 調整）
+- reorder（クリップ順序変更）
+- enable / disable（クリップの有効/無効）
+- track move（トラック間移動）
+- simple transition（ディゾルブ、ワイプ等）
+- marker / note（マーカー・メモ追加）
+
+### 最初は許可しないか、one-way 扱いにする編集
+- complex titles / MOGRT
+- plugin effects
+- full color finish
+- advanced audio finish
+
+これらは OTIO round-trip で再現不能な変更になる。
+「人間が最終審美をやる」が editorial judgment（尺・順序・切り位置・Bロール差し込み）を指すなら round-trip と相性が良い。
+full finishing まで含むなら NLE を source of truth にする one-way handoff になり、engine render は放棄する。
+この判断は M3.5 で明示的に行う。
+
 ## マイルストーン
 
-### Milestone 1: Fixture-Backed Editorial Loop
+### Milestone 1: Fixture-Backed Editorial Loop + Minimal Round-Trip
 
-**ゴール**: API接続なし、fixture データで artifact flow と compiler invariants を証明する
+**ゴール**: API接続なし、fixture データで artifact flow、compiler invariants、**最小 round-trip** を証明する
 
 **入力**:
 - projects/sample/01_intent/creative_brief.yaml
@@ -73,20 +126,28 @@
 - review_patch.json
 - review_report.yaml
 - preview artifact
+- handoff_timeline.otio（export）
+- imported_handoff.otio（fixture human edit を模擬）
+- roundtrip_import_report.yaml
+- human_revision_diff.yaml
 
-**達成条件（4つだけ）**:
+**達成条件**:
 1. schema validate が通る
 2. compiler が決定論的に動く（同一入力 → 同一出力）
 3. critic が patch を返せる
 4. patch を compiler が再適用できる
+5. exported OTIO が再 import 可能である
+6. 人間編集差分を loss-aware に要約できる
+7. round-trip 後も stable ID が維持される
 
 **実装順序**:
-1. スキーマ定義（5つの不足スキーマ） ← 進行中
-2. fixture project（自己整合的なサンプルデータ） ← 進行中
-3. schema validator（全artifact検証スクリプト）
-4. timeline compiler（決定論的コンパイラ、Phase 1-5）
+1. スキーマ定義（5つの不足スキーマ） ← 完了
+2. fixture project（自己整合的なサンプルデータ） ← 完了
+3. schema validator（全artifact検証スクリプト） ← 完了（24テスト）
+4. timeline compiler（決定論的コンパイラ、Phase 1-5） ← 進行中
 5. review patch applicator（patch → compiler 再実行）
-6. E2E harness（golden test、1本通し検証）
+6. OTIO exchange layer（export + fixture import + diff + report）
+7. E2E harness（golden test、1本通し + round-trip 検証）
 
 ### Milestone 2: Live Analysis Pipeline
 
@@ -122,6 +183,28 @@
 - sample-bicycle `/path/to/downloads/子ども自転車`（成長記録ムービー）
 - AX-1 D4887 `/path/to/footage/D4887.MP4`（インタビュー）
 
+### Milestone 3.5: Human Handoff Round-Trip
+
+**ゴール**: AIが handoff package を出し、人間が NLE で editorial edits を行い、OTIO を再 import し、AIが差分を理解して次案に反映する
+
+**フロー**:
+1. compiler が handoff_manifest.yaml + handoff_timeline.otio を出力
+2. 人間が DaVinci Resolve / Premiere 等で editorial edits を実行
+3. 編集済み OTIO を戻す
+4. roundtrip-importer が import report + human revision diff を生成
+5. AI（roughcut-critic or blueprint-planner）が diff を読んで次の blueprint/patch を提案
+6. compiler が再構成し、preview を更新
+
+**達成条件**:
+- 実 NLE で trim / reorder / disable を行い、round-trip で diff が正しく検出される
+- unmapped edits（NLE が追加したエフェクト等）が loss report に記録される
+- stable ID が維持され、AI が「どのクリップに何が変わったか」を追跡できる
+
+**NLE capability profile**:
+- DaVinci Resolve 用 profile を最初に作成
+- 保持可能: clip ID (metadata), trim, reorder, transitions, markers
+- lossy: color grades, Fusion effects, Fairlight advanced audio
+
 ### Milestone 4: Caption + Audio + Packaging
 
 **ゴール**: 完成品質のメディア出力
@@ -133,7 +216,11 @@
 - music cue 契約を追加し、A2 track の entry 条件・cue timing・ducking 前提を machine-readable にする
 - 音声マスタリング: loudnorm, 2-pass
 - Remotion rendering: assembly.mp4 → ffmpeg post → final.mp4
-- OTIO export: timeline.json → .otio（人間の編集者への handoff）
+
+**Source of truth 宣言**（Gate 10）:
+- engine render path: AI → compile → render → final.mp4 が正
+- NLE finishing path: AI → compile → OTIO → NLE → NLE export が正
+- プロジェクトごとに brief で宣言し、混在させない
 
 **引き継ぐ知見**:
 - 現行 video-edit-agent の caption segmentation ルール
@@ -147,17 +234,18 @@
 **手段**:
 - Claude Agent SDK
 - Codex SDK / codex exec
-- CI gates（schema validation, golden test）
+- CI gates（schema validation, golden test, round-trip regression）
 
-**前提**: Milestone 1-3 が interactive で安定稼働していること
+**前提**: Milestone 1-3.5 が interactive で安定稼働していること
 
 ## 進め方のルール
 
 1. **interactive first** — いきなり automation しない。最初は human が明示的に narrow task を投げる
 2. **1 task = 1 artifact** — タスクの粒度は1つの artifact か 1つの module に限定
 3. **fixture first** — API 接続より先に artifact flow を固める
-4. **設計→レビュー→修正ループ** — 大きな指摘がなくなるまで回す
-5. **automation は「1本通しが動いてから」** — 順番を逆にしない
+4. **round-trip early** — OTIO 往復は最初期の IR 設計に食い込むので後回しにしない
+5. **設計→レビュー→修正ループ** — 大きな指摘がなくなるまで回す
+6. **automation は「1本通しが動いてから」** — 順番を逆にしない
 
 ## 現行リポジトリからの引き継ぎ
 

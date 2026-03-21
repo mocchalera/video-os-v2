@@ -275,9 +275,9 @@ Resolve:
 
 ### Phase 5. Export
 Emit:
-- `timeline.json` (canonical)
-- `.otio` (handoff)
-- preview render manifest for ffmpeg / remotion
+- `timeline.json` (canonical) — **required in M1**
+- `.otio` (handoff) — stub in M1, full implementation in M3.5
+- preview render manifest for ffmpeg / remotion — minimal JSON manifest in M1, full in M3.5
 
 ### Phase 6. Critique and patch
 `roughcut-critic` reads:
