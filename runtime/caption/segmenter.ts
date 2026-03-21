@@ -141,6 +141,31 @@ const JA_LINE_START_PARTICLES = new Set([
 ]);
 const DEFAULT_FPS = 30;
 
+/**
+ * Japanese filler patterns — ported from filler_gap_detector.py.
+ * Also includes common English fillers for mixed-language transcripts.
+ * Matches common speech fillers that should be stripped from captions.
+ */
+export const FILLER_PATTERN =
+  /(?:えーと|えーっと|えっと|えー|あー|うーん|うん|まあ|なんか|あの|その|\buh\b|\bum\b)/gi;
+
+/**
+ * Remove Japanese filler words from text.
+ * Returns the cleaned text with leading/trailing whitespace trimmed.
+ */
+export function removeFillers(text: string): string {
+  return text.replace(FILLER_PATTERN, "").replace(/\s{2,}/g, " ").trim();
+}
+
+/**
+ * Check if text consists entirely of filler words (and optional punctuation/whitespace).
+ */
+export function isFillerOnly(text: string): boolean {
+  const cleaned = removeFillers(text);
+  // After removing fillers, if only whitespace, punctuation, or empty → filler-only
+  return cleaned.replace(/[\s。、,.!?！？・…\-ー]+/g, "").length === 0;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -262,12 +287,23 @@ function segmentItems(
 // Main entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * Options for filtering and cleaning transcript content during caption generation.
+ */
+export interface CaptionGenerationOptions {
+  /** Speaker keys to exclude (e.g. interviewer speakers). */
+  excludeSpeakers?: string[];
+  /** If true, remove Japanese filler words from caption text. Default: false. */
+  removeFillers?: boolean;
+}
+
 export function generateCaptionSource(
   timeline: MinimalTimelineIR,
   transcripts: Map<string, TranscriptArtifact>,
   policy: CaptionPolicy,
   projectId: string,
   baseTimelineVersion: string,
+  options?: CaptionGenerationOptions,
 ): CaptionSource {
   if (policy.source === "none") {
     return {
@@ -312,11 +348,20 @@ export function generateCaptionSource(
     if (!transcript) continue;
 
     // Find items that overlap with the clip's source range
-    const matchingItems = transcript.items.filter((item) => {
+    let matchingItems = transcript.items.filter((item) => {
       return (
         item.start_us < clip.src_out_us && item.end_us > clip.src_in_us
       );
     });
+
+    // Filter out excluded speakers (e.g. interviewer)
+    if (options?.excludeSpeakers && options.excludeSpeakers.length > 0) {
+      const excluded = new Set(options.excludeSpeakers);
+      matchingItems = matchingItems.filter(
+        (item) =>
+          !excluded.has(item.speaker) && !excluded.has(item.speaker_key),
+      );
+    }
 
     // Sort by source start time
     matchingItems.sort((a, b) => a.start_us - b.start_us);
@@ -358,7 +403,18 @@ export function generateCaptionSource(
     captionCounter++;
     const captionId = `SC_${String(captionCounter).padStart(4, "0")}`;
 
-    const text = seg.map((p) => p.item.text).join("");
+    let text = seg.map((p) => p.item.text).join("");
+
+    // Apply filler removal if enabled
+    if (options?.removeFillers) {
+      text = removeFillers(text);
+    }
+
+    // Skip segments that are empty or filler-only after cleaning
+    if (text.trim().length === 0 || isFillerOnly(text)) {
+      continue;
+    }
+
     const inFrame = seg[0].timelineInFrame;
     const lastItem = seg[seg.length - 1];
     const outFrame =
