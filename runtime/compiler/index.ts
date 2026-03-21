@@ -20,6 +20,8 @@ import type {
 } from "./types.js";
 
 export type { TimelineIR, CompileOptions };
+export { applyPatch } from "./patch.js";
+export type { ReviewPatch, PatchResult, PatchError, PatchOperation } from "./patch.js";
 
 export interface CompileResult {
   timeline: TimelineIR;

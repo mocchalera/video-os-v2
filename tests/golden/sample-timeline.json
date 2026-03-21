@@ -1,0 +1,267 @@
+{
+  "version": "1",
+  "project_id": "sample-mountain-reset",
+  "created_at": "2026-03-21T00:00:00Z",
+  "sequence": {
+    "name": "Mountain Reset",
+    "fps_num": 24,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_0001",
+            "segment_id": "SEG_0025",
+            "asset_id": "AST_005",
+            "src_in_us": 1400000,
+            "src_out_us": 6000000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 96,
+            "role": "hero",
+            "motivation": "sunrise flare provides a restrained reveal of warmth without reading as conquest",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.93,
+            "quality_flags": [
+              "minor_highlight_clip"
+            ]
+          },
+          {
+            "clip_id": "CLP_0006",
+            "segment_id": "SEG_0020",
+            "asset_id": "AST_004",
+            "src_in_us": 8000000,
+            "src_out_us": 13800000,
+            "timeline_in_frame": 312,
+            "timeline_duration_frames": 240,
+            "role": "hero",
+            "motivation": "profile movement with visible breath widens the film while keeping the pace measured",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.89,
+            "quality_flags": []
+          },
+          {
+            "clip_id": "CLP_0010",
+            "segment_id": "SEG_0028",
+            "asset_id": "AST_005",
+            "src_in_us": 18200000,
+            "src_out_us": 23000000,
+            "timeline_in_frame": 552,
+            "timeline_duration_frames": 168,
+            "role": "hero",
+            "motivation": "the restrained exhale gives the release beat a human ending without overplaying emotion",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": []
+          }
+        ]
+      },
+      {
+        "track_id": "V2",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_0002",
+            "segment_id": "SEG_0013",
+            "asset_id": "AST_003",
+            "src_in_us": 1000000,
+            "src_out_us": 4800000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 96,
+            "role": "texture",
+            "motivation": "hands lacing boots satisfies the tactile ritual brief and opens small before the landscape expands",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.91,
+            "quality_flags": []
+          },
+          {
+            "clip_id": "CLP_0003",
+            "segment_id": "SEG_0032",
+            "asset_id": "AST_006",
+            "src_in_us": 5000000,
+            "src_out_us": 9700000,
+            "timeline_in_frame": 96,
+            "timeline_duration_frames": 216,
+            "role": "texture",
+            "motivation": "moving water gives the middle beat a reset motif without competing with spoken lines",
+            "beat_id": "b02",
+            "fallback_segment_ids": [
+              "SEG_0014"
+            ],
+            "confidence": 0.88,
+            "quality_flags": []
+          },
+          {
+            "clip_id": "CLP_0005",
+            "segment_id": "SEG_0012",
+            "asset_id": "AST_002",
+            "src_in_us": 24000000,
+            "src_out_us": 29600000,
+            "timeline_in_frame": 96,
+            "timeline_duration_frames": 216,
+            "role": "transition",
+            "motivation": "the door opening creates a literal and emotional threshold from interior quiet to exterior air",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": []
+          },
+          {
+            "clip_id": "CLP_0007",
+            "segment_id": "SEG_0023",
+            "asset_id": "AST_004",
+            "src_in_us": 27000000,
+            "src_out_us": 32800000,
+            "timeline_in_frame": 312,
+            "timeline_duration_frames": 240,
+            "role": "support",
+            "motivation": "uphill wide introduces scale without requiring a summit payoff",
+            "beat_id": "b03",
+            "fallback_segment_ids": [
+              "SEG_0014"
+            ],
+            "confidence": 0.84,
+            "quality_flags": [
+              "slight_wind"
+            ]
+          },
+          {
+            "clip_id": "CLP_0009",
+            "segment_id": "SEG_0034",
+            "asset_id": "AST_006",
+            "src_in_us": 15000000,
+            "src_out_us": 19400000,
+            "timeline_in_frame": 312,
+            "timeline_duration_frames": 240,
+            "role": "transition",
+            "motivation": "light through branches is a soft connective tissue between dialogue and movement beats",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.86,
+            "quality_flags": []
+          },
+          {
+            "clip_id": "CLP_0012",
+            "segment_id": "SEG_0036",
+            "asset_id": "AST_006",
+            "src_in_us": 25200000,
+            "src_out_us": 30800000,
+            "timeline_in_frame": 552,
+            "timeline_duration_frames": 168,
+            "role": "transition",
+            "motivation": "the empty trail bend creates an open future-facing image for the final beat without promising triumph",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.85,
+            "quality_flags": []
+          }
+        ]
+      }
+    ],
+    "audio": [
+      {
+        "track_id": "A1",
+        "kind": "audio",
+        "clips": [
+          {
+            "clip_id": "CLP_0004",
+            "segment_id": "SEG_0002",
+            "asset_id": "AST_001",
+            "src_in_us": 6400000,
+            "src_out_us": 11000000,
+            "timeline_in_frame": 96,
+            "timeline_duration_frames": 216,
+            "role": "dialogue",
+            "motivation": "the line cleanly states the need for quiet without sounding like copy",
+            "beat_id": "b02",
+            "fallback_segment_ids": [
+              "SEG_0006"
+            ],
+            "confidence": 0.95,
+            "quality_flags": []
+          },
+          {
+            "clip_id": "CLP_0008",
+            "segment_id": "SEG_0021",
+            "asset_id": "AST_004",
+            "src_in_us": 14500000,
+            "src_out_us": 20200000,
+            "timeline_in_frame": 312,
+            "timeline_duration_frames": 240,
+            "role": "dialogue",
+            "motivation": "explicitly rejects summit rhetoric and protects the brief from drifting into achievement language",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.88,
+            "quality_flags": []
+          },
+          {
+            "clip_id": "CLP_0011",
+            "segment_id": "SEG_0006",
+            "asset_id": "AST_001",
+            "src_in_us": 41200000,
+            "src_out_us": 47600000,
+            "timeline_in_frame": 552,
+            "timeline_duration_frames": 168,
+            "role": "dialogue",
+            "motivation": "explicitly names slowing down and pairs well with breath-focused visuals",
+            "beat_id": "b04",
+            "fallback_segment_ids": [
+              "SEG_0027"
+            ],
+            "confidence": 0.92,
+            "quality_flags": []
+          }
+        ]
+      },
+      {
+        "track_id": "A2",
+        "kind": "audio",
+        "clips": []
+      },
+      {
+        "track_id": "A3",
+        "kind": "audio",
+        "clips": []
+      }
+    ]
+  },
+  "markers": [
+    {
+      "frame": 0,
+      "kind": "beat",
+      "label": "b01: hook"
+    },
+    {
+      "frame": 96,
+      "kind": "beat",
+      "label": "b02: settle"
+    },
+    {
+      "frame": 312,
+      "kind": "beat",
+      "label": "b03: climb"
+    },
+    {
+      "frame": 552,
+      "kind": "beat",
+      "label": "b04: release"
+    }
+  ],
+  "provenance": {
+    "brief_path": "01_intent/creative_brief.yaml",
+    "blueprint_path": "04_plan/edit_blueprint.yaml",
+    "selects_path": "04_plan/selects_candidates.yaml",
+    "compiler_version": "1.0.0"
+  }
+}

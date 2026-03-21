@@ -219,12 +219,20 @@ export interface ClipOutput {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  audio_policy?: AudioPolicy;
 }
 
 export interface MarkerOutput {
   frame: number;
   kind: "note" | "warning" | "beat" | "transition" | "review";
   label: string;
+}
+
+export interface AudioPolicy {
+  duck_music_db?: number;
+  preserve_nat_sound?: boolean;
+  fade_in_frames?: number;
+  fade_out_frames?: number;
 }
 
 // ── Compiler options ────────────────────────────────────────────────

@@ -69,6 +69,26 @@
             "items": {
               "type": "string"
             }
+          },
+          "audio_policy": {
+            "type": "object",
+            "properties": {
+              "duck_music_db": { "type": "number" },
+              "preserve_nat_sound": { "type": "boolean" },
+              "fade_in_frames": { "type": "integer", "minimum": 0 },
+              "fade_out_frames": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "beat_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["hero", "support", "transition", "texture", "dialogue", "music", "title"]
+          },
+          "label": {
+            "type": "string"
           }
         },
         "additionalProperties": false
