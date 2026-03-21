@@ -257,7 +257,7 @@ full finishing まで含むなら NLE を source of truth にする one-way hand
 **Source of truth 宣言**（Gate 10）:
 - engine render path: AI → compile → render → final.mp4 が正
 - NLE finishing path: AI → compile → OTIO → NLE → NLE export が正
-- プロジェクトごとに brief で宣言し、混在させない
+- プロジェクトごとに `project_state.yaml.handoff_resolution` で宣言し、混在させない
 
 **引き継ぐ知見**:
 - 現行 video-edit-agent の caption segmentation ルール

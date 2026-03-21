@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/package-manifest.schema.json",
+  "title": "Video OS Package Manifest",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "source_of_truth",
+    "base_timeline_version",
+    "packaging_projection_hash",
+    "created_at",
+    "artifacts",
+    "provenance"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "source_of_truth": {
+      "type": "string",
+      "enum": ["engine_render", "nle_finishing"]
+    },
+    "base_timeline_version": { "type": "string" },
+    "packaging_projection_hash": { "type": "string" },
+    "created_at": { "type": "string" },
+    "artifacts": { "$ref": "#/$defs/artifactSet" },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "artifactSet": {
+      "type": "object",
+      "required": ["final_video", "qa_report"],
+      "properties": {
+        "final_video": { "$ref": "#/$defs/artifactRef" },
+        "raw_video": { "$ref": "#/$defs/artifactRef" },
+        "raw_dialogue": { "$ref": "#/$defs/artifactRef" },
+        "final_mix": { "$ref": "#/$defs/artifactRef" },
+        "captions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/captionArtifactRef" }
+        },
+        "qa_report": { "$ref": "#/$defs/artifactRef" }
+      },
+      "additionalProperties": false
+    },
+    "artifactRef": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "captionArtifactRef": {
+      "type": "object",
+      "required": ["kind", "delivery", "path", "sha256"],
+      "properties": {
+        "kind": { "type": "string" },
+        "delivery": { "type": "string" },
+        "path": { "type": "string" },
+        "sha256": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["editorial_timeline_hash"],
+      "properties": {
+        "editorial_timeline_hash": { "type": "string" },
+        "caption_approval_hash": { "type": "string" },
+        "music_cues_hash": { "type": "string" },
+        "ffmpeg_version": { "type": "string" },
+        "remotion_bundle_hash": { "type": "string" },
+        "render_defaults_hash": { "type": "string" },
+        "handoff_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

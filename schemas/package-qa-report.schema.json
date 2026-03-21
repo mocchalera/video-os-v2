@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/package-qa-report.schema.json",
+  "title": "Video OS Package QA Report",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "source_of_truth",
+    "qa_profile",
+    "passed",
+    "checks"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "source_of_truth": {
+      "type": "string",
+      "enum": ["engine_render", "nle_finishing"]
+    },
+    "qa_profile": {
+      "type": "string",
+      "enum": ["engine_render", "nle_finishing"]
+    },
+    "passed": { "type": "boolean" },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/qaCheck" }
+    },
+    "metrics": { "$ref": "#/$defs/qaMetrics" },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "final_video": { "type": "string" },
+        "final_mix": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "qaCheck": {
+      "type": "object",
+      "required": ["name", "passed", "details"],
+      "properties": {
+        "name": { "type": "string" },
+        "passed": { "type": "boolean" },
+        "details": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "qaMetrics": {
+      "type": "object",
+      "properties": {
+        "caption_max_density": { "type": "number" },
+        "dialogue_occupancy_ratio": { "type": "number" },
+        "av_drift_ms": { "type": "number" },
+        "integrated_lufs": { "type": "number" },
+        "true_peak_dbtp": { "type": "number" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/music-cues.schema.json",
+  "title": "Video OS Music Cues",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "base_timeline_version",
+    "music_asset",
+    "cues"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "base_timeline_version": { "type": "string" },
+    "music_asset": { "$ref": "#/$defs/musicAsset" },
+    "cues": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/cue" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "musicAsset": {
+      "type": "object",
+      "required": ["asset_id", "path", "source_hash"],
+      "properties": {
+        "asset_id": { "type": "string" },
+        "path": { "type": "string" },
+        "source_hash": { "type": "string" },
+        "analysis_ref": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "cue": {
+      "type": "object",
+      "required": [
+        "cue_id",
+        "track_id",
+        "entry_window",
+        "entry_frame",
+        "exit_frame",
+        "fade_in_ms",
+        "fade_out_ms",
+        "ducking"
+      ],
+      "properties": {
+        "cue_id": { "type": "string", "pattern": "^MC_" },
+        "track_id": { "type": "string" },
+        "entry_window": { "$ref": "#/$defs/entryWindow" },
+        "entry_frame": { "type": "integer", "minimum": 0 },
+        "exit_frame": { "type": "integer", "minimum": 0 },
+        "fade_in_ms": { "type": "number", "minimum": 0 },
+        "fade_out_ms": { "type": "number", "minimum": 0 },
+        "ducking": { "$ref": "#/$defs/ducking" },
+        "beat_sync": { "$ref": "#/$defs/beatSync" }
+      },
+      "additionalProperties": false
+    },
+    "entryWindow": {
+      "type": "object",
+      "required": ["earliest_frame", "latest_frame"],
+      "properties": {
+        "earliest_frame": { "type": "integer", "minimum": 0 },
+        "latest_frame": { "type": "integer", "minimum": 0 },
+        "basis": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "ducking": {
+      "type": "object",
+      "required": [
+        "base_gain_db",
+        "duck_gain_db",
+        "attack_ms",
+        "release_ms"
+      ],
+      "properties": {
+        "base_gain_db": { "type": "number" },
+        "duck_gain_db": { "type": "number" },
+        "attack_ms": { "type": "number", "minimum": 0 },
+        "release_ms": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "beatSync": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "analysis_ref": { "type": "string" },
+        "align": {
+          "type": "string",
+          "enum": ["entry", "exit", "both"]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

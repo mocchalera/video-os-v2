@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/caption-approval.schema.json",
+  "title": "Video OS Caption Approval",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "base_timeline_version",
+    "caption_policy",
+    "speech_captions",
+    "text_overlays",
+    "approval"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "base_timeline_version": { "type": "string" },
+    "caption_policy": { "$ref": "#/$defs/captionPolicy" },
+    "speech_captions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/speechCaption" }
+    },
+    "text_overlays": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/textOverlay" }
+    },
+    "approval": { "$ref": "#/$defs/approval" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "captionPolicy": {
+      "type": "object",
+      "required": ["language", "delivery_mode", "source", "styling_class"],
+      "properties": {
+        "language": { "type": "string", "minLength": 1 },
+        "delivery_mode": {
+          "type": "string",
+          "enum": ["burn_in", "sidecar", "both"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["transcript", "authored", "none"]
+        },
+        "styling_class": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "speechCaption": {
+      "type": "object",
+      "required": [
+        "caption_id",
+        "asset_id",
+        "segment_id",
+        "timeline_in_frame",
+        "timeline_duration_frames",
+        "text",
+        "source",
+        "styling_class",
+        "metrics"
+      ],
+      "properties": {
+        "caption_id": { "type": "string", "pattern": "^SC_" },
+        "asset_id": { "type": "string" },
+        "segment_id": { "type": "string" },
+        "timeline_in_frame": { "type": "integer", "minimum": 0 },
+        "timeline_duration_frames": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "transcript_ref": { "type": "string" },
+        "transcript_item_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "source": {
+          "type": "string",
+          "enum": ["transcript", "authored"]
+        },
+        "styling_class": { "type": "string" },
+        "metrics": { "$ref": "#/$defs/captionMetrics" }
+      },
+      "additionalProperties": false
+    },
+    "captionMetrics": {
+      "type": "object",
+      "required": ["cps", "dwell_ms"],
+      "properties": {
+        "cps": { "type": "number", "minimum": 0 },
+        "dwell_ms": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "textOverlay": {
+      "type": "object",
+      "required": [
+        "overlay_id",
+        "timeline_in_frame",
+        "timeline_duration_frames",
+        "text",
+        "styling_class",
+        "writing_mode",
+        "anchor",
+        "source"
+      ],
+      "properties": {
+        "overlay_id": { "type": "string" },
+        "timeline_in_frame": { "type": "integer", "minimum": 0 },
+        "timeline_duration_frames": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "styling_class": { "type": "string" },
+        "writing_mode": {
+          "type": "string",
+          "enum": ["horizontal_tb", "vertical_rl"]
+        },
+        "anchor": {
+          "type": "string",
+          "enum": [
+            "top_left", "top_center", "top_right",
+            "center",
+            "bottom_left", "bottom_center", "bottom_right"
+          ]
+        },
+        "safe_area": { "type": "object" },
+        "source": {
+          "type": "string",
+          "enum": ["authored"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "approval": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["approved", "stale"]
+        },
+        "approved_by": { "type": "string" },
+        "approved_at": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

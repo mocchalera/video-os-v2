@@ -82,7 +82,13 @@
         "review_report_version": { "type": "string" },
         "review_patch_hash": { "type": "string" },
         "human_notes_hash": { "type": "string" },
-        "style_hash": { "type": "string" }
+        "style_hash": { "type": "string" },
+        "editorial_timeline_hash": { "type": "string" },
+        "caption_approval_hash": { "type": "string" },
+        "music_cues_hash": { "type": "string" },
+        "qa_report_hash": { "type": "string" },
+        "package_manifest_hash": { "type": "string" },
+        "packaging_projection_hash": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -104,7 +110,9 @@
             "review_report_version": { "type": "string" },
             "review_patch_hash": { "type": "string" },
             "human_notes_hash": { "type": "string" },
-            "style_hash": { "type": "string" }
+            "style_hash": { "type": "string" },
+            "base_timeline_version": { "type": "string" },
+            "editorial_timeline_hash": { "type": "string" }
           },
           "additionalProperties": false
         }
@@ -147,6 +155,10 @@
           "enum": ["open", "blocked"]
         },
         "review_gate": {
+          "type": "string",
+          "enum": ["open", "blocked"]
+        },
+        "packaging_gate": {
           "type": "string",
           "enum": ["open", "blocked"]
         }

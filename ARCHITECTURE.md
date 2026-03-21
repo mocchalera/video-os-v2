@@ -193,7 +193,7 @@ stateDiagram-v2
     timeline_drafted --> critique_ready: roughcut-critic emits review_report.yaml
     critique_ready --> timeline_drafted: patch set accepted
     critique_ready --> approved: no fatal review issues OR explicit creative override
-    approved --> packaged: master render + captions + package manifest
+    approved --> packaged: Gate 10 decided + QA pass + package manifest
     packaged --> [*]
 ```
 
@@ -226,6 +226,25 @@ also persist canonical operator records:
 `project_state.yaml` must also snapshot `style_hash` and `human_notes_hash` so
 reconcile can invalidate stale blueprint / review / approved states after
 `STYLE.md` or `human_notes.yaml` changes.
+
+For packaged-plane artifacts, split identity from hashes:
+
+- `base_timeline_version`
+  - canonical cross-artifact timeline identity
+  - must equal approved `timeline.json.version`
+- `editorial_timeline_hash`
+  - hash of the approved editorial surface
+  - approval binding / self-heal must use this hash
+- `packaging_projection_hash`
+  - fingerprint of the packaging plane projection
+  - package freshness / rerun must use this hash
+- `artifact_hashes.timeline_version`
+  - legacy file-hash slot kept for backward compatibility
+  - must not be reused as packaged-plane identity
+
+If `project_state.yaml.handoff_resolution.source_of_truth_decision` changes after
+QA or packaging, the existing `qa_report` and `package_manifest` become stale and
+`current_state` must fall back to `approved`.
 
 ## Non-negotiable gates
 

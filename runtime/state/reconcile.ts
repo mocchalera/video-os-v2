@@ -39,6 +39,13 @@ export interface ArtifactHashes {
   review_patch_hash?: string;
   human_notes_hash?: string;
   style_hash?: string;
+  // M4 additive fields
+  editorial_timeline_hash?: string;
+  caption_approval_hash?: string;
+  music_cues_hash?: string;
+  qa_report_hash?: string;
+  package_manifest_hash?: string;
+  packaging_projection_hash?: string;
 }
 
 export interface ApprovalRecord {
@@ -52,6 +59,9 @@ export interface ApprovalRecord {
     review_patch_hash?: string;
     human_notes_hash?: string;
     style_hash?: string;
+    // M4: canonical timeline identity for packaging freshness
+    base_timeline_version?: string;
+    editorial_timeline_hash?: string;
   };
 }
 
@@ -70,6 +80,7 @@ export interface GateStatus {
   planning_gate: "open" | "blocked";
   timeline_gate: "open" | "blocked";
   review_gate: "open" | "blocked";
+  packaging_gate?: "open" | "blocked";
 }
 
 export interface HandoffResolution {
@@ -129,6 +140,11 @@ const ARTIFACT_PATHS: Record<string, { path: string; format: "yaml" | "json" | "
   review_patch: { path: "06_review/review_patch.json", format: "json" },
   human_notes: { path: "06_review/human_notes.yaml", format: "yaml" },
   style: { path: "STYLE.md", format: "md" },
+  // M4 packaging artifacts
+  caption_approval: { path: "07_package/caption_approval.json", format: "json" },
+  music_cues: { path: "07_package/music_cues.json", format: "json" },
+  qa_report: { path: "07_package/qa-report.json", format: "json" },
+  package_manifest: { path: "07_package/package_manifest.json", format: "json" },
 };
 
 // ── Invalidation Matrix ────────────────────────────────────────────
@@ -173,6 +189,19 @@ const INVALIDATION_MATRIX: Record<string, InvalidationRule> = {
   review: {
     stale_keys: [],
     fallback_state: "critique_ready",
+  },
+  // M4 invalidation rules
+  caption_approval: {
+    stale_keys: ["qa_report", "package_manifest"],
+    fallback_state: "approved",
+  },
+  music_cues: {
+    stale_keys: ["qa_report", "package_manifest"],
+    fallback_state: "approved",
+  },
+  qa_report: {
+    stale_keys: ["package_manifest"],
+    fallback_state: "approved",
   },
 };
 
@@ -234,11 +263,41 @@ export function snapshotArtifacts(projectDir: string): ArtifactSnapshot {
         case "review_patch": hashes.review_patch_hash = hash; break;
         case "human_notes": hashes.human_notes_hash = hash; break;
         case "style": hashes.style_hash = hash; break;
+        case "caption_approval": hashes.caption_approval_hash = hash; break;
+        case "music_cues": hashes.music_cues_hash = hash; break;
+        case "qa_report": hashes.qa_report_hash = hash; break;
+        case "package_manifest": hashes.package_manifest_hash = hash; break;
       }
     }
   }
 
   hashes.analysis_artifact_version = readAnalysisArtifactVersion(projectDir);
+
+  // editorial_timeline_hash mirrors timeline_version (both are hashes of timeline.json)
+  if (hashes.timeline_version) {
+    hashes.editorial_timeline_hash = hashes.timeline_version;
+  }
+
+  // packaging_projection_hash: derived from caption_approval + music_cues + render_defaults
+  // Per design: render defaults / toolchain fingerprint are part of packaging freshness
+  let renderDefaultsHash: string | undefined;
+  const renderDefaultsPath = path.join(projectDir, "runtime/render-pipeline-defaults.yaml");
+  if (fs.existsSync(renderDefaultsPath)) {
+    renderDefaultsHash = computeFileHash(renderDefaultsPath);
+  }
+
+  if (hashes.caption_approval_hash || hashes.music_cues_hash || renderDefaultsHash) {
+    const parts = [
+      hashes.caption_approval_hash ?? "",
+      hashes.music_cues_hash ?? "",
+      renderDefaultsHash ?? "",
+    ].join("+");
+    hashes.packaging_projection_hash = crypto
+      .createHash("sha256")
+      .update(parts)
+      .digest("hex")
+      .slice(0, 16);
+  }
 
   return { exists, hashes };
 }
@@ -259,6 +318,7 @@ const STATE_ORDER: ProjectState[] = [
   "timeline_drafted",
   "critique_ready",
   "approved",
+  "packaged",
 ];
 
 export function reconstructState(
@@ -297,6 +357,10 @@ export function reconstructState(
     (approvalRecord.status === "clean" || approvalRecord.status === "creative_override") &&
     approvalVersionsMatch(approvalRecord, snapshot.hashes)
   ) {
+    // packaged: qa_report + package_manifest exist on top of approved
+    if (exists.qa_report && exists.package_manifest) {
+      return "packaged";
+    }
     return "approved";
   }
 
@@ -314,6 +378,8 @@ function approvalVersionsMatch(
   if (av.review_patch_hash && av.review_patch_hash !== currentHashes.review_patch_hash) return false;
   if (av.human_notes_hash && av.human_notes_hash !== currentHashes.human_notes_hash) return false;
   if (av.style_hash && av.style_hash !== currentHashes.style_hash) return false;
+  // M4: check editorial_timeline_hash binding
+  if (av.editorial_timeline_hash && av.editorial_timeline_hash !== currentHashes.editorial_timeline_hash) return false;
   return true;
 }
 
@@ -328,6 +394,8 @@ export interface InvalidationResult {
 export function detectInvalidation(
   oldHashes: ArtifactHashes | undefined,
   newHashes: ArtifactHashes,
+  oldHandoff?: HandoffResolution,
+  newHandoff?: HandoffResolution,
 ): InvalidationResult {
   if (!oldHashes) {
     return { stale_artifacts: [], lowest_fallback: null, approval_stale: false };
@@ -352,6 +420,10 @@ export function detectInvalidation(
     { oldVal: oldHashes.human_notes_hash, newVal: newHashes.human_notes_hash, ruleKey: "human_notes" },
     { oldVal: oldHashes.review_report_version, newVal: newHashes.review_report_version, ruleKey: "review" },
     { oldVal: oldHashes.review_patch_hash, newVal: newHashes.review_patch_hash, ruleKey: "review" },
+    // M4 invalidation checks
+    { oldVal: oldHashes.caption_approval_hash, newVal: newHashes.caption_approval_hash, ruleKey: "caption_approval" },
+    { oldVal: oldHashes.music_cues_hash, newVal: newHashes.music_cues_hash, ruleKey: "music_cues" },
+    { oldVal: oldHashes.qa_report_hash, newVal: newHashes.qa_report_hash, ruleKey: "qa_report" },
   ];
 
   for (const { oldVal, newVal, ruleKey } of checks) {
@@ -369,6 +441,21 @@ export function detectInvalidation(
       if (idx >= 0 && idx < lowestIdx) {
         lowestIdx = idx;
       }
+    }
+  }
+
+  // M4: source_of_truth_decision change invalidates packaging artifacts
+  if (
+    oldHandoff?.source_of_truth_decision &&
+    newHandoff?.source_of_truth_decision &&
+    oldHandoff.source_of_truth_decision !== newHandoff.source_of_truth_decision
+  ) {
+    staleSet.add("qa_report");
+    staleSet.add("package_manifest");
+    approvalStale = true;
+    const fallbackIdx = STATE_ORDER.indexOf("approved");
+    if (fallbackIdx >= 0 && fallbackIdx < lowestIdx) {
+      lowestIdx = fallbackIdx;
     }
   }
 
@@ -419,8 +506,13 @@ export function reconcile(
   // 2. Snapshot current artifact hashes
   const snapshot = snapshotArtifacts(absProject);
 
-  // 3. Detect invalidation from hash changes
-  const invalidation = detectInvalidation(doc.artifact_hashes, snapshot.hashes);
+  // 3. Detect invalidation from hash changes + source_of_truth changes
+  const invalidation = detectInvalidation(
+    doc.artifact_hashes,
+    snapshot.hashes,
+    doc.handoff_resolution,
+    doc.handoff_resolution,
+  );
 
   // 4. Mark approval_record stale if needed
   if (invalidation.approval_stale && doc.approval_record) {
@@ -462,6 +554,21 @@ export function reconcile(
     (gates.compile_gate === "blocked" || gates.planning_gate === "blocked")
   ) {
     reconciledState = "blocked";
+  }
+
+  // M4: source_of_truth_decision consistency check
+  // If packaged but the manifest's source_of_truth doesn't match the current decision, fall back
+  if (reconciledState === "packaged" && snapshot.exists.package_manifest && doc.handoff_resolution?.source_of_truth_decision) {
+    try {
+      const manifestPath = path.join(absProject, ARTIFACT_PATHS.package_manifest.path);
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as { source_of_truth?: string };
+      if (manifest.source_of_truth && manifest.source_of_truth !== doc.handoff_resolution.source_of_truth_decision) {
+        reconciledState = "approved";
+        invalidation.stale_artifacts.push("qa_report", "package_manifest");
+      }
+    } catch {
+      // Non-fatal: if manifest can't be parsed, leave state as-is
+    }
   }
 
   // 9. Self-heal if needed
@@ -569,12 +676,51 @@ function computeGates(
     }
   }
 
+  // packaging_gate: review_gate open + handoff_resolution decided + M4 prerequisites
+  // Also requires caption_approval if caption_policy.source != "none"
+  // Also requires music_cues if BGM is enabled
+  let packagingGate: "open" | "blocked" = "blocked";
+  if (
+    reviewGate === "open" &&
+    doc.handoff_resolution?.status === "decided" &&
+    doc.handoff_resolution?.source_of_truth_decision &&
+    doc.approval_record &&
+    (doc.approval_record.status === "clean" || doc.approval_record.status === "creative_override")
+  ) {
+    // Check caption/music prerequisites from blueprint caption_policy
+    let captionPrereqMet = true;
+    let musicPrereqMet = true;
+    try {
+      const blueprintPath = path.join(projectDir, ARTIFACT_PATHS.blueprint.path);
+      if (fs.existsSync(blueprintPath)) {
+        const bp = parseYaml(fs.readFileSync(blueprintPath, "utf-8")) as {
+          caption_policy?: { source?: string };
+          music_policy?: { enabled?: boolean };
+        };
+        // Captions enabled → require caption_approval
+        if (bp.caption_policy?.source && bp.caption_policy.source !== "none") {
+          captionPrereqMet = snapshot.exists.caption_approval === true;
+        }
+        // Music enabled → require music_cues
+        if (bp.music_policy?.enabled === true) {
+          musicPrereqMet = snapshot.exists.music_cues === true;
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
+    if (captionPrereqMet && musicPrereqMet) {
+      packagingGate = "open";
+    }
+  }
+
   return {
     analysis_gate: analysisGate,
     compile_gate: compileGate,
     planning_gate: planningGate,
     timeline_gate: timelineGate,
     review_gate: reviewGate,
+    packaging_gate: packagingGate,
   };
 }
 
