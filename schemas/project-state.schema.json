@@ -51,6 +51,9 @@
     "analysis_override": {
       "$ref": "#/$defs/analysisOverride"
     },
+    "handoff_resolution": {
+      "$ref": "#/$defs/handoffResolution"
+    },
     "gates": {
       "$ref": "#/$defs/gates"
     },
@@ -160,6 +163,35 @@
         },
         "resume_command": { "type": "string" },
         "last_error": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "handoffResolution": {
+      "type": "object",
+      "required": ["handoff_id", "status"],
+      "properties": {
+        "handoff_id": {
+          "type": "string",
+          "pattern": "^HND_.+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "decided"]
+        },
+        "source_of_truth_decision": {
+          "type": "string",
+          "enum": ["engine_render", "nle_finishing"]
+        },
+        "decided_by": { "type": "string" },
+        "decided_at": { "type": "string" },
+        "basis_report_hashes": {
+          "type": "object",
+          "properties": {
+            "roundtrip_import_report": { "type": "string" },
+            "human_revision_diff": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },

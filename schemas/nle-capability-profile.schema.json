@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/nle-capability-profile.schema.json",
+  "title": "Video OS NLE Capability Profile",
+  "description": "Data-driven contract declaring which editing surfaces are verified, provisional, report-only, or lossy for a given NLE.",
+  "type": "object",
+  "required": [
+    "version",
+    "profile_id",
+    "nle",
+    "otio",
+    "stable_id",
+    "surfaces",
+    "import_policy"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nle": {
+      "$ref": "#/$defs/nleInfo"
+    },
+    "otio": {
+      "$ref": "#/$defs/otioInfo"
+    },
+    "stable_id": {
+      "$ref": "#/$defs/stableIdConfig"
+    },
+    "surfaces": {
+      "$ref": "#/$defs/surfaces"
+    },
+    "import_policy": {
+      "$ref": "#/$defs/importPolicy"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nleInfo": {
+      "type": "object",
+      "required": ["vendor", "product", "version_range"],
+      "properties": {
+        "vendor": { "type": "string" },
+        "product": { "type": "string" },
+        "version_range": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "otioInfo": {
+      "type": "object",
+      "required": ["interchange_format", "metadata_namespace"],
+      "properties": {
+        "interchange_format": {
+          "type": "string",
+          "enum": ["otio"]
+        },
+        "metadata_namespace": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "stableIdConfig": {
+      "type": "object",
+      "required": ["primary_paths", "require_exact_metadata"],
+      "properties": {
+        "primary_paths": {
+          "type": "object",
+          "required": ["clip", "track"],
+          "properties": {
+            "clip": { "type": "string" },
+            "track": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "fallback_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "require_exact_metadata": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "surfaceMode": {
+      "type": "string",
+      "enum": [
+        "verified_roundtrip",
+        "provisional_roundtrip",
+        "report_only",
+        "lossy",
+        "one_way"
+      ]
+    },
+    "surfaceEntry": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/surfaceMode" },
+        "tolerance_frames": { "type": "integer", "minimum": 0 },
+        "detect_after": { "type": "string" },
+        "allowed_types": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "surfaces": {
+      "type": "object",
+      "properties": {
+        "trim": { "$ref": "#/$defs/surfaceEntry" },
+        "reorder": { "$ref": "#/$defs/surfaceEntry" },
+        "enable_disable": { "$ref": "#/$defs/surfaceEntry" },
+        "track_move": { "$ref": "#/$defs/surfaceEntry" },
+        "track_reorder": { "$ref": "#/$defs/surfaceEntry" },
+        "simple_transition": { "$ref": "#/$defs/surfaceEntry" },
+        "timeline_marker_add": { "$ref": "#/$defs/surfaceEntry" },
+        "clip_marker_add": { "$ref": "#/$defs/surfaceEntry" },
+        "note_text_add": { "$ref": "#/$defs/surfaceEntry" },
+        "color_finish": { "$ref": "#/$defs/surfaceEntry" },
+        "fusion_effect": { "$ref": "#/$defs/surfaceEntry" },
+        "fairlight_advanced_audio": { "$ref": "#/$defs/surfaceEntry" }
+      },
+      "additionalProperties": false
+    },
+    "importPolicy": {
+      "type": "object",
+      "required": [
+        "provisional_mapping_requires_review",
+        "unmapped_edit_requires_review",
+        "one_to_many_requires_review"
+      ],
+      "properties": {
+        "provisional_mapping_requires_review": { "type": "boolean" },
+        "unmapped_edit_requires_review": { "type": "boolean" },
+        "one_to_many_requires_review": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

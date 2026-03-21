@@ -10,6 +10,7 @@ import { scoreCandidates } from "./score.js";
 import { assemble } from "./assemble.js";
 import { resolve } from "./resolve.js";
 import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
+import { applyPatch } from "./patch.js";
 import type {
   CompileOptions,
   CompilerDefaults,
@@ -55,7 +56,9 @@ function readYaml<T>(filePath: string): T {
 
 export function compile(opts: CompileOptions): CompileResult {
   const projectPath = path.resolve(opts.projectPath);
-  const repoRoot = findRepoRoot(projectPath);
+  const repoRoot = opts.repoRoot
+    ? path.resolve(opts.repoRoot)
+    : findRepoRoot(projectPath);
 
   // ── Read input artifacts ──────────────────────────────────────────
 
@@ -65,7 +68,7 @@ export function compile(opts: CompileOptions): CompileResult {
   const defaultsPath = path.join(repoRoot, "runtime/compiler-defaults.yaml");
 
   const brief = readYaml<CreativeBrief>(briefPath);
-  const blueprint = readYaml<EditBlueprint>(blueprintPath);
+  const blueprint = opts.blueprintOverride ?? readYaml<EditBlueprint>(blueprintPath);
   const selects = readYaml<SelectsCandidates>(selectsPath);
   const defaults = readYaml<CompilerDefaults>(defaultsPath);
 
@@ -97,7 +100,7 @@ export function compile(opts: CompileOptions): CompileResult {
 
   const createdAt = opts.createdAt;
 
-  const timelineIR = buildTimelineIR(assembled, {
+  let timelineIR = buildTimelineIR(assembled, {
     projectId: normalized.project_id,
     projectTitle: normalized.project_title,
     projectPath,
@@ -107,9 +110,33 @@ export function compile(opts: CompileOptions): CompileResult {
     selectsRelPath: "04_plan/selects_candidates.yaml",
   });
 
+  let finalResolution = resolution;
+  if (opts.reviewPatch) {
+    const patchResult = applyPatch(
+      timelineIR,
+      opts.reviewPatch,
+      selects.candidates,
+      normalized.total_duration_frames,
+    );
+    if (patchResult.errors.length > 0) {
+      const details = patchResult.errors
+        .map((error) => `${error.op}(${error.op_index}): ${error.message}`)
+        .join("; ");
+      throw new Error(`Review patch could not be applied during compile: ${details}`);
+    }
+    timelineIR = patchResult.timeline;
+    finalResolution = patchResult.resolution;
+  }
+
   const outputPath = writeTimeline(timelineIR, projectPath);
   const otioPath = exportOtio(timelineIR, projectPath);
   const previewManifestPath = writePreviewManifest(timelineIR, projectPath);
 
-  return { timeline: timelineIR, outputPath, otioPath, previewManifestPath, resolution };
+  return {
+    timeline: timelineIR,
+    outputPath,
+    otioPath,
+    previewManifestPath,
+    resolution: finalResolution,
+  };
 }

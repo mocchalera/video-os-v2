@@ -1,0 +1,50 @@
+version: 1
+profile_id: davinci_resolve_otio_v1
+nle:
+  vendor: Blackmagic Design
+  product: DaVinci Resolve
+  version_range: ">=19"
+otio:
+  interchange_format: otio
+  metadata_namespace: video_os
+stable_id:
+  primary_paths:
+    clip: metadata.video_os.exchange_clip_id
+    track: metadata.video_os.exchange_track_id
+  fallback_paths:
+    - clip.name
+  require_exact_metadata: true
+surfaces:
+  trim:
+    mode: verified_roundtrip
+    tolerance_frames: 1
+  reorder:
+    mode: verified_roundtrip
+    detect_after: ripple_normalized_peer_order
+  enable_disable:
+    mode: verified_roundtrip
+  track_move:
+    mode: provisional_roundtrip
+  track_reorder:
+    mode: report_only
+  simple_transition:
+    mode: provisional_roundtrip
+    allowed_types:
+      - dissolve
+      - wipe
+  timeline_marker_add:
+    mode: provisional_roundtrip
+  clip_marker_add:
+    mode: report_only
+  note_text_add:
+    mode: report_only
+  color_finish:
+    mode: lossy
+  fusion_effect:
+    mode: lossy
+  fairlight_advanced_audio:
+    mode: lossy
+import_policy:
+  provisional_mapping_requires_review: true
+  unmapped_edit_requires_review: true
+  one_to_many_requires_review: true

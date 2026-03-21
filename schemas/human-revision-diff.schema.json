@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/human-revision-diff.schema.json",
+  "title": "Video OS Human Revision Diff",
+  "description": "Agent-consumable structured diff of human NLE edits against the base timeline.",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "handoff_id",
+    "base_timeline_version",
+    "capability_profile_id",
+    "status",
+    "summary"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_id": {
+      "type": "string",
+      "pattern": "^HND_.+$"
+    },
+    "base_timeline_version": {
+      "type": "string"
+    },
+    "capability_profile_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["clean", "lossy", "review_required"]
+    },
+    "summary": {
+      "$ref": "#/$defs/diffSummary"
+    },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diffOperation" }
+    },
+    "unmapped_edits": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/unmappedEdit" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "diffSummary": {
+      "type": "object",
+      "properties": {
+        "trim": { "type": "integer", "minimum": 0 },
+        "reorder": { "type": "integer", "minimum": 0 },
+        "enable_disable": { "type": "integer", "minimum": 0 },
+        "track_move": { "type": "integer", "minimum": 0 },
+        "simple_transition": { "type": "integer", "minimum": 0 },
+        "timeline_marker_add": { "type": "integer", "minimum": 0 },
+        "unmapped": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "diffOperation": {
+      "type": "object",
+      "required": ["operation_id", "type", "target"],
+      "properties": {
+        "operation_id": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "trim",
+            "reorder",
+            "enable_disable",
+            "track_move",
+            "simple_transition",
+            "timeline_marker_add"
+          ]
+        },
+        "target": { "$ref": "#/$defs/operationTarget" },
+        "before": { "$ref": "#/$defs/clipState" },
+        "after": { "$ref": "#/$defs/clipState" },
+        "delta": { "$ref": "#/$defs/clipDelta" },
+        "mapped_via": { "type": "string" },
+        "confidence": {
+          "type": "string",
+          "enum": ["exact", "fallback", "provisional"]
+        },
+        "surface": {
+          "type": "string",
+          "enum": ["verified_roundtrip", "provisional_roundtrip", "report_only"]
+        },
+        "transition_type": { "type": "string" },
+        "transition_duration_frames": { "type": "integer", "minimum": 0 },
+        "marker_frame": { "type": "integer", "minimum": 0 },
+        "marker_label": { "type": "string" },
+        "from_track_id": { "type": "string" },
+        "to_track_id": { "type": "string" },
+        "enabled": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "operationTarget": {
+      "type": "object",
+      "required": ["exchange_clip_id"],
+      "properties": {
+        "exchange_clip_id": { "type": "string" },
+        "clip_id": { "type": "string" },
+        "segment_id": { "type": "string" },
+        "asset_id": { "type": "string" },
+        "track_id": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "clipState": {
+      "type": "object",
+      "properties": {
+        "src_in_us": { "type": "integer", "minimum": 0 },
+        "src_out_us": { "type": "integer", "minimum": 0 },
+        "timeline_in_frame": { "type": "integer", "minimum": 0 },
+        "timeline_duration_frames": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "clipDelta": {
+      "type": "object",
+      "properties": {
+        "in_us": { "type": "integer" },
+        "out_us": { "type": "integer" },
+        "duration_frames": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "unmappedEdit": {
+      "type": "object",
+      "required": ["classification", "item_ref", "review_required", "reason"],
+      "properties": {
+        "classification": {
+          "type": "string",
+          "enum": [
+            "complex_title",
+            "plugin_effect",
+            "color_finish",
+            "advanced_audio_finish",
+            "speed_change",
+            "nested_sequence",
+            "deleted_clip_without_disable",
+            "missing_stable_id",
+            "split_clip",
+            "duplicated_clip",
+            "ambiguous_one_to_many",
+            "track_reorder",
+            "clip_marker_add",
+            "note_text_add",
+            "ambiguous_mapping",
+            "unknown_vendor_extension"
+          ]
+        },
+        "item_ref": { "type": "string" },
+        "derived_child_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "copy_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "review_required": { "type": "boolean" },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -215,6 +215,13 @@ also persist canonical operator records:
   - `reason`
   - `scope`
   - `artifact_version`
+- `handoff_resolution`
+  - `handoff_id`
+  - `status`
+  - `source_of_truth_decision`
+  - `decided_by`
+  - `decided_at`
+  - `basis_report_hashes`
 
 `project_state.yaml` must also snapshot `style_hash` and `human_notes_hash` so
 reconcile can invalidate stale blueprint / review / approved states after
@@ -229,6 +236,14 @@ reconcile can invalidate stale blueprint / review / approved states after
 5. **Only engines render**
 6. **Only compiler mutates `timeline.json`**
 7. **Agents may emit `review_patch[]`, not arbitrary ffmpeg commands**
+8. **No OTIO export if stable IDs are missing or duplicated**
+9. **No automatic import acceptance when unmapped edits exist**
+10. **Declare source of truth in `project_state.yaml` before final render**
+11. **NLE handoff is limited by capability profile**
+
+Gates 8-11 protect the OTIO exchange boundary without promoting OTIO to canonical
+status. Gate 10 records the final source-of-truth decision in
+`project_state.yaml.handoff_resolution`, not in export-time manifests.
 
 ## Why the timeline IR should not be just OTIO
 

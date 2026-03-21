@@ -72,6 +72,18 @@ export interface GateStatus {
   review_gate: "open" | "blocked";
 }
 
+export interface HandoffResolution {
+  handoff_id: string;
+  status: "pending" | "decided";
+  source_of_truth_decision?: "engine_render" | "nle_finishing";
+  decided_by?: string;
+  decided_at?: string;
+  basis_report_hashes?: {
+    roundtrip_import_report?: string;
+    human_revision_diff?: string;
+  };
+}
+
 export interface ProjectStateDoc {
   version: string | number;
   project_id: string;
@@ -83,6 +95,7 @@ export interface ProjectStateDoc {
   artifact_hashes?: ArtifactHashes;
   approval_record?: ApprovalRecord;
   analysis_override?: AnalysisOverride;
+  handoff_resolution?: HandoffResolution;
   gates?: GateStatus;
   resume?: {
     pending_human_step?: string;

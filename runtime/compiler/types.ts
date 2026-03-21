@@ -240,4 +240,7 @@ export interface AudioPolicy {
 export interface CompileOptions {
   projectPath: string;
   createdAt: string;
+  repoRoot?: string;
+  blueprintOverride?: EditBlueprint;
+  reviewPatch?: import("./patch.js").ReviewPatch;
 }
