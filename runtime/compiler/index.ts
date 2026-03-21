@@ -4,13 +4,16 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import { normalize } from "./normalize.js";
 import { scoreCandidates } from "./score.js";
 import { assemble } from "./assemble.js";
+import { applyAdaptiveTrim } from "./trim.js";
 import { resolve } from "./resolve.js";
 import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
 import { applyPatch } from "./patch.js";
+import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
 import type {
   CompileOptions,
   CompilerDefaults,
@@ -76,6 +79,14 @@ export function compile(opts: CompileOptions): CompileResult {
 
   const normalized = normalize(brief, blueprint);
 
+  // ── Phase 1.5: Skill Activation ──────────────────────────────────
+  // Determine which editing skills are active based on blueprint + candidates.
+  // Fail-open: if no active_editing_skills in blueprint, use empty set (no skill effects).
+
+  const activeSkills = blueprint.active_editing_skills
+    ? activateSkills(blueprint, selects.candidates, selects.editorial_summary)
+    : [];
+
   // ── Phase 2: Score ────────────────────────────────────────────────
 
   const fpsNum = 24;
@@ -86,11 +97,23 @@ export function compile(opts: CompileOptions): CompileResult {
     defaults.scoring,
     fpsNum,
     fpsDen,
+    activeSkills,
   );
 
   // ── Phase 3: Assemble ─────────────────────────────────────────────
 
   const assembled = assemble(normalized, rankedTable, defaults.scoring);
+
+  // ── Phase 3.5: Adaptive Trim ────────────────────────────────────
+  // Apply center-based trim when trim_hint is available.
+  // Falls back to authored range when no hints exist.
+
+  const allAssembledClips = [
+    ...assembled.tracks.video.flatMap((t) => t.clips),
+    ...assembled.tracks.audio.flatMap((t) => t.clips),
+  ];
+  const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
+  applyAdaptiveTrim(allAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame);
 
   // ── Phase 4: Resolve constraints ──────────────────────────────────
 
@@ -109,6 +132,48 @@ export function compile(opts: CompileOptions): CompileResult {
     blueprintRelPath: "04_plan/edit_blueprint.yaml",
     selectsRelPath: "04_plan/selects_candidates.yaml",
   });
+
+  // ── Phase 5.5: Editorial Metadata ─────────────────────────────────
+  // Attach skill metadata and provenance hashes when active skills exist.
+
+  if (activeSkills.length > 0) {
+    // Add provenance hashes
+    timelineIR.provenance.editorial_registry_hash = computeRegistryHash();
+
+    // Attach editorial metadata to clips
+    for (const trackGroup of [timelineIR.tracks.video, timelineIR.tracks.audio]) {
+      for (const track of trackGroup) {
+        for (const clip of track.clips) {
+          // Find matching candidate for metadata tags
+          const matchingCandidate = selects.candidates.find(
+            (c) => c.segment_id === clip.segment_id &&
+              c.src_in_us === clip.src_in_us &&
+              c.src_out_us === clip.src_out_us,
+          ) ?? selects.candidates.find((c) => c.segment_id === clip.segment_id);
+
+          if (matchingCandidate) {
+            const tags = getSkillMetadataTags(activeSkills, matchingCandidate);
+            if (tags.length > 0) {
+              if (!clip.metadata) clip.metadata = {};
+              (clip.metadata as Record<string, unknown>).editorial = {
+                applied_skills: activeSkills,
+                skill_tags: tags,
+                resolved_profile: blueprint.resolved_profile?.id,
+                resolved_policy: blueprint.resolved_policy?.id,
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Add compiler defaults hash to provenance
+  const defaultsHash = createHash("sha256")
+    .update(JSON.stringify(defaults))
+    .digest("hex")
+    .slice(0, 16);
+  timelineIR.provenance.compiler_defaults_hash = defaultsHash;
 
   let finalResolution = resolution;
   if (opts.reviewPatch) {

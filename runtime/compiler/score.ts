@@ -4,12 +4,14 @@
 
 import type {
   Candidate,
+  EditBlueprint,
   NormalizedBeat,
   NormalizedData,
   RankedCandidateTable,
   ScoredCandidate,
   ScoringParams,
 } from "./types.js";
+import { getSkillScoreAdjustment } from "../editorial/skill-registry.js";
 
 export function scoreCandidates(
   normalized: NormalizedData,
@@ -17,6 +19,7 @@ export function scoreCandidates(
   params: ScoringParams,
   fpsNum: number,
   fpsDen: number,
+  activeSkills?: string[],
 ): RankedCandidateTable {
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const nonReject = candidates.filter((c) => c.role !== "reject");
@@ -92,6 +95,7 @@ export function scoreCandidates(
         usPerFrame,
         motifCounts,
         adjacentAssetOverlap,
+        activeSkills,
       );
       scored.push(entry);
     }
@@ -116,6 +120,7 @@ function scoreCandidate(
   usPerFrame: number,
   motifCounts: Map<string, number>,
   adjacentAssetOverlap: number,
+  activeSkills?: string[],
 ): ScoredCandidate {
   // 1. Semantic rank score: higher rank (lower number) → higher score
   //    Normalize: 1.0 for rank 1, decaying. Use 1 / rank.
@@ -160,13 +165,19 @@ function scoreCandidate(
   //    Assembly may apply additional sequential adjustments.
   const adjacencyPenalty = adjacentAssetOverlap * params.adjacency_penalty;
 
+  // 6. Skill adjustment: bonus/penalty from active editing skills
+  const skillAdjustment = activeSkills && activeSkills.length > 0
+    ? getSkillScoreAdjustment(activeSkills, candidate, beat.purpose)
+    : 0;
+
   // Final score: weighted sum
   const score =
     semanticRankScore * 0.4 +
     durationFitScore * 0.3 -
     qualityPenalty -
     motifReusePenalty -
-    adjacencyPenalty;
+    adjacencyPenalty +
+    skillAdjustment;
 
   return {
     candidate,

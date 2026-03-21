@@ -1,0 +1,17 @@
+id: documentary
+story_arc_strategy: chronological
+chronology_bias: "strict"
+allow_time_reorder: false
+preserve_natural_breath: true
+avoid_wall_to_wall_voiceover: true
+skill_suppressions:
+  - smash_cut_energy
+  - crosscut_suspense
+  - montage_compress
+  - j_cut_lead_in
+  - l_cut_reaction_hold
+  - cutaway_repair
+  - talking_head_pacing
+skill_enforcements:
+  - axis_hold_dialogue
+  - silence_beat

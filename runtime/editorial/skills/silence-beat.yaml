@@ -1,0 +1,18 @@
+id: silence_beat
+category: trim
+primary_phase: resolve
+status: active
+required_signals:
+  - afterglow_score
+  - silence_ratio
+when:
+  - "afterglow_score >= 0.4"
+  - "closing or release beat present"
+avoid_when:
+  - "beat target < 24 frames"
+effects:
+  trim_bias: 0.15
+  duration_bias_frames: 12
+  metadata_tags:
+    - intentional_hold
+    - silence_emphasis

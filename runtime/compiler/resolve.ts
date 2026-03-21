@@ -85,17 +85,18 @@ export function resolve(
     }
   }
 
-  // 3. Resolve repeated shot overuse: same segment_id must not appear
-  //    more than once across ALL tracks.
+  // 3. Resolve repeated shot overuse: the exact same source range must not
+  //    appear more than once across ALL tracks. Different excerpts from the
+  //    same transcript segment are valid and should survive assembly.
   //    Loop until no duplicates remain (fallback replacement may introduce new ones).
   let duplicatePassLimit = 10;
   while (duplicatePassLimit-- > 0) {
     const segmentUsage = new Map<string, { trackId: string; clipId: string }[]>();
     for (const track of allTracks) {
       for (const clip of track.clips) {
-        const list = segmentUsage.get(clip.segment_id) ?? [];
+        const list = segmentUsage.get(clipUsageKey(clip)) ?? [];
         list.push({ trackId: track.track_id, clipId: clip.clip_id });
-        segmentUsage.set(clip.segment_id, list);
+        segmentUsage.set(clipUsageKey(clip), list);
       }
     }
 
@@ -164,4 +165,12 @@ export function resolve(
     total_frames: maxFrame,
     target_frames: totalTargetFrames,
   };
+}
+
+function clipUsageKey(clip: {
+  segment_id: string;
+  src_in_us: number;
+  src_out_us: number;
+}): string {
+  return `${clip.segment_id}:${clip.src_in_us}:${clip.src_out_us}`;
 }

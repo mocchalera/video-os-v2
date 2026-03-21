@@ -89,6 +89,9 @@
           },
           "label": {
             "type": "string"
+          },
+          "with_candidate_ref": {
+            "type": "string"
           }
         },
         "additionalProperties": false

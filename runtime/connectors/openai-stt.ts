@@ -728,6 +728,7 @@ export async function processAssetStt(
       const result = await transcribeFn(chunkWavPath, {
         model: sttPolicy.model_alias,
         response_format: sttPolicy.response_format,
+        ...(sttPolicy.language ? { language: sttPolicy.language } : {}),
       });
 
       chunkResults.push({ chunk, result });

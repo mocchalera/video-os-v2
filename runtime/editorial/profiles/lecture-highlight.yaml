@@ -1,0 +1,24 @@
+id: lecture-highlight
+default_policy: tutorial
+defaults:
+  target_duration_sec: 120
+  opening_cadence: "measured"
+  middle_cadence: "steady"
+  ending_cadence: "resolving"
+  max_shot_length_frames: 240
+  default_transition: "cut"
+  crossfade_frames: 8
+  active_editing_skills:
+    - b_roll_bridge
+    - exposition_release
+    - build_to_peak
+    - silence_beat
+    - cooldown_resolve
+  quality_target_overrides:
+    hook_density_min: 0.3
+    novelty_rate_min: 0.6
+  trim_policy_overrides:
+    mode: adaptive
+    default_preferred_duration_frames: 120
+    default_min_duration_frames: 48
+    default_max_duration_frames: 240

@@ -35,6 +35,28 @@
       "items": {
         "$ref": "#/$defs/candidate"
       }
+    },
+    "editorial_summary": {
+      "type": "object",
+      "properties": {
+        "dominant_visual_mode": {
+          "type": "string",
+          "enum": ["talking_head", "screen_demo", "event_broll", "mixed", "unknown"]
+        },
+        "speaker_topology": {
+          "type": "string",
+          "enum": ["solo_primary", "interviewer_guest", "multi_speaker", "unknown"]
+        },
+        "motion_profile": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "unknown"]
+        },
+        "transcript_density": {
+          "type": "string",
+          "enum": ["sparse", "medium", "dense", "unknown"]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "$defs": {
@@ -132,6 +154,54 @@
         },
         "rejection_reason": {
           "type": "string"
+        },
+        "candidate_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "utterance_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "speaker_role": {
+          "type": "string",
+          "enum": ["primary", "interviewer", "secondary", "unknown"]
+        },
+        "semantic_dedupe_key": {
+          "type": "string"
+        },
+        "editorial_signals": {
+          "type": "object",
+          "properties": {
+            "silence_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+            "afterglow_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "speech_intensity_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "reaction_intensity_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "authenticity_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "surprise_signal": { "type": "number", "minimum": 0, "maximum": 1 },
+            "hope_signal": { "type": "number", "minimum": 0, "maximum": 1 },
+            "face_detected": { "type": "boolean" },
+            "visual_tags": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "semantic_cluster_id": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "trim_hint": {
+          "type": "object",
+          "properties": {
+            "source_center_us": { "type": "integer", "minimum": 0 },
+            "preferred_duration_us": { "type": "integer", "minimum": 1 },
+            "min_duration_us": { "type": "integer", "minimum": 1 },
+            "max_duration_us": { "type": "integer", "minimum": 1 },
+            "window_start_us": { "type": "integer", "minimum": 0 },
+            "window_end_us": { "type": "integer", "minimum": 0 },
+            "interest_point_label": { "type": "string" },
+            "interest_point_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
         }
       },
       "allOf": [

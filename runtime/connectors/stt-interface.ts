@@ -76,6 +76,8 @@ export interface SttPolicy {
   model_snapshot: string;
   endpoint: string;
   response_format: string;
+  /** ISO-639-1 language hint (e.g. "ja", "en"). Improves accuracy for non-English. */
+  language?: string | null;
   chunk_target_us: number;
   chunk_max_us: number;
   chunk_overlap_us: number;

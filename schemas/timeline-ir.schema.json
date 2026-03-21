@@ -132,6 +132,12 @@
         },
         "review_report_path": {
           "type": "string"
+        },
+        "compiler_defaults_hash": {
+          "type": "string"
+        },
+        "editorial_registry_hash": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -268,6 +274,13 @@
             }
           },
           "additionalProperties": false
+        },
+        "candidate_ref": {
+          "type": "string"
+        },
+        "fallback_candidate_refs": {
+          "type": "array",
+          "items": { "type": "string" }
         },
         "metadata": {
           "type": "object"

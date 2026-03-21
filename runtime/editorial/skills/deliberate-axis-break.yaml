@@ -1,0 +1,16 @@
+id: deliberate_axis_break
+category: linear_sequence
+primary_phase: assemble
+status: active
+required_signals:
+  - speech_intensity_score
+when:
+  - "emotional turn in beat sequence"
+  - "speech_intensity_score >= 0.8"
+avoid_when:
+  - "policy == interview"
+  - "no emotional turn detected"
+effects:
+  score_bonus: 0.03
+  metadata_tags:
+    - deliberate_axis_break

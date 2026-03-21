@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/script-evaluation.schema.json",
+  "title": "Video OS Script Evaluation (Operational)",
+  "type": "object",
+  "required": ["version", "project_id", "metrics"],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "metrics": {
+      "type": "object",
+      "required": ["hook_density", "novelty_rate"],
+      "properties": {
+        "hook_density": { "type": "number", "minimum": 0, "maximum": 1 },
+        "novelty_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "duration_pacing": {
+          "type": "object",
+          "properties": {
+            "total_duration_sec": { "type": "number" },
+            "target_duration_sec": { "type": "number" },
+            "within_tolerance": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "emotion_gradient": { "type": "number", "minimum": 0, "maximum": 1 },
+        "causal_connectivity": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "message"],
+        "properties": {
+          "type": { "type": "string" },
+          "message": { "type": "string" },
+          "beat_id": { "type": "string" },
+          "candidate_ref": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "repairs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from_candidate_ref", "to_candidate_ref", "reason"],
+        "properties": {
+          "from_candidate_ref": { "type": "string" },
+          "to_candidate_ref": { "type": "string" },
+          "reason": { "type": "string" },
+          "beat_id": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "missing_beats": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "gate_pass": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}

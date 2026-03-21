@@ -31,7 +31,8 @@
             "confidence": 0.93,
             "quality_flags": [
               "minor_highlight_clip"
-            ]
+            ],
+            "candidate_ref": "legacy:SEG_0025:1400000:6000000"
           },
           {
             "clip_id": "CLP_0006",
@@ -46,7 +47,8 @@
             "beat_id": "b03",
             "fallback_segment_ids": [],
             "confidence": 0.89,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0020:8000000:13800000"
           },
           {
             "clip_id": "CLP_0010",
@@ -61,7 +63,8 @@
             "beat_id": "b04",
             "fallback_segment_ids": [],
             "confidence": 0.9,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0028:18200000:23000000"
           }
         ]
       },
@@ -82,7 +85,8 @@
             "beat_id": "b01",
             "fallback_segment_ids": [],
             "confidence": 0.91,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0013:1000000:4800000"
           },
           {
             "clip_id": "CLP_0003",
@@ -99,7 +103,11 @@
               "SEG_0014"
             ],
             "confidence": 0.88,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0032:5000000:9700000",
+            "fallback_candidate_refs": [
+              "legacy:SEG_0014:5200000:9400000"
+            ]
           },
           {
             "clip_id": "CLP_0005",
@@ -114,7 +122,8 @@
             "beat_id": "b02",
             "fallback_segment_ids": [],
             "confidence": 0.9,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0012:24000000:29600000"
           },
           {
             "clip_id": "CLP_0007",
@@ -133,6 +142,10 @@
             "confidence": 0.84,
             "quality_flags": [
               "slight_wind"
+            ],
+            "candidate_ref": "legacy:SEG_0023:27000000:32800000",
+            "fallback_candidate_refs": [
+              "legacy:SEG_0014:5200000:9400000"
             ]
           },
           {
@@ -148,7 +161,8 @@
             "beat_id": "b03",
             "fallback_segment_ids": [],
             "confidence": 0.86,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0034:15000000:19400000"
           },
           {
             "clip_id": "CLP_0012",
@@ -163,7 +177,8 @@
             "beat_id": "b04",
             "fallback_segment_ids": [],
             "confidence": 0.85,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0036:25200000:30800000"
           }
         ]
       }
@@ -188,7 +203,11 @@
               "SEG_0006"
             ],
             "confidence": 0.95,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0002:6400000:11000000",
+            "fallback_candidate_refs": [
+              "legacy:SEG_0006:41200000:47600000"
+            ]
           },
           {
             "clip_id": "CLP_0008",
@@ -203,7 +222,8 @@
             "beat_id": "b03",
             "fallback_segment_ids": [],
             "confidence": 0.88,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0021:14500000:20200000"
           },
           {
             "clip_id": "CLP_0011",
@@ -220,7 +240,11 @@
               "SEG_0027"
             ],
             "confidence": 0.92,
-            "quality_flags": []
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0006:41200000:47600000",
+            "fallback_candidate_refs": [
+              "legacy:SEG_0027:12000000:17600000"
+            ]
           }
         ]
       },
@@ -262,6 +286,7 @@
     "brief_path": "01_intent/creative_brief.yaml",
     "blueprint_path": "04_plan/edit_blueprint.yaml",
     "selects_path": "04_plan/selects_candidates.yaml",
-    "compiler_version": "1.0.0"
+    "compiler_version": "1.0.0",
+    "compiler_defaults_hash": "994083935c7de513"
   }
 }

@@ -142,16 +142,16 @@ describe("Timeline Compiler", () => {
     expect(beatMarkers[3].label).toContain("b04");
   });
 
-  it("no duplicate segment_id usage across all tracks", () => {
+  it("no duplicate source-range usage across all tracks", () => {
     const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
     const allClips = [
       ...result.timeline.tracks.video.flatMap((t) => t.clips),
       ...result.timeline.tracks.audio.flatMap((t) => t.clips),
     ];
 
-    const segmentIds = allClips.map((c) => c.segment_id);
-    const unique = new Set(segmentIds);
-    expect(segmentIds.length).toBe(unique.size);
+    const usageKeys = allClips.map((c) => `${c.segment_id}:${c.src_in_us}:${c.src_out_us}`);
+    const unique = new Set(usageKeys);
+    expect(usageKeys.length).toBe(unique.size);
   });
 
   it("all clips have src_in_us < src_out_us", () => {
@@ -295,7 +295,7 @@ describe("Phase 4: resolve()", () => {
     expect(timeline.tracks.video[0].clips[0].src_out_us).toBe(500);
   });
 
-  it("replaces duplicate segment with full candidate data from fallback", () => {
+  it("replaces duplicate source range with full candidate data from fallback", () => {
     const candidates: Candidate[] = [
       {
         segment_id: "SEG_FALLBACK",
@@ -320,8 +320,8 @@ describe("Phase 4: resolve()", () => {
       clip_id: "C2",
       segment_id: "SEG_DUP",
       asset_id: "AST_002",
-      src_in_us: 30,
-      src_out_us: 40,
+      src_in_us: 10,
+      src_out_us: 20,
       fallback_segment_ids: ["SEG_FALLBACK"],
     });
 
@@ -338,7 +338,7 @@ describe("Phase 4: resolve()", () => {
     expect(replaced.confidence).toBe(0.8);
   });
 
-  it("removes clip when duplicate has no fallback candidates", () => {
+  it("removes clip when duplicate source range has no fallback candidates", () => {
     const clip1 = makeClip({ clip_id: "C1", segment_id: "SEG_DUP" });
     const clip2 = makeClip({ clip_id: "C2", segment_id: "SEG_DUP", fallback_segment_ids: [] });
     const timeline = makeTimeline([[clip1], [clip2]]);
@@ -346,6 +346,28 @@ describe("Phase 4: resolve()", () => {
 
     expect(report.resolved_duplicates).toBe(1);
     expect(timeline.tracks.video[1].clips.length).toBe(0);
+  });
+
+  it("keeps clips when segment_id matches but source ranges differ", () => {
+    const clip1 = makeClip({
+      clip_id: "C1",
+      segment_id: "SEG_SHARED",
+      src_in_us: 0,
+      src_out_us: 1_000_000,
+    });
+    const clip2 = makeClip({
+      clip_id: "C2",
+      segment_id: "SEG_SHARED",
+      src_in_us: 2_000_000,
+      src_out_us: 3_000_000,
+    });
+
+    const timeline = makeTimeline([[clip1], [clip2]]);
+    const report = resolve(timeline, 1000, []);
+
+    expect(report.resolved_duplicates).toBe(0);
+    expect(timeline.tracks.video[0].clips).toHaveLength(1);
+    expect(timeline.tracks.video[1].clips).toHaveLength(1);
   });
 });
 

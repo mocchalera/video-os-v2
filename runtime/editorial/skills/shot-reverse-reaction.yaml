@@ -1,0 +1,15 @@
+id: shot_reverse_reaction
+category: linear_sequence
+primary_phase: score
+status: active
+required_signals:
+  - reaction_intensity_score
+when:
+  - "speaker_topology in [interviewer_guest, multi_speaker]"
+  - "reaction_intensity_score >= 0.3"
+avoid_when:
+  - "speaker_topology == solo_primary"
+effects:
+  score_bonus: 0.07
+  metadata_tags:
+    - reaction_payoff

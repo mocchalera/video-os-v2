@@ -1,0 +1,14 @@
+id: reveal_then_payoff
+category: linear_sequence
+primary_phase: normalize
+status: active
+required_signals:
+  - surprise_signal
+when:
+  - "story_arc.strategy in [testimonial_highlight, peak_first, release_after_peak]"
+avoid_when:
+  - "story_arc.strategy == chronological and !allow_time_reorder"
+effects:
+  score_bonus: 0.08
+  metadata_tags:
+    - causal_order_enforced

@@ -1,0 +1,35 @@
+# Editorial Matrix — maps profiles to default policies and active skills
+# This file is the single source of truth for the profile-policy-skill relationship.
+
+profile_policy_map:
+  interview-highlight: interview
+  interview-pro-highlight: interview
+  lp-testimonial: interview
+  lecture-highlight: tutorial
+  product-demo: tutorial
+  event-recap: highlight
+  vertical-short: highlight
+
+# Skills supported in M4.5 (beat-linear IR)
+supported_skills:
+  - axis_hold_dialogue
+  - b_roll_bridge
+  - build_to_peak
+  - cooldown_resolve
+  - deliberate_axis_break
+  - exposition_release
+  - match_cut_bridge
+  - punch_in_emphasis
+  - reveal_then_payoff
+  - shot_reverse_reaction
+  - silence_beat
+  - smash_cut_energy
+
+# Skills deferred to post-M4.5 (require IR expansion)
+deferred_skills:
+  - crosscut_suspense
+  - montage_compress
+  - j_cut_lead_in
+  - l_cut_reaction_hold
+  - cutaway_repair
+  - talking_head_pacing

@@ -74,6 +74,8 @@ export interface PipelineOptions {
   skipStt?: boolean;
   /** Skip VLM stage entirely */
   skipVlm?: boolean;
+  /** Override STT language (ISO-639-1, e.g. "ja") — merged into resolved policy */
+  sttLanguageOverride?: string;
 }
 
 export interface PipelineResult {
@@ -781,6 +783,11 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       Record<string, unknown> | undefined;
 
     if (sttPolicy) {
+      // Apply language override from CLI if provided
+      const effectiveSttPolicy: SttPolicy = opts.sttLanguageOverride
+        ? { ...sttPolicy, language: opts.sttLanguageOverride }
+        : sttPolicy;
+
       const alignmentThresholds: TranscriptAlignmentThresholds = {
         transcript_overlap_min_us: (qualThresholds?.transcript_overlap_min_us as number) ?? 250_000,
         transcript_overlap_fraction_min: (qualThresholds?.transcript_overlap_fraction_min as number) ?? 0.25,
@@ -794,7 +801,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         assetsJson.items,
         projectId,
         outputDir,
-        sttPolicy,
+        effectiveSttPolicy,
         alignmentThresholds,
         policyHash,
         transcribeFn,

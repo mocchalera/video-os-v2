@@ -12,6 +12,7 @@ import type {
   TimelineClip,
   Track,
 } from "./types.js";
+import { getCandidateRef } from "./candidate-ref.js";
 
 export function assemble(
   normalized: NormalizedData,
@@ -26,7 +27,7 @@ export function assemble(
   const markers: Marker[] = [];
 
   // Track used segments to apply adjacency penalty and prevent overuse
-  const usedSegments = new Set<string>();
+  const usedClips = new Set<string>();
   let clipCounter = 0;
   let currentFrame = 0;
 
@@ -50,7 +51,7 @@ export function assemble(
     // V1: hero clips
     const heroClip = pickBest(
       byRole.get("hero") ?? [],
-      usedSegments,
+      usedClips,
       prevV1Asset,
       params.adjacency_penalty,
     );
@@ -61,10 +62,10 @@ export function assemble(
         currentFrame,
         beat.target_duration_frames,
         ++clipCounter,
-        getRunnersUp(byRole.get("hero") ?? [], heroClip, usedSegments),
+        getRunnersUp(byRole.get("hero") ?? [], heroClip, usedClips),
       );
       v1Clips.push(clip);
-      usedSegments.add(heroClip.candidate.segment_id);
+      usedClips.add(clipUsageKey(heroClip.candidate));
       prevV1Asset = heroClip.candidate.asset_id;
     }
 
@@ -82,7 +83,7 @@ export function assemble(
 
     const supportClip = pickBest(
       supportCandidates,
-      usedSegments,
+      usedClips,
       prevV2Asset,
       params.adjacency_penalty,
     );
@@ -93,17 +94,17 @@ export function assemble(
         currentFrame,
         beat.target_duration_frames,
         ++clipCounter,
-        getRunnersUp(supportCandidates, supportClip, usedSegments),
+        getRunnersUp(supportCandidates, supportClip, usedClips),
       );
       v2Clips.push(clip);
-      usedSegments.add(supportClip.candidate.segment_id);
+      usedClips.add(clipUsageKey(supportClip.candidate));
       prevV2Asset = supportClip.candidate.asset_id;
     }
 
     // A1: dialogue clips
     const dialogueClip = pickBest(
       byRole.get("dialogue") ?? [],
-      usedSegments,
+      usedClips,
       null,
       0,
     );
@@ -114,16 +115,16 @@ export function assemble(
         currentFrame,
         beat.target_duration_frames,
         ++clipCounter,
-        getRunnersUp(byRole.get("dialogue") ?? [], dialogueClip, usedSegments),
+        getRunnersUp(byRole.get("dialogue") ?? [], dialogueClip, usedClips),
       );
       a1Clips.push(clip);
-      usedSegments.add(dialogueClip.candidate.segment_id);
+      usedClips.add(clipUsageKey(dialogueClip.candidate));
     }
 
     // Transition clips go to V2 as well
     const transitionClip = pickBest(
       byRole.get("transition") ?? [],
-      usedSegments,
+      usedClips,
       prevV2Asset,
       params.adjacency_penalty,
     );
@@ -134,10 +135,10 @@ export function assemble(
         currentFrame,
         beat.target_duration_frames,
         ++clipCounter,
-        getRunnersUp(byRole.get("transition") ?? [], transitionClip, usedSegments),
+        getRunnersUp(byRole.get("transition") ?? [], transitionClip, usedClips),
       );
       v2Clips.push(clip);
-      usedSegments.add(transitionClip.candidate.segment_id);
+      usedClips.add(clipUsageKey(transitionClip.candidate));
       prevV2Asset = transitionClip.candidate.asset_id;
     }
 
@@ -171,15 +172,25 @@ function groupByRole(
   return groups;
 }
 
+/**
+ * Unique key for a candidate's source range.
+ * Uses segment_id + src_in_us + src_out_us so that different sub-ranges
+ * of the same segment (e.g. multiple interview excerpts from one long take)
+ * are treated as distinct clips rather than duplicates.
+ */
+function clipUsageKey(c: { segment_id: string; src_in_us: number; src_out_us: number }): string {
+  return `${c.segment_id}:${c.src_in_us}:${c.src_out_us}`;
+}
+
 function pickBest(
   candidates: ScoredCandidate[],
-  usedSegments: Set<string>,
+  usedClips: Set<string>,
   prevAsset: string | null,
   adjacencyPenalty: number,
 ): ScoredCandidate | null {
-  // Apply adjacency penalty and filter used segments, then pick best
+  // Apply adjacency penalty and filter used source ranges, then pick best
   const available = candidates
-    .filter((c) => !usedSegments.has(c.candidate.segment_id))
+    .filter((c) => !usedClips.has(clipUsageKey(c.candidate)))
     .map((c) => {
       let adjustedScore = c.score;
       if (prevAsset !== null && c.candidate.asset_id === prevAsset) {
@@ -201,16 +212,19 @@ function pickBest(
 function getRunnersUp(
   candidates: ScoredCandidate[],
   chosen: ScoredCandidate,
-  usedSegments: Set<string>,
-): string[] {
-  return candidates
+  usedClips: Set<string>,
+): { segment_ids: string[]; candidate_refs: string[] } {
+  const runners = candidates
     .filter(
       (c) =>
-        c.candidate.segment_id !== chosen.candidate.segment_id &&
-        !usedSegments.has(c.candidate.segment_id),
+        clipUsageKey(c.candidate) !== clipUsageKey(chosen.candidate) &&
+        !usedClips.has(clipUsageKey(c.candidate)),
     )
-    .slice(0, 2)
-    .map((c) => c.candidate.segment_id);
+    .slice(0, 2);
+  return {
+    segment_ids: runners.map((c) => c.candidate.segment_id),
+    candidate_refs: runners.map((c) => getCandidateRef(c.candidate)),
+  };
 }
 
 function makeClip(
@@ -219,7 +233,7 @@ function makeClip(
   timelineInFrame: number,
   beatDurationFrames: number,
   clipNum: number,
-  fallbacks: string[],
+  fallbacks: { segment_ids: string[]; candidate_refs: string[] },
 ): TimelineClip {
   const c = scored.candidate;
   return {
@@ -233,8 +247,10 @@ function makeClip(
     role: c.role as TimelineClip["role"],
     motivation: c.why_it_matches,
     beat_id: beatId,
-    fallback_segment_ids: fallbacks,
+    fallback_segment_ids: fallbacks.segment_ids,
     confidence: c.confidence,
     quality_flags: c.quality_flags ?? [],
+    candidate_ref: getCandidateRef(c),
+    fallback_candidate_refs: fallbacks.candidate_refs,
   };
 }

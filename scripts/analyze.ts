@@ -19,12 +19,14 @@ function parseArgs(argv: string[]): {
   projectDir: string;
   skipStt: boolean;
   skipVlm: boolean;
+  language: string | undefined;
 } {
   const args = argv.slice(2); // skip node + script path
   const sourceFiles: string[] = [];
   let projectDir = "";
   let skipStt = false;
   let skipVlm = false;
+  let language: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -34,6 +36,8 @@ function parseArgs(argv: string[]): {
       skipStt = true;
     } else if (arg === "--skip-vlm") {
       skipVlm = true;
+    } else if (arg === "--language" || arg === "-l") {
+      language = args[++i] ?? undefined;
     } else if (arg === "--help" || arg === "-h") {
       console.log(`Usage: npx tsx scripts/analyze.ts <source-files...> --project <project-dir>
 
@@ -41,6 +45,7 @@ Options:
   --project, -p    Project directory (required)
   --skip-stt       Skip speech-to-text stage
   --skip-vlm       Skip visual language model stage
+  --language, -l   ISO-639-1 language hint for STT (e.g. "ja", "en")
   --help, -h       Show this help
 `);
       process.exit(0);
@@ -59,18 +64,19 @@ Options:
     process.exit(1);
   }
 
-  return { sourceFiles, projectDir, skipStt, skipVlm };
+  return { sourceFiles, projectDir, skipStt, skipVlm, language };
 }
 
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { sourceFiles, projectDir, skipStt, skipVlm } = parseArgs(process.argv);
+  const { sourceFiles, projectDir, skipStt, skipVlm, language } = parseArgs(process.argv);
 
   console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
   console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);
   if (skipStt) console.log("[analyze] STT: skipped");
   if (skipVlm) console.log("[analyze] VLM: skipped");
+  if (language) console.log(`[analyze] Language: ${language}`);
 
   // Create live VLM function if not skipped and API key is available
   let vlmFn;
@@ -89,6 +95,7 @@ async function main(): Promise<void> {
     skipStt,
     skipVlm,
     vlmFn,
+    sttLanguageOverride: language,
   });
 
   console.log("\n[analyze] Pipeline complete");

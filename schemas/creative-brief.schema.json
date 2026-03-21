@@ -175,6 +175,35 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "editorial": {
+      "type": "object",
+      "properties": {
+        "distribution_channel": {
+          "type": "string",
+          "enum": ["web_lp", "social_feed", "product_page", "presentation", "event_recap", "unknown"]
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": ["16:9", "9:16", "1:1", "4:5", "unknown"]
+        },
+        "embed_context": {
+          "type": "string",
+          "enum": ["standalone", "lp_embed", "deck_insert", "kiosk", "unknown"]
+        },
+        "hook_priority": {
+          "type": "string",
+          "enum": ["credibility_first", "balanced", "aggressive"]
+        },
+        "credibility_bias": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "profile_hint": { "type": "string" },
+        "policy_hint": { "type": "string" },
+        "allow_inference": { "type": "boolean" }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

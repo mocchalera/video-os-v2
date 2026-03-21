@@ -147,8 +147,11 @@ function toClipOutput(clip: {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  candidate_ref?: string;
+  fallback_candidate_refs?: string[];
+  metadata?: Record<string, unknown>;
 }): ClipOutput {
-  return {
+  const output: ClipOutput = {
     clip_id: clip.clip_id,
     segment_id: clip.segment_id,
     asset_id: clip.asset_id,
@@ -163,4 +166,14 @@ function toClipOutput(clip: {
     confidence: clip.confidence,
     quality_flags: clip.quality_flags,
   };
+  if (clip.candidate_ref) {
+    output.candidate_ref = clip.candidate_ref;
+  }
+  if (clip.fallback_candidate_refs && clip.fallback_candidate_refs.length > 0) {
+    output.fallback_candidate_refs = clip.fallback_candidate_refs;
+  }
+  if (clip.metadata && Object.keys(clip.metadata).length > 0) {
+    output.metadata = clip.metadata;
+  }
+  return output;
 }

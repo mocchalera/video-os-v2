@@ -64,6 +64,76 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "story_arc": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "strategy": {
+          "type": "string",
+          "enum": ["chronological", "peak_first", "testimonial_highlight", "problem_to_solution", "release_after_peak"]
+        },
+        "chronology_bias": { "type": "string" },
+        "allow_time_reorder": { "type": "boolean" },
+        "causal_links": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "resolved_profile": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string", "enum": ["explicit_hint", "inferred", "default"] },
+        "rationale": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "resolved_policy": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string", "enum": ["explicit_hint", "inferred", "default"] },
+        "rationale": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "active_editing_skills": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "dedupe_rules": {
+      "type": "object",
+      "properties": {
+        "utterance_consumption": { "type": "string", "enum": ["unique", "allow_repeat"] },
+        "semantic_similarity_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "allow_intentional_repetition": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "quality_targets": {
+      "type": "object",
+      "properties": {
+        "hook_density_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "novelty_rate_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "duration_pacing_tolerance_pct": { "type": "number", "minimum": 0 },
+        "emotion_gradient_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "causal_connectivity_min": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "trim_policy": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string", "enum": ["adaptive", "fixed", "center_first"] },
+        "default_preferred_duration_frames": { "type": "integer", "minimum": 1 },
+        "default_min_duration_frames": { "type": "integer", "minimum": 1 },
+        "default_max_duration_frames": { "type": "integer", "minimum": 1 },
+        "action_cut_guard": { "type": "boolean" }
+      },
+      "additionalProperties": false
     }
   },
   "$defs": {
@@ -106,6 +176,33 @@
         },
         "notes": {
           "type": "string"
+        },
+        "story_role": {
+          "type": "string",
+          "enum": ["hook", "setup", "experience", "closing"]
+        },
+        "skill_hints": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "candidate_plan": {
+          "type": "object",
+          "properties": {
+            "primary_candidate_ref": { "type": "string" },
+            "fallback_candidate_refs": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "candidate_constraints": {
+          "type": "object",
+          "properties": {
+            "allow_interviewer_support": { "type": "boolean" },
+            "force_unique_utterances": { "type": "boolean" }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -146,6 +243,10 @@
         },
         "confirmed_preferences": {
           "$ref": "#/$defs/confirmedPreferences"
+        },
+        "default_duration_target_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
         }
       },
       "additionalProperties": false

@@ -12,6 +12,11 @@ export interface CreativeBrief {
   [key: string]: unknown;
 }
 
+export interface CandidatePlan {
+  primary_candidate_ref?: string;
+  fallback_candidate_refs?: string[];
+}
+
 export interface Beat {
   id: string;
   label: string;
@@ -20,6 +25,52 @@ export interface Beat {
   required_roles: Role[];
   preferred_roles?: Role[];
   notes?: string;
+  // M4.5 additive fields
+  story_role?: "hook" | "setup" | "experience" | "closing";
+  skill_hints?: string[];
+  candidate_plan?: CandidatePlan;
+  candidate_constraints?: {
+    allow_interviewer_support?: boolean;
+    force_unique_utterances?: boolean;
+  };
+}
+
+export type StoryArcStrategy = "chronological" | "peak_first" | "testimonial_highlight" | "problem_to_solution" | "release_after_peak";
+
+export interface StoryArc {
+  summary?: string;
+  strategy?: StoryArcStrategy;
+  chronology_bias?: string;
+  allow_time_reorder?: boolean;
+  causal_links?: string[];
+}
+
+export interface ResolvedRef {
+  id?: string;
+  source?: "explicit_hint" | "inferred" | "default";
+  rationale?: string;
+}
+
+export interface DedupeRules {
+  utterance_consumption?: "unique" | "allow_repeat";
+  semantic_similarity_threshold?: number;
+  allow_intentional_repetition?: boolean;
+}
+
+export interface QualityTargets {
+  hook_density_min?: number;
+  novelty_rate_min?: number;
+  duration_pacing_tolerance_pct?: number;
+  emotion_gradient_min?: number;
+  causal_connectivity_min?: number;
+}
+
+export interface TrimPolicy {
+  mode?: "adaptive" | "fixed" | "center_first";
+  default_preferred_duration_frames?: number;
+  default_min_duration_frames?: number;
+  default_max_duration_frames?: number;
+  action_cut_guard?: boolean;
 }
 
 export interface EditBlueprint {
@@ -32,6 +83,7 @@ export interface EditBlueprint {
     middle_cadence: string;
     ending_cadence: string;
     max_shot_length_frames?: number;
+    default_duration_target_sec?: number;
   };
   music_policy: {
     start_sparse: boolean;
@@ -45,11 +97,50 @@ export interface EditBlueprint {
     avoid_wall_to_wall_voiceover: boolean;
     prioritize_lines?: string[];
   };
+  // M4.5 additive fields
+  story_arc?: StoryArc;
+  resolved_profile?: ResolvedRef;
+  resolved_policy?: ResolvedRef;
+  active_editing_skills?: string[];
+  dedupe_rules?: DedupeRules;
+  quality_targets?: QualityTargets;
+  trim_policy?: TrimPolicy;
   [key: string]: unknown;
 }
 
 export type Role = "hero" | "support" | "transition" | "texture" | "dialogue";
 export type ClipRole = Role | "music" | "title";
+
+export interface TrimHint {
+  source_center_us?: number;
+  preferred_duration_us?: number;
+  min_duration_us?: number;
+  max_duration_us?: number;
+  window_start_us?: number;
+  window_end_us?: number;
+  interest_point_label?: string;
+  interest_point_confidence?: number;
+}
+
+export interface EditorialSignals {
+  silence_ratio?: number;
+  afterglow_score?: number;
+  speech_intensity_score?: number;
+  reaction_intensity_score?: number;
+  authenticity_score?: number;
+  surprise_signal?: number;
+  hope_signal?: number;
+  face_detected?: boolean;
+  visual_tags?: string[];
+  semantic_cluster_id?: string;
+}
+
+export interface EditorialSummary {
+  dominant_visual_mode?: "talking_head" | "screen_demo" | "event_broll" | "mixed" | "unknown";
+  speaker_topology?: "solo_primary" | "interviewer_guest" | "multi_speaker" | "unknown";
+  motion_profile?: "low" | "medium" | "high" | "unknown";
+  transcript_density?: "sparse" | "medium" | "dense" | "unknown";
+}
 
 export interface Candidate {
   segment_id: string;
@@ -66,12 +157,20 @@ export interface Candidate {
   eligible_beats?: string[];
   transcript_excerpt?: string;
   motif_tags?: string[];
+  // M4.5 additive fields
+  candidate_id?: string;
+  utterance_ids?: string[];
+  speaker_role?: "primary" | "interviewer" | "secondary" | "unknown";
+  semantic_dedupe_key?: string;
+  editorial_signals?: EditorialSignals;
+  trim_hint?: TrimHint;
 }
 
 export interface SelectsCandidates {
   version: string;
   project_id: string;
   candidates: Candidate[];
+  editorial_summary?: EditorialSummary;
   [key: string]: unknown;
 }
 
@@ -81,6 +180,57 @@ export interface ScoringParams {
   beat_alignment_tolerance_frames: number;
   duration_fit_tolerance_frames: number;
   quality_flag_penalty: number;
+}
+
+export interface SkillEffect {
+  score_bonus?: number;
+  score_penalty?: number;
+  transition_override?: string;
+  trim_bias?: number;
+  duration_bias_frames?: number;
+  metadata_tags?: string[];
+}
+
+export interface SkillDefinition {
+  id: string;
+  category: "linear_sequence" | "trim" | "metadata";
+  primary_phase: "normalize" | "score" | "assemble" | "resolve" | "export";
+  required_signals: string[];
+  when: string[];
+  avoid_when: string[];
+  effects: SkillEffect;
+  status?: "active" | "deferred_ir_required";
+}
+
+export interface ProfileDefaults {
+  target_duration_sec?: number;
+  opening_cadence?: string;
+  middle_cadence?: string;
+  ending_cadence?: string;
+  max_shot_length_frames?: number;
+  default_transition?: string;
+  crossfade_frames?: number;
+  adjacency_penalty_overrides?: Partial<ScoringParams>;
+  active_editing_skills?: string[];
+  quality_target_overrides?: Partial<QualityTargets>;
+  trim_policy_overrides?: Partial<TrimPolicy>;
+}
+
+export interface ProfileDefinition {
+  id: string;
+  defaults: ProfileDefaults;
+  default_policy?: string;
+}
+
+export interface PolicyDefinition {
+  id: string;
+  story_arc_strategy?: StoryArcStrategy;
+  chronology_bias?: string;
+  allow_time_reorder?: boolean;
+  preserve_natural_breath?: boolean;
+  avoid_wall_to_wall_voiceover?: boolean;
+  skill_suppressions?: string[];
+  skill_enforcements?: string[];
 }
 
 export interface CompilerDefaults {
@@ -148,6 +298,10 @@ export interface TimelineClip {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  // M4.5 additive fields
+  candidate_ref?: string;
+  fallback_candidate_refs?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface Track {
@@ -196,6 +350,8 @@ export interface TimelineIR {
     blueprint_path: string;
     selects_path: string;
     compiler_version: string;
+    compiler_defaults_hash?: string;
+    editorial_registry_hash?: string;
   };
 }
 
@@ -220,6 +376,10 @@ export interface ClipOutput {
   confidence: number;
   quality_flags: string[];
   audio_policy?: AudioPolicy;
+  // M4.5 additive fields
+  candidate_ref?: string;
+  fallback_candidate_refs?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface MarkerOutput {
