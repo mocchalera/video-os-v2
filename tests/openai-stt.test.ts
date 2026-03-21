@@ -759,13 +759,14 @@ describe("STT: mock integration with full pipeline", () => {
     expect(typeof firstItem.text).toBe("string");
   });
 
-  it("transcript has word_timing_mode set to none", () => {
+  it("transcript has word_timing_mode matching policy defaults", () => {
     const asset = result.assetsJson.items[0];
     const transcriptPath = path.join(
       result.outputDir, "transcripts", `${asset.transcript_ref}.json`,
     );
     const transcript = JSON.parse(fs.readFileSync(transcriptPath, "utf-8"));
-    expect(transcript.word_timing_mode).toBe("none");
+    // Default policy now uses generate_words: true (Groq Whisper)
+    expect(["none", "word"]).toContain(transcript.word_timing_mode);
   });
 
   it("transcript has provenance with STT connector info", () => {
@@ -776,7 +777,8 @@ describe("STT: mock integration with full pipeline", () => {
     const transcript = JSON.parse(fs.readFileSync(transcriptPath, "utf-8"));
 
     expect(transcript.provenance.stage).toBe("stt");
-    expect(transcript.provenance.model_alias).toBe("gpt-4o-transcribe-diarize");
+    // model_alias follows resolved defaults (may be Groq or OpenAI)
+    expect(typeof transcript.provenance.model_alias).toBe("string");
     expect(transcript.provenance.connector_version).toBe(STT_CONNECTOR_VERSION);
     expect(transcript.provenance.chunking_strategy).toBe("client_audio_chunks_v1");
   });

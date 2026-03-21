@@ -40,17 +40,18 @@ vlm:
   parse_retry_max: 1
 
 stt:
-  model_alias: gpt-4o-transcribe-diarize
+  model_alias: whisper-large-v3-turbo
   model_snapshot: "required_for_canonical_runs"
   endpoint: /v1/audio/transcriptions
-  response_format: diarized_json
+  response_format: verbose_json
+  language: ja
   chunk_target_us: 20000000
   chunk_max_us: 25000000
   chunk_overlap_us: 500000
   chunk_boundary_silence_us: 350000
   chunking_strategy: client_audio_chunks_v1
   speaker_normalization: overlap_anchor_v1
-  generate_words: false
+  generate_words: true
 
 quality_thresholds:
   scene_threshold: 0.30

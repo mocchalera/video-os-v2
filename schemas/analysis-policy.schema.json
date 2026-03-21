@@ -140,7 +140,10 @@
         },
         "response_format": {
           "type": "string",
-          "enum": ["diarized_json"]
+          "enum": ["diarized_json", "verbose_json"]
+        },
+        "language": {
+          "type": ["string", "null"]
         },
         "chunk_target_us": { "type": "integer", "minimum": 0 },
         "chunk_max_us": { "type": "integer", "minimum": 0 },

@@ -33,6 +33,7 @@ import {
   type AssetSttResult,
   type TranscriptItem,
 } from "../connectors/openai-stt.js";
+import { createGroqTranscribeFn } from "../connectors/groq-stt.js";
 import type {
   TranscribeFn,
   SttPolicy,
@@ -76,6 +77,8 @@ export interface PipelineOptions {
   skipVlm?: boolean;
   /** Override STT language (ISO-639-1, e.g. "ja") — merged into resolved policy */
   sttLanguageOverride?: string;
+  /** Override STT provider: "groq" | "openai" (auto-detected from model_alias if omitted) */
+  sttProvider?: string;
 }
 
 export interface PipelineResult {
@@ -341,6 +344,42 @@ function derivativesReduce(
   atomicWriteJson(segmentsOutputPath, segmentsJson);
 
   return { assets: assetsJson, segments: segmentsJson };
+}
+
+// ── STT Provider Selection ──────────────────────────────────────────
+
+/**
+ * Resolve which STT provider to use based on:
+ * 1. Explicit provider override from CLI
+ * 2. Model alias in analysis policy
+ * 3. Available API keys (GROQ_API_KEY → Groq, OPENAI_API_KEY → OpenAI)
+ */
+export function resolveTranscribeFn(
+  sttPolicy: SttPolicy,
+  providerOverride?: string,
+): { transcribeFn: TranscribeFn; providerName: string } {
+  // Explicit override takes priority
+  if (providerOverride === "groq") {
+    return { transcribeFn: createGroqTranscribeFn(), providerName: "groq-whisper" };
+  }
+  if (providerOverride === "openai") {
+    return { transcribeFn: createOpenAiTranscribeFn(), providerName: "openai" };
+  }
+
+  // Infer from model_alias
+  const model = sttPolicy.model_alias;
+  if (model.startsWith("whisper-large-v3")) {
+    return { transcribeFn: createGroqTranscribeFn(), providerName: "groq-whisper" };
+  }
+  if (model.startsWith("gpt-4o-transcribe")) {
+    return { transcribeFn: createOpenAiTranscribeFn(), providerName: "openai" };
+  }
+
+  // Fallback: check available API keys
+  if (process.env.GROQ_API_KEY) {
+    return { transcribeFn: createGroqTranscribeFn(), providerName: "groq-whisper" };
+  }
+  return { transcribeFn: createOpenAiTranscribeFn(), providerName: "openai" };
 }
 
 // ── Stage 7+8: STT ─────────────────────────────────────────────────
@@ -793,8 +832,15 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         transcript_overlap_fraction_min: (qualThresholds?.transcript_overlap_fraction_min as number) ?? 0.25,
       };
 
-      // Use injected transcribeFn if provided (for testing), otherwise create real one
-      const transcribeFn = opts.transcribeFn ?? createOpenAiTranscribeFn();
+      // Use injected transcribeFn if provided (for testing), otherwise resolve from policy
+      let transcribeFn: TranscribeFn;
+      if (opts.transcribeFn) {
+        transcribeFn = opts.transcribeFn;
+      } else {
+        const resolved = resolveTranscribeFn(effectiveSttPolicy, opts.sttProvider);
+        transcribeFn = resolved.transcribeFn;
+        console.log(`[pipeline] STT provider: ${resolved.providerName} (model: ${effectiveSttPolicy.model_alias})`);
+      }
 
       sttResults = await sttMap(
         sourceFileMap,

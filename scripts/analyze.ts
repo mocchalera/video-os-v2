@@ -20,6 +20,7 @@ function parseArgs(argv: string[]): {
   skipStt: boolean;
   skipVlm: boolean;
   language: string | undefined;
+  sttProvider: string | undefined;
 } {
   const args = argv.slice(2); // skip node + script path
   const sourceFiles: string[] = [];
@@ -27,6 +28,7 @@ function parseArgs(argv: string[]): {
   let skipStt = false;
   let skipVlm = false;
   let language: string | undefined;
+  let sttProvider: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -38,15 +40,18 @@ function parseArgs(argv: string[]): {
       skipVlm = true;
     } else if (arg === "--language" || arg === "-l") {
       language = args[++i] ?? undefined;
+    } else if (arg === "--stt-provider") {
+      sttProvider = args[++i] ?? undefined;
     } else if (arg === "--help" || arg === "-h") {
       console.log(`Usage: npx tsx scripts/analyze.ts <source-files...> --project <project-dir>
 
 Options:
-  --project, -p    Project directory (required)
-  --skip-stt       Skip speech-to-text stage
-  --skip-vlm       Skip visual language model stage
-  --language, -l   ISO-639-1 language hint for STT (e.g. "ja", "en")
-  --help, -h       Show this help
+  --project, -p      Project directory (required)
+  --skip-stt         Skip speech-to-text stage
+  --skip-vlm         Skip visual language model stage
+  --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
+  --stt-provider     STT provider: "groq" or "openai" (auto-detected if omitted)
+  --help, -h         Show this help
 `);
       process.exit(0);
     } else if (!arg.startsWith("-")) {
@@ -64,19 +69,20 @@ Options:
     process.exit(1);
   }
 
-  return { sourceFiles, projectDir, skipStt, skipVlm, language };
+  return { sourceFiles, projectDir, skipStt, skipVlm, language, sttProvider };
 }
 
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { sourceFiles, projectDir, skipStt, skipVlm, language } = parseArgs(process.argv);
+  const { sourceFiles, projectDir, skipStt, skipVlm, language, sttProvider } = parseArgs(process.argv);
 
   console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
   console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);
   if (skipStt) console.log("[analyze] STT: skipped");
   if (skipVlm) console.log("[analyze] VLM: skipped");
   if (language) console.log(`[analyze] Language: ${language}`);
+  if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
 
   // Create live VLM function if not skipped and API key is available
   let vlmFn;
@@ -96,6 +102,7 @@ async function main(): Promise<void> {
     skipVlm,
     vlmFn,
     sttLanguageOverride: language,
+    sttProvider,
   });
 
   console.log("\n[analyze] Pipeline complete");
