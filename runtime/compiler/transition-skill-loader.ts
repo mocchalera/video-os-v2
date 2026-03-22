@@ -219,24 +219,112 @@ export function resolveCompositionMatch(
 }
 
 /**
- * resolveAxisConsistency: continuity of camera_axis and screen_side.
+ * resolveShotScaleContinuity: compare shot_scale between adjacent clips.
+ * Returns higher score when shot scales are identical or adjacent,
+ * lower when they jump (e.g., extreme_close → wide).
+ */
+export function resolveShotScaleContinuity(
+  leftShotScale?: string,
+  rightShotScale?: string,
+): number {
+  if (!leftShotScale || !rightShotScale || leftShotScale === "unknown" || rightShotScale === "unknown") {
+    return NEUTRAL;
+  }
+  if (leftShotScale === rightShotScale) return 0.9;
+
+  const scaleOrder: string[] = [
+    "extreme_close", "close", "medium_close", "medium",
+    "medium_wide", "wide", "extreme_wide",
+  ];
+  const leftIdx = scaleOrder.indexOf(leftShotScale);
+  const rightIdx = scaleOrder.indexOf(rightShotScale);
+  if (leftIdx < 0 || rightIdx < 0) return NEUTRAL;
+
+  const jump = Math.abs(leftIdx - rightIdx);
+  // Adjacent scales = good continuity, larger jumps = lower
+  if (jump === 1) return 0.7;
+  if (jump === 2) return 0.5;
+  if (jump === 3) return 0.35;
+  return 0.2;
+}
+
+/**
+ * resolveCadenceFit: compute cadence fit score for a pair.
+ * P0 implementation uses clip duration vs beat target as a proxy for pacing match,
+ * outgoing_silence_ratio, and BGM snap distance as penalty.
+ *
+ * When resolved_profile pacing cadence is unavailable, uses duration ratio as proxy.
+ * Logs a fallback note via the returned diagnostics flag.
+ */
+export function resolveCadenceFit(
+  leftClipDurationFrames: number,
+  leftBeatTargetFrames: number | undefined,
+  outgoingSilenceRatio: number,
+  bgmSnapDistanceFrames: number | undefined,
+  snapToleranceFrames: number,
+): { score: number; usedFallback: boolean } {
+  let usedFallback = false;
+
+  // Duration match: how well does clip duration match the beat target?
+  let durationMatch = NEUTRAL;
+  if (leftBeatTargetFrames && leftBeatTargetFrames > 0 && leftClipDurationFrames > 0) {
+    const ratio = leftClipDurationFrames / leftBeatTargetFrames;
+    // Perfect match = 1.0, deviation penalized
+    durationMatch = clamp01(1.0 - Math.abs(1.0 - ratio) * 0.8);
+  } else {
+    usedFallback = true;
+  }
+
+  // Silence contribution: moderate silence is rhythmically good
+  const silenceContrib = outgoingSilenceRatio >= 0.05 && outgoingSilenceRatio <= 0.4
+    ? 0.6 + 0.4 * (1 - Math.abs(outgoingSilenceRatio - 0.15) / 0.25)
+    : clamp01(0.4 - outgoingSilenceRatio * 0.5);
+
+  // BGM snap penalty: closer to beat = better cadence
+  let bgmContrib = NEUTRAL;
+  if (bgmSnapDistanceFrames !== undefined && snapToleranceFrames > 0) {
+    bgmContrib = clamp01(1.0 - bgmSnapDistanceFrames / snapToleranceFrames);
+  }
+
+  const score = clamp01(
+    0.40 * durationMatch +
+    0.30 * silenceContrib +
+    0.30 * bgmContrib,
+  );
+
+  return { score, usedFallback };
+}
+
+/**
+ * resolveAxisConsistency: continuity of camera_axis, screen_side, and gaze_direction.
+ * When both camera_axis and screen_side differ simultaneously, the score is low
+ * unless axis_break_readiness_score is high (indicating a justified break).
  */
 export function resolveAxisConsistency(
   leftFeatures: { screen_side?: string; gaze_direction?: string; camera_axis?: string },
   rightFeatures: { screen_side?: string; gaze_direction?: string; camera_axis?: string },
+  axisBreakReadinessScore?: number,
 ): number {
   const axisSame = leftFeatures.camera_axis && rightFeatures.camera_axis &&
     leftFeatures.camera_axis === rightFeatures.camera_axis;
   const sideSame = leftFeatures.screen_side && rightFeatures.screen_side &&
     leftFeatures.screen_side === rightFeatures.screen_side;
+  const gazeSame = leftFeatures.gaze_direction && rightFeatures.gaze_direction &&
+    leftFeatures.gaze_direction === rightFeatures.gaze_direction;
 
   // Both same axis and side = high consistency
-  if (axisSame && sideSame) return 0.9;
+  if (axisSame && sideSame) return gazeSame ? 0.95 : 0.9;
   // One matches = moderate
-  if (axisSame || sideSame) return 0.6;
-  // Both differ simultaneously = potential axis break, low consistency
+  if (axisSame || sideSame) return gazeSame ? 0.65 : 0.6;
+  // Both differ simultaneously = potential axis break
   if (leftFeatures.camera_axis && rightFeatures.camera_axis &&
-      leftFeatures.screen_side && rightFeatures.screen_side) return 0.2;
+      leftFeatures.screen_side && rightFeatures.screen_side) {
+    // If axis break readiness is high, the break is justified → moderate score
+    const readiness = axisBreakReadinessScore ?? 0;
+    if (readiness >= 0.7) return 0.45;
+    if (readiness >= 0.5) return 0.35;
+    return 0.2;
+  }
   return NEUTRAL;
 }
 
@@ -263,7 +351,9 @@ export function resolveAxisScores(evidence: PairEvidence): MurchAxisScores {
     0.50 * evidence.visual_tag_overlap_score +
     0.50 * evidence.motion_continuity_score;
 
-  const plane_2d = evidence.composition_match_score ?? NEUTRAL;
+  const plane_2d =
+    0.50 * (evidence.shot_scale_continuity_score ?? NEUTRAL) +
+    0.50 * (evidence.composition_match_score ?? NEUTRAL);
   const space_3d =
     0.50 * (evidence.axis_consistency_score ?? NEUTRAL) +
     0.50 * (evidence.axis_break_readiness_score ?? NEUTRAL);

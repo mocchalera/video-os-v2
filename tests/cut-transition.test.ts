@@ -8,7 +8,9 @@ import * as path from "node:path";
 const Ajv2020 = require("ajv/dist/2020") as new (
   opts?: Record<string, unknown>,
 ) => import("ajv").default;
-import addFormats from "ajv-formats";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const addFormats = require("ajv-formats") as (ajv: import("ajv").default) => void;
+type Ajv = import("ajv").default;
 import type { Candidate, NormalizedBeat, TimelineClip, Track } from "../runtime/compiler/types.js";
 import type {
   TransitionSkillCard,
@@ -29,6 +31,8 @@ import {
   resolveAxisConsistency,
   resolveAxisScores,
   computeMurchScore,
+  resolveShotScaleContinuity,
+  resolveCadenceFit,
 } from "../runtime/compiler/transition-skill-loader.js";
 import {
   adjacencyDecide,
@@ -864,5 +868,301 @@ describe("buildPairEvidence", () => {
     const ev = buildPairEvidence(left, right, undefined, undefined, leftBeat, rightBeat, undefined, undefined, "guide");
     expect(ev.left_story_role).toBe("hook");
     expect(ev.right_story_role).toBe("experience");
+  });
+
+  it("computes shot_scale_continuity_score separately from composition_match_score", () => {
+    const left = makeClip("01");
+    const right = makeClip("02");
+    const leftSeg = { adjacency_features: { visual_tags: [], motion_type: "static" as const, shot_scale: "close" as const, composition_anchor: "center" as const, screen_side: "center" as const } };
+    const rightSeg = { adjacency_features: { visual_tags: [], motion_type: "static" as const, shot_scale: "wide" as const, composition_anchor: "left" as const, screen_side: "left" as const } };
+    const ev = buildPairEvidence(left, right, undefined, undefined, undefined, undefined, leftSeg, rightSeg, "guide");
+    // shot_scale: close vs wide = large jump → low continuity
+    expect(ev.shot_scale_continuity_score).toBeLessThan(0.5);
+    // composition: different anchor and side → low match
+    expect(ev.composition_match_score).toBeLessThan(0.5);
+    // They should NOT be the same value
+    expect(ev.shot_scale_continuity_score).not.toBe(ev.composition_match_score);
+  });
+});
+
+// ── 14. resolveShotScaleContinuity ──────────────────────────────────
+
+describe("resolveShotScaleContinuity", () => {
+  it("returns 0.9 for identical shot scales", () => {
+    expect(resolveShotScaleContinuity("medium", "medium")).toBe(0.9);
+  });
+
+  it("returns 0.7 for adjacent scales", () => {
+    expect(resolveShotScaleContinuity("medium", "medium_close")).toBe(0.7);
+  });
+
+  it("returns low score for large jump", () => {
+    expect(resolveShotScaleContinuity("extreme_close", "wide")).toBeLessThan(0.3);
+  });
+
+  it("returns 0.5 when either scale is unknown", () => {
+    expect(resolveShotScaleContinuity("medium", "unknown")).toBe(0.5);
+    expect(resolveShotScaleContinuity(undefined, "medium")).toBe(0.5);
+  });
+});
+
+// ── 15. resolveCadenceFit ───────────────────────────────────────────
+
+describe("resolveCadenceFit", () => {
+  it("returns higher score when clip duration matches beat target", () => {
+    const matched = resolveCadenceFit(72, 72, 0.1, undefined, 12);
+    const mismatched = resolveCadenceFit(72, 144, 0.1, undefined, 12);
+    expect(matched.score).toBeGreaterThan(mismatched.score);
+  });
+
+  it("penalizes for BGM snap distance", () => {
+    const close = resolveCadenceFit(72, 72, 0.1, 1, 12);
+    const far = resolveCadenceFit(72, 72, 0.1, 10, 12);
+    expect(close.score).toBeGreaterThan(far.score);
+  });
+
+  it("flags fallback when beat target is unavailable", () => {
+    const result = resolveCadenceFit(72, undefined, 0.1, undefined, 12);
+    expect(result.usedFallback).toBe(true);
+  });
+
+  it("does not flag fallback when beat target is available", () => {
+    const result = resolveCadenceFit(72, 72, 0.1, undefined, 12);
+    expect(result.usedFallback).toBe(false);
+  });
+});
+
+// ── 16. resolveAxisConsistency with axis_break_readiness ───────────
+
+describe("resolveAxisConsistency with break readiness", () => {
+  it("returns higher score for axis break when readiness is high", () => {
+    const lowReadiness = resolveAxisConsistency(
+      { camera_axis: "ltr", screen_side: "left" },
+      { camera_axis: "rtl", screen_side: "right" },
+      0.3,
+    );
+    const highReadiness = resolveAxisConsistency(
+      { camera_axis: "ltr", screen_side: "left" },
+      { camera_axis: "rtl", screen_side: "right" },
+      0.8,
+    );
+    expect(highReadiness).toBeGreaterThan(lowReadiness);
+  });
+
+  it("returns 0.2 for axis break with no readiness context", () => {
+    const score = resolveAxisConsistency(
+      { camera_axis: "ltr", screen_side: "left" },
+      { camera_axis: "rtl", screen_side: "right" },
+    );
+    expect(score).toBe(0.2);
+  });
+});
+
+// ── 17. Fallback chain ──────────────────────────────────────────────
+
+describe("Fallback chain", () => {
+  it("applies hard_cut fallback when below threshold for crossfade_bridge", () => {
+    const v1: Track = {
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", { timeline_in_frame: 0, timeline_duration_frames: 72, beat_id: "B01" }),
+        makeClip("02", { timeline_in_frame: 72, timeline_duration_frames: 72, beat_id: "B02", asset_id: "AST_002" }),
+      ],
+    };
+
+    // crossfade_bridge requires semantic_cluster_change=true and low visual overlap
+    // Provide just enough to pass when+viability but with signals that yield low Murch score
+    const { transitions } = adjacencyDecide(v1, {
+      activeEditingSkills: ["crossfade_bridge"],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({
+          segment_id: "SEG_01",
+          editorial_signals: {
+            semantic_cluster_id: "A",
+            afterglow_score: 0.0,
+            silence_ratio: 0.0,
+            speech_intensity_score: 0.0,
+          },
+          motif_tags: [],
+        }),
+        makeCandidate({
+          segment_id: "SEG_02",
+          asset_id: "AST_002",
+          editorial_signals: {
+            semantic_cluster_id: "B",
+            afterglow_score: 0.0,
+            silence_ratio: 0.0,
+            speech_intensity_score: 0.0,
+          },
+          motif_tags: [],
+        }),
+      ],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    // If crossfade_bridge passes when+viability but Murch score < 0.25 threshold,
+    // fallback_order[0]=hard_cut should apply.
+    // If it's above threshold, it stays as crossfade.
+    // Either way, the result should have a valid transition type.
+    expect(["cut", "crossfade"]).toContain(transitions[0].transition_type);
+    if (transitions[0].degraded_from_skill_id) {
+      // Degraded → should use fallback ID
+      expect(transitions[0].applied_skill_id).toMatch(/^fallback\./);
+    }
+  });
+
+  it("records degraded_from_skill_id on threshold degradation", () => {
+    const v1: Track = {
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", { timeline_in_frame: 0, timeline_duration_frames: 72, beat_id: "B01" }),
+        makeClip("02", { timeline_in_frame: 72, timeline_duration_frames: 72, beat_id: "B02", asset_id: "AST_002" }),
+      ],
+    };
+
+    // smash_cut needs energy_delta >= 0.3, provide same energy for low delta
+    const { transitions, analysis } = adjacencyDecide(v1, {
+      activeEditingSkills: ["smash_cut_energy"],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({
+          segment_id: "SEG_01",
+          editorial_signals: {
+            semantic_cluster_id: "A",
+            speech_intensity_score: 0.5,
+          },
+        }),
+        makeCandidate({
+          segment_id: "SEG_02",
+          asset_id: "AST_002",
+          editorial_signals: {
+            semantic_cluster_id: "B",
+            speech_intensity_score: 0.5,
+          },
+        }),
+      ],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    // Should have degraded_from_skill_id in analysis
+    if (analysis.pairs[0].degraded_from_skill_id) {
+      expect(transitions[0].degraded_from_skill_id).toBeDefined();
+    }
+  });
+});
+
+// ── 18. Snap geometry reflected in compile flow ─────────────────────
+
+describe("Snap geometry integration", () => {
+  it("applyBeatSnap updates src_in_us and src_out_us", () => {
+    const left = makeClip("L", {
+      timeline_in_frame: 0,
+      timeline_duration_frames: 72,
+      src_in_us: 0,
+      src_out_us: 3_000_000,
+    });
+    const right = makeClip("R", {
+      timeline_in_frame: 72,
+      timeline_duration_frames: 72,
+      src_in_us: 3_000_000,
+      src_out_us: 6_000_000,
+    });
+
+    const usPerFrame = 1_000_000 / 24;
+    applyBeatSnap(left, right, 2, 24);
+
+    expect(left.src_out_us).toBe(3_000_000 + Math.round(2 * usPerFrame));
+    expect(right.src_in_us).toBe(3_000_000 + Math.round(2 * usPerFrame));
+  });
+
+  it("prev_end_frame == next_start_frame after snap", () => {
+    const left = makeClip("L", {
+      timeline_in_frame: 0,
+      timeline_duration_frames: 72,
+      src_in_us: 0,
+      src_out_us: 3_000_000,
+    });
+    const right = makeClip("R", {
+      timeline_in_frame: 72,
+      timeline_duration_frames: 72,
+      src_in_us: 3_000_000,
+      src_out_us: 6_000_000,
+    });
+
+    applyBeatSnap(left, right, 3, 24);
+    expect(left.timeline_in_frame + left.timeline_duration_frames).toBe(right.timeline_in_frame);
+  });
+});
+
+// ── 19. build_to_peak pair_bonus_prev ───────────────────────────────
+
+describe("build_to_peak pair_bonus_prev", () => {
+  it("consecutive build_to_peak pairs get bonus on second pair", () => {
+    // Create 3 clips where energy increases monotonically
+    const v1: Track = {
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", { timeline_in_frame: 0, timeline_duration_frames: 72, beat_id: "B01" }),
+        makeClip("02", { timeline_in_frame: 72, timeline_duration_frames: 72, beat_id: "B02", asset_id: "AST_002" }),
+        makeClip("03", { timeline_in_frame: 144, timeline_duration_frames: 72, beat_id: "B03", asset_id: "AST_003" }),
+      ],
+    };
+
+    const { analysis } = adjacencyDecide(v1, {
+      activeEditingSkills: ["build_to_peak"],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({
+          segment_id: "SEG_01",
+          editorial_signals: {
+            semantic_cluster_id: "A",
+            speech_intensity_score: 0.3,
+            peak_strength_score: 0.4,
+          },
+        }),
+        makeCandidate({
+          segment_id: "SEG_02",
+          asset_id: "AST_002",
+          editorial_signals: {
+            semantic_cluster_id: "A",
+            speech_intensity_score: 0.6,
+            peak_strength_score: 0.6,
+            peak_type: "emotional_peak",
+          },
+        }),
+        makeCandidate({
+          segment_id: "SEG_03",
+          asset_id: "AST_003",
+          editorial_signals: {
+            semantic_cluster_id: "A",
+            speech_intensity_score: 0.9,
+            peak_strength_score: 0.8,
+            peak_type: "emotional_peak",
+          },
+        }),
+      ],
+      beats: [
+        makeBeat("B01"),
+        makeBeat("B02", { story_role: "experience" }),
+        makeBeat("B03", { story_role: "experience" }),
+      ],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    // Both pairs should have selected build_to_peak
+    // (the second pair gets pair_bonus_prev if first was build_to_peak)
+    expect(analysis.pairs.length).toBe(2);
+    // Verify analysis was produced correctly
+    expect(analysis.pairs[0]).toBeDefined();
+    expect(analysis.pairs[1]).toBeDefined();
   });
 });

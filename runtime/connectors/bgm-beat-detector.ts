@@ -220,7 +220,34 @@ export function detectBgmBeats(opts: BgmBeatDetectOptions): BgmAnalysis {
   // Detect onsets
   const onsets = detectOnsetsViaFfmpeg(opts.audioPath, sampleRate);
 
-  // Estimate BPM
+  // If onset detection failed (no events), return partial status
+  // instead of synthesizing ready + 120 BPM
+  if (onsets.length === 0) {
+    const fileBuffer = fs.readFileSync(opts.audioPath);
+    const sourceHash = createHash("sha256").update(fileBuffer).digest("hex").slice(0, 16);
+    return {
+      version: "1",
+      project_id: opts.projectId,
+      analysis_status: "partial",
+      music_asset: {
+        asset_id: opts.assetId,
+        path: opts.audioPath,
+        source_hash: sourceHash,
+      },
+      bpm: 0,
+      meter,
+      duration_sec: Math.round(durationSec * 100) / 100,
+      beats_sec: [],
+      downbeats_sec: [],
+      sections: estimateSections(durationSec, 120), // section estimate for reporting only
+      provenance: {
+        detector: "ffmpeg_onset_heuristic",
+        sample_rate_hz: sampleRate,
+      },
+    };
+  }
+
+  // Estimate BPM from detected onsets
   const bpm = estimateBpm(onsets);
 
   // Generate beat grid
@@ -273,8 +300,35 @@ export function writeBgmAnalysis(
 
 /**
  * Load BGM analysis from project directory, if available.
+ * Per design doc section 3.1, compiler resolves via
+ * 07_package/music_cues.json.music_asset.analysis_ref first,
+ * falling back to direct 07_package/audio/bgm-analysis.json path.
  */
 export function loadBgmAnalysis(projectPath: string): BgmAnalysis | undefined {
+  // Primary: resolve via music_cues.json.music_asset.analysis_ref
+  const musicCuesPath = path.join(projectPath, "07_package/music_cues.json");
+  if (fs.existsSync(musicCuesPath)) {
+    try {
+      const cuesRaw = fs.readFileSync(musicCuesPath, "utf-8");
+      const cues = JSON.parse(cuesRaw) as {
+        music_asset?: { analysis_ref?: string };
+      };
+      const ref = cues?.music_asset?.analysis_ref;
+      if (ref) {
+        // analysis_ref is relative to project root
+        const refPath = path.isAbsolute(ref) ? ref : path.join(projectPath, ref);
+        if (fs.existsSync(refPath)) {
+          const raw = fs.readFileSync(refPath, "utf-8");
+          const parsed = JSON.parse(raw) as BgmAnalysis;
+          if (parsed.analysis_status === "ready") return parsed;
+        }
+      }
+    } catch {
+      // Fall through to direct path
+    }
+  }
+
+  // Fallback: direct path
   const analysisPath = path.join(projectPath, "07_package/audio/bgm-analysis.json");
   if (!fs.existsSync(analysisPath)) return undefined;
   try {

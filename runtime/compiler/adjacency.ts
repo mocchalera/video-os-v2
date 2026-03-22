@@ -27,6 +27,8 @@ import {
   resolveCompositionMatch,
   resolveAxisConsistency,
   resolveAxisBreakReadiness,
+  resolveShotScaleContinuity,
+  resolveCadenceFit,
 } from "./transition-skill-loader.js";
 
 // ── PairEvidence construction ───────────────────────────────────────
@@ -142,14 +144,22 @@ export function buildPairEvidence(
     { shot_scale: rightAdj?.shot_scale, composition_anchor: rightAdj?.composition_anchor, screen_side: rightAdj?.screen_side },
   );
 
-  // Axis consistency
-  const axisConsistencyScore = resolveAxisConsistency(
-    { screen_side: leftAdj?.screen_side, gaze_direction: leftAdj?.gaze_direction, camera_axis: leftAdj?.camera_axis },
-    { screen_side: rightAdj?.screen_side, gaze_direction: rightAdj?.gaze_direction, camera_axis: rightAdj?.camera_axis },
+  // Shot scale continuity (separate from composition match)
+  const shotScaleContinuityScore = resolveShotScaleContinuity(
+    leftAdj?.shot_scale,
+    rightAdj?.shot_scale,
   );
 
-  // Cadence fit (simplified for P0)
-  const cadenceFitScore = 0.5;
+  // Cadence fit
+  const snapToleranceFrames = durationMode === "strict" ? 6 : 12;
+  const cadenceFitResult = resolveCadenceFit(
+    leftClip.timeline_duration_frames,
+    leftBeat?.target_duration_frames,
+    leftSignals?.silence_ratio ?? 0,
+    bgmSnapDistanceFrames,
+    snapToleranceFrames,
+  );
+  const cadenceFitScore = cadenceFitResult.score;
 
   // Setup/payoff
   const partialEvidence = {
@@ -169,7 +179,7 @@ export function buildPairEvidence(
   const hasBRollCandidate = !!(leftCandidate?.role === "support" || leftCandidate?.role === "texture" ||
     rightCandidate?.role === "support" || rightCandidate?.role === "texture");
 
-  // Build partial evidence for axis break readiness computation
+  // Build partial evidence — compute axis_break_readiness first, then axis_consistency with it
   const partialForAxis: PairEvidence = {
     left_candidate_ref: leftCandidate?.candidate_id ?? leftClip.clip_id,
     right_candidate_ref: rightCandidate?.candidate_id ?? rightClip.clip_id,
@@ -181,10 +191,10 @@ export function buildPairEvidence(
     visual_tag_overlap_score: visualTagOverlapScore,
     motion_continuity_score: motionContinuityScore,
     cadence_fit_score: cadenceFitScore,
-    shot_scale_continuity_score: compositionMatchScore,
+    shot_scale_continuity_score: shotScaleContinuityScore,
     composition_match_score: compositionMatchScore,
-    axis_consistency_score: axisConsistencyScore,
-    axis_break_readiness_score: 0, // placeholder
+    axis_consistency_score: 0, // will be recomputed below
+    axis_break_readiness_score: 0, // will be computed below
     energy_delta_score: energyDeltaScore,
     outgoing_silence_ratio: outgoingSilenceRatio,
     outgoing_afterglow_score: outgoingAfterglowScore,
@@ -203,7 +213,15 @@ export function buildPairEvidence(
     duration_mode: durationMode,
   };
 
+  // Compute axis_break_readiness first (does not depend on axis_consistency)
   partialForAxis.axis_break_readiness_score = resolveAxisBreakReadiness(partialForAxis);
+
+  // Now compute axis_consistency with break readiness context
+  partialForAxis.axis_consistency_score = resolveAxisConsistency(
+    { screen_side: leftAdj?.screen_side, gaze_direction: leftAdj?.gaze_direction, camera_axis: leftAdj?.camera_axis },
+    { screen_side: rightAdj?.screen_side, gaze_direction: rightAdj?.gaze_direction, camera_axis: rightAdj?.camera_axis },
+    partialForAxis.axis_break_readiness_score,
+  );
 
   return partialForAxis;
 }
@@ -344,6 +362,9 @@ export function adjacencyDecide(
 
   const snapToleranceFrames = opts.durationMode === "strict" ? 6 : 12;
 
+  // Track previous pair's selected skill for pair_bonus_prev (build_to_peak P0 bias)
+  let prevSelectedSkillId: string | null = null;
+
   for (let i = 0; i < clips.length - 1; i++) {
     const leftClip = clips[i];
     const rightClip = clips[i + 1];
@@ -403,14 +424,21 @@ export function adjacencyDecide(
       );
 
       // Compute Murch score
-      const score = computeMurchScore(card.murch_weights, axisScores);
+      let score = computeMurchScore(card.murch_weights, axisScores);
       const threshold = resolveSkillThreshold(card);
+
+      // pair_bonus_prev: if the previous pair used build_to_peak and this card
+      // is also build_to_peak, add a continuity bonus to favor sustained build
+      if (card.id === "build_to_peak" && prevSelectedSkillId === "build_to_peak") {
+        score = Math.min(1, score + 0.08);
+      }
 
       scoredCards.push({ card, score, threshold, passesWhen, passesAvoidWhen, passesViability });
     }
 
-    // Filter: must pass when + viability
+    // Separate cards into: fully qualified, viability-failed (for fallback), threshold candidates
     const qualifiedCards = scoredCards.filter(sc => sc.passesWhen && sc.passesViability);
+    const viabilityFailedCards = scoredCards.filter(sc => sc.passesWhen && !sc.passesViability);
 
     // Apply threshold filter
     const thresholdQualified = qualifiedCards.filter(sc => sc.score >= sc.threshold);
@@ -441,6 +469,52 @@ export function adjacencyDecide(
     let selectedSkillScore = 0;
     let selectedSkillId: string | null = null;
 
+    // Fallback resolution: walk fallback_order[] when below threshold or viability failed
+    const resolveFallback = (
+      card: TransitionSkillCard,
+      originSkillId: string,
+    ): { transitionType: TransitionType; appliedSkillId: string; params: Record<string, unknown> } | null => {
+      for (const step of card.fallback_order) {
+        switch (step.kind) {
+          case "hard_cut":
+            return {
+              transitionType: step.transition_type ?? "cut",
+              appliedSkillId: `fallback.hard_cut`,
+              params: {},
+            };
+          case "crossfade":
+            return {
+              transitionType: step.transition_type ?? "crossfade",
+              appliedSkillId: `fallback.crossfade`,
+              params: step.crossfade_sec ? { crossfade_sec: step.crossfade_sec } : {},
+            };
+          case "same_asset_punch_in":
+            if (evidence.same_asset) {
+              return {
+                transitionType: "cut",
+                appliedSkillId: `fallback.same_asset_punch_in`,
+                params: step.punch_in_scale ? { punch_in_scale: step.punch_in_scale } : {},
+              };
+            }
+            continue; // try next step
+          case "freeze_hold":
+            return {
+              transitionType: "cut",
+              appliedSkillId: `fallback.freeze_hold`,
+              params: {
+                ...(step.hold_side ? { hold_side: step.hold_side } : {}),
+                ...(step.hold_frames ? { hold_frames: step.hold_frames } : {}),
+              },
+            };
+          case "skip_skill":
+            return null; // no transition emitted, marker only
+        }
+      }
+      return null;
+    };
+
+    let fallbackParams: Record<string, unknown> = {};
+
     if (selectedCard && !belowThreshold) {
       transitionType = selectedCard.card.pipeline_effects.transition_type;
       appliedSkillId = selectedCard.card.id;
@@ -449,20 +523,75 @@ export function adjacencyDecide(
       selectedSkillScore = selectedCard.score;
       minScoreThreshold = selectedCard.threshold;
     } else if (selectedCard && belowThreshold) {
-      transitionType = "cut";
+      // Below threshold — try fallback chain
+      const fb = resolveFallback(selectedCard.card, selectedCard.card.id);
+      if (fb) {
+        transitionType = fb.transitionType;
+        appliedSkillId = fb.appliedSkillId;
+        degradedFromSkillId = selectedCard.card.id;
+        fallbackParams = fb.params;
+      } else {
+        transitionType = "cut";
+        degradedFromSkillId = selectedCard.card.id;
+      }
       selectedSkillId = selectedCard.card.id;
       selectedSkillScore = selectedCard.score;
       minScoreThreshold = selectedCard.threshold;
+    } else if (viabilityFailedCards.length > 0) {
+      // Viability failed — try fallback chain on highest-scoring viability-failed card
+      viabilityFailedCards.sort((a, b) => b.score - a.score || a.card.id.localeCompare(b.card.id));
+      const failedCard = viabilityFailedCards[0];
+      const fb = resolveFallback(failedCard.card, failedCard.card.id);
+      if (fb) {
+        transitionType = fb.transitionType;
+        appliedSkillId = fb.appliedSkillId;
+        degradedFromSkillId = failedCard.card.id;
+        fallbackParams = fb.params;
+      }
+      selectedSkillId = failedCard.card.id;
+      selectedSkillScore = failedCard.score;
+      minScoreThreshold = failedCard.threshold;
+      belowThreshold = true;
     }
 
-    // BGM beat snap
+    // BGM beat snap — respect snap_anchor for windowed transitions
     let snapResult: ReturnType<typeof findBeatSnapTarget> | undefined;
     if (selectedCard && !belowThreshold) {
-      const preferDownbeat = selectedCard.card.pipeline_effects.beat_snap === "downbeat";
-      snapResult = findBeatSnapTarget(
-        cutFrame, opts.fpsNum, opts.bgmAnalysis,
+      const effects = selectedCard.card.pipeline_effects;
+      const preferDownbeat = effects.beat_snap === "downbeat";
+      const snapAnchor = effects.snap_anchor ?? "cut_frame";
+
+      // For transition_center anchor (crossfade, fade_to_black), compute center
+      // as cut_frame + half the crossfade window in frames
+      let snapReferenceFrame = cutFrame;
+      if (snapAnchor === "transition_center" && effects.crossfade_sec) {
+        const halfWindowFrames = Math.round((effects.crossfade_sec / 2) * opts.fpsNum);
+        snapReferenceFrame = cutFrame + halfWindowFrames;
+      }
+
+      const rawSnap = findBeatSnapTarget(
+        snapReferenceFrame, opts.fpsNum, opts.bgmAnalysis,
         preferDownbeat, snapToleranceFrames,
       );
+
+      // Convert snap result back to cut-frame-relative delta if using transition_center
+      if (rawSnap && snapAnchor === "transition_center" && effects.crossfade_sec) {
+        const halfWindowFrames = Math.round((effects.crossfade_sec / 2) * opts.fpsNum);
+        // The snap target for the center → derive the cut frame target
+        const cutFrameTarget = rawSnap.target_frame - halfWindowFrames;
+        const cutFrameDelta = cutFrameTarget - cutFrame;
+        if (Math.abs(cutFrameDelta) <= snapToleranceFrames) {
+          snapResult = {
+            target_sec: cutFrameTarget / opts.fpsNum,
+            target_frame: cutFrameTarget,
+            is_downbeat: rawSnap.is_downbeat,
+            delta_frames: cutFrameDelta,
+          };
+        }
+        // If converted delta exceeds tolerance, skip snap
+      } else {
+        snapResult = rawSnap;
+      }
     }
 
     // Build transition
@@ -491,6 +620,14 @@ export function adjacencyDecide(
 
     if (selectedCard && !belowThreshold && selectedCard.card.pipeline_effects.crossfade_sec) {
       params.crossfade_sec = selectedCard.card.pipeline_effects.crossfade_sec;
+      hasParams = true;
+    }
+
+    // Merge fallback params (crossfade_sec, hold_side, hold_frames, etc.)
+    if (Object.keys(fallbackParams).length > 0) {
+      for (const [k, v] of Object.entries(fallbackParams)) {
+        params[k] = v;
+      }
       hasParams = true;
     }
 
@@ -542,6 +679,9 @@ export function adjacencyDecide(
       degraded_from_skill_id: degradedFromSkillId,
     };
     pairs.push(pairResult);
+
+    // Track for pair_bonus_prev on next iteration
+    prevSelectedSkillId = appliedSkillId ?? null;
   }
 
   const analysis: AdjacencyAnalysis = {

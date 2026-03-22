@@ -16,7 +16,7 @@ import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from
 import { applyPatch } from "./patch.js";
 import { resolveDurationPolicyFromBlueprint } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
-import { adjacencyDecide, writeAdjacencyAnalysis } from "./adjacency.js";
+import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysis } from "../connectors/bgm-beat-detector.js";
 import type {
   CompileOptions,
@@ -175,6 +175,33 @@ export function compile(opts: CompileOptions): CompileResult {
       });
 
       adjacencyTransitions = adjResult.transitions;
+
+      // ── Phase 4.5b: Apply beat snap to clip geometry ──────────────
+      // Walk transitions and apply pair-preserving reallocation for snapped cuts.
+      // This updates actual clip timeline_in_frame / timeline_duration_frames / src_in/out_us.
+      const clipMap = new Map<string, import("./types.js").TimelineClip>();
+      for (const clip of v1Track.clips) {
+        clipMap.set(clip.clip_id, clip);
+      }
+
+      for (const tr of adjacencyTransitions) {
+        const snapDelta = tr.transition_params?.snap_delta_frames;
+        if (snapDelta && snapDelta !== 0) {
+          const left = clipMap.get(tr.from_clip_id);
+          const right = clipMap.get(tr.to_clip_id);
+          if (left && right) {
+            const committed = applyBeatSnap(left, right, snapDelta, fpsNum);
+            if (!committed) {
+              // Snap failed guard — revert to original cut frame
+              if (tr.transition_params) {
+                tr.transition_params.cut_frame_after_snap = tr.transition_params.cut_frame_before_snap;
+                tr.transition_params.snap_delta_frames = 0;
+                tr.transition_params.beat_snapped = false;
+              }
+            }
+          }
+        }
+      }
 
       // Set project_id on analysis
       adjResult.analysis.project_id = normalized.project_id;

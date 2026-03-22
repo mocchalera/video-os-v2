@@ -31,7 +31,7 @@
       },
       "additionalProperties": false
     },
-    "bpm": { "type": "number", "exclusiveMinimum": 0 },
+    "bpm": { "type": "number", "minimum": 0 },
     "meter": { "type": "string" },
     "duration_sec": { "type": "number", "minimum": 0 },
     "beats_sec": {
