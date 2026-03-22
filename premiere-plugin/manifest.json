@@ -1,12 +1,15 @@
 {
+  "manifestVersion": 6,
   "id": "com.videoos.premiere-watcher",
   "name": "Video OS Watcher",
   "version": "1.0.0",
   "main": "index.html",
-  "host": {
-    "app": "premierepro",
-    "minVersion": "25.0.0"
-  },
+  "host": [
+    {
+      "app": "premierepro",
+      "minVersion": "25.0.0"
+    }
+  ],
   "entrypoints": [
     {
       "type": "panel",
