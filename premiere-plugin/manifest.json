@@ -1,5 +1,5 @@
 {
-  "manifestVersion": 6,
+  "manifestVersion": 5,
   "id": "com.videoos.premiere-watcher",
   "name": "Video OS Watcher",
   "version": "1.0.0",
@@ -25,6 +25,5 @@
     "localFileSystem": "fullAccess",
     "network": { "domains": [] },
     "clipboard": "readAndWrite"
-  },
-  "icons": []
+  }
 }

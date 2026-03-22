@@ -98,8 +98,11 @@
   <h2>Video OS Watcher</h2>
 
   <div class="field">
-    <label>FCP7 XML Path</label>
-    <input type="text" id="xmlPath" placeholder="/path/to/project_premiere.xml" />
+    <label>FCP7 XML File</label>
+    <div class="row">
+      <input type="text" id="xmlPath" placeholder="Browse で選択..." readonly style="flex:1" />
+      <button id="btnBrowse" style="background:var(--border);color:var(--fg)">Browse</button>
+    </div>
   </div>
 
   <div class="field">

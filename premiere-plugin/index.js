@@ -5,19 +5,20 @@
  * Designed for the Video OS agent → Premiere Pro roundtrip workflow.
  */
 
-/* global require */
-const fs = require("uxp").storage.localFileSystem;
+const uxpFs = require("uxp").storage.localFileSystem;
 
 // ── State ──────────────────────────────────────────────────────────
 
 let watchTimer = null;
 let lastMtime = 0;
+let watchEntry = null; // UXP file entry (from picker)
 let watchPath = "";
 
 // ── DOM refs ───────────────────────────────────────────────────────
 
 const elXmlPath = document.getElementById("xmlPath");
 const elInterval = document.getElementById("interval");
+const btnBrowse = document.getElementById("btnBrowse");
 const btnStart = document.getElementById("btnStart");
 const btnStop = document.getElementById("btnStop");
 const elStatus = document.getElementById("status");
@@ -36,30 +37,40 @@ function appendLog(message) {
   elStatus.scrollTop = elStatus.scrollHeight;
 }
 
+// ── File picker ────────────────────────────────────────────────────
+
+async function browseFile() {
+  try {
+    const entry = await uxpFs.getFileForOpening({
+      types: ["xml"],
+      allowMultiple: false,
+    });
+    if (entry) {
+      watchEntry = entry;
+      watchPath = entry.nativePath;
+      elXmlPath.value = watchPath;
+      setStatus("dot-idle", "File selected: " + entry.name);
+    }
+  } catch (err) {
+    setStatus("dot-error", "Browse error: " + (err.message || err));
+  }
+}
+
 // ── File stat helper ───────────────────────────────────────────────
 
-async function getFileMtime(filePath) {
+async function getFileMtime() {
   try {
-    // UXP fs: get entry from path, then read metadata
-    const entry = await fs.getEntryWithUrl("file:" + filePath);
-    if (!entry) return 0;
-    const meta = await entry.getMetadata();
+    if (!watchEntry) return 0;
+    const meta = await watchEntry.getMetadata();
     return meta.modificationDate ? meta.modificationDate.getTime() : 0;
   } catch {
-    // Fallback: try native fs module if available
-    try {
-      const nfs = require("fs");
-      const stat = nfs.lstatSync(filePath);
-      return stat.mtimeMs || 0;
-    } catch {
-      return 0;
-    }
+    return 0;
   }
 }
 
 // ── Import sequence into Premiere Pro ──────────────────────────────
 
-async function importXmlSequence(filePath) {
+async function importXmlSequence() {
   try {
     const app = require("premierepro");
     const project = await app.Project.getActiveProject();
@@ -70,7 +81,7 @@ async function importXmlSequence(filePath) {
 
     // Import the XML file — Premiere treats FCP7 XML as importable media
     const success = await project.importFiles(
-      [filePath],
+      [watchPath],
       true,  // suppressUI
       project.getRootItem(), // target bin
       false  // importAsNumberedStills
@@ -93,24 +104,24 @@ async function importXmlSequence(filePath) {
 
 async function pollOnce() {
   try {
-    const currentMtime = await getFileMtime(watchPath);
+    const currentMtime = await getFileMtime();
 
     if (currentMtime === 0) {
-      setStatus("dot-error", "File not found: " + watchPath);
+      setStatus("dot-error", "Cannot read file");
       return;
     }
 
     if (lastMtime === 0) {
       // First poll — just record the mtime
       lastMtime = currentMtime;
-      setStatus("dot-watching", "Watching: " + watchPath.split("/").pop());
+      setStatus("dot-watching", "Watching: " + (watchEntry ? watchEntry.name : watchPath));
       return;
     }
 
     if (currentMtime > lastMtime) {
       lastMtime = currentMtime;
       setStatus("dot-updated", "Change detected, importing...");
-      const ok = await importXmlSequence(watchPath);
+      const ok = await importXmlSequence();
       if (ok) {
         setStatus("dot-watching", "Import complete. Watching...");
       } else {
@@ -125,20 +136,18 @@ async function pollOnce() {
 // ── Start / Stop ───────────────────────────────────────────────────
 
 function startWatch() {
-  const xmlPath = elXmlPath.value.trim();
-  if (!xmlPath) {
-    setStatus("dot-error", "Please enter an XML file path");
+  if (!watchEntry) {
+    setStatus("dot-error", "Please select an XML file first (Browse)");
     return;
   }
 
   const intervalMs = parseInt(elInterval.value, 10) || 2000;
-  watchPath = xmlPath;
   lastMtime = 0;
 
   setStatus("dot-watching", "Starting watch...");
   btnStart.disabled = true;
   btnStop.disabled = false;
-  elXmlPath.disabled = true;
+  btnBrowse.disabled = true;
   elInterval.disabled = true;
 
   // Initial poll
@@ -152,16 +161,16 @@ function stopWatch() {
     watchTimer = null;
   }
   lastMtime = 0;
-  watchPath = "";
 
   setStatus("dot-idle", "Stopped");
   btnStart.disabled = false;
   btnStop.disabled = true;
-  elXmlPath.disabled = false;
+  btnBrowse.disabled = false;
   elInterval.disabled = false;
 }
 
 // ── Event listeners ────────────────────────────────────────────────
 
+btnBrowse.addEventListener("click", browseFile);
 btnStart.addEventListener("click", startWatch);
 btnStop.addEventListener("click", stopWatch);
