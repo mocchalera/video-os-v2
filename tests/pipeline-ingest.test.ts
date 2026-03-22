@@ -326,6 +326,167 @@ describe("Pipeline: multi-asset order independence", () => {
   }, 180_000);
 });
 
+// ── Peak detection pipeline integration ─────────────────────────────
+
+describe("Pipeline: VLM peak detection writes peak_analysis to segments", () => {
+  it("segments gain peak_analysis when VLM + peak detection enabled", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_peak_pipeline");
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    // Mock VLM function that returns valid peak-like responses
+    const mockVlmFn = async (
+      _framePaths: string[],
+      prompt: string,
+      _options: { model: string; maxOutputTokens: number },
+    ) => {
+      // Coarse pass: contains "editorial peak discovery" from COARSE_PROMPT_TEMPLATE
+      if (prompt.includes("editorial peak discovery")) {
+        return {
+          rawJson: JSON.stringify({
+            coarse_candidates: [
+              {
+                tile_start_index: 0,
+                tile_end_index: 0,
+                likely_peak_type: "action_peak",
+                confidence: 0.8,
+                rationale: "Test peak",
+              },
+            ],
+          }),
+        };
+      }
+      // Refine pass: contains "editorial peak refinement" from REFINE_PROMPT_TEMPLATE
+      if (prompt.includes("editorial peak refinement")) {
+        return {
+          rawJson: JSON.stringify({
+            summary: "Test refine summary",
+            tags: ["test_tag"],
+            interest_points: [],
+            peak_moment: {
+              timestamp_us: 2500000,
+              type: "action_peak",
+              confidence: 0.75,
+              description: "Test peak moment",
+            },
+            recommended_in_out: {
+              best_in_us: 2000000,
+              best_out_us: 3000000,
+              rationale: "Test recommendation",
+              needs_precision: false,
+            },
+            visual_energy_curve: [
+              { timestamp_us: 2500000, energy: 0.8 },
+            ],
+            quality_flags: [],
+            confidence: { summary: 0.8, tags: 0.7, quality_flags: 0.9 },
+            peak_confidence: { vlm: 0.75 },
+          }),
+        };
+      }
+      // Precision pass: contains "Refine the single strongest editorial peak"
+      if (prompt.includes("strongest editorial peak")) {
+        return {
+          rawJson: JSON.stringify({
+            peak_moment: {
+              timestamp_us: 2500000,
+              type: "action_peak",
+              confidence: 0.85,
+              description: "Precision peak",
+            },
+            recommended_in_out: {
+              best_in_us: 2200000,
+              best_out_us: 2800000,
+              rationale: "Precision recommendation",
+            },
+          }),
+        };
+      }
+      // Default VLM enrichment response (for segment enrichment stage)
+      return {
+        rawJson: JSON.stringify({
+          summary: "Test summary",
+          tags: ["test"],
+          interest_points: [],
+          quality_flags: [],
+          confidence: { summary: 0.7, tags: 0.6, quality_flags: 0.8 },
+        }),
+      };
+    };
+
+    try {
+      const result = await runPipeline({
+        sourceFiles: [TEST_CLIP],
+        projectDir: tmpDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        vlmFn: mockVlmFn,
+      });
+
+      // Verify segments.json has peak_analysis on at least one segment
+      const segWithPeak = result.segmentsJson.items.find(
+        (s) => (s as Record<string, unknown>).peak_analysis !== undefined,
+      );
+      expect(segWithPeak).toBeDefined();
+
+      if (segWithPeak) {
+        const pa = (segWithPeak as Record<string, unknown>).peak_analysis as Record<string, unknown>;
+        expect(pa.peak_moments).toBeDefined();
+        expect(pa.visual_energy_curve).toBeDefined();
+        expect(pa.provenance).toBeDefined();
+      }
+
+      // Verify schema compliance
+      const { validateSegments } = createValidator();
+      const valid = validateSegments(result.segmentsJson);
+      if (!valid) {
+        console.error("segments.json peak_analysis validation errors:", validateSegments.errors);
+      }
+      expect(valid).toBe(true);
+
+      // Verify on-disk copy also has peak_analysis
+      const onDisk = JSON.parse(
+        fs.readFileSync(path.join(result.outputDir, "segments.json"), "utf-8"),
+      );
+      const diskSegWithPeak = onDisk.items.find(
+        (s: Record<string, unknown>) => s.peak_analysis !== undefined,
+      );
+      expect(diskSegWithPeak).toBeDefined();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  it("skipPeak prevents peak_analysis from being written", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_peak_skip");
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    const mockVlmFn = async () => ({
+      rawJson: JSON.stringify({
+        summary: "Test", tags: ["test"], interest_points: [],
+        quality_flags: [], confidence: { summary: 0.7, tags: 0.6, quality_flags: 0.8 },
+      }),
+    });
+
+    try {
+      const result = await runPipeline({
+        sourceFiles: [TEST_CLIP],
+        projectDir: tmpDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        skipPeak: true,
+        vlmFn: mockVlmFn,
+      });
+
+      const anyPeak = result.segmentsJson.items.some(
+        (s) => (s as Record<string, unknown>).peak_analysis !== undefined,
+      );
+      expect(anyPeak).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
 // ── Gap report: detector failure surfacing ─────────────────────────
 
 describe("Pipeline: gap report surfaces detector failures", () => {

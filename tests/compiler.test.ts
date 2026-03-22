@@ -200,6 +200,15 @@ describe("Timeline Compiler", () => {
     expect(seq.start_frame).toBe(0);
   });
 
+  it("fps_num propagates from --fps option to timeline", () => {
+    const result30 = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT, fpsNum: 30 });
+    expect(result30.timeline.sequence.fps_num).toBe(30);
+    expect(result30.timeline.sequence.fps_den).toBe(1);
+
+    const result24 = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    expect(result24.timeline.sequence.fps_num).toBe(24);
+  });
+
   it("A2 and A3 tracks exist but are empty in M1", () => {
     const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
     const a2 = result.timeline.tracks.audio.find((t) => t.track_id === "A2");

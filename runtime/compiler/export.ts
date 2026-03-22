@@ -22,6 +22,8 @@ export interface ExportOptions {
   briefRelPath: string;
   blueprintRelPath: string;
   selectsRelPath: string;
+  fpsNum?: number;
+  fpsDen?: number;
 }
 
 export function buildTimelineIR(
@@ -52,8 +54,8 @@ export function buildTimelineIR(
     created_at: opts.createdAt,
     sequence: {
       name: opts.projectTitle,
-      fps_num: 24,
-      fps_den: 1,
+      fps_num: opts.fpsNum ?? 24,
+      fps_den: opts.fpsDen ?? 1,
       width: 1920,
       height: 1080,
       start_frame: 0,

@@ -50,7 +50,7 @@ function ensureDir(dirPath: string): void {
 const TILES_PER_PAGE = 16;
 const TILE_COLS = 4;
 const OVERVIEW_SAMPLE_FPS = 0.5;
-const OVERVIEW_TILE_WIDTH = 240;
+const OVERVIEW_TILE_WIDTH = 320;
 
 /**
  * Generate paginated contact sheets for an asset.
@@ -127,7 +127,7 @@ export async function generateContactSheets(
           inputLabels.push(`[${i}:v]`);
           const col = i % cols;
           const row = Math.floor(i / cols);
-          layoutParts.push(`${col * 240}_${row * 180}`);
+          layoutParts.push(`${col * 240}_${row * 240}`);
         }
 
         // For padding, duplicate the last frame
@@ -136,7 +136,7 @@ export async function generateContactSheets(
           const idx = tmpFrames.length + i;
           const col = idx % cols;
           const row = Math.floor(idx / cols);
-          layoutParts.push(`${col * 240}_${row * 180}`);
+          layoutParts.push(`${col * 240}_${row * 240}`);
         }
 
         // xstack needs all inputs
@@ -263,7 +263,7 @@ export async function generateOverviewContactSheet(
           inputLabels.push(`[${i}:v]`);
           const col = i % cols;
           const row = Math.floor(i / cols);
-          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 180}`);
+          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 240}`);
         }
 
         for (let i = 0; i < padCount; i++) {
@@ -271,7 +271,7 @@ export async function generateOverviewContactSheet(
           const idx = tmpFrames.length + i;
           const col = idx % cols;
           const row = Math.floor(idx / cols);
-          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 180}`);
+          layoutParts.push(`${col * OVERVIEW_TILE_WIDTH}_${row * 240}`);
         }
 
         const filterStr = `${inputLabels.join("")}xstack=inputs=${totalTiles}:layout=${layoutParts.join("|")}`;
@@ -394,7 +394,7 @@ export async function generatePoster(
 // ── Filmstrips ─────────────────────────────────────────────────────
 
 const FILMSTRIP_FRAMES = 6;
-const FILMSTRIP_TILE_WIDTH = 240;
+const FILMSTRIP_TILE_WIDTH = 320;
 const EDGE_TRIM_FRACTION = 0.05;
 
 /**

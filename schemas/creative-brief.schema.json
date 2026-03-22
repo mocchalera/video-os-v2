@@ -176,6 +176,10 @@
         "minLength": 1
       }
     },
+    "content_hint": {
+      "type": "string",
+      "description": "Free-text hint describing what the footage contains, used to improve VLM recognition accuracy (e.g. 'child learning to ride a bicycle')"
+    },
     "editorial": {
       "type": "object",
       "properties": {

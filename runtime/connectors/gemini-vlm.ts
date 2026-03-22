@@ -428,8 +428,11 @@ export function shouldSkipVlm(
 /**
  * Build the full prompt for a segment VLM call.
  */
-export function buildSegmentPrompt(transcriptContext?: string): string {
+export function buildSegmentPrompt(transcriptContext?: string, contentHint?: string): string {
   let prompt = PROMPT_TEMPLATE;
+  if (contentHint && contentHint.length > 0) {
+    prompt += `\n\nContent context: This footage depicts ${contentHint}. Use this context to improve recognition accuracy.`;
+  }
   if (transcriptContext && transcriptContext.length > 0) {
     prompt += `\n\nTranscript context for this segment:\n${transcriptContext}`;
   }
@@ -447,10 +450,11 @@ export async function enrichSegment(
   srcOutUs: number,
   vlmPolicy: VlmPolicy,
   transcriptContext?: string,
+  contentHint?: string,
 ): Promise<VlmEnrichmentResult> {
   const promptHash = computePromptHash();
 
-  const prompt = buildSegmentPrompt(transcriptContext);
+  const prompt = buildSegmentPrompt(transcriptContext, contentHint);
 
   let lastError: string | undefined;
 

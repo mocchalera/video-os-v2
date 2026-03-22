@@ -133,6 +133,8 @@ export function compile(opts: CompileOptions): CompileResult {
     briefRelPath: "01_intent/creative_brief.yaml",
     blueprintRelPath: "04_plan/edit_blueprint.yaml",
     selectsRelPath: "04_plan/selects_candidates.yaml",
+    fpsNum,
+    fpsDen,
   });
 
   // ── Phase 5.5: Editorial Metadata ─────────────────────────────────

@@ -20,6 +20,7 @@ function parseArgs(argv: string[]): {
   skipStt: boolean;
   skipVlm: boolean;
   skipDiarize: boolean;
+  skipPeak: boolean;
   language: string | undefined;
   sttProvider: string | undefined;
 } {
@@ -29,6 +30,7 @@ function parseArgs(argv: string[]): {
   let skipStt = false;
   let skipVlm = false;
   let skipDiarize = false;
+  let skipPeak = false;
   let language: string | undefined;
   let sttProvider: string | undefined;
 
@@ -42,6 +44,8 @@ function parseArgs(argv: string[]): {
       skipVlm = true;
     } else if (arg === "--skip-diarize") {
       skipDiarize = true;
+    } else if (arg === "--skip-peak") {
+      skipPeak = true;
     } else if (arg === "--language" || arg === "-l") {
       language = args[++i] ?? undefined;
     } else if (arg === "--stt-provider") {
@@ -54,6 +58,7 @@ Options:
   --skip-stt         Skip speech-to-text stage
   --skip-vlm         Skip visual language model stage
   --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
+  --skip-peak        Skip VLM peak detection stage
   --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
   --stt-provider     STT provider: "groq" or "openai" (auto-detected if omitted)
   --help, -h         Show this help
@@ -74,19 +79,20 @@ Options:
     process.exit(1);
   }
 
-  return { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, language, sttProvider };
+  return { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider };
 }
 
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, language, sttProvider } = parseArgs(process.argv);
+  const { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider } = parseArgs(process.argv);
 
   console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
   console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);
   if (skipStt) console.log("[analyze] STT: skipped");
   if (skipVlm) console.log("[analyze] VLM: skipped");
   if (skipDiarize) console.log("[analyze] Diarization: skipped");
+  if (skipPeak) console.log("[analyze] Peak detection: skipped");
   if (language) console.log(`[analyze] Language: ${language}`);
   if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
 
@@ -107,6 +113,7 @@ async function main(): Promise<void> {
     skipStt,
     skipVlm,
     skipDiarize,
+    skipPeak,
     vlmFn,
     sttLanguageOverride: language,
     sttProvider,
