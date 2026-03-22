@@ -40,6 +40,7 @@ import {
   buildNleFinishingManifest,
   type PackageManifest,
 } from "../packaging/manifest.js";
+import { assembleTimelineToMp4 } from "../render/assembler.js";
 import { runRenderPipeline } from "../render/pipeline.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
 
@@ -253,8 +254,7 @@ export async function packageCommand(
       }
     } else {
       // Run the actual render pipeline
-      const assemblyPath = options?.assemblyPath ||
-        path.join(absDir, "05_timeline/assembly.mp4");
+      let assemblyPath = options?.assemblyPath;
       const captionApprovalPath = fs.existsSync(path.join(packageDir, "caption_approval.json"))
         ? path.join(packageDir, "caption_approval.json")
         : undefined;
@@ -263,6 +263,17 @@ export async function packageCommand(
         : undefined;
 
       try {
+        if (!assemblyPath) {
+          assemblyPath = path.join(absDir, "05_timeline/assembly.mp4");
+          if (!fs.existsSync(assemblyPath)) {
+            await assembleTimelineToMp4({
+              projectDir: absDir,
+              timelinePath,
+              outputPath: assemblyPath,
+            });
+          }
+        }
+
         const renderResult = await runRenderPipeline({
           projectDir: absDir,
           timelinePath,
