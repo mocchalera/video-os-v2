@@ -24,6 +24,8 @@ export function normalize(
     required_roles: [...b.required_roles],
     preferred_roles: b.preferred_roles ? [...b.preferred_roles] : [],
     purpose: b.purpose ?? "",
+    story_role: b.story_role,
+    skill_hints: b.skill_hints ? [...b.skill_hints] : undefined,
   }));
 
   const roleQuotas = computeRoleQuotas(beats);

@@ -98,6 +98,94 @@
             }
           },
           "additionalProperties": false
+        },
+        "peak_analysis": { "$ref": "#/$defs/peak-analysis" }
+      }
+    },
+    "peak-moment": {
+      "type": "object",
+      "required": ["peak_ref", "timestamp_us", "type", "confidence", "description", "source_pass"],
+      "additionalProperties": false,
+      "properties": {
+        "peak_ref": { "type": "string", "minLength": 1 },
+        "timestamp_us": { "type": "integer", "minimum": 0 },
+        "type": {
+          "type": "string",
+          "enum": ["action_peak", "emotional_peak", "visual_peak"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "description": { "type": "string" },
+        "source_pass": { "type": "string", "minLength": 1 }
+      }
+    },
+    "recommended-in-out": {
+      "type": "object",
+      "required": ["best_in_us", "best_out_us", "rationale", "source_pass"],
+      "additionalProperties": false,
+      "properties": {
+        "best_in_us": { "type": "integer", "minimum": 0 },
+        "best_out_us": { "type": "integer", "minimum": 0 },
+        "rationale": { "type": "string" },
+        "source_pass": { "type": "string" }
+      }
+    },
+    "energy-curve-point": {
+      "type": "object",
+      "required": ["timestamp_us", "energy"],
+      "additionalProperties": false,
+      "properties": {
+        "timestamp_us": { "type": "integer", "minimum": 0 },
+        "energy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source": { "type": "string" }
+      }
+    },
+    "peak-analysis": {
+      "type": "object",
+      "required": ["peak_moments", "visual_energy_curve", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "coarse_locator": {
+          "type": "object",
+          "required": ["contact_sheet_id", "tile_start_index", "tile_end_index", "coarse_window_start_us", "coarse_window_end_us"],
+          "additionalProperties": false,
+          "properties": {
+            "contact_sheet_id": { "type": "string", "minLength": 1 },
+            "tile_start_index": { "type": "integer", "minimum": 0 },
+            "tile_end_index": { "type": "integer", "minimum": 0 },
+            "coarse_window_start_us": { "type": "integer", "minimum": 0 },
+            "coarse_window_end_us": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "peak_moments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/peak-moment" }
+        },
+        "recommended_in_out": { "$ref": "#/$defs/recommended-in-out" },
+        "visual_energy_curve": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/energy-curve-point" }
+        },
+        "support_signals": {
+          "type": "object",
+          "required": ["motion_support_score", "audio_support_score", "fused_peak_score"],
+          "additionalProperties": false,
+          "properties": {
+            "motion_support_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "audio_support_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "fused_peak_score": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["coarse_prompt_template_id", "refine_prompt_template_id", "precision_mode", "fusion_version", "support_signal_version"],
+          "additionalProperties": false,
+          "properties": {
+            "coarse_prompt_template_id": { "type": "string" },
+            "refine_prompt_template_id": { "type": "string" },
+            "precision_mode": { "type": "string" },
+            "fusion_version": { "type": "string" },
+            "support_signal_version": { "type": "string" }
+          }
         }
       }
     }

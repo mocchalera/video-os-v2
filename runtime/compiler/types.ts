@@ -120,6 +120,13 @@ export interface TrimHint {
   window_end_us?: number;
   interest_point_label?: string;
   interest_point_confidence?: number;
+  // Peak-aware extensions (vlm-peak-detection-design.md §7.2)
+  peak_ref?: string;
+  peak_type?: "action_peak" | "emotional_peak" | "visual_peak";
+  center_source?: "refine_filmstrip" | "precision_dense_frames" | "precision_proxy_clip" | "interest_point_fallback" | "midpoint_fallback";
+  rationale?: string;
+  recommended_in_us?: number;
+  recommended_out_us?: number;
 }
 
 export interface EditorialSignals {
@@ -133,6 +140,13 @@ export interface EditorialSignals {
   face_detected?: boolean;
   visual_tags?: string[];
   semantic_cluster_id?: string;
+  // Peak-aware extensions (vlm-peak-detection-design.md §7.2)
+  peak_ref?: string;
+  peak_strength_score?: number;
+  motion_energy_score?: number;
+  audio_energy_score?: number;
+  peak_type?: "action_peak" | "emotional_peak" | "visual_peak";
+  peak_source_pass?: string;
 }
 
 export interface EditorialSummary {
@@ -247,6 +261,9 @@ export interface NormalizedBeat {
   required_roles: Role[];
   preferred_roles: Role[];
   purpose: string;
+  // Peak-aware extensions (vlm-peak-detection-design.md §11.1)
+  story_role?: "hook" | "setup" | "experience" | "closing";
+  skill_hints?: string[];
 }
 
 export interface RoleQuotas {
@@ -277,6 +294,7 @@ export interface ScoredCandidate {
     duration_fit_score: number;
     motif_reuse_penalty: number;
     adjacency_penalty: number;
+    peak_salience_bonus?: number;
   };
 }
 

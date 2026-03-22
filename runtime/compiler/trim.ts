@@ -16,10 +16,13 @@ import type {
 export interface ResolvedTrim {
   src_in_us: number;
   src_out_us: number;
-  mode: "adaptive_center" | "adaptive_interest" | "fixed_midpoint" | "fixed_authored";
+  mode: "adaptive_center" | "adaptive_interest" | "adaptive_peak_center" | "fixed_midpoint" | "fixed_authored";
   source_center_us?: number;
   preferred_duration_us?: number;
   interest_point_label?: string;
+  peak_type?: string;
+  peak_confidence?: number;
+  peak_ref?: string;
 }
 
 export interface TrimContext {
@@ -76,8 +79,24 @@ export function resolveTrim(
   let center: number;
   let mode: ResolvedTrim["mode"];
   let interestLabel: string | undefined;
+  let peakType: string | undefined;
+  let peakConfidence: number | undefined;
+  let peakRef: string | undefined;
 
-  if (hint?.source_center_us !== undefined) {
+  // Check for recommended_in_out first (strong peak with high confidence)
+  const hasRecommendedInOut = hint?.recommended_in_us !== undefined &&
+    hint?.recommended_out_us !== undefined &&
+    hint.recommended_in_us < hint.recommended_out_us;
+
+  if (hint?.source_center_us !== undefined && hint?.peak_type) {
+    // Peak-centered trim
+    center = hint.source_center_us;
+    mode = "adaptive_peak_center";
+    interestLabel = hint.interest_point_label;
+    peakType = hint.peak_type;
+    peakConfidence = hint.interest_point_confidence;
+    peakRef = hint.peak_ref;
+  } else if (hint?.source_center_us !== undefined) {
     center = hint.source_center_us;
     mode = "adaptive_center";
     interestLabel = hint.interest_point_label;
@@ -127,14 +146,21 @@ export function resolveTrim(
   desiredDurationUs = Math.min(desiredDurationUs, authoredDuration);
   desiredDurationUs = Math.max(desiredDurationUs, 1); // at least 1us
 
-  // Step 3: Apply asymmetry (skill trim bias)
-  // bias > 0 means extend post-roll (center shifts earlier)
-  // bias < 0 means extend pre-roll (center shifts later)
+  // Step 3: Apply asymmetry
+  // Peak-type-based asymmetry (design doc §11.4)
   let preRollRatio = 0.5;
+  if (peakType === "action_peak") {
+    preRollRatio = 0.60; // longer pre-roll for anticipation
+  } else if (peakType === "emotional_peak") {
+    preRollRatio = 0.40; // longer post-roll for reaction
+  } else if (peakType === "visual_peak") {
+    preRollRatio = 0.45; // slightly longer post-roll for hold
+  }
+  // Apply skill trim bias on top
   if (ctx.skillTrimBias) {
     // clamp bias to [-0.3, 0.3] to prevent extreme asymmetry
     const bias = Math.max(-0.3, Math.min(0.3, ctx.skillTrimBias));
-    preRollRatio = 0.5 - bias;
+    preRollRatio = Math.max(0.2, Math.min(0.8, preRollRatio - bias));
   }
 
   // Step 4: Compute in/out from center
@@ -177,6 +203,9 @@ export function resolveTrim(
     source_center_us: center,
     preferred_duration_us: desiredDurationUs,
     interest_point_label: interestLabel,
+    peak_type: peakType,
+    peak_confidence: peakConfidence,
+    peak_ref: peakRef,
   };
 }
 
@@ -231,7 +260,7 @@ export function applyAdaptiveTrim(
 
     // Store trim metadata
     if (!clip.metadata) clip.metadata = {};
-    (clip.metadata as Record<string, unknown>).trim = {
+    const trimMeta: Record<string, unknown> = {
       mode: resolved.mode,
       source_center_us: resolved.source_center_us,
       preferred_duration_us: resolved.preferred_duration_us,
@@ -239,6 +268,25 @@ export function applyAdaptiveTrim(
       resolved_src_out_us: resolved.src_out_us,
       interest_point_label: resolved.interest_point_label,
     };
+    if (resolved.peak_type) trimMeta.peak_type = resolved.peak_type;
+    if (resolved.peak_confidence !== undefined) trimMeta.peak_confidence = resolved.peak_confidence;
+    if (resolved.peak_ref) trimMeta.peak_ref = resolved.peak_ref;
+    (clip.metadata as Record<string, unknown>).trim = trimMeta;
+
+    // Peak editorial metadata (design doc §7.3)
+    if (resolved.peak_ref && resolved.peak_confidence !== undefined && resolved.peak_confidence >= 0.55) {
+      const editorial = ((clip.metadata as Record<string, unknown>).editorial ?? {}) as Record<string, unknown>;
+      const peakMeta: Record<string, unknown> = {
+        primary_peak_ref: resolved.peak_ref,
+        peak_type: resolved.peak_type,
+        peak_confidence: resolved.peak_confidence,
+      };
+      if (resolved.peak_confidence >= 0.70 && resolved.interest_point_label) {
+        peakMeta.peak_summary = resolved.interest_point_label;
+      }
+      editorial.peak = peakMeta;
+      (clip.metadata as Record<string, unknown>).editorial = editorial;
+    }
 
     trimResults.set(clip.clip_id, resolved);
   }

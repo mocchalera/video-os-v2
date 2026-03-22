@@ -13,6 +13,44 @@ import type {
 } from "./types.js";
 import { getSkillScoreAdjustment } from "../editorial/skill-registry.js";
 
+// ── Peak Salience Bonus ─────────────────────────────────────────────
+// Per vlm-peak-detection-design.md §11.2
+
+const BEAT_STORY_ROLE_WEIGHT: Record<string, number> = {
+  hook: 1.00,
+  experience: 0.85,
+  closing: 0.70,
+  setup: 0.45,
+};
+
+const PEAK_TYPE_MATCH: Record<string, Record<string, number>> = {
+  action_peak: { hero: 1.00, support: 1.00, transition: 0.55, texture: 0.55, dialogue: 0.55 },
+  emotional_peak: { dialogue: 1.00, hero: 1.00, support: 0.55, transition: 0.55, texture: 0.55 },
+  visual_peak: { support: 1.00, transition: 1.00, texture: 1.00, hero: 0.55, dialogue: 0.55 },
+};
+
+/**
+ * Compute candidate-specific peak salience bonus.
+ * Returns 0 if the candidate has no peak editorial signals.
+ */
+export function computePeakSalienceBonus(
+  candidate: Candidate,
+  beat: NormalizedBeat,
+): number {
+  const signals = candidate.editorial_signals;
+  if (!signals?.peak_strength_score) return 0;
+
+  const peakStrength = signals.peak_strength_score;
+  const storyRole = beat.story_role ?? "experience";
+  const storyRoleWeight = BEAT_STORY_ROLE_WEIGHT[storyRole] ?? 0.60;
+
+  const peakType = signals.peak_type ?? "visual_peak";
+  const candidateRole = candidate.role === "reject" ? "support" : candidate.role;
+  const typeMatchWeight = PEAK_TYPE_MATCH[peakType]?.[candidateRole] ?? 0.55;
+
+  return peakStrength * storyRoleWeight * typeMatchWeight;
+}
+
 export function scoreCandidates(
   normalized: NormalizedData,
   candidates: Candidate[],
@@ -170,6 +208,9 @@ function scoreCandidate(
     ? getSkillScoreAdjustment(activeSkills, candidate, beat.purpose)
     : 0;
 
+  // 7. Peak salience bonus: candidate-specific, per design doc §11.2
+  const peakSalienceBonus = computePeakSalienceBonus(candidate, beat);
+
   // Final score: weighted sum
   const score =
     semanticRankScore * 0.4 +
@@ -177,7 +218,8 @@ function scoreCandidate(
     qualityPenalty -
     motifReusePenalty -
     adjacencyPenalty +
-    skillAdjustment;
+    skillAdjustment +
+    peakSalienceBonus;
 
   return {
     candidate,
@@ -189,6 +231,7 @@ function scoreCandidate(
       duration_fit_score: durationFitScore,
       motif_reuse_penalty: motifReusePenalty,
       adjacency_penalty: adjacencyPenalty,
+      peak_salience_bonus: peakSalienceBonus,
     },
   };
 }

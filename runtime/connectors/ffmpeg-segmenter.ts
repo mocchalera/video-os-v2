@@ -75,6 +75,47 @@ export interface SegmentItem {
     tags?: Record<string, string>;
     quality_flags?: Record<string, string>;
   };
+  // Peak analysis extension (vlm-peak-detection-design.md §7.1)
+  peak_analysis?: {
+    coarse_locator?: {
+      contact_sheet_id: string;
+      tile_start_index: number;
+      tile_end_index: number;
+      coarse_window_start_us: number;
+      coarse_window_end_us: number;
+    };
+    peak_moments: Array<{
+      peak_ref: string;
+      timestamp_us: number;
+      type: string;
+      confidence: number;
+      description: string;
+      source_pass: string;
+    }>;
+    recommended_in_out?: {
+      best_in_us: number;
+      best_out_us: number;
+      rationale: string;
+      source_pass: string;
+    };
+    visual_energy_curve: Array<{
+      timestamp_us: number;
+      energy: number;
+      source?: string;
+    }>;
+    support_signals?: {
+      motion_support_score: number;
+      audio_support_score: number;
+      fused_peak_score: number;
+    };
+    provenance: {
+      coarse_prompt_template_id: string;
+      refine_prompt_template_id: string;
+      precision_mode: string;
+      fusion_version: string;
+      support_signal_version: string;
+    };
+  };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
