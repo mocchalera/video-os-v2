@@ -23,6 +23,7 @@ function parseArgs(argv: string[]): {
   skipPeak: boolean;
   language: string | undefined;
   sttProvider: string | undefined;
+  contentHint: string | undefined;
 } {
   const args = argv.slice(2); // skip node + script path
   const sourceFiles: string[] = [];
@@ -33,6 +34,7 @@ function parseArgs(argv: string[]): {
   let skipPeak = false;
   let language: string | undefined;
   let sttProvider: string | undefined;
+  let contentHint: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -50,6 +52,8 @@ function parseArgs(argv: string[]): {
       language = args[++i] ?? undefined;
     } else if (arg === "--stt-provider") {
       sttProvider = args[++i] ?? undefined;
+    } else if (arg === "--content-hint") {
+      contentHint = args[++i] ?? undefined;
     } else if (arg === "--help" || arg === "-h") {
       console.log(`Usage: npx tsx scripts/analyze.ts <source-files...> --project <project-dir>
 
@@ -61,6 +65,7 @@ Options:
   --skip-peak        Skip VLM peak detection stage
   --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
   --stt-provider     STT provider: "groq" or "openai" (auto-detected if omitted)
+  --content-hint     Content context for VLM (e.g. "子供の自転車練習")
   --help, -h         Show this help
 `);
       process.exit(0);
@@ -79,13 +84,13 @@ Options:
     process.exit(1);
   }
 
-  return { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider };
+  return { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider, contentHint };
 }
 
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider } = parseArgs(process.argv);
+  const { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider, contentHint } = parseArgs(process.argv);
 
   console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
   console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);
@@ -95,6 +100,7 @@ async function main(): Promise<void> {
   if (skipPeak) console.log("[analyze] Peak detection: skipped");
   if (language) console.log(`[analyze] Language: ${language}`);
   if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
+  if (contentHint) console.log(`[analyze] Content hint: ${contentHint}`);
 
   // Create live VLM function if not skipped and API key is available
   let vlmFn;
@@ -117,6 +123,7 @@ async function main(): Promise<void> {
     vlmFn,
     sttLanguageOverride: language,
     sttProvider,
+    contentHint,
   });
 
   console.log("\n[analyze] Pipeline complete");
