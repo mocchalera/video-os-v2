@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/adjacency-analysis.schema.json",
+  "title": "Adjacency Analysis",
+  "description": "Skill selection rationale for each adjacent clip pair",
+  "type": "object",
+  "required": ["version", "project_id", "pairs"],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "pairs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pair_result" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "pair_result": {
+      "type": "object",
+      "required": [
+        "pair_id",
+        "left_candidate_ref",
+        "right_candidate_ref",
+        "selected_skill_id",
+        "selected_skill_score",
+        "min_score_threshold",
+        "transition_type",
+        "confidence",
+        "below_threshold"
+      ],
+      "properties": {
+        "pair_id": { "type": "string" },
+        "left_candidate_ref": { "type": "string" },
+        "right_candidate_ref": { "type": "string" },
+        "selected_skill_id": { "type": ["string", "null"] },
+        "selected_skill_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "min_score_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "transition_type": {
+          "type": "string",
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+        },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "below_threshold": { "type": "boolean" },
+        "evidence": { "type": "object" },
+        "degraded_from_skill_id": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    }
+  }
+}

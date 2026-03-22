@@ -1,7 +1,47 @@
+# Dependency directories
 node_modules/
 dist/
+build/
+.tsbuildinfo
+
+# Temporary files
 tmp-*/
 tests/tmp_*/
-.claude/state/
-.claude/sessions/
-.claude/memory/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.settings/
+.classpath
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+
+# Tool-specific directories
+.claude/
+.codex/
+
+# Project-specific results
+projects/*
+!projects/_template/

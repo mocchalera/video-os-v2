@@ -1,0 +1,58 @@
+{
+  "id": "match_cut_bridge",
+  "version": "1",
+  "scope": "adjacent_pair",
+  "phase": "p0",
+  "intent": "視覚的類似性（構図・動き・形状）で異なる文脈を接続し、意味の橋渡しをする",
+  "audience_effect": "異なる場面が視覚的につながり、隠れた関連性や時間経過を直感的に理解する",
+  "murch_weights": {
+    "emotion": 0.15,
+    "story": 0.30,
+    "rhythm": 0.20,
+    "eye_trace": 0.15,
+    "plane_2d": 0.15,
+    "space_3d": 0.05
+  },
+  "min_score_threshold": 0.35,
+  "when": {
+    "all": [
+      { "path": "visual_tag_overlap_score", "op": "gte", "value": 0.4 },
+      { "path": "semantic_cluster_change", "op": "eq", "value": true }
+    ]
+  },
+  "avoid_when": {
+    "any": [
+      { "path": "visual_tag_overlap_score", "op": "lt", "value": 0.2 },
+      { "path": "same_asset", "op": "eq", "value": true }
+    ]
+  },
+  "minimum_viable": [
+    {
+      "id": "visual_similarity_exists",
+      "predicate": {
+        "all": [
+          { "path": "visual_tag_overlap_score", "op": "gte", "value": 0.3 }
+        ]
+      },
+      "failure_reason": "隣接クリップ間に視覚的類似要素が不十分"
+    }
+  ],
+  "fallback_order": [
+    {
+      "kind": "crossfade",
+      "lower_to": "transition",
+      "transition_type": "crossfade",
+      "crossfade_sec": 0.5
+    },
+    {
+      "kind": "hard_cut",
+      "lower_to": "transition",
+      "transition_type": "cut"
+    }
+  ],
+  "pipeline_effects": {
+    "transition_type": "match_cut",
+    "beat_snap": "downbeat",
+    "snap_anchor": "cut_frame"
+  }
+}

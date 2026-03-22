@@ -1,0 +1,61 @@
+{
+  "id": "smash_cut_energy",
+  "version": "1",
+  "scope": "adjacent_pair",
+  "phase": "p0",
+  "intent": "エネルギーの急激な転換で驚き・衝撃・ユーモアを演出する",
+  "audience_effect": "予想外の断絶で覚醒し、直前の内容とのコントラストが強く印象に残る",
+  "murch_weights": {
+    "emotion": 0.35,
+    "story": 0.25,
+    "rhythm": 0.30,
+    "eye_trace": 0.05,
+    "plane_2d": 0.05,
+    "space_3d": 0.0
+  },
+  "min_score_threshold": 0.35,
+  "when": {
+    "all": [
+      { "path": "energy_delta_score", "op": "gte", "value": 0.4 }
+    ],
+    "any": [
+      { "path": "effective_peak_type", "op": "eq", "value": "action_peak" },
+      { "path": "semantic_cluster_change", "op": "eq", "value": true }
+    ]
+  },
+  "avoid_when": {
+    "any": [
+      { "path": "outgoing_afterglow_score", "op": "gte", "value": 0.6 },
+      { "path": "same_asset", "op": "eq", "value": true }
+    ]
+  },
+  "minimum_viable": [
+    {
+      "id": "energy_contrast_exists",
+      "predicate": {
+        "all": [
+          { "path": "energy_delta_score", "op": "gte", "value": 0.3 }
+        ]
+      },
+      "failure_reason": "前後のエネルギー落差が不十分"
+    }
+  ],
+  "fallback_order": [
+    {
+      "kind": "hard_cut",
+      "lower_to": "transition",
+      "transition_type": "cut"
+    },
+    {
+      "kind": "crossfade",
+      "lower_to": "transition",
+      "transition_type": "crossfade",
+      "crossfade_sec": 0.3
+    }
+  ],
+  "pipeline_effects": {
+    "transition_type": "cut",
+    "beat_snap": "downbeat",
+    "snap_anchor": "cut_frame"
+  }
+}

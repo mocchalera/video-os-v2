@@ -110,6 +110,12 @@
         "$ref": "#/$defs/marker"
       }
     },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/transition"
+      }
+    },
     "provenance": {
       "type": "object",
       "required": [
@@ -297,6 +303,46 @@
         "metadata": {
           "type": "object"
         }
+      },
+      "additionalProperties": false
+    },
+    "transition": {
+      "type": "object",
+      "required": [
+        "transition_id",
+        "from_clip_id",
+        "to_clip_id",
+        "track_id",
+        "transition_type"
+      ],
+      "properties": {
+        "transition_id": { "type": "string" },
+        "from_clip_id": { "type": "string" },
+        "to_clip_id": { "type": "string" },
+        "track_id": { "type": "string" },
+        "transition_type": {
+          "type": "string",
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+        },
+        "transition_params": {
+          "type": "object",
+          "properties": {
+            "crossfade_sec": { "type": "number", "minimum": 0 },
+            "audio_overlap_sec": { "type": "number", "minimum": 0 },
+            "cut_frame_before_snap": { "type": "integer", "minimum": 0 },
+            "cut_frame_after_snap": { "type": "integer", "minimum": 0 },
+            "snap_delta_frames": { "type": "integer" },
+            "hold_side": { "type": "string", "enum": ["left", "right"] },
+            "hold_frames": { "type": "integer", "minimum": 0 },
+            "zoom": { "type": "object" },
+            "beat_snapped": { "type": "boolean" },
+            "beat_ref_sec": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "applied_skill_id": { "type": "string" },
+        "degraded_from_skill_id": { "type": ["string", "null"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
       },
       "additionalProperties": false
     },

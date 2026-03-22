@@ -362,6 +362,18 @@ export interface Marker {
 
 // ── Final output types (Phase 5) ────────────────────────────────────
 
+export interface TimelineTransitionOutput {
+  transition_id: string;
+  from_clip_id: string;
+  to_clip_id: string;
+  track_id: string;
+  transition_type: string;
+  transition_params?: Record<string, unknown>;
+  applied_skill_id?: string;
+  degraded_from_skill_id?: string | null;
+  confidence?: number;
+}
+
 export interface TimelineIR {
   version: string;
   project_id: string;
@@ -381,6 +393,7 @@ export interface TimelineIR {
     audio: TrackOutput[];
   };
   markers: MarkerOutput[];
+  transitions?: TimelineTransitionOutput[];
   provenance: {
     brief_path: string;
     blueprint_path: string;

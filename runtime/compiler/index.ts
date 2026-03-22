@@ -16,6 +16,8 @@ import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from
 import { applyPatch } from "./patch.js";
 import { resolveDurationPolicyFromBlueprint } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
+import { adjacencyDecide, writeAdjacencyAnalysis } from "./adjacency.js";
+import { loadBgmAnalysis } from "../connectors/bgm-beat-detector.js";
 import type {
   CompileOptions,
   CompilerDefaults,
@@ -148,6 +150,40 @@ export function compile(opts: CompileOptions): CompileResult {
 
   const resolution = resolve(assembled, normalized.total_duration_frames, selects.candidates, durationPolicy, fpsNum, fpsDen);
 
+  // ── Phase 4.5: Adjacency Decide ──────────────────────────────────
+  // Analyze adjacent clip pairs on V1 and assign transition skills.
+  // Only runs when active editing skills are available.
+
+  let adjacencyTransitions: import("./transition-types.js").TimelineTransition[] = [];
+
+  if (activeSkills.length > 0 && assembled.tracks.video.length > 0) {
+    const v1Track = assembled.tracks.video[0];
+    if (v1Track.clips.length > 1) {
+      // Load BGM analysis if available
+      const bgmAnalysis = loadBgmAnalysis(projectPath);
+
+      const adjResult = adjacencyDecide(v1Track, {
+        activeEditingSkills: activeSkills,
+        durationMode: durationPolicy?.mode ?? "guide",
+        fpsNum,
+        bgmAnalysis,
+        candidates: selects.candidates,
+        beats: normalized.beats,
+        transitionSkillsDir: opts.repoRoot
+          ? path.join(opts.repoRoot, "runtime/editorial/transition-skills")
+          : undefined,
+      });
+
+      adjacencyTransitions = adjResult.transitions;
+
+      // Set project_id on analysis
+      adjResult.analysis.project_id = normalized.project_id;
+
+      // Write adjacency analysis artifact
+      writeAdjacencyAnalysis(adjResult.analysis, projectPath);
+    }
+  }
+
   // ── Phase 5: Export ───────────────────────────────────────────────
 
   const createdAt = opts.createdAt;
@@ -163,6 +199,7 @@ export function compile(opts: CompileOptions): CompileResult {
     fpsNum,
     fpsDen,
     durationPolicy,
+    transitions: adjacencyTransitions.length > 0 ? adjacencyTransitions : undefined,
   });
 
   // ── Phase 5.5: Editorial Metadata ─────────────────────────────────

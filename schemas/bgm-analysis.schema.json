@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/bgm-analysis.schema.json",
+  "title": "BGM Analysis",
+  "description": "Beat/downbeat detection results for BGM-driven cut synchronization",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "analysis_status",
+    "music_asset",
+    "bpm",
+    "meter",
+    "duration_sec",
+    "beats_sec",
+    "downbeats_sec",
+    "sections",
+    "provenance"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string" },
+    "analysis_status": { "type": "string", "enum": ["ready", "partial", "failed"] },
+    "music_asset": {
+      "type": "object",
+      "required": ["asset_id", "path"],
+      "properties": {
+        "asset_id": { "type": "string" },
+        "path": { "type": "string" },
+        "source_hash": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "bpm": { "type": "number", "exclusiveMinimum": 0 },
+    "meter": { "type": "string" },
+    "duration_sec": { "type": "number", "minimum": 0 },
+    "beats_sec": {
+      "type": "array",
+      "items": { "type": "number", "minimum": 0 }
+    },
+    "downbeats_sec": {
+      "type": "array",
+      "items": { "type": "number", "minimum": 0 }
+    },
+    "sections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/section" }
+    },
+    "editorial_arc_map": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/arc_map_entry" }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["detector", "sample_rate_hz"],
+      "properties": {
+        "detector": { "type": "string" },
+        "sample_rate_hz": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "section": {
+      "type": "object",
+      "required": ["id", "label", "start_sec", "end_sec", "energy"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "start_sec": { "type": "number", "minimum": 0 },
+        "end_sec": { "type": "number", "minimum": 0 },
+        "energy": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "arc_map_entry": {
+      "type": "object",
+      "required": ["story_role", "preferred_sections"],
+      "properties": {
+        "story_role": { "type": "string", "enum": ["hook", "setup", "experience", "closing"] },
+        "preferred_sections": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

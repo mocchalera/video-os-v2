@@ -1,0 +1,60 @@
+{
+  "id": "crossfade_bridge",
+  "version": "1",
+  "scope": "adjacent_pair",
+  "phase": "p0",
+  "intent": "crossfade でトピック転換を示す（montage_compress の簡易版）",
+  "audience_effect": "場面転換がゆるやかに示され、異なるトピックへの移行を自然に受容する",
+  "murch_weights": {
+    "emotion": 0.25,
+    "story": 0.30,
+    "rhythm": 0.30,
+    "eye_trace": 0.10,
+    "plane_2d": 0.05,
+    "space_3d": 0.0
+  },
+  "min_score_threshold": 0.25,
+  "when": {
+    "all": [
+      { "path": "semantic_cluster_change", "op": "eq", "value": true }
+    ],
+    "any": [
+      { "path": "visual_tag_overlap_score", "op": "lt", "value": 0.3 },
+      { "path": "motif_overlap_score", "op": "lt", "value": 0.3 }
+    ]
+  },
+  "avoid_when": {
+    "any": [
+      { "path": "energy_delta_score", "op": "gt", "value": 0.5 },
+      { "path": "effective_peak_type", "op": "eq", "value": "action_peak" }
+    ]
+  },
+  "minimum_viable": [
+    {
+      "id": "topic_change_exists",
+      "predicate": {
+        "all": [
+          { "path": "semantic_cluster_change", "op": "eq", "value": true }
+        ]
+      },
+      "failure_reason": "セマンティッククラスターの変化がない"
+    }
+  ],
+  "fallback_order": [
+    {
+      "kind": "hard_cut",
+      "lower_to": "transition",
+      "transition_type": "cut"
+    },
+    {
+      "kind": "skip_skill",
+      "lower_to": "marker_only"
+    }
+  ],
+  "pipeline_effects": {
+    "transition_type": "crossfade",
+    "crossfade_sec": 0.5,
+    "beat_snap": "beat",
+    "snap_anchor": "transition_center"
+  }
+}

@@ -10,8 +10,10 @@ import type {
   DurationPolicy,
   MarkerOutput,
   TimelineIR,
+  TimelineTransitionOutput,
   TrackOutput,
 } from "./types.js";
+import type { TimelineTransition } from "./transition-types.js";
 
 const COMPILER_VERSION = "1.0.0";
 
@@ -26,6 +28,7 @@ export interface ExportOptions {
   fpsNum?: number;
   fpsDen?: number;
   durationPolicy?: DurationPolicy;
+  transitions?: TimelineTransition[];
 }
 
 export function buildTimelineIR(
@@ -50,6 +53,24 @@ export function buildTimelineIR(
     label: m.label,
   }));
 
+  // Convert transitions if provided
+  const transitionOutputs: TimelineTransitionOutput[] | undefined = opts.transitions
+    ? opts.transitions.map(t => {
+        const out: TimelineTransitionOutput = {
+          transition_id: t.transition_id,
+          from_clip_id: t.from_clip_id,
+          to_clip_id: t.to_clip_id,
+          track_id: t.track_id,
+          transition_type: t.transition_type,
+        };
+        if (t.transition_params) out.transition_params = t.transition_params as Record<string, unknown>;
+        if (t.applied_skill_id) out.applied_skill_id = t.applied_skill_id;
+        if (t.degraded_from_skill_id !== undefined) out.degraded_from_skill_id = t.degraded_from_skill_id;
+        if (t.confidence !== undefined) out.confidence = t.confidence;
+        return out;
+      })
+    : undefined;
+
   return {
     version: "1",
     project_id: opts.projectId,
@@ -67,6 +88,7 @@ export function buildTimelineIR(
       audio: audioTracks,
     },
     markers,
+    ...(transitionOutputs && transitionOutputs.length > 0 ? { transitions: transitionOutputs } : {}),
     provenance: {
       brief_path: opts.briefRelPath,
       blueprint_path: opts.blueprintRelPath,
