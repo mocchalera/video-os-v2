@@ -21,6 +21,7 @@ import type {
   SttUtterance,
   SttWord,
 } from "./stt-interface.js";
+import type { DiarizeTurn } from "./pyannote-diarizer.js";
 
 // ── Groq Response Types ─────────────────────────────────────────────
 
@@ -139,6 +140,122 @@ export function parseGroqResponse(
     utterances,
     language: data.language,
   };
+}
+
+// ── Speaker Assignment (Groq + pyannote merge) ─────────────────────
+
+/**
+ * Compute overlap duration between two time ranges (in microseconds).
+ */
+export function overlapDuration(
+  aStart: number, aEnd: number,
+  bStart: number, bEnd: number,
+): number {
+  const start = Math.max(aStart, bStart);
+  const end = Math.min(aEnd, bEnd);
+  return Math.max(0, end - start);
+}
+
+/**
+ * Assign speaker labels from pyannote DiarizeTurns to Groq STT utterances.
+ *
+ * Port of _assign_speakers_to_transcript_segments from the old video-edit-agent repo.
+ *
+ * For each utterance:
+ * 1. If word-level timings are available, compute per-word overlap with speaker turns
+ * 2. Otherwise, use utterance-level time range
+ * 3. The speaker with the most overlap time wins
+ * 4. If the dominant speaker has ≥ dominantThreshold share, assign that speaker
+ * 5. Otherwise, assign the speaker with the most overlap (no threshold gate)
+ *
+ * Returns new utterances with updated speaker labels. Original utterances are not mutated.
+ */
+export function assignSpeakersToUtterances(
+  utterances: SttUtterance[],
+  turns: DiarizeTurn[],
+  options: { dominantThreshold?: number } = {},
+): SttUtterance[] {
+  if (turns.length === 0) {
+    return utterances;
+  }
+
+  const threshold = options.dominantThreshold ?? 0.70;
+
+  return utterances.map((utt) => {
+    // Determine time slices to check — prefer word-level granularity
+    const slices: Array<{ start_us: number; end_us: number }> =
+      utt.words && utt.words.length > 0
+        ? utt.words
+        : [{ start_us: utt.start_us, end_us: utt.end_us }];
+
+    // Accumulate overlap duration per speaker
+    const speakerDurations = new Map<string, number>();
+
+    for (const slice of slices) {
+      if (slice.end_us <= slice.start_us) continue;
+
+      let bestOverlap = 0;
+      let bestSpeaker: string | null = null;
+
+      for (const turn of turns) {
+        const overlap = overlapDuration(
+          slice.start_us, slice.end_us,
+          turn.start_us, turn.end_us,
+        );
+        if (overlap > bestOverlap) {
+          bestOverlap = overlap;
+          bestSpeaker = turn.speaker_id;
+        }
+      }
+
+      if (bestSpeaker && bestOverlap > 0) {
+        speakerDurations.set(
+          bestSpeaker,
+          (speakerDurations.get(bestSpeaker) ?? 0) + bestOverlap,
+        );
+      }
+    }
+
+    // Find dominant speaker
+    const totalDuration = Array.from(speakerDurations.values()).reduce((a, b) => a + b, 0);
+    if (totalDuration === 0) {
+      return utt; // No overlap — keep original speaker
+    }
+
+    let dominantSpeaker = "";
+    let dominantDuration = 0;
+    for (const [spk, dur] of speakerDurations) {
+      if (dur > dominantDuration) {
+        dominantDuration = dur;
+        dominantSpeaker = spk;
+      }
+    }
+
+    const dominantShare = dominantDuration / totalDuration;
+
+    // Normalize speaker label: SPEAKER_00 → S1, SPEAKER_01 → S2, etc.
+    const assignedSpeaker = dominantShare >= threshold || speakerDurations.size === 1
+      ? dominantSpeaker
+      : dominantSpeaker; // Always assign best match, threshold only affects confidence
+
+    return { ...utt, speaker: assignedSpeaker };
+  });
+}
+
+/**
+ * Normalize pyannote speaker labels to sequential S1, S2, S3... format.
+ * Returns a new array of utterances with normalized speaker labels.
+ */
+export function normalizeSpeakerLabels(utterances: SttUtterance[]): SttUtterance[] {
+  const labelMap = new Map<string, string>();
+  let nextIndex = 1;
+
+  return utterances.map((utt) => {
+    if (!labelMap.has(utt.speaker)) {
+      labelMap.set(utt.speaker, `S${nextIndex++}`);
+    }
+    return { ...utt, speaker: labelMap.get(utt.speaker)! };
+  });
 }
 
 // ── Factory ─────────────────────────────────────────────────────────

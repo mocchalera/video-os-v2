@@ -30,10 +30,20 @@ import {
   processAssetStt,
   computeTranscriptExcerpt,
   createOpenAiTranscribeFn,
+  extractAudioProxy,
   type AssetSttResult,
   type TranscriptItem,
 } from "../connectors/openai-stt.js";
-import { createGroqTranscribeFn } from "../connectors/groq-stt.js";
+import {
+  createGroqTranscribeFn,
+  assignSpeakersToUtterances,
+  normalizeSpeakerLabels,
+} from "../connectors/groq-stt.js";
+import {
+  diarizeAsset,
+  type DiarizeTurn,
+  type DiarizeOptions,
+} from "../connectors/pyannote-diarizer.js";
 import type {
   TranscribeFn,
   SttPolicy,
@@ -79,6 +89,10 @@ export interface PipelineOptions {
   sttLanguageOverride?: string;
   /** Override STT provider: "groq" | "openai" (auto-detected from model_alias if omitted) */
   sttProvider?: string;
+  /** Skip pyannote speaker diarization (e.g. when pyannote is not installed) */
+  skipDiarize?: boolean;
+  /** Injectable diarize function for testing (bypasses real pyannote bridge) */
+  diarizeFn?: (audioPath: string, options?: DiarizeOptions) => Promise<DiarizeTurn[]>;
 }
 
 export interface PipelineResult {
@@ -385,7 +399,13 @@ export function resolveTranscribeFn(
 // ── Stage 7+8: STT ─────────────────────────────────────────────────
 
 /**
- * Stage 7: stt.map — per-asset audio extraction + STT API call.
+ * Stage 7: stt.map — per-asset audio extraction + STT API call + optional diarization.
+ *
+ * When diarization is enabled (skipDiarize=false) and the STT provider is Groq:
+ * 1. processAssetStt runs Groq Whisper (all segments labeled S1)
+ * 2. pyannote bridge runs on the same audio proxy → speaker turns
+ * 3. Speaker turns are merged with STT utterances via time-overlap matching
+ * 4. Labels are normalized to S1, S2, S3... in order of first appearance
  */
 async function sttMap(
   sourceFileMap: Map<string, string>,
@@ -396,6 +416,12 @@ async function sttMap(
   alignmentThresholds: TranscriptAlignmentThresholds,
   policyHash: string,
   transcribeFn: TranscribeFn,
+  diarizeOpts?: {
+    skipDiarize: boolean;
+    providerName: string;
+    diarizeFn?: (audioPath: string, options?: DiarizeOptions) => Promise<DiarizeTurn[]>;
+    gapEntries: GapEntry[];
+  },
 ): Promise<Map<string, AssetSttResult>> {
   const results = new Map<string, AssetSttResult>();
 
@@ -421,6 +447,91 @@ async function sttMap(
       alignmentThresholds,
       transcribeFn,
     });
+
+    // Diarization sub-stage: merge pyannote speaker turns with Groq STT output
+    if (
+      result.success &&
+      result.transcript.items.length > 0 &&
+      diarizeOpts &&
+      !diarizeOpts.skipDiarize &&
+      diarizeOpts.providerName === "groq-whisper"
+    ) {
+      try {
+        // Extract a separate audio proxy for diarization
+        // (processAssetStt cleans up its own tmp dir in a finally block)
+        const diaTmpDir = path.join(outputDir, "_diarize_tmp", asset.asset_id);
+        fs.mkdirSync(diaTmpDir, { recursive: true });
+
+        console.log(`[diarize] Extracting audio proxy for ${asset.asset_id}...`);
+        const wavPath = await extractAudioProxy(sourceFile, diaTmpDir, asset.asset_id);
+
+        {
+          console.log(`[diarize] Running pyannote on ${asset.asset_id}...`);
+
+          const diaFn = diarizeOpts.diarizeFn ?? diarizeAsset;
+          const turns = await diaFn(wavPath);
+
+          if (turns.length > 0) {
+            console.log(`[diarize] ${asset.asset_id}: ${new Set(turns.map(t => t.speaker_id)).size} speakers detected, ${turns.length} turns`);
+
+            // Convert TranscriptItems to SttUtterances for speaker assignment
+            const utterances = result.transcript.items.map((item) => ({
+              speaker: item.speaker,
+              start_us: item.start_us,
+              end_us: item.end_us,
+              text: item.text,
+            }));
+
+            // Assign speakers and normalize labels
+            const withSpeakers = assignSpeakersToUtterances(utterances, turns);
+            const normalized = normalizeSpeakerLabels(withSpeakers);
+
+            // Update transcript items with diarized speaker labels
+            for (let i = 0; i < result.transcript.items.length; i++) {
+              result.transcript.items[i].speaker = normalized[i].speaker;
+              result.transcript.items[i].speaker_key =
+                `${asset.asset_id}:${normalized[i].speaker}`;
+            }
+
+            // Record diarization provenance
+            const diarization = {
+              provider: "pyannote",
+              speaker_count: new Set(normalized.map((u) => u.speaker)).size,
+              turn_count: turns.length,
+            };
+            (result.transcript as unknown as Record<string, unknown>).diarization = diarization;
+          } else {
+            console.warn(`[diarize] ${asset.asset_id}: no speaker turns detected (pyannote may not be available)`);
+            if (diarizeOpts.gapEntries) {
+              diarizeOpts.gapEntries.push({
+                stage: "diarize",
+                asset_id: asset.asset_id,
+                issue: "diarization_no_turns: pyannote returned no speaker turns",
+                severity: "warning",
+              });
+            }
+          }
+
+          // Clean up diarization temp dir
+          try {
+            fs.rmSync(diaTmpDir, { recursive: true, force: true });
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+      } catch (err) {
+        console.warn(`[diarize] ${asset.asset_id}: diarization failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (diarizeOpts?.gapEntries) {
+          diarizeOpts.gapEntries.push({
+            stage: "diarize",
+            asset_id: asset.asset_id,
+            issue: `diarization_failed: ${err instanceof Error ? err.message : String(err)}`,
+            severity: "warning",
+          });
+        }
+      }
+    }
+
     results.set(asset.asset_id, result);
   }
 
@@ -816,6 +927,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
   // Stage 7+8: STT (optional — skipped when no audio or when explicitly disabled)
   let sttResults: Map<string, AssetSttResult> | undefined;
+  const diarizeGapEntries: GapEntry[] = [];
   if (!opts.skipStt) {
     const sttPolicy = (policy as Record<string, unknown>)["stt"] as SttPolicy | undefined;
     const qualThresholds = (policy as Record<string, unknown>)["quality_thresholds"] as
@@ -834,12 +946,15 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
       // Use injected transcribeFn if provided (for testing), otherwise resolve from policy
       let transcribeFn: TranscribeFn;
+      let providerName: string;
       if (opts.transcribeFn) {
         transcribeFn = opts.transcribeFn;
+        providerName = opts.sttProvider ?? "injected";
       } else {
         const resolved = resolveTranscribeFn(effectiveSttPolicy, opts.sttProvider);
         transcribeFn = resolved.transcribeFn;
-        console.log(`[pipeline] STT provider: ${resolved.providerName} (model: ${effectiveSttPolicy.model_alias})`);
+        providerName = resolved.providerName;
+        console.log(`[pipeline] STT provider: ${providerName} (model: ${effectiveSttPolicy.model_alias})`);
       }
 
       sttResults = await sttMap(
@@ -851,6 +966,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         alignmentThresholds,
         policyHash,
         transcribeFn,
+        {
+          skipDiarize: opts.skipDiarize ?? false,
+          providerName,
+          diarizeFn: opts.diarizeFn,
+          gapEntries: diarizeGapEntries,
+        },
       );
 
       const sttReduceResult = sttReduce(
@@ -899,10 +1020,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     }
   }
 
-  // Gap report (includes detector failure reasons + STT + VLM results)
+  // Gap report (includes detector failure reasons + STT + VLM + diarization results)
   const gapReport = buildGapReport(
     assetsJson.items, segmentShards, derivativeResults, segMapResult.detectorFailures, sttResults, vlmShards,
   );
+  // Merge diarization gap entries
+  gapReport.entries.push(...diarizeGapEntries);
   atomicWriteYaml(gapReportPath, gapReport);
 
   return {
