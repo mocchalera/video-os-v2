@@ -55,8 +55,8 @@ Every stage produces **canonical, schema-validated artifacts** — not throwaway
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/your-org/video-os-v2-spec.git
-cd video-os-v2-spec
+git clone https://github.com/user/video-os-v2.git
+cd video-os-v2
 npm install
 ```
 
