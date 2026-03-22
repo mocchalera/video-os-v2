@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "main": "index.html",
   "host": {
-    "app": "PProHeadless",
-    "minVersion": "23.0.0"
+    "app": "premierepro",
+    "minVersion": "25.0.0"
   },
   "entrypoints": [
     {
