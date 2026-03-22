@@ -169,8 +169,9 @@ export function resolve(
     }
   }
 
-  // Legacy duration fit (backward compat)
-  const durationFit = maxFrame <= totalTargetFrames;
+  // Duration fit: for guide mode, use policy max bounds (target is a floor, not a cap).
+  // For strict mode or when no policy, use totalTargetFrames as the ceiling.
+  let durationFit: boolean | undefined;
 
   // Duration policy-aware status
   let duration_status: DurationStatus | undefined;
@@ -200,6 +201,21 @@ export function resolve(
         duration_status = "pass";
       }
     }
+
+    // Guide mode: duration_fit uses policy max bounds (target is a floor).
+    // Strict mode: use window check.
+    if (durationPolicy.mode === "guide") {
+      durationFit = bounds.max_target_frames != null
+        ? maxFrame <= bounds.max_target_frames
+        : true; // unbounded max → always fits
+    } else {
+      durationFit = isWithinWindow(maxFrame, bounds);
+    }
+  }
+
+  // Fallback when no policy: legacy check against beat target sum
+  if (durationFit === undefined) {
+    durationFit = maxFrame <= totalTargetFrames;
   }
 
   return {

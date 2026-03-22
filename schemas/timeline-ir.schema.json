@@ -66,6 +66,15 @@
             "DF",
             "AUTO"
           ]
+        },
+        "output_aspect_ratio": {
+          "type": "string",
+          "description": "Output aspect ratio string (e.g. 16:9, 9:16, 1:1, 4:5)"
+        },
+        "letterbox_policy": {
+          "type": "string",
+          "enum": ["none", "pillarbox", "letterbox"],
+          "description": "How to handle source/output aspect ratio mismatch"
         }
       },
       "additionalProperties": false

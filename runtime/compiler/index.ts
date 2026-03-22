@@ -14,7 +14,7 @@ import { applyDurationAdjust } from "./duration-adjust.js";
 import { resolve } from "./resolve.js";
 import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
 import { applyPatch } from "./patch.js";
-import { resolveDurationPolicyFromBlueprint } from "./duration-helpers.js";
+import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysis } from "../connectors/bgm-beat-detector.js";
@@ -128,9 +128,15 @@ export function compile(opts: CompileOptions): CompileResult {
     durationPolicy,
   );
 
+  // ── Phase 2.5: Resolve Timeline Order & Output Dimensions ────────
+  const timelineOrder = resolveTimelineOrder(blueprint, blueprint.resolved_profile?.id);
+  const outputDims = resolveOutputDimensions(brief.editorial);
+
   // ── Phase 3: Assemble ─────────────────────────────────────────────
 
-  const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen, durationPolicy);
+  const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen, durationPolicy, {
+    timelineOrder,
+  });
 
   // ── Phase 3.5: Adaptive Trim ────────────────────────────────────
   // Apply center-based trim when trim_hint is available.
@@ -227,6 +233,10 @@ export function compile(opts: CompileOptions): CompileResult {
     fpsDen,
     durationPolicy,
     transitions: adjacencyTransitions.length > 0 ? adjacencyTransitions : undefined,
+    width: outputDims.width,
+    height: outputDims.height,
+    outputAspectRatio: outputDims.output_aspect_ratio,
+    letterboxPolicy: outputDims.letterbox_policy,
   });
 
   // ── Phase 5.5: Editorial Metadata ─────────────────────────────────

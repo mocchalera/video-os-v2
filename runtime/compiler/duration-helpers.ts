@@ -2,7 +2,7 @@
 // Pure functions for resolving duration mode, computing frame boundaries,
 // and building DurationPolicy snapshots.
 
-import type { DurationMode, DurationPolicy, CreativeBrief, EditBlueprint } from "./types.js";
+import type { DurationMode, DurationPolicy, CreativeBrief, EditBlueprint, CreativeBriefEditorial } from "./types.js";
 
 // ── Profile → Duration Mode mapping ────────────────────────────────
 
@@ -183,4 +183,82 @@ export function resolveDurationPolicyFromBlueprint(
     blueprint.resolved_profile?.id,
     materialTotalDurationSec,
   );
+}
+
+// ── Output Dimensions ────────────────────────────────────────────────
+
+export interface OutputDimensions {
+  width: number;
+  height: number;
+  output_aspect_ratio: string;
+  letterbox_policy: "none" | "pillarbox" | "letterbox";
+}
+
+const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }> = {
+  "16:9": { width: 1920, height: 1080 },
+  "9:16": { width: 1080, height: 1920 },
+  "1:1": { width: 1080, height: 1080 },
+  "4:5": { width: 1080, height: 1350 },
+};
+
+/**
+ * Resolve output dimensions from creative brief editorial settings.
+ * Falls back to 16:9 (1920x1080) when aspect_ratio is unspecified.
+ */
+export function resolveOutputDimensions(
+  editorial?: CreativeBriefEditorial,
+): OutputDimensions {
+  const ratio = editorial?.aspect_ratio;
+  if (ratio && ratio !== "unknown" && ASPECT_RATIO_DIMENSIONS[ratio]) {
+    const dims = ASPECT_RATIO_DIMENSIONS[ratio];
+    return {
+      width: dims.width,
+      height: dims.height,
+      output_aspect_ratio: ratio,
+      letterbox_policy: "none",
+    };
+  }
+
+  // Default to 16:9
+  return {
+    width: 1920,
+    height: 1080,
+    output_aspect_ratio: "16:9",
+    letterbox_policy: "none",
+  };
+}
+
+// ── Timeline Order ───────────────────────────────────────────────────
+
+const PROFILE_TIMELINE_ORDER: Record<string, "chronological" | "editorial"> = {
+  "keepsake": "chronological",
+  "event-recap": "chronological",
+  "interview-highlight": "editorial",
+  "interview-pro-highlight": "editorial",
+  "lp-testimonial": "editorial",
+  "vertical-short": "editorial",
+  "product-demo": "editorial",
+  "lecture-highlight": "editorial",
+};
+
+/**
+ * Resolve timeline ordering strategy.
+ * Precedence: explicit blueprint > story_arc strategy > profile default > editorial.
+ */
+export function resolveTimelineOrder(
+  blueprint: EditBlueprint,
+  resolvedProfileId?: string,
+): "chronological" | "editorial" {
+  // 1. Explicit in blueprint
+  if (blueprint.timeline_order) return blueprint.timeline_order;
+
+  // 2. Infer from story_arc strategy
+  if (blueprint.story_arc?.strategy === "chronological") return "chronological";
+
+  // 3. Profile default
+  if (resolvedProfileId) {
+    return PROFILE_TIMELINE_ORDER[resolvedProfileId] ?? "editorial";
+  }
+
+  return "editorial";
 }

@@ -8,7 +8,8 @@
     "fps_den": 1,
     "width": 1920,
     "height": 1080,
-    "start_frame": 0
+    "start_frame": 0,
+    "output_aspect_ratio": "16:9"
   },
   "tracks": {
     "video": [
@@ -35,12 +36,12 @@
             "candidate_ref": "legacy:SEG_0025:1400000:6000000"
           },
           {
-            "clip_id": "CLP_0006",
+            "clip_id": "CLP_0008",
             "segment_id": "SEG_0020",
             "asset_id": "AST_004",
             "src_in_us": 8000000,
             "src_out_us": 13800000,
-            "timeline_in_frame": 231,
+            "timeline_in_frame": 312,
             "timeline_duration_frames": 140,
             "role": "hero",
             "motivation": "profile movement with visible breath widens the film while keeping the pace measured",
@@ -51,12 +52,12 @@
             "candidate_ref": "legacy:SEG_0020:8000000:13800000"
           },
           {
-            "clip_id": "CLP_0010",
+            "clip_id": "CLP_0012",
             "segment_id": "SEG_0028",
             "asset_id": "AST_005",
             "src_in_us": 18200000,
             "src_out_us": 23000000,
-            "timeline_in_frame": 371,
+            "timeline_in_frame": 552,
             "timeline_duration_frames": 116,
             "role": "hero",
             "motivation": "the restrained exhale gives the release beat a human ending without overplaying emotion",
@@ -99,18 +100,29 @@
             "role": "texture",
             "motivation": "moving water gives the middle beat a reset motif without competing with spoken lines",
             "beat_id": "b02",
-            "fallback_segment_ids": [
-              "SEG_0014"
-            ],
+            "fallback_segment_ids": [],
             "confidence": 0.88,
             "quality_flags": [],
-            "candidate_ref": "legacy:SEG_0032:5000000:9700000",
-            "fallback_candidate_refs": [
-              "legacy:SEG_0014:5200000:9400000"
-            ]
+            "candidate_ref": "legacy:SEG_0032:5000000:9700000"
           },
           {
-            "clip_id": "CLP_0005",
+            "clip_id": "CLP_0004",
+            "segment_id": "SEG_0014",
+            "asset_id": "AST_003",
+            "src_in_us": 5200000,
+            "src_out_us": 9400000,
+            "timeline_in_frame": 96,
+            "timeline_duration_frames": 101,
+            "role": "support",
+            "motivation": "strap-tightening continues the prep motif while adding forward motion into the exterior section",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.87,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0014:5200000:9400000"
+          },
+          {
+            "clip_id": "CLP_0007",
             "segment_id": "SEG_0012",
             "asset_id": "AST_002",
             "src_in_us": 24000000,
@@ -126,35 +138,30 @@
             "candidate_ref": "legacy:SEG_0012:24000000:29600000"
           },
           {
-            "clip_id": "CLP_0007",
+            "clip_id": "CLP_0009",
             "segment_id": "SEG_0023",
             "asset_id": "AST_004",
             "src_in_us": 27000000,
             "src_out_us": 32800000,
-            "timeline_in_frame": 231,
+            "timeline_in_frame": 312,
             "timeline_duration_frames": 140,
             "role": "support",
             "motivation": "uphill wide introduces scale without requiring a summit payoff",
             "beat_id": "b03",
-            "fallback_segment_ids": [
-              "SEG_0014"
-            ],
+            "fallback_segment_ids": [],
             "confidence": 0.84,
             "quality_flags": [
               "slight_wind"
             ],
-            "candidate_ref": "legacy:SEG_0023:27000000:32800000",
-            "fallback_candidate_refs": [
-              "legacy:SEG_0014:5200000:9400000"
-            ]
+            "candidate_ref": "legacy:SEG_0023:27000000:32800000"
           },
           {
-            "clip_id": "CLP_0009",
+            "clip_id": "CLP_0011",
             "segment_id": "SEG_0034",
             "asset_id": "AST_006",
             "src_in_us": 15000000,
             "src_out_us": 19400000,
-            "timeline_in_frame": 231,
+            "timeline_in_frame": 312,
             "timeline_duration_frames": 106,
             "role": "transition",
             "motivation": "light through branches is a soft connective tissue between dialogue and movement beats",
@@ -165,12 +172,12 @@
             "candidate_ref": "legacy:SEG_0034:15000000:19400000"
           },
           {
-            "clip_id": "CLP_0012",
+            "clip_id": "CLP_0014",
             "segment_id": "SEG_0036",
             "asset_id": "AST_006",
             "src_in_us": 25200000,
             "src_out_us": 30800000,
-            "timeline_in_frame": 371,
+            "timeline_in_frame": 552,
             "timeline_duration_frames": 135,
             "role": "transition",
             "motivation": "the empty trail bend creates an open future-facing image for the final beat without promising triumph",
@@ -189,7 +196,7 @@
         "kind": "audio",
         "clips": [
           {
-            "clip_id": "CLP_0004",
+            "clip_id": "CLP_0005",
             "segment_id": "SEG_0002",
             "asset_id": "AST_001",
             "src_in_us": 6400000,
@@ -199,23 +206,34 @@
             "role": "dialogue",
             "motivation": "the line cleanly states the need for quiet without sounding like copy",
             "beat_id": "b02",
-            "fallback_segment_ids": [
-              "SEG_0006"
-            ],
+            "fallback_segment_ids": [],
             "confidence": 0.95,
             "quality_flags": [],
-            "candidate_ref": "legacy:SEG_0002:6400000:11000000",
-            "fallback_candidate_refs": [
-              "legacy:SEG_0006:41200000:47600000"
-            ]
+            "candidate_ref": "legacy:SEG_0002:6400000:11000000"
           },
           {
-            "clip_id": "CLP_0008",
+            "clip_id": "CLP_0006",
+            "segment_id": "SEG_0006",
+            "asset_id": "AST_001",
+            "src_in_us": 41200000,
+            "src_out_us": 47600000,
+            "timeline_in_frame": 96,
+            "timeline_duration_frames": 154,
+            "role": "dialogue",
+            "motivation": "explicitly names slowing down and pairs well with breath-focused visuals",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.92,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_0006:41200000:47600000"
+          },
+          {
+            "clip_id": "CLP_0010",
             "segment_id": "SEG_0021",
             "asset_id": "AST_004",
             "src_in_us": 14500000,
             "src_out_us": 20200000,
-            "timeline_in_frame": 231,
+            "timeline_in_frame": 312,
             "timeline_duration_frames": 137,
             "role": "dialogue",
             "motivation": "explicitly rejects summit rhetoric and protects the brief from drifting into achievement language",
@@ -226,25 +244,20 @@
             "candidate_ref": "legacy:SEG_0021:14500000:20200000"
           },
           {
-            "clip_id": "CLP_0011",
-            "segment_id": "SEG_0006",
-            "asset_id": "AST_001",
-            "src_in_us": 41200000,
-            "src_out_us": 47600000,
-            "timeline_in_frame": 371,
-            "timeline_duration_frames": 154,
+            "clip_id": "CLP_0013",
+            "segment_id": "SEG_0027",
+            "asset_id": "AST_005",
+            "src_in_us": 12000000,
+            "src_out_us": 17600000,
+            "timeline_in_frame": 552,
+            "timeline_duration_frames": 135,
             "role": "dialogue",
-            "motivation": "explicitly names slowing down and pairs well with breath-focused visuals",
+            "motivation": "this line lands the central message and turns the ending toward lived carryover instead of achievement",
             "beat_id": "b04",
-            "fallback_segment_ids": [
-              "SEG_0027"
-            ],
-            "confidence": 0.92,
+            "fallback_segment_ids": [],
+            "confidence": 0.94,
             "quality_flags": [],
-            "candidate_ref": "legacy:SEG_0006:41200000:47600000",
-            "fallback_candidate_refs": [
-              "legacy:SEG_0027:12000000:17600000"
-            ]
+            "candidate_ref": "legacy:SEG_0027:12000000:17600000"
           }
         ]
       },
@@ -272,12 +285,12 @@
       "label": "b02: settle"
     },
     {
-      "frame": 231,
+      "frame": 312,
       "kind": "beat",
       "label": "b03: climb"
     },
     {
-      "frame": 371,
+      "frame": 552,
       "kind": "beat",
       "label": "b04: release"
     }

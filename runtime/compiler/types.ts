@@ -18,12 +18,24 @@ export interface DurationPolicy {
 
 // ── Input artifact types ────────────────────────────────────────────
 
+export interface CreativeBriefEditorial {
+  distribution_channel?: string;
+  aspect_ratio?: "16:9" | "9:16" | "1:1" | "4:5" | "unknown";
+  embed_context?: string;
+  hook_priority?: string;
+  credibility_bias?: string;
+  profile_hint?: string;
+  policy_hint?: string;
+  allow_inference?: boolean;
+}
+
 export interface CreativeBrief {
   version: string;
   project_id: string;
   project: { id: string; title: string; strategy: string; runtime_target_sec?: number; duration_mode?: DurationMode };
   message: { primary: string; secondary?: string[] };
   emotion_curve: string[];
+  editorial?: CreativeBriefEditorial;
   [key: string]: unknown;
 }
 
@@ -122,6 +134,8 @@ export interface EditBlueprint {
   trim_policy?: TrimPolicy;
   // Duration Mode additive field
   duration_policy?: DurationPolicy;
+  // Timeline ordering: chronological (source timestamp) or editorial (score-based)
+  timeline_order?: "chronological" | "editorial";
   [key: string]: unknown;
 }
 
@@ -387,6 +401,8 @@ export interface TimelineIR {
     start_frame: number;
     sample_rate?: number;
     timecode_format?: "NDF" | "DF" | "AUTO";
+    output_aspect_ratio?: string;
+    letterbox_policy?: "none" | "pillarbox" | "letterbox";
   };
   tracks: {
     video: TrackOutput[];

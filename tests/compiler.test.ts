@@ -183,13 +183,20 @@ describe("Timeline Compiler", () => {
     expect(result.timeline.created_at).toBe(FIXED_CREATED_AT);
   });
 
-  it("total timeline fits within target duration", () => {
+  it("total timeline fits within duration policy", () => {
     const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
     expect(result.resolution.duration_fit).toBe(true);
-    // Sample project: 96 + 216 + 240 + 168 = 720 frames
-    expect(result.resolution.total_frames).toBeLessThanOrEqual(
-      result.resolution.target_frames,
-    );
+    // Guide mode: target_duration is a floor, not a cap.
+    // Fit is checked against policy max bounds (target * 1.3).
+    if (result.resolution.max_target_frames != null) {
+      expect(result.resolution.total_frames).toBeLessThanOrEqual(
+        result.resolution.max_target_frames,
+      );
+    } else {
+      expect(result.resolution.total_frames).toBeLessThanOrEqual(
+        result.resolution.target_frames,
+      );
+    }
   });
 
   it("sequence metadata is correctly set", () => {

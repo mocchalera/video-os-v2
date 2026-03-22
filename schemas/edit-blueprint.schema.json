@@ -137,6 +137,12 @@
     },
     "duration_policy": {
       "$ref": "#/$defs/durationPolicy"
+    },
+    "timeline_order": {
+      "type": "string",
+      "enum": ["chronological", "editorial"],
+      "default": "editorial",
+      "description": "Clip ordering strategy: chronological sorts by source timestamp, editorial uses score-based placement"
     }
   },
   "$defs": {

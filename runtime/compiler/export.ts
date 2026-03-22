@@ -29,6 +29,10 @@ export interface ExportOptions {
   fpsDen?: number;
   durationPolicy?: DurationPolicy;
   transitions?: TimelineTransition[];
+  width?: number;
+  height?: number;
+  outputAspectRatio?: string;
+  letterboxPolicy?: "none" | "pillarbox" | "letterbox";
 }
 
 export function buildTimelineIR(
@@ -79,9 +83,11 @@ export function buildTimelineIR(
       name: opts.projectTitle,
       fps_num: opts.fpsNum ?? 24,
       fps_den: opts.fpsDen ?? 1,
-      width: 1920,
-      height: 1080,
+      width: opts.width ?? 1920,
+      height: opts.height ?? 1080,
       start_frame: 0,
+      ...(opts.outputAspectRatio ? { output_aspect_ratio: opts.outputAspectRatio } : {}),
+      ...(opts.letterboxPolicy && opts.letterboxPolicy !== "none" ? { letterbox_policy: opts.letterboxPolicy } : {}),
     },
     tracks: {
       video: videoTracks,
