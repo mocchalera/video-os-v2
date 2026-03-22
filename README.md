@@ -121,6 +121,8 @@ npx tsx scripts/analyze.ts ./footage/*.mp4 \
   -> 07_package/* / final.mp4
 ```
 
+![ブループリント作成結果プレビュー](docs/images/demo-04-blueprint.png)
+
 補足:
 
 - `runtime/commands/` には `/intent`, `/triage`, `/blueprint`, `/review`, `/caption`, `/package` の command contract が実装されています。
