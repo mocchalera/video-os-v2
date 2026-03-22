@@ -24,6 +24,7 @@
       "properties": {
         "asset_id": { "type": "string", "minLength": 1 },
         "filename": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string" },
         "role_guess": { "type": "string" },
         "duration_us": { "type": "integer", "minimum": 0 },
         "has_transcript": { "type": "boolean" },

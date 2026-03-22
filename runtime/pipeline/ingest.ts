@@ -67,6 +67,10 @@ import {
   type SegmentType,
 } from "../connectors/gemini-vlm.js";
 import { resolvePolicy } from "../policy-resolver.js";
+import {
+  generateDisplayNames,
+  type DisplayNameInput,
+} from "./display-name.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -1019,6 +1023,21 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       segmentsJson = vlmReduceResult.segments;
     }
   }
+
+  // Stage 11: display_name generation — assign human-readable names from VLM summaries + creation dates
+  const displayNameInputs: DisplayNameInput[] = assetsJson.items
+    .filter((asset) => sourceFileMap.has(asset.asset_id))
+    .map((asset) => ({
+      asset,
+      filePath: sourceFileMap.get(asset.asset_id)!,
+      segments: segmentsJson.items.filter((s) => s.asset_id === asset.asset_id),
+    }));
+  const displayNames = generateDisplayNames(displayNameInputs);
+  for (const asset of assetsJson.items) {
+    const dn = displayNames.get(asset.asset_id);
+    if (dn) asset.display_name = dn;
+  }
+  atomicWriteJson(assetsPath, assetsJson);
 
   // Gap report (includes detector failure reasons + STT + VLM + diarization results)
   const gapReport = buildGapReport(

@@ -53,6 +53,7 @@ export interface AudioStream {
 export interface AssetItem {
   asset_id: string;
   filename: string;
+  display_name?: string;
   duration_us: number;
   has_transcript: boolean;
   transcript_ref: string | null;
