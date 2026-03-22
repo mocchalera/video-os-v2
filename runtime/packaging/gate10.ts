@@ -6,14 +6,84 @@
  * Gate 10 decision recorded in project_state.yaml.
  */
 
+import type { AutonomyMode } from "../autonomy.js";
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export type SourceOfTruth = "engine_render" | "nle_finishing";
+
+export interface Gate10HandoffResolution {
+  handoff_id: string;
+  status: string;
+  source_of_truth_decision?: string;
+  decided_by?: string;
+  decided_at?: string;
+}
 
 export interface Gate10Check {
   passed: boolean;
   source_of_truth: SourceOfTruth | null;
   errors: string[];
+  handoff_resolution?: Gate10HandoffResolution;
+  auto_defaulted_handoff: boolean;
+}
+
+export interface Gate10Options {
+  autonomyMode?: AutonomyMode;
+  decidedAt?: string;
+  currentTimelineVersion?: string;
+  blueprint?: {
+    caption_policy?: {
+      source?: string;
+    };
+  } | null;
+  captionApproval?: {
+    base_timeline_version?: string;
+    approval?: {
+      status?: string;
+    };
+  } | null;
+  musicCues?: {
+    base_timeline_version?: string;
+  } | null;
+}
+
+function buildAutoHandoffResolution(
+  decidedAt: string,
+): Gate10HandoffResolution {
+  const compactTimestamp = decidedAt
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+
+  return {
+    handoff_id: `HND_auto_full_autonomy_${compactTimestamp}`,
+    status: "decided",
+    source_of_truth_decision: "engine_render",
+    decided_by: "auto:full_autonomy",
+    decided_at: decidedAt,
+  };
+}
+
+function isCaptionApprovalStale(
+  currentTimelineVersion: string | undefined,
+  captionApproval: NonNullable<Gate10Options["captionApproval"]>,
+): boolean {
+  if (captionApproval.approval?.status === "stale") {
+    return true;
+  }
+
+  return !!currentTimelineVersion &&
+    !!captionApproval.base_timeline_version &&
+    captionApproval.base_timeline_version !== currentTimelineVersion;
+}
+
+function isMusicCuesStale(
+  currentTimelineVersion: string | undefined,
+  musicCues: NonNullable<Gate10Options["musicCues"]>,
+): boolean {
+  return !!currentTimelineVersion &&
+    !!musicCues.base_timeline_version &&
+    musicCues.base_timeline_version !== currentTimelineVersion;
 }
 
 // ── Gate 10 Check ──────────────────────────────────────────────────
@@ -31,11 +101,7 @@ export interface Gate10Check {
  */
 export function checkGate10(projectState: {
   current_state: string;
-  handoff_resolution?: {
-    handoff_id: string;
-    status: string;
-    source_of_truth_decision?: string;
-  };
+  handoff_resolution?: Gate10HandoffResolution | null;
   gates?: {
     review_gate?: string;
     packaging_gate?: string;
@@ -43,7 +109,7 @@ export function checkGate10(projectState: {
   approval_record?: {
     status: string;
   };
-}): Gate10Check {
+}, options?: Gate10Options): Gate10Check {
   const errors: string[] = [];
 
   // current_state must be "approved"
@@ -67,19 +133,28 @@ export function checkGate10(projectState: {
   }
 
   // handoff_resolution.status must be "decided"
-  if (!projectState.handoff_resolution) {
+  let resolvedHandoff = projectState.handoff_resolution ?? undefined;
+  let autoDefaultedHandoff = false;
+  if (!resolvedHandoff && options?.autonomyMode === "full") {
+    resolvedHandoff = buildAutoHandoffResolution(
+      options.decidedAt ?? new Date().toISOString(),
+    );
+    autoDefaultedHandoff = true;
+  }
+
+  if (!resolvedHandoff) {
     errors.push("handoff_resolution is missing");
-  } else if (projectState.handoff_resolution.status !== "decided") {
+  } else if (resolvedHandoff.status !== "decided") {
     errors.push(
       `handoff_resolution.status must be "decided", ` +
-      `got "${projectState.handoff_resolution.status}"`,
+      `got "${resolvedHandoff.status}"`,
     );
   }
 
   // handoff_resolution.source_of_truth_decision must be valid
   let sourceOfTruth: SourceOfTruth | null = null;
-  if (projectState.handoff_resolution?.source_of_truth_decision) {
-    const decision = projectState.handoff_resolution.source_of_truth_decision;
+  if (resolvedHandoff?.source_of_truth_decision) {
+    const decision = resolvedHandoff.source_of_truth_decision;
     if (decision === "engine_render" || decision === "nle_finishing") {
       sourceOfTruth = decision;
     } else {
@@ -88,7 +163,7 @@ export function checkGate10(projectState: {
         `"engine_render" or "nle_finishing", got "${decision}"`,
       );
     }
-  } else if (projectState.handoff_resolution) {
+  } else if (resolvedHandoff) {
     errors.push("handoff_resolution.source_of_truth_decision is missing");
   }
 
@@ -101,9 +176,25 @@ export function checkGate10(projectState: {
     );
   }
 
+  // Caption approval is optional unless an existing approval is stale.
+  const captionsEnabled = options?.blueprint?.caption_policy?.source &&
+    options.blueprint.caption_policy.source !== "none";
+  if (captionsEnabled && options.captionApproval &&
+      isCaptionApprovalStale(options.currentTimelineVersion, options.captionApproval)) {
+    errors.push("caption_approval is stale");
+  }
+
+  // Music cues are optional unless an existing cues document is stale.
+  if (options?.musicCues &&
+      isMusicCuesStale(options.currentTimelineVersion, options.musicCues)) {
+    errors.push("music_cues is stale");
+  }
+
   return {
     passed: errors.length === 0,
     source_of_truth: errors.length === 0 ? sourceOfTruth : null,
     errors,
+    handoff_resolution: resolvedHandoff,
+    auto_defaulted_handoff: autoDefaultedHandoff,
   };
 }

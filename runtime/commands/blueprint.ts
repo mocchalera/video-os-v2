@@ -35,6 +35,7 @@ import { buildMaterialReading, type ReadInput } from "../script/read.js";
 import { buildScriptDraft, type DraftInput } from "../script/draft.js";
 import { evaluateScript, type EvaluateInput } from "../script/evaluate.js";
 import type { Candidate, NormalizedBeat } from "../compiler/types.js";
+import { inferAutonomyMode } from "../autonomy.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -262,17 +263,6 @@ const ALLOWED_STATES: ProjectState[] = [
   "critique_ready",
 ];
 
-function inferAutonomyMode(
-  briefContent: {
-    autonomy?: { mode?: "full" | "collaborative"; must_ask?: string[] };
-  },
-): "full" | "collaborative" {
-  if (briefContent.autonomy?.mode) {
-    return briefContent.autonomy.mode;
-  }
-  return (briefContent.autonomy?.must_ask?.length ?? 0) === 0 ? "full" : "collaborative";
-}
-
 export function validateConfirmedPreferences(
   blueprint: EditBlueprint,
   autonomyMode: "full" | "collaborative",
@@ -297,6 +287,32 @@ export function validateConfirmedPreferences(
     errors.push("pacing.confirmed_preferences.confirmed_at is required");
   }
   return errors;
+}
+
+function recordAutonomousConfirmedPreferences(
+  blueprint: EditBlueprint,
+  briefContent: {
+    project?: { runtime_target_sec?: number };
+  },
+): void {
+  const existing = blueprint.pacing?.confirmed_preferences;
+  if (!blueprint.pacing) {
+    return;
+  }
+
+  blueprint.pacing.confirmed_preferences = {
+    ...existing,
+    mode: "full",
+    source: "ai_autonomous",
+    duration_target_sec: typeof existing?.duration_target_sec === "number" &&
+        existing.duration_target_sec > 0
+      ? existing.duration_target_sec
+      : briefContent.project?.runtime_target_sec ?? 120,
+    confirmed_at: typeof existing?.confirmed_at === "string" &&
+        existing.confirmed_at.length > 0
+      ? existing.confirmed_at
+      : new Date().toISOString(),
+  };
 }
 
 // ── Main entry: supports both legacy agent and iterative engine ──
@@ -524,8 +540,11 @@ export async function runBlueprint(
     });
   }
 
-  // 6. If human declined beat proposal readback, abort
-  if (!agentResult.confirmed) {
+  // 6. Gate 5: beat proposal readback
+  if (autonomyMode === "full") {
+    recordAutonomousConfirmedPreferences(agentResult.blueprint, briefContent);
+    console.log("[auto:full_autonomy] /blueprint skipped beat proposal readback.");
+  } else if (!agentResult.confirmed) {
     return {
       success: false,
       error: {

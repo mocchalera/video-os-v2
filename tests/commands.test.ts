@@ -972,6 +972,7 @@ describe("/triage command", () => {
     const tmpDir = createMinimalProject("triage-decline", {
       withBrief: true,
       withAnalysis: true,
+      autonomyMode: "collaborative",
       state: "intent_locked", // reconcile → media_analyzed (analysis ready)
     });
     const agent = createMockTriageAgent({ confirmed: false });
@@ -979,6 +980,22 @@ describe("/triage command", () => {
     const result = await runTriage(tmpDir, agent);
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("VALIDATION_FAILED");
+  });
+
+  it("autonomy:full auto-approves candidate board even when agent confirmation is false", async () => {
+    const tmpDir = createMinimalProject("triage-auto-full", {
+      withBrief: true,
+      withAnalysis: true,
+      autonomyMode: "full",
+      state: "intent_locked",
+    });
+    const agent = createMockTriageAgent({ confirmed: false });
+
+    const result = await runTriage(tmpDir, agent);
+
+    expect(result.success).toBe(true);
+    expect(result.newState).toBe("selects_ready");
+    expect(fs.existsSync(path.join(tmpDir, "04_plan/selects_candidates.yaml"))).toBe(true);
   });
 
   it("fails when agent produces invalid selects", async () => {
@@ -1479,6 +1496,7 @@ describe("/blueprint command", () => {
       withBrief: true,
       withAnalysis: true,
       withSelects: true,
+      autonomyMode: "collaborative",
       state: "selects_ready",
     });
 
@@ -1491,6 +1509,23 @@ describe("/blueprint command", () => {
     // State should not change
     const doc = readProjectState(tmpDir)!;
     expect(doc.current_state).toBe("selects_ready");
+  });
+
+  it("autonomy:full skips beat proposal readback even when agent confirmation is false", async () => {
+    const tmpDir = createMinimalProject("blueprint-auto-full", {
+      withBrief: true,
+      withAnalysis: true,
+      withSelects: true,
+      autonomyMode: "full",
+      state: "selects_ready",
+    });
+
+    const agent = createMockBlueprintAgent({ confirmed: false }, { autonomyMode: "full" });
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
+
+    expect(result.success).toBe(true);
+    expect(result.newState).toBe("blueprint_ready");
+    expect(result.blueprint!.pacing.confirmed_preferences!.source).toBe("ai_autonomous");
   });
 
   it("fails when state is not selects_ready", async () => {
@@ -2052,6 +2087,38 @@ describe("/review command", () => {
       expect(doc.current_state).toBe("approved");
       expect(doc.approval_record?.status).toBe("clean");
       expect(doc.approval_record?.approved_by).toBe("operator");
+    });
+
+    it("autonomy:full auto-approves clean review without operator acceptance", async () => {
+      const tmpDir = createReviewReadyProject("clean-auto-full");
+      const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
+      const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
+        autonomy?: { mode?: "full" | "collaborative" };
+      };
+      brief.autonomy = {
+        ...(brief.autonomy ?? {}),
+        mode: "full",
+      };
+      fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
+
+      let operatorAcceptCalled = false;
+      const agent = createMockReviewAgent();
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+        operatorAccept: async () => {
+          operatorAcceptCalled = true;
+          return { accepted: false };
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.newState).toBe("approved");
+      expect(operatorAcceptCalled).toBe(false);
+
+      const doc = readProjectState(tmpDir)!;
+      expect(doc.current_state).toBe("approved");
+      expect(doc.approval_record?.status).toBe("clean");
+      expect(doc.approval_record?.approved_by).toBe("auto:full_autonomy");
     });
 
     it("transitions to critique_ready when fatal_issues exist", async () => {

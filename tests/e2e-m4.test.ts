@@ -134,6 +134,7 @@ function createM4Project(
     includeHandoff?: boolean;
     includeApproval?: boolean;
     captionSource?: "transcript" | "authored" | "none";
+    autonomyMode?: "full" | "collaborative";
   },
 ): string {
   const tmpDir = path.resolve(`test-fixtures-m4-${name}-${Date.now()}`);
@@ -145,6 +146,7 @@ function createM4Project(
   const includeHandoff = opts?.includeHandoff ?? true;
   const includeApproval = opts?.includeApproval ?? true;
   const captionSrc = opts?.captionSource ?? "none";
+  const autonomyMode = opts?.autonomyMode;
 
   // 1. Set caption_policy in blueprint
   const blueprintPath = path.join(tmpDir, "04_plan/edit_blueprint.yaml");
@@ -157,6 +159,18 @@ function createM4Project(
     styling_class: "clean-lower-third",
   };
   fs.writeFileSync(blueprintPath, stringifyYaml(blueprint), "utf-8");
+
+  if (autonomyMode) {
+    const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
+    const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
+      autonomy?: Record<string, unknown>;
+    };
+    brief.autonomy = {
+      ...(brief.autonomy ?? {}),
+      mode: autonomyMode,
+    };
+    fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
+  }
 
   // 2. Write project_state.yaml
   stampApprovedState(tmpDir, {
@@ -438,6 +452,47 @@ describe("M4 E2E: packageCommand", () => {
     expect(result.error).toBeDefined();
     expect(result.error!.code).toBe("GATE_CHECK_FAILED");
     expect(result.error!.message).toContain("Gate 10");
+  });
+
+  it("autonomy:full defaults handoff_resolution and skips missing caption/music inputs", async () => {
+    const projDir = createM4Project("pkg-auto-handoff-full", {
+      includeHandoff: false,
+      autonomyMode: "full",
+      captionSource: "transcript",
+    });
+
+    const result = await packageCommand(projDir, {
+      skipRender: true,
+      precomputedMetrics: {
+        integratedLufs: -15.9,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 30000,
+        audioDurationMs: 30008,
+        dialogueWindowMs: 10000,
+        observedNonSilentMs: 8200,
+      },
+      createdAt: "2026-03-22T12:00:00Z",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.sourceOfTruth).toBe("engine_render");
+
+    const stateRaw = fs.readFileSync(
+      path.join(projDir, "project_state.yaml"),
+      "utf-8",
+    );
+    const finalState = parseYaml(stateRaw) as {
+      current_state: string;
+      handoff_resolution?: {
+        status?: string;
+        decided_by?: string;
+        source_of_truth_decision?: string;
+      };
+    };
+    expect(finalState.current_state).toBe("packaged");
+    expect(finalState.handoff_resolution?.status).toBe("decided");
+    expect(finalState.handoff_resolution?.decided_by).toBe("auto:full_autonomy");
+    expect(finalState.handoff_resolution?.source_of_truth_decision).toBe("engine_render");
   });
 });
 

@@ -87,6 +87,71 @@ describe("Gate 10", () => {
     expect(result.passed).toBe(true);
     expect(result.source_of_truth).toBe("nle_finishing");
   });
+
+  it("autonomy:full defaults missing handoff_resolution to engine_render", () => {
+    const state = validProjectState();
+    delete (state as { handoff_resolution?: unknown }).handoff_resolution;
+
+    const result = checkGate10(state, {
+      autonomyMode: "full",
+      decidedAt: "2026-03-22T01:02:03Z",
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.source_of_truth).toBe("engine_render");
+    expect(result.auto_defaulted_handoff).toBe(true);
+    expect(result.handoff_resolution?.status).toBe("decided");
+    expect(result.handoff_resolution?.decided_by).toBe("auto:full_autonomy");
+    expect(result.handoff_resolution?.source_of_truth_decision).toBe("engine_render");
+  });
+
+  it("skips missing caption_approval and music_cues checks", () => {
+    const result = checkGate10(validProjectState(), {
+      currentTimelineVersion: "timeline-v2",
+      blueprint: {
+        caption_policy: {
+          source: "transcript",
+        },
+      },
+      captionApproval: null,
+      musicCues: null,
+    });
+
+    expect(result.passed).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it("fails if caption_approval is stale", () => {
+    const result = checkGate10(validProjectState(), {
+      currentTimelineVersion: "timeline-v2",
+      blueprint: {
+        caption_policy: {
+          source: "transcript",
+        },
+      },
+      captionApproval: {
+        base_timeline_version: "timeline-v1",
+        approval: {
+          status: "approved",
+        },
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain("caption_approval is stale");
+  });
+
+  it("fails if music_cues is stale", () => {
+    const result = checkGate10(validProjectState(), {
+      currentTimelineVersion: "timeline-v2",
+      musicCues: {
+        base_timeline_version: "timeline-v1",
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain("music_cues is stale");
+  });
 });
 
 // ── Caption Density Tests ─────────────────────────────────────────

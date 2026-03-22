@@ -18,6 +18,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   initCommand,
   isCommandError,
@@ -28,6 +29,7 @@ import {
 } from "./shared.js";
 import type { ProjectState, GateStatus } from "../state/reconcile.js";
 import { generateCandidateId } from "../compiler/candidate-ref.js";
+import { inferAutonomyMode } from "../autonomy.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -192,6 +194,10 @@ export async function runTriage(
       },
     };
   }
+  const briefContent = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
+    autonomy?: { mode?: "full" | "collaborative"; must_ask?: string[] };
+  };
+  const autonomyMode = inferAutonomyMode(briefContent);
 
   // 4. Run agent (LLM or mock)
   const agentResult = await agent.run({
@@ -201,8 +207,10 @@ export async function runTriage(
     analysisGate: gates.analysis_gate,
   });
 
-  // 5. If human declined candidate board, abort
-  if (!agentResult.confirmed) {
+  // 5. Gate 4: candidate board approval
+  if (autonomyMode === "full") {
+    console.log("[auto:full_autonomy] /triage auto-approved candidate board.");
+  } else if (!agentResult.confirmed) {
     return {
       success: false,
       error: {

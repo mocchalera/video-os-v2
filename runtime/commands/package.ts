@@ -41,6 +41,7 @@ import {
   type PackageManifest,
 } from "../packaging/manifest.js";
 import { runRenderPipeline } from "../render/pipeline.js";
+import { readCreativeBriefAutonomyMode } from "../autonomy.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -86,9 +87,48 @@ export async function packageCommand(
   }
 
   const { projectDir: absDir, doc } = ctx;
+  const createdAt = options?.createdAt || new Date().toISOString();
+  const autonomyMode = readCreativeBriefAutonomyMode(absDir);
+  if (!autonomyMode) {
+    return {
+      success: false,
+      error: {
+        code: "GATE_CHECK_FAILED",
+        message: "creative_brief.yaml not found. Run /intent first.",
+      },
+    };
+  }
+
+  const timelinePath = path.join(absDir, "05_timeline/timeline.json");
+  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+  const currentTimelineVersion = timeline.version || "1";
+
+  const blueprintPath = path.join(absDir, "04_plan/edit_blueprint.yaml");
+  const blueprint = parseYaml(
+    fs.readFileSync(blueprintPath, "utf-8"),
+  ) as {
+    caption_policy?: { language: string; delivery_mode: string; source: string; styling_class: string };
+  };
+
+  const packageDir = path.join(absDir, "07_package");
+  const captionApprovalPath = path.join(packageDir, "caption_approval.json");
+  const captionApproval = fs.existsSync(captionApprovalPath)
+    ? JSON.parse(fs.readFileSync(captionApprovalPath, "utf-8"))
+    : null;
+  const musicCuesPath = path.join(packageDir, "music_cues.json");
+  const musicCues = fs.existsSync(musicCuesPath)
+    ? JSON.parse(fs.readFileSync(musicCuesPath, "utf-8"))
+    : null;
 
   // 1. Gate 10 check
-  const gate10 = checkGate10(doc);
+  const gate10 = checkGate10(doc, {
+    autonomyMode,
+    decidedAt: createdAt,
+    currentTimelineVersion,
+    blueprint,
+    captionApproval,
+    musicCues,
+  });
   if (!gate10.passed) {
     return {
       success: false,
@@ -98,44 +138,27 @@ export async function packageCommand(
       },
     };
   }
+  if (gate10.auto_defaulted_handoff && gate10.handoff_resolution) {
+    console.log("[auto:full_autonomy] Gate 10 defaulted handoff_resolution to engine_render.");
+    doc.handoff_resolution = gate10.handoff_resolution as typeof doc.handoff_resolution;
+    writeProjectState(absDir, doc);
+  }
 
   const sourceOfTruth = gate10.source_of_truth!;
-  const packageDir = path.join(absDir, "07_package");
   fs.mkdirSync(path.join(packageDir, "video"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "audio"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "captions"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "logs"), { recursive: true });
 
   // 2. Read timeline and caption_policy
-  const timelinePath = path.join(absDir, "05_timeline/timeline.json");
-  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
   const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
   const frameDurationMs = 1000 / fps;
-
-  const blueprintPath = path.join(absDir, "04_plan/edit_blueprint.yaml");
-  const blueprint = parseYaml(
-    fs.readFileSync(blueprintPath, "utf-8"),
-  ) as { caption_policy?: { language: string; delivery_mode: string; source: string; styling_class: string } };
   const captionPolicy = blueprint.caption_policy || {
     language: "ja",
     delivery_mode: "both",
     source: "none",
     styling_class: "clean-lower-third",
   };
-
-  // 3. Read caption_approval if exists
-  const captionApprovalPath = path.join(packageDir, "caption_approval.json");
-  let captionApproval: any = null;
-  if (fs.existsSync(captionApprovalPath)) {
-    captionApproval = JSON.parse(fs.readFileSync(captionApprovalPath, "utf-8"));
-  }
-
-  // 4. Read music_cues if exists
-  const musicCuesPath = path.join(packageDir, "music_cues.json");
-  let musicCues: any = null;
-  if (fs.existsSync(musicCuesPath)) {
-    musicCues = JSON.parse(fs.readFileSync(musicCuesPath, "utf-8"));
-  }
 
   // 5. Build QA checks
   const checks: QaCheckResult[] = [];
@@ -350,7 +373,6 @@ export async function packageCommand(
   }
 
   // 6. Build QA report
-  const createdAt = options?.createdAt || new Date().toISOString();
   const qaReport = buildQaReport(
     doc.project_id,
     sourceOfTruth,

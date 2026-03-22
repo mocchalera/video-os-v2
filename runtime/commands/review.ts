@@ -34,6 +34,7 @@ import type {
 } from "../state/reconcile.js";
 import { computeFileHash, snapshotArtifacts, writeProjectState } from "../state/reconcile.js";
 import { compile, type CompileResult } from "../compiler/index.js";
+import { readCreativeBriefAutonomyMode } from "../autonomy.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -455,6 +456,16 @@ export async function runReview(
   const previousState = doc.current_state;
   const projectId = doc.project_id || "";
   const gates = reconcileResult.gates;
+  const autonomyMode = readCreativeBriefAutonomyMode(absDir);
+  if (!autonomyMode) {
+    return {
+      success: false,
+      error: {
+        code: "GATE_CHECK_FAILED",
+        message: "creative_brief.yaml not found. Run /intent first.",
+      },
+    };
+  }
 
   // 2. Gate 1 check: compile_gate must be open
   if (gates.compile_gate === "blocked") {
@@ -621,16 +632,24 @@ export async function runReview(
       options.overrideReason,
     );
   } else {
-    const operatorDecision = options?.operatorAccept
-      ? await options.operatorAccept({
-        projectDir: absDir,
-        projectId,
-        report: agentResult.report,
-        patch: safePatch,
-        patchSafety,
-        preflight,
-      })
-      : { accepted: false };
+    const operatorDecision = autonomyMode === "full"
+      ? (() => {
+          console.log("[auto:full_autonomy] /review auto-approved clean review.");
+          return {
+            accepted: true,
+            approvedBy: "auto:full_autonomy",
+          };
+        })()
+      : options?.operatorAccept
+        ? await options.operatorAccept({
+          projectDir: absDir,
+          projectId,
+          report: agentResult.report,
+          patch: safePatch,
+          patchSafety,
+          preflight,
+        })
+        : { accepted: false };
 
     if (operatorDecision.accepted) {
       const approvedBy = operatorDecision.approvedBy ?? options?.approvedBy;
@@ -665,7 +684,9 @@ export async function runReview(
     : hasFatal
       ? "critique ready — fatal issues found"
       : approvalRecord
-        ? "approved — operator accepted review"
+        ? autonomyMode === "full"
+          ? "approved — clean review auto-approved"
+          : "approved — operator accepted review"
         : "critique ready — awaiting operator acceptance";
 
   const updatedDoc = transitionState(
