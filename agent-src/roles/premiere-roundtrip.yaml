@@ -1,0 +1,113 @@
+# Agent Skill: Premiere Pro Roundtrip
+#
+# Manages the full roundtrip workflow between Video OS agent and Premiere Pro:
+#   1. Export: timeline.json → FCP7 XML (for Premiere import)
+#   2. Premiere: User reviews and fine-tunes in Premiere Pro
+#   3. Import: FCP7 XML → timeline.json (capture edits back)
+#
+# Invocation:
+#   Export: npx tsx scripts/export-premiere-xml.ts <project-path>
+#   Import: npx tsx scripts/import-premiere-xml.ts <project-path> --xml <edited.xml>
+
+name: premiere-roundtrip
+description: >
+  Premiere Pro との双方向連携スキル。
+  エージェントが生成した timeline.json を FCP7 XML にエクスポートし、
+  Premiere で微調整された XML を読み込んで timeline.json に差分適用する。
+  UXP プラグインによる自動監視もサポート。
+
+triggers:
+  - "Premiere roundtrip"
+  - "premiere ラウンドトリップ"
+  - "NLE 往復"
+  - "premiere import"
+  - "premiere インポート"
+  - "XML 読み込み"
+  - "Premiere 取り込み"
+  - "プレミア逆変換"
+
+input:
+  required:
+    - project_path: "プロジェクトディレクトリ (05_timeline/timeline.json を含む)"
+  optional:
+    - source_map_path: "JSON: { asset_id: '/absolute/path/to/file.MOV' } (エクスポート時)"
+    - xml_path: "Premiere から書き出した FCP7 XML ファイルパス (インポート時)"
+    - dry_run: "true の場合、差分レポートのみ出力 (インポート時)"
+
+output:
+  export:
+    - "09_output/<project_id>_premiere.xml"
+  import:
+    - "05_timeline/timeline.json (更新)"
+    - "05_timeline/timeline.json.bak (バックアップ)"
+
+tools_used:
+  - Read
+  - Write
+  - Bash
+
+steps:
+  # ── Export フロー ──
+  - id: export_validate
+    description: "timeline.json の存在確認と読み込み"
+    action: "Read 05_timeline/timeline.json"
+    phase: export
+
+  - id: export_resolve_sources
+    description: "ソースマップ解決"
+    action: "Read source map or scan 03_analysis"
+    phase: export
+
+  - id: export_generate
+    description: "FCP7 XML 生成"
+    action: "npx tsx scripts/export-premiere-xml.ts <project-path>"
+    phase: export
+
+  - id: export_verify
+    description: "XML well-formedness チェック"
+    action: "xmllint --noout <output.xml>"
+    phase: export
+
+  # ── Import フロー ──
+  - id: import_parse
+    description: "Premiere 出力の FCP7 XML をパース"
+    action: "Read and parse XML"
+    phase: import
+
+  - id: import_diff
+    description: "差分検出 (trim/reorder/delete/add)"
+    action: "Compare parsed clips against timeline.json via video_os markers"
+    phase: import
+
+  - id: import_report
+    description: "差分レポート出力"
+    action: "Print diff report to stdout"
+    phase: import
+
+  - id: import_apply
+    description: "差分適用 (--dry-run でなければ)"
+    action: "npx tsx scripts/import-premiere-xml.ts <project-path> --xml <edited.xml>"
+    phase: import
+
+  - id: import_verify
+    description: "更新後の timeline.json バリデーション"
+    action: "Read and validate updated timeline.json"
+    phase: import
+
+nle_profile: runtime/nle-profiles/premiere-v1.yaml
+
+roundtrip_id_format: >
+  マーカーコメントに埋め込み:
+  video_os:clip_id=<clip_id>|asset_id=<asset_id>|beat_id=<beat_id>|motivation=<motivation>
+
+detectable_diffs:
+  - "クリップの in/out 変更 (src_in_us / src_out_us)"
+  - "クリップの並び順変更 (timeline_in_frame)"
+  - "クリップの削除"
+  - "新規クリップの追加 (検出のみ、warning)"
+
+known_limitations:
+  - "Premiere で追加した新規クリップは video_os マーカーがないため自動取り込み不可"
+  - "トランジション (ディゾルブ等) の逆変換は未対応"
+  - "カラー補正やエフェクトの変更は検出されない (lossy surface)"
+  - "オーディオキーフレームの詳細な逆変換は未対応 (レベル値のみ)"

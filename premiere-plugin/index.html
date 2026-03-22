@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Video OS Watcher</title>
+  <style>
+    :root {
+      --bg: #1e1e1e;
+      --fg: #cccccc;
+      --accent: #0078d4;
+      --success: #4ec9b0;
+      --warn: #dcdcaa;
+      --error: #f44747;
+      --border: #3c3c3c;
+      --input-bg: #2d2d2d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 12px;
+      background: var(--bg);
+      color: var(--fg);
+      padding: 12px;
+      user-select: none;
+    }
+    h2 {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--accent);
+    }
+    label {
+      display: block;
+      font-size: 11px;
+      color: #999;
+      margin-bottom: 4px;
+    }
+    .field { margin-bottom: 10px; }
+    input[type="text"] {
+      width: 100%;
+      padding: 5px 8px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--fg);
+      font-size: 12px;
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    .row { display: flex; gap: 6px; margin-bottom: 10px; }
+    button {
+      padding: 5px 14px;
+      border: none;
+      border-radius: 3px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    #btnStart {
+      background: var(--accent);
+      color: #fff;
+    }
+    #btnStop {
+      background: var(--border);
+      color: var(--fg);
+    }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #status {
+      padding: 8px;
+      border-radius: 3px;
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      font-size: 11px;
+      min-height: 60px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      overflow-y: auto;
+      max-height: 120px;
+    }
+    .dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .dot-idle { background: #666; }
+    .dot-watching { background: var(--success); animation: pulse 1.5s infinite; }
+    .dot-updated { background: var(--warn); }
+    .dot-error { background: var(--error); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+  </style>
+</head>
+<body>
+  <h2>Video OS Watcher</h2>
+
+  <div class="field">
+    <label>FCP7 XML Path</label>
+    <input type="text" id="xmlPath" placeholder="/path/to/project_premiere.xml" />
+  </div>
+
+  <div class="field">
+    <label>Poll Interval (ms)</label>
+    <input type="text" id="interval" value="2000" />
+  </div>
+
+  <div class="row">
+    <button id="btnStart">Watch</button>
+    <button id="btnStop" disabled>Stop</button>
+  </div>
+
+  <div id="status"><span class="dot dot-idle"></span>Idle</div>
+
+  <script src="index.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+version: 1
+profile_id: adobe_premiere_fcp7xml_v1
+nle:
+  vendor: Adobe
+  product: Premiere Pro
+  version_range: ">=23.0"
+otio:
+  interchange_format: otio
+  metadata_namespace: video_os.premiere
+stable_id:
+  primary_paths:
+    clip: clipitem/@id
+    track: track (positional)
+  fallback_paths:
+    - clipitem/name
+  require_exact_metadata: false
+surfaces:
+  trim:
+    mode: verified_roundtrip
+    tolerance_frames: 1
+  reorder:
+    mode: verified_roundtrip
+    detect_after: ripple_normalized_peer_order
+  enable_disable:
+    mode: provisional_roundtrip
+  track_move:
+    mode: provisional_roundtrip
+  simple_transition:
+    mode: provisional_roundtrip
+    allowed_types:
+      - dissolve
+      - wipe
+      - dip_to_color
+  timeline_marker_add:
+    mode: provisional_roundtrip
+  clip_marker_add:
+    mode: provisional_roundtrip
+  note_text_add:
+    mode: report_only
+  color_finish:
+    mode: lossy
+import_policy:
+  provisional_mapping_requires_review: true
+  unmapped_edit_requires_review: true
+  one_to_many_requires_review: true
