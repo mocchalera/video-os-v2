@@ -10,7 +10,6 @@ const uxpFs = require("uxp").storage.localFileSystem;
 // ── State ──────────────────────────────────────────────────────────
 
 let watchTimer = null;
-let lastMtime = 0;
 let watchEntry = null; // UXP file entry (from picker)
 let watchPath = "";
 
@@ -56,16 +55,29 @@ async function browseFile() {
   }
 }
 
-// ── File stat helper ───────────────────────────────────────────────
+// ── File change detection ──────────────────────────────────────────
 
-async function getFileMtime() {
+let lastContentHash = "";
+
+async function readFileContent() {
   try {
-    if (!watchEntry) return 0;
-    const meta = await watchEntry.getMetadata();
-    return meta.modificationDate ? meta.modificationDate.getTime() : 0;
-  } catch {
-    return 0;
+    if (!watchEntry) return null;
+    // Re-read the entry to get fresh content
+    const content = await watchEntry.read({ format: require("uxp").storage.formats.utf8 });
+    return content;
+  } catch (err) {
+    appendLog("[DEBUG] Read error: " + (err.message || err));
+    return null;
   }
+}
+
+// Simple hash for change detection
+function simpleHash(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return String(hash) + ":" + str.length;
 }
 
 // ── Import sequence into Premiere Pro ──────────────────────────────
@@ -104,22 +116,24 @@ async function importXmlSequence() {
 
 async function pollOnce() {
   try {
-    const currentMtime = await getFileMtime();
+    const content = await readFileContent();
 
-    if (currentMtime === 0) {
+    if (content === null) {
       setStatus("dot-error", "Cannot read file");
       return;
     }
 
-    if (lastMtime === 0) {
-      // First poll — just record the mtime
-      lastMtime = currentMtime;
+    const currentHash = simpleHash(content);
+
+    if (lastContentHash === "") {
+      // First poll — just record the hash
+      lastContentHash = currentHash;
       setStatus("dot-watching", "Watching: " + (watchEntry ? watchEntry.name : watchPath));
       return;
     }
 
-    if (currentMtime > lastMtime) {
-      lastMtime = currentMtime;
+    if (currentHash !== lastContentHash) {
+      lastContentHash = currentHash;
       setStatus("dot-updated", "Change detected, importing...");
       const ok = await importXmlSequence();
       if (ok) {
@@ -142,7 +156,7 @@ function startWatch() {
   }
 
   const intervalMs = parseInt(elInterval.value, 10) || 2000;
-  lastMtime = 0;
+  lastContentHash = "";
 
   setStatus("dot-watching", "Starting watch...");
   btnStart.disabled = true;
@@ -160,7 +174,7 @@ function stopWatch() {
     clearInterval(watchTimer);
     watchTimer = null;
   }
-  lastMtime = 0;
+  lastContentHash = "";
 
   setStatus("dot-idle", "Stopped");
   btnStart.disabled = false;
