@@ -23,6 +23,7 @@ Premiere Pro との FCP7 XML ラウンドトリップにも対応しており、
 - アスペクト比自動対応: 最頻アスペクト比を推定し、`letterbox` / `pillarbox` を判定
 - 時系列順コンパイル: `keepsake` / `event-recap` 系は chronological order を選択可能
 - Schema 駆動 + Gate 制御: canonical artifacts を validate しながら進行
+- Full Autonomy Mode: `autonomy.mode: full` で brief 確定後の全ゲートを自動通過。粗編集まで一気に自走
 
 ## クイックスタート
 
@@ -169,13 +170,33 @@ Creative Brief
 - Self-Critique Loop: `review_report.yaml` と `review_patch.json` により rough cut を再評価できます。
 - Transition Skill Cards: P0 の 5 スキル (`match_cut_bridge`, `build_to_peak`, `crossfade_bridge`, `smash_cut_energy`, `silence_beat`) を隣接クリップ単位で自動選択します。
 
+## Agent Skills
+
+`.agents/skills/` に定義された Agent Skill が、エージェントの判断と行動をガイドします。Claude Code / Codex CLI どちらでも同じスキルが発火します（symlink 共有）。
+
+| スキル | 発火条件 | 役割 |
+|--------|----------|------|
+| `setup-environment` | 初回セットアップ、依存不足、API キー未設定 | 環境構築をステップバイステップでガイド |
+| `design-intent` | 素材を渡して「編集して」、新プロジェクト開始 | ユーザーの意図をヒアリングし creative brief を作成 |
+| `analyze-footage` | 素材フォルダや動画ファイルを渡されたとき | VLM/STT で素材を解析し assets.json / segments.json を生成 |
+| `select-clips` | 「クリップを選んで」、triage 実行 | 素材から候補クリップを抽出・スコアリング |
+| `build-blueprint` | 「構成を作って」、blueprint 実行 | ビート構造と編集構成を設計 |
+| `compile-timeline` | 「タイムラインを作って」、compile 実行 | 確定的コンパイラで timeline.json を生成 |
+| `review-roughcut` | 「レビューして」、粗編集の品質確認 | 自己批評ループで品質を評価・パッチ提案 |
+| `export-premiere` | 「Premiere に出して」、XML エクスポート | timeline.json → FCP7 XML 変換 |
+| `import-premiere` | 「Premiere から戻して」、XML インポート | FCP7 XML → timeline.json 差分検出・適用 |
+| `render-video` | 「レンダリングして」、動画出力 | ffmpeg で最終動画を生成 |
+| `full-pipeline` | 「全自動で」「素材から動画を作って」 | 全ステージを Gate 付きでオーケストレーション |
+| `troubleshoot-error` | エラー発生時、「直して」 | エラーカタログから原因特定・復旧手順を案内 |
+| `re-edit` | 「ここを変えて」「尺を短くして」 | 既存 timeline への部分的な再編集指示を処理 |
+
 ## テスト
 
 ```bash
 npm test
 ```
 
-2026-03-22 確認時点で `42` test files、`1432` tests がすべて通過しています。
+2026-03-22 確認時点で `43` test files、`1450` tests がすべて通過しています。
 
 ## 技術スタック
 
