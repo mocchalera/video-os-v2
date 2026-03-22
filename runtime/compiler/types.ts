@@ -4,6 +4,7 @@
 // ── Duration Mode types ─────────────────────────────────────────────
 
 export type DurationMode = "strict" | "guide";
+export type CaptionPolicySource = "transcript" | "authored" | "none";
 
 export interface DurationPolicy {
   mode: DurationMode;
@@ -118,6 +119,12 @@ export interface EditBlueprint {
     entry_beat: string;
     avoid_anthemic_lift: boolean;
     permitted_energy_curve: string;
+  };
+  caption_policy?: {
+    language?: string;
+    delivery_mode?: "burn_in" | "sidecar" | "both";
+    source?: CaptionPolicySource;
+    styling_class?: string;
   };
   dialogue_policy: {
     preserve_natural_breath: boolean;

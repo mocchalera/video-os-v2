@@ -562,6 +562,46 @@ describe("Adjacency Analyzer", () => {
 
     expect(transitions[0].transition_type).toBe("cut");
   });
+
+  it("fires match_cut_bridge when semantic clusters are missing but tag overlap indicates a new cluster", () => {
+    const v1: Track = {
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", { timeline_in_frame: 0, timeline_duration_frames: 72, beat_id: "B01" }),
+        makeClip("02", { timeline_in_frame: 72, timeline_duration_frames: 72, beat_id: "B02", asset_id: "AST_002" }),
+      ],
+    };
+
+    const { transitions, analysis } = adjacencyDecide(v1, {
+      activeEditingSkills: ["match_cut_bridge"],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({
+          segment_id: "SEG_01",
+          editorial_signals: {
+            visual_tags: ["child", "bicycle", "park", "summer"],
+          },
+          motif_tags: ["growth", "practice"],
+        }),
+        makeCandidate({
+          segment_id: "SEG_02",
+          asset_id: "AST_002",
+          editorial_signals: {
+            visual_tags: ["child", "bicycle", "park", "autumn"],
+          },
+          motif_tags: ["growth", "confidence"],
+        }),
+      ],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(analysis.pairs[0].selected_skill_id).toBe("match_cut_bridge");
+    expect(transitions[0].applied_skill_id).toBe("match_cut_bridge");
+    expect(transitions[0].transition_type).toBe("match_cut");
+  });
 });
 
 // ── 8. BGM Beat Snap ────────────────────────────────────────────────
@@ -850,6 +890,24 @@ describe("buildPairEvidence", () => {
     expect(ev.semantic_cluster_change).toBe(true);
   });
 
+  it("falls back to tag-based semantic cluster change for different assets", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const leftCand = makeCandidate({
+      segment_id: "SEG_01",
+      editorial_signals: { visual_tags: ["child", "bicycle", "park", "summer"] },
+    });
+    const rightCand = makeCandidate({
+      segment_id: "SEG_02",
+      editorial_signals: { visual_tags: ["child", "bicycle", "pump_track", "autumn"] },
+    });
+
+    const ev = buildPairEvidence(left, right, leftCand, rightCand, undefined, undefined, undefined, undefined, "guide");
+
+    expect(ev.visual_tag_overlap_score).toBeCloseTo(1 / 3, 2);
+    expect(ev.semantic_cluster_change).toBe(true);
+  });
+
   it("computes visual_tag_overlap_score via Jaccard", () => {
     const left = makeClip("01");
     const right = makeClip("02");
@@ -868,6 +926,71 @@ describe("buildPairEvidence", () => {
     const ev = buildPairEvidence(left, right, undefined, undefined, leftBeat, rightBeat, undefined, undefined, "guide");
     expect(ev.left_story_role).toBe("hook");
     expect(ev.right_story_role).toBe("experience");
+  });
+
+  it("derives energy_delta_score from peak strength when audio signals are absent", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const leftCand = makeCandidate({
+      segment_id: "SEG_01",
+      editorial_signals: { peak_strength_score: 0.2 },
+    });
+    const rightCand = makeCandidate({
+      segment_id: "SEG_02",
+      editorial_signals: { peak_strength_score: 0.8 },
+    });
+
+    const ev = buildPairEvidence(left, right, leftCand, rightCand, undefined, undefined, undefined, undefined, "guide");
+
+    expect(ev.energy_delta_score).toBeCloseTo(0.8, 5);
+  });
+
+  it("prefers motion energy over peak strength when available", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const leftCand = makeCandidate({
+      segment_id: "SEG_01",
+      editorial_signals: { peak_strength_score: 0.9, motion_energy_score: 0.1 },
+    });
+    const rightCand = makeCandidate({
+      segment_id: "SEG_02",
+      editorial_signals: { peak_strength_score: 0.2, motion_energy_score: 0.6 },
+    });
+
+    const ev = buildPairEvidence(left, right, leftCand, rightCand, undefined, undefined, undefined, undefined, "guide");
+
+    expect(ev.energy_delta_score).toBeCloseTo(0.75, 5);
+  });
+
+  it("infers b-roll story roles from beat order when captions are disabled", () => {
+    const left = makeClip("01", { beat_id: "B01" });
+    const right = makeClip("02", { beat_id: "B02", asset_id: "AST_002" });
+    const leftBeat = makeBeat("B01");
+    const rightBeat = makeBeat("B02");
+
+    const ev = buildPairEvidence(
+      left,
+      right,
+      undefined,
+      undefined,
+      leftBeat,
+      rightBeat,
+      undefined,
+      undefined,
+      "guide",
+      undefined,
+      {
+        captionPolicySource: "none",
+        beatOrder: new Map([
+          ["B01", 0],
+          ["B02", 1],
+        ]),
+        totalBeats: 2,
+      },
+    );
+
+    expect(ev.left_story_role).toBe("hook");
+    expect(ev.right_story_role).toBe("closing");
   });
 
   it("computes shot_scale_continuity_score separately from composition_match_score", () => {
@@ -1164,5 +1287,42 @@ describe("build_to_peak pair_bonus_prev", () => {
     // Verify analysis was produced correctly
     expect(analysis.pairs[0]).toBeDefined();
     expect(analysis.pairs[1]).toBeDefined();
+  });
+
+  it("uses inferred b-roll story roles when captions are disabled", () => {
+    const v1: Track = {
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", { timeline_in_frame: 0, timeline_duration_frames: 72, beat_id: "B01" }),
+        makeClip("02", { timeline_in_frame: 72, timeline_duration_frames: 72, beat_id: "B02", asset_id: "AST_002" }),
+      ],
+    };
+
+    const { analysis } = adjacencyDecide(v1, {
+      activeEditingSkills: ["build_to_peak"],
+      durationMode: "guide",
+      fpsNum: 24,
+      captionPolicySource: "none",
+      candidates: [
+        makeCandidate({
+          segment_id: "SEG_01",
+          editorial_signals: {
+            peak_strength_score: 0.35,
+          },
+        }),
+        makeCandidate({
+          segment_id: "SEG_02",
+          asset_id: "AST_002",
+          editorial_signals: {
+            peak_strength_score: 0.8,
+          },
+        }),
+      ],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(analysis.pairs[0].selected_skill_id).toBe("build_to_peak");
   });
 });

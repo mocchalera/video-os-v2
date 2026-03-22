@@ -173,6 +173,7 @@ export function compile(opts: CompileOptions): CompileResult {
         durationMode: durationPolicy?.mode ?? "guide",
         fpsNum,
         bgmAnalysis,
+        captionPolicySource: blueprint.caption_policy?.source,
         candidates: selects.candidates,
         beats: normalized.beats,
         transitionSkillsDir: opts.repoRoot

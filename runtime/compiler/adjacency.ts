@@ -4,7 +4,13 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Candidate, NormalizedBeat, TimelineClip, Track } from "./types.js";
+import type {
+  Candidate,
+  CaptionPolicySource,
+  NormalizedBeat,
+  TimelineClip,
+  Track,
+} from "./types.js";
 import type {
   TransitionSkillCard,
   PairEvidence,
@@ -15,6 +21,7 @@ import type {
   BgmAnalysis,
   AdjacencyFeatures,
   PeakType,
+  StoryRole,
 } from "./transition-types.js";
 import {
   getActiveTransitionCards,
@@ -36,7 +43,17 @@ import {
 interface SegmentEvidence {
   adjacency_features?: AdjacencyFeatures;
   peak_moments?: Array<{ type?: string }>;
-  support_signals?: { fused_peak_score?: number };
+  support_signals?: {
+    fused_peak_score?: number;
+    motion_support_score?: number;
+    audio_support_score?: number;
+  };
+}
+
+interface BuildPairEvidenceContext {
+  captionPolicySource?: CaptionPolicySource;
+  beatOrder?: Map<string, number>;
+  totalBeats?: number;
 }
 
 function jaccard(a: string[], b: string[]): number {
@@ -71,6 +88,64 @@ function motionContinuity(leftMotion?: string, rightMotion?: string): number {
   return 0.3;
 }
 
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function resolveSemanticClusterChange(
+  leftCluster: string | undefined,
+  rightCluster: string | undefined,
+  sameAsset: boolean,
+  visualTagOverlapScore: number,
+): boolean {
+  if (leftCluster && rightCluster) {
+    return leftCluster !== rightCluster;
+  }
+  if (sameAsset) return false;
+  // Lightweight fallback for B-roll/tag-only candidates when semantic clusters are absent.
+  return visualTagOverlapScore < 0.7;
+}
+
+function resolveEnergyProxy(
+  signals: Candidate["editorial_signals"] | undefined,
+  segEvidence: SegmentEvidence | undefined,
+  peakStrengthScore: number,
+): number {
+  return clamp01(
+    signals?.speech_intensity_score ??
+      signals?.motion_energy_score ??
+      segEvidence?.support_signals?.motion_support_score ??
+      signals?.audio_energy_score ??
+      peakStrengthScore ??
+      segEvidence?.support_signals?.fused_peak_score ??
+      0.5,
+  );
+}
+
+function inferBRollStoryRole(
+  beatId: string | undefined,
+  context: BuildPairEvidenceContext | undefined,
+): StoryRole | undefined {
+  if (context?.captionPolicySource !== "none") return undefined;
+  if (!beatId || !context.beatOrder || !context.totalBeats || context.totalBeats < 1) return undefined;
+
+  const beatIndex = context.beatOrder.get(beatId);
+  if (beatIndex === undefined) return undefined;
+
+  if (context.totalBeats === 1) return "experience";
+  if (beatIndex === 0) return "hook";
+  if (beatIndex === context.totalBeats - 1) return "closing";
+  return "experience";
+}
+
+function resolveStoryRole(
+  explicitRole: StoryRole | undefined,
+  beatId: string | undefined,
+  context: BuildPairEvidenceContext | undefined,
+): StoryRole | undefined {
+  return explicitRole ?? inferBRollStoryRole(beatId, context);
+}
+
 export function buildPairEvidence(
   leftClip: TimelineClip,
   rightClip: TimelineClip,
@@ -82,12 +157,14 @@ export function buildPairEvidence(
   rightSegEvidence: SegmentEvidence | undefined,
   durationMode: "strict" | "guide",
   bgmSnapDistanceFrames?: number,
+  context?: BuildPairEvidenceContext,
 ): PairEvidence {
   const leftSignals = leftCandidate?.editorial_signals;
   const rightSignals = rightCandidate?.editorial_signals;
 
   const leftAdj = leftSegEvidence?.adjacency_features;
   const rightAdj = rightSegEvidence?.adjacency_features;
+  const sameAsset = leftClip.asset_id === rightClip.asset_id;
 
   // Visual tag overlap
   const leftTags = leftAdj?.visual_tags ?? leftSignals?.visual_tags ?? [];
@@ -100,7 +177,12 @@ export function buildPairEvidence(
   // Semantic cluster change
   const leftCluster = leftSignals?.semantic_cluster_id;
   const rightCluster = rightSignals?.semantic_cluster_id;
-  const semanticClusterChange = !!(leftCluster && rightCluster && leftCluster !== rightCluster);
+  const semanticClusterChange = resolveSemanticClusterChange(
+    leftCluster,
+    rightCluster,
+    sameAsset,
+    visualTagOverlapScore,
+  );
 
   // Motif overlap
   const leftMotifs = leftCandidate?.motif_tags ?? [];
@@ -125,9 +207,9 @@ export function buildPairEvidence(
   });
 
   // Energy delta (positive = incoming is higher energy)
-  const leftEnergy = leftSignals?.speech_intensity_score ?? leftSignals?.audio_energy_score ?? 0.5;
-  const rightEnergy = rightSignals?.speech_intensity_score ?? rightSignals?.audio_energy_score ?? 0.5;
-  const energyDeltaScore = Math.max(0, Math.min(1, (rightEnergy - leftEnergy + 1) / 2));
+  const leftEnergy = resolveEnergyProxy(leftSignals, leftSegEvidence, leftPeakStrength);
+  const rightEnergy = resolveEnergyProxy(rightSignals, rightSegEvidence, rightPeakStrength);
+  const energyDeltaScore = clamp01((rightEnergy - leftEnergy + 1) / 2);
 
   // Silence and afterglow
   const outgoingSilenceRatio = leftSignals?.silence_ratio ?? 0;
@@ -135,8 +217,8 @@ export function buildPairEvidence(
   const incomingReactionScore = rightSignals?.reaction_intensity_score ?? 0;
 
   // Story roles
-  const leftStoryRole = leftBeat?.story_role;
-  const rightStoryRole = rightBeat?.story_role;
+  const leftStoryRole = resolveStoryRole(leftBeat?.story_role, leftClip.beat_id, context);
+  const rightStoryRole = resolveStoryRole(rightBeat?.story_role, rightClip.beat_id, context);
 
   // Composition match
   const compositionMatchScore = resolveCompositionMatch(
@@ -170,14 +252,17 @@ export function buildPairEvidence(
   } as PairEvidence;
   const setupPayoffRelationScore = resolveSetupPayoff(partialEvidence);
 
-  // Same asset
-  const sameAsset = leftClip.asset_id === rightClip.asset_id;
   const sameSpeakerRole = !!(leftCandidate?.speaker_role && rightCandidate?.speaker_role &&
     leftCandidate.speaker_role === rightCandidate.speaker_role);
 
   // B-roll candidate
-  const hasBRollCandidate = !!(leftCandidate?.role === "support" || leftCandidate?.role === "texture" ||
-    rightCandidate?.role === "support" || rightCandidate?.role === "texture");
+  const hasBRollCandidate = !!(
+    context?.captionPolicySource === "none" ||
+    leftCandidate?.role === "support" ||
+    leftCandidate?.role === "texture" ||
+    rightCandidate?.role === "support" ||
+    rightCandidate?.role === "texture"
+  );
 
   // Build partial evidence — compute axis_break_readiness first, then axis_consistency with it
   const partialForAxis: PairEvidence = {
@@ -233,6 +318,7 @@ export interface AdjacencyDecideOptions {
   durationMode: "strict" | "guide";
   fpsNum: number;
   bgmAnalysis?: BgmAnalysis;
+  captionPolicySource?: CaptionPolicySource;
   candidates: Candidate[];
   beats: NormalizedBeat[];
   segmentEvidenceIndex?: Map<string, SegmentEvidence>;
@@ -352,8 +438,10 @@ export function adjacencyDecide(
   }
 
   const beatMap = new Map<string, NormalizedBeat>();
-  for (const b of opts.beats) {
+  const beatOrder = new Map<string, number>();
+  for (const [index, b] of opts.beats.entries()) {
     beatMap.set(b.beat_id, b);
+    beatOrder.set(b.beat_id, index);
   }
 
   const clips = v1Track.clips;
@@ -392,6 +480,11 @@ export function adjacencyDecide(
       leftSegEvidence, rightSegEvidence,
       opts.durationMode,
       bgmSnapDistFrames,
+      {
+        captionPolicySource: opts.captionPolicySource,
+        beatOrder,
+        totalBeats: opts.beats.length,
+      },
     );
 
     // Resolve axis scores
