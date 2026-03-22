@@ -1,0 +1,20 @@
+{
+  "project_id": "sample-mountain-reset",
+  "artifact_version": "analysis-v1",
+  "transcript_ref": "TR_AST_005",
+  "asset_id": "AST_005",
+  "items": [
+    {
+      "speaker": "S1",
+      "start_us": 12200000,
+      "end_us": 17400000,
+      "text": "When I head back down, I carry that pace with me."
+    },
+    {
+      "speaker": "S1",
+      "start_us": 29200000,
+      "end_us": 33800000,
+      "text": "That is enough."
+    }
+  ]
+}

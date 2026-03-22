@@ -45,3 +45,14 @@ Thumbs.db
 # Project-specific results
 projects/*
 !projects/_template/
+!projects/demo/
+
+# Large binary media files (even in tracked projects)
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.aac
+*.mxf
+*.avi
+*.mkv

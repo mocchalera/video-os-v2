@@ -1,0 +1,127 @@
+{
+  "version": "1",
+  "project_id": "sample-mountain-reset",
+  "sequence": {
+    "name": "Mountain Reset",
+    "fps_num": 24,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0,
+    "output_aspect_ratio": "16:9"
+  },
+  "clips": [
+    {
+      "clip_id": "CLP_0001",
+      "asset_id": "AST_005",
+      "src_in_us": 1400000,
+      "src_out_us": 6000000,
+      "timeline_in_frame": 0,
+      "timeline_duration_frames": 96
+    },
+    {
+      "clip_id": "CLP_0008",
+      "asset_id": "AST_004",
+      "src_in_us": 8000000,
+      "src_out_us": 13800000,
+      "timeline_in_frame": 312,
+      "timeline_duration_frames": 140
+    },
+    {
+      "clip_id": "CLP_0012",
+      "asset_id": "AST_005",
+      "src_in_us": 18200000,
+      "src_out_us": 23000000,
+      "timeline_in_frame": 552,
+      "timeline_duration_frames": 116
+    },
+    {
+      "clip_id": "CLP_0002",
+      "asset_id": "AST_003",
+      "src_in_us": 1000000,
+      "src_out_us": 4800000,
+      "timeline_in_frame": 0,
+      "timeline_duration_frames": 92
+    },
+    {
+      "clip_id": "CLP_0003",
+      "asset_id": "AST_006",
+      "src_in_us": 5000000,
+      "src_out_us": 9700000,
+      "timeline_in_frame": 96,
+      "timeline_duration_frames": 113
+    },
+    {
+      "clip_id": "CLP_0004",
+      "asset_id": "AST_003",
+      "src_in_us": 5200000,
+      "src_out_us": 9400000,
+      "timeline_in_frame": 96,
+      "timeline_duration_frames": 101
+    },
+    {
+      "clip_id": "CLP_0007",
+      "asset_id": "AST_002",
+      "src_in_us": 24000000,
+      "src_out_us": 29600000,
+      "timeline_in_frame": 96,
+      "timeline_duration_frames": 135
+    },
+    {
+      "clip_id": "CLP_0009",
+      "asset_id": "AST_004",
+      "src_in_us": 27000000,
+      "src_out_us": 32800000,
+      "timeline_in_frame": 312,
+      "timeline_duration_frames": 140
+    },
+    {
+      "clip_id": "CLP_0011",
+      "asset_id": "AST_006",
+      "src_in_us": 15000000,
+      "src_out_us": 19400000,
+      "timeline_in_frame": 312,
+      "timeline_duration_frames": 106
+    },
+    {
+      "clip_id": "CLP_0014",
+      "asset_id": "AST_006",
+      "src_in_us": 25200000,
+      "src_out_us": 30800000,
+      "timeline_in_frame": 552,
+      "timeline_duration_frames": 135
+    },
+    {
+      "clip_id": "CLP_0005",
+      "asset_id": "AST_001",
+      "src_in_us": 6400000,
+      "src_out_us": 11000000,
+      "timeline_in_frame": 96,
+      "timeline_duration_frames": 111
+    },
+    {
+      "clip_id": "CLP_0006",
+      "asset_id": "AST_001",
+      "src_in_us": 41200000,
+      "src_out_us": 47600000,
+      "timeline_in_frame": 96,
+      "timeline_duration_frames": 154
+    },
+    {
+      "clip_id": "CLP_0010",
+      "asset_id": "AST_004",
+      "src_in_us": 14500000,
+      "src_out_us": 20200000,
+      "timeline_in_frame": 312,
+      "timeline_duration_frames": 137
+    },
+    {
+      "clip_id": "CLP_0013",
+      "asset_id": "AST_005",
+      "src_in_us": 12000000,
+      "src_out_us": 17600000,
+      "timeline_in_frame": 552,
+      "timeline_duration_frames": 135
+    }
+  ]
+}

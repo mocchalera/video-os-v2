@@ -1,0 +1,20 @@
+{
+  "project_id": "sample-mountain-reset",
+  "artifact_version": "analysis-v1",
+  "transcript_ref": "TR_AST_004",
+  "asset_id": "AST_004",
+  "items": [
+    {
+      "speaker": "S1",
+      "start_us": 14700000,
+      "end_us": 19800000,
+      "text": "I do not need a summit to feel reset."
+    },
+    {
+      "speaker": "S1",
+      "start_us": 33800000,
+      "end_us": 39100000,
+      "text": "I just need enough space to hear myself think."
+    }
+  ]
+}

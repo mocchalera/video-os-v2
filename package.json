@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "demo": "tsx scripts/demo.ts",
     "validate": "tsx scripts/validate-schemas.ts",
     "test": "vitest run",
     "build": "tsc"

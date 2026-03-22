@@ -1,0 +1,51 @@
+version: "1"
+project_id: sample-mountain-reset
+timeline_version: "1"
+created_at: "2026-03-21T04:00:00Z"
+
+summary_judgment:
+  status: needs_revision
+  rationale: "Overall structure is solid but hook beat could use tighter trim and b02 texture could be swapped for stronger support."
+  confidence: 0.82
+
+strengths:
+  - summary: "Beat boundaries are well-placed and the pacing builds naturally."
+    details: "The hook-settle-climb-release arc follows the brief's emotion curve."
+  - summary: "Dialogue selections are strong and avoid over-explanation."
+
+weaknesses:
+  - summary: "CLP_0001 hook hero clip has minor highlight clipping."
+    affected_clip_ids:
+      - CLP_0001
+    affected_beat_ids:
+      - b01
+  - summary: "CLP_0003 texture in b02 feels passive; a more active support shot would strengthen the transition."
+    affected_clip_ids:
+      - CLP_0003
+    affected_beat_ids:
+      - b02
+
+fatal_issues: []
+
+warnings:
+  - summary: "CLP_0007 in b03 has slight_wind quality flag that may compete with dialogue."
+    severity: warning
+    affected_clip_ids:
+      - CLP_0007
+    affected_beat_ids:
+      - b03
+  - summary: "V2 track has no coverage gap analysis — may have implicit timing holes."
+    severity: warning
+
+mismatches_to_brief: []
+mismatches_to_blueprint: []
+
+recommended_next_pass:
+  goal: "Tighten hook, strengthen b02 texture, review wind issues in b03."
+  actions:
+    - "Trim CLP_0001 to reduce highlight clipping exposure."
+    - "Replace CLP_0003 with SEG_0014 for more active support in b02."
+    - "Add review marker at b03 entry for audio QA."
+  preserve:
+    - "Dialogue track selections (A1) are strong — keep all three."
+    - "Beat boundary markers and overall structure."
