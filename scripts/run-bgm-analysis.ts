@@ -7,7 +7,7 @@
 import { detectBgmBeats, writeBgmAnalysis } from "../runtime/connectors/bgm-beat-detector.js";
 
 const audioPath = process.argv[2];
-const projectPath = process.argv[3] ?? "projects/sample-project";
+const projectPath = process.argv[3] ?? "projects/demo";
 
 if (!audioPath) {
   console.error("Usage: npx tsx scripts/run-bgm-analysis.ts <audio-path> [project-path]");

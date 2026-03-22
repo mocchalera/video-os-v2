@@ -20,7 +20,7 @@ import { generateSrt } from "../runtime/render/pipeline.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PROJECT_DIR = path.resolve(__dirname, "../projects/ax1-d4887");
-const SOURCE_VIDEO = "/path/to/footage/D4887.MP4";
+const SOURCE_VIDEO = process.env.AX1_SOURCE_VIDEO ?? path.join(PROJECT_DIR, "00_sources/D4887.MP4");
 const OUTPUT_DIR = path.join(PROJECT_DIR, "09_output");
 
 // ── 1. Load timeline and transcript ──────────────────────────────────
