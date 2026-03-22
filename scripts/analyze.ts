@@ -9,6 +9,7 @@
  */
 
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { runPipeline } from "../runtime/pipeline/ingest.js";
 import { createGeminiVlmFn } from "../runtime/connectors/gemini-vlm.js";
 
@@ -21,6 +22,7 @@ function parseArgs(argv: string[]): {
   skipVlm: boolean;
   skipDiarize: boolean;
   skipPeak: boolean;
+  skipMediaLink: boolean;
   language: string | undefined;
   sttProvider: string | undefined;
   contentHint: string | undefined;
@@ -32,6 +34,7 @@ function parseArgs(argv: string[]): {
   let skipVlm = false;
   let skipDiarize = false;
   let skipPeak = false;
+  let skipMediaLink = false;
   let language: string | undefined;
   let sttProvider: string | undefined;
   let contentHint: string | undefined;
@@ -48,6 +51,8 @@ function parseArgs(argv: string[]): {
       skipDiarize = true;
     } else if (arg === "--skip-peak") {
       skipPeak = true;
+    } else if (arg === "--skip-media-link") {
+      skipMediaLink = true;
     } else if (arg === "--language" || arg === "-l") {
       language = args[++i] ?? undefined;
     } else if (arg === "--stt-provider") {
@@ -63,6 +68,7 @@ Options:
   --skip-vlm         Skip visual language model stage
   --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
   --skip-peak        Skip VLM peak detection stage
+  --skip-media-link  Skip 02_media symlink generation
   --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
   --stt-provider     STT provider: "groq" or "openai" (auto-detected if omitted)
   --content-hint     Content context for VLM (e.g. "子供の自転車練習")
@@ -84,13 +90,35 @@ Options:
     process.exit(1);
   }
 
-  return { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider, contentHint };
+  return {
+    sourceFiles,
+    projectDir,
+    skipStt,
+    skipVlm,
+    skipDiarize,
+    skipPeak,
+    skipMediaLink,
+    language,
+    sttProvider,
+    contentHint,
+  };
 }
 
 // ── Main ───────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { sourceFiles, projectDir, skipStt, skipVlm, skipDiarize, skipPeak, language, sttProvider, contentHint } = parseArgs(process.argv);
+  const {
+    sourceFiles,
+    projectDir,
+    skipStt,
+    skipVlm,
+    skipDiarize,
+    skipPeak,
+    skipMediaLink,
+    language,
+    sttProvider,
+    contentHint,
+  } = parseArgs(process.argv);
 
   console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
   console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);
@@ -98,6 +126,7 @@ async function main(): Promise<void> {
   if (skipVlm) console.log("[analyze] VLM: skipped");
   if (skipDiarize) console.log("[analyze] Diarization: skipped");
   if (skipPeak) console.log("[analyze] Peak detection: skipped");
+  if (skipMediaLink) console.log("[analyze] Media links: skipped");
   if (language) console.log(`[analyze] Language: ${language}`);
   if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
   if (contentHint) console.log(`[analyze] Content hint: ${contentHint}`);
@@ -124,6 +153,7 @@ async function main(): Promise<void> {
     sttLanguageOverride: language,
     sttProvider,
     contentHint,
+    skipMediaLink,
   });
 
   console.log("\n[analyze] Pipeline complete");
@@ -139,9 +169,22 @@ async function main(): Promise<void> {
   } else {
     console.log("  Gaps: none");
   }
+
+  if (result.mediaSourceMapPath) {
+    console.log(`  Media links: ${result.mediaSourceMap?.items.length ?? 0} mapped`);
+    console.log(`  Source map: ${result.mediaSourceMapPath}`);
+  }
 }
 
-main().catch((err) => {
-  console.error("[analyze] Fatal error:", err);
-  process.exit(1);
-});
+const isMain = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMain) {
+  main().catch((err) => {
+    console.error("[analyze] Fatal error:", err);
+    process.exit(1);
+  });
+}
+
+export { parseArgs };

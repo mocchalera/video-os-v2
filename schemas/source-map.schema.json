@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/source-map.schema.json",
+  "title": "Project Media Source Map",
+  "type": "object",
+  "required": ["version", "project_id", "media_dir", "generated_at", "items"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "media_dir": {
+      "type": "string",
+      "const": "02_media"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sourceMapEntry"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sourceMapEntry": {
+      "type": "object",
+      "required": ["asset_id", "source_locator", "local_source_path", "link_path"],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "local_source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "link_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["asset", "bgm"]
+        },
+        "link_type": {
+          "type": "string",
+          "const": "symlink"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

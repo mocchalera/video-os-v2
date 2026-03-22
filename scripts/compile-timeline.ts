@@ -2,6 +2,7 @@
 // Usage:
 //   npx tsx scripts/compile-timeline.ts <project-path>
 //   npx tsx scripts/compile-timeline.ts <project-path> --patch <patch-file>
+//   npx tsx scripts/compile-timeline.ts <project-path> --source-map 02_media/source_map.json
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -10,21 +11,30 @@ import { compile, applyPatch } from "../runtime/compiler/index.js";
 import { writePreviewManifest } from "../runtime/compiler/export.js";
 import type { ReviewPatch } from "../runtime/compiler/patch.js";
 import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
+import { loadSourceMap } from "../runtime/media/source-map.js";
 import { validateProject } from "./validate-schemas.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-function parseArgs(): { projectPath: string; patchPath?: string; fpsNum?: number } {
+function parseArgs(): {
+  projectPath: string;
+  patchPath?: string;
+  fpsNum?: number;
+  sourceMapPath?: string;
+} {
   const args = process.argv.slice(2);
   let projectPath: string | undefined;
   let patchPath: string | undefined;
   let fpsNum: number | undefined;
+  let sourceMapPath: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--patch" && i + 1 < args.length) {
       patchPath = args[++i];
     } else if (args[i] === "--fps" && i + 1 < args.length) {
       fpsNum = parseInt(args[++i], 10);
+    } else if (args[i] === "--source-map" && i + 1 < args.length) {
+      sourceMapPath = args[++i];
     } else if (!projectPath) {
       projectPath = args[i];
     }
@@ -32,17 +42,17 @@ function parseArgs(): { projectPath: string; patchPath?: string; fpsNum?: number
 
   if (!projectPath) {
     console.error(
-      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>]",
+      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>]",
     );
     process.exit(1);
   }
 
-  return { projectPath, patchPath, fpsNum };
+  return { projectPath, patchPath, fpsNum, sourceMapPath };
 }
 
 // ── Compile mode ────────────────────────────────────────────────────
 
-function runCompile(projectPath: string, fpsNum?: number): void {
+function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string): void {
   // Pre-compile validation: check Gate 1
   const preCheck = validateProject(projectPath);
   if (preCheck.compile_gate === "blocked") {
@@ -66,6 +76,7 @@ function runCompile(projectPath: string, fpsNum?: number): void {
     projectPath,
     createdAt,
     fpsNum,
+    sourceMapPath,
   });
 
   console.log(`Timeline compiled: ${result.outputPath}`);
@@ -90,7 +101,7 @@ function runCompile(projectPath: string, fpsNum?: number): void {
 
 // ── Patch mode ──────────────────────────────────────────────────────
 
-function runPatch(projectPath: string, patchPath: string): void {
+function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string): void {
   const absProject = path.resolve(projectPath);
   const timelinePath = path.join(absProject, "05_timeline/timeline.json");
 
@@ -141,7 +152,11 @@ function runPatch(projectPath: string, patchPath: string): void {
   fs.writeFileSync(timelinePath, JSON.stringify(result.timeline, null, 2), "utf-8");
 
   // Regenerate preview-manifest from patched timeline
-  const manifestPath = writePreviewManifest(result.timeline, absProject);
+  const manifestPath = writePreviewManifest(
+    result.timeline,
+    absProject,
+    loadSourceMap(absProject, sourceMapPath),
+  );
 
   console.log(`Patch applied: ${result.appliedOps}/${patch.operations.length} ops`);
   console.log(`  Version: ${timeline.version} → ${result.timeline.version}`);
@@ -174,12 +189,12 @@ function runPatch(projectPath: string, patchPath: string): void {
 // ── Main ────────────────────────────────────────────────────────────
 
 function main(): void {
-  const { projectPath, patchPath, fpsNum } = parseArgs();
+  const { projectPath, patchPath, fpsNum, sourceMapPath } = parseArgs();
 
   if (patchPath) {
-    runPatch(projectPath, patchPath);
+    runPatch(projectPath, patchPath, sourceMapPath);
   } else {
-    runCompile(projectPath, fpsNum);
+    runCompile(projectPath, fpsNum, sourceMapPath);
   }
 }
 

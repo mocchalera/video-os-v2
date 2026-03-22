@@ -18,6 +18,7 @@ import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTim
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysis } from "../connectors/bgm-beat-detector.js";
+import { loadSourceMap } from "../media/source-map.js";
 import type {
   CompileOptions,
   CompilerDefaults,
@@ -341,7 +342,11 @@ export function compile(opts: CompileOptions): CompileResult {
 
   const outputPath = writeTimeline(timelineIR, projectPath);
   const otioPath = exportOtio(timelineIR, projectPath);
-  const previewManifestPath = writePreviewManifest(timelineIR, projectPath);
+  const previewManifestPath = writePreviewManifest(
+    timelineIR,
+    projectPath,
+    loadSourceMap(projectPath, opts.sourceMapPath),
+  );
 
   return {
     timeline: timelineIR,

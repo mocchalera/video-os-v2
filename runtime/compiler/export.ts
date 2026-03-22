@@ -4,6 +4,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { LoadedSourceMap } from "../media/source-map.js";
 import type {
   AssembledTimeline,
   ClipOutput,
@@ -148,6 +149,7 @@ export function exportOtio(
 export function writePreviewManifest(
   timeline: TimelineIR,
   projectPath: string,
+  sourceMap?: LoadedSourceMap,
 ): string {
   const outDir = path.join(projectPath, "05_timeline");
   if (!fs.existsSync(outDir)) {
@@ -162,14 +164,24 @@ export function writePreviewManifest(
     clips: timeline.tracks.video
       .flatMap((t) => t.clips)
       .concat(timeline.tracks.audio.flatMap((t) => t.clips))
-      .map((c) => ({
-        clip_id: c.clip_id,
-        asset_id: c.asset_id,
-        src_in_us: c.src_in_us,
-        src_out_us: c.src_out_us,
-        timeline_in_frame: c.timeline_in_frame,
-        timeline_duration_frames: c.timeline_duration_frames,
-      })),
+      .map((c) => {
+        const sourceEntry = sourceMap?.entryMap.get(c.asset_id);
+        return {
+          clip_id: c.clip_id,
+          asset_id: c.asset_id,
+          src_in_us: c.src_in_us,
+          src_out_us: c.src_out_us,
+          timeline_in_frame: c.timeline_in_frame,
+          timeline_duration_frames: c.timeline_duration_frames,
+          ...(sourceEntry
+            ? {
+                source_locator: sourceEntry.source_locator,
+                local_source_path: sourceEntry.local_source_path,
+                media_link_path: sourceEntry.link_path,
+              }
+            : {}),
+        };
+      }),
   };
 
   const outPath = path.join(outDir, "preview-manifest.json");

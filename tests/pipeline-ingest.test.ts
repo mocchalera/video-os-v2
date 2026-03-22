@@ -201,6 +201,20 @@ describe("Pipeline: full ingest → segment → derivatives", () => {
       expect(fs.existsSync(p)).toBe(true);
     }
   });
+
+  it("writes 02_media/source_map.json and media symlink", () => {
+    const sourceMapPath = path.join(TMP_PROJECT, "02_media", "source_map.json");
+    expect(fs.existsSync(sourceMapPath)).toBe(true);
+
+    const sourceMap = JSON.parse(fs.readFileSync(sourceMapPath, "utf-8")) as {
+      items: Array<{ local_source_path: string; link_path: string }>;
+    };
+    expect(sourceMap.items).toHaveLength(1);
+
+    const linkPath = path.join(TMP_PROJECT, sourceMap.items[0].link_path);
+    expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(linkPath)).toBe(sourceMap.items[0].local_source_path);
+  });
 });
 
 // ── Determinism Test ───────────────────────────────────────────────
@@ -326,6 +340,27 @@ describe("Pipeline: multi-asset order independence", () => {
   }, 180_000);
 });
 
+describe("Pipeline: media-link controls", () => {
+  it("skips 02_media generation when skipMediaLink is enabled", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_pipeline_skip_media");
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    try {
+      await runPipeline({
+        sourceFiles: [TEST_CLIP],
+        projectDir: tmpDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        skipMediaLink: true,
+      });
+
+      expect(fs.existsSync(path.join(tmpDir, "02_media", "source_map.json"))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
 // ── Peak detection pipeline integration ─────────────────────────────
 
 describe("Pipeline: VLM peak detection writes peak_analysis to segments", () => {
@@ -424,12 +459,12 @@ describe("Pipeline: VLM peak detection writes peak_analysis to segments", () => 
 
       // Verify segments.json has peak_analysis on at least one segment
       const segWithPeak = result.segmentsJson.items.find(
-        (s) => (s as Record<string, unknown>).peak_analysis !== undefined,
+        (s) => s.peak_analysis !== undefined,
       );
       expect(segWithPeak).toBeDefined();
 
       if (segWithPeak) {
-        const pa = (segWithPeak as Record<string, unknown>).peak_analysis as Record<string, unknown>;
+        const pa = segWithPeak.peak_analysis as Record<string, unknown>;
         expect(pa.peak_moments).toBeDefined();
         expect(pa.visual_energy_curve).toBeDefined();
         expect(pa.provenance).toBeDefined();
@@ -478,7 +513,7 @@ describe("Pipeline: VLM peak detection writes peak_analysis to segments", () => 
       });
 
       const anyPeak = result.segmentsJson.items.some(
-        (s) => (s as Record<string, unknown>).peak_analysis !== undefined,
+        (s) => s.peak_analysis !== undefined,
       );
       expect(anyPeak).toBe(false);
     } finally {

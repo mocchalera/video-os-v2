@@ -5,11 +5,13 @@
  * Usage:
  *   npx tsx scripts/export-premiere-xml.ts <project-path> [--source-map <source-map.json>]
  *
- * The source map JSON maps asset_id → absolute file path:
- *   { "AST_31A9CDC2": "/path/to/file.MOV", ... }
+ * The source map JSON accepts:
+ * - legacy maps: { "AST_31A9CDC2": "/path/to/file.MOV", ... }
+ * - 02_media/source_map.json
+ * - handoff manifests with source_map[]
  *
- * If --source-map is not provided, the script will attempt to resolve
- * paths from the project's 03_analysis directory.
+ * If --source-map is not provided, the script will first look for
+ * 02_media/source_map.json, then fall back to older 03_analysis heuristics.
  *
  * Output: <project-path>/09_output/<project_id>_premiere.xml
  */
@@ -18,6 +20,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TimelineIR } from "../runtime/compiler/types.js";
 import { timelineToFcp7Xml } from "../runtime/handoff/fcp7-xml-export.js";
+import { loadSourceMap } from "../runtime/media/source-map.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -53,15 +56,16 @@ function resolveSourceMap(
   projectPath: string,
   sourceMapPath?: string,
 ): Map<string, string> {
-  const map = new Map<string, string>();
-
-  if (sourceMapPath) {
-    const raw = JSON.parse(fs.readFileSync(sourceMapPath, "utf-8"));
-    for (const [assetId, filePath] of Object.entries(raw)) {
-      map.set(assetId, filePath as string);
-    }
-    return map;
+  if (sourceMapPath && !fs.existsSync(path.resolve(sourceMapPath))) {
+    throw new Error(`source map not found: ${path.resolve(sourceMapPath)}`);
   }
+
+  const loaded = loadSourceMap(projectPath, sourceMapPath);
+  if (loaded.locatorMap.size > 0) {
+    return loaded.locatorMap;
+  }
+
+  const map = new Map<string, string>();
 
   // Try to auto-resolve from analysis directory
   const analysisDir = path.join(projectPath, "03_analysis");
@@ -120,7 +124,7 @@ function main(): void {
       "  Use --source-map <file.json> to provide asset_id → file path mapping,",
     );
     console.error(
-      "  or ensure 03_analysis contains analysis JSON files with asset_id and source_path fields.",
+      "  or generate 02_media/source_map.json via scripts/analyze.ts.",
     );
     process.exit(1);
   } else {

@@ -91,6 +91,10 @@ import {
   generateDisplayNames,
   type DisplayNameInput,
 } from "./display-name.js";
+import {
+  createMediaLinks,
+  type MediaSourceMapDoc,
+} from "../media/source-map.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -121,6 +125,8 @@ export interface PipelineOptions {
   skipPeak?: boolean;
   /** Content hint for VLM recognition accuracy (e.g. "child learning to ride a bicycle") */
   contentHint?: string;
+  /** Skip 02_media symlink generation */
+  skipMediaLink?: boolean;
 }
 
 export interface PipelineResult {
@@ -128,6 +134,8 @@ export interface PipelineResult {
   segmentsJson: SegmentsJson;
   gapReport: GapReport;
   outputDir: string;
+  mediaSourceMap?: MediaSourceMapDoc;
+  mediaSourceMapPath?: string;
 }
 
 export interface AssetsJson {
@@ -996,7 +1004,7 @@ function peakReduce(
   for (const seg of segmentsJson.items) {
     const shard = shardMap.get(seg.segment_id);
     if (!shard || !shard.peak_analysis) continue;
-    (seg as Record<string, unknown>).peak_analysis = shard.peak_analysis;
+    seg.peak_analysis = shard.peak_analysis;
   }
 
   atomicWriteJson(segmentsOutputPath, segmentsJson);
@@ -1329,10 +1337,28 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   gapReport.entries.push(...diarizeGapEntries);
   atomicWriteYaml(gapReportPath, gapReport);
 
+  let mediaSourceMap: MediaSourceMapDoc | undefined;
+  let mediaSourceMapPath: string | undefined;
+  if (!opts.skipMediaLink) {
+    const mediaLinks = createMediaLinks({
+      projectPath: absProjectDir,
+      projectId,
+      assets: assetsJson.items,
+      sourceFileMap,
+    });
+    mediaSourceMap = mediaLinks.doc;
+    mediaSourceMapPath = mediaLinks.sourceMapPath;
+    for (const warning of mediaLinks.warnings) {
+      console.warn(`[pipeline] ${warning}`);
+    }
+  }
+
   return {
     assetsJson,
     segmentsJson,
     gapReport,
     outputDir,
+    mediaSourceMap,
+    mediaSourceMapPath,
   };
 }
