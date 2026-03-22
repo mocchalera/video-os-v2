@@ -485,4 +485,6 @@ export interface CompileOptions {
   reviewPatch?: import("./patch.js").ReviewPatch;
   /** Timeline framerate numerator (default: 24). Use 30 for 29.97fps source material. */
   fpsNum?: number;
+  /** Optional source map override for preview-manifest media locators. */
+  sourceMapPath?: string;
 }

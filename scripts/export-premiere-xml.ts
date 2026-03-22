@@ -19,7 +19,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TimelineIR } from "../runtime/compiler/types.js";
-import { timelineToFcp7Xml } from "../runtime/handoff/fcp7-xml-export.js";
+import {
+  timelineToFcp7Xml,
+  type TextOverlay,
+} from "../runtime/handoff/fcp7-xml-export.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
@@ -27,14 +30,22 @@ import { loadSourceMap } from "../runtime/media/source-map.js";
 function parseArgs(): {
   projectPath: string;
   sourceMapPath?: string;
+  titlesPath?: string;
+  autoTitles: boolean;
 } {
   const args = process.argv.slice(2);
   let projectPath: string | undefined;
   let sourceMapPath: string | undefined;
+  let titlesPath: string | undefined;
+  let autoTitles = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--source-map" && i + 1 < args.length) {
       sourceMapPath = args[++i];
+    } else if (args[i] === "--titles" && i + 1 < args.length) {
+      titlesPath = args[++i];
+    } else if (args[i] === "--auto-titles") {
+      autoTitles = true;
     } else if (!projectPath) {
       projectPath = args[i];
     }
@@ -42,12 +53,16 @@ function parseArgs(): {
 
   if (!projectPath) {
     console.error(
-      "Usage: npx tsx scripts/export-premiere-xml.ts <project-path> [--source-map <file>]",
+      "Usage: npx tsx scripts/export-premiere-xml.ts <project-path> [options]",
     );
+    console.error("Options:");
+    console.error("  --source-map <file>  Asset ID → file path mapping");
+    console.error("  --titles <file>      Text overlay definitions (JSON)");
+    console.error("  --auto-titles        Generate overlays from timeline markers");
     process.exit(1);
   }
 
-  return { projectPath: path.resolve(projectPath), sourceMapPath };
+  return { projectPath: path.resolve(projectPath), sourceMapPath, titlesPath, autoTitles };
 }
 
 // ── Source map resolution ───────────────────────────────────────────
@@ -93,8 +108,49 @@ function resolveSourceMap(
 
 // ── Main ────────────────────────────────────────────────────────────
 
+// ── Title overlay resolution ────────────────────────────────────────
+
+function resolveTextOverlays(
+  timeline: TimelineIR,
+  titlesPath?: string,
+  autoTitles?: boolean,
+): TextOverlay[] {
+  // Explicit titles file takes priority
+  if (titlesPath) {
+    const raw = JSON.parse(fs.readFileSync(path.resolve(titlesPath), "utf-8"));
+    const items: TextOverlay[] = Array.isArray(raw) ? raw : raw.overlays ?? [];
+    console.log(`  Titles: ${items.length} from ${titlesPath}`);
+    return items;
+  }
+
+  // Auto-generate from timeline markers (beat markers → lower-third labels)
+  if (autoTitles && timeline.markers.length > 0) {
+    const fps = timeline.sequence.fps_num / (timeline.sequence.fps_den || 1);
+    const defaultDurFrames = Math.round(5 * fps); // 5 seconds
+
+    const overlays: TextOverlay[] = timeline.markers
+      .filter((m) => m.kind === "beat" || m.kind === "note")
+      .map((m) => {
+        // Strip "b01: " prefix from beat labels if present
+        const text = m.label.replace(/^b\d+:\s*/, "");
+        return {
+          startFrame: m.frame,
+          durationFrames: defaultDurFrames,
+          text,
+          fontSize: 36,
+          position: "lower-third" as const,
+        };
+      });
+
+    console.log(`  Titles: ${overlays.length} auto-generated from markers`);
+    return overlays;
+  }
+
+  return [];
+}
+
 function main(): void {
-  const { projectPath, sourceMapPath } = parseArgs();
+  const { projectPath, sourceMapPath, titlesPath, autoTitles } = parseArgs();
 
   // Read timeline.json
   const timelinePath = path.join(projectPath, "05_timeline", "timeline.json");
@@ -131,8 +187,11 @@ function main(): void {
     console.log(`  Source map: ${sourceMap.size} entries`);
   }
 
+  // Resolve text overlays
+  const textOverlays = resolveTextOverlays(timeline, titlesPath, autoTitles);
+
   // Export
-  const xml = timelineToFcp7Xml(timeline, { sourceMap });
+  const xml = timelineToFcp7Xml(timeline, { sourceMap, textOverlays });
 
   // Write output
   const outputDir = path.join(projectPath, "09_output");

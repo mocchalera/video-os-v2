@@ -8,6 +8,10 @@
  *   npx tsx scripts/analyze.ts video.mp4 --project projects/test --skip-stt --skip-vlm
  */
 
+import { config as dotenvConfig } from "dotenv";
+dotenvConfig({ path: ".env.local" });
+dotenvConfig(); // fallback: .env
+
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { runPipeline } from "../runtime/pipeline/ingest.js";

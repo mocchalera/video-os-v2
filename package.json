@@ -7,11 +7,14 @@
     "demo": "tsx scripts/demo.ts",
     "validate": "tsx scripts/validate-schemas.ts",
     "test": "vitest run",
-    "build": "tsc"
+    "build": "tsc",
+    "export:premiere": "tsx scripts/export-premiere-xml.ts",
+    "regen:premiere": "tsx scripts/regen-premiere-xml.ts"
   },
   "dependencies": {
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
+    "dotenv": "^17.3.1",
     "typescript": "^5.7.0",
     "yaml": "^2.7.0"
   },

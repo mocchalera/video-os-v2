@@ -39,6 +39,30 @@ export interface Fcp7ExportOptions {
   audioBitDepth?: number;
   /** Additional markers to embed (e.g. section labels) */
   extraMarkers?: ExtraMarker[];
+  /**
+   * Text overlays rendered as Outline Text generators on a dedicated V-Title track.
+   * Each overlay becomes a visible text element in the Premiere timeline.
+   */
+  textOverlays?: TextOverlay[];
+}
+
+export interface TextOverlay {
+  /** Timeline start frame */
+  startFrame: number;
+  /** Duration in frames */
+  durationFrames: number;
+  /** Text content (supports \n for line breaks) */
+  text: string;
+  /** Font size in points (default: 48) */
+  fontSize?: number;
+  /** Text color as [r, g, b] 0-255 (default: [255, 255, 255] white) */
+  color?: [number, number, number];
+  /** Opacity 0-100 (default: 100) */
+  opacity?: number;
+  /** Vertical position: top, center, lower-third (default: "lower-third") */
+  position?: "top" | "center" | "lower-third";
+  /** Optional label shown in Premiere's clip name (defaults to text) */
+  label?: string;
 }
 
 export interface ExtraMarker {
@@ -120,6 +144,10 @@ class ExportContext {
     this.appendVideoFormat(lines, 8);
     for (const track of this.timeline.tracks.video) {
       this.appendVideoTrack(lines, track, 8);
+    }
+    // Text overlay track (V-Title) — rendered as Outline Text generators
+    if (this.opts.textOverlays && this.opts.textOverlays.length > 0) {
+      this.appendTextOverlayTrack(lines, this.opts.textOverlays, 8);
     }
     lines.push(`      </video>`);
 
@@ -493,5 +521,113 @@ class ExportContext {
     }
 
     lines.push(`${d}</track>`);
+  }
+
+  // ── Text Overlay Track ──
+
+  private textOverlayCounter = 0;
+
+  private appendTextOverlayTrack(
+    lines: string[],
+    overlays: TextOverlay[],
+    depth: number,
+  ): void {
+    const d = this.indent(depth);
+    lines.push(`${d}<track>`);
+    lines.push(`${d}  <enabled>TRUE</enabled>`);
+    lines.push(`${d}  <locked>FALSE</locked>`);
+
+    for (const overlay of overlays) {
+      this.textOverlayCounter++;
+      this.appendTextGeneratorItem(lines, overlay, depth + 2);
+    }
+
+    lines.push(`${d}</track>`);
+  }
+
+  private appendTextGeneratorItem(
+    lines: string[],
+    overlay: TextOverlay,
+    depth: number,
+  ): void {
+    const d = this.indent(depth);
+    const id = `title-${this.textOverlayCounter}`;
+    const label = overlay.label || overlay.text.split("\n")[0];
+    const fontSize = overlay.fontSize ?? 48;
+    const [r, g, b] = overlay.color ?? [255, 255, 255];
+    const opacity = overlay.opacity ?? 100;
+    const durFrames = overlay.durationFrames;
+
+    // Compute vertical origin based on position
+    // FCP7 origin: center of frame = (0, 0), range roughly -0.5 to 0.5
+    let originY: number;
+    switch (overlay.position ?? "lower-third") {
+      case "top":
+        originY = 0.35;
+        break;
+      case "center":
+        originY = 0;
+        break;
+      case "lower-third":
+      default:
+        originY = -0.3;
+        break;
+    }
+
+    lines.push(`${d}<generatoritem id="${id}">`);
+    lines.push(`${d}  <name>${this.escXml(label)}</name>`);
+    lines.push(`${d}  <duration>${durFrames}</duration>`);
+    this.appendRate(lines, depth + 2);
+    lines.push(`${d}  <start>${overlay.startFrame}</start>`);
+    lines.push(`${d}  <end>${overlay.startFrame + durFrames}</end>`);
+    lines.push(`${d}  <in>0</in>`);
+    lines.push(`${d}  <out>${durFrames}</out>`);
+
+    // Outline Text generator — reliable in Premiere Pro import
+    lines.push(`${d}  <effect>`);
+    lines.push(`${d}    <name>Outline Text</name>`);
+    lines.push(`${d}    <effectid>Outline Text</effectid>`);
+    lines.push(`${d}    <effectcategory>Generators</effectcategory>`);
+    lines.push(`${d}    <effecttype>generator</effecttype>`);
+    lines.push(`${d}    <mediatype>video</mediatype>`);
+
+    // Text content
+    lines.push(`${d}    <parameter>`);
+    lines.push(`${d}      <parameterid>str</parameterid>`);
+    lines.push(`${d}      <name>Text</name>`);
+    lines.push(`${d}      <value>${this.escXml(overlay.text)}</value>`);
+    lines.push(`${d}    </parameter>`);
+
+    // Font size
+    lines.push(`${d}    <parameter>`);
+    lines.push(`${d}      <parameterid>fontsize</parameterid>`);
+    lines.push(`${d}      <name>Size</name>`);
+    lines.push(`${d}      <value>${fontSize}</value>`);
+    lines.push(`${d}    </parameter>`);
+
+    // Font color (RGBA)
+    lines.push(`${d}    <parameter>`);
+    lines.push(`${d}      <parameterid>fontcolor</parameterid>`);
+    lines.push(`${d}      <name>Font Color</name>`);
+    lines.push(`${d}      <value>`);
+    lines.push(`${d}        <red>${r}</red>`);
+    lines.push(`${d}        <green>${g}</green>`);
+    lines.push(`${d}        <blue>${b}</blue>`);
+    lines.push(`${d}        <alpha>${Math.round((opacity / 100) * 255)}</alpha>`);
+    lines.push(`${d}      </value>`);
+    lines.push(`${d}    </parameter>`);
+
+    // Origin (position)
+    lines.push(`${d}    <parameter>`);
+    lines.push(`${d}      <parameterid>origin</parameterid>`);
+    lines.push(`${d}      <name>Origin</name>`);
+    lines.push(`${d}      <value>`);
+    lines.push(`${d}        <horiz>0</horiz>`);
+    lines.push(`${d}        <vert>${originY}</vert>`);
+    lines.push(`${d}      </value>`);
+    lines.push(`${d}    </parameter>`);
+
+    lines.push(`${d}  </effect>`);
+    lines.push(`${d}</generatoritem>`);
   }
 }

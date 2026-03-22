@@ -128,6 +128,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     optional: true,
     runnerChecks: ["segment_src_time_check"],
   },
+  {
+    artifactPath: "02_media/source_map.json",
+    schemaFile: "source-map.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
   // analysis_policy — optional project-level override
   {
     artifactPath: "analysis_policy.yaml",

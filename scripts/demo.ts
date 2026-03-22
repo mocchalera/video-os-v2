@@ -43,7 +43,11 @@ console.log("  - edit_blueprint.yaml   (structure)\n");
 console.log("[2/3] Running deterministic compiler (Phase 0.5 → 5)...");
 
 try {
-  const result = compile({ projectPath, repoRoot });
+  const result = compile({
+    projectPath,
+    repoRoot,
+    createdAt: new Date().toISOString(),
+  });
 
   console.log("  Phase 0.5  Duration policy resolved");
   console.log("  Phase 1    Blueprint normalized");
