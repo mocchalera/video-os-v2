@@ -2,6 +2,8 @@
 
 素材フォルダと一言の依頼で粗編集まで自走する映像編集エージェント。
 
+![RoughCut Agent](docs/images/demo-00-intro.jpg)
+
 ## このプロジェクトについて
 
 RoughCut Agent は、映像素材から意図整理、素材解析、候補抽出、構成設計、粗編集、自己レビューまでを artifact-driven に進める映像編集エージェントです。  
@@ -98,6 +100,8 @@ npx tsx scripts/analyze.ts ./footage/*.mp4 \
 
 ## 完全な E2E フロー
 
+![エージェントがブリーフを作成中](docs/images/demo-03-output.jpg)
+
 ```text
 素材投入
   -> scripts/analyze.ts
@@ -147,6 +151,8 @@ UXP プラグイン:
 ラウンドトリップ diff engine は `trim_changed`, `reordered`, `deleted`, `added_unmapped` を検出します。`added_unmapped` は自動適用せず、手動レビュー前提です。
 
 ## アーキテクチャ
+
+![自由を渡すには止まる設計が必要](docs/images/demo-05-result.jpg)
 
 ```text
 Creative Brief
