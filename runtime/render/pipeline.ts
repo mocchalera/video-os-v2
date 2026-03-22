@@ -63,6 +63,62 @@ function writeLog(logsDir: string, name: string, content: string): string {
   return logPath;
 }
 
+interface TimelineSequenceConfig {
+  width: number;
+  height: number;
+  output_aspect_ratio?: string;
+}
+
+function readTimelineSequenceConfig(timelinePath: string): TimelineSequenceConfig {
+  const raw = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+    sequence?: { width?: number; height?: number; output_aspect_ratio?: string };
+  };
+
+  const width = raw.sequence?.width;
+  const height = raw.sequence?.height;
+  if (!width || !height) {
+    throw new Error(`Timeline sequence width/height missing: ${timelinePath}`);
+  }
+
+  return {
+    width,
+    height,
+    output_aspect_ratio: raw.sequence?.output_aspect_ratio,
+  };
+}
+
+export function buildAspectRatioFitFilter(
+  outputWidth: number,
+  outputHeight: number,
+  padColor = "black",
+): string {
+  return (
+    `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease,` +
+    `pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2:${padColor}`
+  );
+}
+
+async function fitVideoToTimeline(
+  inputPath: string,
+  outputPath: string,
+  timelinePath: string,
+): Promise<string> {
+  const sequence = readTimelineSequenceConfig(timelinePath);
+  const videoFilter = buildAspectRatioFitFilter(sequence.width, sequence.height);
+
+  await execFilePromise("ffmpeg", [
+    "-y",
+    "-i", inputPath,
+    "-vf", videoFilter,
+    "-an",
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    outputPath,
+  ]);
+
+  return outputPath;
+}
+
 // ── Phase 1: Demux ─────────────────────────────────────────────────
 
 /**
@@ -314,6 +370,26 @@ export async function runRenderPipeline(
     const logPath = writeLog(logsDir, "demux", `Demux failed: ${String(err)}`);
     logs["demux"] = logPath;
     throw new Error(`Demux failed: ${String(err)}`);
+  }
+
+  // 3.5. Fit the video stream to timeline output dimensions with scale+pad.
+  try {
+    const normalizedVideoPath = path.join(videoDir, "raw_video.normalized.mp4");
+    await fitVideoToTimeline(rawVideoPath, normalizedVideoPath, opts.timelinePath);
+    fs.renameSync(normalizedVideoPath, rawVideoPath);
+    logs["video_fit"] = writeLog(
+      logsDir,
+      "video_fit",
+      `Normalized raw video to timeline output using ${path.basename(opts.timelinePath)}`,
+    );
+  } catch (err) {
+    const logPath = writeLog(
+      logsDir,
+      "video_fit",
+      `Video fit failed: ${String(err)}`,
+    );
+    logs["video_fit"] = logPath;
+    throw new Error(`Video fit failed: ${String(err)}`);
   }
 
   // 4. Generate sidecar captions (SRT/VTT) if applicable

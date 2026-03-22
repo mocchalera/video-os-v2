@@ -194,6 +194,11 @@ export interface OutputDimensions {
   letterbox_policy: "none" | "pillarbox" | "letterbox";
 }
 
+export interface SourceVideoDimensions {
+  width: number;
+  height: number;
+}
+
 const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }> = {
   "16:9": { width: 1920, height: 1080 },
   "9:16": { width: 1080, height: 1920 },
@@ -201,30 +206,96 @@ const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }>
   "4:5": { width: 1080, height: 1350 },
 };
 
+const ASPECT_RATIO_VALUES = Object.fromEntries(
+  Object.entries(ASPECT_RATIO_DIMENSIONS).map(([ratio, dims]) => [
+    ratio,
+    dims.width / dims.height,
+  ]),
+) as Record<string, number>;
+
+function inferClosestAspectRatio(
+  width: number,
+  height: number,
+): string | null {
+  if (width <= 0 || height <= 0) return null;
+
+  const actual = width / height;
+  let bestRatio: string | null = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+
+  for (const [ratio, target] of Object.entries(ASPECT_RATIO_VALUES)) {
+    const delta = Math.abs(actual - target);
+    if (delta < bestDelta) {
+      bestRatio = ratio;
+      bestDelta = delta;
+    }
+  }
+
+  return bestRatio;
+}
+
+export function inferDominantSourceAspectRatio(
+  sourceDimensions: SourceVideoDimensions[] = [],
+): string | null {
+  const counts = new Map<string, number>();
+
+  for (const dims of sourceDimensions) {
+    const ratio = inferClosestAspectRatio(dims.width, dims.height);
+    if (!ratio) continue;
+    counts.set(ratio, (counts.get(ratio) ?? 0) + 1);
+  }
+
+  if (counts.size === 0) return null;
+
+  const ranked = [...counts.entries()].sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
+  return ranked[0][0];
+}
+
+function resolveLetterboxPolicy(
+  sourceAspectRatio: string | null,
+  outputAspectRatio: string,
+): "none" | "pillarbox" | "letterbox" {
+  if (!sourceAspectRatio || sourceAspectRatio === outputAspectRatio) {
+    return "none";
+  }
+
+  const sourceValue = ASPECT_RATIO_VALUES[sourceAspectRatio];
+  const outputValue = ASPECT_RATIO_VALUES[outputAspectRatio];
+  if (!sourceValue || !outputValue || Math.abs(sourceValue - outputValue) < 0.001) {
+    return "none";
+  }
+
+  return sourceValue < outputValue ? "pillarbox" : "letterbox";
+}
+
 /**
  * Resolve output dimensions from creative brief editorial settings.
- * Falls back to 16:9 (1920x1080) when aspect_ratio is unspecified.
+ * Falls back to the dominant source aspect ratio, then 16:9 if unspecified.
  */
 export function resolveOutputDimensions(
   editorial?: CreativeBriefEditorial,
+  sourceDimensions: SourceVideoDimensions[] = [],
 ): OutputDimensions {
   const ratio = editorial?.aspect_ratio;
+  const sourceAspectRatio = inferDominantSourceAspectRatio(sourceDimensions);
+
+  let resolvedRatio: string | null = null;
   if (ratio && ratio !== "unknown" && ASPECT_RATIO_DIMENSIONS[ratio]) {
-    const dims = ASPECT_RATIO_DIMENSIONS[ratio];
-    return {
-      width: dims.width,
-      height: dims.height,
-      output_aspect_ratio: ratio,
-      letterbox_policy: "none",
-    };
+    resolvedRatio = ratio;
+  } else if (sourceAspectRatio) {
+    resolvedRatio = sourceAspectRatio;
+  } else {
+    resolvedRatio = "16:9";
   }
 
-  // Default to 16:9
+  const dims = ASPECT_RATIO_DIMENSIONS[resolvedRatio];
   return {
-    width: 1920,
-    height: 1080,
-    output_aspect_ratio: "16:9",
-    letterbox_policy: "none",
+    width: dims.width,
+    height: dims.height,
+    output_aspect_ratio: resolvedRatio,
+    letterbox_policy: resolveLetterboxPolicy(sourceAspectRatio, resolvedRatio),
   };
 }
 

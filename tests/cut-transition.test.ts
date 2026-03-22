@@ -524,6 +524,53 @@ describe("Adjacency Analyzer", () => {
     expect(transitions[0].applied_skill_id).toBe("crossfade_bridge");
   });
 
+  it("crossfade_bridge also activates for B-roll topic changes with high overlap", () => {
+    const v1: Track = {
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", { timeline_in_frame: 0, timeline_duration_frames: 72, beat_id: "B01" }),
+        makeClip("02", { timeline_in_frame: 72, timeline_duration_frames: 72, beat_id: "B02", asset_id: "AST_002" }),
+      ],
+    };
+
+    const { transitions } = adjacencyDecide(v1, {
+      activeEditingSkills: ["crossfade_bridge"],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({
+          segment_id: "SEG_01",
+          role: "support",
+          editorial_signals: {
+            semantic_cluster_id: "topic_A",
+            visual_tags: ["child", "bike", "park"],
+            afterglow_score: 0.6,
+            silence_ratio: 0.15,
+          },
+          motif_tags: ["growth", "practice"],
+        }),
+        makeCandidate({
+          segment_id: "SEG_02",
+          asset_id: "AST_002",
+          role: "support",
+          editorial_signals: {
+            semantic_cluster_id: "topic_B",
+            visual_tags: ["child", "bike", "park"],
+            reaction_intensity_score: 0.5,
+          },
+          motif_tags: ["growth", "practice"],
+        }),
+      ],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(transitions.length).toBe(1);
+    expect(transitions[0].transition_type).toBe("crossfade");
+    expect(transitions[0].applied_skill_id).toBe("crossfade_bridge");
+  });
+
   it("degrades to plain cut when below threshold", () => {
     // Use only smash_cut_energy which needs high energy_delta
     const v1: Track = {

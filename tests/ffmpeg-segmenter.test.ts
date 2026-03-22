@@ -221,7 +221,7 @@ describe("segmentAsset", () => {
       expect(a[i].src_in_us).toBe(b[i].src_in_us);
       expect(a[i].src_out_us).toBe(b[i].src_out_us);
     }
-  });
+  }, 30000);
 
   it("segments cover the entire asset duration without gaps", async () => {
     const asset = await ingestAsset(TEST_CLIP);

@@ -913,10 +913,8 @@ describe("bridge fingerprint", () => {
 describe("export readback validation (structural)", () => {
   it.skipIf(!otioAvailable)(
     "readback detects retained stable IDs after export",
-    () => {
-      const { validateReadback } = require("../runtime/handoff/export.js") as {
-        validateReadback: typeof import("../runtime/handoff/export.js").validateReadback;
-      };
+    async () => {
+      const { validateReadback } = await import("../runtime/handoff/export.js");
       const bridgeScriptPath = path.resolve("runtime/handoff/otio-bridge.py");
 
       // Create a temp dir and export an OTIO

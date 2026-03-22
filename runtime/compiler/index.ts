@@ -70,6 +70,36 @@ function readYaml<T>(filePath: string): T {
   return parseYaml(raw) as T;
 }
 
+function readSourceVideoDimensions(
+  projectPath: string,
+  assetIds: Set<string>,
+): Array<{ width: number; height: number }> {
+  const assetsPath = path.join(projectPath, "03_analysis/assets.json");
+  if (!fs.existsSync(assetsPath)) return [];
+
+  try {
+    const assetsDoc = JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as {
+      items?: Array<{
+        asset_id?: string;
+        video_stream?: { width?: number; height?: number };
+      }>;
+    };
+
+    return (assetsDoc.items ?? [])
+      .filter((item) =>
+        !!item.video_stream &&
+        (assetIds.size === 0 || (item.asset_id ? assetIds.has(item.asset_id) : false))
+      )
+      .map((item) => ({
+        width: item.video_stream!.width ?? 0,
+        height: item.video_stream!.height ?? 0,
+      }))
+      .filter((item) => item.width > 0 && item.height > 0);
+  } catch {
+    return [];
+  }
+}
+
 export function compile(opts: CompileOptions): CompileResult {
   const projectPath = path.resolve(opts.projectPath);
   const repoRoot = opts.repoRoot
@@ -130,7 +160,13 @@ export function compile(opts: CompileOptions): CompileResult {
 
   // ── Phase 2.5: Resolve Timeline Order & Output Dimensions ────────
   const timelineOrder = resolveTimelineOrder(blueprint, blueprint.resolved_profile?.id);
-  const outputDims = resolveOutputDimensions(brief.editorial);
+  const sourceAssetIds = new Set(
+    selects.candidates
+      .map((candidate) => candidate.asset_id)
+      .filter((assetId): assetId is string => typeof assetId === "string" && assetId.length > 0),
+  );
+  const sourceDimensions = readSourceVideoDimensions(projectPath, sourceAssetIds);
+  const outputDims = resolveOutputDimensions(brief.editorial, sourceDimensions);
 
   // ── Phase 3: Assemble ─────────────────────────────────────────────
 

@@ -3,7 +3,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { compile } from "../runtime/compiler/index.js";
-import { resolveOutputDimensions, resolveTimelineOrder } from "../runtime/compiler/duration-helpers.js";
+import {
+  inferDominantSourceAspectRatio,
+  resolveOutputDimensions,
+  resolveTimelineOrder,
+} from "../runtime/compiler/duration-helpers.js";
 import type { EditBlueprint, CreativeBrief } from "../runtime/compiler/types.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -91,6 +95,37 @@ describe("v5 Fix 1: Output Aspect Ratio", () => {
     expect(dims.output_aspect_ratio).toBe("4:5");
   });
 
+  it("inferDominantSourceAspectRatio prefers the most common source format", () => {
+    const ratio = inferDominantSourceAspectRatio([
+      { width: 1080, height: 1920 },
+      { width: 1080, height: 1920 },
+      { width: 1920, height: 1080 },
+    ]);
+    expect(ratio).toBe("9:16");
+  });
+
+  it("resolveOutputDimensions infers 9:16 from dominant source dimensions", () => {
+    const dims = resolveOutputDimensions(undefined, [
+      { width: 1080, height: 1920 },
+      { width: 1080, height: 1920 },
+    ]);
+    expect(dims.width).toBe(1080);
+    expect(dims.height).toBe(1920);
+    expect(dims.output_aspect_ratio).toBe("9:16");
+    expect(dims.letterbox_policy).toBe("none");
+  });
+
+  it("resolveOutputDimensions flags pillarbox when explicit output is wider than vertical source", () => {
+    const dims = resolveOutputDimensions(
+      { aspect_ratio: "16:9" },
+      [{ width: 1080, height: 1920 }],
+    );
+    expect(dims.width).toBe(1920);
+    expect(dims.height).toBe(1080);
+    expect(dims.output_aspect_ratio).toBe("16:9");
+    expect(dims.letterbox_policy).toBe("pillarbox");
+  });
+
   it("resolveOutputDimensions defaults for unknown", () => {
     const dims = resolveOutputDimensions({ aspect_ratio: "unknown" });
     expect(dims.width).toBe(1920);
@@ -119,6 +154,70 @@ describe("v5 Fix 1: Output Aspect Ratio", () => {
       expect(result.timeline.sequence.width).toBe(1920);
       expect(result.timeline.sequence.height).toBe(1080);
       expect(result.timeline.sequence.output_aspect_ratio).toBe("16:9");
+    } finally {
+      removeDirSync(tmpDir);
+    }
+  });
+
+  it("infers 9:16 output from dominant vertical assets when brief aspect_ratio is omitted", () => {
+    const tmpDir = createTempProject();
+    try {
+      const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
+      const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as CreativeBrief;
+      if (brief.editorial) {
+        delete brief.editorial.aspect_ratio;
+      }
+      fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
+
+      const assetsPath = path.join(tmpDir, "03_analysis/assets.json");
+      const assets = JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as {
+        items: Array<{ video_stream?: { width: number; height: number; fps_num: number; fps_den: number; codec: string } }>;
+      };
+      for (const item of assets.items) {
+        item.video_stream = {
+          width: 1080,
+          height: 1920,
+          fps_num: 24,
+          fps_den: 1,
+          codec: "h264",
+        };
+      }
+      fs.writeFileSync(assetsPath, JSON.stringify(assets, null, 2), "utf-8");
+
+      const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+      expect(result.timeline.sequence.width).toBe(1080);
+      expect(result.timeline.sequence.height).toBe(1920);
+      expect(result.timeline.sequence.output_aspect_ratio).toBe("9:16");
+    } finally {
+      removeDirSync(tmpDir);
+    }
+  });
+
+  it("preserves explicit 16:9 output but sets pillarbox policy for vertical assets", () => {
+    const tmpDir = createTempProject({
+      briefOverrides: { editorial: { aspect_ratio: "16:9" } },
+    });
+    try {
+      const assetsPath = path.join(tmpDir, "03_analysis/assets.json");
+      const assets = JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as {
+        items: Array<{ video_stream?: { width: number; height: number; fps_num: number; fps_den: number; codec: string } }>;
+      };
+      for (const item of assets.items) {
+        item.video_stream = {
+          width: 1080,
+          height: 1920,
+          fps_num: 24,
+          fps_den: 1,
+          codec: "h264",
+        };
+      }
+      fs.writeFileSync(assetsPath, JSON.stringify(assets, null, 2), "utf-8");
+
+      const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+      expect(result.timeline.sequence.width).toBe(1920);
+      expect(result.timeline.sequence.height).toBe(1080);
+      expect(result.timeline.sequence.output_aspect_ratio).toBe("16:9");
+      expect(result.timeline.sequence.letterbox_policy).toBe("pillarbox");
     } finally {
       removeDirSync(tmpDir);
     }

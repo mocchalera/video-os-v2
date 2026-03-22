@@ -19,6 +19,7 @@
       { "path": "semantic_cluster_change", "op": "eq", "value": true }
     ],
     "any": [
+      { "path": "has_b_roll_candidate", "op": "eq", "value": true },
       { "path": "visual_tag_overlap_score", "op": "lt", "value": 0.3 },
       { "path": "motif_overlap_score", "op": "lt", "value": 0.3 }
     ]
