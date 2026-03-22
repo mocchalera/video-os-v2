@@ -50,6 +50,15 @@ export interface EditorialMetadata {
   status: "clean" | "edited" | "degraded";
 }
 
+export interface TimingMetadata {
+  source: "word_remap" | "clip_item_remap";
+  confidence: number;
+  sourceWordRefs?: Array<{ word: string; start_us: number; end_us: number }>;
+  triggeredFallback: boolean;
+  timelineInFrame: number;
+  timelineDurationFrames: number;
+}
+
 export interface CaptionDraftEntry {
   caption_id: string;
   asset_id: string;
@@ -63,6 +72,8 @@ export interface CaptionDraftEntry {
   styling_class: string;
   metrics: { cps: number; dwell_ms: number };
   editorial?: EditorialMetadata;
+  /** Word-level timing remap metadata */
+  timing?: TimingMetadata;
 }
 
 export interface CaptionDraft {

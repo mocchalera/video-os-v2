@@ -12,22 +12,43 @@
 // Acronym rejoining
 // ---------------------------------------------------------------------------
 
+/** Well-known acronyms for safe space-split rejoining */
+const KNOWN_ACRONYMS = new Set([
+  "AI", "CEO", "CTO", "CFO", "COO", "GPT", "API", "SDK", "LLM", "NLP",
+  "URL", "HTML", "CSS", "SQL", "AWS", "GCP", "USB", "CPU", "GPU", "RAM",
+  "SSD", "HDD", "IoT", "VPN", "DNS", "HTTP", "SSH", "FTP", "TCP", "UDP",
+  "PDF", "CSV", "JSON", "XML", "YAML", "CLI", "GUI", "IDE", "ORM", "MVC",
+  "MVP", "SaaS", "PaaS", "IaaS", "DX", "UX", "UI", "PR", "QA", "CI", "CD",
+  "ML", "DL", "RL", "NLU", "OCR", "TTS", "STT", "ASR", "VLM", "RAG",
+]);
+
 /**
  * Rejoin underscore-split or space-split uppercase letter sequences.
- * Examples: "A_I" → "AI", "C_E_O" → "CEO", "A I" → "AI"
+ * Examples: "A_I" → "AI", "C_E_O" → "CEO"
+ *
+ * Space-split rejoining is restricted to known acronyms to avoid
+ * false positives like "Plan A B" → "Plan AB".
  */
-export function rejoinAcronyms(text: string): string {
+export function rejoinAcronyms(text: string, extraAcronyms?: Set<string>): string {
   // Pattern: single uppercase letters separated by underscores: A_I, C_E_O, G_P_T
+  // Underscore-split is always safe (STT artifact)
   let result = text.replace(
     /\b([A-Z])(?:[_]([A-Z]))+\b/g,
     (match) => match.replace(/_/g, ""),
   );
 
   // Pattern: single uppercase letters separated by spaces: "A I", "C E O"
-  // Must be 2+ consecutive single-letter groups to avoid false positives
+  // Only rejoin if the result is a known acronym (safety check)
+  const allKnown = extraAcronyms
+    ? new Set([...KNOWN_ACRONYMS, ...extraAcronyms])
+    : KNOWN_ACRONYMS;
+
   result = result.replace(
     /\b([A-Z])\s(?:[A-Z]\s)*[A-Z]\b/g,
-    (match) => match.replace(/\s/g, ""),
+    (match) => {
+      const joined = match.replace(/\s/g, "");
+      return allKnown.has(joined) ? joined : match;
+    },
   );
 
   return result;
@@ -39,12 +60,18 @@ export function rejoinAcronyms(text: string): string {
 
 /**
  * Remove stray/isolated punctuation marks that float alone or at invalid positions.
- * - Lone period/comma/。/、 with only whitespace around it
+ * - Lone period/comma/。/、 with whitespace on either or both sides
  * - Leading punctuation (. at start of caption)
+ * - Trailing lone punctuation preceded by whitespace
  */
 export function removeStrayPunctuation(text: string): string {
-  // Remove lone punctuation surrounded by whitespace (or at boundaries)
+  // Remove lone punctuation surrounded by whitespace (or at boundaries) — both sides
   let result = text.replace(/(?:^|\s)[.。、,]+(?:\s|$)/g, " ");
+
+  // Remove lone punctuation with whitespace on one side only:
+  // "hello .world" → "hello world", "こんにちは 。さようなら" → "こんにちは さようなら"
+  result = result.replace(/\s[.。、,]+(?=\S)/g, " ");
+  result = result.replace(/(?<=\S)[.。、,]+\s/g, " ");
 
   // Remove leading punctuation
   result = result.replace(/^[.。、,!！?？\s]+/, "");

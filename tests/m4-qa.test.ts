@@ -107,8 +107,8 @@ describe("checkCaptionDensity", () => {
     expect(result.name).toBe("caption_density_valid");
   });
 
-  it("fail - Japanese 12.0 CPS over 10.0 threshold", () => {
-    // 12 chars over 1 second (24 frames at 24fps) = 12.0 CPS
+  it("fail - Japanese 12.0 CPS over 6.0 threshold", () => {
+    // 10 chars over 20/24 ≈ 0.833 seconds = ~12.0 CPS (exceeds 6.0 limit)
     const captions = [
       {
         caption_id: "SC_002",
@@ -119,7 +119,7 @@ describe("checkCaptionDensity", () => {
     ];
     const result = checkCaptionDensity(captions, 24, "ja");
     expect(result.passed).toBe(false);
-    expect(result.details).toContain("exceeds 10.0");
+    expect(result.details).toContain("exceeds 6.0");
   });
 
   it("fail - overlapping captions", () => {

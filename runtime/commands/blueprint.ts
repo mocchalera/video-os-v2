@@ -30,6 +30,11 @@ import {
   type DraftFile,
 } from "./shared.js";
 import type { ProjectState, GateStatus } from "../state/reconcile.js";
+import { buildMessageFrame, type FrameInput } from "../script/frame.js";
+import { buildMaterialReading, type ReadInput } from "../script/read.js";
+import { buildScriptDraft, type DraftInput } from "../script/draft.js";
+import { evaluateScript, type EvaluateInput } from "../script/evaluate.js";
+import type { Candidate, NormalizedBeat } from "../compiler/types.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -364,13 +369,17 @@ export async function runBlueprint(
     ? fs.readFileSync(stylePath, "utf-8")
     : null;
 
-  // 5. Decide path: iterative engine or legacy single-pass
-  const useIterative = (options?.iterativeEngine !== false) && !!phases;
+  // 5. Decide path: iterative engine (default) or legacy single-pass (explicit opt-in)
+  const useLegacy = options?.iterativeEngine === false;
+  const effectivePhases = phases ?? (useLegacy ? undefined : buildDefaultPhases(
+    absDir, projectId, selectsContent, briefContent, autonomyMode,
+  ));
+  const useIterative = !useLegacy && !!effectivePhases;
 
   let agentResult: BlueprintAgentResult;
   let loopSummary: LoopSummary | undefined;
 
-  if (useIterative && phases) {
+  if (useIterative && effectivePhases) {
     // ── Iterative narrative loop ──────────────────────────────
     const maxIter = options?.maxIterations ?? 3;
     const requireConfirm = options?.requireConfirmationInCollaborative !== false;
@@ -386,10 +395,30 @@ export async function runBlueprint(
     };
 
     const result = await runNarrativeLoop(
-      phaseCtx, phases, agent, maxIter, requireConfirm,
+      phaseCtx, effectivePhases, agent, maxIter, requireConfirm,
     );
 
     if (!result.success) {
+      // Persist script_evaluation.yaml on ALL failure paths (NOTE 1)
+      const planDirFail = path.join(absDir, "04_plan");
+      fs.mkdirSync(planDirFail, { recursive: true });
+      if (result.evaluateResult || result.loopSummary) {
+        fs.writeFileSync(
+          path.join(planDirFail, "script_evaluation.yaml"),
+          stringifyYaml({
+            version: "1",
+            project_id: projectId,
+            loop_summary: result.loopSummary,
+            gate_pass: result.evaluateResult?.gatePassed ?? false,
+            metrics: result.evaluateResult?.metrics,
+            warnings: result.evaluateResult?.warnings,
+            confirmation_status: result.confirmResult?.status ?? "skipped",
+            decline_reason: result.confirmResult?.declineReason,
+          }),
+          "utf-8",
+        );
+      }
+
       // 3x fail → blocked
       if (result.loopSummary?.finalStatus === "rejected_max_iterations") {
         const blocker: Uncertainty = {
@@ -720,4 +749,320 @@ async function runNarrativeLoop(
     evaluateResult: lastEvaluation,
     confirmResult: lastConfirm,
   };
+}
+
+// ── Default Narrative Phases (built from script/* modules) ───────
+
+/**
+ * Build default NarrativePhases using the deterministic script engine.
+ * This wires frame → read → draft → evaluate → confirm → project
+ * using the existing script/* module implementations.
+ */
+function buildDefaultPhases(
+  absDir: string,
+  projectId: string,
+  selectsContent: unknown,
+  briefContent: unknown,
+  autonomyMode: "full" | "collaborative",
+): NarrativePhases {
+  // Parse selects into candidates + beats
+  const selects = selectsContent as {
+    candidates?: Candidate[];
+    beats?: NormalizedBeat[];
+  };
+  const candidates = selects?.candidates ?? [];
+
+  // Read blueprint if it already exists (for re-run scenarios)
+  const blueprintPath = path.join(absDir, "04_plan/edit_blueprint.yaml");
+  let existingBlueprint: EditBlueprint | undefined;
+  if (fs.existsSync(blueprintPath)) {
+    try {
+      existingBlueprint = parseYaml(
+        fs.readFileSync(blueprintPath, "utf-8"),
+      ) as EditBlueprint;
+    } catch { /* ignore parse errors for re-run */ }
+  }
+
+  // Extract beats from existing blueprint or selects
+  const beats: NormalizedBeat[] = selects?.beats
+    ?? (existingBlueprint?.beats?.map((b) => ({
+      beat_id: b.id,
+      label: b.label,
+      target_duration_frames: b.target_duration_frames,
+      required_roles: b.required_roles,
+      preferred_roles: b.preferred_roles ?? [],
+      purpose: b.purpose ?? b.label,
+    })) ?? []);
+
+  // Stub blueprint for phases that require EditBlueprint from compiler/types
+  const stubBlueprint = {
+    version: "1",
+    project_id: projectId,
+    sequence_goals: [] as string[],
+    beats: [] as Beat[],
+    pacing: { opening_cadence: "medium", middle_cadence: "varied", ending_cadence: "slow-fade" },
+    music_policy: { start_sparse: true, allow_release_late: true, entry_beat: beats[0]?.beat_id ?? "B1", avoid_anthemic_lift: false, permitted_energy_curve: "default" },
+    dialogue_policy: { preserve_natural_breath: true, avoid_wall_to_wall_voiceover: true },
+  } as any;
+
+  return {
+    async frame(ctx) {
+      const brief = ctx.briefContent as {
+        project?: {
+          story_promise?: string;
+          hook_angle?: string;
+          closing_intent?: string;
+          runtime_target_sec?: number;
+        };
+        editorial_profile_hint?: string;
+        editorial_policy_hint?: string;
+      };
+
+      const frameInput: FrameInput = {
+        projectId: ctx.projectId,
+        createdAt: new Date().toISOString(),
+        storyPromise: brief?.project?.story_promise ?? "Untitled story",
+        hookAngle: brief?.project?.hook_angle ?? "cold open",
+        closingIntent: brief?.project?.closing_intent ?? "resolve and reflect",
+        resolutionInput: {
+          briefEditorial: {
+            profile_hint: brief?.editorial_profile_hint ?? "interview-highlight",
+            policy_hint: brief?.editorial_policy_hint ?? "default",
+          },
+          runtimeTargetSec: brief?.project?.runtime_target_sec,
+        },
+        beatCount: beats.length || 4,
+      };
+
+      const { frame } = buildMessageFrame(frameInput);
+
+      return {
+        storyPromise: frame.story_promise,
+        hookAngle: frame.hook_angle,
+        closingIntent: frame.closing_intent,
+        beatCount: frame.beat_strategy.beat_count,
+        qualityTargets: frame.quality_targets as Record<string, number> | undefined,
+      };
+    },
+
+    async read(ctx, frameResult) {
+      const readInput: ReadInput = {
+        projectId: ctx.projectId,
+        createdAt: new Date().toISOString(),
+        beats,
+        candidates,
+        blueprint: (existingBlueprint ?? stubBlueprint) as any,
+      };
+
+      const reading = buildMaterialReading(readInput);
+
+      return {
+        beatReadings: reading.beat_readings.map((br) => ({
+          beatId: br.beat_id,
+          topCandidates: br.top_candidates.map((tc) => tc.candidate_ref),
+          coverageGaps: br.coverage_gaps,
+        })),
+      };
+    },
+
+    async draft(ctx, frameResult, readResult, revisionBrief) {
+      // Build reading from readResult for draft input
+      const readingForDraft = {
+        version: "1",
+        project_id: ctx.projectId,
+        created_at: new Date().toISOString(),
+        beat_readings: readResult.beatReadings.map((br) => ({
+          beat_id: br.beatId,
+          top_candidates: br.topCandidates.map((ref) => ({
+            candidate_ref: ref,
+            why_primary: "matched by reading",
+          })),
+          backup_candidates: [] as Array<{ candidate_ref: string; why_backup?: string }>,
+          coverage_gaps: br.coverageGaps,
+          asset_concentration: 0,
+          speaker_risks: [] as string[],
+          tone_risks: [] as string[],
+        })),
+        dedupe_groups: [],
+      };
+
+      // If revision brief suggests backup preferences, inject them
+      if (revisionBrief?.preferBackups) {
+        for (const beatReading of readingForDraft.beat_readings) {
+          const backups = revisionBrief.preferBackups.filter((b) =>
+            !beatReading.top_candidates.some((tc) => tc.candidate_ref === b),
+          );
+          beatReading.backup_candidates = backups.map((ref) => ({
+            candidate_ref: ref,
+            why_backup: "suggested by revision brief",
+          }));
+        }
+      }
+
+      const draftFrame = {
+        version: "1",
+        project_id: ctx.projectId,
+        created_at: new Date().toISOString(),
+        story_promise: frameResult.storyPromise,
+        hook_angle: frameResult.hookAngle,
+        closing_intent: frameResult.closingIntent,
+        resolved_profile_candidate: { ref: "default", version: "1" },
+        resolved_policy_candidate: { ref: "default", version: "1" },
+        beat_strategy: {
+          beat_count: frameResult.beatCount,
+          role_sequence: buildDefaultRoleSequenceFromCount(frameResult.beatCount),
+        },
+      };
+
+      const draftInput: DraftInput = {
+        projectId: ctx.projectId,
+        createdAt: new Date().toISOString(),
+        frame: draftFrame as any,
+        reading: readingForDraft,
+        blueprint: (existingBlueprint ?? stubBlueprint) as any,
+        beats,
+      };
+
+      const scriptDraft = buildScriptDraft(draftInput);
+
+      return {
+        deliveryOrder: scriptDraft.delivery_order,
+        beatAssignments: scriptDraft.beat_assignments.map((a) => ({
+          beatId: a.beat_id,
+          primaryCandidateRef: a.primary_candidate_ref,
+          backupCandidateRefs: a.backup_candidate_refs,
+          storyRole: a.story_role,
+        })),
+      };
+    },
+
+    async evaluate(ctx, frameResult, readResult, draftResult) {
+      const evalInput: EvaluateInput = {
+        projectId: ctx.projectId,
+        createdAt: new Date().toISOString(),
+        draft: {
+          version: "1",
+          project_id: ctx.projectId,
+          created_at: new Date().toISOString(),
+          delivery_order: draftResult.deliveryOrder,
+          beat_assignments: draftResult.beatAssignments.map((a) => ({
+            beat_id: a.beatId,
+            primary_candidate_ref: a.primaryCandidateRef,
+            backup_candidate_refs: a.backupCandidateRefs,
+            story_role: a.storyRole as any,
+            active_skill_hints: [],
+            rationale: "",
+          })),
+        },
+        candidates,
+        blueprint: (existingBlueprint ?? stubBlueprint) as any,
+        beats,
+        qualityTargets: frameResult.qualityTargets as any,
+      };
+
+      const evaluation = evaluateScript(evalInput);
+
+      const revisionBrief: RevisionBrief | undefined = !evaluation.gate_pass
+        ? {
+            preserve: evaluation.warnings
+              .filter((w) => w.type !== "missing_assignment")
+              .map((w) => w.beat_id ?? "")
+              .filter(Boolean),
+            mustFix: evaluation.warnings.map((w) => w.message),
+            brokenBeats: evaluation.missing_beats,
+            preferBackups: evaluation.repairs.map((r) => r.to_candidate_ref),
+          }
+        : undefined;
+
+      return {
+        gatePassed: evaluation.gate_pass,
+        metrics: {
+          hookDensity: evaluation.metrics.hook_density,
+          noveltyRate: evaluation.metrics.novelty_rate,
+        },
+        warnings: evaluation.warnings.map((w) => w.message),
+        revisionBrief,
+      };
+    },
+
+    async confirm(ctx, draftResult, evaluation) {
+      // In default phases, collaborative mode skips interactive confirmation
+      // (agent.run handles it). Return "skipped" for deterministic phases.
+      if (ctx.autonomyMode === "collaborative") {
+        return { status: "skipped" };
+      }
+      return { status: "skipped" };
+    },
+
+    async project(ctx, draftResult, evaluation) {
+      // Build the final EditBlueprint from the draft result
+      const now = new Date().toISOString();
+      const blueprint: EditBlueprint = {
+        version: "1",
+        project_id: ctx.projectId,
+        created_at: now,
+        sequence_goals: existingBlueprint?.sequence_goals ?? [],
+        beats: beats.map((b) => ({
+          id: b.beat_id,
+          label: b.label,
+          target_duration_frames: b.target_duration_frames,
+          required_roles: b.required_roles,
+          preferred_roles: b.preferred_roles,
+        })),
+        pacing: {
+          opening_cadence: existingBlueprint?.pacing?.opening_cadence ?? "medium",
+          middle_cadence: existingBlueprint?.pacing?.middle_cadence ?? "varied",
+          ending_cadence: existingBlueprint?.pacing?.ending_cadence ?? "slow-fade",
+          confirmed_preferences: {
+            mode: ctx.autonomyMode,
+            source: ctx.autonomyMode === "full" ? "ai_autonomous" : "human_confirmed",
+            duration_target_sec: (ctx.briefContent as any)?.project?.runtime_target_sec ?? 120,
+            confirmed_at: now,
+          },
+        },
+        music_policy: existingBlueprint?.music_policy ?? {
+          start_sparse: true,
+          allow_release_late: true,
+          entry_beat: beats[0]?.beat_id ?? "B1",
+        },
+        caption_policy: existingBlueprint?.caption_policy,
+        dialogue_policy: existingBlueprint?.dialogue_policy ?? {
+          preserve_natural_breath: true,
+          avoid_wall_to_wall_voiceover: true,
+        },
+        transition_policy: existingBlueprint?.transition_policy ?? {
+          prefer_match_texture_over_flashy_fx: true,
+        },
+        ending_policy: existingBlueprint?.ending_policy ?? {
+          should_feel: "resolved",
+        },
+        rejection_rules: existingBlueprint?.rejection_rules ?? [],
+      };
+
+      const register: UncertaintyRegister = {
+        version: "1",
+        project_id: ctx.projectId,
+        created_at: now,
+        uncertainties: [],
+      };
+
+      return {
+        blueprint,
+        uncertaintyRegister: register,
+        confirmed: true,
+      };
+    },
+  };
+}
+
+function buildDefaultRoleSequenceFromCount(
+  count: number,
+): Array<"hook" | "setup" | "experience" | "closing"> {
+  if (count <= 1) return ["hook"];
+  if (count === 2) return ["hook", "closing"];
+  if (count === 3) return ["hook", "experience", "closing"];
+  const seq: Array<"hook" | "setup" | "experience" | "closing"> = ["hook", "setup"];
+  for (let i = 2; i < count - 1; i++) seq.push("experience");
+  seq.push("closing");
+  return seq;
 }

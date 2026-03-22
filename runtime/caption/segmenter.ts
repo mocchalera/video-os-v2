@@ -67,8 +67,8 @@ export interface LanguageCalibration {
 }
 
 export const LANGUAGE_CALIBRATIONS: Record<string, LanguageCalibration> = {
-  ja: { unit: "character", target_max: 6.0, warn: 7.0, fail: 10.0 },
-  en: { unit: "word", target_max: 3.0, warn: 3.5, fail: 4.5 },
+  ja: { unit: "character", target_max: 4.0, warn: 5.0, fail: 6.0 },
+  en: { unit: "character", target_max: 10.0, warn: 12.0, fail: 15.0 },
 };
 
 // ---------------------------------------------------------------------------
@@ -195,7 +195,7 @@ function computeCps(
 
 function getMaxCps(language: string): number {
   const cal = LANGUAGE_CALIBRATIONS[language];
-  return cal ? cal.fail : 4.5;
+  return cal ? cal.fail : 15.0;
 }
 
 /**

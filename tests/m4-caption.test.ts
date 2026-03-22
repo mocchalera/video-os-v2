@@ -168,9 +168,9 @@ describe("Caption Segmenter", () => {
     const jaCal = LANGUAGE_CALIBRATIONS["ja"];
     expect(jaCal).toBeDefined();
     expect(jaCal.unit).toBe("character");
-    expect(jaCal.target_max).toBe(6.0);
-    expect(jaCal.warn).toBe(7.0);
-    expect(jaCal.fail).toBe(10.0);
+    expect(jaCal.target_max).toBe(4.0);
+    expect(jaCal.warn).toBe(5.0);
+    expect(jaCal.fail).toBe(6.0);
 
     // Generate captions with Japanese text and verify CPS uses character count
     const timeline = mockTimeline();
@@ -209,14 +209,14 @@ describe("Caption Segmenter", () => {
     expect(cap.metrics.cps).toBeLessThan(jaCal.fail);
   });
 
-  it("applies English WPS calibration (word-based)", () => {
+  it("applies English CPS calibration (character-based, aligned with line-breaker)", () => {
     // Verify LANGUAGE_CALIBRATIONS for English
     const enCal = LANGUAGE_CALIBRATIONS["en"];
     expect(enCal).toBeDefined();
-    expect(enCal.unit).toBe("word");
-    expect(enCal.target_max).toBe(3.0);
-    expect(enCal.warn).toBe(3.5);
-    expect(enCal.fail).toBe(4.5);
+    expect(enCal.unit).toBe("character");
+    expect(enCal.target_max).toBe(10.0);
+    expect(enCal.warn).toBe(12.0);
+    expect(enCal.fail).toBe(15.0);
 
     // English transcript with known word count
     const timeline = mockTimeline();
@@ -246,7 +246,7 @@ describe("Caption Segmenter", () => {
 
     expect(result.speech_captions.length).toBe(1);
     const cap = result.speech_captions[0];
-    // "Hello world test" = 3 words. Duration ~2s → WPS = 3/2 = 1.5
+    // "Hello world test" = 16 characters. Duration ~2s → CPS = 16/2 = 8.0
     expect(cap.metrics.cps).toBeGreaterThan(0);
     expect(cap.metrics.cps).toBeLessThan(enCal.fail);
   });

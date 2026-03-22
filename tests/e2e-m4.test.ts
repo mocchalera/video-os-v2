@@ -13,7 +13,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
-import { captionCommand } from "../runtime/commands/caption.js";
+import { captionCommand, approveCaptions } from "../runtime/commands/caption.js";
 import { packageCommand } from "../runtime/commands/package.js";
 import {
   computeFileHash,
@@ -216,29 +216,41 @@ describe("M4 E2E: captionCommand", () => {
     expect(written.caption_policy.source).toBe("transcript");
   });
 
-  it("generates caption_approval.json for source=none policy", () => {
+  it("captionCommand produces draft only, approveCaptions creates approval", () => {
     const projDir = createM4Project("caption-approval-none", {
       captionSource: "none",
     });
-    const result = captionCommand(projDir, {
+
+    // Step 1: captionCommand produces draft, NOT approval
+    const result = captionCommand(projDir);
+    expect(result.success).toBe(true);
+    expect(result.captionDraft).toBeDefined();
+    // captionCommand should NOT produce captionApproval
+    expect(result.captionApproval).toBeUndefined();
+    expect(result.timelineUpdated).toBeUndefined();
+
+    // Verify only draft exists, no approval yet
+    expect(fs.existsSync(path.join(projDir, "07_package/caption_source.json"))).toBe(true);
+    expect(fs.existsSync(path.join(projDir, "07_package/caption_draft.json"))).toBe(true);
+    expect(fs.existsSync(path.join(projDir, "07_package/caption_approval.json"))).toBe(false);
+
+    // Step 2: Human approval via approveCaptions
+    const approvalResult = approveCaptions(projDir, {
       approvedBy: "test-operator",
       approvedAt: "2026-03-21T11:00:00Z",
     });
 
-    expect(result.success).toBe(true);
-    expect(result.captionApproval).toBeDefined();
-    expect(result.captionApproval!.approval.status).toBe("approved");
-    expect(result.captionApproval!.approval.approved_by).toBe("test-operator");
+    expect(approvalResult.success).toBe(true);
+    expect(approvalResult.captionApproval).toBeDefined();
+    expect(approvalResult.captionApproval!.approval.status).toBe("approved");
+    expect(approvalResult.captionApproval!.approval.approved_by).toBe("test-operator");
 
     // Verify caption_approval.json was written
-    const approvalPath = path.join(
-      projDir,
-      "07_package/caption_approval.json",
-    );
+    const approvalPath = path.join(projDir, "07_package/caption_approval.json");
     expect(fs.existsSync(approvalPath)).toBe(true);
 
     // Verify timeline was updated
-    expect(result.timelineUpdated).toBe(true);
+    expect(approvalResult.timelineUpdated).toBe(true);
   });
 });
 
@@ -251,12 +263,14 @@ describe("M4 E2E: packageCommand", () => {
       captionSource: "none",
     });
 
-    // Run caption command
-    const capResult = captionCommand(projDir, {
+    // Run caption command (draft only) then approve
+    const capResult = captionCommand(projDir);
+    expect(capResult.success).toBe(true);
+    const approveResult = approveCaptions(projDir, {
       approvedBy: "operator",
       approvedAt: "2026-03-21T11:00:00Z",
     });
-    expect(capResult.success).toBe(true);
+    expect(approveResult.success).toBe(true);
 
     // Re-stamp approval after caption projection changes timeline hash
     restampApproval(projDir, "engine_render");
@@ -436,14 +450,18 @@ describe("M4 E2E: full pipeline", () => {
       captionSource: "none",
     });
 
-    // Step 1: Run caption command
-    const captionResult = captionCommand(projDir, {
+    // Step 1: Run caption command (draft only) then approve
+    const captionResult = captionCommand(projDir);
+    expect(captionResult.success).toBe(true);
+    expect(captionResult.captionDraft).toBeDefined();
+
+    const approveResult = approveCaptions(projDir, {
       approvedBy: "operator",
       approvedAt: "2026-03-21T11:00:00Z",
     });
-    expect(captionResult.success).toBe(true);
-    expect(captionResult.captionApproval).toBeDefined();
-    expect(captionResult.timelineUpdated).toBe(true);
+    expect(approveResult.success).toBe(true);
+    expect(approveResult.captionApproval).toBeDefined();
+    expect(approveResult.timelineUpdated).toBe(true);
 
     // Verify caption artifacts
     expect(

@@ -417,7 +417,7 @@ describe("M3 E2E: full command flow", () => {
     expect(status2.nextCommand).toBe("/blueprint");
 
     // ── Step 3: /blueprint ───────────────────────────────────
-    const blueprintResult = await runBlueprint(projectDir, createE2EBlueprintAgent());
+    const blueprintResult = await runBlueprint(projectDir, createE2EBlueprintAgent(), { iterativeEngine: false });
     expect(blueprintResult.success).toBe(true);
     expect(blueprintResult.newState).toBe("blueprint_ready");
     expect(blueprintResult.planningBlocked).toBe(false);
@@ -544,7 +544,7 @@ describe("M3 E2E: fatal issues path", () => {
     // Fast-forward: intent → triage → blueprint
     await runIntent(projectDir, createE2EIntentAgent());
     await runTriage(projectDir, createE2ETriageAgent());
-    await runBlueprint(projectDir, createE2EBlueprintAgent());
+    await runBlueprint(projectDir, createE2EBlueprintAgent(), { iterativeEngine: false });
 
     // Review with fatal issues
     const reviewResult = await runReview(
@@ -585,7 +585,7 @@ describe("M3 E2E: creative override path", () => {
     // Fast-forward: intent → triage → blueprint
     await runIntent(projectDir, createE2EIntentAgent());
     await runTriage(projectDir, createE2ETriageAgent());
-    await runBlueprint(projectDir, createE2EBlueprintAgent());
+    await runBlueprint(projectDir, createE2EBlueprintAgent(), { iterativeEngine: false });
 
     // Review with fatal issues but creative override
     const reviewResult = await runReview(
@@ -719,7 +719,7 @@ describe("/export command", () => {
     // Fast-forward to approved
     await runIntent(projectDir, createE2EIntentAgent());
     await runTriage(projectDir, createE2ETriageAgent());
-    await runBlueprint(projectDir, createE2EBlueprintAgent());
+    await runBlueprint(projectDir, createE2EBlueprintAgent(), { iterativeEngine: false });
     await runReview(
       projectDir,
       createE2EReviewAgent(),
@@ -748,7 +748,7 @@ describe("/export command", () => {
     // Fast-forward to approved
     await runIntent(projectDir, createE2EIntentAgent());
     await runTriage(projectDir, createE2ETriageAgent());
-    await runBlueprint(projectDir, createE2EBlueprintAgent());
+    await runBlueprint(projectDir, createE2EBlueprintAgent(), { iterativeEngine: false });
     await runReview(
       projectDir,
       createE2EReviewAgent(),
@@ -781,7 +781,7 @@ describe("export manifest content", () => {
     // Fast-forward to approved
     await runIntent(projectDir, createE2EIntentAgent());
     await runTriage(projectDir, createE2ETriageAgent());
-    await runBlueprint(projectDir, createE2EBlueprintAgent());
+    await runBlueprint(projectDir, createE2EBlueprintAgent(), { iterativeEngine: false });
     await runReview(
       projectDir,
       createE2EReviewAgent(),
@@ -812,7 +812,7 @@ describe("export manifest content", () => {
     // Fast-forward to approved
     await runIntent(projectDir, createE2EIntentAgent());
     await runTriage(projectDir, createE2ETriageAgent());
-    await runBlueprint(projectDir, createE2EBlueprintAgent());
+    await runBlueprint(projectDir, createE2EBlueprintAgent(), { iterativeEngine: false });
     await runReview(
       projectDir,
       createE2EReviewAgent(),

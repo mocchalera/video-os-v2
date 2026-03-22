@@ -68,26 +68,16 @@ export function checkCaptionDensity(
 
     const durationSec = cap.timeline_duration_frames / fps;
 
-    if (language === "ja" || language === "jp") {
-      // Japanese: characters per second
-      const charCount = cap.text.length;
-      const cps = charCount / durationSec;
-      if (cps > maxDensity) maxDensity = cps;
-      if (cps > 10.0) {
-        errors.push(
-          `${cap.caption_id}: CPS ${cps.toFixed(2)} exceeds 10.0 limit`,
-        );
-      }
-    } else {
-      // English / other: words per second
-      const wordCount = cap.text.trim().split(/\s+/).length;
-      const wps = wordCount / durationSec;
-      if (wps > maxDensity) maxDensity = wps;
-      if (wps > 4.5) {
-        errors.push(
-          `${cap.caption_id}: WPS ${wps.toFixed(2)} exceeds 4.5 limit`,
-        );
-      }
+    // Both languages use CPS (characters per second) aligned with line-breaker policy
+    const charCount = cap.text.length;
+    const cps = charCount / durationSec;
+    if (cps > maxDensity) maxDensity = cps;
+
+    const cpsLimit = (language === "ja" || language === "jp") ? 6.0 : 15.0;
+    if (cps > cpsLimit) {
+      errors.push(
+        `${cap.caption_id}: CPS ${cps.toFixed(2)} exceeds ${cpsLimit.toFixed(1)} limit`,
+      );
     }
   }
 

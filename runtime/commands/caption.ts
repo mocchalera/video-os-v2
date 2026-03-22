@@ -5,11 +5,12 @@
  * 1. Read caption_policy from blueprint
  * 2. Generate caption_source.json from transcripts (raw + cleanup)
  * 3. Run LLM editorial → caption_draft.json (injectable, fail-open)
- * 4. If approval mode: create caption_approval.json (human-only)
- * 5. Project approved captions into timeline.json
+ * 4. Apply word-level timing remap → timing metadata in draft
+ * 5. Validate readiness gate (layout, density, timing)
  *
- * Artifact chain: caption_source.json → caption_draft.json → caption_approval.json
- * caption_approval.json is human-approved only; machine never writes it directly.
+ * Artifact chain: caption_source.json → caption_draft.json
+ * caption_approval.json is human-approved only; machine NEVER generates it.
+ * Use approveCaptions() after human approval to create caption_approval.json.
  *
  * Allowed start states: approved (for full workflow), critique_ready (for draft only).
  */
@@ -39,11 +40,19 @@ import {
 import {
   runEditorial,
   type CaptionDraft,
+  type CaptionDraftEntry,
   type EditorialJudge,
   type EditorialReport,
   type GlossarySource,
   buildGlossary,
 } from "../caption/editorial.js";
+import {
+  batchWordRemap,
+  type TranscriptItemWithWords,
+  type ClipContext,
+  type TimingRemapResult,
+} from "../caption/word-remap.js";
+import { getLayoutPolicy, checkCps } from "../caption/line-breaker.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -52,17 +61,21 @@ export interface CaptionCommandResult {
   error?: CommandError;
   captionSource?: CaptionSource;
   captionDraft?: CaptionDraft;
-  captionApproval?: CaptionApproval;
   editorialReport?: EditorialReport;
+  /** @deprecated Use approveCaptions() for approval. Always undefined from captionCommand(). */
+  captionApproval?: CaptionApproval;
+  /** @deprecated Use approveCaptions() for timeline projection. Always undefined from captionCommand(). */
   timelineUpdated?: boolean;
 }
 
 export interface CaptionCommandOptions {
-  approvedBy?: string;
-  approvedAt?: string;
   overlayInputs?: TextOverlayInput[];
-  /** If true, only generate source + draft, no approval/projection. */
+  /** @deprecated No longer used — captionCommand always produces draft only. Use approveCaptions() for approval. */
   draftOnly?: boolean;
+  /** @deprecated Approval params belong in approveCaptions(). Kept for backward compat but ignored. */
+  approvedBy?: string;
+  /** @deprecated Approval params belong in approveCaptions(). Kept for backward compat but ignored. */
+  approvedAt?: string;
   /** If true, enable LLM editorial. Default: true when judge is provided. */
   editorialEnabled?: boolean;
   /** Injectable LLM editorial judge. If omitted, editorial is skipped. */
@@ -73,6 +86,18 @@ export interface CaptionCommandOptions {
   excludeSpeakers?: string[];
   /** If true, remove filler words from captions. Default: false. */
   removeFillers?: boolean;
+}
+
+export interface ApproveCaptionsOptions {
+  approvedBy: string;
+  approvedAt?: string;
+}
+
+export interface ApproveCaptionsResult {
+  success: boolean;
+  error?: CommandError;
+  captionApproval?: CaptionApproval;
+  timelineUpdated?: boolean;
 }
 
 // ── Command ─────────────────────────────────────────────────────
@@ -166,6 +191,7 @@ export function captionCommand(
     {
       excludeSpeakers: options?.excludeSpeakers,
       removeFillers: options?.removeFillers,
+      autoLineBreak: true,
     },
   );
 
@@ -187,41 +213,150 @@ export function captionCommand(
   const wantsEditorial = options?.editorialEnabled !== false && !!options?.editorialJudge;
 
   if (wantsEditorial && options?.editorialJudge) {
-    // Async path: run editorial then continue
-    return runEditorialAndFinish(
-      absDir, doc, captionSource, captionPolicy, timeline, timelinePath,
+    // Async path: run editorial then finish draft
+    return runEditorialAndFinishDraft(
+      absDir, captionSource, captionPolicy, timeline, transcripts,
       packageDir, projectId, options,
     );
   }
 
-  // Sync path: no editorial, write draft as-is
-  const draft = buildPassthroughDraft(captionSource);
+  // Sync path: no editorial, build draft with timing + readiness gate
+  const draft = buildPassthroughDraft(captionSource, captionPolicy, timeline, transcripts);
   fs.writeFileSync(
     path.join(packageDir, "caption_draft.json"),
     JSON.stringify(draft, null, 2),
     "utf-8",
   );
 
-  if (options?.draftOnly) {
-    return { success: true, captionSource, captionDraft: draft };
+  return { success: true, captionSource, captionDraft: draft };
+}
+
+// ── Separate approval command (human-only) ──────────────────────
+
+/**
+ * Approve captions from an existing caption_draft.json.
+ * This is the ONLY way to create caption_approval.json — requires explicit human action.
+ */
+export function approveCaptions(
+  projectDir: string,
+  options: ApproveCaptionsOptions,
+): ApproveCaptionsResult {
+  const allowedStates: ProjectState[] = ["approved", "critique_ready"];
+  const ctx = initCommand(projectDir, "caption-approve", allowedStates);
+  if (isCommandError(ctx)) {
+    return { success: false, error: ctx };
   }
 
-  // 8. Handle approval + projection
-  return finishApprovalAndProjection(
-    absDir, doc, captionSource, draft, captionPolicy, timeline, timelinePath,
-    packageDir, options,
-  );
+  const { projectDir: absDir, doc } = ctx;
+  const packageDir = path.join(absDir, "07_package");
+
+  // Read existing draft
+  const draftPath = path.join(packageDir, "caption_draft.json");
+  if (!fs.existsSync(draftPath)) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "caption_draft.json not found. Run /caption first.",
+      },
+    };
+  }
+  const draft: CaptionDraft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
+
+  // Reject if draft is not ready for approval
+  if (draft.draft_status !== "ready_for_human_approval") {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Draft status is "${draft.draft_status}" — must be "ready_for_human_approval"`,
+      },
+    };
+  }
+
+  // Read caption_source for building approval
+  const sourcePath = path.join(packageDir, "caption_source.json");
+  if (!fs.existsSync(sourcePath)) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "caption_source.json not found. Run /caption first.",
+      },
+    };
+  }
+  const captionSource: CaptionSource = JSON.parse(fs.readFileSync(sourcePath, "utf-8"));
+
+  const approvedBy = options.approvedBy;
+  const approvedAt = options.approvedAt || new Date().toISOString();
+
+  // Build approval from draft entries
+  const approvalSource: CaptionSource = {
+    ...captionSource,
+    speech_captions: draft.speech_captions.map((entry) => ({
+      caption_id: entry.caption_id,
+      asset_id: entry.asset_id,
+      segment_id: entry.segment_id,
+      timeline_in_frame: entry.timing?.timelineInFrame ?? entry.timeline_in_frame,
+      timeline_duration_frames: entry.timing?.timelineDurationFrames ?? entry.timeline_duration_frames,
+      text: entry.text,
+      transcript_ref: entry.transcript_ref,
+      transcript_item_ids: entry.transcript_item_ids,
+      source: entry.source,
+      styling_class: entry.styling_class,
+      metrics: entry.metrics,
+    })),
+  };
+
+  const approval = createDraftApproval(approvalSource, approvedBy, approvedAt);
+
+  const promoteResult = draftAndPromote(absDir, [
+    {
+      relativePath: "07_package/caption_approval.json",
+      schemaFile: "caption-approval.schema.json",
+      content: approval,
+      format: "json",
+    },
+  ]);
+
+  if (!promoteResult.success) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Caption approval validation failed: ${promoteResult.errors.join("; ")}`,
+      },
+    };
+  }
+
+  // Project captions into timeline (if approved state)
+  let timelineUpdated = false;
+  if (doc.current_state === "approved") {
+    const timelinePath = path.join(absDir, "05_timeline/timeline.json");
+    if (fs.existsSync(timelinePath)) {
+      const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+      const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
+      const updatedTimeline = projectCaptionsToTimeline(timeline, approval, fps);
+      fs.writeFileSync(timelinePath, JSON.stringify(updatedTimeline, null, 2), "utf-8");
+      timelineUpdated = true;
+    }
+  }
+
+  return {
+    success: true,
+    captionApproval: approval,
+    timelineUpdated,
+  };
 }
 
 // ── Internal helpers ─────────────────────────────────────────────
 
-async function runEditorialAndFinish(
+async function runEditorialAndFinishDraft(
   absDir: string,
-  doc: any,
   captionSource: CaptionSource,
   captionPolicy: CaptionPolicy,
   timeline: any,
-  timelinePath: string,
+  transcripts: Map<string, any>,
   packageDir: string,
   projectId: string,
   options: CaptionCommandOptions,
@@ -235,10 +370,16 @@ async function runEditorialAndFinish(
     glossary,
   });
 
+  // Apply timing phase to editorial draft
+  const timedDraft = applyTimingPhase(draft, captionPolicy, timeline, transcripts);
+
+  // Apply readiness gate
+  applyReadinessGate(timedDraft, captionPolicy);
+
   // Write draft and report
   fs.writeFileSync(
     path.join(packageDir, "caption_draft.json"),
-    JSON.stringify(draft, null, 2),
+    JSON.stringify(timedDraft, null, 2),
     "utf-8",
   );
   fs.writeFileSync(
@@ -247,105 +388,171 @@ async function runEditorialAndFinish(
     "utf-8",
   );
 
-  if (options?.draftOnly) {
-    return {
-      success: true,
-      captionSource,
-      captionDraft: draft,
-      editorialReport: report,
-    };
-  }
-
-  return finishApprovalAndProjection(
-    absDir, doc, captionSource, draft, captionPolicy, timeline, timelinePath,
-    packageDir, options, report,
-  );
-}
-
-function finishApprovalAndProjection(
-  absDir: string,
-  doc: any,
-  captionSource: CaptionSource,
-  draft: CaptionDraft,
-  captionPolicy: CaptionPolicy,
-  timeline: any,
-  timelinePath: string,
-  packageDir: string,
-  options?: CaptionCommandOptions,
-  editorialReport?: EditorialReport,
-): CaptionCommandResult {
-  // Create approval from draft (not from source)
-  const approvedBy = options?.approvedBy || "operator";
-  const approvedAt = options?.approvedAt || new Date().toISOString();
-
-  // Build approval from draft entries (preserving editorial metadata)
-  const approvalSource: CaptionSource = {
-    ...captionSource,
-    speech_captions: draft.speech_captions.map((entry) => ({
-      caption_id: entry.caption_id,
-      asset_id: entry.asset_id,
-      segment_id: entry.segment_id,
-      timeline_in_frame: entry.timeline_in_frame,
-      timeline_duration_frames: entry.timeline_duration_frames,
-      text: entry.text,
-      transcript_ref: entry.transcript_ref,
-      transcript_item_ids: entry.transcript_item_ids,
-      source: entry.source,
-      styling_class: entry.styling_class,
-      metrics: entry.metrics,
-    })),
-  };
-
-  const approval = createDraftApproval(approvalSource, approvedBy, approvedAt);
-
-  // Write approval via draft/promote
-  const promoteResult = draftAndPromote(absDir, [
-    {
-      relativePath: "07_package/caption_approval.json",
-      schemaFile: "caption-approval.schema.json",
-      content: approval,
-      format: "json",
-    },
-  ]);
-
-  if (!promoteResult.success) {
-    return {
-      success: false,
-      captionSource,
-      captionDraft: draft,
-      editorialReport,
-      error: {
-        code: "VALIDATION_FAILED",
-        message: `Caption approval validation failed: ${promoteResult.errors.join("; ")}`,
-      },
-    };
-  }
-
-  // Project captions into timeline (if approved state)
-  let timelineUpdated = false;
-  if (doc.current_state === "approved") {
-    const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
-    const updatedTimeline = projectCaptionsToTimeline(timeline, approval, fps);
-
-    fs.writeFileSync(timelinePath, JSON.stringify(updatedTimeline, null, 2), "utf-8");
-    timelineUpdated = true;
-  }
-
   return {
     success: true,
     captionSource,
-    captionDraft: draft,
-    captionApproval: approval,
-    editorialReport,
-    timelineUpdated,
+    captionDraft: timedDraft,
+    editorialReport: report,
   };
+}
+
+// ── Timing Phase (F2) ───────────────────────────────────────────
+
+/**
+ * Apply word-level timing remap to draft entries.
+ * Updates each entry with timing metadata (source, confidence, sourceWordRefs).
+ */
+function applyTimingPhase(
+  draft: CaptionDraft,
+  captionPolicy: CaptionPolicy,
+  timeline: any,
+  transcripts: Map<string, any>,
+): CaptionDraft {
+  if (captionPolicy.source !== "transcript" || draft.speech_captions.length === 0) {
+    return draft;
+  }
+
+  // Build items-with-words map from transcripts
+  const itemsWithWords = new Map<string, TranscriptItemWithWords>();
+  for (const [, tr] of transcripts) {
+    if (!tr.items) continue;
+    for (const item of tr.items) {
+      itemsWithWords.set(item.item_id, {
+        item_id: item.item_id,
+        start_us: item.start_us,
+        end_us: item.end_us,
+        text: item.text,
+        words: item.words,
+        word_timing_mode: item.word_timing_mode,
+      });
+    }
+  }
+
+  if (itemsWithWords.size === 0) {
+    return draft;
+  }
+
+  // Build clip contexts from timeline
+  const clips: ClipContext[] = [];
+  const allTracks = [
+    ...(timeline.tracks?.video ?? []),
+    ...(timeline.tracks?.audio ?? []),
+  ];
+  for (const track of allTracks) {
+    for (const clip of track.clips ?? []) {
+      if (clip.role === "A1" || clip.dialogue) {
+        clips.push({
+          clipId: clip.clip_id,
+          assetId: clip.asset_id,
+          srcInUs: clip.src_in_us ?? 0,
+          srcOutUs: clip.src_out_us ?? (clip.src_in_us ?? 0) + 1_000_000,
+          timelineInFrame: clip.timeline_in_frame,
+          timelineDurationFrames: clip.timeline_duration_frames,
+        });
+      }
+    }
+  }
+
+  const fps = timeline.fps ?? (timeline.sequence?.fps_num && timeline.sequence?.fps_den
+    ? timeline.sequence.fps_num / timeline.sequence.fps_den
+    : 24);
+
+  // Batch remap
+  const captionInputs = draft.speech_captions.map((entry) => ({
+    captionId: entry.caption_id,
+    text: entry.text,
+    transcriptItemIds: entry.transcript_item_ids ?? [],
+    timelineInFrame: entry.timeline_in_frame,
+    timelineDurationFrames: entry.timeline_duration_frames,
+  }));
+
+  const timingResults = batchWordRemap(captionInputs, clips, itemsWithWords, fps);
+
+  // Apply timing results to draft entries
+  const timedEntries = draft.speech_captions.map((entry) => {
+    const timing = timingResults.get(entry.caption_id);
+    if (!timing) return entry;
+
+    return {
+      ...entry,
+      timeline_in_frame: timing.timelineInFrame,
+      timeline_duration_frames: timing.timelineDurationFrames,
+      timing: {
+        source: timing.timingSource,
+        confidence: timing.timingConfidence,
+        sourceWordRefs: timing.sourceWordRefs,
+        triggeredFallback: timing.timingSource === "clip_item_remap",
+        timelineInFrame: timing.timelineInFrame,
+        timelineDurationFrames: timing.timelineDurationFrames,
+      },
+    };
+  });
+
+  return {
+    ...draft,
+    speech_captions: timedEntries,
+  };
+}
+
+// ── Readiness Gate ───────────────────────────────────────────────
+
+/** Minimum timing confidence for ready_for_human_approval */
+const MIN_TIMING_CONFIDENCE = 0.75;
+
+/**
+ * Apply readiness gate: checks timing, layout, and density.
+ * Modifies draft_status to "needs_operator_fix" if gate fails.
+ */
+function applyReadinessGate(
+  draft: CaptionDraft,
+  captionPolicy: CaptionPolicy,
+): void {
+  const language = captionPolicy.language;
+  const layout = getLayoutPolicy(language);
+
+  let hasFailure = false;
+
+  for (const entry of draft.speech_captions) {
+    // Check timing confidence
+    if (entry.timing && entry.timing.confidence < MIN_TIMING_CONFIDENCE) {
+      hasFailure = true;
+    }
+
+    // Check CPS (checkCps takes durationMs)
+    const durationMs = (entry.timeline_duration_frames / 24) * 1000; // approximate
+    if (durationMs > 0) {
+      const cpsResult = checkCps(entry.text, durationMs, layout);
+      if (!cpsResult.withinLimit) {
+        hasFailure = true;
+      }
+    }
+
+    // Check line length
+    const lines = entry.text.split("\n");
+    for (const line of lines) {
+      if (line.length > layout.maxCharsPerLine) {
+        hasFailure = true;
+      }
+    }
+  }
+
+  if (hasFailure && draft.degraded_count === 0) {
+    // Only downgrade if not already degraded (editorial failures take priority)
+    draft.draft_status = "needs_operator_fix";
+  }
 }
 
 /**
  * Build a passthrough draft (no editorial) from caption source.
+ * Includes timing phase and readiness gate.
  */
-function buildPassthroughDraft(source: CaptionSource): CaptionDraft {
-  return {
+function buildPassthroughDraft(
+  source: CaptionSource,
+  captionPolicy: CaptionPolicy,
+  timeline: any,
+  transcripts: Map<string, any>,
+): CaptionDraft {
+  const draft: CaptionDraft = {
     version: source.version,
     project_id: source.project_id,
     base_timeline_version: source.base_timeline_version,
@@ -364,4 +571,12 @@ function buildPassthroughDraft(source: CaptionSource): CaptionDraft {
     draft_status: "ready_for_human_approval",
     degraded_count: 0,
   };
+
+  // Apply timing phase
+  const timedDraft = applyTimingPhase(draft, captionPolicy, timeline, transcripts);
+
+  // Apply readiness gate
+  applyReadinessGate(timedDraft, captionPolicy);
+
+  return timedDraft;
 }

@@ -1250,7 +1250,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent(undefined, { autonomyMode: "full" });
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
 
     expect(result.success).toBe(true);
     expect(result.newState).toBe("blueprint_ready");
@@ -1287,7 +1287,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent(undefined, { autonomyMode: "collaborative" });
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
 
     expect(result.success).toBe(true);
     expect(result.newState).toBe("blueprint_ready");
@@ -1310,7 +1310,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent(undefined, { withBlocker: true });
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
 
     expect(result.success).toBe(true);
     expect(result.newState).toBe("blocked");
@@ -1366,7 +1366,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(true);
     expect(result.newState).toBe("blocked");
     expect(result.planningBlocked).toBe(true);
@@ -1394,7 +1394,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(true);
     expect(capturedStyle).not.toBeNull();
     expect(capturedStyle).toContain("brisk 2-3 second cuts");
@@ -1421,7 +1421,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(true);
     expect(capturedStyle).toBeNull();
   });
@@ -1444,7 +1444,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("VALIDATION_FAILED");
   });
@@ -1467,7 +1467,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("VALIDATION_FAILED");
     // Neither artifact should be promoted
@@ -1483,7 +1483,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent({ confirmed: false });
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("VALIDATION_FAILED");
     expect(result.error?.message).toContain("readback");
@@ -1500,7 +1500,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent();
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("STATE_CHECK_FAILED");
   });
@@ -1513,7 +1513,7 @@ describe("/blueprint command", () => {
     });
     // No brief → reconcile heals to intent_pending → state check fails
     const agent = createMockBlueprintAgent();
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(false);
   });
 
@@ -1525,7 +1525,7 @@ describe("/blueprint command", () => {
     });
     // selects_ready state but no selects file → reconcile heals to media_analyzed → state check fails
     const agent = createMockBlueprintAgent();
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(false);
   });
 
@@ -1538,7 +1538,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent();
-    await runBlueprint(tmpDir, agent);
+    await runBlueprint(tmpDir, agent, { iterativeEngine: false });
 
     const doc = readProjectState(tmpDir)!;
     const bpEntries = doc.history!.filter((h) => h.trigger === "/blueprint");
@@ -1555,7 +1555,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent();
-    await runBlueprint(tmpDir, agent);
+    await runBlueprint(tmpDir, agent, { iterativeEngine: false });
 
     const doc = readProjectState(tmpDir)!;
     expect(doc.last_agent).toBe("blueprint-planner");
@@ -1571,7 +1571,7 @@ describe("/blueprint command", () => {
     });
 
     const agent = createMockBlueprintAgent();
-    await runBlueprint(tmpDir, agent);
+    await runBlueprint(tmpDir, agent, { iterativeEngine: false });
 
     const urRaw = fs.readFileSync(
       path.join(tmpDir, "04_plan/uncertainty_register.yaml"),
@@ -1623,7 +1623,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(true);
     expect(capturedMode).toBe("collaborative");
   });
@@ -1668,7 +1668,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(true);
     expect(capturedMode).toBe("full");
   });
@@ -1699,7 +1699,7 @@ describe("/blueprint command", () => {
       },
     };
 
-    const result = await runBlueprint(tmpDir, agent);
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("VALIDATION_FAILED");
     expect(result.error?.message).toContain("confirmed_preferences.source");
@@ -1730,7 +1730,7 @@ describe("integration: intent → triage → blueprint pipeline", () => {
 
     // Step 3: /blueprint
     const bpAgent = createMockBlueprintAgent();
-    const bpResult = await runBlueprint(tmpDir, bpAgent);
+    const bpResult = await runBlueprint(tmpDir, bpAgent, { iterativeEngine: false });
     expect(bpResult.success).toBe(true);
     expect(bpResult.newState).toBe("blueprint_ready");
 
@@ -1764,7 +1764,7 @@ describe("integration: intent → triage → blueprint pipeline", () => {
     });
 
     const agent = createMockBlueprintAgent();
-    await runBlueprint(tmpDir, agent);
+    await runBlueprint(tmpDir, agent, { iterativeEngine: false });
 
     const status = runStatus(tmpDir);
     expect(status.success).toBe(true);
