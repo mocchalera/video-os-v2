@@ -4,6 +4,7 @@
 
 import type {
   AssembledTimeline,
+  DurationPolicy,
   Marker,
   NormalizedData,
   RankedCandidateTable,
@@ -20,7 +21,9 @@ export function assemble(
   params: ScoringParams,
   fpsNum: number = 24,
   fpsDen: number = 1,
+  durationPolicy?: DurationPolicy,
 ): AssembledTimeline {
+  const isGuide = durationPolicy?.mode === "guide";
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const v1Clips: TimelineClip[] = []; // primary narrative (hero)
   const v2Clips: TimelineClip[] = []; // support / inserts
@@ -149,7 +152,25 @@ export function assemble(
       prevV2Asset = transitionClip.candidate.asset_id;
     }
 
-    currentFrame += beat.target_duration_frames;
+    // Guide mode: compact timeline by advancing only by actual clip duration
+    // Strict mode: advance by beat target (fixed grid)
+    if (isGuide) {
+      // Find the max end frame of all clips placed in this beat
+      const beatClips = [
+        ...v1Clips.filter((c) => c.beat_id === beat.beat_id),
+        ...v2Clips.filter((c) => c.beat_id === beat.beat_id),
+      ];
+      const maxClipDuration = beatClips.reduce(
+        (max, c) => Math.max(max, c.timeline_duration_frames),
+        0,
+      );
+      const actualBeatDuration = maxClipDuration > 0
+        ? maxClipDuration
+        : beat.target_duration_frames;
+      currentFrame += actualBeatDuration;
+    } else {
+      currentFrame += beat.target_duration_frames;
+    }
   }
 
   const video: Track[] = [

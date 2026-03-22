@@ -10,6 +10,7 @@ import type {
   Candidate,
   ClipOutput,
   ClipRole,
+  DurationPolicy,
   Marker,
   TimelineClip,
   TimelineIR,
@@ -116,6 +117,9 @@ export function applyPatch(
   patch: ReviewPatch,
   candidates: Candidate[],
   targetDurationFrames?: number,
+  durationPolicy?: DurationPolicy,
+  fpsNum?: number,
+  fpsDen?: number,
 ): PatchResult {
   // 1. Version check — reject if patch targets a different version
   if (patch.timeline_version !== timeline.version) {
@@ -164,7 +168,7 @@ export function applyPatch(
   }
 
   // 5. Re-run Phase 4 constraint resolution with blueprint target
-  const resolution = reRunPhase4(patched, candidates, targetDurationFrames);
+  const resolution = reRunPhase4(patched, candidates, targetDurationFrames, durationPolicy, fpsNum, fpsDen);
 
   // 6. Increment version
   const currentVersion = parseInt(patched.version, 10);
@@ -421,6 +425,9 @@ function reRunPhase4(
   timeline: TimelineIR,
   candidates: Candidate[],
   targetDurationFrames?: number,
+  durationPolicy?: DurationPolicy,
+  fpsNum?: number,
+  fpsDen?: number,
 ): ResolutionReport {
   const assembled: AssembledTimeline = {
     tracks: {
@@ -453,5 +460,5 @@ function reRunPhase4(
     target = maxFrame;
   }
 
-  return resolve(assembled, target, candidates);
+  return resolve(assembled, target, candidates, durationPolicy, fpsNum, fpsDen);
 }

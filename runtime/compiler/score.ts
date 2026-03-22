@@ -4,6 +4,7 @@
 
 import type {
   Candidate,
+  DurationPolicy,
   EditBlueprint,
   NormalizedBeat,
   NormalizedData,
@@ -58,6 +59,7 @@ export function scoreCandidates(
   fpsNum: number,
   fpsDen: number,
   activeSkills?: string[],
+  durationPolicy?: DurationPolicy,
 ): RankedCandidateTable {
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const nonReject = candidates.filter((c) => c.role !== "reject");
@@ -134,6 +136,7 @@ export function scoreCandidates(
         motifCounts,
         adjacentAssetOverlap,
         activeSkills,
+        durationPolicy,
       );
       scored.push(entry);
     }
@@ -159,6 +162,7 @@ function scoreCandidate(
   motifCounts: Map<string, number>,
   adjacentAssetOverlap: number,
   activeSkills?: string[],
+  durationPolicy?: DurationPolicy,
 ): ScoredCandidate {
   // 1. Semantic rank score: higher rank (lower number) → higher score
   //    Normalize: 1.0 for rank 1, decaying. Use 1 / rank.
@@ -211,10 +215,30 @@ function scoreCandidate(
   // 7. Peak salience bonus: candidate-specific, per design doc §11.2
   const peakSalienceBonus = computePeakSalienceBonus(candidate, beat);
 
+  // 8. Duration mode adjustments
+  //    - guide: duration fit is soft bonus (weight 0.15 instead of 0.3)
+  //    - guide: peak-protected candidates get a duration_fit floor of 0.5
+  //    - strict: unchanged (full 0.3 weight)
+  const isGuide = durationPolicy?.mode === "guide";
+
+  let effectiveDurationFitScore = durationFitScore;
+  if (isGuide) {
+    const isPeakProtected =
+      (candidate.editorial_signals?.peak_strength_score != null &&
+        candidate.editorial_signals.peak_strength_score >= 0.55) ||
+      candidate.trim_hint?.peak_ref != null;
+    if (isPeakProtected) {
+      effectiveDurationFitScore = Math.max(durationFitScore, 0.5);
+    }
+  }
+
+  const durationWeight = isGuide ? 0.15 : 0.3;
+  const semanticWeight = isGuide ? 0.55 : 0.4;
+
   // Final score: weighted sum
   const score =
-    semanticRankScore * 0.4 +
-    durationFitScore * 0.3 -
+    semanticRankScore * semanticWeight +
+    effectiveDurationFitScore * durationWeight -
     qualityPenalty -
     motifReusePenalty -
     adjacencyPenalty +

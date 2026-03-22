@@ -1,12 +1,27 @@
 // Shared types for the timeline compiler.
 // These mirror the YAML/JSON artifact shapes used across phases.
 
+// ── Duration Mode types ─────────────────────────────────────────────
+
+export type DurationMode = "strict" | "guide";
+
+export interface DurationPolicy {
+  mode: DurationMode;
+  source: "explicit_brief" | "profile_default" | "global_default";
+  target_source: "explicit_brief" | "material_total";
+  target_duration_sec: number;
+  min_duration_sec: number;
+  max_duration_sec: number | null;
+  hard_gate: boolean;
+  protect_vlm_peaks: boolean;
+}
+
 // ── Input artifact types ────────────────────────────────────────────
 
 export interface CreativeBrief {
   version: string;
   project_id: string;
-  project: { id: string; title: string; strategy: string; runtime_target_sec?: number };
+  project: { id: string; title: string; strategy: string; runtime_target_sec?: number; duration_mode?: DurationMode };
   message: { primary: string; secondary?: string[] };
   emotion_curve: string[];
   [key: string]: unknown;
@@ -105,6 +120,8 @@ export interface EditBlueprint {
   dedupe_rules?: DedupeRules;
   quality_targets?: QualityTargets;
   trim_policy?: TrimPolicy;
+  // Duration Mode additive field
+  duration_policy?: DurationPolicy;
   [key: string]: unknown;
 }
 
@@ -280,6 +297,7 @@ export interface NormalizedData {
   beats: NormalizedBeat[];
   role_quotas: RoleQuotas;
   total_duration_frames: number;
+  duration_policy?: DurationPolicy;
 }
 
 // ── Scoring types (Phase 2 output) ──────────────────────────────────
@@ -370,6 +388,14 @@ export interface TimelineIR {
     compiler_version: string;
     compiler_defaults_hash?: string;
     editorial_registry_hash?: string;
+    duration_policy?: {
+      mode: DurationMode;
+      source: string;
+      target_source: string;
+      target_duration_sec: number;
+      min_duration_sec: number;
+      max_duration_sec: number | null;
+    };
   };
 }
 

@@ -40,7 +40,7 @@
             "asset_id": "AST_004",
             "src_in_us": 8000000,
             "src_out_us": 13800000,
-            "timeline_in_frame": 312,
+            "timeline_in_frame": 231,
             "timeline_duration_frames": 140,
             "role": "hero",
             "motivation": "profile movement with visible breath widens the film while keeping the pace measured",
@@ -56,7 +56,7 @@
             "asset_id": "AST_005",
             "src_in_us": 18200000,
             "src_out_us": 23000000,
-            "timeline_in_frame": 552,
+            "timeline_in_frame": 371,
             "timeline_duration_frames": 116,
             "role": "hero",
             "motivation": "the restrained exhale gives the release beat a human ending without overplaying emotion",
@@ -131,7 +131,7 @@
             "asset_id": "AST_004",
             "src_in_us": 27000000,
             "src_out_us": 32800000,
-            "timeline_in_frame": 312,
+            "timeline_in_frame": 231,
             "timeline_duration_frames": 140,
             "role": "support",
             "motivation": "uphill wide introduces scale without requiring a summit payoff",
@@ -154,7 +154,7 @@
             "asset_id": "AST_006",
             "src_in_us": 15000000,
             "src_out_us": 19400000,
-            "timeline_in_frame": 312,
+            "timeline_in_frame": 231,
             "timeline_duration_frames": 106,
             "role": "transition",
             "motivation": "light through branches is a soft connective tissue between dialogue and movement beats",
@@ -170,7 +170,7 @@
             "asset_id": "AST_006",
             "src_in_us": 25200000,
             "src_out_us": 30800000,
-            "timeline_in_frame": 552,
+            "timeline_in_frame": 371,
             "timeline_duration_frames": 135,
             "role": "transition",
             "motivation": "the empty trail bend creates an open future-facing image for the final beat without promising triumph",
@@ -215,7 +215,7 @@
             "asset_id": "AST_004",
             "src_in_us": 14500000,
             "src_out_us": 20200000,
-            "timeline_in_frame": 312,
+            "timeline_in_frame": 231,
             "timeline_duration_frames": 137,
             "role": "dialogue",
             "motivation": "explicitly rejects summit rhetoric and protects the brief from drifting into achievement language",
@@ -231,7 +231,7 @@
             "asset_id": "AST_001",
             "src_in_us": 41200000,
             "src_out_us": 47600000,
-            "timeline_in_frame": 552,
+            "timeline_in_frame": 371,
             "timeline_duration_frames": 154,
             "role": "dialogue",
             "motivation": "explicitly names slowing down and pairs well with breath-focused visuals",
@@ -272,12 +272,12 @@
       "label": "b02: settle"
     },
     {
-      "frame": 312,
+      "frame": 231,
       "kind": "beat",
       "label": "b03: climb"
     },
     {
-      "frame": 552,
+      "frame": 371,
       "kind": "beat",
       "label": "b04: release"
     }
@@ -287,6 +287,14 @@
     "blueprint_path": "04_plan/edit_blueprint.yaml",
     "selects_path": "04_plan/selects_candidates.yaml",
     "compiler_version": "1.0.0",
+    "duration_policy": {
+      "mode": "guide",
+      "source": "global_default",
+      "target_source": "explicit_brief",
+      "target_duration_sec": 28,
+      "min_duration_sec": 19.599999999999998,
+      "max_duration_sec": 36.4
+    },
     "compiler_defaults_hash": "994083935c7de513"
   }
 }

@@ -134,6 +134,9 @@
         "action_cut_guard": { "type": "boolean" }
       },
       "additionalProperties": false
+    },
+    "duration_policy": {
+      "$ref": "#/$defs/durationPolicy"
     }
   },
   "$defs": {
@@ -385,6 +388,21 @@
         "avoid_speed_ramps": {
           "type": "boolean"
         }
+      },
+      "additionalProperties": false
+    },
+    "durationPolicy": {
+      "type": "object",
+      "required": ["mode", "source", "target_source", "target_duration_sec", "hard_gate", "protect_vlm_peaks"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["strict", "guide"] },
+        "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+        "target_source": { "type": "string", "enum": ["explicit_brief", "material_total"] },
+        "target_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "min_duration_sec": { "type": "number", "minimum": 0 },
+        "max_duration_sec": { "type": ["number", "null"], "minimum": 0 },
+        "hard_gate": { "type": "boolean" },
+        "protect_vlm_peaks": { "type": "boolean" }
       },
       "additionalProperties": false
     },

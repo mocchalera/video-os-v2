@@ -51,6 +51,11 @@
         "runtime_target_sec": {
           "type": "number",
           "exclusiveMinimum": 0
+        },
+        "duration_mode": {
+          "type": "string",
+          "enum": ["strict", "guide"],
+          "default": "guide"
         }
       },
       "additionalProperties": false

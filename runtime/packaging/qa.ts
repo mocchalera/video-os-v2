@@ -285,6 +285,70 @@ export function checkPackageCompleteness(
   };
 }
 
+// ── Duration Policy Validation ────────────────────────────────────
+
+export interface DurationPolicyInput {
+  mode: "strict" | "guide";
+  target_duration_sec: number;
+  min_duration_sec: number;
+  max_duration_sec: number | null;
+}
+
+/**
+ * Check that actual duration is within the duration policy window.
+ *
+ * - strict: required check; actual must be within min/max
+ * - guide: info-only; reports drift but never fails
+ */
+export function checkDurationPolicy(
+  actualDurationSec: number,
+  policy: DurationPolicyInput,
+): QaCheckResult & {
+  metrics: {
+    duration_mode: string;
+    target_duration_sec: number;
+    actual_duration_sec: number;
+    duration_delta_sec: number;
+    duration_delta_pct: number;
+  };
+} {
+  const delta = actualDurationSec - policy.target_duration_sec;
+  const deltaPct = policy.target_duration_sec > 0
+    ? (delta / policy.target_duration_sec) * 100
+    : 0;
+
+  const metrics = {
+    duration_mode: policy.mode,
+    target_duration_sec: policy.target_duration_sec,
+    actual_duration_sec: actualDurationSec,
+    duration_delta_sec: Math.round(delta * 1000) / 1000,
+    duration_delta_pct: Math.round(deltaPct * 100) / 100,
+  };
+
+  if (policy.mode === "strict") {
+    const withinMin = actualDurationSec >= policy.min_duration_sec;
+    const withinMax = policy.max_duration_sec == null || actualDurationSec <= policy.max_duration_sec;
+    const passed = withinMin && withinMax;
+
+    return {
+      name: "duration_policy_valid",
+      passed,
+      details: passed
+        ? `Duration ${actualDurationSec.toFixed(2)}s within strict window [${policy.min_duration_sec.toFixed(1)}s, ${(policy.max_duration_sec ?? Infinity).toFixed(1)}s]`
+        : `Duration ${actualDurationSec.toFixed(2)}s outside strict window [${policy.min_duration_sec.toFixed(1)}s, ${(policy.max_duration_sec ?? Infinity).toFixed(1)}s]`,
+      metrics,
+    };
+  }
+
+  // guide: always passes
+  return {
+    name: "duration_policy_valid",
+    passed: true,
+    details: `Duration ${actualDurationSec.toFixed(2)}s (guide advisory: target ${policy.target_duration_sec.toFixed(1)}s, delta ${delta >= 0 ? "+" : ""}${delta.toFixed(2)}s / ${deltaPct >= 0 ? "+" : ""}${deltaPct.toFixed(1)}%)`,
+    metrics,
+  };
+}
+
 // ── QA Report Builder ──────────────────────────────────────────────
 
 /**
@@ -329,9 +393,12 @@ export function buildQaReport(
  */
 export function getRequiredChecks(
   profile: "engine_render" | "nle_finishing",
+  durationMode?: "strict" | "guide",
 ): string[] {
+  const checks: string[] = [];
+
   if (profile === "engine_render") {
-    return [
+    checks.push(
       "timeline_schema_valid",
       "caption_policy_valid",
       "caption_density_valid",
@@ -340,17 +407,24 @@ export function getRequiredChecks(
       "av_drift_valid",
       "loudness_target_valid",
       "package_completeness_valid",
-    ];
+    );
+  } else {
+    // nle_finishing
+    checks.push(
+      "timeline_schema_valid",
+      "caption_policy_valid",
+      "supplied_export_probe_valid",
+      "caption_delivery_valid",
+      "supplied_av_sync_valid",
+      "loudness_target_valid",
+      "package_completeness_valid",
+    );
   }
 
-  // nle_finishing
-  return [
-    "timeline_schema_valid",
-    "caption_policy_valid",
-    "supplied_export_probe_valid",
-    "caption_delivery_valid",
-    "supplied_av_sync_valid",
-    "loudness_target_valid",
-    "package_completeness_valid",
-  ];
+  // Duration policy check is required only for strict mode
+  if (durationMode === "strict") {
+    checks.push("duration_policy_valid");
+  }
+
+  return checks;
 }

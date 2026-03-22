@@ -10,14 +10,17 @@ import { normalize } from "./normalize.js";
 import { scoreCandidates } from "./score.js";
 import { assemble } from "./assemble.js";
 import { applyAdaptiveTrim } from "./trim.js";
+import { applyDurationAdjust } from "./duration-adjust.js";
 import { resolve } from "./resolve.js";
 import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
 import { applyPatch } from "./patch.js";
+import { resolveDurationPolicyFromBlueprint } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
 import type {
   CompileOptions,
   CompilerDefaults,
   CreativeBrief,
+  DurationPolicy,
   EditBlueprint,
   SelectsCandidates,
   TimelineIR,
@@ -40,7 +43,15 @@ export interface CompileResult {
     duration_fit: boolean;
     total_frames: number;
     target_frames: number;
+    duration_mode?: string;
+    target_source?: string;
+    min_target_frames?: number;
+    max_target_frames?: number | null;
+    duration_status?: string;
+    duration_delta_frames?: number;
+    duration_delta_pct?: number;
   };
+  duration_policy?: DurationPolicy;
 }
 
 function findRepoRoot(from: string): string {
@@ -75,6 +86,18 @@ export function compile(opts: CompileOptions): CompileResult {
   const selects = readYaml<SelectsCandidates>(selectsPath);
   const defaults = readYaml<CompilerDefaults>(defaultsPath);
 
+  // ── Phase 0.5: Resolve Duration Policy ──────────────────────────
+  // Compute material total duration for guide+no-target case.
+  const materialTotalSec = selects.candidates
+    .filter((c) => c.role !== "reject")
+    .reduce((sum, c) => sum + (c.src_out_us - c.src_in_us) / 1_000_000, 0);
+
+  const durationPolicy = resolveDurationPolicyFromBlueprint(
+    blueprint,
+    brief,
+    materialTotalSec,
+  );
+
   // ── Phase 1: Normalize ────────────────────────────────────────────
 
   const normalized = normalize(brief, blueprint);
@@ -100,11 +123,12 @@ export function compile(opts: CompileOptions): CompileResult {
     fpsNum,
     fpsDen,
     activeSkills,
+    durationPolicy,
   );
 
   // ── Phase 3: Assemble ─────────────────────────────────────────────
 
-  const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen);
+  const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen, durationPolicy);
 
   // ── Phase 3.5: Adaptive Trim ────────────────────────────────────
   // Apply center-based trim when trim_hint is available.
@@ -117,9 +141,12 @@ export function compile(opts: CompileOptions): CompileResult {
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   applyAdaptiveTrim(allAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame);
 
+  // ── Phase 3.5b: Duration Adjustment (strict mode) ───────────────
+  applyDurationAdjust(assembled, normalized.beats, selects.candidates, durationPolicy, fpsNum, fpsDen);
+
   // ── Phase 4: Resolve constraints ──────────────────────────────────
 
-  const resolution = resolve(assembled, normalized.total_duration_frames, selects.candidates);
+  const resolution = resolve(assembled, normalized.total_duration_frames, selects.candidates, durationPolicy, fpsNum, fpsDen);
 
   // ── Phase 5: Export ───────────────────────────────────────────────
 
@@ -135,6 +162,7 @@ export function compile(opts: CompileOptions): CompileResult {
     selectsRelPath: "04_plan/selects_candidates.yaml",
     fpsNum,
     fpsDen,
+    durationPolicy,
   });
 
   // ── Phase 5.5: Editorial Metadata ─────────────────────────────────
@@ -186,6 +214,9 @@ export function compile(opts: CompileOptions): CompileResult {
       opts.reviewPatch,
       selects.candidates,
       normalized.total_duration_frames,
+      durationPolicy,
+      fpsNum,
+      fpsDen,
     );
     if (patchResult.errors.length > 0) {
       const details = patchResult.errors
@@ -207,5 +238,6 @@ export function compile(opts: CompileOptions): CompileResult {
     otioPath,
     previewManifestPath,
     resolution: finalResolution,
+    duration_policy: durationPolicy,
   };
 }

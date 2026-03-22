@@ -4,6 +4,7 @@
 
 import type {
   CreativeBrief,
+  DurationPolicy,
   EditBlueprint,
   NormalizedBeat,
   NormalizedData,
@@ -41,6 +42,7 @@ export function normalize(
     beats,
     role_quotas: roleQuotas,
     total_duration_frames: totalDurationFrames,
+    duration_policy: blueprint.duration_policy,
   };
 }
 

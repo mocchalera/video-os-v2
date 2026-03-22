@@ -2,7 +2,10 @@
 // Resolves overlaps, repeated shot overuse, invalid source ranges,
 // and checks total duration fit.
 
-import type { AssembledTimeline, Candidate, Track } from "./types.js";
+import type { AssembledTimeline, Candidate, DurationPolicy, Track } from "./types.js";
+import { computeFrameBounds, isWithinWindow } from "./duration-helpers.js";
+
+export type DurationStatus = "pass" | "advisory" | "fail";
 
 export interface ResolutionReport {
   resolved_overlaps: number;
@@ -11,12 +14,23 @@ export interface ResolutionReport {
   duration_fit: boolean;
   total_frames: number;
   target_frames: number;
+  // Duration policy fields
+  duration_mode?: string;
+  target_source?: string;
+  min_target_frames?: number;
+  max_target_frames?: number | null;
+  duration_status?: DurationStatus;
+  duration_delta_frames?: number;
+  duration_delta_pct?: number;
 }
 
 export function resolve(
   timeline: AssembledTimeline,
   totalTargetFrames: number,
   candidates: Candidate[] = [],
+  durationPolicy?: DurationPolicy,
+  fpsNum?: number,
+  fpsDen?: number,
 ): ResolutionReport {
   // Build candidate lookup by segment_id for fallback replacement
   const candidateMap = new Map<string, Candidate>();
@@ -155,7 +169,38 @@ export function resolve(
     }
   }
 
+  // Legacy duration fit (backward compat)
   const durationFit = maxFrame <= totalTargetFrames;
+
+  // Duration policy-aware status
+  let duration_status: DurationStatus | undefined;
+  let min_target_frames: number | undefined;
+  let max_target_frames: number | null | undefined;
+  let duration_delta_frames: number | undefined;
+  let duration_delta_pct: number | undefined;
+  let resolved_target_frames = totalTargetFrames;
+
+  if (durationPolicy && fpsNum && fpsDen) {
+    const bounds = computeFrameBounds(durationPolicy, fpsNum, fpsDen);
+    min_target_frames = bounds.min_target_frames;
+    max_target_frames = bounds.max_target_frames;
+    resolved_target_frames = bounds.target_frames;
+    duration_delta_frames = maxFrame - bounds.target_frames;
+    duration_delta_pct = bounds.target_frames > 0
+      ? ((maxFrame - bounds.target_frames) / bounds.target_frames) * 100
+      : 0;
+
+    if (durationPolicy.mode === "strict") {
+      duration_status = isWithinWindow(maxFrame, bounds) ? "pass" : "fail";
+    } else {
+      // guide mode
+      if (maxFrame > 0) {
+        duration_status = isWithinWindow(maxFrame, bounds) ? "pass" : "advisory";
+      } else {
+        duration_status = "pass";
+      }
+    }
+  }
 
   return {
     resolved_overlaps: resolvedOverlaps,
@@ -163,7 +208,14 @@ export function resolve(
     resolved_invalid_ranges: resolvedInvalidRanges,
     duration_fit: durationFit,
     total_frames: maxFrame,
-    target_frames: totalTargetFrames,
+    target_frames: resolved_target_frames,
+    duration_mode: durationPolicy?.mode,
+    target_source: durationPolicy?.target_source,
+    min_target_frames,
+    max_target_frames,
+    duration_status,
+    duration_delta_frames,
+    duration_delta_pct,
   };
 }
 

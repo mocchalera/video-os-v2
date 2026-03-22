@@ -7,6 +7,7 @@ import * as path from "node:path";
 import type {
   AssembledTimeline,
   ClipOutput,
+  DurationPolicy,
   MarkerOutput,
   TimelineIR,
   TrackOutput,
@@ -24,6 +25,7 @@ export interface ExportOptions {
   selectsRelPath: string;
   fpsNum?: number;
   fpsDen?: number;
+  durationPolicy?: DurationPolicy;
 }
 
 export function buildTimelineIR(
@@ -70,6 +72,18 @@ export function buildTimelineIR(
       blueprint_path: opts.blueprintRelPath,
       selects_path: opts.selectsRelPath,
       compiler_version: COMPILER_VERSION,
+      ...(opts.durationPolicy
+        ? {
+            duration_policy: {
+              mode: opts.durationPolicy.mode,
+              source: opts.durationPolicy.source,
+              target_source: opts.durationPolicy.target_source,
+              target_duration_sec: opts.durationPolicy.target_duration_sec,
+              min_duration_sec: opts.durationPolicy.min_duration_sec,
+              max_duration_sec: opts.durationPolicy.max_duration_sec,
+            },
+          }
+        : {}),
     },
   };
 }

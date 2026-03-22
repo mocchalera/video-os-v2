@@ -138,6 +138,18 @@
         },
         "editorial_registry_hash": {
           "type": "string"
+        },
+        "duration_policy": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["strict", "guide"] },
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+            "target_source": { "type": "string", "enum": ["explicit_brief", "material_total"] },
+            "target_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "min_duration_sec": { "type": "number", "minimum": 0 },
+            "max_duration_sec": { "type": ["number", "null"], "minimum": 0 }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
