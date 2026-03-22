@@ -18,7 +18,10 @@ export function assemble(
   normalized: NormalizedData,
   rankedTable: RankedCandidateTable,
   params: ScoringParams,
+  fpsNum: number = 24,
+  fpsDen: number = 1,
 ): AssembledTimeline {
+  const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const v1Clips: TimelineClip[] = []; // primary narrative (hero)
   const v2Clips: TimelineClip[] = []; // support / inserts
   const a1Clips: TimelineClip[] = []; // dialogue / nat sound
@@ -63,6 +66,7 @@ export function assemble(
         beat.target_duration_frames,
         ++clipCounter,
         getRunnersUp(byRole.get("hero") ?? [], heroClip, usedClips),
+        usPerFrame,
       );
       v1Clips.push(clip);
       usedClips.add(clipUsageKey(heroClip.candidate));
@@ -95,6 +99,7 @@ export function assemble(
         beat.target_duration_frames,
         ++clipCounter,
         getRunnersUp(supportCandidates, supportClip, usedClips),
+        usPerFrame,
       );
       v2Clips.push(clip);
       usedClips.add(clipUsageKey(supportClip.candidate));
@@ -116,6 +121,7 @@ export function assemble(
         beat.target_duration_frames,
         ++clipCounter,
         getRunnersUp(byRole.get("dialogue") ?? [], dialogueClip, usedClips),
+        usPerFrame,
       );
       a1Clips.push(clip);
       usedClips.add(clipUsageKey(dialogueClip.candidate));
@@ -136,6 +142,7 @@ export function assemble(
         beat.target_duration_frames,
         ++clipCounter,
         getRunnersUp(byRole.get("transition") ?? [], transitionClip, usedClips),
+        usPerFrame,
       );
       v2Clips.push(clip);
       usedClips.add(clipUsageKey(transitionClip.candidate));
@@ -234,8 +241,15 @@ function makeClip(
   beatDurationFrames: number,
   clipNum: number,
   fallbacks: { segment_ids: string[]; candidate_refs: string[] },
+  usPerFrame: number,
 ): TimelineClip {
   const c = scored.candidate;
+  // Cap timeline_duration_frames at the source material's actual duration.
+  // Without this, a 10s clip assigned to a 40s beat would play in slow motion.
+  const sourceDurationUs = c.src_out_us - c.src_in_us;
+  const sourceDurationFrames = Math.ceil(sourceDurationUs / usPerFrame);
+  const clampedDurationFrames = Math.min(beatDurationFrames, sourceDurationFrames);
+
   return {
     clip_id: `CLP_${String(clipNum).padStart(4, "0")}`,
     segment_id: c.segment_id,
@@ -243,7 +257,7 @@ function makeClip(
     src_in_us: c.src_in_us,
     src_out_us: c.src_out_us,
     timeline_in_frame: timelineInFrame,
-    timeline_duration_frames: beatDurationFrames,
+    timeline_duration_frames: clampedDurationFrames,
     role: c.role as TimelineClip["role"],
     motivation: c.why_it_matches,
     beat_id: beatId,

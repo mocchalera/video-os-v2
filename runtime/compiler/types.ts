@@ -403,4 +403,6 @@ export interface CompileOptions {
   repoRoot?: string;
   blueprintOverride?: EditBlueprint;
   reviewPatch?: import("./patch.js").ReviewPatch;
+  /** Timeline framerate numerator (default: 24). Use 30 for 29.97fps source material. */
+  fpsNum?: number;
 }

@@ -89,7 +89,9 @@ export function compile(opts: CompileOptions): CompileResult {
 
   // ── Phase 2: Score ────────────────────────────────────────────────
 
-  const fpsNum = 24;
+  // Use fps from compile options if provided, otherwise default to 24fps.
+  // For source material at 30fps, pass fpsNum: 30 via compile options.
+  const fpsNum = opts.fpsNum ?? 24;
   const fpsDen = 1;
   const rankedTable = scoreCandidates(
     normalized,
@@ -102,7 +104,7 @@ export function compile(opts: CompileOptions): CompileResult {
 
   // ── Phase 3: Assemble ─────────────────────────────────────────────
 
-  const assembled = assemble(normalized, rankedTable, defaults.scoring);
+  const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen);
 
   // ── Phase 3.5: Adaptive Trim ────────────────────────────────────
   // Apply center-based trim when trim_hint is available.
