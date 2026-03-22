@@ -5,20 +5,22 @@
  * - 04_plan/edit_blueprint.yaml
  * - 04_plan/uncertainty_register.yaml
  *
- * Planning flow (design doc):
- * 1. brief / selects / STYLE synthesis
- * 2. sequence goals + beat candidates generation
- * 3. preference interview (autonomy branching)
- * 4. beat proposal readback
- * 5. uncertainty extraction
- * 6. schema validate and promote
+ * Narrative loop (design doc §8.1):
+ * 1. frame — message frame + quality targets
+ * 2. read — material reading review
+ * 3. draft — beat assignment + delivery order
+ * 4. evaluate — deterministic gate + continuity + advisory
+ * 5. reject? — if gate fails, revision brief → re-draft (max 3)
+ * 6. confirm — collaborative mode human confirmation
+ * 7. promote — accepted artifacts to canonical
  *
  * LLM agent is injectable for testability.
+ * When iterativeEngine is disabled, falls back to single-pass agent.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   initCommand,
   isCommandError,
@@ -136,6 +138,90 @@ export interface BlueprintAgentResult {
   confirmed: boolean;
 }
 
+// ── Narrative Loop Types ────────────────────────────────────────
+
+/** Injectable narrative phase functions for testability */
+export interface NarrativePhases {
+  /** Phase A: Build message frame */
+  frame(ctx: NarrativePhaseContext): Promise<FrameResult>;
+  /** Phase B: Material reading review */
+  read(ctx: NarrativePhaseContext, frame: FrameResult): Promise<ReadResult>;
+  /** Phase C: Script draft */
+  draft(ctx: NarrativePhaseContext, frame: FrameResult, reading: ReadResult, revisionBrief?: RevisionBrief): Promise<DraftResult>;
+  /** Phase D: Evaluate — deterministic gate */
+  evaluate(ctx: NarrativePhaseContext, frame: FrameResult, reading: ReadResult, draft: DraftResult): Promise<EvaluateResult>;
+  /** Phase E: Confirm — collaborative human confirmation */
+  confirm(ctx: NarrativePhaseContext, draft: DraftResult, evaluation: EvaluateResult): Promise<ConfirmResult>;
+  /** Phase F: Project to canonical artifacts */
+  project(ctx: NarrativePhaseContext, draft: DraftResult, evaluation: EvaluateResult): Promise<BlueprintAgentResult>;
+}
+
+export interface NarrativePhaseContext {
+  projectDir: string;
+  projectId: string;
+  autonomyMode: "full" | "collaborative";
+  briefContent: unknown;
+  blockersContent: unknown;
+  selectsContent: unknown;
+  styleContent: string | null;
+}
+
+export interface FrameResult {
+  storyPromise: string;
+  hookAngle: string;
+  closingIntent: string;
+  beatCount: number;
+  qualityTargets?: Record<string, number>;
+}
+
+export interface ReadResult {
+  beatReadings: Array<{
+    beatId: string;
+    topCandidates: string[];
+    coverageGaps: string[];
+  }>;
+}
+
+export interface DraftResult {
+  deliveryOrder: string[];
+  beatAssignments: Array<{
+    beatId: string;
+    primaryCandidateRef: string;
+    backupCandidateRefs: string[];
+    storyRole: string;
+  }>;
+  draftSummary?: string;
+}
+
+export interface EvaluateResult {
+  gatePassed: boolean;
+  metrics: {
+    hookDensity: number;
+    noveltyRate: number;
+  };
+  warnings: string[];
+  revisionBrief?: RevisionBrief;
+}
+
+export interface RevisionBrief {
+  preserve: string[];
+  mustFix: string[];
+  brokenBeats: string[];
+  preferBackups: string[];
+}
+
+export interface ConfirmResult {
+  status: "confirmed" | "declined" | "skipped";
+  declineReason?: string;
+}
+
+export interface LoopSummary {
+  totalIterations: number;
+  evaluateRejectCount: number;
+  humanDeclineCount: number;
+  finalStatus: "accepted" | "rejected_max_iterations" | "human_declined" | "blocked";
+}
+
 export interface BlueprintCommandResult {
   success: boolean;
   error?: CommandError;
@@ -145,6 +231,16 @@ export interface BlueprintCommandResult {
   newState?: ProjectState;
   promoted?: string[];
   planningBlocked?: boolean;
+  loopSummary?: LoopSummary;
+}
+
+export interface BlueprintCommandOptions {
+  /** Enable iterative narrative engine. Default: true. */
+  iterativeEngine?: boolean;
+  /** Max draft→evaluate iterations. Default: 3. */
+  maxIterations?: number;
+  /** Require human confirmation in collaborative mode. Default: true. */
+  requireConfirmationInCollaborative?: boolean;
 }
 
 // ── Command Implementation ───────────────────────────────────────
@@ -172,7 +268,7 @@ function inferAutonomyMode(
   return (briefContent.autonomy?.must_ask?.length ?? 0) === 0 ? "full" : "collaborative";
 }
 
-function validateConfirmedPreferences(
+export function validateConfirmedPreferences(
   blueprint: EditBlueprint,
   autonomyMode: "full" | "collaborative",
 ): string[] {
@@ -198,9 +294,13 @@ function validateConfirmedPreferences(
   return errors;
 }
 
+// ── Main entry: supports both legacy agent and iterative engine ──
+
 export async function runBlueprint(
   projectDir: string,
   agent: BlueprintAgent,
+  options?: BlueprintCommandOptions,
+  phases?: NarrativePhases,
 ): Promise<BlueprintCommandResult> {
   // 1. Init command (reconcile + state check)
   const ctx = initCommand(projectDir, "/blueprint", ALLOWED_STATES);
@@ -264,17 +364,136 @@ export async function runBlueprint(
     ? fs.readFileSync(stylePath, "utf-8")
     : null;
 
-  // 5. Run agent (LLM or mock)
-  const agentResult = await agent.run({
-    projectDir: absDir,
-    projectId,
-    currentState: previousState,
-    autonomyMode,
-    briefContent,
-    blockersContent,
-    selectsContent,
-    styleContent,
-  });
+  // 5. Decide path: iterative engine or legacy single-pass
+  const useIterative = (options?.iterativeEngine !== false) && !!phases;
+
+  let agentResult: BlueprintAgentResult;
+  let loopSummary: LoopSummary | undefined;
+
+  if (useIterative && phases) {
+    // ── Iterative narrative loop ──────────────────────────────
+    const maxIter = options?.maxIterations ?? 3;
+    const requireConfirm = options?.requireConfirmationInCollaborative !== false;
+
+    const phaseCtx: NarrativePhaseContext = {
+      projectDir: absDir,
+      projectId,
+      autonomyMode,
+      briefContent,
+      blockersContent,
+      selectsContent,
+      styleContent,
+    };
+
+    const result = await runNarrativeLoop(
+      phaseCtx, phases, agent, maxIter, requireConfirm,
+    );
+
+    if (!result.success) {
+      // 3x fail → blocked
+      if (result.loopSummary?.finalStatus === "rejected_max_iterations") {
+        const blocker: Uncertainty = {
+          id: "U_LOOP_FAIL",
+          type: "structure",
+          question: "Blueprint narrative loop exhausted max iterations without passing quality gate",
+          status: "blocker",
+          evidence: result.lastWarnings ?? [],
+          alternatives: [],
+          escalation_required: true,
+        };
+        const register: UncertaintyRegister = {
+          version: "1",
+          project_id: projectId,
+          uncertainties: [blocker],
+        };
+
+        // Write uncertainty register and transition to blocked
+        const drafts: DraftFile[] = [{
+          relativePath: "04_plan/uncertainty_register.yaml",
+          schemaFile: "uncertainty-register.schema.json",
+          content: register,
+          format: "yaml",
+        }];
+        draftAndPromote(absDir, drafts, { preflightHashes });
+
+        const updatedDoc = transitionState(
+          absDir, doc, "blocked", "/blueprint", "blueprint-planner",
+          "blueprint loop exhausted — quality gate failed after max iterations",
+        );
+
+        return {
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: `Narrative loop failed after ${maxIter} iterations`,
+          },
+          previousState,
+          newState: updatedDoc.current_state,
+          planningBlocked: true,
+          loopSummary: result.loopSummary,
+        };
+      }
+
+      // Human declined
+      if (result.loopSummary?.finalStatus === "human_declined") {
+        return {
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "Human declined narrative confirmation",
+          },
+          previousState,
+          loopSummary: result.loopSummary,
+        };
+      }
+
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: result.errorMessage ?? "Narrative loop failed",
+        },
+        previousState,
+        loopSummary: result.loopSummary,
+      };
+    }
+
+    agentResult = result.agentResult!;
+    loopSummary = result.loopSummary;
+
+    // Write operational artifacts
+    const planDir = path.join(absDir, "04_plan");
+    fs.mkdirSync(planDir, { recursive: true });
+
+    if (result.evaluateResult) {
+      fs.writeFileSync(
+        path.join(planDir, "script_evaluation.yaml"),
+        stringifyYaml({
+          version: "1",
+          project_id: projectId,
+          loop_summary: loopSummary,
+          gate_pass: result.evaluateResult.gatePassed,
+          metrics: result.evaluateResult.metrics,
+          warnings: result.evaluateResult.warnings,
+          confirmation_status: result.confirmResult?.status ?? "skipped",
+          decline_reason: result.confirmResult?.declineReason,
+        }),
+        "utf-8",
+      );
+    }
+  } else {
+    // ── Legacy single-pass agent ──────────────────────────────
+    agentResult = await agent.run({
+      projectDir: absDir,
+      projectId,
+      currentState: previousState,
+      autonomyMode,
+      briefContent,
+      blockersContent,
+      selectsContent,
+      styleContent,
+    });
+  }
 
   // 6. If human declined beat proposal readback, abort
   if (!agentResult.confirmed) {
@@ -284,6 +503,7 @@ export async function runBlueprint(
         code: "VALIDATION_FAILED",
         message: "Human declined beat proposal readback",
       },
+      loopSummary,
     };
   }
 
@@ -299,6 +519,7 @@ export async function runBlueprint(
         message: `Blueprint preference contract failed: ${confirmedPreferenceErrors.join("; ")}`,
         details: confirmedPreferenceErrors,
       },
+      loopSummary,
     };
   }
 
@@ -346,6 +567,7 @@ export async function runBlueprint(
         message,
         details: promoteResult.errors,
       },
+      loopSummary,
     };
   }
 
@@ -380,5 +602,122 @@ export async function runBlueprint(
     newState: updatedDoc.current_state,
     promoted: promoteResult.promoted,
     planningBlocked: hasPlanningBlocker || hasCompileBlocker,
+    loopSummary,
+  };
+}
+
+// ── Narrative Loop Implementation ──────────────────────────────
+
+interface NarrativeLoopResult {
+  success: boolean;
+  agentResult?: BlueprintAgentResult;
+  loopSummary?: LoopSummary;
+  evaluateResult?: EvaluateResult;
+  confirmResult?: ConfirmResult;
+  lastWarnings?: string[];
+  errorMessage?: string;
+}
+
+async function runNarrativeLoop(
+  ctx: NarrativePhaseContext,
+  phases: NarrativePhases,
+  agent: BlueprintAgent,
+  maxIterations: number,
+  requireConfirmation: boolean,
+): Promise<NarrativeLoopResult> {
+  let evaluateRejectCount = 0;
+  let humanDeclineCount = 0;
+  let lastEvaluation: EvaluateResult | undefined;
+  let lastConfirm: ConfirmResult | undefined;
+
+  // Phase A: Frame
+  const frameResult = await phases.frame(ctx);
+
+  // Phase B: Read
+  const readResult = await phases.read(ctx, frameResult);
+
+  // Phase C-D loop: Draft → Evaluate → (reject → re-draft)
+  let revisionBrief: RevisionBrief | undefined;
+  let draftResult: DraftResult | undefined;
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    // Phase C: Draft (with revision brief if re-drafting)
+    draftResult = await phases.draft(ctx, frameResult, readResult, revisionBrief);
+
+    // Phase D: Evaluate
+    lastEvaluation = await phases.evaluate(ctx, frameResult, readResult, draftResult);
+
+    if (lastEvaluation.gatePassed) {
+      break; // Gate passed, proceed to confirm
+    }
+
+    // Gate failed — prepare revision brief for next iteration
+    evaluateRejectCount++;
+    revisionBrief = lastEvaluation.revisionBrief;
+
+    if (iteration === maxIterations - 1) {
+      // Max iterations reached
+      return {
+        success: false,
+        loopSummary: {
+          totalIterations: iteration + 1,
+          evaluateRejectCount,
+          humanDeclineCount,
+          finalStatus: "rejected_max_iterations",
+        },
+        evaluateResult: lastEvaluation,
+        lastWarnings: lastEvaluation.warnings,
+      };
+    }
+  }
+
+  if (!draftResult || !lastEvaluation?.gatePassed) {
+    return {
+      success: false,
+      errorMessage: "Draft loop ended without passing gate",
+      loopSummary: {
+        totalIterations: evaluateRejectCount,
+        evaluateRejectCount,
+        humanDeclineCount,
+        finalStatus: "rejected_max_iterations",
+      },
+      evaluateResult: lastEvaluation,
+    };
+  }
+
+  // Phase E: Confirm (collaborative mode only)
+  if (ctx.autonomyMode === "collaborative" && requireConfirmation) {
+    lastConfirm = await phases.confirm(ctx, draftResult, lastEvaluation);
+
+    if (lastConfirm.status === "declined") {
+      humanDeclineCount++;
+      return {
+        success: false,
+        loopSummary: {
+          totalIterations: evaluateRejectCount + 1,
+          evaluateRejectCount,
+          humanDeclineCount,
+          finalStatus: "human_declined",
+        },
+        evaluateResult: lastEvaluation,
+        confirmResult: lastConfirm,
+      };
+    }
+  }
+
+  // Phase F: Project to canonical artifacts
+  const agentResult = await phases.project(ctx, draftResult, lastEvaluation);
+
+  return {
+    success: true,
+    agentResult,
+    loopSummary: {
+      totalIterations: evaluateRejectCount + 1,
+      evaluateRejectCount,
+      humanDeclineCount,
+      finalStatus: "accepted",
+    },
+    evaluateResult: lastEvaluation,
+    confirmResult: lastConfirm,
   };
 }

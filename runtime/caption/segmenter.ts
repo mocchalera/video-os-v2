@@ -3,6 +3,9 @@
  * timeline, and caption policy.
  */
 
+import { cleanupCaptionText } from "./cleanup.js";
+import { formatCaption } from "./line-breaker.js";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -295,6 +298,10 @@ export interface CaptionGenerationOptions {
   excludeSpeakers?: string[];
   /** If true, remove Japanese filler words from caption text. Default: false. */
   removeFillers?: boolean;
+  /** If true, apply deterministic cleanup (acronym rejoin, punctuation normalization). Default: true. */
+  deterministicCleanup?: boolean;
+  /** If true, apply auto line-breaking per layout policy. Default: false (opt-in). */
+  autoLineBreak?: boolean;
 }
 
 export function generateCaptionSource(
@@ -410,9 +417,20 @@ export function generateCaptionSource(
       text = removeFillers(text);
     }
 
+    // Apply deterministic cleanup (default: true)
+    if (options?.deterministicCleanup !== false) {
+      text = cleanupCaptionText(text);
+    }
+
     // Skip segments that are empty or filler-only after cleaning
     if (text.trim().length === 0 || isFillerOnly(text)) {
       continue;
+    }
+
+    // Apply auto line-breaking (opt-in to preserve backward compatibility)
+    if (options?.autoLineBreak === true) {
+      const breakResult = formatCaption(text, language);
+      text = breakResult.lines.join("\n");
     }
 
     const inFrame = seg[0].timelineInFrame;

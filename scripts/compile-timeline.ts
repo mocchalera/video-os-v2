@@ -14,14 +14,17 @@ import { validateProject } from "./validate-schemas.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-function parseArgs(): { projectPath: string; patchPath?: string } {
+function parseArgs(): { projectPath: string; patchPath?: string; fpsNum?: number } {
   const args = process.argv.slice(2);
   let projectPath: string | undefined;
   let patchPath: string | undefined;
+  let fpsNum: number | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--patch" && i + 1 < args.length) {
       patchPath = args[++i];
+    } else if (args[i] === "--fps" && i + 1 < args.length) {
+      fpsNum = parseInt(args[++i], 10);
     } else if (!projectPath) {
       projectPath = args[i];
     }
@@ -29,17 +32,17 @@ function parseArgs(): { projectPath: string; patchPath?: string } {
 
   if (!projectPath) {
     console.error(
-      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>]",
+      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>]",
     );
     process.exit(1);
   }
 
-  return { projectPath, patchPath };
+  return { projectPath, patchPath, fpsNum };
 }
 
 // ── Compile mode ────────────────────────────────────────────────────
 
-function runCompile(projectPath: string): void {
+function runCompile(projectPath: string, fpsNum?: number): void {
   // Pre-compile validation: check Gate 1
   const preCheck = validateProject(projectPath);
   if (preCheck.compile_gate === "blocked") {
@@ -62,6 +65,7 @@ function runCompile(projectPath: string): void {
   const result = compile({
     projectPath,
     createdAt,
+    fpsNum,
   });
 
   console.log(`Timeline compiled: ${result.outputPath}`);
@@ -170,12 +174,12 @@ function runPatch(projectPath: string, patchPath: string): void {
 // ── Main ────────────────────────────────────────────────────────────
 
 function main(): void {
-  const { projectPath, patchPath } = parseArgs();
+  const { projectPath, patchPath, fpsNum } = parseArgs();
 
   if (patchPath) {
     runPatch(projectPath, patchPath);
   } else {
-    runCompile(projectPath);
+    runCompile(projectPath, fpsNum);
   }
 }
 
