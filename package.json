@@ -8,6 +8,7 @@
     "validate": "tsx scripts/validate-schemas.ts",
     "test": "vitest run",
     "build": "tsc",
+    "preview": "tsx scripts/preview-segment.ts",
     "export:premiere": "tsx scripts/export-premiere-xml.ts",
     "regen:premiere": "tsx scripts/regen-premiere-xml.ts"
   },

@@ -14,6 +14,7 @@ import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
 import { validateProject } from "./validate-schemas.js";
 import { ProgressTracker } from "../runtime/progress.js";
+import { generateTimelineOverview } from "../runtime/preview/timeline-overview.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -22,12 +23,14 @@ function parseArgs(): {
   patchPath?: string;
   fpsNum?: number;
   sourceMapPath?: string;
+  skipPreview?: boolean;
 } {
   const args = process.argv.slice(2);
   let projectPath: string | undefined;
   let patchPath: string | undefined;
   let fpsNum: number | undefined;
   let sourceMapPath: string | undefined;
+  let skipPreview = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--patch" && i + 1 < args.length) {
@@ -36,6 +39,8 @@ function parseArgs(): {
       fpsNum = parseInt(args[++i], 10);
     } else if (args[i] === "--source-map" && i + 1 < args.length) {
       sourceMapPath = args[++i];
+    } else if (args[i] === "--skip-preview") {
+      skipPreview = true;
     } else if (!projectPath) {
       projectPath = args[i];
     }
@@ -43,18 +48,23 @@ function parseArgs(): {
 
   if (!projectPath) {
     console.error(
-      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>]",
+      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>] [--skip-preview]",
     );
     process.exit(1);
   }
 
-  return { projectPath, patchPath, fpsNum, sourceMapPath };
+  return { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview };
 }
 
 // ── Compile mode ────────────────────────────────────────────────────
 
-function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string): void {
-  const pt = new ProgressTracker(projectPath, "compile", 3);
+async function runCompile(
+  projectPath: string,
+  fpsNum?: number,
+  sourceMapPath?: string,
+  skipPreview?: boolean,
+): Promise<void> {
+  const pt = new ProgressTracker(projectPath, "compile", skipPreview ? 3 : 4);
 
   // Pre-compile validation: check Gate 1
   const preCheck = validateProject(projectPath);
@@ -103,7 +113,30 @@ function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string
     process.exit(1);
   }
 
-  pt.complete(["timeline.json", "timeline.otio", "preview-manifest.json"]);
+  // Generate timeline overview image (unless skipped)
+  if (!skipPreview) {
+    const absProject = path.resolve(projectPath);
+    const timelinePath = path.join(absProject, "05_timeline/timeline.json");
+    const sourceMap = loadSourceMap(absProject, sourceMapPath);
+
+    try {
+      const overview = await generateTimelineOverview({
+        projectDir: absProject,
+        timelinePath,
+        sourceMap,
+      });
+      pt.advance("timeline-overview.png");
+      console.log(`Timeline overview: ${overview.outputPath} (${overview.clipCount} clips)`);
+    } catch (err) {
+      // Overview generation is best-effort — don't fail the compile
+      console.error(`Warning: Timeline overview generation failed: ${String(err)}`);
+      pt.advance();
+    }
+  }
+
+  const artifacts = ["timeline.json", "timeline.otio", "preview-manifest.json"];
+  if (!skipPreview) artifacts.push("timeline-overview.png");
+  pt.complete(artifacts);
   console.log("Schema validation: PASSED");
 }
 
@@ -196,14 +229,17 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
 
 // ── Main ────────────────────────────────────────────────────────────
 
-function main(): void {
-  const { projectPath, patchPath, fpsNum, sourceMapPath } = parseArgs();
+async function main(): Promise<void> {
+  const { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview } = parseArgs();
 
   if (patchPath) {
     runPatch(projectPath, patchPath, sourceMapPath);
   } else {
-    runCompile(projectPath, fpsNum, sourceMapPath);
+    await runCompile(projectPath, fpsNum, sourceMapPath, skipPreview);
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(`Compile failed: ${String(err)}`);
+  process.exit(1);
+});
