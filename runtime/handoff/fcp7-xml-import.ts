@@ -120,9 +120,10 @@ interface XmlNode {
  * - No CDATA, namespaces, processing instructions, or DTD entities
  */
 export function parseFcp7Xml(xml: string): XmlNode {
-  // Strip XML declaration and DOCTYPE
+  // Strip XML declaration, DOCTYPE, and comments
   let cleaned = xml.replace(/<\?xml[^?]*\?>/g, "");
   cleaned = cleaned.replace(/<!DOCTYPE[^>]*>/g, "");
+  cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, "");
   cleaned = cleaned.trim();
 
   const [node] = parseElement(cleaned, 0);

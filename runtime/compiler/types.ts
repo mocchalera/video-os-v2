@@ -334,6 +334,7 @@ export interface ScoredCandidate {
     motif_reuse_penalty: number;
     adjacency_penalty: number;
     peak_salience_bonus?: number;
+    bgm_bonus?: number;
   };
 }
 
