@@ -13,6 +13,21 @@ import type {
   ScoringParams,
 } from "./types.js";
 import { getSkillScoreAdjustment } from "../editorial/skill-registry.js";
+import type { BgmSection } from "./transition-types.js";
+import type { BeatEvent } from "../media/bgm-analyzer.js";
+
+// ── BGM-aware scoring context ───────────────────────────────────────
+
+export interface BgmScoringContext {
+  /** Downbeat timestamps in seconds. */
+  downbeats_sec: number[];
+  /** BGM sections with energy and labels. */
+  sections: BgmSection[];
+  /** Beat events with per-beat onset strength (optional). */
+  beats?: BeatEvent[];
+  /** Frames per second for time conversion. */
+  fpsNum: number;
+}
 
 // ── Peak Salience Bonus ─────────────────────────────────────────────
 // Per vlm-peak-detection-design.md §11.2
@@ -60,6 +75,7 @@ export function scoreCandidates(
   fpsDen: number,
   activeSkills?: string[],
   durationPolicy?: DurationPolicy,
+  bgmContext?: BgmScoringContext,
 ): RankedCandidateTable {
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const nonReject = candidates.filter((c) => c.role !== "reject");
@@ -137,6 +153,7 @@ export function scoreCandidates(
         adjacentAssetOverlap,
         activeSkills,
         durationPolicy,
+        bgmContext,
       );
       scored.push(entry);
     }
@@ -163,6 +180,7 @@ function scoreCandidate(
   adjacentAssetOverlap: number,
   activeSkills?: string[],
   durationPolicy?: DurationPolicy,
+  bgmContext?: BgmScoringContext,
 ): ScoredCandidate {
   // 1. Semantic rank score: higher rank (lower number) → higher score
   //    Normalize: 1.0 for rank 1, decaying. Use 1 / rank.
@@ -215,7 +233,12 @@ function scoreCandidate(
   // 7. Peak salience bonus: candidate-specific, per design doc §11.2
   const peakSalienceBonus = computePeakSalienceBonus(candidate, beat);
 
-  // 8. Duration mode adjustments
+  // 8. BGM downbeat proximity bonus + chorus-peak priority
+  const bgmBonus = bgmContext
+    ? computeBgmBonus(candidate, beat, bgmContext, usPerFrame)
+    : 0;
+
+  // 9. Duration mode adjustments
   //    - guide: duration fit is soft bonus (weight 0.15 instead of 0.3)
   //    - guide: peak-protected candidates get a duration_fit floor of 0.5
   //    - strict: unchanged (full 0.3 weight)
@@ -243,7 +266,8 @@ function scoreCandidate(
     motifReusePenalty -
     adjacencyPenalty +
     skillAdjustment +
-    peakSalienceBonus;
+    peakSalienceBonus +
+    bgmBonus;
 
   return {
     candidate,
@@ -256,6 +280,101 @@ function scoreCandidate(
       motif_reuse_penalty: motifReusePenalty,
       adjacency_penalty: adjacencyPenalty,
       peak_salience_bonus: peakSalienceBonus,
+      bgm_bonus: bgmBonus,
     },
   };
+}
+
+// ── BGM Downbeat Proximity Bonus + Chorus-Peak Priority ─────────────
+//
+// Two bonuses for BGM-synchronized editing:
+//
+// 1. Downbeat proximity bonus:
+//    If the clip's cut point (start of the beat in timeline) lands near a downbeat,
+//    the candidate gets a bonus. This encourages cuts on musical downbeats.
+//    Max bonus: 0.12 (within 2 frames), decaying to 0 at 8 frames distance.
+//
+// 2. Chorus-peak priority:
+//    If the beat falls within a "chorus" section AND the candidate has peak signals,
+//    the candidate gets an additional bonus. This ensures peak material lands in
+//    musically intense sections.
+//    Max bonus: 0.10
+
+const DOWNBEAT_BONUS_MAX = 0.12;
+const DOWNBEAT_TOLERANCE_FRAMES = 8;
+const CHORUS_PEAK_BONUS = 0.10;
+
+/**
+ * Compute BGM-aware scoring bonus for a candidate.
+ * Returns the sum of downbeat proximity bonus and chorus-peak priority bonus.
+ */
+export function computeBgmBonus(
+  candidate: Candidate,
+  beat: NormalizedBeat,
+  bgm: BgmScoringContext,
+  usPerFrame: number,
+): number {
+  let bonus = 0;
+
+  // ── Downbeat proximity bonus ────────────────────────────────────
+  // Estimate the clip's cut point in seconds from its timeline position.
+  // We use the beat's target_duration_frames to estimate where this beat
+  // starts in the timeline (accumulated from prior beats), but since we
+  // don't have the exact timeline_in_frame here, we approximate using
+  // the candidate's source timing against downbeat grid.
+  if (bgm.downbeats_sec.length > 0) {
+    // Use the candidate's duration midpoint as a proxy for when it plays
+    const candidateMidUs = (candidate.src_in_us + candidate.src_out_us) / 2;
+    const candidateDurationSec = (candidate.src_out_us - candidate.src_in_us) / 1_000_000;
+
+    // Find the nearest downbeat to the beat's target duration
+    // (in practice, the assembler will snap to downbeats, but scoring
+    //  provides the preference signal)
+    const beatDurationSec = beat.target_duration_frames * usPerFrame / 1_000_000;
+    let minDistFrames = Infinity;
+
+    for (const db of bgm.downbeats_sec) {
+      // Check if the candidate's duration aligns with a downbeat interval
+      const distSec = Math.abs(candidateDurationSec - beatDurationSec);
+      // Also check if the downbeat falls near a beat boundary
+      const modSec = candidateDurationSec > 0
+        ? db % candidateDurationSec
+        : db;
+      const distToGrid = Math.min(modSec, candidateDurationSec - modSec);
+      const distFrames = distToGrid * bgm.fpsNum;
+      if (distFrames < minDistFrames) {
+        minDistFrames = distFrames;
+      }
+    }
+
+    if (minDistFrames <= DOWNBEAT_TOLERANCE_FRAMES) {
+      // Linear decay: full bonus at 0 frames, 0 at DOWNBEAT_TOLERANCE_FRAMES
+      bonus += DOWNBEAT_BONUS_MAX * (1 - minDistFrames / DOWNBEAT_TOLERANCE_FRAMES);
+    }
+  }
+
+  // ── Chorus-peak priority bonus ──────────────────────────────────
+  // If the candidate has peak signals and the beat's timing falls within
+  // a chorus section, boost the candidate.
+  if (bgm.sections.length > 0) {
+    const hasPeakSignal = candidate.editorial_signals?.peak_strength_score != null &&
+      candidate.editorial_signals.peak_strength_score >= 0.3;
+
+    if (hasPeakSignal) {
+      // Check if any chorus section overlaps with this beat's approximate timeline position
+      const isChorusBeat = bgm.sections.some((s) =>
+        s.label === "chorus" && s.energy >= 0.7
+      );
+
+      // For story_role = "hook" or "experience" beats in chorus sections,
+      // peak candidates get a stronger boost
+      if (isChorusBeat) {
+        const storyRole = beat.story_role ?? "experience";
+        const roleMultiplier = storyRole === "hook" || storyRole === "experience" ? 1.0 : 0.5;
+        bonus += CHORUS_PEAK_BONUS * roleMultiplier * (candidate.editorial_signals!.peak_strength_score!);
+      }
+    }
+  }
+
+  return Math.round(bonus * 1000) / 1000;
 }

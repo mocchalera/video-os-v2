@@ -18,7 +18,9 @@ import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTim
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysis } from "../connectors/bgm-beat-detector.js";
+import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
 import { loadSourceMap } from "../media/source-map.js";
+import type { BgmScoringContext } from "./score.js";
 import type {
   CompileOptions,
   CompilerDefaults,
@@ -149,6 +151,29 @@ export function compile(opts: CompileOptions): CompileResult {
   // For source material at 30fps, pass fpsNum: 30 via compile options.
   const fpsNum = opts.fpsNum ?? 24;
   const fpsDen = 1;
+
+  // Load BGM analysis for beat-synchronized scoring.
+  // Prefer enhanced analysis from 03_analysis/, falling back to legacy 07_package/.
+  let bgmScoringContext: BgmScoringContext | undefined;
+  const enhancedBgm = loadBgmAnalysisFromProject(projectPath);
+  if (enhancedBgm) {
+    bgmScoringContext = {
+      downbeats_sec: enhancedBgm.downbeats_sec,
+      sections: enhancedBgm.sections,
+      beats: enhancedBgm.beats,
+      fpsNum,
+    };
+  } else {
+    const legacyBgm = loadBgmAnalysis(projectPath);
+    if (legacyBgm) {
+      bgmScoringContext = {
+        downbeats_sec: legacyBgm.downbeats_sec,
+        sections: legacyBgm.sections,
+        fpsNum,
+      };
+    }
+  }
+
   const rankedTable = scoreCandidates(
     normalized,
     selects.candidates,
@@ -157,6 +182,7 @@ export function compile(opts: CompileOptions): CompileResult {
     fpsDen,
     activeSkills,
     durationPolicy,
+    bgmScoringContext,
   );
 
   // ── Phase 2.5: Resolve Timeline Order & Output Dimensions ────────

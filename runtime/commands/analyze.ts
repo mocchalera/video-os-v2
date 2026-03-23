@@ -16,6 +16,11 @@ import { DEFAULT_VLM_CONCURRENCY } from "../pipeline/vlm-analysis.js";
 import type { ProjectState } from "../state/reconcile.js";
 import { ProgressTracker } from "../progress.js";
 import { runPreflight } from "../../scripts/preflight.js";
+import {
+  analyzeBgm,
+  detectBgmFiles,
+  writeBgmAnalysis,
+} from "../media/bgm-analyzer.js";
 
 export interface AnalyzeCommandOptions {
   sourceFiles: string[];
@@ -25,6 +30,7 @@ export interface AnalyzeCommandOptions {
   skipPeak?: boolean;
   skipMediaLink?: boolean;
   skipPreflight?: boolean;
+  skipBgmAnalysis?: boolean;
   language?: string;
   sttProvider?: string;
   contentHint?: string;
@@ -60,6 +66,7 @@ const ANALYZE_ARTIFACT_CANDIDATES = [
   "03_analysis/assets.json",
   "03_analysis/segments.json",
   "03_analysis/gap_report.yaml",
+  "03_analysis/bgm_analysis.json",
 ];
 
 export async function runAnalyze(
@@ -163,6 +170,23 @@ class DefaultAnalyzeRunner implements AnalyzeRunner {
       noCache: ctx.noCache,
       clearCache: ctx.clearCache,
     });
+
+    // ── BGM beat analysis (post-pipeline) ───────────────────────────
+    if (!ctx.skipBgmAnalysis) {
+      const bgmFiles = detectBgmFiles(ctx.sourceFiles);
+      for (const bgmPath of bgmFiles) {
+        const assetId = `BGM_${path.basename(bgmPath, path.extname(bgmPath)).replace(/[^a-zA-Z0-9]/g, "_")}`;
+        const result = analyzeBgm({
+          audioPath: bgmPath,
+          projectDir: ctx.projectDir,
+          projectId: ctx.projectId,
+          assetId,
+        });
+        if (result.analysis_status !== "failed") {
+          writeBgmAnalysis(result, ctx.projectDir);
+        }
+      }
+    }
 
     return {
       artifactsCreated: collectExistingAnalyzeArtifacts(ctx.projectDir),

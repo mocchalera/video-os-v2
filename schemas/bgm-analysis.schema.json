@@ -46,6 +46,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/section" }
     },
+    "beats": {
+      "type": "array",
+      "description": "Beat events with onset strength (0–1). Optional; when present, provides richer data than beats_sec.",
+      "items": { "$ref": "#/$defs/beat_event" }
+    },
     "editorial_arc_map": {
       "type": "array",
       "items": { "$ref": "#/$defs/arc_map_entry" }
@@ -71,6 +76,15 @@
         "start_sec": { "type": "number", "minimum": 0 },
         "end_sec": { "type": "number", "minimum": 0 },
         "energy": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "beat_event": {
+      "type": "object",
+      "required": ["time_sec", "strength"],
+      "properties": {
+        "time_sec": { "type": "number", "minimum": 0 },
+        "strength": { "type": "number", "minimum": 0, "maximum": 1 }
       },
       "additionalProperties": false
     },
