@@ -31,17 +31,21 @@ function parseArgs(): {
   projectPath: string;
   xmlPath: string;
   dryRun: boolean;
+  jsonOutput: boolean;
 } {
   const args = process.argv.slice(2);
   let projectPath: string | undefined;
   let xmlPath: string | undefined;
   let dryRun = false;
+  let jsonOutput = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--xml" && i + 1 < args.length) {
       xmlPath = args[++i];
     } else if (args[i] === "--dry-run") {
       dryRun = true;
+    } else if (args[i] === "--json") {
+      jsonOutput = true;
     } else if (!projectPath) {
       projectPath = args[i];
     }
@@ -49,7 +53,7 @@ function parseArgs(): {
 
   if (!projectPath || !xmlPath) {
     console.error(
-      "Usage: npx tsx scripts/import-premiere-xml.ts <project-path> --xml <edited.xml> [--dry-run]",
+      "Usage: npx tsx scripts/import-premiere-xml.ts <project-path> --xml <edited.xml> [--dry-run] [--json]",
     );
     process.exit(1);
   }
@@ -58,10 +62,22 @@ function parseArgs(): {
     projectPath: path.resolve(projectPath),
     xmlPath: path.resolve(xmlPath),
     dryRun,
+    jsonOutput,
   };
 }
 
 // ── Diff report formatting ──────────────────────────────────────────
+
+/** Format microseconds as human-readable timecode (HH:MM:SS.mmm) */
+function usToTimecode(us: number): string {
+  const totalSec = us / 1_000_000;
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${s.toFixed(3).padStart(6, "0")}`;
+  if (m > 0) return `${m}:${s.toFixed(3).padStart(6, "0")}`;
+  return `${s.toFixed(3)}s`;
+}
 
 function formatDiffReport(report: ImportDiffReport): string {
   const lines: string[] = [];
@@ -94,10 +110,10 @@ function formatDiffReport(report: ImportDiffReport): string {
       if (diff.original && diff.updated) {
         if (kind === "trim_changed") {
           lines.push(
-            `    src_in:  ${diff.original.src_in_us}us → ${diff.updated.src_in_us}us`,
+            `    src_in:  ${usToTimecode(diff.original.src_in_us)} → ${usToTimecode(diff.updated.src_in_us)}`,
           );
           lines.push(
-            `    src_out: ${diff.original.src_out_us}us → ${diff.updated.src_out_us}us`,
+            `    src_out: ${usToTimecode(diff.original.src_out_us)} → ${usToTimecode(diff.updated.src_out_us)}`,
           );
           lines.push(
             `    duration: ${diff.original.timeline_duration_frames}f → ${diff.updated.timeline_duration_frames}f`,
@@ -116,10 +132,32 @@ function formatDiffReport(report: ImportDiffReport): string {
   return lines.join("\n");
 }
 
+/** Format diff report as structured JSON for programmatic consumption */
+function formatDiffReportJson(report: ImportDiffReport): string {
+  const grouped: Record<string, ClipDiff[]> = {};
+  for (const diff of report.diffs) {
+    (grouped[diff.kind] ??= []).push(diff);
+  }
+
+  const summary = {
+    sequence_name: report.sequenceName,
+    total_clips_in_xml: report.totalClipsInXml,
+    mapped_clips: report.mappedClips,
+    unmapped_clips: report.unmappedClips,
+    total_diffs: report.diffs.length,
+    by_kind: Object.fromEntries(
+      Object.entries(grouped).map(([kind, diffs]) => [kind, diffs.length]),
+    ),
+    diffs: report.diffs,
+  };
+
+  return JSON.stringify(summary, null, 2);
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 function main(): void {
-  const { projectPath, xmlPath, dryRun } = parseArgs();
+  const { projectPath, xmlPath, dryRun, jsonOutput } = parseArgs();
 
   // Read timeline.json
   const timelinePath = path.join(projectPath, "05_timeline", "timeline.json");
@@ -131,7 +169,7 @@ function main(): void {
   const timeline: TimelineIR = JSON.parse(
     fs.readFileSync(timelinePath, "utf-8"),
   );
-  console.log(`Reference timeline: ${timeline.sequence.name}`);
+  if (!jsonOutput) console.log(`Reference timeline: ${timeline.sequence.name}`);
 
   // Read XML
   if (!fs.existsSync(xmlPath)) {
@@ -140,17 +178,25 @@ function main(): void {
   }
 
   const xmlContent = fs.readFileSync(xmlPath, "utf-8");
-  console.log(`Parsing XML: ${xmlPath}`);
+  if (!jsonOutput) console.log(`Parsing XML: ${xmlPath}`);
 
   // Parse FCP7 XML
   const parsed = parseFcp7Sequence(xmlContent);
-  console.log(
-    `Parsed: ${parsed.videoTracks.reduce((n, t) => n + t.length, 0)} video clips, ${parsed.audioTracks.reduce((n, t) => n + t.length, 0)} audio clips`,
-  );
+  if (!jsonOutput) {
+    console.log(
+      `Parsed: ${parsed.videoTracks.reduce((n, t) => n + t.length, 0)} video clips, ${parsed.audioTracks.reduce((n, t) => n + t.length, 0)} audio clips`,
+    );
+  }
 
   // Detect diffs
   const report = detectDiffs(parsed, timeline);
-  console.log(formatDiffReport(report));
+
+  if (jsonOutput) {
+    console.log(formatDiffReportJson(report));
+    if (dryRun) return;
+  } else {
+    console.log(formatDiffReport(report));
+  }
 
   if (dryRun) {
     console.log(`[DRY RUN] No changes applied.`);

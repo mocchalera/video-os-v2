@@ -23,7 +23,7 @@ import {
   timelineToFcp7Xml,
   type TextOverlay,
 } from "../runtime/handoff/fcp7-xml-export.js";
-import { loadSourceMap } from "../runtime/media/source-map.js";
+import { loadSourceMap, type LoadedSourceMap } from "../runtime/media/source-map.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -70,14 +70,23 @@ function parseArgs(): {
 function resolveSourceMap(
   projectPath: string,
   sourceMapPath?: string,
-): Map<string, string> {
+): { locatorMap: Map<string, string>; displayNameMap: Map<string, string> } {
   if (sourceMapPath && !fs.existsSync(path.resolve(sourceMapPath))) {
     throw new Error(`source map not found: ${path.resolve(sourceMapPath)}`);
   }
 
   const loaded = loadSourceMap(projectPath, sourceMapPath);
+
+  // Build display name map from source map entries
+  const displayNameMap = new Map<string, string>();
+  for (const entry of loaded.entries) {
+    if (entry.display_name) {
+      displayNameMap.set(entry.asset_id, entry.display_name);
+    }
+  }
+
   if (loaded.locatorMap.size > 0) {
-    return loaded.locatorMap;
+    return { locatorMap: loaded.locatorMap, displayNameMap };
   }
 
   const map = new Map<string, string>();
@@ -103,7 +112,7 @@ function resolveSourceMap(
     }
   }
 
-  return map;
+  return { locatorMap: map, displayNameMap };
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -171,7 +180,7 @@ function main(): void {
   );
 
   // Resolve source map
-  const sourceMap = resolveSourceMap(projectPath, sourceMapPath);
+  const { locatorMap: sourceMap, displayNameMap } = resolveSourceMap(projectPath, sourceMapPath);
   if (sourceMap.size === 0) {
     console.error(
       "Error: No source map entries found. Cannot produce valid Premiere XML without media references.",
@@ -185,13 +194,21 @@ function main(): void {
     process.exit(1);
   } else {
     console.log(`  Source map: ${sourceMap.size} entries`);
+    if (displayNameMap.size > 0) {
+      console.log(`  Display names: ${displayNameMap.size} entries`);
+    }
   }
 
   // Resolve text overlays
   const textOverlays = resolveTextOverlays(timeline, titlesPath, autoTitles);
 
   // Export
-  const xml = timelineToFcp7Xml(timeline, { sourceMap, textOverlays });
+  const xml = timelineToFcp7Xml(timeline, {
+    sourceMap,
+    textOverlays,
+    assetDisplayNameMap: displayNameMap.size > 0 ? displayNameMap : undefined,
+    projectId: timeline.project_id,
+  });
 
   // Write output
   const outputDir = path.join(projectPath, "09_output");

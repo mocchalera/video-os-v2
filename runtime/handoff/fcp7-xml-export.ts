@@ -29,6 +29,8 @@ export interface Fcp7ExportOptions {
   sourceMap: Map<string, string>;
   /** Map asset_id → total asset duration in microseconds (for accurate <file> duration) */
   assetDurationMap?: Map<string, number>;
+  /** Map asset_id → human-readable display name (used for clip names in XML) */
+  assetDisplayNameMap?: Map<string, string>;
   /** Project ID for deriving exchange clip IDs */
   projectId?: string;
   /** Timeline version for deriving exchange clip IDs */
@@ -131,6 +133,10 @@ class ExportContext {
 
     lines.push(`<?xml version="1.0" encoding="UTF-8"?>`);
     lines.push(`<!DOCTYPE xmeml>`);
+    // Metadata comment for roundtrip identification
+    const projectId = this.opts.projectId || this.timeline.project_id;
+    const generatedAt = new Date().toISOString();
+    lines.push(`<!-- Video OS v2 | project: ${this.escXml(projectId)} | generated: ${generatedAt} | compiler: ${this.escXml(this.timeline.provenance?.compiler_version ?? "unknown")} -->`);
     lines.push(`<xmeml version="5">`);
     lines.push(`  <sequence>`);
     lines.push(`    <name>${this.escXml(this.timeline.sequence.name)}</name>`);
@@ -264,6 +270,14 @@ class ExportContext {
   /** Mark a file as having been emitted inline */
   private markFileDefined(assetId: string): void {
     this.definedFiles.add(assetId);
+  }
+
+  /** Resolve the best display name for a clip in the XML <name> element */
+  private resolveClipDisplayName(clip: ClipOutput): string {
+    // Priority: assetDisplayNameMap → motivation → clip_id
+    const displayName = this.opts.assetDisplayNameMap?.get(clip.asset_id);
+    if (displayName) return displayName;
+    return clip.motivation || clip.clip_id;
   }
 
   // ── Structure Emitters ──
@@ -419,7 +433,7 @@ class ExportContext {
 
       lines.push(`${d}  <clipitem id="${clipId}">`);
       lines.push(
-        `${d}    <name>${this.escXml(clip.motivation || clip.clip_id)}</name>`,
+        `${d}    <name>${this.escXml(this.resolveClipDisplayName(clip))}</name>`,
       );
       lines.push(`${d}    <duration>${srcOutFrames}</duration>`);
       this.appendRate(lines, depth + 4);
@@ -473,7 +487,7 @@ class ExportContext {
 
       lines.push(`${d}  <clipitem id="${clipId}">`);
       lines.push(
-        `${d}    <name>${this.escXml(clip.motivation || clip.clip_id)}</name>`,
+        `${d}    <name>${this.escXml(this.resolveClipDisplayName(clip))}</name>`,
       );
       lines.push(`${d}    <duration>${srcOutFrames}</duration>`);
       this.appendRate(lines, depth + 4);
