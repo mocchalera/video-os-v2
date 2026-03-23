@@ -55,16 +55,8 @@ import {
   type SamplingPolicy,
   type VlmEnrichmentResult,
   VLM_CONNECTOR_VERSION,
-  getAdaptiveSampleFps,
-  computeFrameCount,
-  computeSampleTimestamps,
-  adjustFpsForBudget,
-  enrichSegment,
-  shouldSkipVlm,
-  computePromptHash,
   computeVlmRequestHash,
   guessAssetRole,
-  type SegmentType,
 } from "../connectors/gemini-vlm.js";
 import {
   type PeakAnalysis,
@@ -95,6 +87,21 @@ import {
   createMediaLinks,
   type MediaSourceMapDoc,
 } from "../media/source-map.js";
+import {
+  hydrateCachedVlmSegments,
+  runParallelVlmAnalysis,
+  type VlmAssetRunSummary,
+  type VlmProgressReporter,
+  type VlmShard,
+} from "./vlm-analysis.js";
+import {
+  computeCacheHash,
+  loadCacheManifest,
+  saveCacheManifest,
+  clearCacheManifest,
+  lookupCache,
+  type CacheManifestEntry,
+} from "./analysis-cache.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -127,6 +134,14 @@ export interface PipelineOptions {
   contentHint?: string;
   /** Skip 02_media symlink generation */
   skipMediaLink?: boolean;
+  /** Max number of assets to analyze concurrently during VLM enrichment */
+  vlmConcurrency?: number;
+  /** Optional progress hooks for VLM enrichment */
+  vlmProgressReporter?: VlmProgressReporter;
+  /** Disable analysis cache (always re-analyze everything) */
+  noCache?: boolean;
+  /** Clear existing cache before analysis */
+  clearCache?: boolean;
 }
 
 export interface PipelineResult {
@@ -136,6 +151,7 @@ export interface PipelineResult {
   outputDir: string;
   mediaSourceMap?: MediaSourceMapDoc;
   mediaSourceMapPath?: string;
+  vlmSummary?: VlmAssetRunSummary;
 }
 
 export interface AssetsJson {
@@ -188,6 +204,11 @@ function atomicWriteYaml(filePath: string, data: unknown): void {
   const tmp = filePath + ".tmp." + process.pid;
   fs.writeFileSync(tmp, stringifyYaml(data));
   fs.renameSync(tmp, filePath);
+}
+
+function readJsonIfExists<T>(filePath: string): T | undefined {
+  if (!fs.existsSync(filePath)) return undefined;
+  return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
 }
 
 // ── Pipeline Stages ────────────────────────────────────────────────
@@ -629,93 +650,12 @@ function sttReduce(
 
 // ── Stage 9+10: VLM ─────────────────────────────────────────────────
 
-/** Per-segment VLM enrichment result shard. */
-export interface VlmShard {
-  segment_id: string;
-  result: VlmEnrichmentResult;
-}
-
-/**
- * Stage 9: vlm.map — per-segment frame sampling + VLM call.
- * Uses mock-injectable VlmFn for testing.
- */
-async function vlmMap(
-  segments: SegmentItem[],
-  vlmPolicy: VlmPolicy,
-  samplingPolicy: SamplingPolicy,
-  minSegmentDurationUs: number,
-  policyHash: string,
-  vlmFn: VlmFn,
-  contentHint?: string,
-): Promise<VlmShard[]> {
-  const shards: VlmShard[] = [];
-
-  for (const seg of segments) {
-    const durationUs = seg.src_out_us - seg.src_in_us;
-
-    // Check skip conditions
-    if (shouldSkipVlm(seg.quality_flags, durationUs, minSegmentDurationUs)) {
-      continue;
-    }
-
-    // Adaptive sampling
-    const segType = (seg.segment_type || "general") as SegmentType;
-    let fps = getAdaptiveSampleFps(segType, samplingPolicy);
-
-    // Adjust for token budget
-    fps = adjustFpsForBudget(
-      durationUs,
-      fps,
-      vlmPolicy.segment_visual_frame_cap,
-      vlmPolicy.segment_visual_token_budget_max,
-    );
-
-    const frameCount = computeFrameCount(durationUs, fps, vlmPolicy.segment_visual_frame_cap);
-    const timestamps = computeSampleTimestamps(seg.src_in_us, seg.src_out_us, frameCount);
-
-    // In real pipeline, frame extraction would happen here via ffmpeg.
-    // For the VLM call, we pass timestamp-based "virtual" frame paths.
-    // The actual VlmFn implementation handles frame data.
-    const framePaths = timestamps.map((ts) => `frame_${ts}.jpg`);
-
-    const transcriptContext = seg.transcript_excerpt || undefined;
-
-    try {
-      const result = await enrichSegment(
-        vlmFn,
-        framePaths,
-        seg.src_in_us,
-        seg.src_out_us,
-        vlmPolicy,
-        transcriptContext,
-        contentHint,
-      );
-      shards.push({ segment_id: seg.segment_id, result });
-    } catch (err) {
-      shards.push({
-        segment_id: seg.segment_id,
-        result: {
-          success: false,
-          error: `vlm_exception: ${err instanceof Error ? err.message : String(err)}`,
-          prompt_hash: computePromptHash(),
-          model_alias: vlmPolicy.model_alias,
-          model_snapshot: vlmPolicy.model_snapshot,
-        },
-      });
-    }
-  }
-
-  return shards;
-}
-
-/**
- * Stage 10: vlm.reduce — update segments.json with enrichment fields.
- */
 function vlmReduce(
   vlmShards: VlmShard[],
   assetsJson: AssetsJson,
   segmentsJson: SegmentsJson,
   policyHash: string,
+  responseFormat: string,
   segmentsOutputPath: string,
   assetsOutputPath: string,
 ): { segments: SegmentsJson; assets: AssetsJson } {
@@ -778,6 +718,7 @@ function vlmReduce(
       model_alias: shard.result.model_alias,
       model_snapshot: shard.result.model_snapshot,
       prompt_hash: shard.result.prompt_hash,
+      response_format: responseFormat,
     };
     (seg.provenance as Record<string, unknown>).summary = vlmProvenance;
     (seg.provenance as Record<string, unknown>).tags = vlmProvenance;
@@ -1128,6 +1069,21 @@ function buildGapReport(
   return { version: "1", entries };
 }
 
+// ── Cache Helpers ──────────────────────────────────────────────────
+
+function buildManifestEntries(
+  shards: IngestShard[],
+  hashMap: Map<string, string>,
+): CacheManifestEntry[] {
+  const now = new Date().toISOString();
+  return shards.map((shard) => ({
+    hash: hashMap.get(shard.asset.asset_id) ?? "",
+    asset_id: shard.asset.asset_id,
+    cached_at: now,
+    source_path: shard.sourceFile,
+  }));
+}
+
 // ── Main Pipeline ──────────────────────────────────────────────────
 
 /**
@@ -1141,6 +1097,19 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   const assetsPath = path.join(outputDir, "assets.json");
   const segmentsPath = path.join(outputDir, "segments.json");
   const gapReportPath = path.join(outputDir, "gap_report.yaml");
+  const manifestPath = path.join(outputDir, "cache_manifest.json");
+
+  // ── Cache Setup ──
+  if (opts.clearCache) {
+    clearCacheManifest(manifestPath);
+    console.log("[cache] Cache cleared");
+  }
+  const useCache = !opts.noCache;
+  const manifest = useCache ? loadCacheManifest(manifestPath) : [];
+
+  // Load prior analysis data BEFORE pipeline may overwrite files
+  const existingAssetsJson = readJsonIfExists<AssetsJson>(assetsPath);
+  const existingSegmentsJson = readJsonIfExists<SegmentsJson>(segmentsPath);
 
   // Resolve policy
   const { resolved: policy } = resolvePolicy(absProjectDir, opts.repoRoot);
@@ -1154,14 +1123,116 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   // Project ID from directory name
   const projectId = path.basename(absProjectDir);
 
-  // Stage 1+2: Ingest
-  const ingestShards = await ingestMap(sourceFiles, {
+  // Stage 1: Ingest (always runs for all files to get asset IDs + durations)
+  const allIngestShards = await ingestMap(sourceFiles, {
     projectRoot: absProjectDir,
     policyHash,
     ffmpegVersion,
   });
+
+  // ── Cache Check ──
+  const cacheHitIds = new Set<string>();
+  const cacheHashMap = new Map<string, string>();
+
+  for (const shard of allIngestShards) {
+    const absPath = path.resolve(shard.sourceFile);
+    const stat = fs.statSync(absPath);
+    const hash = computeCacheHash(absPath, stat.size, shard.asset.duration_us);
+    cacheHashMap.set(shard.asset.asset_id, hash);
+
+    if (useCache && manifest.length > 0) {
+      const entry = lookupCache(manifest, hash);
+      if (entry && entry.asset_id === shard.asset.asset_id && existingAssetsJson) {
+        const priorAsset = existingAssetsJson.items.find(
+          (a) => a.asset_id === shard.asset.asset_id,
+        );
+        if (priorAsset) {
+          cacheHitIds.add(shard.asset.asset_id);
+          console.log(`[cache hit] ${shard.asset.asset_id}`);
+        }
+      }
+    }
+  }
+
+  // Collect prior data for cached assets
+  const cachedAssetItems: AssetItem[] = [];
+  const cachedSegmentItems: SegmentItem[] = [];
+  if (cacheHitIds.size > 0 && existingAssetsJson && existingSegmentsJson) {
+    for (const id of cacheHitIds) {
+      const pa = existingAssetsJson.items.find((a) => a.asset_id === id);
+      if (pa) cachedAssetItems.push(pa);
+      cachedSegmentItems.push(
+        ...existingSegmentsJson.items.filter((s) => s.asset_id === id),
+      );
+    }
+  }
+
+  const newIngestShards = allIngestShards.filter(
+    (s) => !cacheHitIds.has(s.asset.asset_id),
+  );
+  if (cacheHitIds.size > 0) {
+    console.log(`[cache] ${cacheHitIds.size} cached, ${newIngestShards.length} new`);
+  }
+
+  // ── All cached — short-circuit ──
+  if (newIngestShards.length === 0 && cacheHitIds.size > 0) {
+    const assetsJson: AssetsJson = {
+      project_id: projectId,
+      artifact_version: "2.0.0",
+      items: [...cachedAssetItems].sort((a, b) =>
+        a.asset_id.localeCompare(b.asset_id),
+      ),
+    };
+    const segmentsJson: SegmentsJson = {
+      project_id: projectId,
+      artifact_version: "2.0.0",
+      items: [...cachedSegmentItems].sort((a, b) => {
+        if (a.asset_id !== b.asset_id)
+          return a.asset_id.localeCompare(b.asset_id);
+        return a.src_in_us - b.src_in_us;
+      }),
+    };
+    atomicWriteJson(assetsPath, assetsJson);
+    atomicWriteJson(segmentsPath, segmentsJson);
+
+    const gapReport: GapReport = { version: "1", entries: [] };
+    atomicWriteYaml(gapReportPath, gapReport);
+
+    const allSourceFileMap = new Map<string, string>();
+    for (const shard of allIngestShards) {
+      allSourceFileMap.set(shard.asset.asset_id, shard.sourceFile);
+    }
+
+    let mediaSourceMap: MediaSourceMapDoc | undefined;
+    let mediaSourceMapPath: string | undefined;
+    if (!opts.skipMediaLink) {
+      const mediaLinks = createMediaLinks({
+        projectPath: absProjectDir,
+        projectId,
+        assets: assetsJson.items,
+        sourceFileMap: allSourceFileMap,
+      });
+      mediaSourceMap = mediaLinks.doc;
+      mediaSourceMapPath = mediaLinks.sourceMapPath;
+    }
+
+    saveCacheManifest(
+      manifestPath,
+      buildManifestEntries(allIngestShards, cacheHashMap),
+    );
+    return {
+      assetsJson,
+      segmentsJson,
+      gapReport,
+      outputDir,
+      mediaSourceMap,
+      mediaSourceMapPath,
+    };
+  }
+
+  // Stage 2: Reduce (new assets only)
   const { assetsJson: initialAssetsJson, sourceFileMap } = ingestReduce(
-    ingestShards, projectId, assetsPath,
+    newIngestShards, projectId, assetsPath,
   );
   let assetsJson = initialAssetsJson;
 
@@ -1259,6 +1330,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
   // Stage 9+10: VLM (optional — skipped when explicitly disabled or no vlmFn)
   let vlmShards: VlmShard[] | undefined;
+  let vlmSummary: VlmAssetRunSummary | undefined;
   if (!opts.skipVlm) {
     const vlmPolicy = (policy as Record<string, unknown>)["vlm"] as VlmPolicy | undefined;
     const samplingPolicy = (policy as Record<string, unknown>)["sampling"] as SamplingPolicy | undefined;
@@ -1266,27 +1338,45 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       Record<string, unknown> | undefined;
     const minSegDuration = (qualThresholds2?.min_segment_duration_us as number) ?? 750_000;
 
-    if (vlmPolicy && samplingPolicy && opts.vlmFn) {
-      vlmShards = await vlmMap(
-        segmentsJson.items,
+    if (vlmPolicy && samplingPolicy) {
+      const cachedSegmentIds = hydrateCachedVlmSegments({
+        currentSegments: segmentsJson.items,
+        cachedSegments: existingSegmentsJson?.items,
         vlmPolicy,
-        samplingPolicy,
-        minSegDuration,
         policyHash,
-        opts.vlmFn,
-        opts.contentHint,
-      );
+      });
 
-      const vlmReduceResult = vlmReduce(
-        vlmShards,
-        assetsJson,
-        segmentsJson,
-        policyHash,
-        segmentsPath,
-        assetsPath,
-      );
-      assetsJson = vlmReduceResult.assets;
-      segmentsJson = vlmReduceResult.segments;
+      vlmShards = [];
+      if (opts.vlmFn) {
+        const liveVlm = await runParallelVlmAnalysis({
+          assets: assetsJson.items,
+          segments: segmentsJson.items,
+          vlmPolicy,
+          samplingPolicy,
+          minSegmentDurationUs: minSegDuration,
+          vlmFn: opts.vlmFn,
+          contentHint: opts.contentHint,
+          concurrency: opts.vlmConcurrency,
+          reporter: opts.vlmProgressReporter,
+          cachedSegmentIds,
+        });
+        vlmShards = liveVlm.shards;
+        vlmSummary = liveVlm.summary;
+      }
+
+      if (vlmShards.length > 0 || cachedSegmentIds.size > 0) {
+        const vlmReduceResult = vlmReduce(
+          vlmShards,
+          assetsJson,
+          segmentsJson,
+          policyHash,
+          vlmPolicy.response_format,
+          segmentsPath,
+          assetsPath,
+        );
+        assetsJson = vlmReduceResult.assets;
+        segmentsJson = vlmReduceResult.segments;
+      }
     }
   }
 
@@ -1314,6 +1404,27 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     }
   }
 
+  // ── Merge cached data ──
+  if (cacheHitIds.size > 0) {
+    assetsJson.items.push(...cachedAssetItems);
+    assetsJson.items.sort((a, b) => a.asset_id.localeCompare(b.asset_id));
+    segmentsJson.items.push(...cachedSegmentItems);
+    segmentsJson.items.sort((a, b) => {
+      if (a.asset_id !== b.asset_id)
+        return a.asset_id.localeCompare(b.asset_id);
+      return a.src_in_us - b.src_in_us;
+    });
+    atomicWriteJson(assetsPath, assetsJson);
+    atomicWriteJson(segmentsPath, segmentsJson);
+
+    // Add cached source files for display names + media links
+    for (const shard of allIngestShards) {
+      if (cacheHitIds.has(shard.asset.asset_id)) {
+        sourceFileMap.set(shard.asset.asset_id, shard.sourceFile);
+      }
+    }
+  }
+
   // Stage 13: display_name generation — assign human-readable names from VLM summaries + creation dates
   const displayNameInputs: DisplayNameInput[] = assetsJson.items
     .filter((asset) => sourceFileMap.has(asset.asset_id))
@@ -1329,9 +1440,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   }
   atomicWriteJson(assetsPath, assetsJson);
 
-  // Gap report (includes detector failure reasons + STT + VLM + diarization results)
+  // Gap report — only check new (non-cached) assets
+  const newAssetItems = assetsJson.items.filter(
+    (a) => !cacheHitIds.has(a.asset_id),
+  );
   const gapReport = buildGapReport(
-    assetsJson.items, segmentShards, derivativeResults, segMapResult.detectorFailures, sttResults, vlmShards, peakShards,
+    newAssetItems, segmentShards, derivativeResults, segMapResult.detectorFailures, sttResults, vlmShards, peakShards,
   );
   // Merge diarization gap entries
   gapReport.entries.push(...diarizeGapEntries);
@@ -1353,6 +1467,12 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     }
   }
 
+  // ── Update cache manifest ──
+  saveCacheManifest(
+    manifestPath,
+    buildManifestEntries(allIngestShards, cacheHashMap),
+  );
+
   return {
     assetsJson,
     segmentsJson,
@@ -1360,5 +1480,6 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     outputDir,
     mediaSourceMap,
     mediaSourceMapPath,
+    vlmSummary,
   };
 }

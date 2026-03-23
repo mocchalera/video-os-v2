@@ -269,4 +269,17 @@ describe("analyze parseArgs", () => {
     ]);
     expect(parsed.skipMediaLink).toBe(true);
   });
+
+  it("parses --concurrency", () => {
+    const parsed = parseArgs([
+      "node",
+      "scripts/analyze.ts",
+      "clip.mov",
+      "--project",
+      "projects/test",
+      "--concurrency",
+      "5",
+    ]);
+    expect(parsed.concurrency).toBe(5);
+  });
 });

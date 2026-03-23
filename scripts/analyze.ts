@@ -16,6 +16,10 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { runPipeline } from "../runtime/pipeline/ingest.js";
 import { createGeminiVlmFn } from "../runtime/connectors/gemini-vlm.js";
+import {
+  DEFAULT_VLM_CONCURRENCY,
+  type VlmProgressReporter,
+} from "../runtime/pipeline/vlm-analysis.js";
 import { runPreflight } from "./preflight.js";
 
 // ── Arg Parsing ────────────────────────────────────────────────────
@@ -32,6 +36,9 @@ function parseArgs(argv: string[]): {
   language: string | undefined;
   sttProvider: string | undefined;
   contentHint: string | undefined;
+  concurrency: number;
+  noCache: boolean;
+  clearCache: boolean;
 } {
   const args = argv.slice(2); // skip node + script path
   const sourceFiles: string[] = [];
@@ -45,6 +52,9 @@ function parseArgs(argv: string[]): {
   let language: string | undefined;
   let sttProvider: string | undefined;
   let contentHint: string | undefined;
+  let concurrency = DEFAULT_VLM_CONCURRENCY;
+  let noCache = false;
+  let clearCache = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -68,11 +78,23 @@ function parseArgs(argv: string[]): {
       sttProvider = args[++i] ?? undefined;
     } else if (arg === "--content-hint") {
       contentHint = args[++i] ?? undefined;
+    } else if (arg === "--concurrency") {
+      const value = Number.parseInt(args[++i] ?? "", 10);
+      if (!Number.isInteger(value) || value < 1) {
+        console.error("Error: --concurrency must be a positive integer");
+        process.exit(1);
+      }
+      concurrency = value;
+    } else if (arg === "--no-cache") {
+      noCache = true;
+    } else if (arg === "--clear-cache") {
+      clearCache = true;
     } else if (arg === "--help" || arg === "-h") {
       console.log(`Usage: npx tsx scripts/analyze.ts <source-files...> --project <project-dir>
 
 Options:
   --project, -p      Project directory (required)
+  --concurrency      Concurrent VLM asset jobs (default: ${DEFAULT_VLM_CONCURRENCY})
   --skip-stt         Skip speech-to-text stage
   --skip-vlm         Skip visual language model stage
   --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
@@ -82,6 +104,8 @@ Options:
   --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
   --stt-provider     STT provider: "groq" or "openai" (auto-detected if omitted)
   --content-hint     Content context for VLM (e.g. "子供の自転車練習")
+  --no-cache         Disable analysis cache (re-analyze everything)
+  --clear-cache      Clear existing cache, then re-analyze
   --help, -h         Show this help
 `);
       process.exit(0);
@@ -112,7 +136,18 @@ Options:
     language,
     sttProvider,
     contentHint,
+    concurrency,
+    noCache,
+    clearCache,
   };
+}
+
+function formatDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${totalSeconds}s`;
+  return `${minutes}m ${seconds}s`;
 }
 
 // ── Main ───────────────────────────────────────────────────────────
@@ -130,6 +165,9 @@ async function main(): Promise<void> {
     language,
     sttProvider,
     contentHint,
+    concurrency,
+    noCache,
+    clearCache,
   } = parseArgs(process.argv);
 
   // ── Pre-flight checks ──────────────────────────────────────────
@@ -159,6 +197,9 @@ async function main(): Promise<void> {
   if (language) console.log(`[analyze] Language: ${language}`);
   if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
   if (contentHint) console.log(`[analyze] Content hint: ${contentHint}`);
+  if (!skipVlm) console.log(`[analyze] VLM concurrency: ${concurrency}`);
+  if (noCache) console.log("[analyze] Cache: disabled");
+  if (clearCache) console.log("[analyze] Cache: clearing");
 
   // Create live VLM function if not skipped and API key is available
   let vlmFn;
@@ -183,7 +224,35 @@ async function main(): Promise<void> {
     sttProvider,
     contentHint,
     skipMediaLink,
+    vlmConcurrency: concurrency,
+    vlmProgressReporter: createVlmProgressReporter(),
+    noCache,
+    clearCache,
   });
+
+  if (result.vlmSummary) {
+    console.log(
+      `[analyze] Done: ${result.vlmSummary.totalAssets} assets, ` +
+      `${result.vlmSummary.cachedAssets} cached, ` +
+      `${result.vlmSummary.analyzedAssets} analyzed ` +
+      `(${formatDuration(result.vlmSummary.durationMs)})`,
+    );
+
+    if (result.vlmSummary.failedAssets.length > 0) {
+      console.log(`[analyze] Failure summary: ${result.vlmSummary.failedAssets.length} assets`);
+      for (const failure of result.vlmSummary.failedAssets) {
+        console.error(`[FAIL] ${failure.assetId}: ${failure.error}`);
+      }
+    }
+
+    const allLiveAssetsFailed =
+      result.vlmSummary.analyzedAssets > 0 &&
+      result.vlmSummary.failedAssets.length === result.vlmSummary.analyzedAssets &&
+      result.vlmSummary.cachedAssets === 0;
+    if (allLiveAssetsFailed) {
+      process.exitCode = 1;
+    }
+  }
 
   console.log("\n[analyze] Pipeline complete");
   console.log(`  Output: ${result.outputDir}`);
@@ -203,6 +272,22 @@ async function main(): Promise<void> {
     console.log(`  Media links: ${result.mediaSourceMap?.items.length ?? 0} mapped`);
     console.log(`  Source map: ${result.mediaSourceMapPath}`);
   }
+}
+
+function createVlmProgressReporter(): VlmProgressReporter {
+  return {
+    onAssetProgress(event) {
+      const label = event.status === "cached"
+        ? "Cached"
+        : event.status === "skipped"
+        ? "Skipping"
+        : "Analyzing";
+      console.log(`[${event.current}/${event.total}] ${label} ${event.filename}...`);
+    },
+    onAssetFailure(failure) {
+      console.error(`[FAIL] ${failure.assetId}: ${failure.error}`);
+    },
+  };
 }
 
 const isMain = process.argv[1]
