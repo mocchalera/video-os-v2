@@ -2,7 +2,11 @@ import { describe, it, expect, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { validateProject, type ValidationResult } from "../scripts/validate-schemas.js";
+import {
+  parseValidationCliArgs,
+  validateProject,
+  type ValidationResult,
+} from "../scripts/validate-schemas.js";
 
 const SAMPLE_PROJECT = "projects/sample";
 
@@ -761,6 +765,247 @@ describe("validate-schemas", () => {
         (v) => v.rule === "uncertainty_blocker_warning",
       );
       expect(warnings).toHaveLength(0);
+    });
+  });
+
+  // ── 11. Manual-render / lenient profiles ─────────────────────────
+
+  describe("profile handling", () => {
+    it("parses --profile from CLI args", () => {
+      expect(
+        parseValidationCliArgs(["--profile", "manual-render", "projects/sample"]),
+      ).toEqual({
+        profile: "manual-render",
+        projectPaths: ["projects/sample"],
+      });
+
+      expect(
+        parseValidationCliArgs(["--profile=lenient", "projects/sample"]),
+      ).toEqual({
+        profile: "lenient",
+        projectPaths: ["projects/sample"],
+      });
+    });
+
+    it("standard profile rejects manual-render-only timeline fields", () => {
+      const timeline = {
+        version: "1",
+        project_id: "sample-mountain-reset",
+        sequence: {
+          name: "main",
+          fps_num: 24,
+          fps_den: 1,
+          width: 1920,
+          height: 1080,
+          start_frame: 0,
+        },
+        tracks: {
+          video: [],
+          audio: [],
+        },
+        provenance: {
+          brief_path: "01_intent/creative_brief.yaml",
+          blueprint_path: "04_plan/edit_blueprint.yaml",
+          selects_path: "04_plan/selects_candidates.yaml",
+        },
+        manual_render: {
+          spec_path: "manual_render/reedit_spec_full_song.json",
+        },
+      };
+
+      const tmp = createTempProject("profile-standard-manual", {
+        "05_timeline/timeline.json": timeline,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.valid).toBe(false);
+      const tlViolations = result.violations.filter(
+        (v) => v.artifact === "05_timeline/timeline.json" && v.rule === "schema",
+      );
+      expect(tlViolations.length).toBeGreaterThanOrEqual(1);
+      expect(
+        tlViolations.some((v) =>
+          (v.details as { params?: { additionalProperty?: string } } | undefined)
+            ?.params?.additionalProperty === "manual_render"),
+      ).toBe(true);
+    });
+
+    it("manual-render profile accepts manual-render timeline fields", () => {
+      const timeline = {
+        version: "1",
+        project_id: "sample-mountain-reset",
+        sequence: {
+          name: "main",
+          fps_num: 24,
+          fps_den: 1,
+          width: 1920,
+          height: 1080,
+          start_frame: 0,
+        },
+        tracks: {
+          video: [],
+          audio: [
+            {
+              track_id: "A1",
+              kind: "audio",
+              clips: [
+                {
+                  clip_id: "ACL_001",
+                  segment_id: "SEG_0025",
+                  asset_id: "AST_005",
+                  src_in_us: 0,
+                  src_out_us: 3000000,
+                  timeline_in_frame: 0,
+                  timeline_duration_frames: 72,
+                  role: "nat_sound",
+                  motivation: "manual render audio bed",
+                  audio_policy: {
+                    nat_gain: 0.9,
+                  },
+                },
+                {
+                  clip_id: "ACL_002",
+                  segment_id: "manual:bgm",
+                  asset_id: "AST_BGM_001",
+                  src_in_us: 0,
+                  src_out_us: 3000000,
+                  timeline_in_frame: 0,
+                  timeline_duration_frames: 72,
+                  role: "bgm",
+                  motivation: "manual render music bed",
+                  audio_policy: {
+                    bgm_gain: -4,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        audio_mix: {
+          nat_sound_gain: 0.9,
+          bgm_gain: -4,
+        },
+        provenance: {
+          brief_path: "01_intent/creative_brief.yaml",
+          blueprint_path: "04_plan/edit_blueprint.yaml",
+          selects_path: "04_plan/selects_candidates.yaml",
+          manual_render_spec_path: "manual_render/reedit_spec_full_song.json",
+          render_profile: "manual-render",
+        },
+        manual_render: {
+          spec_path: "manual_render/reedit_spec_full_song.json",
+          render_script_path: "manual_render/render_from_spec.py",
+        },
+      };
+
+      const tmp = createTempProject("profile-manual-render", {
+        "05_timeline/timeline.json": timeline,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp, { profile: "manual-render" });
+
+      expect(result.valid).toBe(true);
+      expect(result.error_count).toBe(0);
+      const tlViolations = result.violations.filter(
+        (v) => v.artifact === "05_timeline/timeline.json",
+      );
+      expect(tlViolations).toHaveLength(0);
+    });
+
+    it("lenient profile downgrades validation failures to warnings", () => {
+      const tmp = createTempProject("profile-lenient", {
+        "05_timeline/timeline.json": {
+          version: "1",
+          project_id: "sample-mountain-reset",
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp, { profile: "lenient" });
+
+      expect(result.valid).toBe(true);
+      expect(result.error_count).toBe(0);
+      expect(result.warning_count).toBeGreaterThan(0);
+      expect(result.violations.every((v) => v.severity === "warning")).toBe(true);
+      expect(result.gate2_timeline_valid).toBe(false);
+    });
+  });
+
+  // ── 12. Generated artifact compatibility ─────────────────────────
+
+  describe("generated artifact compatibility", () => {
+    it("accepts generated source_map entries", () => {
+      const tmp = createTempProject("generated-source-map", {
+        "02_media/source_map.json": {
+          version: "1",
+          project_id: "sample-mountain-reset",
+          media_dir: "02_media",
+          generated_at: "2026-03-23T00:00:00Z",
+          items: [
+            {
+              asset_id: "GFX_CAPTION_BAND_01",
+              source_locator: "/tmp/generated/caption-band.png",
+              local_source_path: "/tmp/generated/caption-band.png",
+              link_path: "02_media/caption-band.png",
+              display_name: "caption_band",
+              kind: "asset",
+              link_type: "generated",
+            },
+          ],
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+      const sourceMapViolations = result.violations.filter(
+        (v) => v.artifact === "02_media/source_map.json",
+      );
+      expect(sourceMapViolations).toHaveLength(0);
+    });
+
+    it("accepts transcript diarization summaries", () => {
+      const tmp = createTempProject("transcript-diarization", {
+        "03_analysis/transcripts/TR_AST_999.json": {
+          project_id: "sample-mountain-reset",
+          artifact_version: "2.0.0",
+          transcript_ref: "TR_AST_999",
+          asset_id: "AST_999",
+          items: [
+            {
+              item_id: "TRI_AST_999_0001",
+              speaker: "S1",
+              start_us: 0,
+              end_us: 1200000,
+              text: "test",
+            },
+          ],
+          analysis_status: "ready",
+          word_timing_mode: "word",
+          diarization: {
+            provider: "pyannote",
+            speaker_count: 1,
+            turn_count: 2,
+          },
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+      const transcriptViolations = result.violations.filter(
+        (v) => v.artifact === "03_analysis/transcripts/TR_AST_999.json",
+      );
+      expect(transcriptViolations).toHaveLength(0);
+    });
+
+    it("validates rokutaro-growth-20260323 manual artifacts in standard profile", () => {
+      const result = validateProject("projects/rokutaro-growth-20260323");
+
+      expect(result.valid).toBe(true);
+      expect(result.error_count).toBe(0);
+      expect(result.violations).toHaveLength(0);
     });
   });
 });

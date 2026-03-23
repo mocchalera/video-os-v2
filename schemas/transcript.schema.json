@@ -25,6 +25,9 @@
     },
     "provenance": {
       "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+    },
+    "diarization": {
+      "$ref": "#/$defs/diarization-summary"
     }
   },
   "if": {
@@ -66,6 +69,16 @@
         "start_us": { "type": "integer", "minimum": 0 },
         "end_us": { "type": "integer", "minimum": 0 },
         "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "diarization-summary": {
+      "type": "object",
+      "required": ["provider", "speaker_count", "turn_count"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "speaker_count": { "type": "integer", "minimum": 0 },
+        "turn_count": { "type": "integer", "minimum": 0 }
       }
     }
   }

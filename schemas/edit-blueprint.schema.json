@@ -311,6 +311,16 @@
           "type": "string",
           "minLength": 1
         },
+        "bgm_asset_id": {
+          "type": "string"
+        },
+        "bgm_segment_id": {
+          "type": "string"
+        },
+        "bgm_duration_sec": {
+          "type": "number",
+          "minimum": 0
+        },
         "avoid_anthemic_lift": {
           "type": "boolean"
         },
@@ -391,7 +401,17 @@
         "allow_hard_cuts": {
           "type": "boolean"
         },
+        "allow_crossfade_for_time_passage": {
+          "type": "boolean"
+        },
         "avoid_speed_ramps": {
+          "type": "boolean"
+        },
+        "dissolve_overlap_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep_milestone_cuts_clean": {
           "type": "boolean"
         }
       },
@@ -431,6 +451,12 @@
         "final_hold_min_frames": {
           "type": "integer",
           "minimum": 0
+        },
+        "final_visual_strategy": {
+          "type": "string"
+        },
+        "final_audio_strategy": {
+          "type": "string"
         }
       },
       "additionalProperties": false

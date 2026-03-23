@@ -49,6 +49,7 @@
           "type": "string",
           "enum": [
             "blocker",
+            "soft",
             "hypothesis",
             "resolved",
             "waived"

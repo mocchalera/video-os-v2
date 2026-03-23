@@ -147,7 +147,7 @@ export interface EditBlueprint {
 }
 
 export type Role = "hero" | "support" | "transition" | "texture" | "dialogue";
-export type ClipRole = Role | "music" | "title";
+export type ClipRole = Role | "music" | "nat_sound" | "bgm" | "title";
 
 export interface TrimHint {
   source_center_us?: number;
@@ -470,9 +470,16 @@ export interface MarkerOutput {
 
 export interface AudioPolicy {
   duck_music_db?: number;
+  nat_gain?: number;
+  nat_sound_gain?: number;
+  bgm_gain?: number;
   preserve_nat_sound?: boolean;
   fade_in_frames?: number;
   fade_out_frames?: number;
+  nat_sound_fade_in_frames?: number;
+  nat_sound_fade_out_frames?: number;
+  bgm_fade_in_frames?: number;
+  bgm_fade_out_frames?: number;
 }
 
 // ── Compiler options ────────────────────────────────────────────────

@@ -23,11 +23,19 @@
       "type": "string"
     },
     "selection_notes": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        }
+      ]
     },
     "candidates": {
       "type": "array",
@@ -37,26 +45,34 @@
       }
     },
     "editorial_summary": {
-      "type": "object",
-      "properties": {
-        "dominant_visual_mode": {
-          "type": "string",
-          "enum": ["talking_head", "screen_demo", "event_broll", "mixed", "unknown"]
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "dominant_visual_mode": {
+              "type": "string",
+              "enum": ["talking_head", "screen_demo", "event_broll", "mixed", "unknown"]
+            },
+            "speaker_topology": {
+              "type": "string",
+              "enum": ["solo_primary", "interviewer_guest", "multi_speaker", "unknown"]
+            },
+            "motion_profile": {
+              "type": "string",
+              "enum": ["low", "medium", "high", "unknown"]
+            },
+            "transcript_density": {
+              "type": "string",
+              "enum": ["sparse", "medium", "dense", "unknown"]
+            }
+          },
+          "additionalProperties": false
         },
-        "speaker_topology": {
+        {
           "type": "string",
-          "enum": ["solo_primary", "interviewer_guest", "multi_speaker", "unknown"]
-        },
-        "motion_profile": {
-          "type": "string",
-          "enum": ["low", "medium", "high", "unknown"]
-        },
-        "transcript_density": {
-          "type": "string",
-          "enum": ["sparse", "medium", "dense", "unknown"]
+          "minLength": 1
         }
-      },
-      "additionalProperties": false
+      ]
     }
   },
   "$defs": {
@@ -103,7 +119,7 @@
         },
         "why_it_matches": {
           "type": "string",
-          "minLength": 1
+          "minLength": 0
         },
         "risks": {
           "type": "array",
@@ -180,6 +196,11 @@
             "authenticity_score": { "type": "number", "minimum": 0, "maximum": 1 },
             "surprise_signal": { "type": "number", "minimum": 0, "maximum": 1 },
             "hope_signal": { "type": "number", "minimum": 0, "maximum": 1 },
+            "peak_strength_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "peak_type": {
+              "type": "string",
+              "enum": ["action_peak", "emotional_peak", "visual_peak"]
+            },
             "face_detected": { "type": "boolean" },
             "visual_tags": {
               "type": "array",

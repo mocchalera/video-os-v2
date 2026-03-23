@@ -60,7 +60,7 @@
         },
         "link_type": {
           "type": "string",
-          "const": "symlink"
+          "enum": ["symlink", "generated", "direct"]
         }
       },
       "additionalProperties": false

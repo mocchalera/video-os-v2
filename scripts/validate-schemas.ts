@@ -19,18 +19,38 @@ export interface Violation {
   rule: string;
   message: string;
   details?: unknown;
+  severity?: "error" | "warning";
+}
+
+export type ValidationProfile = "standard" | "manual-render" | "lenient";
+
+export interface ValidateProjectOptions {
+  profile?: ValidationProfile;
 }
 
 export interface ValidationResult {
   project: string;
+  profile: ValidationProfile;
   valid: boolean;
   artifacts_checked: number;
+  error_count: number;
+  warning_count: number;
   violations: Violation[];
   compile_gate: "open" | "blocked";
   /** Gate 2: canonical timeline.json passes schema + runner checks */
   gate2_timeline_valid: boolean;
   /** Gate 3: no fatal issues in review_report */
   gate3_no_fatal_reviews: boolean;
+}
+
+export interface ValidationBatchResult {
+  profile: ValidationProfile;
+  valid: boolean;
+  projects_checked: number;
+  artifacts_checked: number;
+  error_count: number;
+  warning_count: number;
+  results: ValidationResult[];
 }
 
 // ── Artifact Registry ──────────────────────────────────────────────
@@ -177,9 +197,129 @@ function findRepoRoot(from: string): string {
   throw new Error("Could not find repo root (directory containing schemas/)");
 }
 
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function buildSchemaVariant(
+  schemaFile: string,
+  schema: object,
+  profile: ValidationProfile,
+): object {
+  if (schemaFile !== "timeline-ir.schema.json" || profile !== "manual-render") {
+    return schema;
+  }
+
+  const variant = cloneJson(schema) as Record<string, unknown>;
+  const properties = variant.properties as Record<string, unknown> | undefined;
+  if (!properties) return variant;
+
+  properties.manual_render = { "$ref": "#/$defs/manualRender" };
+
+  const provenance = properties.provenance as Record<string, unknown> | undefined;
+  const provenanceProperties = provenance?.properties as Record<string, unknown> | undefined;
+  if (provenanceProperties) {
+    provenanceProperties.manual_render_spec_path = { type: "string" };
+    provenanceProperties.render_script_path = { type: "string" };
+    provenanceProperties.render_profile = {
+      type: "string",
+      enum: ["manual-render"],
+    };
+  }
+
+  return variant;
+}
+
+function violationSeverity(
+  rule: string,
+  profile: ValidationProfile,
+): "error" | "warning" {
+  if (profile === "lenient") return "warning";
+  if (rule === "uncertainty_blocker_warning") return "warning";
+  return "error";
+}
+
+function finalizeViolations(
+  violations: Violation[],
+  profile: ValidationProfile,
+): { violations: Violation[]; errorCount: number; warningCount: number } {
+  let errorCount = 0;
+  let warningCount = 0;
+
+  const finalized = violations.map((violation) => {
+    const severity = violationSeverity(violation.rule, profile);
+    if (severity === "warning") warningCount += 1;
+    else errorCount += 1;
+    return { ...violation, severity };
+  });
+
+  return { violations: finalized, errorCount, warningCount };
+}
+
+export function parseValidationCliArgs(argv: string[]): {
+  profile: ValidationProfile;
+  projectPaths: string[];
+} {
+  const projectPaths: string[] = [];
+  let profile: ValidationProfile = "standard";
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--profile") {
+      const next = argv[i + 1];
+      if (!next) {
+        throw new Error("Missing value for --profile");
+      }
+      if (next !== "standard" && next !== "manual-render" && next !== "lenient") {
+        throw new Error(`Unknown profile: ${next}`);
+      }
+      profile = next;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--profile=")) {
+      const value = arg.slice("--profile=".length);
+      if (value !== "standard" && value !== "manual-render" && value !== "lenient") {
+        throw new Error(`Unknown profile: ${value}`);
+      }
+      profile = value;
+      continue;
+    }
+
+    if (arg === "--help" || arg === "-h") {
+      throw new Error("help");
+    }
+
+    projectPaths.push(arg);
+  }
+
+  return { profile, projectPaths };
+}
+
+function discoverProjectPaths(repoRoot: string): string[] {
+  const projectsDir = path.join(repoRoot, "projects");
+  if (!fs.existsSync(projectsDir)) return [];
+
+  return fs.readdirSync(projectsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
+    .map((entry) => path.join(projectsDir, entry.name))
+    .filter((projectDir) => {
+      const hasIntentArtifacts = fs.existsSync(path.join(projectDir, "01_intent", "creative_brief.yaml"));
+      const hasPlanArtifacts = fs.existsSync(path.join(projectDir, "04_plan", "selects_candidates.yaml")) ||
+        fs.existsSync(path.join(projectDir, "04_plan", "edit_blueprint.yaml"));
+      return hasIntentArtifacts || hasPlanArtifacts;
+    })
+    .sort();
+}
+
 // ── Core validator ──────────────────────────────────────────────────
 
-export function validateProject(projectPath: string): ValidationResult {
+export function validateProject(
+  projectPath: string,
+  options: ValidateProjectOptions = {},
+): ValidationResult {
+  const profile = options.profile ?? "standard";
   const absProject = path.resolve(projectPath);
   const repoRoot = findRepoRoot(absProject);
   const schemasDir = path.join(repoRoot, "schemas");
@@ -213,7 +353,9 @@ export function validateProject(projectPath: string): ValidationResult {
     const schemaPath = path.join(schemasDir, schemaFile);
     const schemaParsed = safeParse(schemaPath, "json", violations, schemaFile);
     if (!schemaParsed.ok) return null;
-    const validator = ajv.compile(schemaParsed.data as object);
+    const validator = ajv.compile(
+      buildSchemaVariant(schemaFile, schemaParsed.data as object, profile),
+    );
     validatorCache.set(schemaFile, validator);
     return validator;
   }
@@ -403,15 +545,37 @@ export function validateProject(projectPath: string): ValidationResult {
     (v) => v.rule === "compile_gate",
   );
   const compileGate: "open" | "blocked" = hasBlockerViolation ? "blocked" : "open";
+  const finalized = finalizeViolations(violations, profile);
 
   return {
     project: projectPath,
-    valid: violations.length === 0,
+    profile,
+    valid: finalized.errorCount === 0,
     artifacts_checked: artifactsChecked,
-    violations,
+    error_count: finalized.errorCount,
+    warning_count: finalized.warningCount,
+    violations: finalized.violations,
     compile_gate: compileGate,
     gate2_timeline_valid: gate2TimelineValid,
     gate3_no_fatal_reviews: gate3NoFatalReviews,
+  };
+}
+
+export function validateProjects(
+  projectPaths: string[],
+  options: ValidateProjectOptions = {},
+): ValidationBatchResult {
+  const profile = options.profile ?? "standard";
+  const results = projectPaths.map((projectPath) => validateProject(projectPath, { profile }));
+
+  return {
+    profile,
+    valid: results.every((result) => result.valid),
+    projects_checked: results.length,
+    artifacts_checked: results.reduce((sum, result) => sum + result.artifacts_checked, 0),
+    error_count: results.reduce((sum, result) => sum + result.error_count, 0),
+    warning_count: results.reduce((sum, result) => sum + result.warning_count, 0),
+    results,
   };
 }
 
@@ -709,17 +873,41 @@ function runTranscriptPathInvariants(
 // ── CLI entry point ─────────────────────────────────────────────────
 
 function main(): void {
-  const projectPath = process.argv[2];
-  if (!projectPath) {
-    console.error(
-      "Usage: npx tsx scripts/validate-schemas.ts <project-path>",
-    );
+  let parsed: ReturnType<typeof parseValidationCliArgs>;
+  try {
+    parsed = parseValidationCliArgs(process.argv.slice(2));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const usage =
+      "Usage: npx tsx scripts/validate-schemas.ts [--profile standard|manual-render|lenient] [project-path ...]";
+    if (message === "help") {
+      console.error(usage);
+      process.exit(0);
+    }
+    console.error(message);
+    console.error(usage);
     process.exit(1);
   }
 
-  const result = validateProject(projectPath);
-  console.log(JSON.stringify(result, null, 2));
-  process.exit(result.valid ? 0 : 1);
+  const repoRoot = findRepoRoot(process.cwd());
+  const projectPaths = parsed.projectPaths.length > 0
+    ? parsed.projectPaths
+    : discoverProjectPaths(repoRoot);
+
+  if (projectPaths.length === 0) {
+    console.error("No projects found to validate.");
+    process.exit(1);
+  }
+
+  if (projectPaths.length === 1 && parsed.projectPaths.length === 1) {
+    const result = validateProject(projectPaths[0], { profile: parsed.profile });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.valid ? 0 : 1);
+  }
+
+  const batch = validateProjects(projectPaths, { profile: parsed.profile });
+  console.log(JSON.stringify(batch, null, 2));
+  process.exit(batch.valid ? 0 : 1);
 }
 
 // Only run CLI when executed directly, not when imported

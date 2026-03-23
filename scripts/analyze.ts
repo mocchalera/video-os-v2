@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { runPipeline } from "../runtime/pipeline/ingest.js";
 import { createGeminiVlmFn } from "../runtime/connectors/gemini-vlm.js";
+import { runPreflight } from "./preflight.js";
 
 // ── Arg Parsing ────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ function parseArgs(argv: string[]): {
   skipDiarize: boolean;
   skipPeak: boolean;
   skipMediaLink: boolean;
+  skipPreflight: boolean;
   language: string | undefined;
   sttProvider: string | undefined;
   contentHint: string | undefined;
@@ -39,6 +41,7 @@ function parseArgs(argv: string[]): {
   let skipDiarize = false;
   let skipPeak = false;
   let skipMediaLink = false;
+  let skipPreflight = false;
   let language: string | undefined;
   let sttProvider: string | undefined;
   let contentHint: string | undefined;
@@ -57,6 +60,8 @@ function parseArgs(argv: string[]): {
       skipPeak = true;
     } else if (arg === "--skip-media-link") {
       skipMediaLink = true;
+    } else if (arg === "--skip-preflight") {
+      skipPreflight = true;
     } else if (arg === "--language" || arg === "-l") {
       language = args[++i] ?? undefined;
     } else if (arg === "--stt-provider") {
@@ -73,6 +78,7 @@ Options:
   --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
   --skip-peak        Skip VLM peak detection stage
   --skip-media-link  Skip 02_media symlink generation
+  --skip-preflight   Skip pre-flight environment checks
   --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
   --stt-provider     STT provider: "groq" or "openai" (auto-detected if omitted)
   --content-hint     Content context for VLM (e.g. "子供の自転車練習")
@@ -102,6 +108,7 @@ Options:
     skipDiarize,
     skipPeak,
     skipMediaLink,
+    skipPreflight,
     language,
     sttProvider,
     contentHint,
@@ -119,10 +126,28 @@ async function main(): Promise<void> {
     skipDiarize,
     skipPeak,
     skipMediaLink,
+    skipPreflight,
     language,
     sttProvider,
     contentHint,
   } = parseArgs(process.argv);
+
+  // ── Pre-flight checks ──────────────────────────────────────────
+  if (!skipPreflight) {
+    // Use the directory of the first source file as the source folder
+    const sourceFolder = path.dirname(path.resolve(sourceFiles[0]));
+    console.log("[analyze] Running pre-flight checks...");
+    const preflight = runPreflight(sourceFolder);
+    for (const check of preflight.checks) {
+      const icon = check.status === "pass" ? "✓" : check.status === "warn" ? "⚠" : "✗";
+      console.log(`  ${icon} ${check.name}: ${check.detail}`);
+    }
+    if (!preflight.ok) {
+      console.error("[analyze] Pre-flight failed. Fix the issues above or use --skip-preflight.");
+      process.exit(1);
+    }
+    console.log("[analyze] Pre-flight passed.\n");
+  }
 
   console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
   console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);

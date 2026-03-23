@@ -125,6 +125,9 @@
         "$ref": "#/$defs/transition"
       }
     },
+    "audio_mix": {
+      "$ref": "#/$defs/audioMix"
+    },
     "provenance": {
       "type": "object",
       "required": [
@@ -255,6 +258,9 @@
             "texture",
             "dialogue",
             "music",
+            "nat_sound",
+            "ambient",
+            "bgm",
             "title"
           ]
         },
@@ -288,6 +294,15 @@
             "duck_music_db": {
               "type": "number"
             },
+            "nat_gain": {
+              "type": "number"
+            },
+            "nat_sound_gain": {
+              "type": "number"
+            },
+            "bgm_gain": {
+              "type": "number"
+            },
             "preserve_nat_sound": {
               "type": "boolean"
             },
@@ -296,6 +311,22 @@
               "minimum": 0
             },
             "fade_out_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nat_sound_fade_in_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "nat_sound_fade_out_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bgm_fade_in_frames": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bgm_fade_out_frames": {
               "type": "integer",
               "minimum": 0
             }
@@ -311,6 +342,83 @@
         },
         "metadata": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "audioMix": {
+      "type": "object",
+      "properties": {
+        "nat_sound_gain": {
+          "type": "number"
+        },
+        "bgm_gain": {
+          "type": "number"
+        },
+        "duck_music_db": {
+          "type": "number"
+        },
+        "fade_in_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fade_out_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nat_sound_fade_in_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "nat_sound_fade_out_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bgm_fade_in_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bgm_fade_out_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bgm_asset_id": {
+          "type": "string"
+        },
+        "bgm_clip_id": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "manual_mix",
+            "nat_under_bgm",
+            "dialogue_ducked_bgm"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "manualRender": {
+      "type": "object",
+      "properties": {
+        "spec_path": {
+          "type": "string"
+        },
+        "render_script_path": {
+          "type": "string"
+        },
+        "concat_list_path": {
+          "type": "string"
+        },
+        "title_manifest_path": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
         }
       },
       "additionalProperties": false
@@ -373,6 +481,7 @@
             "note",
             "warning",
             "beat",
+            "caption",
             "transition",
             "review"
           ]
