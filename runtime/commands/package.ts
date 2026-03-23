@@ -73,6 +73,12 @@ export interface PackageCommandOptions {
     dialogueWindowMs?: number;
     observedNonSilentMs?: number;
   };
+  /** Internal override used by /render phase wrapper */
+  commandName?: string;
+  /** Internal override used by /render phase wrapper */
+  actorName?: string;
+  /** Internal override used by /render phase wrapper */
+  allowedStates?: ProjectState[];
 }
 
 // ── Command ─────────────────────────────────────────────────────
@@ -81,8 +87,10 @@ export async function packageCommand(
   projectDir: string,
   options?: PackageCommandOptions,
 ): Promise<PackageCommandResult> {
-  const allowedStates: ProjectState[] = ["approved"];
-  const ctx = initCommand(projectDir, "package", allowedStates);
+  const allowedStates: ProjectState[] = options?.allowedStates ?? ["approved"];
+  const commandName = options?.commandName ?? "package";
+  const actorName = options?.actorName ?? "package_command";
+  const ctx = initCommand(projectDir, commandName, allowedStates);
   if (isCommandError(ctx)) {
     return { success: false, error: ctx };
   }
@@ -481,8 +489,8 @@ export async function packageCommand(
     absDir,
     doc,
     "packaged",
-    "package",
-    "package_command",
+    commandName,
+    actorName,
     `packaged via ${sourceOfTruth}`,
   );
 

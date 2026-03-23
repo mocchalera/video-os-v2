@@ -13,6 +13,7 @@ import type { ReviewPatch } from "../runtime/compiler/patch.js";
 import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
 import { validateProject } from "./validate-schemas.js";
+import { ProgressTracker } from "../runtime/progress.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -53,9 +54,12 @@ function parseArgs(): {
 // ── Compile mode ────────────────────────────────────────────────────
 
 function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string): void {
+  const pt = new ProgressTracker(projectPath, "compile", 3);
+
   // Pre-compile validation: check Gate 1
   const preCheck = validateProject(projectPath);
   if (preCheck.compile_gate === "blocked") {
+    pt.block("pre_validation", "Compile gate BLOCKED. Unresolved blockers exist.");
     console.error("Compile gate BLOCKED. Unresolved blockers exist.");
     for (const v of preCheck.violations) {
       if (v.rule === "compile_gate") {
@@ -64,6 +68,7 @@ function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string
     }
     process.exit(1);
   }
+  pt.advance();
 
   // Derive createdAt deterministically from the creative brief's created_at
   const briefPath = path.join(path.resolve(projectPath), "01_intent/creative_brief.yaml");
@@ -78,6 +83,7 @@ function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string
     fpsNum,
     sourceMapPath,
   });
+  pt.advance("timeline.json");
 
   console.log(`Timeline compiled: ${result.outputPath}`);
   console.log(`  Tracks: ${result.timeline.tracks.video.length} video, ${result.timeline.tracks.audio.length} audio`);
@@ -87,6 +93,7 @@ function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string
   // Post-compile validation: check Gate 2
   const postCheck = validateProject(projectPath);
   if (!postCheck.gate2_timeline_valid) {
+    pt.fail("post_validation", "Generated timeline.json has validation issues");
     console.error("WARNING: Generated timeline.json has validation issues:");
     for (const v of postCheck.violations) {
       if (v.artifact === "05_timeline/timeline.json") {
@@ -96,6 +103,7 @@ function runCompile(projectPath: string, fpsNum?: number, sourceMapPath?: string
     process.exit(1);
   }
 
+  pt.complete(["timeline.json", "timeline.otio", "preview-manifest.json"]);
   console.log("Schema validation: PASSED");
 }
 

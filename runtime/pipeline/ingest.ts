@@ -94,6 +94,7 @@ import {
   type VlmProgressReporter,
   type VlmShard,
 } from "./vlm-analysis.js";
+import { type ProgressTracker } from "../progress.js";
 import {
   computeCacheHash,
   loadCacheManifest,
@@ -142,6 +143,8 @@ export interface PipelineOptions {
   noCache?: boolean;
   /** Clear existing cache before analysis */
   clearCache?: boolean;
+  /** Optional progress tracker for structured progress reporting */
+  progressTracker?: ProgressTracker;
 }
 
 export interface PipelineResult {
@@ -1123,12 +1126,22 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   // Project ID from directory name
   const projectId = path.basename(absProjectDir);
 
+  // Progress tracking — count stages that will run
+  const pt = opts.progressTracker;
+  // Base stages: ingest(1) + reduce(2) + segment(3) + derivatives(4) + display_names(5) + finalize(6)
+  let totalStages = 6;
+  if (!opts.skipStt) totalStages += 1;  // STT
+  if (!opts.skipVlm) totalStages += 1;  // VLM
+  if (!opts.skipVlm && !opts.skipPeak) totalStages += 1;  // Peak
+  pt?.setTotal(totalStages);
+
   // Stage 1: Ingest (always runs for all files to get asset IDs + durations)
   const allIngestShards = await ingestMap(sourceFiles, {
     projectRoot: absProjectDir,
     policyHash,
     ffmpegVersion,
   });
+  pt?.advance();
 
   // ── Cache Check ──
   const cacheHitIds = new Set<string>();
@@ -1220,6 +1233,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       manifestPath,
       buildManifestEntries(allIngestShards, cacheHashMap),
     );
+    pt?.complete(["assets.json", "segments.json"]);
     return {
       assetsJson,
       segmentsJson,
@@ -1235,6 +1249,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     newIngestShards, projectId, assetsPath,
   );
   let assetsJson = initialAssetsJson;
+  pt?.advance("assets.json");
 
   // Stage 3+4: Segment (uses sourceFileMap for correct asset↔file pairing)
   const segMapResult = await segmentMap(
@@ -1247,6 +1262,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   const segResult = segmentReduce(segmentShards, assetsJson, segmentsPath, assetsPath);
   assetsJson = segResult.assets;
   let segmentsJson = segResult.segments;
+  pt?.advance("segments.json");
 
   // Stage 5+6: Derivatives (uses sourceFileMap for correct asset↔file pairing)
   const derivativeResults = await derivativesMap(
@@ -1264,6 +1280,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   );
   assetsJson = derivResult.assets;
   segmentsJson = derivResult.segments;
+  pt?.advance();
 
   // Stage 7+8: STT (optional — skipped when no audio or when explicitly disabled)
   let sttResults: Map<string, AssetSttResult> | undefined;
@@ -1326,6 +1343,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       assetsJson = sttReduceResult.assets;
       segmentsJson = sttReduceResult.segments;
     }
+    pt?.advance();
   }
 
   // Stage 9+10: VLM (optional — skipped when explicitly disabled or no vlmFn)
@@ -1378,6 +1396,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         segmentsJson = vlmReduceResult.segments;
       }
     }
+    pt?.advance();
   }
 
   // Stage 11+12: Peak Detection (optional — requires VLM, not skipped, and derivatives)
@@ -1402,6 +1421,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       const peaksFound = peakShards.filter((s) => s.peak_analysis).length;
       console.log(`[pipeline] Peak detection: ${peaksFound}/${peakShards.length} segments enriched`);
     }
+    pt?.advance();
   }
 
   // ── Merge cached data ──
@@ -1439,6 +1459,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     if (dn) asset.display_name = dn;
   }
   atomicWriteJson(assetsPath, assetsJson);
+  pt?.advance();
 
   // Gap report — only check new (non-cached) assets
   const newAssetItems = assetsJson.items.filter(
@@ -1472,6 +1493,8 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     manifestPath,
     buildManifestEntries(allIngestShards, cacheHashMap),
   );
+
+  pt?.complete(["assets.json", "segments.json", "gap_report.yaml"]);
 
   return {
     assetsJson,

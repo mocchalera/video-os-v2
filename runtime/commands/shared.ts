@@ -126,6 +126,18 @@ export function isCommandError(v: CommandContext | CommandError): v is CommandEr
   return "code" in v;
 }
 
+export function reconcileAndPersist(
+  projectDir: string,
+  actor: string,
+  trigger: string,
+): ReconcileResult {
+  const result = reconcile(projectDir, actor, trigger);
+  result.doc.last_agent = actor;
+  result.doc.last_command = trigger;
+  writeProjectState(projectDir, result.doc);
+  return result;
+}
+
 // ── Schema Validation ────────────────────────────────────────────
 
 const schemasDir = path.resolve(

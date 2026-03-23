@@ -27,6 +27,7 @@ import {
   type CommandError,
   type DraftFile,
 } from "./shared.js";
+import { ProgressTracker } from "../progress.js";
 import type {
   ProjectState,
   GateStatus,
@@ -241,6 +242,8 @@ export interface ReviewCommandOptions {
   createdAt?: string;
   /** Explicit human-in-the-loop approval callback for clean approval */
   operatorAccept?: ReviewOperatorAccept;
+  /** Phase-split mode: refuse to auto-compile and require timeline.json to exist already */
+  requireCompiledTimeline?: boolean;
 }
 
 // ── Patch Safety Guard ──────────────────────────────────────────
@@ -446,51 +449,59 @@ export async function runReview(
   agent: ReviewAgent,
   options?: ReviewCommandOptions,
 ): Promise<ReviewCommandResult> {
+  const pt = new ProgressTracker(projectDir, "review", 5);
+
   // 1. Init command (reconcile + state check)
   const ctx = initCommand(projectDir, "/review", ALLOWED_STATES);
   if (isCommandError(ctx)) {
+    pt.fail("init", ctx.message);
     return { success: false, error: ctx };
   }
+  pt.advance();
 
   const { projectDir: absDir, reconcileResult, doc } = ctx;
   const previousState = doc.current_state;
   const projectId = doc.project_id || "";
   const gates = reconcileResult.gates;
-  const autonomyMode = readCreativeBriefAutonomyMode(absDir);
-  if (!autonomyMode) {
+  const fail = (
+    stage: string,
+    error: CommandError,
+    extras: Omit<ReviewCommandResult, "success" | "error"> = {},
+  ): ReviewCommandResult => {
+    pt.fail(stage, error.message);
     return {
       success: false,
-      error: {
-        code: "GATE_CHECK_FAILED",
-        message: "creative_brief.yaml not found. Run /intent first.",
-      },
+      error,
+      previousState,
+      ...extras,
     };
+  };
+  const autonomyMode = readCreativeBriefAutonomyMode(absDir);
+  if (!autonomyMode) {
+    return fail("brief", {
+      code: "GATE_CHECK_FAILED",
+      message: "creative_brief.yaml not found. Run /intent first.",
+    });
   }
 
   // 2. Gate 1 check: compile_gate must be open
   if (gates.compile_gate === "blocked") {
-    return {
-      success: false,
-      error: {
-        code: "GATE_CHECK_FAILED",
-        message: "Compile gate is blocked — unresolved blockers with status 'blocker' exist. " +
-          "Resolve blockers before running /review.",
-        details: { compile_gate: gates.compile_gate },
-      },
-    };
+    return fail("gate", {
+      code: "GATE_CHECK_FAILED",
+      message: "Compile gate is blocked — unresolved blockers with status 'blocker' exist. " +
+        "Resolve blockers before running /review.",
+      details: { compile_gate: gates.compile_gate },
+    });
   }
 
   // 3. Planning gate check
   if (gates.planning_gate === "blocked") {
-    return {
-      success: false,
-      error: {
-        code: "GATE_CHECK_FAILED",
-        message: "Planning gate is blocked — uncertainty_register has status 'blocker' entries. " +
-          "Resolve planning blockers before running /review.",
-        details: { planning_gate: gates.planning_gate },
-      },
-    };
+    return fail("gate", {
+      code: "GATE_CHECK_FAILED",
+      message: "Planning gate is blocked — uncertainty_register has status 'blocker' entries. " +
+        "Resolve planning blockers before running /review.",
+      details: { planning_gate: gates.planning_gate },
+    });
   }
 
   const createdAt = options?.createdAt ?? new Date().toISOString();
@@ -501,30 +512,41 @@ export async function runReview(
   let timelineVersion = "unknown";
   let preflight: ReviewPreflightResult;
   try {
-    const preflightResult = runReviewPreflight(absDir, createdAt);
-    compileResult = preflightResult.compileResult;
-    timelineJson = preflightResult.timelineJson;
-    timelineVersion = preflightResult.timelineVersion;
-    preflight = preflightResult.preflight;
+    if (options?.requireCompiledTimeline) {
+      if (gates.timeline_gate === "blocked") {
+        return fail("preflight", {
+          code: "GATE_CHECK_FAILED",
+          message: "Timeline gate is blocked — run /compile before running /review.",
+          details: { timeline_gate: gates.timeline_gate },
+        });
+      }
+      const preflightResult = runReviewExistingTimelinePreflight(absDir, createdAt);
+      compileResult = preflightResult.compileResult;
+      timelineJson = preflightResult.timelineJson;
+      timelineVersion = preflightResult.timelineVersion;
+      preflight = preflightResult.preflight;
+    } else {
+      const preflightResult = runReviewPreflight(absDir, createdAt);
+      compileResult = preflightResult.compileResult;
+      timelineJson = preflightResult.timelineJson;
+      timelineVersion = preflightResult.timelineVersion;
+      preflight = preflightResult.preflight;
+    }
   } catch (err) {
-    return {
-      success: false,
-      error: {
-        code: "GATE_CHECK_FAILED",
-        message: `Deterministic preflight failed: ${err instanceof Error ? err.message : String(err)}`,
-      },
-    };
+    return fail("preflight", {
+      code: "GATE_CHECK_FAILED",
+      message: `Deterministic preflight failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
   }
+  pt.advance("timeline.json");
 
   // 5. Read optional inputs: human_notes.yaml, STYLE.md
   const humanNotesResult = readHumanNotes(absDir);
   if (humanNotesResult.error) {
-    return {
-      success: false,
-      error: humanNotesResult.error,
+    return fail("human_notes", humanNotesResult.error, {
       compileResult,
       preflight,
-    };
+    });
   }
   const humanNotes = humanNotesResult.humanNotes;
   const styleMd = readStyleMd(absDir);
@@ -539,6 +561,8 @@ export async function runReview(
     humanNotes,
     styleMd,
   });
+
+  pt.advance();
 
   // 7. Patch safety guard
   const patchSafety = validatePatchSafety(
@@ -582,6 +606,7 @@ export async function runReview(
       "review_patch_hash",
     ],
   });
+  pt.advance("review_report.yaml");
   if (!promoteResult.success) {
     const code = promoteResult.failure_kind === "validation"
       ? "VALIDATION_FAILED"
@@ -591,16 +616,14 @@ export async function runReview(
       : promoteResult.failure_kind === "promote"
         ? `Artifact promote failed: ${promoteResult.errors.join("; ")}`
         : `Artifact validation failed: ${promoteResult.errors.join("; ")}`;
-    return {
-      success: false,
-      error: {
-        code,
-        message,
-        details: promoteResult.errors,
-      },
+    return fail("promote", {
+      code,
+      message,
+      details: promoteResult.errors,
+    }, {
       compileResult,
       preflight,
-    };
+    });
   }
 
   // 10. Determine state transition based on fatal_issues / operator accept
@@ -615,13 +638,10 @@ export async function runReview(
   } else if (hasFatal && options?.creativeOverride) {
     // Fatal issues present but operator overrides → approved with creative_override
     if (!options.approvedBy || !options.overrideReason) {
-      return {
-        success: false,
-        error: {
-          code: "VALIDATION_FAILED",
-          message: "Creative override requires approved_by and override_reason",
-        },
-      };
+      return fail("approval", {
+        code: "VALIDATION_FAILED",
+        message: "Creative override requires approved_by and override_reason",
+      });
     }
 
     newState = "approved";
@@ -654,15 +674,13 @@ export async function runReview(
     if (operatorDecision.accepted) {
       const approvedBy = operatorDecision.approvedBy ?? options?.approvedBy;
       if (!approvedBy) {
-        return {
-          success: false,
-          error: {
-            code: "VALIDATION_FAILED",
-            message: "Operator acceptance requires approvedBy",
-          },
+        return fail("approval", {
+          code: "VALIDATION_FAILED",
+          message: "Operator acceptance requires approvedBy",
+        }, {
           compileResult,
           preflight,
-        };
+        });
       }
 
       newState = "approved";
@@ -698,6 +716,8 @@ export async function runReview(
     note,
   );
 
+  pt.complete(["review_report.yaml", "review_patch.json"]);
+
   return {
     success: true,
     report: agentResult.report,
@@ -713,6 +733,33 @@ export async function runReview(
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
+
+function runReviewExistingTimelinePreflight(
+  projectDir: string,
+  createdAt: string,
+): {
+  compileResult: CompileResult;
+  timelineJson: unknown;
+  timelineVersion: string;
+  preflight: ReviewPreflightResult;
+} {
+  const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+  if (!fs.existsSync(timelinePath)) {
+    throw new Error("timeline.json not found");
+  }
+
+  const timelineJson = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+  const timelineVersion = (timelineJson as { version?: string }).version ?? "unknown";
+  const compileResult = buildCompileResultFromExistingTimeline(projectDir, timelineJson);
+  const preflight = writeReviewPreviewAndQc(projectDir, createdAt, timelineJson, timelineVersion);
+
+  return {
+    compileResult,
+    timelineJson,
+    timelineVersion,
+    preflight,
+  };
+}
 
 function runReviewPreflight(
   projectDir: string,
@@ -740,6 +787,31 @@ function runReviewPreflight(
   const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
   const timelineJson = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
   const timelineVersion = (timelineJson as { version?: string }).version ?? "unknown";
+  const preflight = writeReviewPreviewAndQc(projectDir, createdAt, timelineJson, timelineVersion);
+  steps.push(...preflight.steps);
+  gapReport.push(...preflight.gapReport);
+
+  return {
+    compileResult,
+    timelineJson,
+    timelineVersion,
+    preflight: {
+      steps,
+      gapReport,
+      reviewMp4Path: preflight.reviewMp4Path,
+      qcSummaryPath: preflight.qcSummaryPath,
+    },
+  };
+}
+
+function writeReviewPreviewAndQc(
+  projectDir: string,
+  createdAt: string,
+  timelineJson: unknown,
+  timelineVersion: string,
+): ReviewPreflightResult {
+  const steps: ReviewPreflightStep[] = [];
+  const gapReport: string[] = [];
 
   const reviewMp4Path = path.join(projectDir, "05_timeline/review.mp4");
   fs.writeFileSync(
@@ -786,14 +858,30 @@ function runReviewPreflight(
   });
 
   return {
-    compileResult,
-    timelineJson,
-    timelineVersion,
-    preflight: {
-      steps,
-      gapReport,
-      reviewMp4Path,
-      qcSummaryPath,
+    steps,
+    gapReport,
+    reviewMp4Path,
+    qcSummaryPath,
+  };
+}
+
+function buildCompileResultFromExistingTimeline(
+  projectDir: string,
+  timelineJson: unknown,
+): CompileResult {
+  const timeline = timelineJson as CompileResult["timeline"];
+  return {
+    timeline,
+    outputPath: path.join(projectDir, "05_timeline/timeline.json"),
+    otioPath: path.join(projectDir, "05_timeline/timeline.otio"),
+    previewManifestPath: path.join(projectDir, "05_timeline/preview-manifest.json"),
+    resolution: {
+      resolved_overlaps: 0,
+      resolved_duplicates: 0,
+      resolved_invalid_ranges: 0,
+      duration_fit: true,
+      total_frames: 0,
+      target_frames: 0,
     },
   };
 }

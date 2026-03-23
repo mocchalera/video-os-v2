@@ -29,6 +29,7 @@ import {
   type CommandError,
   type DraftFile,
 } from "./shared.js";
+import { ProgressTracker } from "../progress.js";
 import type { ProjectState, GateStatus } from "../state/reconcile.js";
 import { buildMessageFrame, type FrameInput } from "../script/frame.js";
 import { buildMaterialReading, type ReadInput } from "../script/read.js";
@@ -261,6 +262,8 @@ const ALLOWED_STATES: ProjectState[] = [
   "blocked",
   "timeline_drafted",
   "critique_ready",
+  "approved",
+  "packaged",
 ];
 
 export function validateConfirmedPreferences(
@@ -323,11 +326,14 @@ export async function runBlueprint(
   options?: BlueprintCommandOptions,
   phases?: NarrativePhases,
 ): Promise<BlueprintCommandResult> {
+  const pt = new ProgressTracker(projectDir, "blueprint", 4);
   // 1. Init command (reconcile + state check)
   const ctx = initCommand(projectDir, "/blueprint", ALLOWED_STATES);
   if (isCommandError(ctx)) {
+    pt.fail("init", ctx.message);
     return { success: false, error: ctx };
   }
+  pt.advance();
 
   const { projectDir: absDir, reconcileResult, doc, preflightHashes } = ctx;
   const previousState = doc.current_state;
@@ -336,6 +342,7 @@ export async function runBlueprint(
   // 2. Read creative_brief.yaml to determine autonomy mode
   const briefPath = path.join(absDir, "01_intent/creative_brief.yaml");
   if (!fs.existsSync(briefPath)) {
+    pt.block("brief", "creative_brief.yaml not found. Run /intent first.");
     return {
       success: false,
       error: {
@@ -354,6 +361,7 @@ export async function runBlueprint(
 
   const blockersPath = path.join(absDir, "01_intent/unresolved_blockers.yaml");
   if (!fs.existsSync(blockersPath)) {
+    pt.block("blockers", "unresolved_blockers.yaml not found. Run /intent first.");
     return {
       success: false,
       error: {
@@ -368,6 +376,7 @@ export async function runBlueprint(
   // 3. Read selects_candidates.yaml
   const selectsPath = path.join(absDir, "04_plan/selects_candidates.yaml");
   if (!fs.existsSync(selectsPath)) {
+    pt.block("selects", "selects_candidates.yaml not found. Run /triage first.");
     return {
       success: false,
       error: {
@@ -465,6 +474,7 @@ export async function runBlueprint(
           absDir, doc, "blocked", "/blueprint", "blueprint-planner",
           "blueprint loop exhausted — quality gate failed after max iterations",
         );
+        pt.fail("loop", `Narrative loop failed after ${maxIter} iterations`);
 
         return {
           success: false,
@@ -481,6 +491,7 @@ export async function runBlueprint(
 
       // Human declined
       if (result.loopSummary?.finalStatus === "human_declined") {
+        pt.fail("approval", "Human declined narrative confirmation");
         return {
           success: false,
           error: {
@@ -492,6 +503,7 @@ export async function runBlueprint(
         };
       }
 
+      pt.fail("loop", result.errorMessage ?? "Narrative loop failed");
       return {
         success: false,
         error: {
@@ -526,6 +538,7 @@ export async function runBlueprint(
         "utf-8",
       );
     }
+    pt.advance("04_plan/script_evaluation.yaml");
   } else {
     // ── Legacy single-pass agent ──────────────────────────────
     agentResult = await agent.run({
@@ -545,6 +558,7 @@ export async function runBlueprint(
     recordAutonomousConfirmedPreferences(agentResult.blueprint, briefContent);
     console.log("[auto:full_autonomy] /blueprint skipped beat proposal readback.");
   } else if (!agentResult.confirmed) {
+    pt.fail("approval", "Human declined beat proposal readback");
     return {
       success: false,
       error: {
@@ -560,6 +574,7 @@ export async function runBlueprint(
     autonomyMode,
   );
   if (confirmedPreferenceErrors.length > 0) {
+    pt.fail("validate", `Blueprint preference contract failed: ${confirmedPreferenceErrors.join("; ")}`);
     return {
       success: false,
       error: {
@@ -608,6 +623,7 @@ export async function runBlueprint(
       : promoteResult.failure_kind === "promote"
         ? `Artifact promote failed: ${promoteResult.errors.join("; ")}`
         : `Artifact validation failed: ${promoteResult.errors.join("; ")}`;
+    pt.fail("promote", message);
     return {
       success: false,
       error: {
@@ -618,6 +634,7 @@ export async function runBlueprint(
       loopSummary,
     };
   }
+  pt.advance("04_plan/edit_blueprint.yaml");
 
   // 9. Planning blocker check: if uncertainty_register has status:blocker → blocked
   const hasPlanningBlocker = agentResult.uncertaintyRegister.uncertainties.some(
@@ -641,6 +658,10 @@ export async function runBlueprint(
     "blueprint-planner",
     note,
   );
+  pt.complete([
+    "04_plan/edit_blueprint.yaml",
+    "04_plan/uncertainty_register.yaml",
+  ]);
 
   return {
     success: true,

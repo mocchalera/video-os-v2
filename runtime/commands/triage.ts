@@ -27,6 +27,7 @@ import {
   type CommandError,
   type DraftFile,
 } from "./shared.js";
+import { ProgressTracker } from "../progress.js";
 import type { ProjectState, GateStatus } from "../state/reconcile.js";
 import { generateCandidateId } from "../compiler/candidate-ref.js";
 import { inferAutonomyMode } from "../autonomy.js";
@@ -139,8 +140,11 @@ const ALLOWED_STATES: ProjectState[] = [
   "media_analyzed",
   "selects_ready",
   "blueprint_ready",
+  "blocked",
   "timeline_drafted",
   "critique_ready",
+  "approved",
+  "packaged",
 ];
 
 export async function runTriage(
@@ -148,13 +152,16 @@ export async function runTriage(
   agent: TriageAgent,
   options?: { analysisOverride?: boolean },
 ): Promise<TriageCommandResult> {
+  const pt = new ProgressTracker(projectDir, "triage", 4);
   // 1. Init command (reconcile + state check)
   const ctx = initCommand(projectDir, "/triage", ALLOWED_STATES);
   if (isCommandError(ctx)) {
     // Special case: if state check failed because we're at intent_locked,
     // we might need to check analysis gate more carefully
+    pt.fail("init", ctx.message);
     return { success: false, error: ctx };
   }
+  pt.advance();
 
   const { projectDir: absDir, reconcileResult, doc, preflightHashes } = ctx;
   const previousState = doc.current_state;
@@ -166,6 +173,7 @@ export async function runTriage(
     const overrideHint = options?.analysisOverride
       ? "analysis_override must be active and match the current analysis artifact_version."
       : "Run analysis first or activate a matching analysis_override for partial QC.";
+    pt.block("gate", `Analysis gate is blocked. ${overrideHint}`);
     return {
       success: false,
       error: {
@@ -186,6 +194,7 @@ export async function runTriage(
   // 3. Verify creative_brief.yaml exists
   const briefPath = path.join(absDir, "01_intent/creative_brief.yaml");
   if (!fs.existsSync(briefPath)) {
+    pt.block("brief", "creative_brief.yaml not found. Run /intent first.");
     return {
       success: false,
       error: {
@@ -206,11 +215,13 @@ export async function runTriage(
     currentState: previousState,
     analysisGate: gates.analysis_gate,
   });
+  pt.advance();
 
   // 5. Gate 4: candidate board approval
   if (autonomyMode === "full") {
     console.log("[auto:full_autonomy] /triage auto-approved candidate board.");
   } else if (!agentResult.confirmed) {
+    pt.fail("approval", "Human declined candidate board approval");
     return {
       success: false,
       error: {
@@ -247,6 +258,7 @@ export async function runTriage(
       : promoteResult.failure_kind === "promote"
         ? `Artifact promote failed: ${promoteResult.errors.join("; ")}`
         : `Artifact validation failed: ${promoteResult.errors.join("; ")}`;
+    pt.fail("promote", message);
     return {
       success: false,
       error: {
@@ -256,6 +268,7 @@ export async function runTriage(
       },
     };
   }
+  pt.advance("04_plan/selects_candidates.yaml");
 
   // 8. State transition: → selects_ready
   const updatedDoc = transitionState(
@@ -266,6 +279,7 @@ export async function runTriage(
     "footage-triager",
     "selects candidates finalized",
   );
+  pt.complete(["04_plan/selects_candidates.yaml"]);
 
   return {
     success: true,
