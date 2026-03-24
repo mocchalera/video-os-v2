@@ -117,21 +117,53 @@ interface XmlNode {
  * Handles the subset of XML features used in FCP7:
  * - Elements with attributes, text content, child elements
  * - Self-closing tags (e.g. <file id="file-1"/>)
- * - No CDATA, namespaces, processing instructions, or DTD entities
+ * - XML comments (<!-- ... -->) and processing instructions (<? ... ?>)
+ *   are skipped both at pre-strip and structurally during parsing
+ * - No CDATA, namespaces, or DTD entities
  */
 export function parseFcp7Xml(xml: string): XmlNode {
-  // Strip XML declaration, DOCTYPE, and comments
+  // Pre-strip XML declaration and DOCTYPE (not elements, so skip them early)
   let cleaned = xml.replace(/<\?xml[^?]*\?>/g, "");
   cleaned = cleaned.replace(/<!DOCTYPE[^>]*>/g, "");
+  // Strip comments via regex as first pass (structural skip handles survivors)
   cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, "");
   cleaned = cleaned.trim();
 
-  const [node] = parseElement(cleaned, 0);
+  // Skip any remaining comments/PIs before the root element
+  let pos = 0;
+  pos = skipNonElements(cleaned, pos);
+
+  const [node] = parseElement(cleaned, pos);
   return node;
 }
 
 function skipWhitespace(s: string, pos: number): number {
   while (pos < s.length && /\s/.test(s[pos])) pos++;
+  return pos;
+}
+
+/** Skip XML comments (<!-- ... -->) and processing instructions (<? ... ?>) */
+function skipNonElements(s: string, pos: number): number {
+  pos = skipWhitespace(s, pos);
+  while (pos < s.length) {
+    // XML comment
+    if (s.startsWith("<!--", pos)) {
+      const end = s.indexOf("-->", pos + 4);
+      if (end === -1) break; // malformed — let parseElement deal with it
+      pos = end + 3;
+      pos = skipWhitespace(s, pos);
+      continue;
+    }
+    // Processing instruction
+    if (s.startsWith("<?", pos)) {
+      const end = s.indexOf("?>", pos + 2);
+      if (end === -1) break;
+      pos = end + 2;
+      pos = skipWhitespace(s, pos);
+      continue;
+    }
+    break;
+  }
   return pos;
 }
 
@@ -186,6 +218,10 @@ function parseElement(s: string, pos: number): [XmlNode, number] {
   while (pos < s.length) {
     pos = skipWhitespace(s, pos);
 
+    if (pos >= s.length) break;
+
+    // Skip comments and processing instructions inside elements
+    pos = skipNonElements(s, pos);
     if (pos >= s.length) break;
 
     // Check for closing tag

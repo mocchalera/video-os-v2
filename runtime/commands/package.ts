@@ -19,6 +19,7 @@ import {
   initCommand,
   isCommandError,
   transitionState,
+  validateAgainstSchema,
   type CommandError,
 } from "./shared.js";
 import { writeProjectState, computeFileHash, type ProjectState } from "../state/reconcile.js";
@@ -40,6 +41,14 @@ import {
   buildNleFinishingManifest,
   type PackageManifest,
 } from "../packaging/manifest.js";
+import {
+  buildQaMeasurementsFromPrecomputed,
+  collectQaMeasurementWarnings,
+  measureQaMedia,
+  writeQaMeasurements,
+  type PrecomputedQaMetrics,
+  type QaMeasurements,
+} from "../packaging/qa-measure.js";
 import { assembleTimelineToMp4 } from "../render/assembler.js";
 import { runRenderPipeline } from "../render/pipeline.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
@@ -65,14 +74,7 @@ export interface PackageCommandOptions {
   /** Skip render pipeline (for validation-only/testing) */
   skipRender?: boolean;
   /** Precomputed metrics for testing (skips ffprobe/ffmpeg measurement) */
-  precomputedMetrics?: {
-    integratedLufs?: number;
-    truePeakDbtp?: number;
-    videoDurationMs?: number;
-    audioDurationMs?: number;
-    dialogueWindowMs?: number;
-    observedNonSilentMs?: number;
-  };
+  precomputedMetrics?: PrecomputedQaMetrics;
   /** Internal override used by /render phase wrapper */
   commandName?: string;
   /** Internal override used by /render phase wrapper */
@@ -172,12 +174,23 @@ export async function packageCommand(
   // 5. Build QA checks
   const checks: QaCheckResult[] = [];
   const metrics: QaReport["metrics"] = {};
+  let qaMeasurementVideoPath: string | undefined;
+  let qaMeasurementAudioPath: string | undefined;
+  let qaMeasurementAssemblyPath: string | undefined = options?.assemblyPath;
+  const defaultAssemblyPath = path.join(absDir, "05_timeline/assembly.mp4");
+  if (!qaMeasurementAssemblyPath && fs.existsSync(defaultAssemblyPath)) {
+    qaMeasurementAssemblyPath = defaultAssemblyPath;
+  }
+  let completenessCheck: QaCheckResult | undefined;
 
-  // timeline_schema_valid (simplified: just check it parsed)
+  // timeline_schema_valid
+  const timelineValidation = validateAgainstSchema(timeline, "timeline-ir.schema.json");
   checks.push({
     name: "timeline_schema_valid",
-    passed: true,
-    details: "timeline.json parsed and valid",
+    passed: timelineValidation.valid,
+    details: timelineValidation.valid
+      ? "timeline-ir.schema.json validation passed"
+      : timelineValidation.errors.join("; "),
   });
 
   // caption_policy_valid
@@ -211,31 +224,6 @@ export async function packageCommand(
       checks.push(alignCheck);
     }
 
-    // Dialogue occupancy
-    const dialogueWindowMs = options?.precomputedMetrics?.dialogueWindowMs ?? 10000;
-    const observedNonSilentMs = options?.precomputedMetrics?.observedNonSilentMs ?? 8000;
-    const occupancyCheck = checkDialogueOccupancy(dialogueWindowMs, observedNonSilentMs);
-    checks.push(occupancyCheck);
-    metrics.dialogue_occupancy_ratio = dialogueWindowMs > 0
-      ? observedNonSilentMs / dialogueWindowMs
-      : 0;
-
-    // A/V drift
-    const videoDur = options?.precomputedMetrics?.videoDurationMs ?? 10000;
-    const audioDur = options?.precomputedMetrics?.audioDurationMs ?? 10000;
-    const driftCheck = checkAvDrift(videoDur, audioDur, frameDurationMs);
-    checks.push(driftCheck);
-    metrics.av_drift_ms = Math.abs(videoDur - audioDur);
-
-    // Loudness
-    const lufs = options?.precomputedMetrics?.integratedLufs ?? -16.0;
-    const tp = options?.precomputedMetrics?.truePeakDbtp ?? -1.8;
-    const loudnessCheck = checkLoudnessTarget(lufs, tp);
-    checks.push(loudnessCheck);
-    metrics.integrated_lufs = lufs;
-    metrics.true_peak_dbtp = tp;
-
-    // Package completeness
     const existingArtifacts = new Set<string>();
     if (options?.skipRender) {
       // For testing: create stub files and assume standard artifacts exist
@@ -297,6 +285,9 @@ export async function packageCommand(
           outputDir: packageDir,
           fps,
         });
+        qaMeasurementAssemblyPath = assemblyPath;
+        qaMeasurementVideoPath = renderResult.finalVideoPath;
+        qaMeasurementAudioPath = renderResult.finalMixPath;
 
         // Check which artifacts the render produced
         if (fs.existsSync(renderResult.finalVideoPath)) existingArtifacts.add("final_video");
@@ -319,15 +310,22 @@ export async function packageCommand(
       }
       existingArtifacts.add("qa_report"); // Will be generated below
     }
-    const completenessCheck = checkPackageCompleteness(
+    completenessCheck = checkPackageCompleteness(
       sourceOfTruth,
       captionPolicy,
       existingArtifacts,
     );
-    checks.push(completenessCheck);
+    if (!qaMeasurementVideoPath) {
+      qaMeasurementVideoPath = path.join(packageDir, "video/final.mp4");
+    }
+    if (!qaMeasurementAudioPath) {
+      qaMeasurementAudioPath = path.join(packageDir, "audio/final_mix.wav");
+    }
   } else {
     // nle_finishing checks
     // supplied_export_probe_valid (simplified)
+    qaMeasurementVideoPath = options?.suppliedFinalPath ||
+      path.join(packageDir, "video/final.mp4");
     const suppliedExists = options?.suppliedFinalPath
       ? fs.existsSync(options.suppliedFinalPath)
       : fs.existsSync(path.join(packageDir, "video/final.mp4"));
@@ -352,25 +350,6 @@ export async function packageCommand(
         : `delivery_mode=${captionPolicy.delivery_mode} missing=sidecar`,
     });
 
-    // supplied_av_sync_valid
-    const sVideoDur = options?.precomputedMetrics?.videoDurationMs ?? 10000;
-    const sAudioDur = options?.precomputedMetrics?.audioDurationMs ?? 10000;
-    const syncCheck = checkAvDrift(sVideoDur, sAudioDur, frameDurationMs);
-    checks.push({
-      name: "supplied_av_sync_valid",
-      passed: syncCheck.passed,
-      details: syncCheck.details,
-    });
-
-    // Loudness
-    const sLufs = options?.precomputedMetrics?.integratedLufs ?? -16.0;
-    const sTp = options?.precomputedMetrics?.truePeakDbtp ?? -1.8;
-    const sLoudnessCheck = checkLoudnessTarget(sLufs, sTp);
-    checks.push(sLoudnessCheck);
-    metrics.integrated_lufs = sLufs;
-    metrics.true_peak_dbtp = sTp;
-
-    // Package completeness
     const nleArtifacts = new Set<string>(["final_video", "qa_report"]);
     if (
       captionPolicy.source !== "none" &&
@@ -383,12 +362,84 @@ export async function packageCommand(
         nleArtifacts.add("vtt_sidecar");
       }
     }
-    const nleCompletenessCheck = checkPackageCompleteness(
+    completenessCheck = checkPackageCompleteness(
       sourceOfTruth,
       captionPolicy,
       nleArtifacts,
     );
-    checks.push(nleCompletenessCheck);
+  }
+
+  let qaMeasurements: QaMeasurements;
+  try {
+    qaMeasurements = await resolveQaMeasurements({
+      packageDir,
+      sourceOfTruth,
+      createdAt,
+      skipRender: options?.skipRender ?? false,
+      finalVideoPath: qaMeasurementVideoPath,
+      finalAudioPath: qaMeasurementAudioPath,
+      assemblyPath: qaMeasurementAssemblyPath,
+      precomputedMetrics: options?.precomputedMetrics,
+    });
+  } catch (err) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `QA measurement failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      sourceOfTruth,
+    };
+  }
+  logQaMeasurementWarnings(qaMeasurements);
+
+  if (sourceOfTruth === "engine_render") {
+    const occupancyCheck = checkDialogueOccupancy(
+      qaMeasurements.dialogue_window_ms,
+      qaMeasurements.observed_non_silent_ms,
+    );
+    checks.push(occupancyCheck);
+    metrics.dialogue_occupancy_ratio = qaMeasurements.dialogue_occupancy;
+
+    const driftCheck = checkAvDrift(
+      qaMeasurements.video_duration_ms,
+      qaMeasurements.audio_duration_ms,
+      frameDurationMs,
+    );
+    checks.push(driftCheck);
+    metrics.av_drift_ms = qaMeasurements.av_drift_ms;
+
+    const loudnessCheck = checkLoudnessTarget(
+      qaMeasurements.loudness_integrated,
+      qaMeasurements.loudness_true_peak,
+    );
+    checks.push(loudnessCheck);
+    metrics.integrated_lufs = qaMeasurements.loudness_integrated;
+    metrics.true_peak_dbtp = qaMeasurements.loudness_true_peak;
+  } else {
+    const syncCheck = checkAvDrift(
+      qaMeasurements.video_duration_ms,
+      qaMeasurements.audio_duration_ms,
+      frameDurationMs,
+    );
+    checks.push({
+      name: "supplied_av_sync_valid",
+      passed: syncCheck.passed,
+      details: syncCheck.details,
+    });
+    metrics.av_drift_ms = qaMeasurements.av_drift_ms;
+
+    const loudnessCheck = checkLoudnessTarget(
+      qaMeasurements.loudness_integrated,
+      qaMeasurements.loudness_true_peak,
+    );
+    checks.push(loudnessCheck);
+    metrics.integrated_lufs = qaMeasurements.loudness_integrated;
+    metrics.true_peak_dbtp = qaMeasurements.loudness_true_peak;
+  }
+
+  if (completenessCheck) {
+    checks.push(completenessCheck);
   }
 
   // 6. Build QA report
@@ -508,4 +559,77 @@ export async function packageCommand(
 function parseDensityFromDetails(details: string): number | undefined {
   const match = details.match(/max_density=([\d.]+)/);
   return match ? parseFloat(match[1]) : undefined;
+}
+
+interface ResolveQaMeasurementsOptions {
+  packageDir: string;
+  sourceOfTruth: SourceOfTruth;
+  createdAt: string;
+  skipRender: boolean;
+  finalVideoPath?: string;
+  finalAudioPath?: string;
+  assemblyPath?: string;
+  precomputedMetrics?: PrecomputedQaMetrics;
+}
+
+async function resolveQaMeasurements(
+  options: ResolveQaMeasurementsOptions,
+): Promise<QaMeasurements> {
+  const outputPath = path.join(options.packageDir, "qa-measurements.json");
+  const assemblyExists = !!options.assemblyPath && fs.existsSync(options.assemblyPath);
+
+  if (options.skipRender) {
+    if (options.sourceOfTruth === "engine_render" && assemblyExists) {
+      return measureQaMedia({
+        videoPath: options.assemblyPath!,
+        outputPath,
+        createdAt: options.createdAt,
+      });
+    }
+
+    if (options.precomputedMetrics) {
+      const precomputed = buildQaMeasurementsFromPrecomputed(
+        options.precomputedMetrics,
+        options.createdAt,
+      );
+      writeQaMeasurements(outputPath, precomputed);
+      return precomputed;
+    }
+  }
+
+  const finalVideoExists = !!options.finalVideoPath && fs.existsSync(options.finalVideoPath);
+  const measuredVideoPath = finalVideoExists
+    ? options.finalVideoPath
+    : options.sourceOfTruth === "engine_render" && assemblyExists
+      ? options.assemblyPath
+      : undefined;
+
+  if (measuredVideoPath) {
+    const measuredAudioPath = options.finalAudioPath && fs.existsSync(options.finalAudioPath)
+      ? options.finalAudioPath
+      : undefined;
+    return measureQaMedia({
+      videoPath: measuredVideoPath,
+      audioPath: measuredAudioPath,
+      outputPath,
+      createdAt: options.createdAt,
+    });
+  }
+
+  if (options.precomputedMetrics) {
+    const precomputed = buildQaMeasurementsFromPrecomputed(
+      options.precomputedMetrics,
+      options.createdAt,
+    );
+    writeQaMeasurements(outputPath, precomputed);
+    return precomputed;
+  }
+
+  throw new Error("No measurable media artifact available for QA");
+}
+
+function logQaMeasurementWarnings(measurements: QaMeasurements): void {
+  for (const warning of collectQaMeasurementWarnings(measurements)) {
+    console.warn(`[package] QA warning: ${warning.message}`);
+  }
 }

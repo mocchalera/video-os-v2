@@ -190,6 +190,7 @@ export function projectCaptionsToTimeline(
   }
   result.tracks.caption.push({
     track_id: "C1",
+    kind: "caption",
     clips: captionClips,
   });
 
@@ -199,6 +200,7 @@ export function projectCaptionsToTimeline(
   }
   result.tracks.overlay.push({
     track_id: "O1",
+    kind: "overlay",
     clips: overlayClips,
   });
 

@@ -602,3 +602,226 @@ describe("audio track roundtrip", () => {
     expect(parsed.audioTracks[0][0].videoOsMeta!.clip_id).toBe("audio-1");
   });
 });
+
+// ── 8. Comment/PI resilience (self-roundtrip smoke test) ─────────────
+
+describe("XML comment and PI resilience", () => {
+  it("parses XML with metadata comment before xmeml (exporter output)", () => {
+    const clip = makeClip({ clip_id: "comment-test" });
+    const timeline = makeTimeline([[clip]]);
+    const sourceMap = new Map([["AST_001", "/media/test.mov"]]);
+
+    const xml = timelineToFcp7Xml(timeline, {
+      sourceMap,
+      projectId: "PROJ_COMMENT",
+      timelineVersion: "v1",
+    });
+
+    // Verify the metadata comment is present
+    expect(xml).toContain("<!-- Video OS v2");
+
+    // Parse should succeed despite the comment
+    const parsed = parseFcp7Sequence(xml);
+    expect(parsed.name).toBe("Test Sequence");
+    expect(parsed.videoTracks[0][0].videoOsMeta!.clip_id).toBe("comment-test");
+  });
+
+  it("parses XML with extra comments injected inside elements", () => {
+    const clip = makeClip({ clip_id: "inner-comment" });
+    const timeline = makeTimeline([[clip]]);
+    const sourceMap = new Map([["AST_001", "/media/test.mov"]]);
+
+    let xml = timelineToFcp7Xml(timeline, { sourceMap });
+
+    // Inject comments inside the sequence element (simulating Premiere additions)
+    xml = xml.replace(
+      "<media>",
+      "<!-- Premiere Pro internal comment -->\n    <media>",
+    );
+    xml = xml.replace(
+      "</track>",
+      "<!-- track end marker -->\n        </track>",
+    );
+
+    const parsed = parseFcp7Sequence(xml);
+    expect(parsed.videoTracks[0]).toHaveLength(1);
+    expect(parsed.videoTracks[0][0].videoOsMeta!.clip_id).toBe("inner-comment");
+  });
+
+  it("handles processing instructions before the root element", () => {
+    const clip = makeClip({ clip_id: "pi-test" });
+    const timeline = makeTimeline([[clip]]);
+    const sourceMap = new Map([["AST_001", "/media/test.mov"]]);
+
+    let xml = timelineToFcp7Xml(timeline, { sourceMap });
+
+    // Add a processing instruction after DOCTYPE
+    xml = xml.replace(
+      "<!DOCTYPE xmeml>",
+      '<!DOCTYPE xmeml>\n<?premiere version="24.0"?>',
+    );
+
+    const parsed = parseFcp7Sequence(xml);
+    expect(parsed.videoTracks[0][0].videoOsMeta!.clip_id).toBe("pi-test");
+  });
+
+  it("self-roundtrip: export→import produces no diffs", () => {
+    const clip1 = makeClip({
+      clip_id: "rt-1",
+      asset_id: "AST_RT1",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 48,
+    });
+    const clip2 = makeClip({
+      clip_id: "rt-2",
+      asset_id: "AST_RT2",
+      timeline_in_frame: 48,
+      timeline_duration_frames: 72,
+    });
+    const audioClip = makeClip({
+      clip_id: "rt-bgm",
+      asset_id: "AST_BGM",
+      role: "music",
+      beat_id: "beat-bgm",
+      audio_policy: { duck_music_db: -6 },
+    });
+    const timeline = makeTimeline([[clip1, clip2]], [[audioClip]]);
+    const sourceMap = new Map([
+      ["AST_RT1", "/media/a.mov"],
+      ["AST_RT2", "/media/b.mov"],
+      ["AST_BGM", "/media/bgm.wav"],
+    ]);
+
+    const xml = timelineToFcp7Xml(timeline, {
+      sourceMap,
+      projectId: "SMOKE_TEST",
+      timelineVersion: "v2",
+    });
+
+    // The XML contains the metadata comment
+    expect(xml).toContain("<!-- Video OS v2");
+
+    const parsed = parseFcp7Sequence(xml);
+    const report = detectDiffs(parsed, timeline);
+
+    expect(report.diffs).toHaveLength(0);
+    expect(report.mappedClips).toBe(3);
+    expect(report.unmappedClips).toBe(0);
+  });
+});
+
+// ── 9. Non-ASCII path + audio metadata fixture ──────────────────────
+
+describe("non-ASCII path and audio metadata fixtures", () => {
+  it("roundtrips CJK file paths with audio duck levels", () => {
+    const videoClip = makeClip({
+      clip_id: "cjk-video",
+      asset_id: "AST_CJK_VID",
+      motivation: "日本語テスト映像",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 120,
+    });
+    const audioClip = makeClip({
+      clip_id: "cjk-audio",
+      asset_id: "AST_CJK_AUD",
+      role: "music",
+      motivation: "背景音楽",
+      beat_id: "beat-bgm",
+      audio_policy: { duck_music_db: -9 },
+    });
+    const timeline = makeTimeline([[videoClip]], [[audioClip]]);
+
+    const sourceMap = new Map([
+      ["AST_CJK_VID", "/プロジェクト/素材/インタビュー_2024年.mov"],
+      ["AST_CJK_AUD", "/プロジェクト/音楽/ピアノ曲.wav"],
+    ]);
+
+    const xml = timelineToFcp7Xml(timeline, {
+      sourceMap,
+      sampleRate: 44100,
+      audioBitDepth: 24,
+    });
+
+    // Pathurl should be percent-encoded
+    expect(xml).not.toContain("/プロジェクト/");
+    expect(xml).toContain("file://localhost/");
+
+    // Audio metadata present
+    expect(xml).toContain("<samplerate>44100</samplerate>");
+    expect(xml).toContain("<depth>24</depth>");
+    expect(xml).toContain("-9");
+
+    // Parse back
+    const parsed = parseFcp7Sequence(xml);
+    expect(parsed.videoTracks[0][0].videoOsMeta!.clip_id).toBe("cjk-video");
+    expect(parsed.videoTracks[0][0].videoOsMeta!.motivation).toBe(
+      "日本語テスト映像",
+    );
+
+    expect(parsed.audioTracks[0][0].videoOsMeta!.clip_id).toBe("cjk-audio");
+    expect(parsed.audioTracks[0][0].audioLevelDb).toBe(-9);
+
+    // Full roundtrip to TimelineIR
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    const importedVideo = imported.tracks.video[0].clips[0];
+    expect(importedVideo.clip_id).toBe("cjk-video");
+    expect(importedVideo.motivation).toBe("日本語テスト映像");
+
+    const importedAudio = imported.tracks.audio[0].clips[0];
+    expect(importedAudio.clip_id).toBe("cjk-audio");
+    expect(importedAudio.audio_policy?.duck_music_db).toBe(-9);
+
+    // No diffs
+    const report = detectDiffs(parsed, timeline);
+    expect(report.diffs).toHaveLength(0);
+  });
+
+  it("handles Korean and emoji in paths", () => {
+    const clip = makeClip({
+      clip_id: "emoji-path",
+      asset_id: "AST_EMOJI",
+    });
+    const timeline = makeTimeline([[clip]]);
+    const sourceMap = new Map([
+      ["AST_EMOJI", "/미디어/촬영_🎬/clip.mov"],
+    ]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+    const parsed = parseFcp7Sequence(xml);
+
+    expect(parsed.videoTracks[0][0].videoOsMeta!.clip_id).toBe("emoji-path");
+    expect(parsed.videoTracks[0][0].pathurl).toBeTruthy();
+  });
+
+  it("preserves audio sample rate and bit depth in file definition", () => {
+    const audioClip = makeClip({
+      clip_id: "audio-hd",
+      asset_id: "AST_AUDIO_HD",
+      role: "music",
+      beat_id: "beat-hd",
+      audio_policy: { duck_music_db: -3 },
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    const sourceMap = new Map([
+      ["AST_AUDIO_HD", "/media/studio_recording.wav"],
+    ]);
+
+    const xml = timelineToFcp7Xml(timeline, {
+      sourceMap,
+      sampleRate: 96000,
+      audioBitDepth: 32,
+    });
+
+    expect(xml).toContain("<samplerate>96000</samplerate>");
+    expect(xml).toContain("<depth>32</depth>");
+
+    // Parse and roundtrip
+    const parsed = parseFcp7Sequence(xml);
+    expect(parsed.audioTracks[0][0].audioLevelDb).toBe(-3);
+
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    expect(imported.tracks.audio[0].clips[0].audio_policy?.duck_music_db).toBe(
+      -3,
+    );
+  });
+});

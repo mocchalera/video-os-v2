@@ -5,9 +5,10 @@ import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { computeFileHash } from "../runtime/state/reconcile.js";
 
-const { assembleMock, renderMock } = vi.hoisted(() => ({
+const { assembleMock, renderMock, measureQaMediaMock } = vi.hoisted(() => ({
   assembleMock: vi.fn(),
   renderMock: vi.fn(),
+  measureQaMediaMock: vi.fn(),
 }));
 
 vi.mock("../runtime/render/assembler.js", () => ({
@@ -18,6 +19,37 @@ vi.mock("../runtime/render/pipeline.js", () => ({
   runRenderPipeline: renderMock,
 }));
 
+vi.mock("../runtime/packaging/qa-measure.js", () => ({
+  measureQaMedia: measureQaMediaMock,
+  buildQaMeasurementsFromPrecomputed: vi.fn((metrics: {
+    integratedLufs?: number;
+    truePeakDbtp?: number;
+    videoDurationMs?: number;
+    audioDurationMs?: number;
+    dialogueWindowMs?: number;
+    observedNonSilentMs?: number;
+  }) => ({
+    version: "1.0.0",
+    measured_at: "2026-03-21T12:00:00.000Z",
+    measurement_source: "precomputed",
+    video_duration_ms: metrics.videoDurationMs ?? 0,
+    audio_duration_ms: metrics.audioDurationMs ?? 0,
+    dialogue_window_ms: metrics.dialogueWindowMs ?? metrics.audioDurationMs ?? 0,
+    av_drift_ms: Math.abs((metrics.videoDurationMs ?? 0) - (metrics.audioDurationMs ?? 0)),
+    loudness_integrated: metrics.integratedLufs ?? 0,
+    loudness_true_peak: metrics.truePeakDbtp ?? 0,
+    dialogue_occupancy: metrics.dialogueWindowMs
+      ? (metrics.observedNonSilentMs ?? 0) / metrics.dialogueWindowMs
+      : 0,
+    observed_non_silent_ms: metrics.observedNonSilentMs ?? 0,
+    silence_total_ms: metrics.dialogueWindowMs && metrics.observedNonSilentMs != null
+      ? Math.max(0, metrics.dialogueWindowMs - metrics.observedNonSilentMs)
+      : 0,
+  })),
+  writeQaMeasurements: vi.fn(),
+  collectQaMeasurementWarnings: vi.fn(() => []),
+}));
+
 import { packageCommand } from "../runtime/commands/package.js";
 
 const tempDirs: string[] = [];
@@ -25,6 +57,23 @@ const tempDirs: string[] = [];
 beforeEach(() => {
   assembleMock.mockReset();
   renderMock.mockReset();
+  measureQaMediaMock.mockReset();
+  measureQaMediaMock.mockResolvedValue({
+    version: "1.0.0",
+    measured_at: "2026-03-21T12:00:00.000Z",
+    measurement_source: "media_probe",
+    video_path: "/tmp/final.mp4",
+    audio_path: "/tmp/final_mix.wav",
+    video_duration_ms: 28000,
+    audio_duration_ms: 28000,
+    dialogue_window_ms: 10000,
+    av_drift_ms: 0,
+    loudness_integrated: -16.0,
+    loudness_true_peak: -1.8,
+    dialogue_occupancy: 0.85,
+    observed_non_silent_ms: 8500,
+    silence_total_ms: 1500,
+  });
 });
 
 afterEach(() => {
