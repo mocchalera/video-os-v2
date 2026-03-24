@@ -10,7 +10,7 @@ import * as path from "node:path";
 import * as crypto from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createHistoryEntry, type HistoryEntry } from "./history.js";
-import { validateProject } from "../../scripts/validate-schemas.js";
+import { validateProject } from "../validation/schema-validator.js";
 import { LiveAnalysisRepository } from "../mcp/repository.js";
 
 // ── Types ──────────────────────────────────────────────────────────

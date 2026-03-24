@@ -15,7 +15,7 @@ import { createGeminiVlmFn } from "../connectors/gemini-vlm.js";
 import { DEFAULT_VLM_CONCURRENCY } from "../pipeline/vlm-analysis.js";
 import type { ProjectState } from "../state/reconcile.js";
 import { ProgressTracker } from "../progress.js";
-import { runPreflight } from "../../scripts/preflight.js";
+import { runPreflight } from "../preflight.js";
 
 export interface AnalyzeCommandOptions {
   sourceFiles: string[];
