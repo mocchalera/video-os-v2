@@ -1,5 +1,5 @@
 import type { Clip, EditorLane } from '../types';
-import { getRoleColor } from '../utils/draw';
+import { getTrackColor } from '../utils/draw';
 import ClipBlock, { type TrimSide } from './ClipBlock';
 
 interface TrackLaneProps {
@@ -30,11 +30,12 @@ export default function TrackLane({
   onTrimClip,
 }: TrackLaneProps) {
   const empty = lane.clips.length === 0 || !lane.trackId;
+  const trackColor = getTrackColor(lane.laneId, lane.trackKind);
 
   return (
     <div className="relative" style={{ width, height: laneHeight }}>
       {empty ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center px-4 text-xs text-slate-500">
+        <div className="pointer-events-none absolute inset-0 flex items-center px-5 text-[11px] font-medium text-[color:var(--text-subtle)]">
           No clips on {lane.label}
         </div>
       ) : null}
@@ -47,7 +48,7 @@ export default function TrackLane({
               pxPerFrame={pxPerFrame}
               fps={fps}
               selected={selectedClipId === clip.clip_id}
-              color={getRoleColor(clip.role)}
+              color={trackColor}
               onSelect={() => onSelectClip(lane.trackKind, lane.trackId!, clip)}
               onTrim={(side, baseClip, deltaFrames) =>
                 onTrimClip(lane.trackKind, lane.trackId!, baseClip, side, deltaFrames)

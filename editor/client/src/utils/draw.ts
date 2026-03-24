@@ -2,19 +2,29 @@ import type { ClipRole, EditorLane, Marker } from '../types';
 import { formatFrameLabel } from './time';
 
 const ROLE_COLORS: Record<ClipRole, string> = {
-  hero: '#4a90d9',
-  support: '#5bc0de',
-  transition: '#f0ad4e',
-  texture: '#8e7cc3',
-  dialogue: '#5cb85c',
-  music: '#2ecc71',
-  nat_sound: '#e67e22',
-  ambient: '#95a5a6',
-  bgm: '#2ecc71',
-  title: '#e74c3c',
+  hero: '#3B82F6',
+  support: '#60A5FA',
+  transition: '#F59E0B',
+  texture: '#818CF8',
+  dialogue: '#22C55E',
+  music: '#8B5CF6',
+  nat_sound: '#34D399',
+  ambient: '#6B7280',
+  bgm: '#8B5CF6',
+  title: '#F472B6',
 };
 
-const LANE_FILLS = ['rgba(15, 52, 96, 0.22)', 'rgba(13, 41, 75, 0.5)'];
+const TRACK_COLORS: Record<string, string> = {
+  V1: '#5ea4ff',
+  V2: '#7cc0ff',
+  V3: '#9ad6ff',
+  A1: '#5bcf8b',
+  A2: '#b38aff',
+  A3: '#f4a340',
+  A4: '#ef6b9c',
+};
+
+const LANE_FILLS = ['rgba(16, 23, 34, 0.96)', 'rgba(12, 18, 28, 0.96)'];
 
 export interface DrawTimelineOptions {
   width: number;
@@ -29,7 +39,11 @@ export interface DrawTimelineOptions {
 }
 
 export function getRoleColor(role: ClipRole): string {
-  return ROLE_COLORS[role] ?? '#95a5a6';
+  return ROLE_COLORS[role] ?? '#6B7280';
+}
+
+export function getTrackColor(laneId: string, trackKind: 'video' | 'audio'): string {
+  return TRACK_COLORS[laneId] ?? (trackKind === 'video' ? '#3B82F6' : '#22C55E');
 }
 
 export function hexToRgba(hex: string, alpha: number): string {
@@ -98,10 +112,10 @@ export function drawTimelineBackdrop(
   } = options;
 
   context.clearRect(0, 0, width, height);
-  context.fillStyle = '#111827';
+  context.fillStyle = '#0b1017';
   context.fillRect(0, 0, width, height);
 
-  context.fillStyle = 'rgba(14, 24, 45, 0.98)';
+  context.fillStyle = '#101722';
   context.fillRect(0, 0, width, rulerHeight);
 
   lanes.forEach((_, index) => {
@@ -112,7 +126,7 @@ export function drawTimelineBackdrop(
   const majorStep = getMajorTickStep(fps, pxPerFrame);
   const minorStep = Math.max(1, Math.round(majorStep / 2));
 
-  context.font = '11px "Geist Mono", monospace';
+  context.font = '10px "Geist Mono", monospace';
   context.textBaseline = 'middle';
 
   for (let frame = 0; frame <= totalFrames + majorStep; frame += minorStep) {
@@ -122,14 +136,20 @@ export function drawTimelineBackdrop(
     context.moveTo(x, 0);
     context.lineTo(x, height);
     context.strokeStyle = isMajor
-      ? 'rgba(130, 149, 196, 0.18)'
-      : 'rgba(130, 149, 196, 0.08)';
+      ? 'rgba(148, 163, 184, 0.12)'
+      : 'rgba(148, 163, 184, 0.04)';
     context.lineWidth = 1;
     context.stroke();
 
     if (isMajor) {
-      context.fillStyle = 'rgba(208, 218, 240, 0.74)';
-      context.fillText(formatFrameLabel(frame, fps), x + 6, rulerHeight / 2);
+      context.beginPath();
+      context.moveTo(x, rulerHeight - 6);
+      context.lineTo(x, rulerHeight);
+      context.strokeStyle = 'rgba(148, 163, 184, 0.28)';
+      context.stroke();
+
+      context.fillStyle = 'rgba(203, 213, 225, 0.58)';
+      context.fillText(formatFrameLabel(frame, fps), x + 4, rulerHeight / 2);
     }
   }
 
@@ -140,14 +160,16 @@ export function drawTimelineBackdrop(
     context.lineTo(x, height);
     context.strokeStyle =
       marker.kind === 'beat'
-        ? 'rgba(255, 180, 86, 0.5)'
-        : 'rgba(255, 92, 92, 0.34)';
-    context.setLineDash([6, 6]);
+        ? 'rgba(245, 158, 11, 0.42)'
+        : 'rgba(248, 113, 113, 0.26)';
+    context.setLineDash([4, 4]);
     context.stroke();
     context.setLineDash([]);
 
-    context.fillStyle = 'rgba(255, 218, 162, 0.9)';
-    context.fillText(marker.label, x + 6, 12);
+    context.fillStyle = 'rgba(251, 191, 36, 0.78)';
+    context.font = '9px "Geist Mono", monospace';
+    context.fillText(marker.label, x + 4, 10);
+    context.font = '10px "Geist Mono", monospace';
   });
 
   for (let index = 0; index <= lanes.length; index += 1) {
@@ -155,7 +177,7 @@ export function drawTimelineBackdrop(
     context.beginPath();
     context.moveTo(0, y);
     context.lineTo(width, y);
-    context.strokeStyle = 'rgba(120, 146, 194, 0.16)';
+    context.strokeStyle = 'rgba(148, 163, 184, 0.07)';
     context.lineWidth = 1;
     context.stroke();
   }
@@ -163,6 +185,6 @@ export function drawTimelineBackdrop(
   context.beginPath();
   context.moveTo(0, rulerHeight + 0.5);
   context.lineTo(width, rulerHeight + 0.5);
-  context.strokeStyle = 'rgba(120, 146, 194, 0.3)';
+  context.strokeStyle = 'rgba(148, 163, 184, 0.12)';
   context.stroke();
 }

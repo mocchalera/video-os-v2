@@ -31,53 +31,46 @@ export default function PreviewPlayer({
         : 'No Preview';
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-[color:var(--panel-bg)] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.25)]">
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(19,28,50,1),rgba(9,14,26,1))]">
-        <div className="aspect-video w-full">
-          {previewUrl ? (
-            <video
-              ref={videoRef}
-              src={previewUrl}
-              className="h-full w-full object-contain"
-              playsInline
-              onTimeUpdate={onTimeUpdate}
-              onLoadedMetadata={onLoadedMetadata}
-              onEnded={onEnded}
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_center,rgba(87,164,255,0.18),transparent_45%),linear-gradient(180deg,rgba(8,14,28,0.96),rgba(4,8,18,0.98))]">
-              <div className="text-center">
-                <div className="font-mono text-xs uppercase tracking-[0.26em] text-slate-500">
-                  {modeLabel}
-                </div>
-                <div className="mt-3 text-lg font-medium text-slate-100">
-                  {previewMode === 'mock'
-                    ? 'Virtual playback is active while the preview API is unavailable.'
-                    : 'Render preview to attach backend video playback.'}
-                </div>
-                <div className="mt-2 text-sm text-slate-400">
-                  Space toggles transport. Ctrl+Enter renders the current clip or 5s range.
-                </div>
-              </div>
-            </div>
-          )}
+    <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#04070d]">
+      {previewUrl ? (
+        <video
+          ref={videoRef}
+          src={previewUrl}
+          className="h-full w-full bg-black object-contain"
+          playsInline
+          onTimeUpdate={onTimeUpdate}
+          onLoadedMetadata={onLoadedMetadata}
+          onEnded={onEnded}
+        />
+      ) : (
+        <div className="px-6 text-center">
+          <div className="font-mono text-[10px] uppercase tracking-[0.42em] text-[#64748b]">
+            {modeLabel}
+          </div>
+          <div className="mt-3 text-[22px] font-semibold tracking-tight text-white">
+            Render preview to attach playback
+          </div>
+          <div className="mx-auto mt-2 max-w-[360px] text-[13px] leading-6 text-[#94a3b8]">
+            Space toggles transport. Ctrl+Enter renders the selected clip or a 5 second
+            range from the playhead.
+          </div>
         </div>
+      )}
 
-        <div className="pointer-events-none absolute top-3 left-3 flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-slate-200">
-          <span
-            className={`h-2 w-2 rounded-full ${
-              isPlaying ? 'bg-emerald-400' : 'bg-slate-500'
-            }`}
-          />
-          {modeLabel}
-        </div>
-
-        <div className="pointer-events-none absolute top-3 right-3 rounded-full border border-white/10 bg-slate-950/60 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-slate-300">
-          {renderStatus}
-        </div>
+      <div className="pointer-events-none absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-[#cbd5e1]">
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${
+            isPlaying ? 'bg-emerald-400' : 'bg-slate-500'
+          }`}
+        />
+        {modeLabel}
       </div>
 
-      {error ? <p className="mt-3 text-sm text-amber-300">{error}</p> : null}
+      {error ? (
+        <div className="absolute inset-x-0 bottom-0 border-t border-amber-400/20 bg-amber-950/80 px-3 py-1.5 text-[11px] text-amber-300">
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }

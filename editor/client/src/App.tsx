@@ -1,4 +1,5 @@
-import { useEffect, useEffectEvent, useState } from 'react';
+import { useEffect, useEffectEvent, useState, type ReactNode } from 'react';
+import type { TrimSide } from './components/ClipBlock';
 import PreviewPlayer from './components/PreviewPlayer';
 import PropertyPanel from './components/PropertyPanel';
 import Timeline from './components/Timeline';
@@ -16,9 +17,10 @@ import {
   microsecondsToFrames,
   secondsToFrames,
 } from './utils/time';
-import type { TrimSide } from './components/ClipBlock';
 
-const DEFAULT_ZOOM = 6;
+const MAX_ZOOM = 24;
+const MIN_ZOOM = 1.25;
+const FALLBACK_ZOOM = 6;
 
 function buildLanes(timeline: TimelineIR | null): EditorLane[] {
   if (!timeline) {
@@ -29,42 +31,44 @@ function buildLanes(timeline: TimelineIR | null): EditorLane[] {
     ];
   }
 
-  const videoTrack =
-    timeline.tracks.video.find((track) => track.track_id === 'V1') ??
-    timeline.tracks.video[0] ??
-    null;
-  const primaryAudio =
-    timeline.tracks.audio.find((track) => track.track_id === 'A1') ??
-    timeline.tracks.audio[0] ??
-    null;
-  const secondaryAudio =
-    timeline.tracks.audio.find((track) => track.track_id.startsWith('A2')) ??
-    timeline.tracks.audio[1] ??
-    null;
+  const lanes: EditorLane[] = [];
 
-  return [
-    {
-      laneId: 'V1',
-      label: 'V1',
+  for (const track of timeline.tracks.video) {
+    lanes.push({
+      laneId: track.track_id,
+      label: track.track_id,
       trackKind: 'video',
-      trackId: videoTrack?.track_id ?? null,
-      clips: videoTrack?.clips ?? [],
-    },
-    {
-      laneId: 'A1',
-      label: 'A1',
-      trackKind: 'audio',
-      trackId: primaryAudio?.track_id ?? null,
-      clips: primaryAudio?.clips ?? [],
-    },
-    {
-      laneId: 'A2',
-      label: 'A2',
-      trackKind: 'audio',
-      trackId: secondaryAudio?.track_id ?? null,
-      clips: secondaryAudio?.clips ?? [],
-    },
-  ];
+      trackId: track.track_id,
+      clips: track.clips,
+    });
+  }
+
+  for (const track of timeline.tracks.audio) {
+    if (track.clips.length > 0) {
+      lanes.push({
+        laneId: track.track_id,
+        label: track.track_id,
+        trackKind: 'audio',
+        trackId: track.track_id,
+        clips: track.clips,
+      });
+    }
+  }
+
+  if (lanes.length === 0) {
+    return [
+      { laneId: 'V1', label: 'V1', trackKind: 'video', trackId: null, clips: [] },
+      { laneId: 'A1', label: 'A1', trackKind: 'audio', trackId: null, clips: [] },
+    ];
+  }
+
+  return lanes;
+}
+
+function computeAutoFitZoom(totalFrames: number): number {
+  const availableWidth = Math.max(560, window.innerWidth - 160);
+  const fitted = availableWidth / Math.max(1, totalFrames);
+  return clamp(fitted, MIN_ZOOM, MAX_ZOOM);
 }
 
 function findSelectedClip(
@@ -93,10 +97,18 @@ function getTotalFrames(timeline: TimelineIR | null): number {
   return Math.max(...clipEnds, ...markerFrames, 1);
 }
 
+function PanelBadge({ children }: { children: ReactNode }) {
+  return (
+    <span className="px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.22em] text-[color:var(--text-subtle)]">
+      {children}
+    </span>
+  );
+}
+
 export default function App() {
   const timelineState = useTimeline();
   const selectionState = useSelection();
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [zoom, setZoom] = useState(FALLBACK_ZOOM);
   const timeline = timelineState.timeline;
   const fps = timeline ? getFps(timeline.sequence) : 24;
   const lanes = buildLanes(timeline);
@@ -110,8 +122,15 @@ export default function App() {
 
   useEffect(() => {
     selectionState.clearSelection();
-    setZoom(DEFAULT_ZOOM);
   }, [timelineState.projectId]);
+
+  useEffect(() => {
+    if (!timeline) {
+      return;
+    }
+
+    setZoom(computeAutoFitZoom(getTotalFrames(timeline)));
+  }, [timelineState.projectId, timeline?.project_id]);
 
   useEffect(() => {
     if (selectionState.selection && !selectedClip) {
@@ -269,173 +288,219 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const hiddenTrackCount = timeline
-    ? Math.max(0, timeline.tracks.video.length - 1) +
-      Math.max(0, timeline.tracks.audio.length - 2)
+  const totalTrackCount = timeline
+    ? timeline.tracks.video.length + timeline.tracks.audio.length
     : 0;
+  const hiddenTrackCount = Math.max(0, totalTrackCount - lanes.length);
   const transportTimecode = formatClockFromFrames(playback.playheadFrame, fps);
   const durationTimecode = formatClockFromFrames(totalFrames, fps);
-  const zoomPercent = Math.round((zoom / DEFAULT_ZOOM) * 100);
-  const primaryStatus =
-    timelineState.error ??
-    playback.error ??
-    (timelineState.connectionMode === 'mock'
-      ? 'API unavailable. Timeline saves fall back to local mock storage.'
-      : 'Ready');
+  const zoomLabel = zoom >= 2 ? `${zoom.toFixed(1)} px/f` : `${zoom.toFixed(2)} px/f`;
+  const resolutionLabel = `${timeline?.sequence.width ?? 1920}x${timeline?.sequence.height ?? 1080}`;
+  const fpsLabel = `${fps.toFixed(2).replace('.00', '')} fps`;
+  const issueCount = timelineState.validationIssues.length;
 
   return (
-    <div className="min-h-screen p-4 text-[color:var(--text-main)]">
-      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-[1600px] flex-col gap-4">
-        <header className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[color:var(--panel-bg)] px-4 py-3 shadow-[0_16px_60px_rgba(0,0,0,0.22)]">
-          <div className="flex flex-wrap items-center gap-3">
-            <div>
-              <div className="font-mono text-[11px] uppercase tracking-[0.22em] text-slate-500">
+    <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[color:var(--editor-bg)] text-[color:var(--text-main)]">
+      <header className="shrink-0 border-b border-white/[0.06] px-4 py-2.5">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-[color:var(--text-subtle)]">
                 Video OS v2
               </div>
-              <div className="text-lg font-semibold text-slate-50">Timeline Editor MVP</div>
+              <div className="truncate text-[28px] font-semibold leading-none text-white">
+                Timeline Editor
+              </div>
             </div>
 
-            <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-sm">
-              <span className="text-slate-400">Project</span>
+            <div className="h-10 w-px bg-white/[0.08]" />
+
+            <div className="flex items-center gap-2">
               <select
-                className="bg-transparent font-mono text-slate-100 outline-none"
+                className="min-w-[240px] border border-white/[0.06] bg-transparent px-3 py-1.5 text-[13px] font-medium text-neutral-100 outline-none transition focus:border-[var(--accent)]"
                 value={timelineState.projectId}
                 onChange={(event) => timelineState.setProjectId(event.target.value)}
               >
                 {timelineState.projects.map((project) => (
-                  <option key={project.id} value={project.id} className="bg-slate-950">
+                  <option key={project.id} value={project.id} className="bg-[#11161d]">
                     {project.name}
                   </option>
                 ))}
               </select>
-            </label>
 
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-slate-400">
-              {timelineState.connectionMode}
+              <PanelBadge>
+                {timelineState.connectionMode === 'api' ? 'Live API' : 'Mock Cache'}
+              </PanelBadge>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!timelineState.timeline}
-              onClick={() => {
-                void timelineState.save();
-              }}
-            >
-              Save
-            </button>
-
-            <button
-              type="button"
-              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={!timelineState.canUndo}
-              onClick={() => timelineState.undo()}
-            >
-              Undo
-            </button>
-
-            <div className="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 font-mono text-xs uppercase tracking-[0.18em] text-slate-400">
-              Zoom {zoomPercent}%
+          <div className="flex shrink-0 items-center gap-4">
+            <div className="hidden text-right md:block">
+              <div className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-subtle)]">
+                Program TC
+              </div>
+              <div className="font-mono text-[24px] font-semibold tabular-nums tracking-[0.08em] text-white">
+                {transportTimecode}
+              </div>
             </div>
-          </div>
-        </header>
 
-        <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px] gap-4">
-          <div className="grid min-h-0 grid-rows-[minmax(320px,42vh)_minmax(300px,1fr)] gap-4">
-            <div className="min-h-0">
-              <PreviewPlayer
-                videoRef={playback.videoRef}
-                previewUrl={playback.previewUrl}
-                previewMode={playback.previewMode}
-                renderStatus={playback.renderStatus}
-                isPlaying={playback.isPlaying}
-                error={playback.error}
-                onTimeUpdate={playback.handleVideoTimeUpdate}
-                onLoadedMetadata={playback.handleVideoLoadedMetadata}
-                onEnded={playback.handleVideoEnded}
-              />
-
-              <TransportBar
-                isPlaying={playback.isPlaying}
-                timecode={transportTimecode}
-                currentFrame={playback.playheadFrame}
-                previewMode={playback.previewMode}
-                renderStatus={playback.renderStatus}
-                onTogglePlayback={() => {
-                  void playback.togglePlayback();
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="border border-white/[0.06] bg-transparent px-3 py-1.5 text-[13px] font-medium text-neutral-200 transition hover:bg-white/[0.06] disabled:opacity-35"
+                disabled={!timelineState.canUndo}
+                onClick={() => timelineState.undo()}
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                className="border border-white/[0.06] bg-transparent px-3 py-1.5 text-[13px] font-medium text-neutral-200 transition hover:bg-white/[0.06] disabled:opacity-35"
+                disabled={!timelineState.canRedo}
+                onClick={() => timelineState.redo()}
+              >
+                Redo
+              </button>
+              <button
+                type="button"
+                className="bg-[color:var(--accent-strong)] px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-[#4f95ff] disabled:opacity-35"
+                disabled={!timelineState.timeline}
+                onClick={() => {
+                  void timelineState.save();
                 }}
-                onRenderPreview={() => {
-                  void handleRenderPreview();
-                }}
-              />
-            </div>
-
-            <div className="min-h-0">
-              <Timeline
-                lanes={lanes}
-                markers={timeline?.markers ?? []}
-                fps={fps}
-                totalFrames={totalFrames}
-                zoom={zoom}
-                playheadFrame={playback.playheadFrame}
-                selectedClipId={selectionState.selection?.clipId ?? null}
-                onZoomChange={setZoom}
-                onSeek={playback.seekToFrame}
-                onClearSelection={selectionState.clearSelection}
-                onSelectClip={(trackKind, trackId, clip) =>
-                  selectionState.selectClip({
-                    trackKind,
-                    trackId,
-                    clipId: clip.clip_id,
-                  })
-                }
-                onTrimClip={handleTrimClip}
-              />
+              >
+                Save
+              </button>
             </div>
           </div>
-
-          <PropertyPanel
-            clip={selectedClip}
-            fps={fps}
-            onUpdateAudioNumber={handleUpdateAudioNumber}
-            onUpdateAudioBoolean={handleUpdateAudioBoolean}
-          />
-        </main>
-
-        <footer className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[rgba(8,12,24,0.8)] px-4 py-3 text-sm text-slate-400">
-          <div className="flex flex-wrap items-center gap-4">
-            <span>Status: {timelineState.status}</span>
-            <span>Duration: {durationTimecode}</span>
-            <span>
-              {timeline?.sequence.width ?? 1920}×{timeline?.sequence.height ?? 1080}
-            </span>
-            <span>{fps.toFixed(2).replace('.00', '')}fps</span>
-            <span>Visible tracks: {lanes.length}</span>
-            {hiddenTrackCount > 0 ? <span>Hidden tracks: {hiddenTrackCount}</span> : null}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-4">
-            {timelineState.lastSavedAt ? (
-              <span className="font-mono text-xs text-slate-500">
-                Last save {timelineState.lastSavedAt}
-              </span>
-            ) : null}
-            <span
-              className={
-                timelineState.dirty ? 'text-amber-300' : 'text-emerald-300'
-              }
-            >
-              {timelineState.dirty ? 'Unsaved changes' : 'Synced'}
-            </span>
-          </div>
-        </footer>
-
-        <div className="rounded-2xl border border-white/8 bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
-          {primaryStatus}
         </div>
-      </div>
+      </header>
+
+      <main className="min-h-0 flex-1 overflow-hidden">
+        <div
+          className="grid h-full min-h-0 overflow-hidden"
+          style={{
+            gridTemplateColumns: 'minmax(0, 1fr) 320px',
+            gridTemplateRows: 'minmax(0, 2fr) minmax(0, 3fr)',
+          }}
+        >
+          <section className="flex min-h-0 flex-col overflow-hidden border-r border-white/[0.06]">
+            <PreviewPlayer
+              videoRef={playback.videoRef}
+              previewUrl={playback.previewUrl}
+              previewMode={playback.previewMode}
+              renderStatus={playback.renderStatus}
+              isPlaying={playback.isPlaying}
+              error={playback.error}
+              onTimeUpdate={playback.handleVideoTimeUpdate}
+              onLoadedMetadata={playback.handleVideoLoadedMetadata}
+              onEnded={playback.handleVideoEnded}
+            />
+            <TransportBar
+              isPlaying={playback.isPlaying}
+              timecode={transportTimecode}
+              currentFrame={playback.playheadFrame}
+              previewMode={playback.previewMode}
+              renderStatus={playback.renderStatus}
+              onTogglePlayback={() => {
+                void playback.togglePlayback();
+              }}
+              onRenderPreview={() => {
+                void handleRenderPreview();
+              }}
+            />
+          </section>
+
+          <section className="min-h-0 overflow-hidden">
+            <PropertyPanel
+              clip={selectedClip}
+              fps={fps}
+              onUpdateAudioNumber={handleUpdateAudioNumber}
+              onUpdateAudioBoolean={handleUpdateAudioBoolean}
+            />
+          </section>
+
+          <section className="col-span-2 flex min-h-0 flex-col overflow-hidden border-t border-white/[0.06]">
+            <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-3 py-1.5">
+              <h2 className="text-[13px] font-semibold text-white">Assembly Dock</h2>
+              <span className="font-mono text-[10px] text-[color:var(--text-subtle)]">
+                {lanes.length}T{hiddenTrackCount > 0 ? ` +${hiddenTrackCount}h` : ''} · {timeline?.markers?.length ?? 0}M
+              </span>
+
+              <div className="flex-1" />
+
+              <label className="flex items-center gap-2">
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-subtle)]">
+                  Zoom
+                </span>
+                <input
+                  className="range-input w-24"
+                  type="range"
+                  min={MIN_ZOOM}
+                  max={MAX_ZOOM}
+                  step={0.25}
+                  value={zoom}
+                  onChange={(event) => setZoom(Number(event.target.value))}
+                />
+                <span className="font-mono text-[10px] tabular-nums text-neutral-300">
+                  {zoomLabel}
+                </span>
+              </label>
+            </div>
+
+            <div className="min-h-0 flex-1">
+              <Timeline
+                  lanes={lanes}
+                  markers={timeline?.markers ?? []}
+                  fps={fps}
+                  totalFrames={totalFrames}
+                  zoom={zoom}
+                  playheadFrame={playback.playheadFrame}
+                  selectedClipId={selectionState.selection?.clipId ?? null}
+                  onZoomChange={setZoom}
+                  onSeek={playback.seekToFrame}
+                  onClearSelection={selectionState.clearSelection}
+                  onSelectClip={(trackKind, trackId, clip) =>
+                    selectionState.selectClip({
+                      trackKind,
+                      trackId,
+                      clipId: clip.clip_id,
+                    })
+                  }
+                  onTrimClip={handleTrimClip}
+                />
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <footer className="flex h-8 shrink-0 items-center justify-between border-t border-white/[0.06] px-4 font-mono text-[11px] text-[color:var(--text-muted)]">
+        <div className="flex items-center gap-4">
+          <span className="uppercase tracking-[0.22em] text-[color:var(--text-subtle)]">
+            {timelineState.status}
+          </span>
+          <span>{resolutionLabel}</span>
+          <span>{fpsLabel}</span>
+          <span>{durationTimecode}</span>
+          <span>{lanes.length} tracks</span>
+          {issueCount > 0 ? (
+            <span className="text-[color:var(--warning)]">{issueCount} validation issues</span>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-4">
+          {timelineState.lastSavedAt ? <span>Saved {timelineState.lastSavedAt}</span> : null}
+          <span className={timelineState.dirty ? 'text-[color:var(--warning)]' : 'text-[color:var(--success)]'}>
+            {timelineState.dirty ? 'Unsaved' : 'Synced'}
+          </span>
+        </div>
+      </footer>
+
+      {timelineState.error || playback.error ? (
+        <div className="shrink-0 border-t border-red-400/20 px-4 py-2 text-[12px] text-[color:var(--danger)]">
+          {timelineState.error ?? playback.error}
+        </div>
+      ) : null}
     </div>
   );
 }

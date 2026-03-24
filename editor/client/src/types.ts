@@ -160,7 +160,7 @@ export interface SelectionState {
 }
 
 export interface EditorLane {
-  laneId: 'V1' | 'A1' | 'A2';
+  laneId: string;
   label: string;
   trackKind: 'video' | 'audio';
   trackId: string | null;

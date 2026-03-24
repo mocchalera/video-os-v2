@@ -221,6 +221,12 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
 
 export const mockProjects: ProjectSummary[] = [
   {
+    id: 'demo',
+    name: 'demo',
+    hasTimeline: true,
+    path: 'projects/demo',
+  },
+  {
     id: 'sample',
     name: 'sample',
     hasTimeline: true,

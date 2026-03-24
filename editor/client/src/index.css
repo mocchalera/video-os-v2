@@ -7,17 +7,23 @@
 
 :root {
   color-scheme: dark;
-  --editor-bg: #1a1a2e;
-  --panel-bg: rgba(22, 33, 62, 0.92);
-  --panel-muted: rgba(15, 52, 96, 0.7);
-  --track-bg: rgba(15, 52, 96, 0.4);
-  --track-alt-bg: rgba(13, 41, 75, 0.75);
-  --border-strong: rgba(133, 155, 196, 0.28);
-  --border-soft: rgba(133, 155, 196, 0.14);
-  --text-main: #e6edf7;
-  --text-muted: #8d9dbc;
-  --accent: #57a4ff;
-  --danger: #ff4444;
+  --editor-bg: #0d1117;
+  --chrome-bg: #0d1117;
+  --panel-bg: #0d1117;
+  --panel-bg-elevated: #0d1117;
+  --panel-muted: #181d26;
+  --track-bg: #111825;
+  --track-alt-bg: #0d131d;
+  --border-strong: rgba(148, 163, 184, 0.18);
+  --border-soft: rgba(148, 163, 184, 0.08);
+  --text-main: #e5e7eb;
+  --text-muted: #9aa4b2;
+  --text-subtle: #64748b;
+  --accent: #6aa8ff;
+  --accent-strong: #3b82f6;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
 }
 
 * {
@@ -32,14 +38,11 @@ body,
 
 body {
   margin: 0;
-  min-width: 1024px;
+  min-width: 1120px;
   min-height: 100vh;
   font-family: var(--font-sans);
   color: var(--text-main);
-  background:
-    radial-gradient(circle at top left, rgba(87, 164, 255, 0.18), transparent 24%),
-    radial-gradient(circle at top right, rgba(255, 68, 68, 0.08), transparent 20%),
-    linear-gradient(180deg, #131728 0%, #0f1220 100%);
+  background: var(--editor-bg);
 }
 
 button,
@@ -50,16 +53,17 @@ select {
 
 #root {
   min-height: 100vh;
+  isolation: isolate;
 }
 
 .editor-scrollbar {
-  scrollbar-color: rgba(120, 146, 194, 0.55) transparent;
+  scrollbar-color: rgba(148, 163, 184, 0.32) transparent;
   scrollbar-width: thin;
 }
 
 .editor-scrollbar::-webkit-scrollbar {
-  height: 10px;
-  width: 10px;
+  height: 8px;
+  width: 8px;
 }
 
 .editor-scrollbar::-webkit-scrollbar-track {
@@ -68,9 +72,43 @@ select {
 
 .editor-scrollbar::-webkit-scrollbar-thumb {
   border-radius: 9999px;
-  background: rgba(120, 146, 194, 0.45);
+  background: rgba(148, 163, 184, 0.26);
 }
 
+.editor-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.42);
+}
+
+/* FCP-style thin range slider */
 .range-input {
-  accent-color: #57a4ff;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: rgba(148, 163, 184, 0.22);
+  border-radius: 2px;
+  outline: none;
+}
+
+.range-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.range-input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.range-input:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px rgba(106, 168, 255, 0.28);
 }

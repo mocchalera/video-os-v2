@@ -199,13 +199,25 @@ export function useTimeline() {
 
       setProjects(nextProjects);
       setConnectionMode('api');
-      setProjectIdState((current) => current || storedProjectId || nextProjects[0]?.id || '');
+
+      const validStoredId =
+        storedProjectId && nextProjects.some((p) => p.id === storedProjectId)
+          ? storedProjectId
+          : '';
+      const defaultId =
+        nextProjects.find((p) => p.id === 'demo')?.id ?? nextProjects[0]?.id ?? '';
+      setProjectIdState((current) => current || validStoredId || defaultId);
     } catch {
       setProjects(mockProjects);
       setConnectionMode('mock');
-      setProjectIdState(
-        (current) => current || storedProjectId || mockProjects[0]?.id || '',
-      );
+
+      const validStoredId =
+        storedProjectId && mockProjects.some((p) => p.id === storedProjectId)
+          ? storedProjectId
+          : '';
+      const defaultId =
+        mockProjects.find((p) => p.id === 'demo')?.id ?? mockProjects[0]?.id ?? '';
+      setProjectIdState((current) => current || validStoredId || defaultId);
     }
   }
 

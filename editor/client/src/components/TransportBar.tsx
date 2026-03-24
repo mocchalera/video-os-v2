@@ -8,6 +8,18 @@ interface TransportBarProps {
   onRenderPreview: () => void;
 }
 
+function chromeLabel(previewMode: 'none' | 'api' | 'mock'): string {
+  if (previewMode === 'api') {
+    return 'Backend';
+  }
+
+  if (previewMode === 'mock') {
+    return 'Local';
+  }
+
+  return 'Detached';
+}
+
 export default function TransportBar({
   isPlaying,
   timecode,
@@ -18,40 +30,41 @@ export default function TransportBar({
   onRenderPreview,
 }: TransportBarProps) {
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[rgba(10,16,30,0.82)] px-4 py-3">
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          className="rounded-xl bg-[#57a4ff] px-4 py-2 text-sm font-semibold text-slate-950 transition hover:brightness-110"
-          onClick={onTogglePlayback}
-        >
-          {isPlaying ? 'Stop' : 'Play'}
-        </button>
+    <div className="flex shrink-0 items-center gap-3 border-t border-white/[0.06] px-3 py-1.5">
+      <button
+        type="button"
+        className="flex h-6 w-6 items-center justify-center bg-white/[0.06] text-[11px] text-white transition hover:bg-white/[0.12]"
+        onClick={onTogglePlayback}
+        title={isPlaying ? 'Stop (Space)' : 'Play (Space)'}
+      >
+        {isPlaying ? '\u25A0' : '\u25B6'}
+      </button>
 
-        <button
-          type="button"
-          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-white/10"
-          onClick={onRenderPreview}
-        >
-          Render Preview
-        </button>
-      </div>
+      <span className="font-mono text-[15px] font-semibold tabular-nums tracking-[0.06em] text-white">
+        {timecode}
+      </span>
 
-      <div className="flex items-center gap-4 text-right">
-        <div>
-          <div className="font-mono text-lg font-semibold text-slate-50">{timecode}</div>
-          <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-slate-500">
-            frame {currentFrame}
-          </div>
-        </div>
+      <span className="font-mono text-[10px] tabular-nums text-[color:var(--text-muted)]">
+        {currentFrame}f
+      </span>
 
-        <div className="text-xs text-slate-400">
-          <div>{previewMode === 'api' ? 'Backend preview linked' : 'Local transport mode'}</div>
-          <div className="font-mono uppercase tracking-[0.18em] text-slate-500">
-            {renderStatus}
-          </div>
-        </div>
-      </div>
+      <div className="flex-1" />
+
+      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-subtle)]">
+        {chromeLabel(previewMode)}
+      </span>
+      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-subtle)]">
+        {renderStatus}
+      </span>
+
+      <button
+        type="button"
+        className="border border-white/[0.06] bg-transparent px-2.5 py-1 text-[11px] font-medium text-neutral-200 transition hover:bg-white/[0.06]"
+        onClick={onRenderPreview}
+        title="Render Preview (Ctrl+Enter)"
+      >
+        Render
+      </button>
     </div>
   );
 }
