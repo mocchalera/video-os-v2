@@ -425,6 +425,7 @@ export interface TimelineTransitionOutput {
   to_clip_id: string;
   track_id: string;
   transition_type: string;
+  transition_frames?: number;
   transition_params?: Record<string, unknown>;
   applied_skill_id?: string;
   degraded_from_skill_id?: string | null;

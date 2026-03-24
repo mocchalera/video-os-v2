@@ -11,7 +11,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import type { TimelineIR, ClipOutput, TrackOutput } from "../runtime/compiler/types.js";
+import type {
+  TimelineIR,
+  ClipOutput,
+  TimelineTransitionOutput,
+} from "../runtime/compiler/types.js";
 import { timelineToFcp7Xml } from "../runtime/handoff/fcp7-xml-export.js";
 import {
   parseFcp7Xml,
@@ -46,6 +50,7 @@ function makeClip(overrides: Partial<ClipOutput> = {}): ClipOutput {
 function makeTimeline(
   videoClips: ClipOutput[][],
   audioClips: ClipOutput[][] = [],
+  transitions?: TimelineTransitionOutput[],
 ): TimelineIR {
   return {
     version: "1.0.0",
@@ -73,6 +78,7 @@ function makeTimeline(
       })),
     },
     markers: [],
+    ...(transitions ? { transitions } : {}),
     provenance: {
       brief_path: "test/brief.yaml",
       blueprint_path: "test/blueprint.yaml",
@@ -260,6 +266,95 @@ describe("roundtrip: export then import", () => {
     expect(report.diffs).toHaveLength(0);
     expect(report.mappedClips).toBe(1);
     expect(report.unmappedClips).toBe(0);
+  });
+
+  it("restores visible editorial marker values on import", () => {
+    const clip = makeClip({
+      clip_id: "clip-marker",
+      beat_id: "beat-a",
+      motivation: "Original motivation",
+      role: "support",
+      confidence: 0.81,
+      timeline_in_frame: 48,
+    });
+    const timeline = makeTimeline([[clip]]);
+    const sourceMap = new Map([["AST_001", "/media/test.mov"]]);
+
+    let xml = timelineToFcp7Xml(timeline, { sourceMap });
+    xml = xml.replace(
+      "<name>beat-a: Original motivation</name>",
+      "<name>beat-b: Updated motivation from marker</name>",
+    );
+    xml = xml.replace(
+      "<comment>support | confidence: 0.81</comment>",
+      "<comment>hero | confidence: 0.42</comment>",
+    );
+
+    const parsed = parseFcp7Sequence(xml);
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    const importedClip = imported.tracks.video[0].clips[0];
+
+    expect(importedClip.beat_id).toBe("beat-b");
+    expect(importedClip.motivation).toBe("Updated motivation from marker");
+    expect(importedClip.role).toBe("support");
+    expect(importedClip.confidence).toBe(0.81);
+  });
+
+  it("roundtrips transitionitem back into timeline transitions", () => {
+    const clip1 = makeClip({
+      clip_id: "clip-alpha",
+      asset_id: "AST_A",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 72,
+    });
+    const clip2 = makeClip({
+      clip_id: "clip-beta",
+      asset_id: "AST_B",
+      timeline_in_frame: 72,
+      timeline_duration_frames: 60,
+    });
+    const timeline = makeTimeline(
+      [[clip1, clip2]],
+      [],
+      [
+        {
+          transition_id: "tr-1",
+          from_clip_id: "clip-alpha",
+          to_clip_id: "clip-beta",
+          track_id: "V1",
+          transition_type: "match_cut",
+          applied_skill_id: "match_cut_bridge",
+          transition_frames: 12,
+          transition_params: {
+            cut_frame_after_snap: 72,
+            snap_delta_frames: 0,
+          },
+        },
+      ],
+    );
+    const sourceMap = new Map<string, string>([
+      ["AST_A", "/media/a.mov"],
+      ["AST_B", "/media/b.mov"],
+    ]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+    expect(xml).toContain("<transitionitem>");
+
+    const parsed = parseFcp7Sequence(xml);
+    expect(parsed.videoTransitions[0]).toHaveLength(1);
+    expect(parsed.videoTransitions[0][0].effectName).toBe("Dip to Color");
+
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    expect(imported.transitions).toHaveLength(1);
+    expect(imported.transitions![0]).toMatchObject({
+      transition_id: "tr-1",
+      from_clip_id: "clip-alpha",
+      to_clip_id: "clip-beta",
+      track_id: "V1",
+      transition_type: "match_cut",
+      applied_skill_id: "match_cut_bridge",
+      transition_frames: 12,
+    });
   });
 });
 
@@ -579,7 +674,7 @@ describe("Japanese path roundtrip", () => {
 // ── 7. Audio track roundtrip ─────────────────────────────────────────
 
 describe("audio track roundtrip", () => {
-  it("preserves audio clips with duck level", () => {
+  it("preserves audio clips with duck level (via linear gain conversion)", () => {
     const audioClip = makeClip({
       clip_id: "audio-1",
       asset_id: "AST_MUSIC",
@@ -593,13 +688,91 @@ describe("audio track roundtrip", () => {
 
     const xml = timelineToFcp7Xml(timeline, { sourceMap });
     expect(xml).toContain("audiolevels");
-    expect(xml).toContain("-12");
+    expect(xml).toContain("<valuemin>0</valuemin>");
+    expect(xml).toContain("<valuemax>4</valuemax>");
 
     const parsed = parseFcp7Sequence(xml);
     expect(parsed.audioTracks).toHaveLength(1);
     expect(parsed.audioTracks[0]).toHaveLength(1);
-    expect(parsed.audioTracks[0][0].audioLevelDb).toBe(-12);
+    // New format: linear gain is parsed
+    expect(parsed.audioTracks[0][0].audioGainLinear).toBeCloseTo(0.251189, 3);
     expect(parsed.audioTracks[0][0].videoOsMeta!.clip_id).toBe("audio-1");
+
+    // Full roundtrip to TimelineIR: duck_music_db becomes bgm_gain
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    const importedClip = imported.tracks.audio[0].clips[0];
+    expect(importedClip.audio_policy?.bgm_gain).toBeCloseTo(-12, 1);
+  });
+
+  it("preserves audio clips with bgm_gain", () => {
+    const audioClip = makeClip({
+      clip_id: "audio-bgm",
+      asset_id: "AST_MUSIC",
+      role: "music",
+      motivation: "BGM",
+      beat_id: "beat-bgm",
+      audio_policy: { bgm_gain: -6 },
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    const sourceMap = new Map([["AST_MUSIC", "/media/bgm.wav"]]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+    const parsed = parseFcp7Sequence(xml);
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    const importedClip = imported.tracks.audio[0].clips[0];
+    expect(importedClip.audio_policy?.bgm_gain).toBeCloseTo(-6, 1);
+  });
+
+  it("preserves nat_sound_gain through roundtrip", () => {
+    const audioClip = makeClip({
+      clip_id: "audio-nat",
+      asset_id: "AST_NAT",
+      role: "nat_sound",
+      motivation: "Natural sound",
+      beat_id: "beat-nat",
+      audio_policy: { nat_sound_gain: -9 },
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    const sourceMap = new Map([["AST_NAT", "/media/nat.wav"]]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+    const parsed = parseFcp7Sequence(xml);
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    const importedClip = imported.tracks.audio[0].clips[0];
+    expect(importedClip.audio_policy?.nat_sound_gain).toBeCloseTo(-9, 1);
+  });
+
+  it("preserves fade keyframes through roundtrip", () => {
+    const audioClip = makeClip({
+      clip_id: "audio-fade",
+      asset_id: "AST_BGM",
+      role: "music",
+      motivation: "BGM with fades",
+      beat_id: "beat-bgm",
+      timeline_duration_frames: 240,
+      audio_policy: {
+        bgm_gain: -6,
+        bgm_fade_in_frames: 24,
+        bgm_fade_out_frames: 48,
+      },
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    const sourceMap = new Map([["AST_BGM", "/media/bgm.wav"]]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+    const parsed = parseFcp7Sequence(xml);
+
+    // Check parsed fade values
+    expect(parsed.audioTracks[0][0].fadeInFrames).toBe(24);
+    expect(parsed.audioTracks[0][0].fadeOutFrames).toBe(48);
+    expect(parsed.audioTracks[0][0].audioGainLinear).toBeCloseTo(0.501187, 3);
+
+    // Full roundtrip
+    const imported = parsedSequenceToTimelineIR(parsed, timeline);
+    const importedClip = imported.tracks.audio[0].clips[0];
+    expect(importedClip.audio_policy?.bgm_gain).toBeCloseTo(-6, 1);
+    expect(importedClip.audio_policy?.bgm_fade_in_frames).toBe(24);
+    expect(importedClip.audio_policy?.bgm_fade_out_frames).toBe(48);
   });
 });
 
@@ -683,7 +856,7 @@ describe("XML comment and PI resilience", () => {
       asset_id: "AST_BGM",
       role: "music",
       beat_id: "beat-bgm",
-      audio_policy: { duck_music_db: -6 },
+      audio_policy: { bgm_gain: -6 },
     });
     const timeline = makeTimeline([[clip1, clip2]], [[audioClip]]);
     const sourceMap = new Map([
@@ -713,7 +886,7 @@ describe("XML comment and PI resilience", () => {
 // ── 9. Non-ASCII path + audio metadata fixture ──────────────────────
 
 describe("non-ASCII path and audio metadata fixtures", () => {
-  it("roundtrips CJK file paths with audio duck levels", () => {
+  it("roundtrips CJK file paths with audio gain levels", () => {
     const videoClip = makeClip({
       clip_id: "cjk-video",
       asset_id: "AST_CJK_VID",
@@ -727,7 +900,7 @@ describe("non-ASCII path and audio metadata fixtures", () => {
       role: "music",
       motivation: "背景音楽",
       beat_id: "beat-bgm",
-      audio_policy: { duck_music_db: -9 },
+      audio_policy: { bgm_gain: -9 },
     });
     const timeline = makeTimeline([[videoClip]], [[audioClip]]);
 
@@ -749,7 +922,7 @@ describe("non-ASCII path and audio metadata fixtures", () => {
     // Audio metadata present
     expect(xml).toContain("<samplerate>44100</samplerate>");
     expect(xml).toContain("<depth>24</depth>");
-    expect(xml).toContain("-9");
+    expect(xml).toContain("<effectid>audiolevels</effectid>");
 
     // Parse back
     const parsed = parseFcp7Sequence(xml);
@@ -759,7 +932,7 @@ describe("non-ASCII path and audio metadata fixtures", () => {
     );
 
     expect(parsed.audioTracks[0][0].videoOsMeta!.clip_id).toBe("cjk-audio");
-    expect(parsed.audioTracks[0][0].audioLevelDb).toBe(-9);
+    expect(parsed.audioTracks[0][0].audioGainLinear).toBeCloseTo(0.354813, 3);
 
     // Full roundtrip to TimelineIR
     const imported = parsedSequenceToTimelineIR(parsed, timeline);
@@ -769,7 +942,7 @@ describe("non-ASCII path and audio metadata fixtures", () => {
 
     const importedAudio = imported.tracks.audio[0].clips[0];
     expect(importedAudio.clip_id).toBe("cjk-audio");
-    expect(importedAudio.audio_policy?.duck_music_db).toBe(-9);
+    expect(importedAudio.audio_policy?.bgm_gain).toBeCloseTo(-9, 1);
 
     // No diffs
     const report = detectDiffs(parsed, timeline);
@@ -799,7 +972,7 @@ describe("non-ASCII path and audio metadata fixtures", () => {
       asset_id: "AST_AUDIO_HD",
       role: "music",
       beat_id: "beat-hd",
-      audio_policy: { duck_music_db: -3 },
+      audio_policy: { bgm_gain: -3 },
     });
     const timeline = makeTimeline([], [[audioClip]]);
     const sourceMap = new Map([
@@ -817,11 +990,12 @@ describe("non-ASCII path and audio metadata fixtures", () => {
 
     // Parse and roundtrip
     const parsed = parseFcp7Sequence(xml);
-    expect(parsed.audioTracks[0][0].audioLevelDb).toBe(-3);
+    expect(parsed.audioTracks[0][0].audioGainLinear).toBeCloseTo(0.70795, 3);
 
     const imported = parsedSequenceToTimelineIR(parsed, timeline);
-    expect(imported.tracks.audio[0].clips[0].audio_policy?.duck_music_db).toBe(
+    expect(imported.tracks.audio[0].clips[0].audio_policy?.bgm_gain).toBeCloseTo(
       -3,
+      1,
     );
   });
 });

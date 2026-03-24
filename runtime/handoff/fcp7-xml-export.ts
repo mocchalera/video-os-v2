@@ -19,8 +19,10 @@ import type {
   TimelineIR,
   TrackOutput,
   ClipOutput,
-  MarkerOutput,
+  TimelineTransitionOutput,
 } from "../compiler/types.js";
+
+const DEFAULT_TRANSITION_FRAMES = 15;
 
 // ── Public API ────────────────────────────────────────────────────
 
@@ -90,6 +92,19 @@ export function timelineToFcp7Xml(
 ): string {
   const ctx = new ExportContext(timeline, options);
   return ctx.build();
+}
+
+// ── Audio Gain Helpers ────────────────────────────────────────────
+
+/** Convert a dB value to linear gain: gain = 10^(dB/20) */
+export function dbToLinearGain(db: number): number {
+  return Math.pow(10, db / 20);
+}
+
+/** Convert linear gain to dB: dB = 20 * log10(gain). Returns -Infinity for gain <= 0. */
+export function linearGainToDb(gain: number): number {
+  if (gain <= 0) return -Infinity;
+  return 20 * Math.log10(gain);
 }
 
 // ── Internal Implementation ───────────────────────────────────────
@@ -384,6 +399,15 @@ class ExportContext {
     depth: number,
     clip: ClipOutput,
   ): void {
+    this.appendRoundtripMarker(lines, depth, clip);
+    this.appendEditorialMarker(lines, depth, clip);
+  }
+
+  private appendRoundtripMarker(
+    lines: string[],
+    depth: number,
+    clip: ClipOutput,
+  ): void {
     const d = this.indent(depth);
 
     // Derive exchange_clip_id for roundtrip identification
@@ -413,17 +437,136 @@ class ExportContext {
     lines.push(`${d}</marker>`);
   }
 
+  private appendEditorialMarker(
+    lines: string[],
+    depth: number,
+    clip: ClipOutput,
+  ): void {
+    const d = this.indent(depth);
+    lines.push(`${d}<marker>`);
+    lines.push(
+      `${d}  <name>${this.escXml(`${clip.beat_id}: ${clip.motivation}`)}</name>`,
+    );
+    lines.push(
+      `${d}  <comment>${this.escXml(`${clip.role} | confidence: ${clip.confidence}`)}</comment>`,
+    );
+    lines.push(`${d}  <in>${clip.timeline_in_frame}</in>`);
+    lines.push(`${d}  <out>${clip.timeline_in_frame + 1}</out>`);
+    lines.push(`${d}</marker>`);
+  }
+
+  private getTrackTransitions(trackId: string): TimelineTransitionOutput[] {
+    return (this.timeline.transitions ?? []).filter(
+      (transition) => transition.track_id === trackId,
+    );
+  }
+
+  private resolveTransitionFrames(transition: TimelineTransitionOutput): number {
+    if (
+      typeof transition.transition_frames === "number" &&
+      transition.transition_frames > 0
+    ) {
+      return Math.round(transition.transition_frames);
+    }
+
+    const paramFrames = transition.transition_params?.transition_frames;
+    if (typeof paramFrames === "number" && paramFrames > 0) {
+      return Math.round(paramFrames);
+    }
+
+    const crossfadeSec = transition.transition_params?.crossfade_sec;
+    if (typeof crossfadeSec === "number" && crossfadeSec > 0) {
+      return Math.max(1, Math.round(crossfadeSec * this.fps));
+    }
+
+    return DEFAULT_TRANSITION_FRAMES;
+  }
+
+  private resolveTransitionEffect(
+    transition: TimelineTransitionOutput,
+  ): { name: string; effectId: string } | null {
+    const skillId =
+      transition.applied_skill_id ?? transition.degraded_from_skill_id ?? "";
+
+    switch (skillId) {
+      case "crossfade_bridge":
+      case "silence_beat":
+      case "build_to_peak":
+      case "fallback.crossfade":
+        return { name: "Cross Dissolve", effectId: "CrossDissolve" };
+      case "match_cut_bridge":
+        return { name: "Dip to Color", effectId: "DipToColor" };
+      case "smash_cut_energy":
+      case "fallback.hard_cut":
+        return null;
+      default:
+        break;
+    }
+
+    switch (transition.transition_type) {
+      case "crossfade":
+      case "fade_to_black":
+        return { name: "Cross Dissolve", effectId: "CrossDissolve" };
+      case "match_cut":
+        return { name: "Dip to Color", effectId: "DipToColor" };
+      default:
+        return null;
+    }
+  }
+
+  private appendTransitionItem(
+    lines: string[],
+    depth: number,
+    transition: TimelineTransitionOutput,
+    fromClip: ClipOutput,
+    toClip: ClipOutput,
+  ): void {
+    const effect = this.resolveTransitionEffect(transition);
+    if (!effect) return;
+
+    const d = this.indent(depth);
+    const transitionFrames = this.resolveTransitionFrames(transition);
+    const cutFrame =
+      typeof transition.transition_params?.cut_frame_after_snap === "number"
+        ? transition.transition_params.cut_frame_after_snap
+        : toClip.timeline_in_frame;
+    const startFrame = Math.max(
+      0,
+      cutFrame - Math.floor(transitionFrames / 2),
+    );
+    const endFrame = startFrame + transitionFrames;
+
+    lines.push(`${d}<transitionitem>`);
+    lines.push(`${d}  <start>${startFrame}</start>`);
+    lines.push(`${d}  <end>${endFrame}</end>`);
+    lines.push(`${d}  <alignment>center</alignment>`);
+    lines.push(`${d}  <effect>`);
+    lines.push(`${d}    <name>${effect.name}</name>`);
+    lines.push(`${d}    <effectid>${effect.effectId}</effectid>`);
+    lines.push(`${d}    <effecttype>transition</effecttype>`);
+    lines.push(`${d}    <mediatype>video</mediatype>`);
+    lines.push(`${d}  </effect>`);
+    lines.push(`${d}</transitionitem>`);
+  }
+
   private appendVideoTrack(
     lines: string[],
     track: TrackOutput,
     depth: number,
   ): void {
     const d = this.indent(depth);
+    const trackTransitions = new Map(
+      this.getTrackTransitions(track.track_id).map((transition) => [
+        transition.from_clip_id,
+        transition,
+      ]),
+    );
+
     lines.push(`${d}<track>`);
     lines.push(`${d}  <enabled>TRUE</enabled>`);
     lines.push(`${d}  <locked>FALSE</locked>`);
 
-    for (const clip of track.clips) {
+    for (const [index, clip] of track.clips.entries()) {
       const clipId = this.toAsciiId("cv", clip.clip_id);
       const fileId = this.getFileId(clip.asset_id);
       const alreadyDefined = this.isFileDefined(clip.asset_id);
@@ -462,6 +605,12 @@ class ExportContext {
 
       this.appendClipMarkers(lines, depth + 4, clip);
       lines.push(`${d}  </clipitem>`);
+
+      const nextClip = track.clips[index + 1];
+      const transition = trackTransitions.get(clip.clip_id);
+      if (transition && nextClip && transition.to_clip_id === nextClip.clip_id) {
+        this.appendTransitionItem(lines, depth + 2, transition, clip, nextClip);
+      }
     }
 
     lines.push(`${d}</track>`);
@@ -512,29 +661,114 @@ class ExportContext {
         lines.push(`${d}    <file id="${fileId}"/>`);
       }
 
-      // Audio level from metadata
-      const audioPolicy = clip.audio_policy;
-      if (audioPolicy?.duck_music_db !== undefined) {
-        lines.push(`${d}    <filter>`);
-        lines.push(`${d}      <effect>`);
-        lines.push(`${d}        <name>Audio Levels</name>`);
-        lines.push(`${d}        <effectid>audiolevels</effectid>`);
-        lines.push(`${d}        <parameter>`);
-        lines.push(`${d}          <name>Level</name>`);
-        lines.push(`${d}          <parameterid>level</parameterid>`);
-        lines.push(
-          `${d}          <value>${audioPolicy.duck_music_db}</value>`,
-        );
-        lines.push(`${d}        </parameter>`);
-        lines.push(`${d}      </effect>`);
-        lines.push(`${d}    </filter>`);
-      }
+      // Audio level filter (gain + optional fade keyframes)
+      this.appendAudioLevelFilter(lines, depth + 4, clip);
 
       this.appendClipMarkers(lines, depth + 4, clip);
       lines.push(`${d}  </clipitem>`);
     }
 
     lines.push(`${d}</track>`);
+  }
+
+  // ── Audio Level Filter ──
+
+  /**
+   * Emit an Audio Levels filter for an audio clip.
+   * Resolves the gain dB from audio_policy based on clip role,
+   * converts to linear gain (10^(dB/20)), and optionally adds
+   * fade-in / fade-out keyframes.
+   */
+  private appendAudioLevelFilter(
+    lines: string[],
+    depth: number,
+    clip: ClipOutput,
+  ): void {
+    const ap = clip.audio_policy;
+    if (!ap) return;
+
+    const isBgm = clip.role === "bgm" || clip.role === "music";
+
+    // Resolve gain dB: most specific field first
+    const gainDb: number | undefined = isBgm
+      ? (ap.bgm_gain ?? ap.duck_music_db)
+      : (ap.nat_sound_gain ?? ap.nat_gain ?? ap.duck_music_db);
+
+    // Resolve fade frames
+    const fadeInFrames: number | undefined = isBgm
+      ? (ap.bgm_fade_in_frames ?? ap.fade_in_frames)
+      : (ap.nat_sound_fade_in_frames ?? ap.fade_in_frames);
+
+    const fadeOutFrames: number | undefined = isBgm
+      ? (ap.bgm_fade_out_frames ?? ap.fade_out_frames)
+      : (ap.nat_sound_fade_out_frames ?? ap.fade_out_frames);
+
+    const hasGain = gainDb !== undefined;
+    const hasFadeIn = fadeInFrames !== undefined && fadeInFrames > 0;
+    const hasFadeOut = fadeOutFrames !== undefined && fadeOutFrames > 0;
+
+    // Nothing to emit
+    if (!hasGain && !hasFadeIn && !hasFadeOut) return;
+
+    const linearGain = hasGain ? dbToLinearGain(gainDb) : 1.0;
+    const d = this.indent(depth);
+
+    lines.push(`${d}<filter>`);
+    lines.push(`${d}  <effect>`);
+    lines.push(`${d}    <name>Audio Levels</name>`);
+    lines.push(`${d}    <effectid>audiolevels</effectid>`);
+    lines.push(`${d}    <parameter authoringApp="FinalCutPro">`);
+    lines.push(`${d}      <parameterid>level</parameterid>`);
+    lines.push(`${d}      <name>Level</name>`);
+    lines.push(`${d}      <valuemin>0</valuemin>`);
+    lines.push(`${d}      <valuemax>4</valuemax>`);
+
+    if (hasFadeIn || hasFadeOut) {
+      // Keyframe-based gain with fades
+      const clipDur = clip.timeline_duration_frames;
+
+      if (hasFadeIn) {
+        // 0 → gain over fadeInFrames
+        lines.push(`${d}      <keyframe>`);
+        lines.push(`${d}        <when>0</when>`);
+        lines.push(`${d}        <value>0</value>`);
+        lines.push(`${d}      </keyframe>`);
+        lines.push(`${d}      <keyframe>`);
+        lines.push(`${d}        <when>${fadeInFrames}</when>`);
+        lines.push(`${d}        <value>${linearGain}</value>`);
+        lines.push(`${d}      </keyframe>`);
+      }
+
+      if (hasFadeOut) {
+        const fadeOutStart = clipDur - fadeOutFrames!;
+        // If no fade in, emit a hold keyframe at the start
+        if (!hasFadeIn) {
+          lines.push(`${d}      <keyframe>`);
+          lines.push(`${d}        <when>0</when>`);
+          lines.push(`${d}        <value>${linearGain}</value>`);
+          lines.push(`${d}      </keyframe>`);
+        }
+        // Hold at gain until fade-out starts (if there's a gap)
+        if (fadeOutStart > (hasFadeIn ? fadeInFrames! : 0)) {
+          lines.push(`${d}      <keyframe>`);
+          lines.push(`${d}        <when>${fadeOutStart}</when>`);
+          lines.push(`${d}        <value>${linearGain}</value>`);
+          lines.push(`${d}      </keyframe>`);
+        }
+        // gain → 0 over fadeOutFrames
+        lines.push(`${d}      <keyframe>`);
+        lines.push(`${d}        <when>${clipDur}</when>`);
+        lines.push(`${d}        <value>0</value>`);
+        lines.push(`${d}      </keyframe>`);
+      }
+    } else {
+      // Static gain (no fades)
+      lines.push(`${d}      <value>${linearGain}</value>`);
+    }
+
+    lines.push(`${d}    </parameter>`);
+    lines.push(`${d}  </effect>`);
+    lines.push(`${d}</filter>`);
   }
 
   // ── Text Overlay Track ──

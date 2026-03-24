@@ -441,6 +441,10 @@
           "type": "string",
           "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
         },
+        "transition_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
         "transition_params": {
           "type": "object",
           "properties": {

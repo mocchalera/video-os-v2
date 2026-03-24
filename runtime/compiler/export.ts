@@ -68,6 +68,13 @@ export function buildTimelineIR(
           track_id: t.track_id,
           transition_type: t.transition_type,
         };
+        if (typeof t.transition_params?.crossfade_sec === "number") {
+          const fps = (opts.fpsNum ?? 24) / (opts.fpsDen ?? 1);
+          out.transition_frames = Math.max(
+            1,
+            Math.round(t.transition_params.crossfade_sec * fps),
+          );
+        }
         if (t.transition_params) out.transition_params = t.transition_params as Record<string, unknown>;
         if (t.applied_skill_id) out.applied_skill_id = t.applied_skill_id;
         if (t.degraded_from_skill_id !== undefined) out.degraded_from_skill_id = t.degraded_from_skill_id;
