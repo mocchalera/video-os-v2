@@ -71,6 +71,10 @@
     },
     "recommended_next_pass": {
       "$ref": "#/$defs/recommendedNextPass"
+    },
+    "preview_path": {
+      "type": "string",
+      "description": "Relative path to the preview MP4 generated during review preflight (null/absent if skipped or failed)."
     }
   },
   "$defs": {

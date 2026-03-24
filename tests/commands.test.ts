@@ -1919,7 +1919,7 @@ function createReviewReadyProject(
 
 describe("/review command", () => {
   describe("compile preflight", () => {
-    it("runs compile → preview stub → QC and emits deterministic preflight artifacts", async () => {
+    it("runs compile → preview (degraded) → QC and emits preflight artifacts", async () => {
       const tmpDir = createReviewReadyProject("compile-ok");
       const agent = createMockReviewAgent();
 
@@ -1932,11 +1932,31 @@ describe("/review command", () => {
       expect(result.preflight).toBeDefined();
       expect(result.compileResult!.outputPath).toContain("timeline.json");
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/timeline.json"))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, "05_timeline/review.mp4"))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/review-qc-summary.json"))).toBe(true);
+      // Preview steps: compile, preview (skipped due to no source files), qc
+      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc"]);
+      // No source files in test fixture → preview degrades gracefully
+      expect(result.preflight!.steps[1].status).toBe("skipped");
+      // Gap report contains overview and/or preview degradation messages
+      const gapJoined = result.preflight!.gapReport.join(" ");
+      expect(gapJoined).toContain("degraded");
+    });
+
+    it("skips preview with skipPreview option", async () => {
+      const tmpDir = createReviewReadyProject("compile-skip-preview");
+      const agent = createMockReviewAgent();
+
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+        skipPreview: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.preflight).toBeDefined();
       expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc"]);
       expect(result.preflight!.steps[1].status).toBe("skipped");
-      expect(result.preflight!.gapReport[0]).toContain("preview_render skipped");
+      expect(result.preflight!.steps[1].detail).toContain("--skip-preview");
+      expect(result.preflight!.gapReport[0]).toContain("skipped via --skip-preview");
     });
 
     it("fails when compile cannot run (missing blueprint)", async () => {

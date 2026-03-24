@@ -9,39 +9,37 @@ Two target projects: `rokutaro-bicycle` and `AX-1 D4887`.
 - [ ] `npm install` completed in repo root
 - [ ] `npx tsc --noEmit` passes (no type errors)
 - [ ] `npx vitest run` passes (all CI tests green)
+- [ ] `.env.local` prepared from `.env.example`
 - [ ] FFmpeg and FFprobe available on PATH
 - [ ] Target footage accessible at expected paths
 
 ## Per-Project Steps
 
-### 1. Ingest (M2 Pipeline)
+### 1. Bootstrap Project
 
 ```bash
-# Create project directory structure
-mkdir -p projects/<project-id>/{01_intent,02_source,03_analysis,04_plan,05_timeline,06_review,07_export}
+# Scaffold projects/<project-id>/ from projects/_template/
+# --source-dir creates projects/<project-id>/02_media/source -> /path/to/footage
+npx tsx scripts/init-project.ts <project-id> --source-dir /path/to/footage
+```
 
-# Copy source media to 02_source/
-cp /path/to/footage/*.mp4 projects/<project-id>/02_source/
+- [ ] `project_state.yaml` has correct `project_id`
+- [ ] `02_media/source` symlink points to the intended footage directory
 
+### 2. Ingest / Analyze (M2 Pipeline)
+
+```bash
 # Run M2 ingest pipeline (generates assets.json, segments.json, transcripts/)
-# NOTE: Requires live FFprobe, FFmpeg. STT/VLM require API keys.
-npx tsx scripts/analyze.ts projects/<project-id>
+# Narrow the glob if the source folder contains non-video files.
+npx tsx scripts/analyze.ts \
+  projects/<project-id>/02_media/source/* \
+  --project projects/<project-id>
 ```
 
 - [ ] `03_analysis/assets.json` generated and non-empty
 - [ ] `03_analysis/segments.json` generated with segments
 - [ ] Transcripts generated (if STT configured)
 - [ ] `qc_status` per asset reviewed
-
-### 2. Initialize Project State
-
-```bash
-# Create project_state.yaml (or copy from template)
-cp projects/_template/project_state.yaml projects/<project-id>/project_state.yaml
-# Edit project_id field
-```
-
-- [ ] `project_state.yaml` has correct `project_id`
 
 ### 3. /intent — Creative Brief
 
@@ -58,6 +56,7 @@ Run the intent interview interactively:
 
 ```bash
 # Check analysis gate status
+npx tsx scripts/status.ts projects/<project-id>
 ```
 
 - [ ] `analysis_gate: ready` — all analysis artifacts present

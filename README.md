@@ -33,7 +33,15 @@ Premiere Pro との FCP7 XML ラウンドトリップにも対応しており、
 npm install
 ```
 
-### 2. デモを実行
+### 2. 環境変数テンプレートを用意
+
+```bash
+cp .env.example .env.local
+```
+
+`.env.local` を編集して必要な API キーを設定してください。最低限、VLM を使う場合は `GEMINI_API_KEY`、Groq STT を使う場合は `GROQ_API_KEY` が必要です。
+
+### 3. デモを実行
 
 ```bash
 npm run demo
@@ -86,18 +94,40 @@ npm run demo
 ─────────────────────────────────────────────────
 ```
 
-### 3. 自分の素材を解析
+### 4. プロジェクトを初期化
 
 ```bash
-export GEMINI_API_KEY=your-gemini-key
-export GROQ_API_KEY=your-groq-key
+npx tsx scripts/init-project.ts my-project --source-dir /path/to/footage
+```
 
-npx tsx scripts/analyze.ts ./footage/*.mp4 \
+`projects/_template/` を元に `projects/my-project/` を作成し、`project_id` を埋めます。`--source-dir` を付けると `projects/my-project/02_media/source` に素材フォルダへのシンボリックリンクを作成します。
+
+### 5. 自分の素材を解析
+
+```bash
+npx tsx scripts/analyze.ts \
+  projects/my-project/02_media/source/* \
   --project projects/my-project \
   --content-hint "子どもの自転車練習"
 ```
 
+必要に応じて glob を `*.mp4` や `*.MOV` に狭めてください。`--source-dir` を使わずに初期化した場合は、`projects/my-project/02_media/source/*` を `/path/to/footage/*` に置き換えてください。
+
 `--content-hint` は VLM prompt に文脈情報を追加し、タグ付けや peak 検出の認識精度向上に使えます。
+
+## CLI EntryPoints
+
+公開サポートしている CLI は次の 7 本です。
+
+| Entry point | Purpose | Command |
+|-------------|---------|---------|
+| `init-project` | 新規プロジェクトの雛形作成 | `npx tsx scripts/init-project.ts <project-id> [--source-dir /path/to/footage]` |
+| `analyze` | 素材解析と `03_analysis/` 生成 | `npx tsx scripts/analyze.ts <source-files...> --project projects/<project-id>` |
+| `status` | Gate 状態と次アクション確認 | `npx tsx scripts/status.ts projects/<project-id>` |
+| `compile` | `timeline.json` と preview manifest 生成 | `npx tsx scripts/compile-timeline.ts projects/<project-id>` |
+| `preview` | preview clip / overview 生成 | `npx tsx scripts/preview-segment.ts projects/<project-id> [--beat <beat-name>]` |
+| `export-premiere` | Premiere 向け FCP7 XML 出力 | `npx tsx scripts/export-premiere-xml.ts projects/<project-id>` |
+| `import-premiere` | Premiere で編集した XML の差分読込 | `npx tsx scripts/import-premiere-xml.ts projects/<project-id> --xml edited.xml [--dry-run]` |
 
 ## 完全な E2E フロー
 
@@ -198,7 +228,7 @@ Creative Brief
 npm test
 ```
 
-2026-03-22 確認時点で `43` test files、`1450` tests がすべて通過しています。
+2026-03-24 確認時点で `57` test files、`1659` tests がすべて通過しています。
 
 ## 技術スタック
 
@@ -213,11 +243,11 @@ npm test
 
 ## 制限事項
 
-- 現状の公開 CLI は `demo`, `validate`, `build`, `scripts/analyze.ts`, `scripts/compile-timeline.ts`, Premiere XML import/export が中心です。
+- 公開 CLI は `init-project`, `analyze`, `status`, `compile`, `preview`, Premiere XML import/export が中心です。
 - `/intent` などの slash command は `runtime/commands/` の command contract として実装されており、専用アプリ UI はまだありません。
 - 高精度 analysis には `ffmpeg` 系ツールと API key、場合によっては Python / `opentimelineio` / `pyannote` が必要です。
 - Premiere UXP plugin は手動インストールと Premiere 上での手動確認が前提です。
 
 ## ライセンス
 
-未設定です。2026-03-22 時点でリポジトリに `LICENSE` ファイルは含まれていません。
+このリポジトリにはまだ `LICENSE` ファイルがありません。配布や再利用を前提にする場合は、利用条件を明示してから扱ってください。

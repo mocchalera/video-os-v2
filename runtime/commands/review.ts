@@ -36,6 +36,9 @@ import type {
 import { computeFileHash, snapshotArtifacts, writeProjectState } from "../state/reconcile.js";
 import { compile, type CompileResult } from "../compiler/index.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
+import { loadSourceMap } from "../media/source-map.js";
+import { renderPreviewSegment } from "../preview/segment-renderer.js";
+import { generateTimelineOverview } from "../preview/timeline-overview.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -101,6 +104,7 @@ export interface ReviewReport {
     preserve?: string[];
     alternative_directions?: string[];
   };
+  preview_path?: string;
 }
 
 export interface PatchOperation {
@@ -213,7 +217,8 @@ export interface ReviewPreflightStep {
 export interface ReviewPreflightResult {
   steps: ReviewPreflightStep[];
   gapReport: string[];
-  reviewMp4Path: string;
+  previewPath?: string;
+  overviewPath?: string;
   qcSummaryPath: string;
 }
 
@@ -244,6 +249,8 @@ export interface ReviewCommandOptions {
   operatorAccept?: ReviewOperatorAccept;
   /** Phase-split mode: refuse to auto-compile and require timeline.json to exist already */
   requireCompiledTimeline?: boolean;
+  /** Skip preview/overview generation (--skip-preview) */
+  skipPreview?: boolean;
 }
 
 // ── Patch Safety Guard ──────────────────────────────────────────
@@ -506,11 +513,12 @@ export async function runReview(
 
   const createdAt = options?.createdAt ?? new Date().toISOString();
 
-  // 4. Deterministic preflight: compile → preview stub → QC summary
+  // 4. Deterministic preflight: compile → preview → QC summary
   let compileResult: CompileResult;
   let timelineJson: unknown;
   let timelineVersion = "unknown";
   let preflight: ReviewPreflightResult;
+  const skipPreview = options?.skipPreview ?? false;
   try {
     if (options?.requireCompiledTimeline) {
       if (gates.timeline_gate === "blocked") {
@@ -520,13 +528,13 @@ export async function runReview(
           details: { timeline_gate: gates.timeline_gate },
         });
       }
-      const preflightResult = runReviewExistingTimelinePreflight(absDir, createdAt);
+      const preflightResult = await runReviewExistingTimelinePreflight(absDir, createdAt, skipPreview);
       compileResult = preflightResult.compileResult;
       timelineJson = preflightResult.timelineJson;
       timelineVersion = preflightResult.timelineVersion;
       preflight = preflightResult.preflight;
     } else {
-      const preflightResult = runReviewPreflight(absDir, createdAt);
+      const preflightResult = await runReviewPreflight(absDir, createdAt, skipPreview);
       compileResult = preflightResult.compileResult;
       timelineJson = preflightResult.timelineJson;
       timelineVersion = preflightResult.timelineVersion;
@@ -573,6 +581,11 @@ export async function runReview(
 
   // Use the filtered patch (safe operations only)
   const safePatch = patchSafety.filteredPatch;
+
+  // 7b. Inject preview_path into report if preview was generated
+  if (preflight.previewPath) {
+    agentResult.report.preview_path = path.relative(absDir, preflight.previewPath);
+  }
 
   // 8. Draft review artifacts
   const drafts: DraftFile[] = [
@@ -734,15 +747,16 @@ export async function runReview(
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-function runReviewExistingTimelinePreflight(
+async function runReviewExistingTimelinePreflight(
   projectDir: string,
   createdAt: string,
-): {
+  skipPreview: boolean,
+): Promise<{
   compileResult: CompileResult;
   timelineJson: unknown;
   timelineVersion: string;
   preflight: ReviewPreflightResult;
-} {
+}> {
   const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
   if (!fs.existsSync(timelinePath)) {
     throw new Error("timeline.json not found");
@@ -751,7 +765,7 @@ function runReviewExistingTimelinePreflight(
   const timelineJson = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
   const timelineVersion = (timelineJson as { version?: string }).version ?? "unknown";
   const compileResult = buildCompileResultFromExistingTimeline(projectDir, timelineJson);
-  const preflight = writeReviewPreviewAndQc(projectDir, createdAt, timelineJson, timelineVersion);
+  const preflight = await generateReviewPreviewAndQc(projectDir, createdAt, timelineJson, timelineVersion, skipPreview);
 
   return {
     compileResult,
@@ -761,15 +775,16 @@ function runReviewExistingTimelinePreflight(
   };
 }
 
-function runReviewPreflight(
+async function runReviewPreflight(
   projectDir: string,
   createdAt: string,
-): {
+  skipPreview: boolean,
+): Promise<{
   compileResult: CompileResult;
   timelineJson: unknown;
   timelineVersion: string;
   preflight: ReviewPreflightResult;
-} {
+}> {
   const steps: ReviewPreflightStep[] = [];
   const gapReport: string[] = [];
 
@@ -787,7 +802,7 @@ function runReviewPreflight(
   const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
   const timelineJson = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
   const timelineVersion = (timelineJson as { version?: string }).version ?? "unknown";
-  const preflight = writeReviewPreviewAndQc(projectDir, createdAt, timelineJson, timelineVersion);
+  const preflight = await generateReviewPreviewAndQc(projectDir, createdAt, timelineJson, timelineVersion, skipPreview);
   steps.push(...preflight.steps);
   gapReport.push(...preflight.gapReport);
 
@@ -798,40 +813,86 @@ function runReviewPreflight(
     preflight: {
       steps,
       gapReport,
-      reviewMp4Path: preflight.reviewMp4Path,
+      previewPath: preflight.previewPath,
+      overviewPath: preflight.overviewPath,
       qcSummaryPath: preflight.qcSummaryPath,
     },
   };
 }
 
-function writeReviewPreviewAndQc(
+async function generateReviewPreviewAndQc(
   projectDir: string,
   createdAt: string,
   timelineJson: unknown,
   timelineVersion: string,
-): ReviewPreflightResult {
+  skipPreview: boolean,
+): Promise<ReviewPreflightResult> {
   const steps: ReviewPreflightStep[] = [];
   const gapReport: string[] = [];
+  let previewPath: string | undefined;
+  let overviewPath: string | undefined;
 
-  const reviewMp4Path = path.join(projectDir, "05_timeline/review.mp4");
-  fs.writeFileSync(
-    reviewMp4Path,
-    JSON.stringify({
-      stub: true,
-      created_at: createdAt,
-      timeline_version: timelineVersion,
-      note: "Preview render is deferred to M4; this is a deterministic placeholder.",
-    }, null, 2),
-    "utf-8",
-  );
-  gapReport.push("preview_render skipped in M3: wrote deterministic placeholder review.mp4");
-  steps.push({
-    step: "preview",
-    status: "skipped",
-    detail: "Preview render is not implemented in M3; wrote a deterministic placeholder review.mp4.",
-    artifactPath: reviewMp4Path,
-  });
+  const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
 
+  if (!skipPreview) {
+    const sourceMap = loadSourceMap(projectDir);
+
+    // 1. Generate timeline-overview.png if missing
+    const overviewTarget = path.join(projectDir, "05_timeline/timeline-overview.png");
+    if (!fs.existsSync(overviewTarget)) {
+      try {
+        const overview = await generateTimelineOverview({
+          projectDir,
+          timelinePath,
+          sourceMap,
+        });
+        overviewPath = overview.outputPath;
+      } catch (err) {
+        gapReport.push(
+          `timeline-overview.png generation failed (degraded): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else {
+      overviewPath = overviewTarget;
+    }
+
+    // 2. Render preview-first30s.mp4 at 720p
+    const previewTarget = path.join(projectDir, "05_timeline/preview-first30s.mp4");
+    try {
+      const previewResult = await renderPreviewSegment({
+        projectDir,
+        timelinePath,
+        sourceMap,
+        firstNSec: 30,
+        outputPath: previewTarget,
+      });
+      previewPath = previewResult.outputPath;
+      steps.push({
+        step: "preview",
+        status: "completed",
+        detail: `Rendered preview-first30s.mp4 (${previewResult.clipCount} clips, ${previewResult.durationSec.toFixed(1)}s).`,
+        artifactPath: previewResult.outputPath,
+      });
+    } catch (err) {
+      gapReport.push(
+        `preview render failed (degraded review): ${err instanceof Error ? err.message : String(err)}`,
+      );
+      steps.push({
+        step: "preview",
+        status: "skipped",
+        detail: `Preview render failed (degraded): ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  } else {
+    gapReport.push("preview generation skipped via --skip-preview");
+    steps.push({
+      step: "preview",
+      status: "skipped",
+      detail: "Preview generation skipped via --skip-preview.",
+    });
+  }
+
+  // QC validation
   const qcValidation = validateAgainstSchema(timelineJson, "timeline-ir.schema.json");
   const qcSummaryPath = path.join(projectDir, "05_timeline/review-qc-summary.json");
   fs.writeFileSync(
@@ -840,7 +901,8 @@ function writeReviewPreviewAndQc(
       version: "1",
       created_at: createdAt,
       timeline_path: "05_timeline/timeline.json",
-      preview_path: "05_timeline/review.mp4",
+      preview_path: previewPath ? path.relative(projectDir, previewPath) : null,
+      overview_path: overviewPath ? path.relative(projectDir, overviewPath) : null,
       schema_valid: qcValidation.valid,
       errors: qcValidation.errors,
       gap_report: gapReport,
@@ -860,7 +922,8 @@ function writeReviewPreviewAndQc(
   return {
     steps,
     gapReport,
-    reviewMp4Path,
+    previewPath,
+    overviewPath,
     qcSummaryPath,
   };
 }
