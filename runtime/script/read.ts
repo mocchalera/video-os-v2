@@ -65,9 +65,9 @@ export function buildMaterialReading(input: ReadInput): MaterialReading {
 
     // Filter by role match
     const roleMatched = eligible.filter((c) => {
-      const role = c.role as string;
-      return beat.required_roles.includes(role as any) ||
-        beat.preferred_roles.includes(role as any);
+      if (c.role === "reject") return false;
+      return beat.required_roles.includes(c.role) ||
+        beat.preferred_roles.includes(c.role);
     });
 
     // Sort by confidence * semantic_rank

@@ -5,30 +5,44 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { readProgress, type ProgressReport } from "../runtime/progress.js";
 
-function parseArgs(): { projectId: string; jsonOutput: boolean } {
-  const args = process.argv.slice(2);
+const USAGE = "Usage: npx tsx scripts/check-progress.ts <project-id> [--json]";
+
+export interface CheckProgressCliArgs {
+  projectId: string;
+  jsonOutput: boolean;
+}
+
+export function parseArgs(argv: string[]): CheckProgressCliArgs {
+  const args = argv.slice(2);
   let projectId: string | undefined;
   let jsonOutput = false;
 
   for (const arg of args) {
     if (arg === "--json") {
       jsonOutput = true;
+    } else if (arg === "--help" || arg === "-h") {
+      console.log(USAGE);
+      process.exit(0);
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown argument: ${arg}`);
     } else if (!projectId) {
       projectId = arg;
+    } else {
+      throw new Error(`Unexpected argument: ${arg}`);
     }
   }
 
   if (!projectId) {
-    console.error("Usage: npx tsx scripts/check-progress.ts <project-id> [--json]");
-    process.exit(1);
+    throw new Error("Error: <project-id> is required");
   }
 
   return { projectId, jsonOutput };
 }
 
-function resolveProjectDir(projectId: string): string {
+export function resolveProjectDir(projectId: string): string {
   // Try as-is (absolute or relative path)
   if (fs.existsSync(path.join(path.resolve(projectId), "progress.json"))) {
     return path.resolve(projectId);
@@ -57,7 +71,7 @@ const STATUS_ICONS: Record<string, string> = {
   blocked: "[BLOCKED]",
 };
 
-function printHumanReadable(report: ProgressReport): void {
+export function printHumanReadable(report: ProgressReport): void {
   const icon = STATUS_ICONS[report.status] ?? report.status;
   const pct = report.total > 0 ? Math.round((report.completed / report.total) * 100) : 0;
 
@@ -83,24 +97,37 @@ function printHumanReadable(report: ProgressReport): void {
 }
 
 function main(): void {
-  const { projectId, jsonOutput } = parseArgs();
-  const projectDir = resolveProjectDir(projectId);
-  const report = readProgress(projectDir);
+  try {
+    const { projectId, jsonOutput } = parseArgs(process.argv);
+    const projectDir = resolveProjectDir(projectId);
+    const report = readProgress(projectDir);
 
-  if (!report) {
-    if (jsonOutput) {
-      console.log(JSON.stringify({ error: "progress.json not found", project_id: projectId }));
-    } else {
-      console.error(`No progress.json found for project: ${projectId}`);
+    if (!report) {
+      if (jsonOutput) {
+        console.log(JSON.stringify({ error: "progress.json not found", project_id: projectId }));
+      } else {
+        console.error(`No progress.json found for project: ${projectId}`);
+      }
+      process.exit(1);
     }
-    process.exit(1);
-  }
 
-  if (jsonOutput) {
-    console.log(JSON.stringify(report, null, 2));
-  } else {
-    printHumanReadable(report);
+    if (jsonOutput) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      printHumanReadable(report);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[check-progress] ${message}`);
+    console.error(USAGE);
+    process.exit(1);
   }
 }
 
-main();
+const isMain = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMain) {
+  main();
+}

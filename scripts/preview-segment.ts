@@ -4,13 +4,14 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { renderPreviewSegment } from "../runtime/preview/segment-renderer.js";
 import { generateTimelineOverview } from "../runtime/preview/timeline-overview.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-interface PreviewArgs {
+export interface PreviewArgs {
   projectPath: string;
   beatId?: string;
   firstNSec?: number;
@@ -18,8 +19,11 @@ interface PreviewArgs {
   overviewOnly?: boolean;
 }
 
-function parseArgs(): PreviewArgs {
-  const args = process.argv.slice(2);
+const USAGE =
+  "Usage: npx tsx scripts/preview-segment.ts <project-path> [--beat <beat-name>] [--first-n-sec 30] [--source-map <file>] [--overview-only]";
+
+export function parseArgs(argv: string[]): PreviewArgs {
+  const args = argv.slice(2);
   let projectPath: string | undefined;
   let beatId: string | undefined;
   let firstNSec: number | undefined;
@@ -27,28 +31,32 @@ function parseArgs(): PreviewArgs {
   let overviewOnly = false;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--beat" && i + 1 < args.length) {
+    const arg = args[i];
+    if (arg === "--help" || arg === "-h") {
+      console.log(USAGE);
+      process.exit(0);
+    } else if (arg === "--beat" && i + 1 < args.length) {
       beatId = args[++i];
-    } else if (args[i] === "--first-n-sec" && i + 1 < args.length) {
+    } else if (arg === "--first-n-sec" && i + 1 < args.length) {
       firstNSec = parseInt(args[++i], 10);
       if (Number.isNaN(firstNSec) || firstNSec <= 0) {
-        console.error("--first-n-sec must be a positive integer");
-        process.exit(1);
+        throw new Error("--first-n-sec must be a positive integer");
       }
-    } else if (args[i] === "--source-map" && i + 1 < args.length) {
+    } else if (arg === "--source-map" && i + 1 < args.length) {
       sourceMapPath = args[++i];
-    } else if (args[i] === "--overview-only") {
+    } else if (arg === "--overview-only") {
       overviewOnly = true;
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown argument: ${arg}`);
     } else if (!projectPath) {
-      projectPath = args[i];
+      projectPath = arg;
+    } else {
+      throw new Error(`Unexpected argument: ${arg}`);
     }
   }
 
   if (!projectPath) {
-    console.error(
-      "Usage: npx tsx scripts/preview-segment.ts <project-path> [--beat <beat-name>] [--first-n-sec 30] [--source-map <file>] [--overview-only]",
-    );
-    process.exit(1);
+    throw new Error("Error: <project-path> is required");
   }
 
   return { projectPath, beatId, firstNSec, sourceMapPath, overviewOnly };
@@ -57,7 +65,7 @@ function parseArgs(): PreviewArgs {
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { projectPath, beatId, firstNSec, sourceMapPath, overviewOnly } = parseArgs();
+  const { projectPath, beatId, firstNSec, sourceMapPath, overviewOnly } = parseArgs(process.argv);
 
   const absProject = path.resolve(projectPath);
   const timelinePath = path.join(absProject, "05_timeline/timeline.json");
@@ -115,11 +123,20 @@ async function main(): Promise<void> {
     console.log(`Timeline overview: ${overview.outputPath}`);
     console.log(`  Clips: ${overview.clipCount}`);
   } catch (err) {
-    console.error(`Warning: Overview generation failed: ${String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Warning: Overview generation failed: ${message}`);
   }
 }
 
-main().catch((err) => {
-  console.error(`Preview failed: ${String(err)}`);
-  process.exit(1);
-});
+const isMain = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMain) {
+  main().catch((err) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`Preview failed: ${message}`);
+    console.error(USAGE);
+    process.exit(1);
+  });
+}

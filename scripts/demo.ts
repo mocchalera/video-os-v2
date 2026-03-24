@@ -9,40 +9,62 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
+import { pathToFileURL } from "node:url";
 import { compile } from "../runtime/compiler/index.js";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const projectPath = path.join(repoRoot, "projects/demo");
 
-console.log("─────────────────────────────────────────────────");
-console.log("  RoughCut Agent — Demo (deterministic compile)");
-console.log("─────────────────────────────────────────────────\n");
+const USAGE = `Usage: npx tsx scripts/demo.ts
 
-// ── Check demo artifacts exist ────────────────────────────────────
-const requiredFiles = [
-  "01_intent/creative_brief.yaml",
-  "04_plan/edit_blueprint.yaml",
-  "04_plan/selects_candidates.yaml",
-];
+Runs the deterministic demo compile against projects/demo.
+Options:
+  --help, -h     Show this help`;
 
-for (const f of requiredFiles) {
-  const fp = path.join(projectPath, f);
-  if (!fs.existsSync(fp)) {
-    console.error(`Missing required artifact: ${f}`);
-    console.error("Run from the repo root: npm run demo");
-    process.exit(1);
-  }
+export interface DemoCliArgs {
+  help: boolean;
 }
 
-console.log("[1/3] Reading artifacts from projects/demo/...");
-console.log("  - creative_brief.yaml   (intent)");
-console.log("  - selects_candidates.yaml (candidates)");
-console.log("  - edit_blueprint.yaml   (structure)\n");
+export function parseArgs(argv: string[]): DemoCliArgs {
+  const args = argv.slice(2);
 
-// ── Compile ───────────────────────────────────────────────────────
-console.log("[2/3] Running deterministic compiler (Phase 0.5 → 5)...");
+  for (const arg of args) {
+    if (arg === "--help" || arg === "-h") {
+      return { help: true };
+    }
+    throw new Error(`Unknown argument: ${arg}`);
+  }
 
-try {
+  return { help: false };
+}
+
+export async function runDemo(): Promise<void> {
+  console.log("─────────────────────────────────────────────────");
+  console.log("  RoughCut Agent — Demo (deterministic compile)");
+  console.log("─────────────────────────────────────────────────\n");
+
+  // ── Check demo artifacts exist ────────────────────────────────────
+  const requiredFiles = [
+    "01_intent/creative_brief.yaml",
+    "04_plan/edit_blueprint.yaml",
+    "04_plan/selects_candidates.yaml",
+  ];
+
+  for (const f of requiredFiles) {
+    const fp = path.join(projectPath, f);
+    if (!fs.existsSync(fp)) {
+      throw new Error(`Missing required artifact: ${f}`);
+    }
+  }
+
+  console.log("[1/3] Reading artifacts from projects/demo/...");
+  console.log("  - creative_brief.yaml   (intent)");
+  console.log("  - selects_candidates.yaml (candidates)");
+  console.log("  - edit_blueprint.yaml   (structure)\n");
+
+  // ── Compile ───────────────────────────────────────────────────────
+  console.log("[2/3] Running deterministic compiler (Phase 0.5 → 5)...");
+
   const result = compile({
     projectPath,
     repoRoot,
@@ -77,8 +99,8 @@ try {
   const videoTracks = timeline.tracks.video ?? [];
   const audioTracks = timeline.tracks.audio ?? [];
   const totalClips = [
-    ...videoTracks.flatMap(t => t.clips),
-    ...audioTracks.flatMap(t => t.clips),
+    ...videoTracks.flatMap((track) => track.clips),
+    ...audioTracks.flatMap((track) => track.clips),
   ].length;
 
   console.log(`\n  Timeline: "${timeline.sequence.name}"`);
@@ -101,9 +123,28 @@ try {
   console.log("\n─────────────────────────────────────────────────");
   console.log("  Demo complete. Explore projects/demo/ to see all artifacts.");
   console.log("─────────────────────────────────────────────────\n");
+}
 
-} catch (err) {
-  console.error("\nCompilation failed:", (err as Error).message);
-  console.error("\nThis may indicate missing dependencies. Run: npm install");
-  process.exit(1);
+async function main(): Promise<void> {
+  try {
+    const args = parseArgs(process.argv);
+    if (args.help) {
+      console.log(USAGE);
+      return;
+    }
+
+    await runDemo();
+  } catch (err) {
+    console.error("\nCompilation failed:", err instanceof Error ? err.message : String(err));
+    console.error("\nThis may indicate missing dependencies. Run: npm install");
+    process.exit(1);
+  }
+}
+
+const isMain = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMain) {
+  void main();
 }

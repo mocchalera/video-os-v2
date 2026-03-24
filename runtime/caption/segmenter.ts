@@ -111,9 +111,11 @@ interface TranscriptItem {
   end_us: number;
   text: string;
   confidence?: number;
+  words?: Array<{ word: string; start_us: number; end_us: number }>;
+  word_timing_mode?: "word" | "char" | "none";
 }
 
-interface TranscriptArtifact {
+export interface TranscriptArtifact {
   project_id: string;
   artifact_version: string;
   transcript_ref: string;

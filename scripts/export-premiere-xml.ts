@@ -18,6 +18,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { TimelineIR } from "../runtime/compiler/types.js";
 import {
   timelineToFcp7Xml,
@@ -27,39 +28,47 @@ import { loadSourceMap, type LoadedSourceMap } from "../runtime/media/source-map
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-function parseArgs(): {
+const USAGE = `Usage: npx tsx scripts/export-premiere-xml.ts <project-path> [options]
+Options:
+  --source-map <file>  Asset ID → file path mapping
+  --titles <file>      Text overlay definitions (JSON)
+  --auto-titles        Generate overlays from timeline markers
+  --help, -h           Show this help`;
+
+export function parseArgs(argv: string[]): {
   projectPath: string;
   sourceMapPath?: string;
   titlesPath?: string;
   autoTitles: boolean;
 } {
-  const args = process.argv.slice(2);
+  const args = argv.slice(2);
   let projectPath: string | undefined;
   let sourceMapPath: string | undefined;
   let titlesPath: string | undefined;
   let autoTitles = false;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--source-map" && i + 1 < args.length) {
+    const arg = args[i];
+    if (arg === "--help" || arg === "-h") {
+      console.log(USAGE);
+      process.exit(0);
+    } else if (arg === "--source-map" && i + 1 < args.length) {
       sourceMapPath = args[++i];
-    } else if (args[i] === "--titles" && i + 1 < args.length) {
+    } else if (arg === "--titles" && i + 1 < args.length) {
       titlesPath = args[++i];
-    } else if (args[i] === "--auto-titles") {
+    } else if (arg === "--auto-titles") {
       autoTitles = true;
+    } else if (arg.startsWith("-")) {
+      throw new Error(`Unknown argument: ${arg}`);
     } else if (!projectPath) {
-      projectPath = args[i];
+      projectPath = arg;
+    } else {
+      throw new Error(`Unexpected argument: ${arg}`);
     }
   }
 
   if (!projectPath) {
-    console.error(
-      "Usage: npx tsx scripts/export-premiere-xml.ts <project-path> [options]",
-    );
-    console.error("Options:");
-    console.error("  --source-map <file>  Asset ID → file path mapping");
-    console.error("  --titles <file>      Text overlay definitions (JSON)");
-    console.error("  --auto-titles        Generate overlays from timeline markers");
-    process.exit(1);
+    throw new Error("Error: <project-path> is required");
   }
 
   return { projectPath: path.resolve(projectPath), sourceMapPath, titlesPath, autoTitles };
@@ -159,70 +168,83 @@ function resolveTextOverlays(
 }
 
 function main(): void {
-  const { projectPath, sourceMapPath, titlesPath, autoTitles } = parseArgs();
+  try {
+    const { projectPath, sourceMapPath, titlesPath, autoTitles } = parseArgs(process.argv);
 
-  // Read timeline.json
-  const timelinePath = path.join(projectPath, "05_timeline", "timeline.json");
-  if (!fs.existsSync(timelinePath)) {
-    console.error(`timeline.json not found: ${timelinePath}`);
-    process.exit(1);
-  }
-
-  const timeline: TimelineIR = JSON.parse(
-    fs.readFileSync(timelinePath, "utf-8"),
-  );
-  console.log(`Timeline: ${timeline.sequence.name}`);
-  console.log(
-    `  Tracks: ${timeline.tracks.video.length}V + ${timeline.tracks.audio.length}A`,
-  );
-  console.log(
-    `  Clips: ${timeline.tracks.video.reduce((n, t) => n + t.clips.length, 0) + timeline.tracks.audio.reduce((n, t) => n + t.clips.length, 0)}`,
-  );
-
-  // Resolve source map
-  const { locatorMap: sourceMap, displayNameMap } = resolveSourceMap(projectPath, sourceMapPath);
-  if (sourceMap.size === 0) {
-    console.error(
-      "Error: No source map entries found. Cannot produce valid Premiere XML without media references.",
-    );
-    console.error(
-      "  Use --source-map <file.json> to provide asset_id → file path mapping,",
-    );
-    console.error(
-      "  or generate 02_media/source_map.json via scripts/analyze.ts.",
-    );
-    process.exit(1);
-  } else {
-    console.log(`  Source map: ${sourceMap.size} entries`);
-    if (displayNameMap.size > 0) {
-      console.log(`  Display names: ${displayNameMap.size} entries`);
+    // Read timeline.json
+    const timelinePath = path.join(projectPath, "05_timeline", "timeline.json");
+    if (!fs.existsSync(timelinePath)) {
+      console.error(`timeline.json not found: ${timelinePath}`);
+      process.exit(1);
     }
+
+    const timeline: TimelineIR = JSON.parse(
+      fs.readFileSync(timelinePath, "utf-8"),
+    );
+    console.log(`Timeline: ${timeline.sequence.name}`);
+    console.log(
+      `  Tracks: ${timeline.tracks.video.length}V + ${timeline.tracks.audio.length}A`,
+    );
+    console.log(
+      `  Clips: ${timeline.tracks.video.reduce((n, t) => n + t.clips.length, 0) + timeline.tracks.audio.reduce((n, t) => n + t.clips.length, 0)}`,
+    );
+
+    // Resolve source map
+    const { locatorMap: sourceMap, displayNameMap } = resolveSourceMap(projectPath, sourceMapPath);
+    if (sourceMap.size === 0) {
+      console.error(
+        "Error: No source map entries found. Cannot produce valid Premiere XML without media references.",
+      );
+      console.error(
+        "  Use --source-map <file.json> to provide asset_id → file path mapping,",
+      );
+      console.error(
+        "  or generate 02_media/source_map.json via scripts/analyze.ts.",
+      );
+      process.exit(1);
+    } else {
+      console.log(`  Source map: ${sourceMap.size} entries`);
+      if (displayNameMap.size > 0) {
+        console.log(`  Display names: ${displayNameMap.size} entries`);
+      }
+    }
+
+    // Resolve text overlays
+    const textOverlays = resolveTextOverlays(timeline, titlesPath, autoTitles);
+
+    // Export
+    const xml = timelineToFcp7Xml(timeline, {
+      sourceMap,
+      textOverlays,
+      assetDisplayNameMap: displayNameMap.size > 0 ? displayNameMap : undefined,
+      projectId: timeline.project_id,
+    });
+
+    // Write output
+    const outputDir = path.join(projectPath, "09_output");
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPath = path.join(
+      outputDir,
+      `${timeline.project_id}_premiere.xml`,
+    );
+    fs.writeFileSync(outputPath, xml, "utf-8");
+
+    console.log(`\nExported: ${outputPath}`);
+    console.log(
+      `  → Premiere Pro: File → Import → select this XML`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[export-premiere-xml] ${message}`);
+    console.error(USAGE);
+    process.exit(1);
   }
-
-  // Resolve text overlays
-  const textOverlays = resolveTextOverlays(timeline, titlesPath, autoTitles);
-
-  // Export
-  const xml = timelineToFcp7Xml(timeline, {
-    sourceMap,
-    textOverlays,
-    assetDisplayNameMap: displayNameMap.size > 0 ? displayNameMap : undefined,
-    projectId: timeline.project_id,
-  });
-
-  // Write output
-  const outputDir = path.join(projectPath, "09_output");
-  fs.mkdirSync(outputDir, { recursive: true });
-  const outputPath = path.join(
-    outputDir,
-    `${timeline.project_id}_premiere.xml`,
-  );
-  fs.writeFileSync(outputPath, xml, "utf-8");
-
-  console.log(`\nExported: ${outputPath}`);
-  console.log(
-    `  → Premiere Pro: File → Import → select this XML`,
-  );
 }
 
-main();
+const isMain = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isMain) {
+  main();
+}

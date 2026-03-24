@@ -1,16 +1,18 @@
 /**
- * Remotion composition types (stub - no actual Remotion dependency).
+ * Experimental Remotion composition stub.
  *
- * Type-only Remotion composition definition for M4.
- * Real Remotion rendering is out of scope - this defines the contract.
+ * This module is quarantined under __experimental because the production
+ * render pipeline does not import it and Video OS currently ships the
+ * ffmpeg-based fallback pipeline instead of a real Remotion renderer.
  */
 
 import * as path from "node:path";
+import type { TimelineIR, TrackOutput } from "../../compiler/types.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface CompositionProps {
-  timeline: any; // Full timeline.json
+  timeline: TimelineIR;
   fps: number;
   width: number;
   height: number;
@@ -32,19 +34,21 @@ export interface RenderConfig {
  * Computes total duration from all video and audio track clips.
  */
 export function buildRenderConfig(
-  timeline: any,
+  timeline: TimelineIR,
   outputDir: string,
 ): RenderConfig {
   const seq = timeline.sequence;
   const fps = seq.fps_num / seq.fps_den;
+  const trackGroups: TrackOutput[][] = [timeline.tracks.video, timeline.tracks.audio];
 
-  // Calculate total duration from all tracks
   let maxFrame = 0;
-  for (const trackGroup of [timeline.tracks.video, timeline.tracks.audio]) {
-    for (const track of trackGroup || []) {
-      for (const clip of track.clips || []) {
+  for (const trackGroup of trackGroups) {
+    for (const track of trackGroup) {
+      for (const clip of track.clips) {
         const end = clip.timeline_in_frame + clip.timeline_duration_frames;
-        if (end > maxFrame) maxFrame = end;
+        if (end > maxFrame) {
+          maxFrame = end;
+        }
       }
     }
   }
@@ -67,10 +71,10 @@ export function buildRenderConfig(
 // ── Stub Renderer ──────────────────────────────────────────────────
 
 /**
- * Stub: in real implementation, this would call Remotion's renderMedia.
- * For M4, we use the ffmpeg fallback pipeline instead of actual Remotion.
+ * Stub only: Remotion rendering is intentionally not implemented here.
+ * Production callers should use the ffmpeg fallback pipeline.
  */
-export async function renderAssembly(config: RenderConfig): Promise<string> {
+export async function renderAssembly(_config: RenderConfig): Promise<string> {
   throw new Error(
     "Remotion rendering not available - use ffmpeg fallback pipeline",
   );

@@ -214,6 +214,8 @@ function createE2EBlueprintAgent(): BlueprintAgent {
   return {
     async run(ctx) {
       const blueprint: EditBlueprint = {
+        version: "1",
+        project_id: ctx.projectId,
         sequence_goals: ["Open on tactile ritual", "Build grounding", "Resolve with warmth"],
         beats: [
           {

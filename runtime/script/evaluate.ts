@@ -97,8 +97,9 @@ export function evaluateScript(input: EvaluateInput): ScriptEvaluation {
   // ── Metric: duration_pacing ───────────────────────────────────
   const totalFrames = input.beats.reduce((s, b) => s + b.target_duration_frames, 0);
   const totalDurationSec = totalFrames / 24; // assuming 24fps
+  const blueprintProject = input.blueprint["project"] as { runtime_target_sec?: number } | undefined;
   const targetSec = input.blueprint.pacing?.default_duration_target_sec
-    ?? (input.blueprint as any).project?.runtime_target_sec
+    ?? blueprintProject?.runtime_target_sec
     ?? totalDurationSec;
   const tolerance = input.qualityTargets?.duration_pacing_tolerance_pct ?? 10;
   const withinTolerance =

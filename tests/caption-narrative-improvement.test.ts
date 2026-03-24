@@ -358,6 +358,8 @@ describe("Narrative Loop", () => {
   describe("validateConfirmedPreferences", () => {
     it("passes with correct full mode preferences", () => {
       const blueprint = {
+        version: "1",
+        project_id: "test",
         sequence_goals: ["test"],
         beats: [],
         pacing: {
@@ -383,6 +385,8 @@ describe("Narrative Loop", () => {
 
     it("fails when mode mismatches", () => {
       const blueprint = {
+        version: "1",
+        project_id: "test",
         sequence_goals: ["test"],
         beats: [],
         pacing: {
@@ -410,6 +414,8 @@ describe("Narrative Loop", () => {
 
     it("fails when preferences missing", () => {
       const blueprint = {
+        version: "1",
+        project_id: "test",
         sequence_goals: [],
         beats: [],
         pacing: { opening_cadence: "fast", middle_cadence: "medium", ending_cadence: "slow" },

@@ -65,7 +65,7 @@
   - `/blueprint` redefines artifact interfaces that already exist in compiler types, creating drift risk: [runtime/commands/blueprint.ts:52](../runtime/commands/blueprint.ts#L52), [runtime/commands/blueprint.ts:62](../runtime/commands/blueprint.ts#L62), [runtime/compiler/types.ts:48](../runtime/compiler/types.ts#L48), [runtime/compiler/types.ts:104](../runtime/compiler/types.ts#L104)
   - The same file relies on a stub blueprint plus repeated `as any` casts in the narrative loop: [runtime/commands/blueprint.ts:837](../runtime/commands/blueprint.ts#L837), [runtime/commands/blueprint.ts:894](../runtime/commands/blueprint.ts#L894), [runtime/commands/blueprint.ts:960](../runtime/commands/blueprint.ts#L960), [runtime/commands/blueprint.ts:998](../runtime/commands/blueprint.ts#L998)
   - Additional runtime casts leak into scoring/evaluation helpers: [runtime/script/read.ts:68](../runtime/script/read.ts#L68), [runtime/script/evaluate.ts:100](../runtime/script/evaluate.ts#L100)
-  - Render/caption surfaces still carry `any`: [runtime/render/composition.ts:13](../runtime/render/composition.ts#L13), [runtime/render/composition.ts:35](../runtime/render/composition.ts#L35), [runtime/commands/caption.ts:166](../runtime/commands/caption.ts#L166)
+  - Render/caption surfaces still carry weak typing or stub contracts: [runtime/render/__experimental/composition.ts](../runtime/render/__experimental/composition.ts), [runtime/commands/caption.ts:166](../runtime/commands/caption.ts#L166)
 - Proposal:
   - Introduce one canonical artifact type module plus typed parse/validate loaders for `creative_brief`, `selects`, `blueprint`, `timeline`, `caption`, and `project_state`.
   - Replace ad-hoc `JSON.parse(...)`/`parseYaml(...) as unknown` with schema-backed loader functions.
@@ -164,8 +164,8 @@
     - [scripts/preview-segment.ts](../scripts/preview-segment.ts)
     - [scripts/export-premiere-xml.ts](../scripts/export-premiere-xml.ts)
     - [scripts/import-premiere-xml.ts](../scripts/import-premiere-xml.ts)
-    - [runtime/render/composition.ts](../runtime/render/composition.ts)
-  - `runtime/render/composition.ts` is also still a pure stub with `any`-typed props and a hard throw: [runtime/render/composition.ts:13](../runtime/render/composition.ts#L13), [runtime/render/composition.ts:35](../runtime/render/composition.ts#L35), [runtime/render/composition.ts:73](../runtime/render/composition.ts#L73)
+    - [runtime/render/__experimental/composition.ts](../runtime/render/__experimental/composition.ts)
+  - `runtime/render/__experimental/composition.ts` remains a quarantined stub with a hard throw and no production callers: [runtime/render/__experimental/composition.ts](../runtime/render/__experimental/composition.ts)
 - Proposal:
   - Add smoke tests for supported CLIs and remove or quarantine dead stubs that are not part of the supported surface.
   - Prefer contract tests around file outputs / exit codes for CLI wrappers, and fixture tests for preview/render orchestration.

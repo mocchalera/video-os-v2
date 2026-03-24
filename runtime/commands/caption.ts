@@ -26,10 +26,12 @@ import {
   type CommandError,
 } from "./shared.js";
 import type { ProjectState } from "../state/reconcile.js";
+import type { TimelineIR } from "../artifacts/types.js";
 import {
   generateCaptionSource,
   type CaptionPolicy,
   type CaptionSource,
+  type TranscriptArtifact,
 } from "../caption/segmenter.js";
 import { buildTextOverlays, type TextOverlayInput } from "../caption/overlay.js";
 import {
@@ -160,10 +162,10 @@ export function captionCommand(
       },
     };
   }
-  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+  const timeline: TimelineIR = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
 
   // 3. Read transcripts if source=transcript
-  const transcripts = new Map<string, any>();
+  const transcripts = new Map<string, TranscriptArtifact>();
   if (captionPolicy.source === "transcript") {
     const transcriptDir = path.join(absDir, "03_analysis/transcripts");
     if (fs.existsSync(transcriptDir)) {
@@ -334,7 +336,7 @@ export function approveCaptions(
   if (doc.current_state === "approved") {
     const timelinePath = path.join(absDir, "05_timeline/timeline.json");
     if (fs.existsSync(timelinePath)) {
-      const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+      const timeline: TimelineIR = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
       const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
       const updatedTimeline = projectCaptionsToTimeline(timeline, approval, fps);
       fs.writeFileSync(timelinePath, JSON.stringify(updatedTimeline, null, 2), "utf-8");
@@ -355,8 +357,8 @@ async function runEditorialAndFinishDraft(
   absDir: string,
   captionSource: CaptionSource,
   captionPolicy: CaptionPolicy,
-  timeline: any,
-  transcripts: Map<string, any>,
+  timeline: TimelineIR,
+  transcripts: Map<string, TranscriptArtifact>,
   packageDir: string,
   projectId: string,
   options: CaptionCommandOptions,
@@ -405,8 +407,8 @@ async function runEditorialAndFinishDraft(
 function applyTimingPhase(
   draft: CaptionDraft,
   captionPolicy: CaptionPolicy,
-  timeline: any,
-  transcripts: Map<string, any>,
+  timeline: TimelineIR,
+  transcripts: Map<string, TranscriptArtifact>,
 ): CaptionDraft {
   if (captionPolicy.source !== "transcript" || draft.speech_captions.length === 0) {
     return draft;
@@ -440,7 +442,7 @@ function applyTimingPhase(
   ];
   for (const track of allTracks) {
     for (const clip of track.clips ?? []) {
-      if (clip.role === "A1" || clip.dialogue) {
+      if (clip.role === "A1" || clip.role === "dialogue") {
         clips.push({
           clipId: clip.clip_id,
           assetId: clip.asset_id,
@@ -453,9 +455,7 @@ function applyTimingPhase(
     }
   }
 
-  const fps = timeline.fps ?? (timeline.sequence?.fps_num && timeline.sequence?.fps_den
-    ? timeline.sequence.fps_num / timeline.sequence.fps_den
-    : 24);
+  const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
 
   // Batch remap
   const captionInputs = draft.speech_captions.map((entry) => ({
@@ -549,8 +549,8 @@ function applyReadinessGate(
 function buildPassthroughDraft(
   source: CaptionSource,
   captionPolicy: CaptionPolicy,
-  timeline: any,
-  transcripts: Map<string, any>,
+  timeline: TimelineIR,
+  transcripts: Map<string, TranscriptArtifact>,
 ): CaptionDraft {
   const draft: CaptionDraft = {
     version: source.version,

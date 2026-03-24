@@ -260,6 +260,8 @@ function makeMockBlueprint(
   const mode = opts?.autonomyMode ?? "full";
   const durationSec = opts?.durationSec ?? 120;
   return {
+    version: "1",
+    project_id: projectId,
     sequence_goals: ["Convey courage through mountain rescue narrative"],
     beats: [
       {

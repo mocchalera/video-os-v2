@@ -35,74 +35,18 @@ import { buildMessageFrame, type FrameInput } from "../script/frame.js";
 import { buildMaterialReading, type ReadInput } from "../script/read.js";
 import { buildScriptDraft, type DraftInput } from "../script/draft.js";
 import { evaluateScript, type EvaluateInput } from "../script/evaluate.js";
-import type { Candidate, NormalizedBeat } from "../compiler/types.js";
+import type {
+  Candidate,
+  NormalizedBeat,
+  EditBlueprint,
+  Beat,
+  ConfirmedPreferences,
+  QualityTargets,
+} from "../artifacts/types.js";
 import { inferAutonomyMode } from "../autonomy.js";
 
-// ── Types ────────────────────────────────────────────────────────
-
-export interface ConfirmedPreferences {
-  mode: "full" | "collaborative";
-  source: "human_confirmed" | "ai_autonomous";
-  duration_target_sec: number;
-  confirmed_at: string;
-  structure_choice?: string;
-  pacing_notes?: string;
-}
-
-export interface Beat {
-  id: string;
-  label: string;
-  purpose?: string;
-  target_duration_frames: number;
-  required_roles: Array<"hero" | "support" | "transition" | "texture" | "dialogue">;
-  preferred_roles?: Array<"hero" | "support" | "transition" | "texture" | "dialogue">;
-  notes?: string;
-}
-
-export interface EditBlueprint {
-  version?: string;
-  project_id?: string;
-  created_at?: string;
-  sequence_goals: string[];
-  beats: Beat[];
-  pacing: {
-    opening_cadence: string;
-    middle_cadence: string;
-    ending_cadence: string;
-    max_shot_length_frames?: number;
-    confirmed_preferences?: ConfirmedPreferences;
-  };
-  music_policy: {
-    start_sparse: boolean;
-    allow_release_late: boolean;
-    entry_beat: string;
-    avoid_anthemic_lift?: boolean;
-    permitted_energy_curve?: string;
-  };
-  caption_policy?: {
-    language: string;
-    delivery_mode: "burn_in" | "sidecar" | "both";
-    source: "transcript" | "authored" | "none";
-    styling_class: string;
-  };
-  dialogue_policy: {
-    preserve_natural_breath: boolean;
-    avoid_wall_to_wall_voiceover: boolean;
-    prioritize_lines?: string[];
-  };
-  transition_policy: {
-    prefer_match_texture_over_flashy_fx: boolean;
-    allow_hard_cuts?: boolean;
-    avoid_speed_ramps?: boolean;
-  };
-  ending_policy: {
-    should_feel: string;
-    final_line_strategy?: string;
-    avoid_cta?: boolean;
-    final_hold_min_frames?: number;
-  };
-  rejection_rules: string[];
-}
+// Re-export artifact types used by consumers of this module
+export type { EditBlueprint, Beat, ConfirmedPreferences };
 
 export interface Uncertainty {
   id: string;
@@ -178,7 +122,7 @@ export interface FrameResult {
   hookAngle: string;
   closingIntent: string;
   beatCount: number;
-  qualityTargets?: Record<string, number>;
+  qualityTargets?: Partial<QualityTargets>;
 }
 
 export interface ReadResult {
@@ -189,13 +133,15 @@ export interface ReadResult {
   }>;
 }
 
+export type StoryRole = "hook" | "setup" | "experience" | "closing";
+
 export interface DraftResult {
   deliveryOrder: string[];
   beatAssignments: Array<{
     beatId: string;
     primaryCandidateRef: string;
     backupCandidateRefs: string[];
-    storyRole: string;
+    storyRole: StoryRole;
   }>;
   draftSummary?: string;
 }
@@ -834,16 +780,16 @@ function buildDefaultPhases(
       purpose: b.purpose ?? b.label,
     })) ?? []);
 
-  // Stub blueprint for phases that require EditBlueprint from compiler/types
-  const stubBlueprint = {
+  // Stub blueprint for phases that require EditBlueprint
+  const stubBlueprint: EditBlueprint = {
     version: "1",
     project_id: projectId,
-    sequence_goals: [] as string[],
-    beats: [] as Beat[],
+    sequence_goals: [],
+    beats: [],
     pacing: { opening_cadence: "medium", middle_cadence: "varied", ending_cadence: "slow-fade" },
     music_policy: { start_sparse: true, allow_release_late: true, entry_beat: beats[0]?.beat_id ?? "B1", avoid_anthemic_lift: false, permitted_energy_curve: "default" },
     dialogue_policy: { preserve_natural_breath: true, avoid_wall_to_wall_voiceover: true },
-  } as any;
+  };
 
   return {
     async frame(ctx) {
@@ -881,7 +827,7 @@ function buildDefaultPhases(
         hookAngle: frame.hook_angle,
         closingIntent: frame.closing_intent,
         beatCount: frame.beat_strategy.beat_count,
-        qualityTargets: frame.quality_targets as Record<string, number> | undefined,
+        qualityTargets: frame.quality_targets,
       };
     },
 
@@ -891,7 +837,7 @@ function buildDefaultPhases(
         createdAt: new Date().toISOString(),
         beats,
         candidates,
-        blueprint: (existingBlueprint ?? stubBlueprint) as any,
+        blueprint: existingBlueprint ?? stubBlueprint,
       };
 
       const reading = buildMaterialReading(readInput);
@@ -939,15 +885,15 @@ function buildDefaultPhases(
         }
       }
 
-      const draftFrame = {
+      const draftFrame: import("../script/frame.js").MessageFrame = {
         version: "1",
         project_id: ctx.projectId,
         created_at: new Date().toISOString(),
         story_promise: frameResult.storyPromise,
         hook_angle: frameResult.hookAngle,
         closing_intent: frameResult.closingIntent,
-        resolved_profile_candidate: { ref: "default", version: "1" },
-        resolved_policy_candidate: { ref: "default", version: "1" },
+        resolved_profile_candidate: { id: "default", source: "default" },
+        resolved_policy_candidate: { id: "default", source: "default" },
         beat_strategy: {
           beat_count: frameResult.beatCount,
           role_sequence: buildDefaultRoleSequenceFromCount(frameResult.beatCount),
@@ -957,9 +903,9 @@ function buildDefaultPhases(
       const draftInput: DraftInput = {
         projectId: ctx.projectId,
         createdAt: new Date().toISOString(),
-        frame: draftFrame as any,
+        frame: draftFrame,
         reading: readingForDraft,
-        blueprint: (existingBlueprint ?? stubBlueprint) as any,
+        blueprint: existingBlueprint ?? stubBlueprint,
         beats,
       };
 
@@ -989,15 +935,15 @@ function buildDefaultPhases(
             beat_id: a.beatId,
             primary_candidate_ref: a.primaryCandidateRef,
             backup_candidate_refs: a.backupCandidateRefs,
-            story_role: a.storyRole as any,
+            story_role: a.storyRole,
             active_skill_hints: [],
             rationale: "",
           })),
         },
         candidates,
-        blueprint: (existingBlueprint ?? stubBlueprint) as any,
+        blueprint: existingBlueprint ?? stubBlueprint,
         beats,
-        qualityTargets: frameResult.qualityTargets as any,
+        qualityTargets: frameResult.qualityTargets,
       };
 
       const evaluation = evaluateScript(evalInput);
@@ -1056,7 +1002,7 @@ function buildDefaultPhases(
           confirmed_preferences: {
             mode: ctx.autonomyMode,
             source: ctx.autonomyMode === "full" ? "ai_autonomous" : "human_confirmed",
-            duration_target_sec: (ctx.briefContent as any)?.project?.runtime_target_sec ?? 120,
+            duration_target_sec: (ctx.briefContent as { project?: { runtime_target_sec?: number } })?.project?.runtime_target_sec ?? 120,
             confirmed_at: now,
           },
         },

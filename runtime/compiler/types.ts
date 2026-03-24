@@ -101,9 +101,37 @@ export interface TrimPolicy {
   action_cut_guard?: boolean;
 }
 
+export interface ConfirmedPreferences {
+  mode: "full" | "collaborative";
+  source: "human_confirmed" | "ai_autonomous";
+  duration_target_sec: number;
+  confirmed_at: string;
+  structure_choice?: string;
+  pacing_notes?: string;
+}
+
+export interface TransitionPolicy {
+  prefer_match_texture_over_flashy_fx: boolean;
+  allow_hard_cuts?: boolean;
+  allow_crossfade_for_time_passage?: boolean;
+  avoid_speed_ramps?: boolean;
+  dissolve_overlap_frames?: number;
+  keep_milestone_cuts_clean?: boolean;
+}
+
+export interface EndingPolicy {
+  should_feel: string;
+  final_line_strategy?: string;
+  avoid_cta?: boolean;
+  final_hold_min_frames?: number;
+  final_visual_strategy?: string;
+  final_audio_strategy?: string;
+}
+
 export interface EditBlueprint {
   version: string;
   project_id: string;
+  created_at?: string;
   sequence_goals: string[];
   beats: Beat[];
   pacing: {
@@ -112,13 +140,17 @@ export interface EditBlueprint {
     ending_cadence: string;
     max_shot_length_frames?: number;
     default_duration_target_sec?: number;
+    confirmed_preferences?: ConfirmedPreferences;
   };
   music_policy: {
     start_sparse: boolean;
     allow_release_late: boolean;
     entry_beat: string;
-    avoid_anthemic_lift: boolean;
-    permitted_energy_curve: string;
+    avoid_anthemic_lift?: boolean;
+    permitted_energy_curve?: string;
+    bgm_asset_id?: string;
+    bgm_segment_id?: string;
+    bgm_duration_sec?: number;
   };
   caption_policy?: {
     language?: string;
@@ -131,6 +163,9 @@ export interface EditBlueprint {
     avoid_wall_to_wall_voiceover: boolean;
     prioritize_lines?: string[];
   };
+  transition_policy?: TransitionPolicy;
+  ending_policy?: EndingPolicy;
+  rejection_rules?: string[];
   // M4.5 additive fields
   story_arc?: StoryArc;
   resolved_profile?: ResolvedRef;
