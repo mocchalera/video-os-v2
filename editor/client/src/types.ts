@@ -191,3 +191,138 @@ export interface TimelineSaveResult {
   mode: 'api' | 'mock';
   error?: string;
 }
+
+// ── Phase 2b-1: Review & Patch types ──────────────────────────────
+
+export interface ReviewSummaryJudgment {
+  status: 'approved' | 'needs_revision' | 'blocked';
+  rationale: string;
+  confidence: number;
+}
+
+export interface ReviewWeakness {
+  clip_id?: string;
+  beat_id?: string;
+  severity: 'minor' | 'major' | 'critical';
+  description: string;
+  suggestion?: string;
+}
+
+export interface ReviewWarning {
+  clip_id?: string;
+  category: string;
+  description: string;
+}
+
+export interface ReviewReport {
+  summary_judgment?: ReviewSummaryJudgment;
+  strengths?: string[];
+  weaknesses?: ReviewWeakness[];
+  warnings?: ReviewWarning[];
+  fatal_issues?: string[];
+  recommended_next_pass?: string;
+}
+
+export interface ReviewReportResponse {
+  exists: boolean;
+  revision?: string;
+  data: ReviewReport | null;
+}
+
+export type PatchOpType =
+  | 'replace_segment'
+  | 'trim_segment'
+  | 'move_segment'
+  | 'insert_segment'
+  | 'remove_segment'
+  | 'change_audio_policy'
+  | 'add_marker'
+  | 'add_note';
+
+/** Schema-compliant patch operation (review-patch.schema.json). */
+export interface PatchOperation {
+  op: PatchOpType;
+  target_clip_id?: string;
+  with_segment_id?: string;
+  new_src_in_us?: number;
+  new_src_out_us?: number;
+  new_timeline_in_frame?: number;
+  new_duration_frames?: number;
+  reason: string;
+  confidence?: number;
+  evidence?: string[];
+  audio_policy?: AudioPolicy;
+  beat_id?: string;
+  role?: ClipRole;
+  label?: string;
+  with_candidate_ref?: string;
+}
+
+export interface ReviewPatch {
+  timeline_version: string;
+  operations: PatchOperation[];
+}
+
+export interface PatchSafety {
+  safe: boolean;
+  rejected_ops: number[];
+  filtered_patch: ReviewPatch;
+}
+
+export interface ReviewPatchResponse {
+  exists: boolean;
+  revision?: string;
+  data: ReviewPatch | null;
+  safety?: PatchSafety;
+}
+
+export interface PatchApplyRequest {
+  base_timeline_revision: string;
+  operation_indexes: number[];
+}
+
+export interface PatchApplyResponse {
+  ok: boolean;
+  timeline_revision_before: string;
+  timeline_revision_after: string;
+  applied_operation_indexes: number[];
+  rejected_operations: number[];
+  timeline: TimelineIR;
+}
+
+// ── History origin tracking (undo stack) ──────────────────────────
+
+export type HistoryOrigin =
+  | 'manual_edit'
+  | 'patch_apply'
+  | 'server_reload';
+
+export interface SelectsCandidate {
+  segment_id: string;
+  asset_id: string;
+  src_in_us: number;
+  src_out_us: number;
+  role: ClipRole;
+  why_it_matches?: string;
+  risks?: string[];
+  confidence: number;
+  semantic_rank?: number;
+  quality_flags?: string[];
+  eligible_beats?: string[];
+  trim_hint?: {
+    source_center_us: number;
+    preferred_duration_us: number;
+  };
+}
+
+export interface SelectsCandidatesData {
+  version?: string;
+  project_id?: string;
+  candidates: SelectsCandidate[];
+}
+
+export interface SelectsResponse {
+  exists: boolean;
+  revision?: string;
+  data: SelectsCandidatesData | null;
+}

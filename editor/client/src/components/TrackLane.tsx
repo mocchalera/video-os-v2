@@ -1,6 +1,6 @@
 import type { Clip, EditorLane } from '../types';
 import { getTrackColor } from '../utils/draw';
-import ClipBlock, { type TrimSide } from './ClipBlock';
+import ClipBlock, { type ClipOverlay, type TrimSide } from './ClipBlock';
 
 interface TrackLaneProps {
   lane: EditorLane;
@@ -9,6 +9,7 @@ interface TrackLaneProps {
   pxPerFrame: number;
   fps: number;
   selectedClipId: string | null;
+  clipOverlays?: Map<string, ClipOverlay>;
   onSelectClip: (trackKind: 'video' | 'audio', trackId: string, clip: Clip) => void;
   onTrimClip: (
     trackKind: 'video' | 'audio',
@@ -26,6 +27,7 @@ export default function TrackLane({
   pxPerFrame,
   fps,
   selectedClipId,
+  clipOverlays,
   onSelectClip,
   onTrimClip,
 }: TrackLaneProps) {
@@ -49,6 +51,7 @@ export default function TrackLane({
               fps={fps}
               selected={selectedClipId === clip.clip_id}
               color={trackColor}
+              overlay={clipOverlays?.get(clip.clip_id)}
               onSelect={() => onSelectClip(lane.trackKind, lane.trackId!, clip)}
               onTrim={(side, baseClip, deltaFrames) =>
                 onTrimClip(lane.trackKind, lane.trackId!, baseClip, side, deltaFrames)

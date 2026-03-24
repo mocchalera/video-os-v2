@@ -1,13 +1,16 @@
-import { useEffect, useEffectEvent, useState, type ReactNode } from 'react';
-import type { TrimSide } from './components/ClipBlock';
+import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react';
+import type { ClipOverlay, TrimSide } from './components/ClipBlock';
+import PatchPanel from './components/PatchPanel';
 import PreviewPlayer from './components/PreviewPlayer';
 import PropertyPanel from './components/PropertyPanel';
+import ReviewOverlay from './components/ReviewOverlay';
 import Timeline from './components/Timeline';
 import TransportBar from './components/TransportBar';
 import { usePlayback } from './hooks/usePlayback';
+import { useReview } from './hooks/useReview';
 import { useSelection } from './hooks/useSelection';
 import { useTimeline } from './hooks/useTimeline';
-import type { AudioPolicy, Clip, EditorLane, SelectionState, TimelineIR } from './types';
+import type { AudioPolicy, Clip, EditorLane, PatchOperation, ReviewWarning, ReviewWeakness, SelectionState, TimelineIR } from './types';
 import {
   clamp,
   durationFramesFromSource,
@@ -119,6 +122,50 @@ export default function App() {
     fps,
     durationFrames: totalFrames,
   });
+  const reviewState = useReview(timelineState.projectId);
+  const [bottomTab, setBottomTab] = useState<'timeline' | 'patches'>('timeline');
+
+  // Build clip overlay map from review weaknesses + patch operations
+  const clipOverlays = useMemo(() => {
+    const map = new Map<string, ClipOverlay>();
+
+    function ensure(clipId: string): ClipOverlay {
+      let entry = map.get(clipId);
+      if (!entry) {
+        entry = { weaknesses: [], warnings: [], patchOps: [] };
+        map.set(clipId, entry);
+      }
+      return entry;
+    }
+
+    // Collect weaknesses per clip
+    const weaknesses = reviewState.report?.data?.weaknesses ?? [];
+    for (const w of weaknesses) {
+      if (w.clip_id) {
+        ensure(w.clip_id).weaknesses.push(w);
+      }
+    }
+
+    // Collect warnings per clip (修正R2-4)
+    const warnings = reviewState.report?.data?.warnings ?? [];
+    for (const w of warnings) {
+      if (w.clip_id) {
+        ensure(w.clip_id).warnings.push(w);
+      }
+    }
+
+    // Collect patch operations per target clip — use safety-filtered ops only (修正R2-2)
+    const patchOps = reviewState.patch?.safety?.filtered_patch?.operations
+      ?? reviewState.patch?.data?.operations
+      ?? [];
+    for (const op of patchOps) {
+      if (op.target_clip_id) {
+        ensure(op.target_clip_id).patchOps.push(op);
+      }
+    }
+
+    return map;
+  }, [reviewState.report, reviewState.patch]);
 
   useEffect(() => {
     selectionState.clearSelection();
@@ -137,6 +184,20 @@ export default function App() {
       selectionState.clearSelection();
     }
   }, [selectedClip, selectionState.selection]);
+
+  async function handleApplyPatch(operationIndexes: number[]): Promise<void> {
+    if (!timelineState.timelineRevision) return;
+
+    const result = await reviewState.applyPatch({
+      base_timeline_revision: timelineState.timelineRevision,
+      operation_indexes: operationIndexes,
+    });
+
+    if (result?.ok) {
+      timelineState.commitRemoteMutation(result.timeline, result.timeline_revision_after);
+      reviewState.reload();
+    }
+  }
 
   async function handleRenderPreview(): Promise<void> {
     if (!timeline) {
@@ -415,6 +476,7 @@ export default function App() {
             <PropertyPanel
               clip={selectedClip}
               fps={fps}
+              reviewReport={reviewState.report}
               onUpdateAudioNumber={handleUpdateAudioNumber}
               onUpdateAudioBoolean={handleUpdateAudioBoolean}
             />
@@ -422,7 +484,37 @@ export default function App() {
 
           <section className="col-span-2 flex min-h-0 flex-col overflow-hidden border-t border-white/[0.06]">
             <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-3 py-1.5">
-              <h2 className="text-[13px] font-semibold text-white">Assembly Dock</h2>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className={`px-2 py-0.5 text-[13px] font-semibold transition ${
+                    bottomTab === 'timeline'
+                      ? 'text-white'
+                      : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
+                  }`}
+                  onClick={() => setBottomTab('timeline')}
+                >
+                  Assembly Dock
+                </button>
+                <span className="text-[color:var(--text-subtle)]">/</span>
+                <button
+                  type="button"
+                  className={`px-2 py-0.5 text-[13px] font-semibold transition ${
+                    bottomTab === 'patches'
+                      ? 'text-white'
+                      : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
+                  }`}
+                  onClick={() => setBottomTab('patches')}
+                >
+                  Patches
+                  {reviewState.patch?.data?.operations?.length ? (
+                    <span className="ml-1.5 rounded-sm bg-[var(--accent)]/20 px-1 py-px font-mono text-[9px] text-[var(--accent)]">
+                      {reviewState.patch.data.operations.length}
+                    </span>
+                  ) : null}
+                </button>
+              </div>
+
               <span className="font-mono text-[10px] text-[color:var(--text-subtle)]">
                 {lanes.length}T{hiddenTrackCount > 0 ? ` +${hiddenTrackCount}h` : ''} · {timeline?.markers?.length ?? 0}M
               </span>
@@ -448,28 +540,46 @@ export default function App() {
               </label>
             </div>
 
-            <div className="min-h-0 flex-1">
-              <Timeline
-                  lanes={lanes}
-                  markers={timeline?.markers ?? []}
-                  fps={fps}
+            {bottomTab === 'timeline' ? (
+              <div className="min-h-0 flex-1 flex flex-col">
+                <ReviewOverlay
+                  reviewReport={reviewState.report}
+                  pxPerFrame={zoom}
                   totalFrames={totalFrames}
-                  zoom={zoom}
-                  playheadFrame={playback.playheadFrame}
-                  selectedClipId={selectionState.selection?.clipId ?? null}
-                  onZoomChange={setZoom}
-                  onSeek={playback.seekToFrame}
-                  onClearSelection={selectionState.clearSelection}
-                  onSelectClip={(trackKind, trackId, clip) =>
-                    selectionState.selectClip({
-                      trackKind,
-                      trackId,
-                      clipId: clip.clip_id,
-                    })
-                  }
-                  onTrimClip={handleTrimClip}
+                  viewportWidth={800}
                 />
-            </div>
+                <div className="min-h-0 flex-1">
+                  <Timeline
+                    lanes={lanes}
+                    markers={timeline?.markers ?? []}
+                    fps={fps}
+                    totalFrames={totalFrames}
+                    zoom={zoom}
+                    playheadFrame={playback.playheadFrame}
+                    selectedClipId={selectionState.selection?.clipId ?? null}
+                    clipOverlays={clipOverlays}
+                    onZoomChange={setZoom}
+                    onSeek={playback.seekToFrame}
+                    onClearSelection={selectionState.clearSelection}
+                    onSelectClip={(trackKind, trackId, clip) =>
+                      selectionState.selectClip({
+                        trackKind,
+                        trackId,
+                        clipId: clip.clip_id,
+                      })
+                    }
+                    onTrimClip={handleTrimClip}
+                  />
+                </div>
+              </div>
+            ) : (
+              <PatchPanel
+                patchData={reviewState.patch}
+                dirty={timelineState.dirty}
+                timelineRevision={timelineState.timelineRevision}
+                onApply={handleApplyPatch}
+              />
+            )}
           </section>
         </div>
       </main>

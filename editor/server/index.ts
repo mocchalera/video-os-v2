@@ -15,6 +15,9 @@ import { createTimelineRouter } from "./routes/timeline.js";
 import { createPreviewRouter } from "./routes/preview.js";
 import { createMediaRouter } from "./routes/media.js";
 import { createThumbnailRouter } from "./routes/thumbnails.js";
+import { createReviewRouter } from "./routes/review.js";
+import { createSelectsRouter } from "./routes/selects.js";
+import { safeProjectDir } from "./utils.js";
 
 // ── CLI argument parsing ──────────────────────────────────────────
 
@@ -68,8 +71,8 @@ app.use(
       "http://127.0.0.1:5555",
     ],
     methods: ["GET", "PUT", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Range"],
-    exposedHeaders: ["Content-Range", "Accept-Ranges", "Content-Length"],
+    allowedHeaders: ["Content-Type", "Range", "If-Match"],
+    exposedHeaders: ["Content-Range", "Accept-Ranges", "Content-Length", "ETag"],
   }),
 );
 
@@ -113,12 +116,13 @@ app.get("/api/projects", (_req, res) => {
 
 // GET /api/projects/:id/source-map
 app.get("/api/projects/:id/source-map", (req, res) => {
-  const sourceMapPath = path.join(
-    resolvedProjectsDir,
-    req.params.id,
-    "02_media",
-    "source_map.json",
-  );
+  const projDir = safeProjectDir(resolvedProjectsDir, req.params.id);
+  if (!projDir) {
+    res.status(400).json({ error: "Invalid project ID" });
+    return;
+  }
+
+  const sourceMapPath = path.join(projDir, "02_media", "source_map.json");
 
   if (!fs.existsSync(sourceMapPath)) {
     res.status(404).json({ error: "Source map not found" });
@@ -141,6 +145,8 @@ app.use("/api/projects", createTimelineRouter(resolvedProjectsDir));
 app.use("/api/projects", createPreviewRouter(resolvedProjectsDir));
 app.use("/api/projects", createMediaRouter(resolvedProjectsDir));
 app.use("/api/projects", createThumbnailRouter(resolvedProjectsDir));
+app.use("/api/projects", createReviewRouter(resolvedProjectsDir));
+app.use("/api/projects", createSelectsRouter(resolvedProjectsDir));
 
 // ── Health check ──────────────────────────────────────────────────
 

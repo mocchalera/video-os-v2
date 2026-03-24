@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { mockProjects, resolveMockTimeline } from '../mocks/mockData';
 import type {
   Clip,
+  HistoryOrigin,
   ProjectSummary,
   TimelineIR,
   TimelineSaveResult,
@@ -16,10 +17,15 @@ const TIMELINE_STORAGE_PREFIX = 'video-os-editor.timeline.';
 
 type TimelineStatus = 'idle' | 'loading' | 'ready' | 'saving' | 'error';
 
+interface HistoryEntry {
+  timeline: TimelineIR;
+  origin: HistoryOrigin;
+}
+
 interface TimelineHistory {
-  past: TimelineIR[];
+  past: HistoryEntry[];
   present: TimelineIR | null;
-  future: TimelineIR[];
+  future: HistoryEntry[];
 }
 
 function readStoredProjectId(): string {
@@ -164,6 +170,7 @@ export function useTimeline() {
   const [connectionMode, setConnectionMode] = useState<'api' | 'mock'>('api');
   const [dirty, setDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [timelineRevision, setTimelineRevision] = useState<string | null>(null);
 
   const timeline = history.present;
 
@@ -236,10 +243,17 @@ export function useTimeline() {
 
         nextTimeline = (await response.json()) as TimelineIR;
         setConnectionMode('api');
+
+        // Capture timeline_revision from ETag header
+        const etag = response.headers.get('ETag');
+        if (etag) {
+          setTimelineRevision(etag.replace(/^"|"$/g, ''));
+        }
       } catch {
         nextTimeline =
           readStoredTimeline(nextProjectId) ?? resolveMockTimeline(nextProjectId);
         setConnectionMode('mock');
+        setTimelineRevision(null);
       }
 
       const normalized = normalizeTimeline(nextTimeline);
@@ -267,7 +281,7 @@ export function useTimeline() {
     }
   }
 
-  function pushTimeline(nextTimeline: TimelineIR): void {
+  function pushTimeline(nextTimeline: TimelineIR, origin: HistoryOrigin = 'manual_edit'): void {
     const normalized = normalizeTimeline(nextTimeline);
 
     setHistory((current) => {
@@ -275,9 +289,11 @@ export function useTimeline() {
         return current;
       }
 
-      const nextPast = [...current.past, structuredClone(current.present)].slice(
-        -HISTORY_LIMIT,
-      );
+      const entry: HistoryEntry = {
+        timeline: structuredClone(current.present),
+        origin,
+      };
+      const nextPast = [...current.past, entry].slice(-HISTORY_LIMIT);
       return {
         past: nextPast,
         present: normalized,
@@ -321,14 +337,15 @@ export function useTimeline() {
       }
 
       const past = [...current.past];
-      const previous = past.pop()!;
+      const previousEntry = past.pop()!;
+      const futureEntry: HistoryEntry = {
+        timeline: structuredClone(current.present),
+        origin: 'manual_edit',
+      };
       return {
         past,
-        present: previous,
-        future: [structuredClone(current.present), ...current.future].slice(
-          0,
-          HISTORY_LIMIT,
-        ),
+        present: previousEntry.timeline,
+        future: [futureEntry, ...current.future].slice(0, HISTORY_LIMIT),
       };
     });
     setDirty(true);
@@ -340,10 +357,14 @@ export function useTimeline() {
         return current;
       }
 
-      const [next, ...future] = current.future;
+      const [nextEntry, ...future] = current.future;
+      const pastEntry: HistoryEntry = {
+        timeline: structuredClone(current.present),
+        origin: 'manual_edit',
+      };
       return {
-        past: [...current.past, structuredClone(current.present)].slice(-HISTORY_LIMIT),
-        present: next,
+        past: [...current.past, pastEntry].slice(-HISTORY_LIMIT),
+        present: nextEntry.timeline,
         future,
       };
     });
@@ -385,16 +406,57 @@ export function useTimeline() {
     setError(null);
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (timelineRevision) {
+        headers['If-Match'] = `"${timelineRevision}"`;
+      }
+
       const response = await fetch(`/api/projects/${projectId}/timeline`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify(nextTimeline),
       });
 
+      if (response.status === 409) {
+        setStatus('error');
+        setError('Timeline was modified externally. Reload to get the latest version.');
+        return { ok: false, mode: 'api' as const, error: 'Conflict: revision mismatch' };
+      }
+
+      if (response.status === 423) {
+        setStatus('error');
+        setError('Project is locked by another operation. Try again shortly.');
+        return { ok: false, mode: 'api' as const, error: 'Project locked (423)' };
+      }
+
+      if (response.status === 422 || response.status === 428) {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        const msg = body.error ?? `Validation failed (${response.status})`;
+        setStatus('error');
+        setError(msg);
+        return { ok: false, mode: 'api' as const, error: msg };
+      }
+
       if (!response.ok) {
-        throw new Error(`Timeline save failed (${response.status})`);
+        // Server returned an error — do NOT fall back to mock
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        const msg = body.error ?? `Timeline save failed (${response.status})`;
+        setStatus('error');
+        setError(msg);
+        return { ok: false, mode: 'api' as const, error: msg };
+      }
+
+      const result = (await response.json()) as { timeline_revision?: string };
+      if (result.timeline_revision) {
+        setTimelineRevision(result.timeline_revision);
+      } else {
+        // Fallback: read ETag header
+        const etag = response.headers.get('ETag');
+        if (etag) {
+          setTimelineRevision(etag.replace(/^"|"$/g, ''));
+        }
       }
 
       setHistory((current) => ({
@@ -410,7 +472,17 @@ export function useTimeline() {
         ok: true,
         mode: 'api',
       };
-    } catch {
+    } catch (saveError) {
+      // Only fall back to mock on network failure (TypeError from fetch)
+      if (!(saveError instanceof TypeError)) {
+        // Server was reachable but something unexpected happened
+        const msg = saveError instanceof Error ? saveError.message : 'Save failed';
+        setStatus('error');
+        setError(msg);
+        return { ok: false, mode: 'api' as const, error: msg };
+      }
+
+      // Network unreachable — fall back to local mock storage
       writeStoredTimeline(projectId, nextTimeline);
       setHistory((current) => ({
         ...current,
@@ -419,7 +491,7 @@ export function useTimeline() {
       setConnectionMode('mock');
       setDirty(false);
       setStatus('ready');
-      setError('Preview API unavailable. Saved timeline to local mock storage.');
+      setError('API unreachable. Saved timeline to local storage.');
       setLastSavedAt(nextTimeline.provenance.last_editor_save ?? new Date().toISOString());
 
       return {
@@ -431,6 +503,43 @@ export function useTimeline() {
 
   function setProjectId(nextProjectId: string): void {
     setProjectIdState(nextProjectId);
+  }
+
+  /**
+   * Accept a timeline mutation that was applied server-side (e.g. patch apply).
+   * Pushes current present onto undo stack and sets the new timeline + revision.
+   */
+  /**
+   * Accept a timeline mutation that was applied server-side (e.g. patch apply).
+   * Pushes current present onto undo stack with origin: patch_apply.
+   */
+  function commitRemoteMutation(
+    nextTimeline: TimelineIR,
+    newRevision: string,
+  ): void {
+    const normalized = normalizeTimeline(nextTimeline);
+
+    setHistory((current) => {
+      if (!current.present) {
+        return { past: [], present: normalized, future: [] };
+      }
+
+      const entry: HistoryEntry = {
+        timeline: structuredClone(current.present),
+        origin: 'patch_apply',
+      };
+      const nextPast = [...current.past, entry].slice(-HISTORY_LIMIT);
+      return {
+        past: nextPast,
+        present: normalized,
+        future: [],
+      };
+    });
+
+    setTimelineRevision(newRevision);
+    setDirty(false);
+    setStatus('ready');
+    setError(null);
   }
 
   async function reload(): Promise<void> {
@@ -450,6 +559,7 @@ export function useTimeline() {
     dirty,
     connectionMode,
     lastSavedAt,
+    timelineRevision,
     validationIssues: timeline ? validateTimeline(timeline) : [],
     canUndo: history.past.length > 0,
     canRedo: history.future.length > 0,
@@ -459,5 +569,6 @@ export function useTimeline() {
     redo,
     save,
     reload,
+    commitRemoteMutation,
   };
 }

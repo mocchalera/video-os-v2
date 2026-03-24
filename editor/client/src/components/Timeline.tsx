@@ -8,7 +8,7 @@ import {
 import type { Clip, EditorLane, Marker } from '../types';
 import { drawTimelineBackdrop, resizeCanvas } from '../utils/draw';
 import { clamp } from '../utils/time';
-import type { TrimSide } from './ClipBlock';
+import type { ClipOverlay, TrimSide } from './ClipBlock';
 import TrackLane from './TrackLane';
 
 const TRACK_LABEL_WIDTH = 104;
@@ -25,6 +25,7 @@ interface TimelineProps {
   zoom: number;
   playheadFrame: number;
   selectedClipId: string | null;
+  clipOverlays?: Map<string, ClipOverlay>;
   onZoomChange: (nextZoom: number) => void;
   onSeek: (frame: number) => void;
   onClearSelection: () => void;
@@ -46,6 +47,7 @@ export default function Timeline({
   zoom,
   playheadFrame,
   selectedClipId,
+  clipOverlays,
   onZoomChange,
   onSeek,
   onClearSelection,
@@ -203,6 +205,7 @@ export default function Timeline({
                 pxPerFrame={zoom}
                 fps={fps}
                 selectedClipId={selectedClipId}
+                clipOverlays={clipOverlays}
                 onSelectClip={onSelectClip}
                 onTrimClip={onTrimClip}
               />

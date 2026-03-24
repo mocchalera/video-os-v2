@@ -22,7 +22,7 @@ const SCHEMA_PATH = path.resolve(
 
 let cachedValidate: ReturnType<Ajv["compile"]> | null = null;
 
-function getValidator(): ReturnType<Ajv["compile"]> {
+export function getTimelineValidator(): ReturnType<Ajv["compile"]> {
   if (cachedValidate) return cachedValidate;
 
   const schemaText = fs.readFileSync(SCHEMA_PATH, "utf-8");
@@ -44,7 +44,7 @@ export function validateTimeline(
   res: Response,
   next: NextFunction,
 ): void {
-  const validate = getValidator();
+  const validate = getTimelineValidator();
   const valid = validate(req.body);
 
   if (!valid) {
