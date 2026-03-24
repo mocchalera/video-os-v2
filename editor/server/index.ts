@@ -17,6 +17,7 @@ import { createMediaRouter } from "./routes/media.js";
 import { createThumbnailRouter } from "./routes/thumbnails.js";
 import { createReviewRouter } from "./routes/review.js";
 import { createSelectsRouter } from "./routes/selects.js";
+import { createAiJobsRouter } from "./routes/ai-jobs.js";
 import { safeProjectDir } from "./utils.js";
 
 // ── CLI argument parsing ──────────────────────────────────────────
@@ -147,6 +148,7 @@ app.use("/api/projects", createMediaRouter(resolvedProjectsDir));
 app.use("/api/projects", createThumbnailRouter(resolvedProjectsDir));
 app.use("/api/projects", createReviewRouter(resolvedProjectsDir));
 app.use("/api/projects", createSelectsRouter(resolvedProjectsDir));
+app.use("/api/projects", createAiJobsRouter(resolvedProjectsDir));
 
 // ── Health check ──────────────────────────────────────────────────
 

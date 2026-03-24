@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react';
 import AlternativesPanel from './components/AlternativesPanel';
 import type { ClipOverlay, TrimSide } from './components/ClipBlock';
+import CommandBar from './components/CommandBar';
 import DiffPanel from './components/DiffPanel';
 import PatchPanel from './components/PatchPanel';
 import PreviewPlayer from './components/PreviewPlayer';
@@ -8,6 +9,7 @@ import PropertyPanel from './components/PropertyPanel';
 import ReviewOverlay from './components/ReviewOverlay';
 import Timeline from './components/Timeline';
 import TransportBar from './components/TransportBar';
+import { useAiJob } from './hooks/useAiJob';
 import { useAlternatives, type AlternativeCandidate } from './hooks/useAlternatives';
 import { useDiff } from './hooks/useDiff';
 import { usePlayback } from './hooks/usePlayback';
@@ -135,6 +137,30 @@ export default function App() {
     timelineState.historyOrigins,
     timelineState.historySnapshots,
   );
+  const aiJob = useAiJob(timelineState.projectId, {
+    onCompileComplete: () => {
+      // Compile: timeline + review + baseline reset (reload resets baseline)
+      void timelineState.reload();
+      reviewState.reload();
+    },
+    onReviewComplete: () => {
+      // Review: timeline + review + context
+      void timelineState.reload();
+      reviewState.reload();
+    },
+    onRenderComplete: () => {
+      // Render: timeline + review + preview
+      void timelineState.reload();
+      reviewState.reload();
+      void playback.requestPreview({
+        mode: 'range',
+        startFrame: 0,
+        endFrame: totalFrames,
+        resolution: '720p',
+      });
+    },
+  });
+
   const [bottomTab, setBottomTab] = useState<'timeline' | 'patches' | 'alternatives' | 'diff'>('timeline');
 
   // Build clip overlay map from review weaknesses + patch operations
@@ -198,7 +224,7 @@ export default function App() {
   }, [selectedClip, selectionState.selection]);
 
   async function handleApplyPatch(operationIndexes: number[]): Promise<void> {
-    if (!timelineState.timelineRevision) return;
+    if (!timelineState.timelineRevision || aiJob.isRunning) return;
 
     const result = await reviewState.applyPatch({
       base_timeline_revision: timelineState.timelineRevision,
@@ -213,7 +239,7 @@ export default function App() {
 
   function handleSwapClip(candidate: AlternativeCandidate): void {
     const sel = selectionState.selection;
-    if (!sel) return;
+    if (!sel || aiJob.isRunning) return;
     timelineState.swapClip(sel.trackKind, sel.trackId, sel.clipId, {
       segment_id: candidate.segment_id,
       asset_id: candidate.asset_id,
@@ -257,7 +283,7 @@ export default function App() {
     side: TrimSide,
     deltaFrames: number,
   ): void {
-    if (!timeline) {
+    if (!timeline || aiJob.isRunning) {
       return;
     }
 
@@ -301,7 +327,7 @@ export default function App() {
 
   function handleUpdateAudioNumber(field: keyof AudioPolicy, value: number): void {
     const selection = selectionState.selection;
-    if (!selection) {
+    if (!selection || aiJob.isRunning) {
       return;
     }
 
@@ -315,7 +341,7 @@ export default function App() {
 
   function handleUpdateAudioBoolean(field: keyof AudioPolicy, value: boolean): void {
     const selection = selectionState.selection;
-    if (!selection) {
+    if (!selection || aiJob.isRunning) {
       return;
     }
 
@@ -341,7 +367,9 @@ export default function App() {
 
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
-      await timelineState.save();
+      if (!aiJob.isRunning) {
+        await timelineState.save();
+      }
       return;
     }
 
@@ -353,6 +381,7 @@ export default function App() {
 
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
       event.preventDefault();
+      if (aiJob.isRunning) return;
       if (event.shiftKey) {
         timelineState.redo();
         return;
@@ -432,11 +461,38 @@ export default function App() {
               </div>
             </div>
 
+            <div className="h-8 w-px bg-white/[0.08]" />
+
+            <CommandBar
+              jobStatus={aiJob.status}
+              jobPhase={aiJob.phase}
+              progress={aiJob.progress}
+              jobError={aiJob.error}
+              dirty={timelineState.dirty}
+              hasTimeline={!!timelineState.timeline}
+              timelineRevision={timelineState.timelineRevision}
+              onCompile={() => {
+                void aiJob.startJob('compile', timelineState.timelineRevision);
+              }}
+              onReview={() => {
+                void aiJob.startJob('review', timelineState.timelineRevision);
+              }}
+              onRender={() => {
+                void aiJob.startJob('render', timelineState.timelineRevision);
+              }}
+              onSave={() => {
+                void timelineState.save();
+              }}
+              onDismissError={() => aiJob.reset()}
+            />
+
+            <div className="h-8 w-px bg-white/[0.08]" />
+
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 className="border border-white/[0.06] bg-transparent px-3 py-1.5 text-[13px] font-medium text-neutral-200 transition hover:bg-white/[0.06] disabled:opacity-35"
-                disabled={!timelineState.canUndo}
+                disabled={!timelineState.canUndo || aiJob.isRunning}
                 onClick={() => timelineState.undo()}
               >
                 Undo
@@ -444,7 +500,7 @@ export default function App() {
               <button
                 type="button"
                 className="border border-white/[0.06] bg-transparent px-3 py-1.5 text-[13px] font-medium text-neutral-200 transition hover:bg-white/[0.06] disabled:opacity-35"
-                disabled={!timelineState.canRedo}
+                disabled={!timelineState.canRedo || aiJob.isRunning}
                 onClick={() => timelineState.redo()}
               >
                 Redo
@@ -452,7 +508,7 @@ export default function App() {
               <button
                 type="button"
                 className="bg-[color:var(--accent-strong)] px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-[#4f95ff] disabled:opacity-35"
-                disabled={!timelineState.timeline}
+                disabled={!timelineState.timeline || aiJob.isRunning}
                 onClick={() => {
                   void timelineState.save();
                 }}
@@ -627,7 +683,7 @@ export default function App() {
       <footer className="flex h-8 shrink-0 items-center justify-between border-t border-white/[0.06] px-4 font-mono text-[11px] text-[color:var(--text-muted)]">
         <div className="flex items-center gap-4">
           <span className="uppercase tracking-[0.22em] text-[color:var(--text-subtle)]">
-            {timelineState.status}
+            {aiJob.isRunning ? `AI ${aiJob.phase ?? ''}` : timelineState.status}
           </span>
           <span>{resolutionLabel}</span>
           <span>{fpsLabel}</span>
@@ -635,6 +691,11 @@ export default function App() {
           <span>{lanes.length} tracks</span>
           {issueCount > 0 ? (
             <span className="text-[color:var(--warning)]">{issueCount} validation issues</span>
+          ) : null}
+          {aiJob.isRunning ? (
+            <span className="text-[var(--accent)]">
+              AI job running — editing disabled
+            </span>
           ) : null}
         </div>
 
