@@ -12,7 +12,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync, type ExecSyncOptionsWithStringEncoding } from "node:child_process";
+import { execFileSync, type ExecSyncOptionsWithStringEncoding } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { BgmAnalysis, BgmSection } from "../compiler/transition-types.js";
 
@@ -51,7 +51,7 @@ const EXEC_OPTS: ExecSyncOptionsWithStringEncoding = {
 
 export function isAubioAvailable(): boolean {
   try {
-    execSync("aubiotrack --help 2>&1", EXEC_OPTS);
+    execFileSync("aubiotrack", ["--help"], { ...EXEC_OPTS, stdio: ["pipe", "pipe", "pipe"] });
     return true;
   } catch {
     return false;
@@ -60,7 +60,7 @@ export function isAubioAvailable(): boolean {
 
 export function isLibrosaAvailable(): boolean {
   try {
-    execSync('python3 -c "import librosa" 2>&1', EXEC_OPTS);
+    execFileSync("python3", ["-c", "import librosa"], { ...EXEC_OPTS, stdio: ["pipe", "pipe", "pipe"] });
     return true;
   } catch {
     return false;
@@ -75,8 +75,9 @@ export function isLibrosaAvailable(): boolean {
  */
 export function detectBeatsViaAubio(audioPath: string): BeatEvent[] {
   try {
-    const raw = execSync(
-      `aubiotrack -i "${audioPath}" -B 1024 -H 512`,
+    const raw = execFileSync(
+      "aubiotrack",
+      ["-i", audioPath, "-B", "1024", "-H", "512"],
       { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, timeout: 120_000 },
     );
     const beats: BeatEvent[] = [];
@@ -103,13 +104,24 @@ export function extractEbur128Profile(
   audioPath: string,
 ): Array<{ time_sec: number; lufs: number }> {
   try {
-    const raw = execSync(
-      `ffmpeg -i "${audioPath}" -af "ebur128=peak=true:framelog=verbose" -f null - 2>&1`,
-      { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024, timeout: 120_000 },
-    );
+    let raw: string;
+    try {
+      const result = execFileSync(
+        "ffmpeg",
+        ["-i", audioPath, "-af", "ebur128=peak=true:framelog=verbose", "-f", "null", "-"],
+        { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024, timeout: 120_000, stdio: ["pipe", "pipe", "pipe"] },
+      );
+      raw = result;
+    } catch (e: unknown) {
+      // ffmpeg exits non-zero for -f null; read stderr from the error
+      if (e && typeof e === "object" && "stderr" in e && typeof (e as any).stderr === "string") {
+        raw = (e as any).stderr;
+      } else {
+        return [];
+      }
+    }
 
     const profile: Array<{ time_sec: number; lufs: number }> = [];
-    // Parse "t: <time>  M: <momentary_lufs>" lines
     const regex = /t:\s*([\d.]+)\s+.*?M:\s*(-?[\d.]+)/g;
     let match: RegExpExecArray | null;
     while ((match = regex.exec(raw)) !== null) {
@@ -266,8 +278,9 @@ print(json.dumps(result))
 `.trim();
 
   try {
-    const raw = execSync(
-      `python3 -c ${JSON.stringify(script)} "${audioPath}"`,
+    const raw = execFileSync(
+      "python3",
+      ["-c", script, audioPath],
       { encoding: "utf-8", maxBuffer: 50 * 1024 * 1024, timeout: 300_000 },
     );
     const parsed = JSON.parse(raw.trim()) as LibrosaResult;
@@ -458,8 +471,9 @@ export function generateBeatGrid(
 
 export function getAudioDuration(audioPath: string): number {
   try {
-    const raw = execSync(
-      `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioPath}"`,
+    const raw = execFileSync(
+      "ffprobe",
+      ["-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", audioPath],
       { encoding: "utf-8", timeout: 30_000 },
     );
     return parseFloat(raw.trim()) || 0;
@@ -472,11 +486,14 @@ export function getAudioDuration(audioPath: string): number {
 
 function computeSourceHash(audioPath: string): string {
   const fd = fs.openSync(audioPath, "r");
-  const chunkSize = 16 * 1024 * 1024; // first 16MB
-  const buf = Buffer.alloc(Math.min(chunkSize, fs.fstatSync(fd).size));
-  fs.readSync(fd, buf, 0, buf.length, 0);
-  fs.closeSync(fd);
-  return createHash("sha256").update(buf).digest("hex").slice(0, 16);
+  try {
+    const chunkSize = 16 * 1024 * 1024; // first 16MB
+    const buf = Buffer.alloc(Math.min(chunkSize, fs.fstatSync(fd).size));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    return createHash("sha256").update(buf).digest("hex").slice(0, 16);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -748,8 +765,9 @@ export function detectBgmFiles(sourceFiles: string[]): string[] {
 
     // Verify it's audio-only (no video stream)
     try {
-      const probe = execSync(
-        `ffprobe -v quiet -show_streams -select_streams v -of csv=p=0 "${f}"`,
+      const probe = execFileSync(
+        "ffprobe",
+        ["-v", "quiet", "-show_streams", "-select_streams", "v", "-of", "csv=p=0", f],
         { encoding: "utf-8", timeout: 10_000 },
       );
       // If ffprobe returns empty for video streams → audio-only

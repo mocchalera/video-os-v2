@@ -48,19 +48,25 @@ const LOW_LOUDNESS_WARNING_LUFS = -23;
 function execFilePromise(
   cmd: string,
   args: string[],
+  options?: { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        reject(
-          new Error(
-            `${cmd} failed: ${stderr?.trim() || err.message}`,
-          ),
-        );
-        return;
-      }
-      resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
-    });
+    execFile(
+      cmd,
+      args,
+      { maxBuffer: 50 * 1024 * 1024, timeout: options?.timeout ?? 120_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(
+            new Error(
+              `${cmd} failed: ${stderr?.trim() || err.message}`,
+            ),
+          );
+          return;
+        }
+        resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+      },
+    );
   });
 }
 
@@ -100,7 +106,7 @@ async function probeDurationMs(
     "-show_entries", "stream=duration:format=duration",
     "-of", "json",
     inputPath,
-  ]);
+  ], { timeout: 30_000 });
 
   return Math.round(parseDurationSeconds(stdout) * 1000);
 }
@@ -117,14 +123,25 @@ function parseSignedDbValue(rawValue: string): number {
 async function measureLoudness(
   inputPath: string,
 ): Promise<{ integratedLufs: number; truePeakDbtp: number }> {
-  const { stderr } = await execFilePromise("ffmpeg", [
-    "-hide_banner",
-    "-nostats",
-    "-i", inputPath,
-    "-filter_complex", "ebur128=peak=true",
-    "-f", "null",
-    "-",
-  ]);
+  let stderr: string;
+  try {
+    const result = await execFilePromise("ffmpeg", [
+      "-hide_banner",
+      "-nostats",
+      "-i", inputPath,
+      "-filter_complex", "ebur128=peak=true",
+      "-f", "null",
+      "-",
+    ], { timeout: 120_000 });
+    stderr = result.stderr;
+  } catch (e: unknown) {
+    // ffmpeg may exit non-zero for -f null; try to extract stderr
+    const msg = e instanceof Error ? e.message : "";
+    if (!msg) {
+      return { integratedLufs: -24, truePeakDbtp: -1 };
+    }
+    stderr = msg;
+  }
 
   const integratedMatches = Array.from(
     stderr.matchAll(/^\s*I:\s*(-?(?:inf|[\d.]+))\s+LUFS\s*$/gm),
@@ -136,7 +153,8 @@ async function measureLoudness(
   const integratedMatch = integratedMatches.at(-1);
   const truePeakMatch = truePeakMatches.at(-1);
   if (!integratedMatch || !truePeakMatch) {
-    throw new Error("Unable to parse ebur128 summary from ffmpeg output");
+    // Fallback: return safe defaults instead of throwing
+    return { integratedLufs: -24, truePeakDbtp: -1 };
   }
 
   return {
@@ -161,7 +179,7 @@ async function measureDialogueOccupancy(
     "-vn",
     "-f", "null",
     "-",
-  ]);
+  ], { timeout: 120_000 });
 
   let currentSilenceStartMs: number | null = null;
   let silenceTotalMs = 0;

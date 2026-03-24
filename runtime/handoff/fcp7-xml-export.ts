@@ -103,8 +103,8 @@ export function dbToLinearGain(db: number): number {
 
 /** Convert linear gain to dB: dB = 20 * log10(gain). Returns -Infinity for gain <= 0. */
 export function linearGainToDb(gain: number): number {
-  if (gain <= 0) return -Infinity;
-  return 20 * Math.log10(gain);
+  if (gain <= 0) return -96;
+  return Math.max(-96, 20 * Math.log10(gain));
 }
 
 // ── Internal Implementation ───────────────────────────────────────
@@ -727,29 +727,41 @@ class ExportContext {
       // Keyframe-based gain with fades
       const clipDur = clip.timeline_duration_frames;
 
-      if (hasFadeIn) {
+      // Guard: clamp fade durations so they don't exceed the clip
+      let effFadeIn = hasFadeIn ? fadeInFrames! : 0;
+      let effFadeOut = hasFadeOut ? fadeOutFrames! : 0;
+
+      if (effFadeIn + effFadeOut > clipDur) {
+        // Proportionally shrink both fades to fit within clip duration
+        const total = effFadeIn + effFadeOut;
+        effFadeIn = Math.round((effFadeIn / total) * clipDur);
+        effFadeOut = clipDur - effFadeIn;
+      }
+
+      const fadeOutStart = Math.max(effFadeIn, clipDur - effFadeOut);
+
+      if (effFadeIn > 0) {
         // 0 → gain over fadeInFrames
         lines.push(`${d}      <keyframe>`);
         lines.push(`${d}        <when>0</when>`);
         lines.push(`${d}        <value>0</value>`);
         lines.push(`${d}      </keyframe>`);
         lines.push(`${d}      <keyframe>`);
-        lines.push(`${d}        <when>${fadeInFrames}</when>`);
+        lines.push(`${d}        <when>${effFadeIn}</when>`);
         lines.push(`${d}        <value>${linearGain}</value>`);
         lines.push(`${d}      </keyframe>`);
       }
 
-      if (hasFadeOut) {
-        const fadeOutStart = clipDur - fadeOutFrames!;
+      if (effFadeOut > 0) {
         // If no fade in, emit a hold keyframe at the start
-        if (!hasFadeIn) {
+        if (effFadeIn <= 0) {
           lines.push(`${d}      <keyframe>`);
           lines.push(`${d}        <when>0</when>`);
           lines.push(`${d}        <value>${linearGain}</value>`);
           lines.push(`${d}      </keyframe>`);
         }
         // Hold at gain until fade-out starts (if there's a gap)
-        if (fadeOutStart > (hasFadeIn ? fadeInFrames! : 0)) {
+        if (fadeOutStart > effFadeIn) {
           lines.push(`${d}      <keyframe>`);
           lines.push(`${d}        <when>${fadeOutStart}</when>`);
           lines.push(`${d}        <value>${linearGain}</value>`);

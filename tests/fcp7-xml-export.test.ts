@@ -478,12 +478,12 @@ describe("dB ↔ linear gain conversion", () => {
     }
   });
 
-  it("linearGainToDb returns -Infinity for gain 0", () => {
-    expect(linearGainToDb(0)).toBe(-Infinity);
+  it("linearGainToDb returns -96 for gain 0 (clamped silence floor)", () => {
+    expect(linearGainToDb(0)).toBe(-96);
   });
 
-  it("linearGainToDb returns -Infinity for negative gain", () => {
-    expect(linearGainToDb(-1)).toBe(-Infinity);
+  it("linearGainToDb returns -96 for negative gain (clamped silence floor)", () => {
+    expect(linearGainToDb(-1)).toBe(-96);
   });
 });
 
@@ -741,5 +741,98 @@ describe("fade keyframe export", () => {
     const gainKf = xml.match(/<when>10<\/when>\s*<value>([\d.]+)<\/value>/);
     expect(gainKf).not.toBeNull();
     expect(Number(gainKf![1])).toBeCloseTo(1.0, 5);
+  });
+});
+
+// ── C-02 edge case: fade frames >= clip duration ─────────────────
+
+describe("C-02: fade keyframe edge cases", () => {
+  it("clamps fade-out when fadeOutFrames >= clipDur (no negative keyframe)", () => {
+    const audioClip = makeClip({
+      clip_id: "bgm-oversize-fade",
+      asset_id: "AST_BGM",
+      role: "music",
+      beat_id: "beat-bgm",
+      timeline_duration_frames: 20,
+      audio_policy: { bgm_gain: -6, bgm_fade_out_frames: 50 }, // 50 > 20
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    const sourceMap = new Map([["AST_BGM", "/media/bgm.wav"]]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+
+    // No negative <when> values
+    const whenValues = Array.from(xml.matchAll(/<when>(-?\d+)<\/when>/g)).map(m => Number(m[1]));
+    for (const w of whenValues) {
+      expect(w).toBeGreaterThanOrEqual(0);
+    }
+    // Last keyframe should be at clip duration
+    expect(whenValues).toContain(20);
+  });
+
+  it("proportionally shrinks fades when fadeIn + fadeOut > clipDur", () => {
+    const audioClip = makeClip({
+      clip_id: "bgm-overlap-fades",
+      asset_id: "AST_BGM",
+      role: "music",
+      beat_id: "beat-bgm",
+      timeline_duration_frames: 30,
+      audio_policy: { bgm_gain: -6, bgm_fade_in_frames: 20, bgm_fade_out_frames: 20 }, // 40 > 30
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    const sourceMap = new Map([["AST_BGM", "/media/bgm.wav"]]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+
+    const whenValues = Array.from(xml.matchAll(/<when>(-?\d+)<\/when>/g)).map(m => Number(m[1]));
+    // All keyframe positions must be within [0, 30]
+    for (const w of whenValues) {
+      expect(w).toBeGreaterThanOrEqual(0);
+      expect(w).toBeLessThanOrEqual(30);
+    }
+    // Must have start and end keyframes
+    expect(whenValues).toContain(0);
+    expect(whenValues).toContain(30);
+  });
+
+  it("handles clipDur = 1 with both fades gracefully", () => {
+    const audioClip = makeClip({
+      clip_id: "bgm-tiny-clip",
+      asset_id: "AST_BGM",
+      role: "music",
+      beat_id: "beat-bgm",
+      timeline_duration_frames: 1,
+      audio_policy: { bgm_gain: 0, bgm_fade_in_frames: 10, bgm_fade_out_frames: 10 },
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    const sourceMap = new Map([["AST_BGM", "/media/bgm.wav"]]);
+
+    const xml = timelineToFcp7Xml(timeline, { sourceMap });
+
+    const whenValues = Array.from(xml.matchAll(/<when>(-?\d+)<\/when>/g)).map(m => Number(m[1]));
+    for (const w of whenValues) {
+      expect(w).toBeGreaterThanOrEqual(0);
+      expect(w).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
+// ── W-04 edge case: linearGainToDb with very small gain ──────────
+
+describe("W-04: linearGainToDb clamp edge cases", () => {
+  it("returns -96 for gain = 0 (JSON-safe)", () => {
+    const db = linearGainToDb(0);
+    expect(db).toBe(-96);
+    expect(JSON.stringify(db)).toBe("-96"); // not "null"
+  });
+
+  it("clamps extremely small positive gain to -96", () => {
+    const db = linearGainToDb(1e-10);
+    expect(db).toBe(-96);
+  });
+
+  it("does not clamp moderate gain", () => {
+    const db = linearGainToDb(0.5);
+    expect(db).toBeCloseTo(-6.0206, 2);
   });
 });

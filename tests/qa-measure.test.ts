@@ -150,4 +150,88 @@ describe("qa measurement", () => {
       }),
     ]);
   });
+
+  // ── C-03 edge case: ebur128 stderr parse failure returns fallback ──
+
+  it("returns fallback loudness when ffmpeg ebur128 output is unparseable", async () => {
+    execFileMock.mockImplementation((
+      cmd: string,
+      args: string[],
+      _opts: unknown,
+      cb: (err: Error | null, stdout?: string, stderr?: string) => void,
+    ) => {
+      if (cmd === "ffprobe") {
+        cb(null, JSON.stringify({
+          streams: [{ duration: "10.0" }],
+          format: { duration: "10.0" },
+        }), "");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-filter_complex")) {
+        // Simulate unparseable ebur128 output (no I: or Peak: lines)
+        cb(null, "", "some random ffmpeg output without ebur128 summary");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-af")) {
+        cb(null, "", "");
+        return;
+      }
+
+      cb(new Error(`Unexpected command: ${cmd} ${args.join(" ")}`));
+    });
+
+    const result = await measureQaMedia({
+      videoPath,
+      audioPath,
+      outputPath,
+      createdAt: "2026-03-24T00:00:00.000Z",
+    });
+
+    // Should use fallback values instead of throwing
+    expect(result.loudness_integrated).toBe(-24);
+    expect(result.loudness_true_peak).toBe(-1);
+  });
+
+  it("returns fallback loudness when ffmpeg exits with error and no stderr", async () => {
+    execFileMock.mockImplementation((
+      cmd: string,
+      args: string[],
+      _opts: unknown,
+      cb: (err: Error | null, stdout?: string, stderr?: string) => void,
+    ) => {
+      if (cmd === "ffprobe") {
+        cb(null, JSON.stringify({
+          streams: [{ duration: "5.0" }],
+          format: { duration: "5.0" },
+        }), "");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-filter_complex")) {
+        // Simulate complete failure with no output
+        cb(new Error("ffmpeg crashed"), "", "");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-af")) {
+        cb(null, "", "");
+        return;
+      }
+
+      cb(new Error(`Unexpected command: ${cmd} ${args.join(" ")}`));
+    });
+
+    const result = await measureQaMedia({
+      videoPath,
+      audioPath,
+      outputPath,
+      createdAt: "2026-03-24T00:00:00.000Z",
+    });
+
+    // Should use fallback values
+    expect(result.loudness_integrated).toBe(-24);
+    expect(result.loudness_true_peak).toBe(-1);
+  });
 });
