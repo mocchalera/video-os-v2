@@ -1,8 +1,10 @@
 /**
- * Shared server utilities: path traversal guard + per-project lock.
+ * Shared server utilities: path traversal guard + per-project lock + atomic write.
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
+import * as crypto from "node:crypto";
 
 // ── Path traversal prevention ────────────────────────────────────────
 
@@ -50,4 +52,19 @@ export function releaseProjectLock(projectId: string): void {
 
 export function getProjectLockKind(projectId: string): string | undefined {
   return projectLocks.get(projectId);
+}
+
+// ── Atomic file write (temp + rename) ──────────────────────────────
+
+/**
+ * Write content to filePath atomically using a temp file + rename.
+ * This prevents partial writes on crash.
+ */
+export function atomicWriteFileSync(filePath: string, content: string): void {
+  const dir = path.dirname(filePath);
+  const tmpSuffix = `.tmp.${crypto.randomBytes(6).toString("hex")}`;
+  const tmpPath = filePath + tmpSuffix;
+
+  fs.writeFileSync(tmpPath, content, "utf-8");
+  fs.renameSync(tmpPath, filePath);
 }

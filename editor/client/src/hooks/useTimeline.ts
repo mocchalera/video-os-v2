@@ -4,6 +4,7 @@ import type {
   Clip,
   HistoryOrigin,
   ProjectSummary,
+  SessionBaseline,
   TimelineIR,
   TimelineSaveResult,
   TimelineValidationIssue,
@@ -171,6 +172,7 @@ export function useTimeline() {
   const [dirty, setDirty] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [timelineRevision, setTimelineRevision] = useState<string | null>(null);
+  const [sessionBaseline, setSessionBaseline] = useState<SessionBaseline | null>(null);
 
   const timeline = history.present;
 
@@ -234,6 +236,7 @@ export function useTimeline() {
 
     try {
       let nextTimeline: TimelineIR | null = null;
+      let fetchedRevision: string | null = null;
 
       try {
         const response = await fetch(`/api/projects/${nextProjectId}/timeline`);
@@ -247,7 +250,8 @@ export function useTimeline() {
         // Capture timeline_revision from ETag header
         const etag = response.headers.get('ETag');
         if (etag) {
-          setTimelineRevision(etag.replace(/^"|"$/g, ''));
+          fetchedRevision = etag.replace(/^"|"$/g, '');
+          setTimelineRevision(fetchedRevision);
         }
       } catch {
         nextTimeline =
@@ -264,6 +268,13 @@ export function useTimeline() {
       });
       setDirty(false);
       setStatus('ready');
+
+      // Establish session baseline with the confirmed ETag value (not stale state)
+      setSessionBaseline({
+        timeline: structuredClone(normalized),
+        baselineRevision: fetchedRevision ?? 'initial',
+        establishedBy: 'initial_load',
+      });
 
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(SELECTED_PROJECT_KEY, nextProjectId);
@@ -328,6 +339,46 @@ export function useTimeline() {
 
     updater(clip);
     pushTimeline(nextTimeline);
+  }
+
+  /**
+   * Swap a clip's source with an alternative candidate.
+   * This is a manual edit (not an AI patch), tracked as 'manual_swap'.
+   */
+  function swapClip(
+    trackKind: 'video' | 'audio',
+    trackId: string,
+    clipId: string,
+    candidate: {
+      segment_id: string;
+      asset_id: string;
+      src_in_us: number;
+      src_out_us: number;
+      confidence: number;
+      quality_flags?: string[];
+      candidate_ref?: string;
+      why_it_matches?: string;
+    },
+  ): void {
+    if (!timeline) return;
+
+    const nextTimeline = structuredClone(timeline);
+    const track = nextTimeline.tracks[trackKind].find(
+      (t) => t.track_id === trackId,
+    );
+    const clip = track?.clips.find((c) => c.clip_id === clipId);
+    if (!track || !clip) return;
+
+    clip.segment_id = candidate.segment_id;
+    clip.asset_id = candidate.asset_id;
+    clip.src_in_us = candidate.src_in_us;
+    clip.src_out_us = candidate.src_out_us;
+    clip.confidence = candidate.confidence;
+    clip.quality_flags = candidate.quality_flags ?? [];
+    clip.candidate_ref = candidate.candidate_ref ?? candidate.segment_id;
+    clip.motivation = `[Manual swap] ${candidate.why_it_matches ?? 'Alternative selected by editor'}`;
+
+    pushTimeline(nextTimeline, 'manual_swap');
   }
 
   function undo(): void {
@@ -550,6 +601,10 @@ export function useTimeline() {
     await loadTimeline(projectId);
   }
 
+  // Expose history origins and snapshots for useDiff patch_apply detection
+  const historyOrigins = history.past.map((entry) => entry.origin);
+  const historySnapshots = history.past.map((entry) => entry.timeline);
+
   return {
     projects,
     projectId,
@@ -560,11 +615,15 @@ export function useTimeline() {
     connectionMode,
     lastSavedAt,
     timelineRevision,
+    sessionBaseline,
+    historyOrigins,
+    historySnapshots,
     validationIssues: timeline ? validateTimeline(timeline) : [],
     canUndo: history.past.length > 0,
     canRedo: history.future.length > 0,
     setProjectId,
     updateClip,
+    swapClip,
     undo,
     redo,
     save,

@@ -15,7 +15,9 @@ import {
   acquireProjectLock,
   releaseProjectLock,
   getProjectLockKind,
+  atomicWriteFileSync,
 } from "../utils.js";
+import { getReconcileStatus } from "../services/reconcile-status.js";
 
 /** Compute SHA-256 hash of file content, returned as `sha256:<hex16>`. */
 export function computeTimelineRevision(content: string): string {
@@ -28,7 +30,7 @@ export function createTimelineRouter(projectsDir: string): Router {
 
   // GET /api/projects/:id/timeline
   router.get("/:id/timeline", (req, res) => {
-    const projDir = safeProjectDir(projectsDir, req.params.id);
+    const projDir = safeProjectDir(projectsDir, req.params.id as string);
     if (!projDir) {
       res.status(400).json({ error: "Invalid project ID" });
       return;
@@ -61,7 +63,7 @@ export function createTimelineRouter(projectsDir: string): Router {
 
   // PUT /api/projects/:id/timeline
   router.put("/:id/timeline", validateTimeline, (req, res) => {
-    const projectId = req.params.id;
+    const projectId = req.params.id as string;
     const projDir = safeProjectDir(projectsDir, projectId);
     if (!projDir) {
       res.status(400).json({ error: "Invalid project ID" });
@@ -122,12 +124,20 @@ export function createTimelineRouter(projectsDir: string): Router {
         fs.copyFileSync(timelinePath, backupPath);
       }
 
-      // Write validated timeline
+      // Write validated timeline (atomic: temp + rename)
       const newContent = JSON.stringify(req.body, null, 2);
-      fs.writeFileSync(timelinePath, newContent, "utf-8");
+      atomicWriteFileSync(timelinePath, newContent);
 
       const newRevision = computeTimelineRevision(newContent);
       res.setHeader("ETag", `"${newRevision}"`);
+
+      // Reconcile project state after save
+      let status: { currentState: string; staleArtifacts: string[]; gates: Record<string, string> } | undefined;
+      try {
+        status = getReconcileStatus(projDir);
+      } catch {
+        // Non-fatal
+      }
 
       res.json({
         ok: true,
@@ -135,6 +145,7 @@ export function createTimelineRouter(projectsDir: string): Router {
         timeline_revision: newRevision,
         saved_at: new Date().toISOString(),
         ...(backupPath ? { backupPath: path.basename(backupPath) } : {}),
+        ...(status ? { status } : {}),
       });
     } catch (err) {
       res.status(500).json({

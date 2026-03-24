@@ -9,6 +9,7 @@ import { Router } from "express";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { safeProjectDir } from "../utils.js";
 
 interface TimelineClip {
   clip_id: string;
@@ -94,7 +95,11 @@ export function createPreviewRouter(projectsDir: string): Router {
   // POST /api/projects/:id/preview
   router.post("/:id/preview", async (req, res) => {
     const projectId = req.params.id;
-    const projectDir = path.join(projectsDir, projectId);
+    const projectDir = safeProjectDir(projectsDir, projectId);
+    if (!projectDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
     const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
     const sourceMapPath = path.join(projectDir, "02_media", "source_map.json");
 
@@ -299,21 +304,21 @@ export function createPreviewRouter(projectsDir: string): Router {
 
   // GET /api/projects/:id/preview/:filename — serve generated preview
   router.get("/:id/preview/:filename", (req, res) => {
-    const projectId = req.params.id;
+    const projDir = safeProjectDir(projectsDir, req.params.id);
+    if (!projDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+
     const filename = req.params.filename;
 
-    // Prevent path traversal
-    if (filename.includes("..") || filename.includes("/")) {
+    // Prevent path traversal (including %2F decode attacks)
+    if (filename.includes("..") || filename.includes("/") || filename.includes("%2F") || filename.includes("%2f") || filename.includes("\0")) {
       res.status(400).json({ error: "Invalid filename" });
       return;
     }
 
-    const filePath = path.join(
-      projectsDir,
-      projectId,
-      "05_timeline",
-      filename,
-    );
+    const filePath = path.join(projDir, "05_timeline", filename);
 
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: "Preview file not found" });

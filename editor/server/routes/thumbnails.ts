@@ -8,6 +8,7 @@ import { Router } from "express";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { safeProjectDir } from "../utils.js";
 
 interface TimelineClip {
   clip_id: string;
@@ -92,14 +93,24 @@ export function createThumbnailRouter(projectsDir: string): Router {
 
   // GET /api/projects/:id/thumbnail/:clipId
   router.get("/:id/thumbnail/:clipId", async (req, res) => {
-    const projectId = req.params.id;
+    const projectDir = safeProjectDir(projectsDir, req.params.id);
+    if (!projectDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
     const clipId = req.params.clipId;
-    const projectDir = path.join(projectsDir, projectId);
+
+    // Prevent path traversal in clipId
+    if (!clipId || clipId.includes("..") || clipId.includes("/") || clipId.includes("%2F") || clipId.includes("%2f") || clipId.includes("\0")) {
+      res.status(400).json({ error: "Invalid clip ID" });
+      return;
+    }
+
     const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
     const sourceMapPath = path.join(projectDir, "02_media", "source_map.json");
 
     if (!fs.existsSync(timelinePath)) {
-      res.status(404).json({ error: "Timeline not found", project: projectId });
+      res.status(404).json({ error: "Timeline not found", project: req.params.id });
       return;
     }
 
@@ -159,6 +170,92 @@ export function createThumbnailRouter(projectsDir: string): Router {
         "1",
         "-vf",
         "scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2",
+        "-q:v",
+        "5",
+        thumbPath,
+      ]);
+
+      if (!fs.existsSync(thumbPath)) {
+        res.status(500).json({ error: "Thumbnail generation failed" });
+        return;
+      }
+
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      fs.createReadStream(thumbPath).pipe(res);
+    } catch (err) {
+      res.status(500).json({
+        error: "Thumbnail generation failed",
+        details: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  // GET /api/projects/:id/thumbnail/:assetId — Generate thumbnail by asset ID + frame_us
+  router.get("/:id/thumbnail/:assetId", async (req, res) => {
+    const projectDir = safeProjectDir(projectsDir, req.params.id);
+    if (!projectDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+
+    const assetId = req.params.assetId;
+    if (!assetId || assetId.includes("..") || assetId.includes("/") || assetId.includes("%2F") || assetId.includes("%2f")) {
+      res.status(400).json({ error: "Invalid asset ID" });
+      return;
+    }
+
+    const frameUs = parseInt(req.query.frame_us as string, 10);
+    if (isNaN(frameUs) || frameUs < 0) {
+      res.status(400).json({ error: "frame_us query parameter is required and must be >= 0" });
+      return;
+    }
+
+    const width = parseInt(req.query.width as string, 10) || 160;
+    const height = parseInt(req.query.height as string, 10) || 90;
+
+    try {
+      // Load source map
+      const sourceMapPath = path.join(projectDir, "02_media", "source_map.json");
+      let sourceMap: SourceMapDoc = { items: [] };
+      if (fs.existsSync(sourceMapPath)) {
+        sourceMap = JSON.parse(fs.readFileSync(sourceMapPath, "utf-8"));
+      }
+
+      const sourcePath = resolveAssetPath(sourceMap, assetId);
+      if (!sourcePath) {
+        res.status(404).json({ error: `Source file not found for asset ${assetId}` });
+        return;
+      }
+
+      // Cache directory per design doc: .cache/thumbs/
+      const cacheDir = path.join(projectDir, ".cache", "thumbs");
+      fs.mkdirSync(cacheDir, { recursive: true });
+
+      const thumbKey = `${assetId}_${frameUs}_${width}x${height}`;
+      const thumbPath = path.join(cacheDir, `${thumbKey}.jpg`);
+
+      // Return cached thumbnail if available
+      if (fs.existsSync(thumbPath)) {
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        fs.createReadStream(thumbPath).pipe(res);
+        return;
+      }
+
+      // Extract thumbnail at specified frame
+      const seekSec = frameUs / 1_000_000;
+
+      await execFilePromise("ffmpeg", [
+        "-y",
+        "-ss",
+        seekSec.toFixed(6),
+        "-i",
+        sourcePath,
+        "-vframes",
+        "1",
+        "-vf",
+        `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
         "-q:v",
         "5",
         thumbPath,

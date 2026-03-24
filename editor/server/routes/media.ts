@@ -7,6 +7,7 @@
 import { Router } from "express";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { safeProjectDir } from "../utils.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -29,17 +30,22 @@ export function createMediaRouter(projectsDir: string): Router {
 
   // GET /api/projects/:id/media/:filename
   router.get("/:id/media/:filename", (req, res) => {
-    const projectId = req.params.id;
+    const projectDir = safeProjectDir(projectsDir, req.params.id);
+    if (!projectDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+
     const filename = req.params.filename;
 
-    // Prevent path traversal
-    if (filename.includes("..") || filename.includes("/")) {
+    // Prevent path traversal (including %2F decode attacks)
+    if (filename.includes("..") || filename.includes("/") || filename.includes("%2F") || filename.includes("%2f") || filename.includes("\0")) {
       res.status(400).json({ error: "Invalid filename" });
       return;
     }
 
     // Look for file in 02_media/ directory
-    const mediaDir = path.join(projectsDir, projectId, "02_media");
+    const mediaDir = path.join(projectDir, "02_media");
     const filePath = path.join(mediaDir, filename);
 
     // Also check subdirectories (e.g. 02_media/bgm/)
@@ -56,7 +62,6 @@ export function createMediaRouter(projectsDir: string): Router {
     }
 
     // Verify the resolved path is within the project directory
-    const projectDir = path.join(projectsDir, projectId);
     const realPath = fs.realpathSync(resolvedPath);
     // Allow symlinks that point outside the project (source media files)
     // but verify the media directory entry itself is within the project

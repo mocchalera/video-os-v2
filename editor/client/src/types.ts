@@ -256,6 +256,8 @@ export interface PatchOperation {
   role?: ClipRole;
   label?: string;
   with_candidate_ref?: string;
+  /** Index of this operation in the original (unfiltered) patch. Set by safety filter. */
+  original_index?: number;
 }
 
 export interface ReviewPatch {
@@ -294,8 +296,18 @@ export interface PatchApplyResponse {
 
 export type HistoryOrigin =
   | 'manual_edit'
+  | 'manual_swap'
+  | 'manual_trim'
+  | 'manual_audio'
   | 'patch_apply'
   | 'server_reload';
+
+/** Client-side session baseline for diff comparison. Not persisted to server. */
+export interface SessionBaseline {
+  timeline: TimelineIR;
+  baselineRevision: string;
+  establishedBy: 'initial_load' | 'reload_after_compile';
+}
 
 export interface SelectsCandidate {
   segment_id: string;

@@ -19,7 +19,9 @@ import {
   acquireProjectLock,
   releaseProjectLock,
   getProjectLockKind,
+  atomicWriteFileSync,
 } from "../utils.js";
+import { getReconcileStatus } from "../services/reconcile-status.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -75,10 +77,20 @@ interface PatchDoc {
   operations: PatchOp[];
 }
 
+interface FilteredOp extends PatchOp {
+  /** Index of this operation in the original patch.operations array. */
+  original_index: number;
+}
+
+interface FilteredPatchDoc {
+  timeline_version: string;
+  operations: FilteredOp[];
+}
+
 interface SafetyResult {
   safe: boolean;
   rejected_ops: number[];
-  filtered_patch: PatchDoc;
+  filtered_patch: FilteredPatchDoc;
 }
 
 const OPS_REQUIRING_TARGET = new Set([
@@ -91,7 +103,7 @@ const OPS_REQUIRING_TARGET = new Set([
 
 function validatePatchSafety(patch: PatchDoc): SafetyResult {
   const rejected: number[] = [];
-  const accepted: PatchOp[] = [];
+  const accepted: FilteredOp[] = [];
 
   for (let i = 0; i < patch.operations.length; i++) {
     const op = patch.operations[i];
@@ -108,7 +120,7 @@ function validatePatchSafety(patch: PatchDoc): SafetyResult {
       rejected.push(i);
       continue;
     }
-    accepted.push(op);
+    accepted.push({ ...op, original_index: i });
   }
 
   return {
@@ -429,6 +441,14 @@ export function createReviewRouter(projectsDir: string): Router {
         reviewPatch = { exists: true, revision: fileRevision(content), data, safety };
       }
 
+      // Reconcile status
+      let status: { currentState: string; staleArtifacts: string[]; gates: Record<string, string> } | undefined;
+      try {
+        status = getReconcileStatus(projDir);
+      } catch {
+        // Non-fatal
+      }
+
       res.json({
         project_id: req.params.id,
         timeline_revision: timelineRevision,
@@ -438,6 +458,7 @@ export function createReviewRouter(projectsDir: string): Router {
           review_report: reviewReport,
           review_patch: reviewPatch,
         },
+        ...(status ? { status } : {}),
       });
     } catch (err) {
       res.status(500).json({
@@ -619,11 +640,19 @@ export function createReviewRouter(projectsDir: string): Router {
         return;
       }
 
-      // Backup and save
+      // Backup and save (atomic: temp + rename)
       fs.copyFileSync(timelinePath, `${timelinePath}.bak`);
       const newContent = JSON.stringify(timeline, null, 2);
-      fs.writeFileSync(timelinePath, newContent, "utf-8");
+      atomicWriteFileSync(timelinePath, newContent);
       const newRevision = computeTimelineRevision(newContent);
+
+      // Reconcile project state after patch apply
+      let status: { currentState: string; staleArtifacts: string[]; gates: Record<string, string> } | undefined;
+      try {
+        status = getReconcileStatus(projDir);
+      } catch {
+        // Non-fatal
+      }
 
       res.json({
         ok: true,
@@ -632,6 +661,7 @@ export function createReviewRouter(projectsDir: string): Router {
         applied_operation_indexes: appliedOps,
         rejected_operations: rejectedOps,
         timeline,
+        ...(status ? { status } : {}),
       });
     } catch (err) {
       res.status(500).json({
@@ -640,6 +670,174 @@ export function createReviewRouter(projectsDir: string): Router {
       });
     } finally {
       releaseProjectLock(projectId);
+    }
+  });
+
+  // GET /api/projects/:id/ai/alternatives/:clipId
+  // Returns ranked alternative candidates for a given clip from selects_candidates.yaml
+  router.get("/:id/ai/alternatives/:clipId", (req, res) => {
+    const projDir = safeProjectDir(projectsDir, req.params.id as string);
+    if (!projDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+
+    const clipId = req.params.clipId as string;
+
+    // Load timeline to find the current clip
+    const timelinePath = path.join(projDir, "05_timeline", "timeline.json");
+    if (!fs.existsSync(timelinePath)) {
+      res.status(404).json({ error: "Timeline not found" });
+      return;
+    }
+
+    // Load selects_candidates
+    const selectsPath = path.join(projDir, "04_plan", "selects_candidates.yaml");
+    if (!fs.existsSync(selectsPath)) {
+      res.json({ clip_id: clipId, alternatives: [] });
+      return;
+    }
+
+    try {
+      const timelineContent = fs.readFileSync(timelinePath, "utf-8");
+      const timeline = JSON.parse(timelineContent);
+      const tracks = timeline.tracks as TracksData;
+
+      // Find the target clip
+      const found = findClipInTimeline(tracks, clipId);
+      if (!found) {
+        res.status(404).json({ error: "Clip not found", clip_id: clipId });
+        return;
+      }
+
+      const clip = found.clip;
+      const clipSegmentId = clip.segment_id as string;
+      const clipRole = (clip.role as string) ?? "";
+      const clipBeatId = (clip.beat_id as string) ?? "";
+      const clipCandidateRef = (clip.candidate_ref as string) ?? "";
+      const clipFallbacks = (clip.fallback_segment_ids as string[]) ?? [];
+
+      // Load selects
+      const selectsContent = fs.readFileSync(selectsPath, "utf-8");
+      const selectsData = yaml.load(selectsContent) as {
+        candidates?: Array<{
+          segment_id: string;
+          asset_id: string;
+          src_in_us: number;
+          src_out_us: number;
+          role: string;
+          why_it_matches?: string;
+          risks?: string[];
+          confidence: number;
+          semantic_rank?: number;
+          quality_flags?: string[];
+          eligible_beats?: string[];
+          trim_hint?: { source_center_us: number; preferred_duration_us: number };
+        }>;
+      };
+
+      const candidates = selectsData?.candidates ?? [];
+
+      // Compute current clip duration for short-clip exclusion
+      const clipDurationUs = (clip.src_out_us as number) - (clip.src_in_us as number);
+      const minCandidateDurationUs = clipDurationUs * 0.5;
+
+      // Exclude current clip's segment, reject role, and too-short candidates
+      const eligible = candidates.filter((c) => {
+        if (c.segment_id === clipSegmentId) return false;
+        if (c.role === "reject") return false;
+        // Exclude candidates whose duration < 50% of current clip
+        const candidateDuration = c.src_out_us - c.src_in_us;
+        if (candidateDuration < minCandidateDurationUs) return false;
+        return true;
+      });
+
+      // Ranking per design doc section 4-4
+      interface RankedCandidate {
+        segment_id: string;
+        asset_id: string;
+        src_in_us: number;
+        src_out_us: number;
+        role: string;
+        why_it_matches?: string;
+        risks?: string[];
+        confidence: number;
+        semantic_rank?: number;
+        quality_flags?: string[];
+        eligible_beats?: string[];
+        trim_hint?: { source_center_us: number; preferred_duration_us: number };
+        rank_reason: string;
+        rank_priority: number;
+        thumbnail_url: string;
+      }
+
+      const ranked: RankedCandidate[] = eligible.map((c) => {
+        let priority = 5;
+        let reason = "fallback";
+
+        // 1. candidate_ref match
+        if (clipCandidateRef && c.segment_id === clipCandidateRef) {
+          priority = 1;
+          reason = "candidate_ref_match";
+        }
+        // 2. fallback_segment_ids
+        else if (clipFallbacks.includes(c.segment_id)) {
+          priority = 2;
+          reason = "fallback_segment";
+        }
+        // 3. eligible_beats contains current beat
+        else if (clipBeatId && c.eligible_beats?.includes(clipBeatId)) {
+          priority = 3;
+          reason = "eligible_beat_match";
+        }
+        // 4. same role
+        else if (clipRole && c.role === clipRole) {
+          priority = 4;
+          reason = "same_role";
+        }
+
+        // Build thumbnail URL (matches GET /api/projects/:id/thumbnail/:assetId)
+        const frameUs = c.trim_hint?.source_center_us ?? Math.round((c.src_in_us + c.src_out_us) / 2);
+        const thumbnailUrl = `/api/projects/${req.params.id as string}/thumbnail/${encodeURIComponent(c.asset_id)}?frame_us=${frameUs}&width=160&height=90`;
+
+        return {
+          segment_id: c.segment_id,
+          asset_id: c.asset_id,
+          src_in_us: c.src_in_us,
+          src_out_us: c.src_out_us,
+          role: c.role,
+          why_it_matches: c.why_it_matches,
+          risks: c.risks,
+          confidence: c.confidence,
+          semantic_rank: c.semantic_rank,
+          quality_flags: c.quality_flags,
+          eligible_beats: c.eligible_beats,
+          trim_hint: c.trim_hint,
+          rank_reason: reason,
+          rank_priority: priority,
+          thumbnail_url: thumbnailUrl,
+        };
+      });
+
+      // Sort by priority asc, then semantic_rank asc, then confidence desc
+      ranked.sort((a, b) => {
+        if (a.rank_priority !== b.rank_priority) return a.rank_priority - b.rank_priority;
+        const aRank = a.semantic_rank ?? 999;
+        const bRank = b.semantic_rank ?? 999;
+        if (aRank !== bRank) return aRank - bRank;
+        return b.confidence - a.confidence;
+      });
+
+      res.json({
+        clip_id: clipId,
+        current_segment_id: clipSegmentId,
+        alternatives: ranked,
+      });
+    } catch (err) {
+      res.status(500).json({
+        error: "Failed to compute alternatives",
+        details: err instanceof Error ? err.message : String(err),
+      });
     }
   });
 

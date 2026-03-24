@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { AudioPolicy, Clip, ReviewReportResponse } from '../types';
+import type { BlueprintResponse } from '../hooks/useReview';
 import { formatMicroseconds } from '../utils/time';
 
 type PanelTab = 'properties' | 'ai-context' | 'review';
@@ -8,6 +9,7 @@ interface PropertyPanelProps {
   clip: Clip | null;
   fps: number;
   reviewReport: ReviewReportResponse | null;
+  blueprint: BlueprintResponse | null;
   onUpdateAudioNumber: (field: keyof AudioPolicy, value: number) => void;
   onUpdateAudioBoolean: (field: keyof AudioPolicy, value: boolean) => void;
 }
@@ -244,14 +246,19 @@ function PropertiesTab({
 function AiContextTab({
   clip,
   reviewReport,
+  blueprint,
 }: {
   clip: Clip;
   reviewReport: ReviewReportResponse | null;
+  blueprint: BlueprintResponse | null;
 }) {
   const clipWeaknesses =
     reviewReport?.data?.weaknesses?.filter((w) => w.clip_id === clip.clip_id) ?? [];
   const clipWarnings =
     reviewReport?.data?.warnings?.filter((w) => w.clip_id === clip.clip_id) ?? [];
+  const beatInfo = clip.beat_id
+    ? blueprint?.data?.beats?.find((b) => b.beat_id === clip.beat_id)
+    : null;
 
   return (
     <>
@@ -278,6 +285,15 @@ function AiContextTab({
             <span className="text-[color:var(--text-muted)]">Beat ID</span>
             <span className="font-mono text-neutral-100">{clip.beat_id ?? '\u2014'}</span>
           </div>
+
+          {beatInfo?.purpose ? (
+            <div>
+              <div className="text-[color:var(--text-muted)]">Beat Purpose</div>
+              <div className="mt-1 text-[13px] leading-relaxed text-neutral-100">
+                {beatInfo.purpose}
+              </div>
+            </div>
+          ) : null}
         </div>
       </PanelSection>
 
@@ -469,6 +485,31 @@ function ReviewTab({
         </PanelSection>
       ) : null}
 
+      {report.warnings && report.warnings.length > 0 ? (
+        <PanelSection title="Warnings">
+          <div className="space-y-2">
+            {report.warnings.map((w, i) => (
+              <div
+                key={i}
+                className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px]"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="rounded-sm bg-amber-600 px-1 py-px text-[9px] font-bold uppercase text-white">
+                    {w.category}
+                  </span>
+                  {w.clip_id ? (
+                    <span className="font-mono text-[9px] text-[color:var(--text-subtle)]">
+                      {w.clip_id}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1 text-neutral-200">{w.description}</div>
+              </div>
+            ))}
+          </div>
+        </PanelSection>
+      ) : null}
+
       {report.recommended_next_pass ? (
         <PanelSection title="Recommended Next Pass">
           <div className="text-[12px] leading-relaxed text-neutral-200">
@@ -484,6 +525,7 @@ export default function PropertyPanel({
   clip,
   fps,
   reviewReport,
+  blueprint,
   onUpdateAudioNumber,
   onUpdateAudioBoolean,
 }: PropertyPanelProps) {
@@ -564,7 +606,7 @@ export default function PropertyPanel({
             onUpdateAudioBoolean={onUpdateAudioBoolean}
           />
         ) : activeTab === 'ai-context' ? (
-          <AiContextTab clip={clip} reviewReport={reviewReport} />
+          <AiContextTab clip={clip} reviewReport={reviewReport} blueprint={blueprint} />
         ) : (
           <ReviewTab reviewReport={reviewReport} />
         )}

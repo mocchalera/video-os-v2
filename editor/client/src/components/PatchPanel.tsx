@@ -50,29 +50,35 @@ export default function PatchPanel({
   // Use safety-filtered operations only; rejected_ops are shown as warning (修正R2-2)
   const safetyRejectedOps = patchData.safety?.rejected_ops ?? [];
   const operations = patchData.safety?.filtered_patch?.operations ?? patchData.data.operations;
+  // filteredIdx = index within this filtered list (for UI state);
+  // originalIdx = original_index from server (for API calls)
   const activeOps = operations
-    .map((op, idx) => ({ op, idx }))
-    .filter(({ idx }) => !rejectedIndexes.has(idx));
+    .map((op, filteredIdx) => ({
+      op,
+      filteredIdx,
+      originalIdx: op.original_index ?? filteredIdx,
+    }))
+    .filter(({ filteredIdx }) => !rejectedIndexes.has(filteredIdx));
 
-  async function handleApply(index: number): Promise<void> {
-    setApplyingIndexes((prev) => new Set(prev).add(index));
+  async function handleApply(filteredIdx: number, originalIdx: number): Promise<void> {
+    setApplyingIndexes((prev) => new Set(prev).add(filteredIdx));
     try {
-      await onApply([index]);
+      await onApply([originalIdx]);
     } finally {
       setApplyingIndexes((prev) => {
         const next = new Set(prev);
-        next.delete(index);
+        next.delete(filteredIdx);
         return next;
       });
     }
   }
 
   async function handleApplyAll(): Promise<void> {
-    const indexes = activeOps.map(({ idx }) => idx);
-    if (indexes.length === 0) return;
-    setApplyingIndexes(new Set(indexes));
+    const originalIndexes = activeOps.map(({ originalIdx }) => originalIdx);
+    if (originalIndexes.length === 0) return;
+    setApplyingIndexes(new Set(activeOps.map(({ filteredIdx }) => filteredIdx)));
     try {
-      await onApply(indexes);
+      await onApply(originalIndexes);
     } finally {
       setApplyingIndexes(new Set());
     }
@@ -119,14 +125,15 @@ export default function PatchPanel({
 
       {/* Patch list */}
       <div className="editor-scrollbar min-h-0 flex-1 overflow-y-auto">
-        {operations.map((op, idx) => {
-          const rejected = rejectedIndexes.has(idx);
-          const applying = applyingIndexes.has(idx);
+        {operations.map((op, filteredIdx) => {
+          const rejected = rejectedIndexes.has(filteredIdx);
+          const applying = applyingIndexes.has(filteredIdx);
+          const originalIdx = op.original_index ?? filteredIdx;
           const style = getOpStyle(op);
 
           return (
             <div
-              key={idx}
+              key={filteredIdx}
               className={`border-b border-white/[0.04] px-4 py-3 transition ${
                 rejected ? 'opacity-30' : ''
               }`}
@@ -174,7 +181,7 @@ export default function PatchPanel({
                       className="rounded border border-green-500/30 bg-green-500/10 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase text-green-400 transition hover:bg-green-500/20 disabled:opacity-35"
                       disabled={!canApply || applying}
                       onClick={() => {
-                        void handleApply(idx);
+                        void handleApply(filteredIdx, originalIdx);
                       }}
                     >
                       {applying ? '...' : 'Apply'}
@@ -182,7 +189,7 @@ export default function PatchPanel({
                     <button
                       type="button"
                       className="rounded border border-red-500/30 bg-red-500/10 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase text-red-400 transition hover:bg-red-500/20"
-                      onClick={() => handleReject(idx)}
+                      onClick={() => handleReject(filteredIdx)}
                     >
                       Reject
                     </button>

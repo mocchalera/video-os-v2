@@ -1,11 +1,15 @@
 import { useEffect, useEffectEvent, useMemo, useState, type ReactNode } from 'react';
+import AlternativesPanel from './components/AlternativesPanel';
 import type { ClipOverlay, TrimSide } from './components/ClipBlock';
+import DiffPanel from './components/DiffPanel';
 import PatchPanel from './components/PatchPanel';
 import PreviewPlayer from './components/PreviewPlayer';
 import PropertyPanel from './components/PropertyPanel';
 import ReviewOverlay from './components/ReviewOverlay';
 import Timeline from './components/Timeline';
 import TransportBar from './components/TransportBar';
+import { useAlternatives, type AlternativeCandidate } from './hooks/useAlternatives';
+import { useDiff } from './hooks/useDiff';
 import { usePlayback } from './hooks/usePlayback';
 import { useReview } from './hooks/useReview';
 import { useSelection } from './hooks/useSelection';
@@ -123,7 +127,15 @@ export default function App() {
     durationFrames: totalFrames,
   });
   const reviewState = useReview(timelineState.projectId);
-  const [bottomTab, setBottomTab] = useState<'timeline' | 'patches'>('timeline');
+  const selectedClipId = selectionState.selection?.clipId ?? null;
+  const alternativesState = useAlternatives(timelineState.projectId, selectedClipId);
+  const clipDiffs = useDiff(
+    timelineState.sessionBaseline,
+    timelineState.timeline,
+    timelineState.historyOrigins,
+    timelineState.historySnapshots,
+  );
+  const [bottomTab, setBottomTab] = useState<'timeline' | 'patches' | 'alternatives' | 'diff'>('timeline');
 
   // Build clip overlay map from review weaknesses + patch operations
   const clipOverlays = useMemo(() => {
@@ -197,6 +209,21 @@ export default function App() {
       timelineState.commitRemoteMutation(result.timeline, result.timeline_revision_after);
       reviewState.reload();
     }
+  }
+
+  function handleSwapClip(candidate: AlternativeCandidate): void {
+    const sel = selectionState.selection;
+    if (!sel) return;
+    timelineState.swapClip(sel.trackKind, sel.trackId, sel.clipId, {
+      segment_id: candidate.segment_id,
+      asset_id: candidate.asset_id,
+      src_in_us: candidate.src_in_us,
+      src_out_us: candidate.src_out_us,
+      confidence: candidate.confidence,
+      quality_flags: candidate.quality_flags,
+      candidate_ref: candidate.segment_id,
+      why_it_matches: candidate.why_it_matches,
+    });
   }
 
   async function handleRenderPreview(): Promise<void> {
@@ -477,6 +504,7 @@ export default function App() {
               clip={selectedClip}
               fps={fps}
               reviewReport={reviewState.report}
+              blueprint={reviewState.blueprint}
               onUpdateAudioNumber={handleUpdateAudioNumber}
               onUpdateAudioBoolean={handleUpdateAudioBoolean}
             />
@@ -485,34 +513,34 @@ export default function App() {
           <section className="col-span-2 flex min-h-0 flex-col overflow-hidden border-t border-white/[0.06]">
             <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-3 py-1.5">
               <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  className={`px-2 py-0.5 text-[13px] font-semibold transition ${
-                    bottomTab === 'timeline'
-                      ? 'text-white'
-                      : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
-                  }`}
-                  onClick={() => setBottomTab('timeline')}
-                >
-                  Assembly Dock
-                </button>
-                <span className="text-[color:var(--text-subtle)]">/</span>
-                <button
-                  type="button"
-                  className={`px-2 py-0.5 text-[13px] font-semibold transition ${
-                    bottomTab === 'patches'
-                      ? 'text-white'
-                      : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
-                  }`}
-                  onClick={() => setBottomTab('patches')}
-                >
-                  Patches
-                  {reviewState.patch?.data?.operations?.length ? (
-                    <span className="ml-1.5 rounded-sm bg-[var(--accent)]/20 px-1 py-px font-mono text-[9px] text-[var(--accent)]">
-                      {reviewState.patch.data.operations.length}
-                    </span>
-                  ) : null}
-                </button>
+                {(
+                  [
+                    { key: 'timeline' as const, label: 'Assembly Dock', badge: undefined as number | undefined },
+                    { key: 'patches' as const, label: 'Patches', badge: reviewState.patch?.data?.operations?.length },
+                    { key: 'alternatives' as const, label: 'Alternatives', badge: alternativesState.alternatives.length || undefined },
+                    { key: 'diff' as const, label: 'Diff', badge: clipDiffs.length || undefined },
+                  ]
+                ).map(({ key, label, badge }, i) => (
+                  <span key={key} className="flex items-center">
+                    {i > 0 ? <span className="text-[color:var(--text-subtle)]">/</span> : null}
+                    <button
+                      type="button"
+                      className={`px-2 py-0.5 text-[13px] font-semibold transition ${
+                        bottomTab === key
+                          ? 'text-white'
+                          : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
+                      }`}
+                      onClick={() => setBottomTab(key)}
+                    >
+                      {label}
+                      {badge ? (
+                        <span className="ml-1.5 rounded-sm bg-[var(--accent)]/20 px-1 py-px font-mono text-[9px] text-[var(--accent)]">
+                          {badge}
+                        </span>
+                      ) : null}
+                    </button>
+                  </span>
+                ))}
               </div>
 
               <span className="font-mono text-[10px] text-[color:var(--text-subtle)]">
@@ -572,12 +600,24 @@ export default function App() {
                   />
                 </div>
               </div>
-            ) : (
+            ) : bottomTab === 'patches' ? (
               <PatchPanel
                 patchData={reviewState.patch}
                 dirty={timelineState.dirty}
                 timelineRevision={timelineState.timelineRevision}
                 onApply={handleApplyPatch}
+              />
+            ) : bottomTab === 'alternatives' ? (
+              <AlternativesPanel
+                clipId={selectedClipId}
+                alternatives={alternativesState.alternatives}
+                loading={alternativesState.loading}
+                onSwap={handleSwapClip}
+              />
+            ) : (
+              <DiffPanel
+                diffs={clipDiffs}
+                baselineRevision={timelineState.sessionBaseline?.baselineRevision ?? null}
               />
             )}
           </section>
