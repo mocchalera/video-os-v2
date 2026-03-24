@@ -39,6 +39,8 @@ export interface BgmAnalysisResult extends BgmAnalysis {
   beats: BeatEvent[];
 }
 
+export const BGM_ANALYSIS_RELATIVE_PATH = "03_analysis/bgm_analysis.json";
+
 // ── Tool availability checks ────────────────────────────────────────
 
 const EXEC_OPTS: ExecSyncOptionsWithStringEncoding = {
@@ -725,6 +727,16 @@ function makeFailed(
 /** BGM audio file extensions to auto-detect. */
 export const BGM_EXTENSIONS = new Set([".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a"]);
 
+export interface ProjectBgmAnalysisOptions {
+  sourceFiles: string[];
+  projectDir: string;
+  projectId: string;
+}
+
+export function resolveBgmAnalysisPath(projectPath: string): string {
+  return path.join(projectPath, BGM_ANALYSIS_RELATIVE_PATH);
+}
+
 /**
  * Auto-detect BGM files in a project's source files.
  * Identifies audio-only files (no video stream) as potential BGM.
@@ -750,17 +762,42 @@ export function detectBgmFiles(sourceFiles: string[]): string[] {
 }
 
 /**
+ * Run project-level BGM analysis for detected audio-only source files.
+ * Writes the canonical 03_analysis artifact before downstream stages consume it.
+ */
+export function runProjectBgmAnalysis(
+  opts: ProjectBgmAnalysisOptions,
+): string[] {
+  const writtenPaths: string[] = [];
+  const bgmFiles = detectBgmFiles(opts.sourceFiles);
+
+  for (const bgmPath of bgmFiles) {
+    const assetId = `BGM_${path.basename(bgmPath, path.extname(bgmPath)).replace(/[^a-zA-Z0-9]/g, "_")}`;
+    const result = analyzeBgm({
+      audioPath: bgmPath,
+      projectDir: opts.projectDir,
+      projectId: opts.projectId,
+      assetId,
+    });
+    if (result.analysis_status === "failed") continue;
+    writtenPaths.push(writeBgmAnalysis(result, opts.projectDir));
+  }
+
+  return writtenPaths;
+}
+
+/**
  * Write BGM analysis artifact to 03_analysis/ directory.
  */
 export function writeBgmAnalysis(
   analysis: BgmAnalysisResult,
   projectPath: string,
 ): string {
-  const outDir = path.join(projectPath, "03_analysis");
+  const outPath = resolveBgmAnalysisPath(projectPath);
+  const outDir = path.dirname(outPath);
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
   }
-  const outPath = path.join(outDir, "bgm_analysis.json");
   fs.writeFileSync(outPath, JSON.stringify(analysis, null, 2), "utf-8");
   return outPath;
 }
@@ -770,7 +807,7 @@ export function writeBgmAnalysis(
  */
 export function loadBgmAnalysisFromProject(projectPath: string): BgmAnalysisResult | undefined {
   // Primary: 03_analysis/bgm_analysis.json
-  const analysisPath = path.join(projectPath, "03_analysis/bgm_analysis.json");
+  const analysisPath = resolveBgmAnalysisPath(projectPath);
   if (fs.existsSync(analysisPath)) {
     try {
       const raw = fs.readFileSync(analysisPath, "utf-8");

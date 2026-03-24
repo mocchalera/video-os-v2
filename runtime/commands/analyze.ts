@@ -16,11 +16,6 @@ import { DEFAULT_VLM_CONCURRENCY } from "../pipeline/vlm-analysis.js";
 import type { ProjectState } from "../state/reconcile.js";
 import { ProgressTracker } from "../progress.js";
 import { runPreflight } from "../../scripts/preflight.js";
-import {
-  analyzeBgm,
-  detectBgmFiles,
-  writeBgmAnalysis,
-} from "../media/bgm-analyzer.js";
 
 export interface AnalyzeCommandOptions {
   sourceFiles: string[];
@@ -166,27 +161,11 @@ class DefaultAnalyzeRunner implements AnalyzeRunner {
       sttProvider: ctx.sttProvider,
       contentHint: ctx.contentHint,
       skipMediaLink: ctx.skipMediaLink,
+      skipBgmAnalysis: ctx.skipBgmAnalysis,
       vlmConcurrency: ctx.concurrency ?? DEFAULT_VLM_CONCURRENCY,
       noCache: ctx.noCache,
       clearCache: ctx.clearCache,
     });
-
-    // ── BGM beat analysis (post-pipeline) ───────────────────────────
-    if (!ctx.skipBgmAnalysis) {
-      const bgmFiles = detectBgmFiles(ctx.sourceFiles);
-      for (const bgmPath of bgmFiles) {
-        const assetId = `BGM_${path.basename(bgmPath, path.extname(bgmPath)).replace(/[^a-zA-Z0-9]/g, "_")}`;
-        const result = analyzeBgm({
-          audioPath: bgmPath,
-          projectDir: ctx.projectDir,
-          projectId: ctx.projectId,
-          assetId,
-        });
-        if (result.analysis_status !== "failed") {
-          writeBgmAnalysis(result, ctx.projectDir);
-        }
-      }
-    }
 
     return {
       artifactsCreated: collectExistingAnalyzeArtifacts(ctx.projectDir),

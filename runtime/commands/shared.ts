@@ -17,10 +17,14 @@ import {
   reconcile,
   snapshotArtifacts,
   writeProjectState,
+  readProjectStateWithRevision,
+  computeRevision,
+  ConflictError,
   type ProjectStateDoc,
   type ProjectState,
   type ReconcileResult,
   type ArtifactHashes,
+  type WriteProjectStateOptions,
 } from "../state/reconcile.js";
 import { createHistoryEntry } from "../state/history.js";
 
@@ -42,6 +46,8 @@ export interface CommandContext {
   reconcileResult: ReconcileResult;
   doc: ProjectStateDoc;
   preflightHashes: ArtifactHashes;
+  /** Revision hash of project_state.yaml after reconcile write, for conflict detection. */
+  stateRevision: string;
 }
 
 export interface DraftFile {
@@ -98,8 +104,11 @@ export function initCommand(
   // Reconcile on startup
   const result = reconcile(absDir, commandName, commandName);
 
-  // Write reconciled state back (self-heal)
+  // Write reconciled state back (self-heal) — atomic write, no revision guard on init
   writeProjectState(absDir, result.doc);
+
+  // Capture revision of what we just wrote for downstream conflict detection
+  const stateRevision = readProjectStateWithRevision(absDir)?.revision ?? "";
 
   // Check allowed start states
   if (allowedStates.length > 0 && !allowedStates.includes(result.reconciled_state)) {
@@ -119,6 +128,7 @@ export function initCommand(
     reconcileResult: result,
     doc: result.doc,
     preflightHashes: { ...(result.doc.artifact_hashes ?? {}) },
+    stateRevision,
   };
 }
 
@@ -290,6 +300,7 @@ export function transitionState(
   trigger: string,
   actor: string,
   note?: string,
+  options?: { expectedRevision?: string },
 ): ProjectStateDoc {
   const fromState = doc.current_state;
 
@@ -303,8 +314,10 @@ export function transitionState(
   doc.last_agent = actor;
   doc.last_command = trigger;
 
-  // Persist
-  writeProjectState(projectDir, doc);
+  // Persist with revision guard
+  writeProjectState(projectDir, doc, {
+    expectedRevision: options?.expectedRevision,
+  });
 
   return doc;
 }

@@ -8,6 +8,7 @@ import {
   loadSourceMap,
   toSafeMediaBasename,
 } from "../runtime/media/source-map.js";
+import { BGM_ANALYSIS_RELATIVE_PATH } from "../runtime/media/bgm-analyzer.js";
 import { parseArgs } from "../scripts/analyze.js";
 import type { AssetItem } from "../runtime/connectors/ffprobe.js";
 import type { TimelineIR } from "../runtime/compiler/types.js";
@@ -166,6 +167,59 @@ describe("createMediaLinks", () => {
 
     const onDisk = JSON.parse(fs.readFileSync(result.sourceMapPath, "utf-8"));
     expect(onDisk.items).toHaveLength(2);
+  });
+
+  it("adds a BGM media link from canonical 03_analysis/bgm_analysis.json", () => {
+    const projectDir = createTempProject("bgm");
+    const bgmSource = path.join(projectDir, "theme.mp3");
+    fs.writeFileSync(bgmSource, "bgm");
+
+    const bgmAnalysisPath = path.join(projectDir, BGM_ANALYSIS_RELATIVE_PATH);
+    fs.mkdirSync(path.dirname(bgmAnalysisPath), { recursive: true });
+    fs.writeFileSync(
+      bgmAnalysisPath,
+      JSON.stringify({
+        version: "1",
+        project_id: "test-project",
+        analysis_status: "partial",
+        music_asset: {
+          asset_id: "BGM_theme",
+          path: bgmSource,
+        },
+        bpm: 0,
+        meter: "4/4",
+        duration_sec: 12.5,
+        beats_sec: [],
+        downbeats_sec: [],
+        sections: [],
+        beats: [],
+        provenance: {
+          detector: "test",
+          sample_rate_hz: 48_000,
+        },
+      }, null, 2),
+      "utf-8",
+    );
+
+    const result = createMediaLinks({
+      projectPath: projectDir,
+      projectId: "test-project",
+      assets: [],
+      sourceFileMap: new Map(),
+      generatedAt: "2026-03-22T00:00:00Z",
+    });
+
+    expect(result.doc.items).toHaveLength(1);
+    expect(result.doc.items[0]).toMatchObject({
+      asset_id: "BGM_theme",
+      kind: "bgm",
+      local_source_path: bgmSource,
+      link_path: "02_media/bgm/theme.mp3",
+    });
+
+    const bgmLink = path.join(projectDir, result.doc.items[0].link_path);
+    expect(fs.lstatSync(bgmLink).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(bgmLink)).toBe(bgmSource);
   });
 });
 

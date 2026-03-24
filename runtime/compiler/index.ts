@@ -17,7 +17,6 @@ import { applyPatch } from "./patch.js";
 import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
-import { loadBgmAnalysis } from "../connectors/bgm-beat-detector.js";
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
 import { loadSourceMap } from "../media/source-map.js";
 import type { BgmScoringContext } from "./score.js";
@@ -152,26 +151,17 @@ export function compile(opts: CompileOptions): CompileResult {
   const fpsNum = opts.fpsNum ?? 24;
   const fpsDen = 1;
 
-  // Load BGM analysis for beat-synchronized scoring.
-  // Prefer enhanced analysis from 03_analysis/, falling back to legacy 07_package/.
+  // Load BGM analysis for beat-synchronized scoring and snap decisions.
+  // Canonical path is 03_analysis/bgm_analysis.json; the loader keeps a legacy fallback.
+  const bgmAnalysis = loadBgmAnalysisFromProject(projectPath);
   let bgmScoringContext: BgmScoringContext | undefined;
-  const enhancedBgm = loadBgmAnalysisFromProject(projectPath);
-  if (enhancedBgm) {
+  if (bgmAnalysis) {
     bgmScoringContext = {
-      downbeats_sec: enhancedBgm.downbeats_sec,
-      sections: enhancedBgm.sections,
-      beats: enhancedBgm.beats,
+      downbeats_sec: bgmAnalysis.downbeats_sec,
+      sections: bgmAnalysis.sections,
+      beats: bgmAnalysis.beats,
       fpsNum,
     };
-  } else {
-    const legacyBgm = loadBgmAnalysis(projectPath);
-    if (legacyBgm) {
-      bgmScoringContext = {
-        downbeats_sec: legacyBgm.downbeats_sec,
-        sections: legacyBgm.sections,
-        fpsNum,
-      };
-    }
   }
 
   const rankedTable = scoreCandidates(
@@ -228,9 +218,6 @@ export function compile(opts: CompileOptions): CompileResult {
   if (activeSkills.length > 0 && assembled.tracks.video.length > 0) {
     const v1Track = assembled.tracks.video[0];
     if (v1Track.clips.length > 1) {
-      // Load BGM analysis if available
-      const bgmAnalysis = loadBgmAnalysis(projectPath);
-
       const adjResult = adjacencyDecide(v1Track, {
         activeEditingSkills: activeSkills,
         durationMode: durationPolicy?.mode ?? "guide",

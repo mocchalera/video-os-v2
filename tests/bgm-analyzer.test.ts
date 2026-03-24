@@ -8,7 +8,9 @@
 //   - BGM file detection
 //   - Beat grid generation
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Candidate, NormalizedBeat } from "../runtime/compiler/types.js";
 import type { BgmSection } from "../runtime/compiler/transition-types.js";
 import {
@@ -18,6 +20,8 @@ import {
   generateBeatGrid,
   detectBeatsFromEnergy,
   BGM_EXTENSIONS,
+  BGM_ANALYSIS_RELATIVE_PATH,
+  loadBgmAnalysisFromProject,
   type BeatEvent,
   type BgmAnalyzerOptions,
 } from "../runtime/media/bgm-analyzer.js";
@@ -61,6 +65,21 @@ const makeBgmContext = (overrides: Partial<BgmScoringContext> = {}): BgmScoringC
   fpsNum: 24,
   ...overrides,
 });
+
+const tempDirs: string[] = [];
+
+afterAll(() => {
+  for (const dir of tempDirs) {
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function createTempProject(name: string): string {
+  const tmpDir = path.resolve(`tests/tmp_bgm_analyzer_${name}_${Date.now()}`);
+  fs.mkdirSync(tmpDir, { recursive: true });
+  tempDirs.push(tmpDir);
+  return tmpDir;
+}
 
 // ── BPM estimation ──────────────────────────────────────────────────
 
@@ -397,5 +416,90 @@ describe("BGM scoring integration", () => {
     // Total should be sum
     const total = peakBonus + bgmBonus;
     expect(total).toBeGreaterThan(peakBonus);
+  });
+});
+
+describe("loadBgmAnalysisFromProject", () => {
+  it("prefers canonical 03_analysis/bgm_analysis.json over legacy output", () => {
+    const projectDir = createTempProject("canonical-preferred");
+    const canonicalPath = path.join(projectDir, BGM_ANALYSIS_RELATIVE_PATH);
+    const legacyPath = path.join(projectDir, "07_package/audio/bgm-analysis.json");
+
+    fs.mkdirSync(path.dirname(canonicalPath), { recursive: true });
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+
+    fs.writeFileSync(
+      canonicalPath,
+      JSON.stringify({
+        version: "1",
+        project_id: "test-project",
+        analysis_status: "ready",
+        music_asset: { asset_id: "BGM_CANON", path: "/music/canonical.mp3" },
+        bpm: 128,
+        meter: "4/4",
+        duration_sec: 20,
+        beats_sec: [0, 0.5, 1.0],
+        downbeats_sec: [0, 2.0],
+        sections: [],
+        beats: [{ time_sec: 0, strength: 1 }],
+        provenance: { detector: "test", sample_rate_hz: 48_000 },
+      }, null, 2),
+      "utf-8",
+    );
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        version: "1",
+        project_id: "test-project",
+        analysis_status: "ready",
+        music_asset: { asset_id: "BGM_LEGACY", path: "/music/legacy.mp3" },
+        bpm: 96,
+        meter: "4/4",
+        duration_sec: 20,
+        beats_sec: [9],
+        downbeats_sec: [9],
+        sections: [],
+        provenance: { detector: "legacy", sample_rate_hz: 44_100 },
+      }, null, 2),
+      "utf-8",
+    );
+
+    const loaded = loadBgmAnalysisFromProject(projectDir);
+
+    expect(loaded?.music_asset.asset_id).toBe("BGM_CANON");
+    expect(loaded?.music_asset.path).toBe("/music/canonical.mp3");
+    expect(loaded?.beats).toEqual([{ time_sec: 0, strength: 1 }]);
+  });
+
+  it("falls back to legacy output and upgrades beats when canonical artifact is absent", () => {
+    const projectDir = createTempProject("legacy-fallback");
+    const legacyPath = path.join(projectDir, "07_package/audio/bgm-analysis.json");
+    fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        version: "1",
+        project_id: "test-project",
+        analysis_status: "ready",
+        music_asset: { asset_id: "BGM_LEGACY", path: "/music/legacy.mp3" },
+        bpm: 100,
+        meter: "4/4",
+        duration_sec: 20,
+        beats_sec: [0.25, 0.75],
+        downbeats_sec: [0.25],
+        sections: [],
+        provenance: { detector: "legacy", sample_rate_hz: 44_100 },
+      }, null, 2),
+      "utf-8",
+    );
+
+    const loaded = loadBgmAnalysisFromProject(projectDir);
+
+    expect(loaded?.music_asset.asset_id).toBe("BGM_LEGACY");
+    expect(loaded?.beats).toEqual([
+      { time_sec: 0.25, strength: 1.0 },
+      { time_sec: 0.75, strength: 1.0 },
+    ]);
   });
 });

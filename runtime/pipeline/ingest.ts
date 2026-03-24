@@ -87,6 +87,7 @@ import {
   createMediaLinks,
   type MediaSourceMapDoc,
 } from "../media/source-map.js";
+import { runProjectBgmAnalysis } from "../media/bgm-analyzer.js";
 import {
   hydrateCachedVlmSegments,
   runParallelVlmAnalysis,
@@ -135,6 +136,8 @@ export interface PipelineOptions {
   contentHint?: string;
   /** Skip 02_media symlink generation */
   skipMediaLink?: boolean;
+  /** Skip canonical 03_analysis/bgm_analysis.json generation */
+  skipBgmAnalysis?: boolean;
   /** Max number of assets to analyze concurrently during VLM enrichment */
   vlmConcurrency?: number;
   /** Optional progress hooks for VLM enrichment */
@@ -1218,6 +1221,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
     let mediaSourceMap: MediaSourceMapDoc | undefined;
     let mediaSourceMapPath: string | undefined;
+    if (!opts.skipBgmAnalysis) {
+      runProjectBgmAnalysis({
+        sourceFiles,
+        projectDir: absProjectDir,
+        projectId,
+      });
+    }
     if (!opts.skipMediaLink) {
       const mediaLinks = createMediaLinks({
         projectPath: absProjectDir,
@@ -1474,6 +1484,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
   let mediaSourceMap: MediaSourceMapDoc | undefined;
   let mediaSourceMapPath: string | undefined;
+  if (!opts.skipBgmAnalysis) {
+    runProjectBgmAnalysis({
+      sourceFiles,
+      projectDir: absProjectDir,
+      projectId,
+    });
+  }
   if (!opts.skipMediaLink) {
     const mediaLinks = createMediaLinks({
       projectPath: absProjectDir,

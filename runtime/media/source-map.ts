@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AssetItem } from "../connectors/ffprobe.js";
+import { resolveBgmAnalysisPath } from "./bgm-analyzer.js";
 
 export const MEDIA_DIR_NAME = "02_media";
 export const SOURCE_MAP_FILE_NAME = "source_map.json";
@@ -327,7 +328,7 @@ function findBgmAssetIdInObject(
 
 function discoverBgmPlan(projectPath: string): MediaLinkPlan | undefined {
   const briefPath = path.join(projectPath, "01_intent", "creative_brief.yaml");
-  const bgmAnalysisPath = path.join(projectPath, "07_package", "audio", "bgm-analysis.json");
+  const bgmAnalysisPath = resolveBgmAnalysisPath(projectPath);
 
   let briefPathValue: string | undefined;
   let briefAssetId: string | undefined;
@@ -344,7 +345,7 @@ function discoverBgmPlan(projectPath: string): MediaLinkPlan | undefined {
   const bgmAnalysis = readJsonIfExists<{
     music_asset?: { asset_id?: string; path?: string };
   }>(bgmAnalysisPath);
-  const bgmSourcePath = briefPathValue ?? bgmAnalysis?.music_asset?.path;
+  const bgmSourcePath = bgmAnalysis?.music_asset?.path ?? briefPathValue;
   const bgmAssetId = bgmAnalysis?.music_asset?.asset_id ?? briefAssetId;
 
   if (!bgmSourcePath) return undefined;

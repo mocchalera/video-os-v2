@@ -466,6 +466,35 @@ export function detectInvalidation(
   };
 }
 
+// ── ConflictError ───────────────────────────────────────────────────
+
+export class ConflictError extends Error {
+  readonly code = "STATE_CONFLICT" as const;
+  readonly expectedRevision: string;
+  readonly actualRevision: string;
+
+  constructor(expected: string, actual: string) {
+    super(
+      `project_state.yaml conflict: expected revision ${expected}, ` +
+      `but file has revision ${actual}`,
+    );
+    this.name = "ConflictError";
+    this.expectedRevision = expected;
+    this.actualRevision = actual;
+  }
+}
+
+// ── Revision helpers ────────────────────────────────────────────────
+
+export function computeRevision(content: string): string {
+  return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
+}
+
+export interface ProjectStateWithRevision {
+  doc: ProjectStateDoc;
+  revision: string;
+}
+
 // ── Read / Write project_state.yaml ────────────────────────────────
 
 export function readProjectState(projectDir: string): ProjectStateDoc | null {
@@ -475,10 +504,58 @@ export function readProjectState(projectDir: string): ProjectStateDoc | null {
   return parseYaml(raw) as ProjectStateDoc;
 }
 
-export function writeProjectState(projectDir: string, doc: ProjectStateDoc): void {
+/**
+ * Read project_state.yaml and return both the parsed doc and a revision hash.
+ * The revision hash is used by writeProjectState to detect concurrent edits.
+ */
+export function readProjectStateWithRevision(
+  projectDir: string,
+): ProjectStateWithRevision | null {
   const stateFile = path.join(projectDir, "project_state.yaml");
+  if (!fs.existsSync(stateFile)) return null;
+  const raw = fs.readFileSync(stateFile, "utf-8");
+  return {
+    doc: parseYaml(raw) as ProjectStateDoc,
+    revision: computeRevision(raw),
+  };
+}
+
+export interface WriteProjectStateOptions {
+  /** If provided, write will verify the file hasn't changed since this revision. */
+  expectedRevision?: string;
+}
+
+/**
+ * Atomic write of project_state.yaml using temp file + rename.
+ * When expectedRevision is provided, throws ConflictError if the file
+ * has been modified since the revision was read.
+ */
+export function writeProjectState(
+  projectDir: string,
+  doc: ProjectStateDoc,
+  options?: WriteProjectStateOptions,
+): void {
+  const stateFile = path.join(projectDir, "project_state.yaml");
+
+  // Revision guard: verify file hasn't changed since caller read it
+  if (options?.expectedRevision) {
+    if (fs.existsSync(stateFile)) {
+      const currentRaw = fs.readFileSync(stateFile, "utf-8");
+      const currentRevision = computeRevision(currentRaw);
+      if (currentRevision !== options.expectedRevision) {
+        throw new ConflictError(options.expectedRevision, currentRevision);
+      }
+    }
+    // If file doesn't exist but caller had a revision, another session deleted it
+  }
+
   doc.last_updated = new Date().toISOString();
-  fs.writeFileSync(stateFile, stringifyYaml(doc), "utf-8");
+  const content = stringifyYaml(doc);
+
+  // Atomic write: temp file + rename (same pattern as progress.ts)
+  const tmp = stateFile + ".tmp." + process.pid;
+  fs.writeFileSync(tmp, content, "utf-8");
+  fs.renameSync(tmp, stateFile);
 }
 
 // ── Reconcile ──────────────────────────────────────────────────────
