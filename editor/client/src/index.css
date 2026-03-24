@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  color-scheme: dark;
+  --editor-bg: #1a1a2e;
+  --panel-bg: rgba(22, 33, 62, 0.92);
+  --panel-muted: rgba(15, 52, 96, 0.7);
+  --track-bg: rgba(15, 52, 96, 0.4);
+  --track-alt-bg: rgba(13, 41, 75, 0.75);
+  --border-strong: rgba(133, 155, 196, 0.28);
+  --border-soft: rgba(133, 155, 196, 0.14);
+  --text-main: #e6edf7;
+  --text-muted: #8d9dbc;
+  --accent: #57a4ff;
+  --danger: #ff4444;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 1024px;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  color: var(--text-main);
+  background:
+    radial-gradient(circle at top left, rgba(87, 164, 255, 0.18), transparent 24%),
+    radial-gradient(circle at top right, rgba(255, 68, 68, 0.08), transparent 20%),
+    linear-gradient(180deg, #131728 0%, #0f1220 100%);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.editor-scrollbar {
+  scrollbar-color: rgba(120, 146, 194, 0.55) transparent;
+  scrollbar-width: thin;
+}
+
+.editor-scrollbar::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+.editor-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgba(120, 146, 194, 0.45);
+}
+
+.range-input {
+  accent-color: #57a4ff;
+}
