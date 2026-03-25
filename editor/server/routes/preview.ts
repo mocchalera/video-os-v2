@@ -10,6 +10,15 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { safeProjectDir } from "../utils.js";
+import { computeTimelineRevision } from "./timeline.js";
+
+interface AudioPolicy {
+  nat_sound_gain?: number;
+  nat_gain?: number;
+  bgm_gain?: number;
+  duck_music_db?: number;
+  preserve_nat_sound?: boolean;
+}
 
 interface TimelineClip {
   clip_id: string;
@@ -18,6 +27,7 @@ interface TimelineClip {
   src_out_us: number;
   timeline_in_frame: number;
   timeline_duration_frames: number;
+  audio_policy?: AudioPolicy;
 }
 
 interface TimelineTrack {
@@ -53,6 +63,7 @@ interface PreviewRequest {
   endFrame?: number;
   clipId?: string;
   resolution?: string;
+  timelineRevision?: string;
 }
 
 function execFilePromise(
@@ -70,6 +81,32 @@ function execFilePromise(
       },
     );
   });
+}
+
+async function hasAudioStream(filePath: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFilePromise("ffprobe", [
+      "-v",
+      "error",
+      "-select_streams",
+      "a",
+      "-show_entries",
+      "stream=codec_type",
+      "-of",
+      "csv=p=0",
+      filePath,
+    ]);
+    return stdout.trim().includes("audio");
+  } catch {
+    return false;
+  }
+}
+
+function computeNatSoundGainDb(policy?: AudioPolicy): number | null {
+  if (!policy) return null;
+  const gain = policy.nat_sound_gain ?? policy.nat_gain ?? null;
+  if (gain === null || gain === undefined || gain === 0) return null;
+  return gain;
 }
 
 function resolveAssetPath(
@@ -118,9 +155,21 @@ export function createPreviewRouter(projectsDir: string): Router {
     }
 
     try {
-      const timeline: TimelineData = JSON.parse(
-        fs.readFileSync(timelinePath, "utf-8"),
-      );
+      const timelineContent = fs.readFileSync(timelinePath, "utf-8");
+      const timelineRevision = computeTimelineRevision(timelineContent);
+      if (
+        body.timelineRevision &&
+        body.timelineRevision !== timelineRevision
+      ) {
+        res.status(409).json({
+          error: "Timeline revision mismatch",
+          current_revision: timelineRevision,
+          client_revision: body.timelineRevision,
+        });
+        return;
+      }
+
+      const timeline: TimelineData = JSON.parse(timelineContent);
       const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
 
       // Load source map
@@ -230,14 +279,31 @@ export function createPreviewRouter(projectsDir: string): Router {
             `clip_${String(i).padStart(4, "0")}.mp4`,
           );
 
-          await execFilePromise("ffmpeg", [
-            "-y",
+          const sourceHasAudio = await hasAudioStream(sourcePath);
+          const ffmpegArgs: string[] = ["-y"];
+
+          // Input: source video
+          ffmpegArgs.push(
             "-ss",
             startSec.toFixed(6),
             "-i",
             sourcePath,
             "-t",
             durationSec.toFixed(6),
+          );
+
+          if (!sourceHasAudio) {
+            // Silent audio source to fill missing audio track
+            ffmpegArgs.push(
+              "-f",
+              "lavfi",
+              "-i",
+              "anullsrc=channel_layout=stereo:sample_rate=48000",
+            );
+          }
+
+          // Video filter & codec
+          ffmpegArgs.push(
             "-vf",
             "scale=-2:720",
             "-c:v",
@@ -246,11 +312,43 @@ export function createPreviewRouter(projectsDir: string): Router {
             "ultrafast",
             "-crf",
             "28",
-            "-an",
-            "-pix_fmt",
-            "yuv420p",
-            clipOutPath,
-          ]);
+          );
+
+          if (!sourceHasAudio) {
+            // Map video from source, audio from anullsrc
+            ffmpegArgs.push("-map", "0:v:0", "-map", "1:a:0");
+          }
+
+          // Audio normalization: optional gain + loudnorm to -16 LUFS
+          if (sourceHasAudio) {
+            const gainDb = computeNatSoundGainDb(clip.audio_policy);
+            const filters: string[] = [];
+            if (gainDb !== null) {
+              filters.push(`volume=${gainDb}dB`);
+            }
+            filters.push("loudnorm=I=-16:TP=-1.5:LRA=11");
+            ffmpegArgs.push("-af", filters.join(","));
+          }
+
+          // Audio codec — uniform format for concat compatibility
+          ffmpegArgs.push(
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+          );
+
+          if (!sourceHasAudio) {
+            ffmpegArgs.push("-shortest");
+          }
+
+          ffmpegArgs.push("-pix_fmt", "yuv420p", clipOutPath);
+
+          await execFilePromise("ffmpeg", ffmpegArgs);
           clipPaths.push(clipOutPath);
         }
 
@@ -286,9 +384,11 @@ export function createPreviewRouter(projectsDir: string): Router {
         const durationSec = totalFrames / fps;
 
         res.json({
-          previewUrl: `/api/projects/${projectId}/preview/${outputFilename}`,
+          previewUrl: `/api/projects/${projectId}/preview/${outputFilename}?t=${timestamp}&rev=${encodeURIComponent(timelineRevision)}`,
           clipCount: clips.length,
           durationSec,
+          timelineRevision,
+          generatedAt: new Date(timestamp).toISOString(),
         });
       } finally {
         // Clean up temp directory
@@ -325,6 +425,9 @@ export function createPreviewRouter(projectsDir: string): Router {
       return;
     }
 
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     res.sendFile(filePath);
   });
 

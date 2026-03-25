@@ -24,7 +24,6 @@ import {
   framesToMicroseconds,
   getFps,
   microsecondsToFrames,
-  secondsToFrames,
 } from './utils/time';
 
 const MAX_ZOOM = 24;
@@ -127,6 +126,7 @@ export default function App() {
     projectId: timelineState.projectId,
     fps,
     durationFrames: totalFrames,
+    timeline,
   });
   const reviewState = useReview(timelineState.projectId);
   const selectedClipId = selectionState.selection?.clipId ?? null;
@@ -149,15 +149,9 @@ export default function App() {
       reviewState.reload();
     },
     onRenderComplete: () => {
-      // Render: timeline + review + preview
+      // Render: timeline + review (source playback is live — no preview needed)
       void timelineState.reload();
       reviewState.reload();
-      void playback.requestPreview({
-        mode: 'range',
-        startFrame: 0,
-        endFrame: totalFrames,
-        resolution: '720p',
-      });
     },
   });
 
@@ -218,6 +212,12 @@ export default function App() {
   }, [timelineState.projectId, timeline?.project_id]);
 
   useEffect(() => {
+    if (timelineState.dirty) {
+      playback.markPreviewStale();
+    }
+  }, [timelineState.dirty]);
+
+  useEffect(() => {
     if (selectionState.selection && !selectedClip) {
       selectionState.clearSelection();
     }
@@ -252,28 +252,23 @@ export default function App() {
     });
   }
 
-  async function handleRenderPreview(): Promise<void> {
-    if (!timeline) {
+  async function handleExportRender(): Promise<void> {
+    if (!timeline || aiJob.isRunning) {
       return;
     }
 
-    const request = selectedClip
-      ? {
-          mode: 'clip' as const,
-          clipId: selectedClip.clip_id,
-          resolution: '720p' as const,
-        }
-      : {
-          mode: 'range' as const,
-          startFrame: playback.playheadFrame,
-          endFrame: Math.min(
-            totalFrames,
-            playback.playheadFrame + secondsToFrames(5, fps),
-          ),
-          resolution: '720p' as const,
-        };
+    let nextRevision = timelineState.timelineRevision;
+    if (timelineState.dirty || timelineState.status === 'saving') {
+      const saveResult = await timelineState.save();
+      if (!saveResult.ok) {
+        return;
+      }
+      nextRevision = saveResult.timelineRevision ?? nextRevision;
+    }
 
-    await playback.requestPreview(request);
+    await playback.requestFullPreview({
+      timelineRevision: nextRevision,
+    });
   }
 
   function handleTrimClip(
@@ -287,12 +282,34 @@ export default function App() {
       return;
     }
 
-    timelineState.updateClip(trackKind, trackId, baseClip.clip_id, (clip) => {
+    // Find neighboring clips for overlap prevention
+    const track = timeline.tracks[trackKind].find(
+      (t) => t.track_id === trackId,
+    );
+    const sortedClips = track
+      ? [...track.clips].sort((a, b) => a.timeline_in_frame - b.timeline_in_frame)
+      : [];
+    const clipIndex = sortedClips.findIndex(
+      (c) => c.clip_id === baseClip.clip_id,
+    );
+    const prevClip = clipIndex > 0 ? sortedClips[clipIndex - 1] : null;
+    const nextClip =
+      clipIndex >= 0 && clipIndex < sortedClips.length - 1
+        ? sortedClips[clipIndex + 1]
+        : null;
+
+    timelineState.updateClipSilent(trackKind, trackId, baseClip.clip_id, (clip) => {
       if (side === 'start') {
-        const minDelta = Math.max(
+        let minDelta = Math.max(
           -microsecondsToFrames(baseClip.src_in_us, fps),
           -baseClip.timeline_in_frame,
         );
+        // Prevent overlap with previous clip
+        if (prevClip) {
+          const prevEnd =
+            prevClip.timeline_in_frame + prevClip.timeline_duration_frames;
+          minDelta = Math.max(minDelta, prevEnd - baseClip.timeline_in_frame);
+        }
         const maxDelta = baseClip.timeline_duration_frames - 1;
         const clampedDelta = clamp(deltaFrames, minDelta, maxDelta);
         const nextSrcInUs = Math.max(
@@ -311,10 +328,21 @@ export default function App() {
       }
 
       const minimumSrcOut = baseClip.src_in_us + framesToMicroseconds(1, fps);
-      const nextSrcOutUs = Math.max(
+      let nextSrcOutUs = Math.max(
         minimumSrcOut,
         baseClip.src_out_us + framesToMicroseconds(deltaFrames, fps),
       );
+      // Prevent overlap with next clip
+      if (nextClip) {
+        const maxDurationFrames =
+          nextClip.timeline_in_frame - baseClip.timeline_in_frame;
+        const maxSrcOutUs =
+          baseClip.src_in_us + framesToMicroseconds(maxDurationFrames, fps);
+        nextSrcOutUs = Math.min(
+          nextSrcOutUs,
+          Math.max(minimumSrcOut, maxSrcOutUs),
+        );
+      }
 
       clip.src_out_us = nextSrcOutUs;
       clip.timeline_duration_frames = durationFramesFromSource(
@@ -375,7 +403,7 @@ export default function App() {
 
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
-      await handleRenderPreview();
+      await handleExportRender();
       return;
     }
 
@@ -391,6 +419,13 @@ export default function App() {
       return;
     }
 
+    if (event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'y') {
+      event.preventDefault();
+      if (aiJob.isRunning) return;
+      timelineState.redo();
+      return;
+    }
+
     if (event.key === 'Escape') {
       selectionState.clearSelection();
     }
@@ -401,8 +436,8 @@ export default function App() {
       void handleKeyboard(event);
     }
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
 
   const totalTrackCount = timeline
@@ -531,14 +566,19 @@ export default function App() {
           <section className="flex min-h-0 flex-col overflow-hidden border-r border-white/[0.06]">
             <PreviewPlayer
               videoRef={playback.videoRef}
-              previewUrl={playback.previewUrl}
               previewMode={playback.previewMode}
               renderStatus={playback.renderStatus}
               isPlaying={playback.isPlaying}
+              isBuffering={playback.isBuffering}
+              isGap={playback.isGap}
               error={playback.error}
-              onTimeUpdate={playback.handleVideoTimeUpdate}
               onLoadedMetadata={playback.handleVideoLoadedMetadata}
+              onTimeUpdate={playback.handleVideoTimeUpdate}
+              onWaiting={playback.handleVideoWaiting}
+              onPlaying={playback.handleVideoPlaying}
+              onStalled={playback.handleVideoStalled}
               onEnded={playback.handleVideoEnded}
+              onVideoError={playback.handleVideoError}
             />
             <TransportBar
               isPlaying={playback.isPlaying}
@@ -546,11 +586,12 @@ export default function App() {
               currentFrame={playback.playheadFrame}
               previewMode={playback.previewMode}
               renderStatus={playback.renderStatus}
+              previewStale={playback.previewStale}
               onTogglePlayback={() => {
                 void playback.togglePlayback();
               }}
-              onRenderPreview={() => {
-                void handleRenderPreview();
+              onExportRender={() => {
+                void handleExportRender();
               }}
             />
           </section>
@@ -653,6 +694,8 @@ export default function App() {
                       })
                     }
                     onTrimClip={handleTrimClip}
+                    onTrimStart={() => timelineState.beginDrag()}
+                    onTrimEnd={() => timelineState.endDrag()}
                   />
                 </div>
               </div>
@@ -690,7 +733,14 @@ export default function App() {
           <span>{durationTimecode}</span>
           <span>{lanes.length} tracks</span>
           {issueCount > 0 ? (
-            <span className="text-[color:var(--warning)]">{issueCount} validation issues</span>
+            <span
+              className="cursor-help text-[color:var(--warning)]"
+              title={timelineState.validationIssues
+                .map((i) => `${i.path}: ${i.message}`)
+                .join('\n')}
+            >
+              {issueCount} validation issue{issueCount !== 1 ? 's' : ''}
+            </span>
           ) : null}
           {aiJob.isRunning ? (
             <span className="text-[var(--accent)]">

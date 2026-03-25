@@ -2,6 +2,16 @@ import type { Sequence } from '../types';
 
 const MICROSECONDS_PER_SECOND = 1_000_000;
 
+interface TimelineDurationSource {
+  src_in_us: number;
+  src_out_us: number;
+  timeline_duration_frames?: number | null;
+}
+
+interface TimelineClipSource extends TimelineDurationSource {
+  timeline_in_frame: number;
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -32,6 +42,42 @@ export function durationFramesFromSource(
   fps: number,
 ): number {
   return Math.max(1, microsecondsToFrames(srcOutUs - srcInUs, fps));
+}
+
+export function resolveTimelineDurationFrames(
+  timelineDurationFrames: number | null | undefined,
+  srcInUs: number,
+  srcOutUs: number,
+  fps: number,
+): number {
+  if (
+    typeof timelineDurationFrames === 'number' &&
+    Number.isFinite(timelineDurationFrames) &&
+    timelineDurationFrames >= 1
+  ) {
+    return Math.round(timelineDurationFrames);
+  }
+
+  return durationFramesFromSource(srcInUs, srcOutUs, fps);
+}
+
+export function getTimelineDurationFrames(
+  clip: TimelineDurationSource,
+  fps: number,
+): number {
+  return resolveTimelineDurationFrames(
+    clip.timeline_duration_frames,
+    clip.src_in_us,
+    clip.src_out_us,
+    fps,
+  );
+}
+
+export function getTimelineClipEndFrame(
+  clip: TimelineClipSource,
+  fps: number,
+): number {
+  return clip.timeline_in_frame + getTimelineDurationFrames(clip, fps);
 }
 
 export function formatClockFromFrames(frames: number, fps: number): string {

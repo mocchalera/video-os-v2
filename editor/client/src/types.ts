@@ -173,12 +173,15 @@ export interface PreviewRequest {
   endFrame?: number;
   clipId?: string;
   resolution?: '720p' | '1080p';
+  timelineRevision?: string;
 }
 
 export interface PreviewResponse {
   previewUrl: string;
   clipCount: number;
   durationSec: number;
+  timelineRevision?: string;
+  generatedAt?: string;
 }
 
 export interface TimelineValidationIssue {
@@ -190,6 +193,7 @@ export interface TimelineSaveResult {
   ok: boolean;
   mode: 'api' | 'mock';
   error?: string;
+  timelineRevision?: string;
 }
 
 // ── Phase 2b-1: Review & Patch types ──────────────────────────────

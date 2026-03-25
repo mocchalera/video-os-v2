@@ -18,6 +18,8 @@ interface TrackLaneProps {
     side: TrimSide,
     deltaFrames: number,
   ) => void;
+  onTrimStart?: () => void;
+  onTrimEnd?: () => void;
 }
 
 export default function TrackLane({
@@ -30,6 +32,8 @@ export default function TrackLane({
   clipOverlays,
   onSelectClip,
   onTrimClip,
+  onTrimStart,
+  onTrimEnd,
 }: TrackLaneProps) {
   const empty = lane.clips.length === 0 || !lane.trackId;
   const trackColor = getTrackColor(lane.laneId, lane.trackKind);
@@ -56,6 +60,8 @@ export default function TrackLane({
               onTrim={(side, baseClip, deltaFrames) =>
                 onTrimClip(lane.trackKind, lane.trackId!, baseClip, side, deltaFrames)
               }
+              onTrimStart={onTrimStart}
+              onTrimEnd={onTrimEnd}
             />
           ))
         : null}

@@ -28,7 +28,7 @@ export function getTimelineValidator(): ReturnType<Ajv["compile"]> {
   const schemaText = fs.readFileSync(SCHEMA_PATH, "utf-8");
   const schema = JSON.parse(schemaText);
 
-  const ajv = new Ajv({ allErrors: true, strict: false });
+  const ajv = new Ajv({ allErrors: true, strict: false, validateSchema: false });
   addFormats(ajv);
 
   cachedValidate = ajv.compile(schema);

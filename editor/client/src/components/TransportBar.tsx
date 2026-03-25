@@ -2,22 +2,15 @@ interface TransportBarProps {
   isPlaying: boolean;
   timecode: string;
   currentFrame: number;
-  previewMode: 'none' | 'api' | 'mock';
+  previewMode: 'source' | 'none';
   renderStatus: 'idle' | 'rendering' | 'ready' | 'error';
+  previewStale: boolean;
   onTogglePlayback: () => void;
-  onRenderPreview: () => void;
+  onExportRender: () => void;
 }
 
-function chromeLabel(previewMode: 'none' | 'api' | 'mock'): string {
-  if (previewMode === 'api') {
-    return 'Backend';
-  }
-
-  if (previewMode === 'mock') {
-    return 'Local';
-  }
-
-  return 'Detached';
+function chromeLabel(previewMode: 'source' | 'none'): string {
+  return previewMode === 'source' ? 'Source' : 'Offline';
 }
 
 export default function TransportBar({
@@ -26,8 +19,9 @@ export default function TransportBar({
   currentFrame,
   previewMode,
   renderStatus,
+  previewStale,
   onTogglePlayback,
-  onRenderPreview,
+  onExportRender,
 }: TransportBarProps) {
   return (
     <div className="flex shrink-0 items-center gap-3 border-t border-white/[0.06] px-3 py-1.5">
@@ -53,17 +47,28 @@ export default function TransportBar({
       <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-subtle)]">
         {chromeLabel(previewMode)}
       </span>
-      <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-subtle)]">
-        {renderStatus}
+      <span
+        className={`font-mono text-[10px] uppercase tracking-[0.18em] ${previewStale ? 'text-[color:var(--warning)]' : 'text-[color:var(--text-subtle)]'}`}
+      >
+        {renderStatus === 'rendering'
+          ? 'exporting\u2026'
+          : previewStale
+            ? 'stale'
+            : renderStatus}
       </span>
 
       <button
         type="button"
-        className="border border-white/[0.06] bg-transparent px-2.5 py-1 text-[11px] font-medium text-neutral-200 transition hover:bg-white/[0.06]"
-        onClick={onRenderPreview}
-        title="Render Preview (Ctrl+Enter)"
+        className={`border px-2.5 py-1 text-[11px] font-medium transition hover:bg-white/[0.06] ${
+          previewStale
+            ? 'border-[color:var(--warning)]/30 text-[color:var(--warning)]'
+            : 'border-white/[0.06] text-neutral-200'
+        }`}
+        onClick={onExportRender}
+        disabled={renderStatus === 'rendering'}
+        title="Export full render (Ctrl+Enter)"
       >
-        Render
+        Export Render
       </button>
     </div>
   );

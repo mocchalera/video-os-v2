@@ -37,6 +37,8 @@ interface TimelineProps {
     side: TrimSide,
     deltaFrames: number,
   ) => void;
+  onTrimStart?: () => void;
+  onTrimEnd?: () => void;
 }
 
 export default function Timeline({
@@ -53,6 +55,8 @@ export default function Timeline({
   onClearSelection,
   onSelectClip,
   onTrimClip,
+  onTrimStart,
+  onTrimEnd,
 }: TimelineProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -183,6 +187,22 @@ export default function Timeline({
             onPointerDown={(event) => {
               onClearSelection();
               onSeek(getFrameFromPointer(event));
+
+              const element = event.currentTarget;
+              element.setPointerCapture(event.pointerId);
+
+              function handleMove(e: PointerEvent): void {
+                const rect = element.getBoundingClientRect();
+                onSeek(clamp((e.clientX - rect.left) / zoom, 0, totalFrames));
+              }
+
+              function handleUp(): void {
+                element.removeEventListener('pointermove', handleMove);
+                element.removeEventListener('pointerup', handleUp);
+              }
+
+              element.addEventListener('pointermove', handleMove);
+              element.addEventListener('pointerup', handleUp);
             }}
           />
 
@@ -192,10 +212,26 @@ export default function Timeline({
             onPointerDown={(event) => {
               onClearSelection();
               onSeek(getFrameFromPointer(event));
+
+              const element = event.currentTarget;
+              element.setPointerCapture(event.pointerId);
+
+              function handleMove(e: PointerEvent): void {
+                const rect = element.getBoundingClientRect();
+                onSeek(clamp((e.clientX - rect.left) / zoom, 0, totalFrames));
+              }
+
+              function handleUp(): void {
+                element.removeEventListener('pointermove', handleMove);
+                element.removeEventListener('pointerup', handleUp);
+              }
+
+              element.addEventListener('pointermove', handleMove);
+              element.addEventListener('pointerup', handleUp);
             }}
           />
 
-          <div className="absolute inset-x-0 top-[34px] z-20">
+          <div className="pointer-events-none absolute inset-x-0 top-[34px] z-20">
             {lanes.map((lane) => (
               <TrackLane
                 key={lane.label}
@@ -208,6 +244,8 @@ export default function Timeline({
                 clipOverlays={clipOverlays}
                 onSelectClip={onSelectClip}
                 onTrimClip={onTrimClip}
+                onTrimStart={onTrimStart}
+                onTrimEnd={onTrimEnd}
               />
             ))}
           </div>

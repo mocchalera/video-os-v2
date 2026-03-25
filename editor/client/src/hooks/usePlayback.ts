@@ -1,99 +1,434 @@
-import { useEffect, useRef, useState } from 'react';
-import type { PreviewRequest, PreviewResponse } from '../types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Clip, PreviewResponse, TimelineIR } from '../types';
 import { clamp, framesToSeconds, secondsToFrames } from '../utils/time';
 
 interface UsePlaybackOptions {
   projectId: string;
   fps: number;
   durationFrames: number;
+  timeline: TimelineIR | null;
 }
 
+interface SourceMapItem {
+  asset_id: string;
+  link_path?: string;
+  source_locator?: string;
+  local_source_path?: string;
+  filename?: string;
+}
+
+interface SourceMapData {
+  items: SourceMapItem[];
+}
+
+interface RequestFullPreviewOptions {
+  timelineRevision?: string | null;
+}
+
+interface PendingSourceSync {
+  clip: Clip;
+  frame: number;
+  shouldPlay: boolean;
+  mediaUrl: string;
+}
+
+interface GapPlaybackSession {
+  startTimestamp: number;
+  startFrame: number;
+  endFrame: number;
+}
+
+const DRIFT_TOLERANCE_SEC = 0.05;
+
+/**
+ * Source-based playback hook.
+ *
+ * Playback inside a clip is delegated to the native HTML5 video element.
+ * The hook only seeks on explicit user actions or clip/gap transitions.
+ */
 export function usePlayback({
   projectId,
   fps,
   durationFrames,
+  timeline,
 }: UsePlaybackOptions) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-  const virtualSessionRef = useRef<{
-    startTimestamp: number;
-    startFrame: number;
-  } | null>(null);
+  const activeClipRef = useRef<Clip | null>(null);
+  const currentMediaUrlRef = useRef<string | null>(null);
+  const pendingSourceSyncRef = useRef<PendingSourceSync | null>(null);
+  const gapTimeoutRef = useRef<number | null>(null);
+  const gapRafRef = useRef<number | null>(null);
+  const gapSessionRef = useRef<GapPlaybackSession | null>(null);
+  const sourceMapRef = useRef<SourceMapData | null>(null);
+
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<'none' | 'api' | 'mock'>('none');
-  const [renderStatus, setRenderStatus] = useState<'idle' | 'rendering' | 'ready' | 'error'>(
-    'idle',
-  );
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [isGap, setIsGap] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sourceMapLoaded, setSourceMapLoaded] = useState(false);
+  const [renderStatus, setRenderStatus] = useState<
+    'idle' | 'rendering' | 'ready' | 'error'
+  >('idle');
+  const [previewStale, setPreviewStale] = useState(false);
 
-  function cancelVirtualPlayback(): void {
-    if (animationFrameRef.current !== null) {
-      window.cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    virtualSessionRef.current = null;
-  }
+  const playheadFrameRef = useRef(playheadFrame);
+  playheadFrameRef.current = playheadFrame;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
 
-  function stop(): void {
-    cancelVirtualPlayback();
-    videoRef.current?.pause();
-    setIsPlaying(false);
-  }
+  const videoClips = useMemo(() => {
+    if (!timeline) return [];
+    return timeline.tracks.video
+      .flatMap((track) => track.clips)
+      .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame);
+  }, [timeline]);
 
-  function stepVirtualPlayback(timestamp: number): void {
-    const session = virtualSessionRef.current;
-    if (!session) {
+  const videoClipsRef = useRef(videoClips);
+  videoClipsRef.current = videoClips;
+  const fpsRef = useRef(fps);
+  fpsRef.current = fps;
+  const durationFramesRef = useRef(durationFrames);
+  durationFramesRef.current = durationFrames;
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+
+  useEffect(() => {
+    if (!projectId) {
+      sourceMapRef.current = null;
+      setSourceMapLoaded(false);
       return;
     }
 
-    const elapsedSeconds = (timestamp - session.startTimestamp) / 1000;
-    const nextFrame = clamp(
-      session.startFrame + secondsToFrames(elapsedSeconds, fps),
-      0,
-      durationFrames,
-    );
+    let cancelled = false;
 
-    setPlayheadFrame(nextFrame);
-
-    if (nextFrame >= durationFrames) {
-      stop();
-      return;
-    }
-
-    animationFrameRef.current = window.requestAnimationFrame(stepVirtualPlayback);
-  }
-
-  function startVirtualPlayback(): void {
-    cancelVirtualPlayback();
-    virtualSessionRef.current = {
-      startTimestamp: performance.now(),
-      startFrame: playheadFrame,
-    };
-    setPreviewMode((current) => (current === 'api' ? 'api' : 'mock'));
-    setIsPlaying(true);
-    animationFrameRef.current = window.requestAnimationFrame(stepVirtualPlayback);
-  }
-
-  async function play(): Promise<void> {
-    if (previewUrl && previewMode === 'api' && videoRef.current) {
+    async function load(): Promise<void> {
       try {
-        videoRef.current.currentTime = framesToSeconds(playheadFrame, fps);
-        await videoRef.current.play();
-        setIsPlaying(true);
-        return;
+        const response = await fetch(
+          `/api/projects/${projectId}/media/source_map.json`,
+        );
+        if (!response.ok) {
+          throw new Error('Not found');
+        }
+
+        const data = (await response.json()) as SourceMapData;
+        if (cancelled) {
+          return;
+        }
+
+        sourceMapRef.current = data;
+        setSourceMapLoaded(true);
       } catch {
-        setError('Preview video could not start. Falling back to mock playback.');
+        if (cancelled) {
+          return;
+        }
+
+        sourceMapRef.current = null;
+        setSourceMapLoaded(false);
       }
     }
 
-    startVirtualPlayback();
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  function getClipEndFrame(clip: Clip): number {
+    return clip.timeline_in_frame + clip.timeline_duration_frames;
+  }
+
+  function clearGapPlayback(): void {
+    if (gapTimeoutRef.current !== null) {
+      window.clearTimeout(gapTimeoutRef.current);
+      gapTimeoutRef.current = null;
+    }
+
+    if (gapRafRef.current !== null) {
+      window.cancelAnimationFrame(gapRafRef.current);
+      gapRafRef.current = null;
+    }
+
+    gapSessionRef.current = null;
+  }
+
+  function pauseVideoElement(): void {
+    videoRef.current?.pause();
+    setIsBuffering(false);
+  }
+
+  function clearVideoSource(): void {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    video.pause();
+    if (video.getAttribute('src')) {
+      video.removeAttribute('src');
+      video.load();
+    }
+  }
+
+  function getMediaUrl(assetId: string): string | null {
+    const sourceMap = sourceMapRef.current;
+    if (!sourceMap) {
+      return null;
+    }
+
+    const entry = sourceMap.items.find((item) => item.asset_id === assetId);
+    if (!entry) {
+      return null;
+    }
+
+    const filename =
+      entry.filename
+      ?? entry.link_path?.split('/').pop()
+      ?? entry.local_source_path?.split('/').pop()
+      ?? entry.source_locator?.split('/').pop();
+
+    if (!filename) {
+      return null;
+    }
+
+    return `/api/projects/${projectIdRef.current}/media/${encodeURIComponent(filename)}`;
+  }
+
+  function findClipAtFrame(frame: number): Clip | null {
+    const clips = videoClipsRef.current;
+    for (const clip of clips) {
+      const clipEnd = getClipEndFrame(clip);
+      if (frame >= clip.timeline_in_frame && frame < clipEnd) {
+        return clip;
+      }
+    }
+
+    return null;
+  }
+
+  function findNextClipAfterFrame(frame: number): Clip | null {
+    return videoClipsRef.current.find((clip) => clip.timeline_in_frame > frame) ?? null;
+  }
+
+  function computeSourceTimeSec(clip: Clip, frame: number): number {
+    const offsetFrames = clamp(
+      frame - clip.timeline_in_frame,
+      0,
+      clip.timeline_duration_frames,
+    );
+
+    return clip.src_in_us / 1_000_000 + framesToSeconds(offsetFrames, fpsRef.current);
+  }
+
+  function computeTimelineFrameFromCurrentTime(
+    clip: Clip,
+    currentTimeSec: number,
+  ): number {
+    const elapsedSec = Math.max(0, currentTimeSec - clip.src_in_us / 1_000_000);
+    const sourceOffsetFrames = secondsToFrames(elapsedSec, fpsRef.current);
+
+    return clamp(
+      clip.timeline_in_frame + sourceOffsetFrames,
+      clip.timeline_in_frame,
+      getClipEndFrame(clip),
+    );
+  }
+
+  function stopPlaybackAtFrame(frame: number): void {
+    clearGapPlayback();
+    pendingSourceSyncRef.current = null;
+    pauseVideoElement();
+    setIsPlaying(false);
+    setPlayheadFrame(clamp(frame, 0, durationFramesRef.current));
+  }
+
+  function handlePlayRejection(playError: unknown): void {
+    stopPlaybackAtFrame(playheadFrameRef.current);
+    setError(
+      playError instanceof Error
+        ? playError.message
+        : 'Video playback could not start.',
+    );
+  }
+
+  function startVideoPlayback(video: HTMLVideoElement): void {
+    setIsBuffering(true);
+    void video.play().catch((playError) => {
+      handlePlayRejection(playError);
+    });
+  }
+
+  function startGapPlayback(startFrame: number, endFrame: number): void {
+    clearGapPlayback();
+
+    if (endFrame <= startFrame) {
+      return;
+    }
+
+    gapSessionRef.current = {
+      startTimestamp: performance.now(),
+      startFrame,
+      endFrame,
+    };
+
+    const tick = (timestamp: number) => {
+      const session = gapSessionRef.current;
+      if (!session || !isPlayingRef.current) {
+        return;
+      }
+
+      const elapsedSec = (timestamp - session.startTimestamp) / 1000;
+      const nextFrame = clamp(
+        session.startFrame + secondsToFrames(elapsedSec, fpsRef.current),
+        session.startFrame,
+        session.endFrame,
+      );
+
+      setPlayheadFrame(nextFrame);
+
+      if (nextFrame >= session.endFrame) {
+        return;
+      }
+
+      gapRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    gapRafRef.current = window.requestAnimationFrame(tick);
+
+    const gapDurationMs = framesToSeconds(endFrame - startFrame, fpsRef.current) * 1000;
+    gapTimeoutRef.current = window.setTimeout(() => {
+      clearGapPlayback();
+      if (!isPlayingRef.current) {
+        return;
+      }
+
+      syncPlaybackToFrame(endFrame, true);
+    }, gapDurationMs);
+  }
+
+  function enterGap(frame: number, shouldPlay: boolean): void {
+    pendingSourceSyncRef.current = null;
+    activeClipRef.current = null;
+    currentMediaUrlRef.current = null;
+    setIsGap(true);
+    setPlayheadFrame(frame);
+    clearVideoSource();
+    setIsBuffering(false);
+
+    if (!shouldPlay) {
+      clearGapPlayback();
+      return;
+    }
+
+    const nextClip = findNextClipAfterFrame(frame);
+    if (!nextClip) {
+      stopPlaybackAtFrame(durationFramesRef.current);
+      return;
+    }
+
+    startGapPlayback(frame, nextClip.timeline_in_frame);
+  }
+
+  function syncVideoToClip(
+    clip: Clip,
+    frame: number,
+    shouldPlay: boolean,
+  ): void {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    clearGapPlayback();
+
+    const mediaUrl = getMediaUrl(clip.asset_id);
+    if (!mediaUrl) {
+      stopPlaybackAtFrame(frame);
+      setIsGap(true);
+      setError(`Media source not found for asset ${clip.asset_id}.`);
+      clearVideoSource();
+      return;
+    }
+
+    const previousClipId = activeClipRef.current?.clip_id ?? null;
+    activeClipRef.current = clip;
+    setIsGap(false);
+    setError(null);
+
+    if (mediaUrl !== currentMediaUrlRef.current) {
+      currentMediaUrlRef.current = mediaUrl;
+      pendingSourceSyncRef.current = {
+        clip,
+        frame,
+        shouldPlay,
+        mediaUrl,
+      };
+
+      video.pause();
+      video.src = mediaUrl;
+      video.load();
+      setIsBuffering(shouldPlay);
+      return;
+    }
+
+    pendingSourceSyncRef.current = null;
+
+    const sourceTime = computeSourceTimeSec(clip, frame);
+    const needsSeek =
+      previousClipId !== clip.clip_id
+      || Math.abs(video.currentTime - sourceTime) > DRIFT_TOLERANCE_SEC;
+
+    if (needsSeek) {
+      video.currentTime = sourceTime;
+    }
+
+    if (shouldPlay) {
+      startVideoPlayback(video);
+      return;
+    }
+
+    pauseVideoElement();
+  }
+
+  function syncPlaybackToFrame(frame: number, shouldPlay: boolean): void {
+    const nextFrame = clamp(Math.round(frame), 0, durationFramesRef.current);
+    setPlayheadFrame(nextFrame);
+
+    if (nextFrame >= durationFramesRef.current) {
+      stopPlaybackAtFrame(nextFrame);
+      enterGap(nextFrame, false);
+      return;
+    }
+
+    const clip = findClipAtFrame(nextFrame);
+    if (!clip) {
+      enterGap(nextFrame, shouldPlay);
+      return;
+    }
+
+    syncVideoToClip(clip, nextFrame, shouldPlay);
+  }
+
+  async function play(): Promise<void> {
+    setIsPlaying(true);
+    setError(null);
+    syncPlaybackToFrame(playheadFrameRef.current, true);
+  }
+
+  function pause(): void {
+    clearGapPlayback();
+    pendingSourceSyncRef.current = null;
+    pauseVideoElement();
+    setIsPlaying(false);
+  }
+
+  function stop(): void {
+    pause();
   }
 
   async function togglePlayback(): Promise<void> {
-    if (isPlaying) {
-      stop();
+    if (isPlayingRef.current) {
+      pause();
       return;
     }
 
@@ -101,27 +436,18 @@ export function usePlayback({
   }
 
   function seekToFrame(frame: number): void {
-    const nextFrame = clamp(Math.round(frame), 0, durationFrames);
-    setPlayheadFrame(nextFrame);
-
-    if (previewMode === 'api' && previewUrl && videoRef.current) {
-      videoRef.current.currentTime = framesToSeconds(nextFrame, fps);
-    }
-
-    if (isPlaying && previewMode !== 'api') {
-      virtualSessionRef.current = {
-        startTimestamp: performance.now(),
-        startFrame: nextFrame,
-      };
-    }
+    const shouldResume = isPlayingRef.current;
+    clearGapPlayback();
+    pendingSourceSyncRef.current = null;
+    pauseVideoElement();
+    setIsPlaying(shouldResume);
+    syncPlaybackToFrame(frame, shouldResume);
   }
 
-  async function requestPreview(
-    request: PreviewRequest,
+  async function requestFullPreview(
+    options: RequestFullPreviewOptions = {},
   ): Promise<PreviewResponse | null> {
-    if (!projectId) {
-      return null;
-    }
+    if (!projectId) return null;
 
     setRenderStatus('rendering');
     setError(null);
@@ -129,66 +455,140 @@ export function usePlayback({
     try {
       const response = await fetch(`/api/projects/${projectId}/preview`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'full',
+          startFrame: 0,
+          endFrame: durationFrames,
+          resolution: '720p',
+          timelineRevision: options.timelineRevision ?? undefined,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error(`Preview render failed (${response.status})`);
+        const body = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(
+          body.error ?? `Export render failed (${response.status})`,
+        );
       }
 
       const payload = (await response.json()) as PreviewResponse;
-      setPreviewUrl(payload.previewUrl);
-      setPreviewMode('api');
       setRenderStatus('ready');
-
-      if (videoRef.current) {
-        videoRef.current.load();
-        videoRef.current.currentTime = framesToSeconds(playheadFrame, fps);
-      }
-
+      setPreviewStale(false);
       return payload;
-    } catch {
-      setPreviewUrl(null);
-      setPreviewMode('mock');
+    } catch (err) {
       setRenderStatus('error');
-      setError('Preview API unavailable. Virtual playback mode is active.');
+      if (err instanceof TypeError) {
+        setError('Preview API unavailable.');
+      } else {
+        setError(
+          err instanceof Error ? err.message : 'Export render failed.',
+        );
+      }
       return null;
     }
   }
 
-  function handleVideoTimeUpdate(): void {
-    if (!videoRef.current) {
-      return;
-    }
-
-    setPlayheadFrame(
-      clamp(secondsToFrames(videoRef.current.currentTime, fps), 0, durationFrames),
-    );
+  function markPreviewStale(): void {
+    setPreviewStale(true);
   }
 
   function handleVideoLoadedMetadata(): void {
-    if (!videoRef.current) {
+    const video = videoRef.current;
+    const pendingSync = pendingSourceSyncRef.current;
+    if (!video || !pendingSync) {
       return;
     }
 
-    videoRef.current.currentTime = framesToSeconds(playheadFrame, fps);
+    if (pendingSync.mediaUrl !== currentMediaUrlRef.current) {
+      return;
+    }
+
+    const sourceTime = computeSourceTimeSec(pendingSync.clip, pendingSync.frame);
+    video.currentTime = sourceTime;
+    setPlayheadFrame(pendingSync.frame);
+    pendingSourceSyncRef.current = null;
+
+    if (pendingSync.shouldPlay) {
+      startVideoPlayback(video);
+      return;
+    }
+
+    pauseVideoElement();
+  }
+
+  function handleVideoTimeUpdate(): void {
+    const video = videoRef.current;
+    const activeClip = activeClipRef.current;
+    if (!video || !activeClip || pendingSourceSyncRef.current) {
+      return;
+    }
+
+    const nextFrame = computeTimelineFrameFromCurrentTime(
+      activeClip,
+      video.currentTime,
+    );
+    setPlayheadFrame(nextFrame);
+
+    const clipEndFrame = getClipEndFrame(activeClip);
+    const clipOutSec = activeClip.src_out_us / 1_000_000;
+    const boundaryEpsilonSec = 0.5 / Math.max(fpsRef.current, 1);
+
+    if (
+      video.currentTime >= clipOutSec - boundaryEpsilonSec
+      || nextFrame >= clipEndFrame
+    ) {
+      syncPlaybackToFrame(clipEndFrame, isPlayingRef.current);
+    }
+  }
+
+  function handleVideoWaiting(): void {
+    setIsBuffering(true);
+  }
+
+  function handleVideoPlaying(): void {
+    setIsBuffering(false);
+  }
+
+  function handleVideoStalled(): void {
+    setIsBuffering(true);
   }
 
   function handleVideoEnded(): void {
-    stop();
-    setPlayheadFrame(durationFrames);
+    const activeClip = activeClipRef.current;
+    if (!activeClip) {
+      stopPlaybackAtFrame(playheadFrameRef.current);
+      return;
+    }
+
+    syncPlaybackToFrame(getClipEndFrame(activeClip), isPlayingRef.current);
+  }
+
+  function handleVideoError(): void {
+    clearGapPlayback();
+    pauseVideoElement();
+    setIsBuffering(false);
+    const mediaError = videoRef.current?.error;
+    const message = mediaError
+      ? `Video error: ${mediaError.message || `code ${mediaError.code}`}`
+      : 'Video playback error';
+    setError(message);
+    setIsPlaying(false);
   }
 
   useEffect(() => {
-    stop();
-    setPreviewUrl(null);
-    setPreviewMode('none');
-    setRenderStatus('idle');
-    setError(null);
+    pause();
+    activeClipRef.current = null;
+    currentMediaUrlRef.current = null;
     setPlayheadFrame(0);
+    setIsBuffering(false);
+    setIsGap(true);
+    setError(null);
+    setRenderStatus('idle');
+    setPreviewStale(false);
+    clearVideoSource();
   }, [projectId]);
 
   useEffect(() => {
@@ -197,24 +597,33 @@ export function usePlayback({
 
   useEffect(() => {
     return () => {
-      cancelVirtualPlayback();
+      clearGapPlayback();
     };
   }, []);
+
+  const previewMode: 'source' | 'none' = sourceMapLoaded ? 'source' : 'none';
 
   return {
     videoRef,
     playheadFrame,
     isPlaying,
-    previewUrl,
+    isBuffering,
+    isGap,
     previewMode,
+    previewStale,
     renderStatus,
     error,
     seekToFrame,
     stop,
     togglePlayback,
-    requestPreview,
-    handleVideoTimeUpdate,
+    requestFullPreview,
+    markPreviewStale,
     handleVideoLoadedMetadata,
+    handleVideoTimeUpdate,
+    handleVideoWaiting,
+    handleVideoPlaying,
+    handleVideoStalled,
     handleVideoEnded,
+    handleVideoError,
   };
 }

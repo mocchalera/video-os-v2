@@ -30,6 +30,8 @@ interface ClipBlockProps {
   overlay?: ClipOverlay;
   onSelect: () => void;
   onTrim: (side: TrimSide, baseClip: Clip, deltaFrames: number) => void;
+  onTrimStart?: () => void;
+  onTrimEnd?: () => void;
 }
 
 function confidenceColor(confidence: number | undefined): {
@@ -52,6 +54,8 @@ export default function ClipBlock({
   overlay,
   onSelect,
   onTrim,
+  onTrimStart,
+  onTrimEnd,
 }: ClipBlockProps) {
   const [trimSide, setTrimSide] = useState<TrimSide | null>(null);
   const left = clip.timeline_in_frame * pxPerFrame;
@@ -65,6 +69,7 @@ export default function ClipBlock({
     const baseClip = structuredClone(clip);
     setTrimSide(side);
     onSelect();
+    onTrimStart?.();
 
     function handlePointerMove(moveEvent: PointerEvent): void {
       const deltaFrames = Math.round((moveEvent.clientX - startX) / pxPerFrame);
@@ -73,6 +78,7 @@ export default function ClipBlock({
 
     function handlePointerUp(): void {
       setTrimSide(null);
+      onTrimEnd?.();
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     }
@@ -89,7 +95,7 @@ export default function ClipBlock({
 
   return (
     <div
-      className="absolute cursor-pointer select-none overflow-hidden rounded border"
+      className="pointer-events-auto absolute cursor-pointer select-none overflow-hidden rounded border"
       style={{
         left,
         width,
