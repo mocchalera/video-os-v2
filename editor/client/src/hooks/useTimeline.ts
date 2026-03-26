@@ -199,6 +199,7 @@ export function useTimeline() {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [timelineRevision, setTimelineRevision] = useState<string | null>(null);
   const [sessionBaseline, setSessionBaseline] = useState<SessionBaseline | null>(null);
+  const [conflict, setConflict] = useState<{ localRevision: string; remoteRevision: string } | null>(null);
 
   const timeline = history.present;
   const dragSnapshotRef = useRef<TimelineIR | null>(null);
@@ -570,8 +571,16 @@ export function useTimeline() {
         });
 
         if (response.status === 409) {
+          const conflictBody = await response.json().catch(() => ({})) as {
+            current_revision?: string;
+            client_revision?: string;
+          };
           setStatus('error');
-          setError('Timeline was modified externally. Reload to get the latest version.');
+          setError('Timeline was modified externally.');
+          setConflict({
+            localRevision: timelineRevision ?? 'unknown',
+            remoteRevision: conflictBody.current_revision ?? 'unknown',
+          });
           return { ok: false, mode: 'api' as const, error: 'Conflict: revision mismatch' };
         }
 
@@ -714,6 +723,20 @@ export function useTimeline() {
     await loadTimeline(projectId);
   }
 
+  /** Dismiss the conflict dialog, keeping local changes (stay dirty). */
+  function dismissConflict(): void {
+    setConflict(null);
+    setError(null);
+    setStatus('ready');
+  }
+
+  /** Accept remote version: reload from server and discard local edits. */
+  async function resolveConflictWithReload(): Promise<void> {
+    setConflict(null);
+    setError(null);
+    await reload();
+  }
+
   // Expose history origins and snapshots for useDiff patch_apply detection
   const historyOrigins = history.past.map((entry) => entry.origin);
   const historySnapshots = history.past.map((entry) => entry.timeline);
@@ -745,5 +768,8 @@ export function useTimeline() {
     save,
     reload,
     commitRemoteMutation,
+    conflict,
+    dismissConflict,
+    resolveConflictWithReload,
   };
 }

@@ -162,7 +162,7 @@ function spawnJobWorker(
     }
 
     // Release project lock
-    releaseProjectLock(projectId);
+    releaseProjectLock(projectId, projectDir);
 
     // Move to history
     activeJobs.delete(projectId);
@@ -174,7 +174,7 @@ function spawnJobWorker(
     job.status = "failed";
     job.finished_at = new Date().toISOString();
     job.error = `Worker spawn error: ${err.message}`;
-    releaseProjectLock(projectId);
+    releaseProjectLock(projectId, projectDir);
     activeJobs.delete(projectId);
     addToHistory(projectId, job);
   });
@@ -231,7 +231,7 @@ export function createAiJobsRouter(projectsDir: string): Router {
     }
 
     // Check for existing lock (another job, save, or patch in progress)
-    const existingLock = getProjectLockKind(projectId);
+    const existingLock = getProjectLockKind(projectId, projDir);
     if (existingLock) {
       res.status(423).json({
         error: "Project is locked",
@@ -279,7 +279,7 @@ export function createAiJobsRouter(projectsDir: string): Router {
 
     // Acquire project lock
     const lockKind = lockKindForPhase(jobPhase);
-    if (!acquireProjectLock(projectId, lockKind)) {
+    if (!acquireProjectLock(projectId, lockKind, projDir)) {
       res.status(423).json({ error: "Failed to acquire project lock" });
       return;
     }

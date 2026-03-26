@@ -12,7 +12,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import yaml from "js-yaml";
-import { computeTimelineRevision } from "./timeline.js";
+import { computeTimelineRevision, normalizeTimelineServer } from "./timeline.js";
 import { getTimelineValidator } from "../middleware/validation.js";
 import {
   safeProjectDir,
@@ -22,6 +22,7 @@ import {
   atomicWriteFileSync,
 } from "../utils.js";
 import { getReconcileStatus } from "../services/reconcile-status.js";
+import type { NotifyWriteFn } from "./timeline.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -308,7 +309,10 @@ function applyOperation(
 
 // ── Router ───────────────────────────────────────────────────────────
 
-export function createReviewRouter(projectsDir: string): Router {
+export function createReviewRouter(
+  projectsDir: string,
+  notifyWrite?: NotifyWriteFn,
+): Router {
   const router = Router();
 
   // GET /api/projects/:id/ai/review-report
@@ -531,8 +535,8 @@ export function createReviewRouter(projectsDir: string): Router {
       return;
     }
 
-    // Per-project lock (修正4)
-    const existingLock = getProjectLockKind(projectId);
+    // Per-project filesystem advisory lock
+    const existingLock = getProjectLockKind(projectId, projDir);
     if (existingLock) {
       res.status(423).json({
         error: "Project is locked",
@@ -541,7 +545,7 @@ export function createReviewRouter(projectsDir: string): Router {
       return;
     }
 
-    if (!acquireProjectLock(projectId, "patching")) {
+    if (!acquireProjectLock(projectId, "patching", projDir)) {
       res.status(423).json({ error: "Project is locked", lock_kind: "patching" });
       return;
     }
@@ -640,9 +644,12 @@ export function createReviewRouter(projectsDir: string): Router {
         return;
       }
 
+      // Server normalization: clip sort + timeline_duration_frames recalculation (修正R2-final)
+      const normalized = normalizeTimelineServer(timeline);
+
       // Backup and save (atomic: temp + rename)
       fs.copyFileSync(timelinePath, `${timelinePath}.bak`);
-      const newContent = JSON.stringify(timeline, null, 2);
+      const newContent = JSON.stringify(normalized, null, 2);
       atomicWriteFileSync(timelinePath, newContent);
       const newRevision = computeTimelineRevision(newContent);
 
@@ -660,16 +667,19 @@ export function createReviewRouter(projectsDir: string): Router {
         timeline_revision_after: newRevision,
         applied_operation_indexes: appliedOps,
         rejected_operations: rejectedOps,
-        timeline,
+        timeline: normalized,
         ...(status ? { status } : {}),
       });
+
+      // Notify WatchHub of patch-apply mutation
+      notifyWrite?.(projectId, "timeline.changed", "patch-apply");
     } catch (err) {
       res.status(500).json({
         error: "Failed to apply patch",
         details: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      releaseProjectLock(projectId);
+      releaseProjectLock(projectId, projDir);
     }
   });
 

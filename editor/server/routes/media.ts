@@ -7,6 +7,7 @@
  */
 
 import { Router } from "express";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFile, spawn } from "node:child_process";
@@ -54,10 +55,100 @@ const BROWSER_COMPATIBLE_VIDEO_CODECS = new Set([
 /** In-flight transcoding promises keyed by cache path — prevents duplicate jobs. */
 const inflightTranscodes = new Map<string, Promise<string>>();
 
+/** Resolve asset_id to a local file path using source_map. */
+function resolveAssetPath(
+  projectDir: string,
+  assetId: string,
+): string | null {
+  for (const smName of [
+    "02_media/source_map.json",
+    "03_analysis/source_map.json",
+  ]) {
+    const smPath = path.join(projectDir, smName);
+    if (!fs.existsSync(smPath)) continue;
+    try {
+      const sm = JSON.parse(fs.readFileSync(smPath, "utf-8"));
+      const entry = (sm.items || []).find(
+        (i: { asset_id?: string }) => i.asset_id === assetId,
+      );
+      if (!entry) continue;
+      const srcPath =
+        entry.local_source_path || entry.link_path || entry.source_locator;
+      if (srcPath && fs.existsSync(srcPath)) return srcPath;
+      // Fallback: resolve filename in 02_media/
+      const filename =
+        entry.filename ??
+        srcPath?.split("/").pop() ??
+        srcPath?.split("\\").pop();
+      if (filename) {
+        const mediaDir = path.join(projectDir, "02_media");
+        const filePath = path.join(mediaDir, filename);
+        if (fs.existsSync(filePath)) return filePath;
+        const found = findFileInDir(mediaDir, filename);
+        if (found) return found;
+      }
+    } catch {
+      /* ignore parse errors */
+    }
+  }
+  return null;
+}
+
+/** Generate a collision-resistant cache key from realPath + mtime + codec info. */
+function getCacheKeyPath(
+  projectDir: string,
+  realPath: string,
+): string {
+  const stat = fs.statSync(realPath);
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${realPath}:${stat.mtimeMs}`)
+    .digest("hex")
+    .slice(0, 16);
+  const cacheDir = path.join(projectDir, ".proxy-cache");
+  return path.join(cacheDir, `${hash}.mp4`);
+}
+
 export function createMediaRouter(projectsDir: string): Router {
   const router = Router();
 
-  // GET /api/projects/:id/media/:filename
+  // GET /api/projects/:id/media/by-asset/:assetId
+  // v3 canonical endpoint: resolve asset_id → source file → stream
+  router.get("/:id/media/by-asset/:assetId", async (req, res) => {
+    try {
+      const projectDir = safeProjectDir(projectsDir, req.params.id);
+      if (!projectDir) {
+        res.status(400).json({ error: "Invalid project ID" });
+        return;
+      }
+
+      const assetId = req.params.assetId;
+      const resolvedPath = resolveAssetPath(projectDir, assetId);
+      if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+        res.status(404).json({ error: "Asset not found", asset_id: assetId });
+        return;
+      }
+
+      const realPath = fs.realpathSync(resolvedPath);
+
+      // Force transcode when ?transcode=1 is set (MEDIA_ERR_SRC_NOT_SUPPORTED fallback)
+      const forceTranscode = req.query.transcode === "1";
+      const needsTranscode = forceTranscode || await checkNeedsTranscode(realPath);
+
+      if (needsTranscode) {
+        await serveTranscodedV3(req, res, realPath, projectDir);
+      } else {
+        serveDirect(req, res, realPath, path.basename(realPath));
+      }
+    } catch (err) {
+      console.error("[media] Error serving asset:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Internal server error" });
+      }
+    }
+  });
+
+  // GET /api/projects/:id/media/:filename (backward-compat)
   router.get("/:id/media/:filename", async (req, res) => {
     try {
       const projectDir = safeProjectDir(projectsDir, req.params.id);
@@ -255,6 +346,34 @@ async function serveTranscoded(
   }
 
   // Check for in-flight transcode of the same file
+  let transcodePromise = inflightTranscodes.get(cachePath);
+  if (!transcodePromise) {
+    transcodePromise = transcode(realPath, cachePath);
+    inflightTranscodes.set(cachePath, transcodePromise);
+  }
+
+  try {
+    const cached = await transcodePromise;
+    serveDirect(req, res, cached, path.basename(cached));
+  } finally {
+    inflightTranscodes.delete(cachePath);
+  }
+}
+
+/** v3 transcode serving with collision-resistant cache keys. */
+async function serveTranscodedV3(
+  req: import("express").Request,
+  res: import("express").Response,
+  realPath: string,
+  projectDir: string,
+): Promise<void> {
+  const cachePath = getCacheKeyPath(projectDir, realPath);
+
+  if (fs.existsSync(cachePath)) {
+    serveDirect(req, res, cachePath, path.basename(cachePath));
+    return;
+  }
+
   let transcodePromise = inflightTranscodes.get(cachePath);
   if (!transcodePromise) {
     transcodePromise = transcode(realPath, cachePath);

@@ -157,6 +157,13 @@
         "editorial_registry_hash": {
           "type": "string"
         },
+        "editor_version": {
+          "type": "string"
+        },
+        "last_editor_save": {
+          "type": "string",
+          "format": "date-time"
+        },
         "duration_policy": {
           "type": "object",
           "properties": {
@@ -169,8 +176,7 @@
           },
           "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      }
     }
   },
   "$defs": {
@@ -343,8 +349,7 @@
         "metadata": {
           "type": "object"
         }
-      },
-      "additionalProperties": false
+      }
     },
     "audioMix": {
       "type": "object",
@@ -499,6 +504,5 @@
       },
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  }
 }

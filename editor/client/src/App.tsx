@@ -15,6 +15,7 @@ import { useDiff } from './hooks/useDiff';
 import { usePlayback } from './hooks/usePlayback';
 import { useReview } from './hooks/useReview';
 import { useSelection } from './hooks/useSelection';
+import { useProjectSync } from './hooks/useProjectSync';
 import { useTimeline } from './hooks/useTimeline';
 import type { AudioPolicy, Clip, EditorLane, PatchOperation, ReviewWarning, ReviewWeakness, SelectionState, TimelineIR } from './types';
 import {
@@ -153,6 +154,15 @@ export default function App() {
       void timelineState.reload();
       reviewState.reload();
     },
+  });
+
+  // ── WebSocket-driven project sync ───────────────────────────────
+  const projectSync = useProjectSync({
+    projectId: timelineState.projectId,
+    localRevision: timelineState.timelineRevision,
+    dirty: timelineState.dirty,
+    onTimelineReload: async () => { await timelineState.reload(); },
+    onReviewReload: () => { reviewState.reload(); },
   });
 
   const [bottomTab, setBottomTab] = useState<'timeline' | 'patches' | 'alternatives' | 'diff'>('timeline');
@@ -453,6 +463,26 @@ export default function App() {
 
   return (
     <div className="flex h-screen min-h-screen flex-col overflow-hidden bg-[color:var(--editor-bg)] text-[color:var(--text-main)]">
+      {/* Merge banner — shown when server-side changes arrive while editor has unsaved edits */}
+      {projectSync.showMergeBanner && (
+        <div className="flex shrink-0 items-center justify-between border-b border-amber-600/40 bg-amber-950/60 px-4 py-2 text-sm text-amber-200">
+          <span>Timeline changed on disk. You have unsaved edits.</span>
+          <div className="flex gap-2">
+            <button
+              className="rounded border border-amber-600/60 px-3 py-1 text-xs font-medium hover:bg-amber-800/40"
+              onClick={projectSync.keepLocal}
+            >
+              Keep mine
+            </button>
+            <button
+              className="rounded border border-amber-600/60 bg-amber-700/40 px-3 py-1 text-xs font-medium hover:bg-amber-700/60"
+              onClick={projectSync.acceptRemote}
+            >
+              Load remote
+            </button>
+          </div>
+        </div>
+      )}
       <header className="shrink-0 border-b border-white/[0.06] px-4 py-2.5">
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -573,6 +603,7 @@ export default function App() {
               isGap={playback.isGap}
               error={playback.error}
               onLoadedMetadata={playback.handleVideoLoadedMetadata}
+              onCanPlayThrough={playback.handleVideoCanPlayThrough}
               onTimeUpdate={playback.handleVideoTimeUpdate}
               onWaiting={playback.handleVideoWaiting}
               onPlaying={playback.handleVideoPlaying}
@@ -754,12 +785,63 @@ export default function App() {
           <span className={timelineState.dirty ? 'text-[color:var(--warning)]' : 'text-[color:var(--success)]'}>
             {timelineState.dirty ? 'Unsaved' : 'Synced'}
           </span>
+          <span className={
+            projectSync.wsStatus === 'connected'
+              ? 'text-emerald-400'
+              : projectSync.wsStatus === 'connecting'
+                ? 'text-amber-400'
+                : 'text-neutral-500'
+          }>
+            {projectSync.wsStatus === 'connected' ? 'WS' : projectSync.wsStatus === 'connecting' ? 'WS...' : 'WS off'}
+          </span>
         </div>
       </footer>
 
       {timelineState.error || playback.error ? (
         <div className="shrink-0 border-t border-red-400/20 px-4 py-2 text-[12px] text-[color:var(--danger)]">
           {timelineState.error ?? playback.error}
+        </div>
+      ) : null}
+
+      {/* Merge Dialog — shown on 409 conflict during save */}
+      {timelineState.conflict ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="w-[420px] border border-white/[0.1] bg-[#1a1f28] p-6 shadow-2xl">
+            <h2 className="mb-1 text-[15px] font-semibold text-white">Timeline Conflict</h2>
+            <p className="mb-4 text-[13px] text-neutral-400">
+              The timeline was modified externally while you had unsaved changes.
+            </p>
+            <div className="mb-4 space-y-1 rounded border border-white/[0.06] bg-black/30 px-3 py-2 font-mono text-[11px] text-neutral-400">
+              <div>Local rev: <span className="text-neutral-200">{timelineState.conflict.localRevision}</span></div>
+              <div>Remote rev: <span className="text-neutral-200">{timelineState.conflict.remoteRevision}</span></div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="flex-1 border border-white/[0.06] bg-transparent px-3 py-2 text-[13px] font-medium text-neutral-200 transition hover:bg-white/[0.06]"
+                onClick={() => timelineState.dismissConflict()}
+              >
+                Keep mine
+              </button>
+              <button
+                type="button"
+                className="flex-1 bg-[color:var(--accent-strong)] px-3 py-2 text-[13px] font-semibold text-white transition hover:bg-[#4f95ff]"
+                onClick={() => { void timelineState.resolveConflictWithReload(); }}
+              >
+                Load remote
+              </button>
+              <button
+                type="button"
+                className="flex-1 border border-white/[0.06] bg-transparent px-3 py-2 text-[13px] font-medium text-neutral-200 transition hover:bg-white/[0.06]"
+                onClick={() => {
+                  setBottomTab('diff');
+                  timelineState.dismissConflict();
+                }}
+              >
+                Compare
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

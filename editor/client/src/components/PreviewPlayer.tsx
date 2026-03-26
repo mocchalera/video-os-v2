@@ -9,6 +9,7 @@ interface PreviewPlayerProps {
   isGap: boolean;
   error: string | null;
   onLoadedMetadata: () => void;
+  onCanPlayThrough: () => void;
   onTimeUpdate: () => void;
   onWaiting: () => void;
   onPlaying: () => void;
@@ -26,6 +27,7 @@ export default function PreviewPlayer({
   isGap,
   error,
   onLoadedMetadata,
+  onCanPlayThrough,
   onTimeUpdate,
   onWaiting,
   onPlaying,
@@ -44,6 +46,7 @@ export default function PreviewPlayer({
         playsInline
         preload="auto"
         onLoadedMetadata={onLoadedMetadata}
+        onCanPlayThrough={onCanPlayThrough}
         onTimeUpdate={onTimeUpdate}
         onWaiting={onWaiting}
         onPlaying={onPlaying}

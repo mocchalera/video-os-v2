@@ -17,6 +17,14 @@ import {
   atomicWriteFileSync,
 } from "../utils.js";
 import { getReconcileStatus } from "../services/reconcile-status.js";
+import { getTimelineValidator } from "../middleware/validation.js";
+import type { ProjectSyncSource } from "../services/watch-hub.js";
+
+export type NotifyWriteFn = (
+  projectId: string,
+  eventType: "timeline.changed" | "review.changed" | "project-state.changed" | "render.changed",
+  source: ProjectSyncSource,
+) => void;
 
 /** Compute SHA-256 hash of file content, returned as `sha256:<hex16>`. */
 export function computeTimelineRevision(content: string): string {
@@ -24,7 +32,64 @@ export function computeTimelineRevision(content: string): string {
   return `sha256:${hash}`;
 }
 
-export function createTimelineRouter(projectsDir: string): Router {
+export type EnsureWatchFn = (projectId: string, projectDir: string) => void;
+
+// ── Server-side normalization ─────────────────────────────────────
+
+interface TimelineClip {
+  clip_id: string;
+  timeline_in_frame: number;
+  timeline_duration_frames: number;
+  src_in_us: number;
+  src_out_us: number;
+  [key: string]: unknown;
+}
+
+interface TimelineTrack {
+  track_id: string;
+  clips: TimelineClip[];
+  [key: string]: unknown;
+}
+
+interface TimelineBody {
+  sequence: { fps_num: number; fps_den: number; [key: string]: unknown };
+  tracks: { video: TimelineTrack[]; audio: TimelineTrack[] };
+  [key: string]: unknown;
+}
+
+function durationFramesFromSource(srcInUs: number, srcOutUs: number, fps: number): number {
+  const durationUs = srcOutUs - srcInUs;
+  return Math.max(1, Math.round((durationUs / 1_000_000) * fps));
+}
+
+/** Normalize a timeline: sort clips by timeline_in_frame, recalculate timeline_duration_frames. */
+export function normalizeTimelineServer(timeline: TimelineBody): TimelineBody {
+  const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
+
+  for (const group of [timeline.tracks.video, timeline.tracks.audio]) {
+    for (const track of group) {
+      track.clips = [...track.clips]
+        .map((clip) => ({
+          ...clip,
+          timeline_duration_frames: durationFramesFromSource(clip.src_in_us, clip.src_out_us, fps),
+        }))
+        .sort((a, b) => {
+          if (a.timeline_in_frame !== b.timeline_in_frame) {
+            return a.timeline_in_frame - b.timeline_in_frame;
+          }
+          return a.clip_id.localeCompare(b.clip_id);
+        });
+    }
+  }
+
+  return timeline;
+}
+
+export function createTimelineRouter(
+  projectsDir: string,
+  notifyWrite?: NotifyWriteFn,
+  ensureWatch?: EnsureWatchFn,
+): Router {
   const router = Router();
 
   // GET /api/projects/:id/timeline
@@ -52,6 +117,9 @@ export function createTimelineRouter(projectsDir: string): Router {
 
       res.setHeader("ETag", `"${revision}"`);
       res.json(timeline);
+
+      // Lazily ensure this project is being watched
+      ensureWatch?.(req.params.id as string, projDir);
     } catch (err) {
       res.status(500).json({
         error: "Failed to read timeline",
@@ -61,8 +129,6 @@ export function createTimelineRouter(projectsDir: string): Router {
   });
 
   // PUT /api/projects/:id/timeline
-  // Schema validation temporarily relaxed — ax1-voices projects have
-  // fields not yet in the strict schema. Validate on best-effort basis.
   router.put("/:id/timeline", (req, res) => {
     const projectId = req.params.id as string;
     const projDir = safeProjectDir(projectsDir, projectId);
@@ -79,8 +145,8 @@ export function createTimelineRouter(projectsDir: string): Router {
       fs.mkdirSync(timelineDir, { recursive: true });
     }
 
-    // Per-project lock (修正4)
-    const existingLock = getProjectLockKind(projectId);
+    // Per-project filesystem advisory lock
+    const existingLock = getProjectLockKind(projectId, projDir);
     if (existingLock) {
       res.status(423).json({
         error: "Project is locked",
@@ -89,12 +155,27 @@ export function createTimelineRouter(projectsDir: string): Router {
       return;
     }
 
-    if (!acquireProjectLock(projectId, "saving")) {
+    if (!acquireProjectLock(projectId, "saving", projDir)) {
       res.status(423).json({ error: "Project is locked", lock_kind: "saving" });
       return;
     }
 
     try {
+      // Server-side Ajv validation — canonical save contract
+      const validate = getTimelineValidator();
+      if (!validate(req.body)) {
+        releaseProjectLock(projectId, projDir);
+        res.status(400).json({
+          error: "Schema validation failed",
+          details: validate.errors?.map((e) => ({
+            path: e.instancePath,
+            message: e.message,
+            params: e.params,
+          })),
+        });
+        return;
+      }
+
       // If-Match is REQUIRED when the file already exists (修正4)
       const ifMatch = req.headers["if-match"];
       if (fs.existsSync(timelinePath)) {
@@ -118,6 +199,9 @@ export function createTimelineRouter(projectsDir: string): Router {
         }
       }
 
+      // Normalize: clip sort + timeline_duration_frames recalculation
+      const normalized = normalizeTimelineServer(req.body as TimelineBody);
+
       // Create backup if file already exists
       let backupPath: string | undefined;
       if (fs.existsSync(timelinePath)) {
@@ -125,8 +209,8 @@ export function createTimelineRouter(projectsDir: string): Router {
         fs.copyFileSync(timelinePath, backupPath);
       }
 
-      // Write validated timeline (atomic: temp + rename)
-      const newContent = JSON.stringify(req.body, null, 2);
+      // Write normalized timeline (atomic: temp + rename)
+      const newContent = JSON.stringify(normalized, null, 2);
       atomicWriteFileSync(timelinePath, newContent);
 
       const persistedContent = fs.readFileSync(timelinePath, "utf-8");
@@ -151,13 +235,16 @@ export function createTimelineRouter(projectsDir: string): Router {
         ...(backupPath ? { backupPath: path.basename(backupPath) } : {}),
         ...(status ? { status } : {}),
       });
+
+      // Notify WatchHub of API-driven save (updates hash registry, broadcasts to WS clients)
+      notifyWrite?.(projectId, "timeline.changed", "api-save");
     } catch (err) {
       res.status(500).json({
         error: "Failed to save timeline",
         details: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      releaseProjectLock(projectId);
+      releaseProjectLock(projectId, projDir);
     }
   });
 
