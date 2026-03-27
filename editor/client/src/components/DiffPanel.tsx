@@ -1,8 +1,15 @@
+import { useState } from 'react';
 import type { ClipDiff, DiffChangeType } from '../hooks/useDiff';
+
+type DiffMode = 'session' | 'remote';
 
 interface DiffPanelProps {
   diffs: ClipDiff[];
   baselineRevision: string | null;
+  remoteDiffs?: ClipDiff[] | null;
+  remoteRevision?: string | null;
+  /** Jump to a clip on the timeline (select + scroll) */
+  onJumpToClip?: (clipId: string) => void;
 }
 
 const CHANGE_STYLES: Record<
@@ -18,8 +25,14 @@ const CHANGE_STYLES: Record<
   patch_apply: { bg: 'rgba(217,70,239,0.08)', border: '#d946ef', label: 'Patch' },
 };
 
-export default function DiffPanel({ diffs, baselineRevision }: DiffPanelProps) {
-  if (!baselineRevision) {
+export default function DiffPanel({ diffs, baselineRevision, remoteDiffs, remoteRevision, onJumpToClip }: DiffPanelProps) {
+  const hasRemote = remoteDiffs != null;
+  const [mode, setMode] = useState<DiffMode>(hasRemote ? 'remote' : 'session');
+
+  const activeDiffs = mode === 'remote' && remoteDiffs ? remoteDiffs : diffs;
+  const activeRevision = mode === 'remote' && remoteRevision ? remoteRevision : baselineRevision;
+
+  if (!baselineRevision && !hasRemote) {
     return (
       <div className="flex h-full items-center justify-center px-5 py-8">
         <div className="text-center">
@@ -34,19 +47,26 @@ export default function DiffPanel({ diffs, baselineRevision }: DiffPanelProps) {
     );
   }
 
-  if (diffs.length === 0) {
+  if (activeDiffs.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center px-5 py-8">
-        <div className="text-center">
-          <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--text-subtle)]">
-            No Changes
+      <div className="flex h-full min-h-0 flex-col">
+        {hasRemote && (
+          <DiffModeToggle mode={mode} onModeChange={setMode} sessionCount={diffs.length} remoteCount={remoteDiffs?.length ?? 0} />
+        )}
+        <div className="flex flex-1 items-center justify-center px-5 py-8">
+          <div className="text-center">
+            <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--text-subtle)]">
+              No Changes
+            </div>
+            <p className="mt-2 text-[12px] text-[color:var(--text-muted)]">
+              {mode === 'remote' ? 'Local matches remote.' : 'Timeline matches the session baseline.'}
+            </p>
+            {activeRevision && (
+              <p className="mt-1 font-mono text-[9px] text-[color:var(--text-subtle)]">
+                vs {activeRevision.slice(0, 20)}...
+              </p>
+            )}
           </div>
-          <p className="mt-2 text-[12px] text-[color:var(--text-muted)]">
-            Timeline matches the session baseline.
-          </p>
-          <p className="mt-1 font-mono text-[9px] text-[color:var(--text-subtle)]">
-            Baseline: {baselineRevision.slice(0, 20)}...
-          </p>
         </div>
       </div>
     );
@@ -54,17 +74,20 @@ export default function DiffPanel({ diffs, baselineRevision }: DiffPanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {hasRemote && (
+        <DiffModeToggle mode={mode} onModeChange={setMode} sessionCount={diffs.length} remoteCount={remoteDiffs?.length ?? 0} />
+      )}
       <div className="flex shrink-0 items-center justify-between border-b border-white/[0.06] px-4 py-2">
         <div className="font-mono text-[10px] uppercase tracking-[0.24em] text-[color:var(--text-subtle)]">
-          Changes ({diffs.length})
+          {mode === 'remote' ? 'Local vs Remote' : 'Changes'} ({activeDiffs.length})
         </div>
         <div className="font-mono text-[9px] text-[color:var(--text-subtle)]">
-          vs {baselineRevision.slice(0, 16)}
+          vs {activeRevision?.slice(0, 16) ?? '—'}
         </div>
       </div>
 
       <div className="editor-scrollbar min-h-0 flex-1 overflow-y-auto">
-        {diffs.map((diff) => {
+        {activeDiffs.map((diff) => {
           const primary = diff.changes[0];
           const style = CHANGE_STYLES[primary] ?? CHANGE_STYLES.trimmed;
 
@@ -79,9 +102,20 @@ export default function DiffPanel({ diffs, baselineRevision }: DiffPanelProps) {
               }}
             >
               <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] text-neutral-200">
-                  {diff.clip_id}
-                </span>
+                {onJumpToClip ? (
+                  <button
+                    type="button"
+                    className="font-mono text-[10px] text-neutral-200 underline decoration-white/20 underline-offset-2 transition hover:text-[var(--accent)]"
+                    onClick={() => onJumpToClip(diff.clip_id)}
+                    title="Jump to clip on timeline"
+                  >
+                    {diff.clip_id}
+                  </button>
+                ) : (
+                  <span className="font-mono text-[10px] text-neutral-200">
+                    {diff.clip_id}
+                  </span>
+                )}
                 {diff.changes.map((change) => {
                   const s = CHANGE_STYLES[change];
                   return (
@@ -146,6 +180,42 @@ export default function DiffPanel({ diffs, baselineRevision }: DiffPanelProps) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ── Mode toggle (Session vs Remote) ─────────────────────────────────
+
+function DiffModeToggle({
+  mode,
+  onModeChange,
+  sessionCount,
+  remoteCount,
+}: {
+  mode: DiffMode;
+  onModeChange: (m: DiffMode) => void;
+  sessionCount: number;
+  remoteCount: number;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-1.5">
+      {(['session', 'remote'] as const).map((m) => {
+        const label = m === 'session' ? `Session (${sessionCount})` : `Local vs Remote (${remoteCount})`;
+        return (
+          <button
+            key={m}
+            type="button"
+            className={`px-2 py-0.5 text-[11px] font-semibold transition ${
+              mode === m
+                ? 'text-[var(--accent)]'
+                : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
+            }`}
+            onClick={() => onModeChange(m)}
+          >
+            {label}
+          </button>
+        );
+      })}
     </div>
   );
 }

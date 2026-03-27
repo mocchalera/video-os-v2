@@ -19,6 +19,7 @@ import { createThumbnailRouter } from "./routes/thumbnails.js";
 import { createReviewRouter } from "./routes/review.js";
 import { createSelectsRouter } from "./routes/selects.js";
 import { createAiJobsRouter } from "./routes/ai-jobs.js";
+import { createWaveformRouter } from "./routes/waveforms.js";
 import { safeProjectDir } from "./utils.js";
 import { TimelineWatchHub } from "./services/watch-hub.js";
 import { ProjectSocketHub } from "./services/project-socket-hub.js";
@@ -199,6 +200,7 @@ app.use("/api/projects", createThumbnailRouter(resolvedProjectsDir));
 app.use("/api/projects", createReviewRouter(resolvedProjectsDir, notifyWrite));
 app.use("/api/projects", createSelectsRouter(resolvedProjectsDir));
 app.use("/api/projects", createAiJobsRouter(resolvedProjectsDir));
+app.use("/api/projects", createWaveformRouter(resolvedProjectsDir));
 
 // ── Health check ──────────────────────────────────────────────────
 

@@ -80,7 +80,7 @@ function hasPatchMotivation(clip: Clip): boolean {
   );
 }
 
-function computeDiff(
+export function computeDiff(
   baseline: TimelineIR,
   current: TimelineIR,
   patchAffectedClips: Set<string>,

@@ -6,6 +6,10 @@ interface PatchPanelProps {
   dirty: boolean;
   timelineRevision: string | null;
   onApply: (operationIndexes: number[]) => Promise<void>;
+  /** Preview a single operation (temporarily show result without committing) */
+  onPreview?: (operationIndex: number) => void;
+  /** Currently previewing operation index */
+  previewingIndex?: number | null;
 }
 
 const OP_COLORS: Record<string, { border: string; bg: string; label: string }> = {
@@ -28,6 +32,8 @@ export default function PatchPanel({
   dirty,
   timelineRevision,
   onApply,
+  onPreview,
+  previewingIndex,
 }: PatchPanelProps) {
   const [rejectedIndexes, setRejectedIndexes] = useState<Set<number>>(new Set());
   const [applyingIndexes, setApplyingIndexes] = useState<Set<number>>(new Set());
@@ -176,6 +182,20 @@ export default function PatchPanel({
 
                 {!rejected ? (
                   <div className="flex shrink-0 gap-1.5">
+                    {onPreview && (
+                      <button
+                        type="button"
+                        className={`rounded border px-2 py-0.5 font-mono text-[9px] font-semibold uppercase transition ${
+                          previewingIndex === filteredIdx
+                            ? 'border-[var(--accent)]/50 bg-[var(--accent)]/20 text-[var(--accent)]'
+                            : 'border-white/[0.12] bg-white/[0.04] text-neutral-300 hover:bg-white/[0.08]'
+                        }`}
+                        onClick={() => onPreview(filteredIdx)}
+                        title="Preview this patch operation"
+                      >
+                        {previewingIndex === filteredIdx ? 'Exit' : 'Preview'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="rounded border border-green-500/30 bg-green-500/10 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase text-green-400 transition hover:bg-green-500/20 disabled:opacity-35"

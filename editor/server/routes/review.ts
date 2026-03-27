@@ -14,6 +14,7 @@ import * as path from "node:path";
 import yaml from "js-yaml";
 import { computeTimelineRevision, normalizeTimelineServer } from "./timeline.js";
 import { getTimelineValidator } from "../middleware/validation.js";
+import { validateTimeline } from "../../shared/timeline-validation.js";
 import {
   safeProjectDir,
   acquireProjectLock,
@@ -646,6 +647,16 @@ export function createReviewRouter(
 
       // Server normalization: clip sort + timeline_duration_frames recalculation (修正R2-final)
       const normalized = normalizeTimelineServer(timeline);
+
+      // Shared overlap & structural validation (client/server parity)
+      const overlapIssues = validateTimeline(normalized);
+      if (overlapIssues.length > 0) {
+        res.status(400).json({
+          error: "Patched timeline failed overlap/structural validation",
+          details: overlapIssues.map((i) => ({ path: i.path, message: i.message })),
+        });
+        return;
+      }
 
       // Backup and save (atomic: temp + rename)
       fs.copyFileSync(timelinePath, `${timelinePath}.bak`);

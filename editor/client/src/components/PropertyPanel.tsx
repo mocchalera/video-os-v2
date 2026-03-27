@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from 'react';
 import type { AudioPolicy, Clip, ReviewReportResponse } from '../types';
+import { CONFIDENCE_HIGH, CONFIDENCE_MEDIUM } from '../types';
 import type { BlueprintResponse } from '../hooks/useReview';
 import { formatMicroseconds } from '../utils/time';
+import AiDecisionPanel from './AiDecisionPanel';
 
 type PanelTab = 'properties' | 'ai-context' | 'review';
 
@@ -97,10 +99,10 @@ function confidenceBadge(confidence: number | undefined) {
   const pct = (confidence * 100).toFixed(0);
   let bg: string;
   let textColor: string;
-  if (confidence >= 0.85) {
+  if (confidence >= CONFIDENCE_HIGH) {
     bg = '#16a34a';
     textColor = '#fff';
-  } else if (confidence >= 0.65) {
+  } else if (confidence >= CONFIDENCE_MEDIUM) {
     bg = '#ca8a04';
     textColor = '#fff';
   } else {
@@ -599,12 +601,21 @@ export default function PropertyPanel({
 
       <div className="editor-scrollbar min-h-0 flex-1 overflow-y-auto">
         {activeTab === 'properties' ? (
-          <PropertiesTab
-            clip={clip}
-            fps={fps}
-            onUpdateAudioNumber={onUpdateAudioNumber}
-            onUpdateAudioBoolean={onUpdateAudioBoolean}
-          />
+          <>
+            <PropertiesTab
+              clip={clip}
+              fps={fps}
+              onUpdateAudioNumber={onUpdateAudioNumber}
+              onUpdateAudioBoolean={onUpdateAudioBoolean}
+            />
+            {/* AI Decision collapsible section in NLE Inspector */}
+            <AiDecisionPanel
+              clip={clip}
+              reviewReport={reviewReport}
+              blueprint={blueprint}
+              collapsible
+            />
+          </>
         ) : activeTab === 'ai-context' ? (
           <AiContextTab clip={clip} reviewReport={reviewReport} blueprint={blueprint} />
         ) : (

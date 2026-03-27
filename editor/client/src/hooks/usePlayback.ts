@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Clip, PreviewResponse, TimelineIR } from '../types';
+import type { Clip, PreviewResponse, TimelineIR, TrackHeaderState } from '../types';
 import { clamp, framesToSeconds, secondsToFrames } from '../utils/time';
 
 interface UsePlaybackOptions {
   projectId: string;
   fps: number;
   durationFrames: number;
+  /** Sequence start frame (usually 0). Playhead resets to this on project load. */
+  startFrame?: number;
   timeline: TimelineIR | null;
+  /** Track states for mute/solo filtering. If omitted, all tracks play. */
+  trackStates?: Record<string, TrackHeaderState>;
 }
 
 interface SourceMapAsset {
@@ -60,7 +64,9 @@ export function usePlayback({
   projectId,
   fps,
   durationFrames,
+  startFrame = 0,
   timeline,
+  trackStates,
 }: UsePlaybackOptions) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activeClipRef = useRef<Clip | null>(null);
@@ -75,6 +81,11 @@ export function usePlayback({
   /** Set of asset_ids for which transcode fallback has been attempted. */
   const transcodeFallbackAttemptedRef = useRef<Set<string>>(new Set());
 
+  // ── Audio-only playback (hidden <audio> element for video-gap regions) ──
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const activeAudioClipRef = useRef<Clip | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
+
   const [playheadFrame, setPlayheadFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -86,6 +97,21 @@ export function usePlayback({
   >('idle');
   const [previewStale, setPreviewStale] = useState(false);
 
+  // ── Phase 3: Shuttle, Marks, Loop ──────────────────────────────────
+  const [shuttleSpeed, setShuttleSpeedState] = useState(0);
+  const [markIn, setMarkInState] = useState<number | null>(null);
+  const [markOut, setMarkOutState] = useState<number | null>(null);
+  const [loopEnabled, setLoopEnabled] = useState(false);
+  const shuttleSpeedRef = useRef(shuttleSpeed);
+  shuttleSpeedRef.current = shuttleSpeed;
+  const markInRef = useRef(markIn);
+  markInRef.current = markIn;
+  const markOutRef = useRef(markOut);
+  markOutRef.current = markOut;
+  const loopEnabledRef = useRef(loopEnabled);
+  loopEnabledRef.current = loopEnabled;
+  const reverseRafRef = useRef<number | null>(null);
+
   const playheadFrameRef = useRef(playheadFrame);
   playheadFrameRef.current = playheadFrame;
   const isPlayingRef = useRef(isPlaying);
@@ -93,19 +119,52 @@ export function usePlayback({
 
   const videoClips = useMemo(() => {
     if (!timeline) return [];
+    // Solo is per-kind: only check video tracks for video solo.
+    // Audio solo must not black out video tracks.
+    const hasVideoSolo = trackStates
+      ? timeline.tracks.video.some((track) => trackStates[track.track_id]?.solo)
+      : false;
     return timeline.tracks.video
+      .filter((track) => {
+        if (!trackStates) return true;
+        const state = trackStates[track.track_id];
+        if (!state) return true;
+        if (hasVideoSolo) return state.solo;
+        return !state.muted;
+      })
       .flatMap((track) => track.clips)
       .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame);
-  }, [timeline]);
+  }, [timeline, trackStates]);
+
+  const audioClips = useMemo(() => {
+    if (!timeline) return [];
+    const hasAudioSolo = trackStates
+      ? timeline.tracks.audio.some((track) => trackStates[track.track_id]?.solo)
+      : false;
+    return timeline.tracks.audio
+      .filter((track) => {
+        if (!trackStates) return true;
+        const state = trackStates[track.track_id];
+        if (!state) return true;
+        if (hasAudioSolo) return state.solo;
+        return !state.muted;
+      })
+      .flatMap((track) => track.clips)
+      .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame);
+  }, [timeline, trackStates]);
 
   const videoClipsRef = useRef(videoClips);
   videoClipsRef.current = videoClips;
+  const audioClipsRef = useRef(audioClips);
+  audioClipsRef.current = audioClips;
   const fpsRef = useRef(fps);
   fpsRef.current = fps;
   const durationFramesRef = useRef(durationFrames);
   durationFramesRef.current = durationFrames;
   const projectIdRef = useRef(projectId);
   projectIdRef.current = projectId;
+  const startFrameRef = useRef(startFrame);
+  startFrameRef.current = startFrame;
 
   // Check if requestVideoFrameCallback is available
   const hasRVFC = typeof HTMLVideoElement !== 'undefined' &&
@@ -249,6 +308,77 @@ export function usePlayback({
     return videoClipsRef.current.find((clip) => clip.timeline_in_frame > frame) ?? null;
   }
 
+  function findAudioClipAtFrame(frame: number): Clip | null {
+    const clips = audioClipsRef.current;
+    for (const clip of clips) {
+      if (frame >= clip.timeline_in_frame && frame < getClipEndFrame(clip)) {
+        return clip;
+      }
+    }
+    return null;
+  }
+
+  function findNextAudioClipAfterFrame(frame: number): Clip | null {
+    return audioClipsRef.current.find((clip) => clip.timeline_in_frame > frame) ?? null;
+  }
+
+  /** Sync the hidden audio element to an audio clip (for audio-only regions). */
+  function syncAudioElement(clip: Clip, frame: number, shouldPlay: boolean): void {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const mediaUrl = getMediaUrl(clip.asset_id);
+    if (!mediaUrl) {
+      clearAudioElement();
+      return;
+    }
+
+    activeAudioClipRef.current = clip;
+    const sourceTime = computeSourceTimeSec(clip, frame);
+
+    if (mediaUrl !== currentAudioUrlRef.current) {
+      currentAudioUrlRef.current = mediaUrl;
+      audio.pause();
+      audio.src = mediaUrl;
+      const onReady = () => {
+        audio.removeEventListener('canplaythrough', onReady);
+        audio.currentTime = sourceTime;
+        if (shouldPlay) {
+          const speed = shuttleSpeedRef.current;
+          audio.playbackRate = speed > 0 ? Math.min(speed, 16) : 1;
+          void audio.play().catch(() => {});
+        }
+      };
+      audio.addEventListener('canplaythrough', onReady, { once: true });
+      audio.load();
+      return;
+    }
+
+    // Same source — seek if needed
+    if (Math.abs(audio.currentTime - sourceTime) > DRIFT_TOLERANCE_SEC) {
+      audio.currentTime = sourceTime;
+    }
+    if (shouldPlay) {
+      const speed = shuttleSpeedRef.current;
+      audio.playbackRate = speed > 0 ? Math.min(speed, 16) : 1;
+      if (audio.paused) void audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }
+
+  function clearAudioElement(): void {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.pause();
+    if (audio.getAttribute('src') || audio.src) {
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    activeAudioClipRef.current = null;
+    currentAudioUrlRef.current = null;
+  }
+
   function computeSourceTimeSec(clip: Clip, frame: number): number {
     const offsetFrames = clamp(
       frame - clip.timeline_in_frame,
@@ -276,8 +406,9 @@ export function usePlayback({
     cancelFrameCallbacks();
     pendingSourceSyncRef.current = null;
     pauseVideoElement();
+    audioRef.current?.pause();
     setIsPlaying(false);
-    setPlayheadFrame(clamp(frame, 0, durationFramesRef.current));
+    setPlayheadFrame(clamp(frame, startFrameRef.current, durationFramesRef.current));
   }
 
   function handlePlayRejection(playError: unknown): void {
@@ -306,6 +437,16 @@ export function usePlayback({
 
       const nextFrame = computeTimelineFrameFromCurrentTime(activeClip, metadata.mediaTime);
       setPlayheadFrame(nextFrame);
+
+      // Loop detection: when reaching markOut, jump to markIn (only if loop enabled)
+      if (loopEnabledRef.current) {
+        const mOut = markOutRef.current;
+        const mIn = markInRef.current;
+        if (mOut != null && nextFrame >= mOut && mIn != null) {
+          syncPlaybackToFrame(mIn, true);
+          return;
+        }
+      }
 
       // Check clip boundary
       const clipEndFrame = getClipEndFrame(activeClip);
@@ -344,6 +485,16 @@ export function usePlayback({
       const nextFrame = computeTimelineFrameFromCurrentTime(activeClip, video.currentTime);
       setPlayheadFrame(nextFrame);
 
+      // Loop detection (only if loop enabled)
+      if (loopEnabledRef.current) {
+        const mOut = markOutRef.current;
+        const mIn = markInRef.current;
+        if (mOut != null && nextFrame >= mOut && mIn != null) {
+          syncPlaybackToFrame(mIn, true);
+          return;
+        }
+      }
+
       const clipEndFrame = getClipEndFrame(activeClip);
       const clipOutSec = activeClip.src_out_us / 1_000_000;
       const boundaryEpsilonSec = 0.5 / Math.max(fpsRef.current, 1);
@@ -375,6 +526,13 @@ export function usePlayback({
 
   function startVideoPlayback(video: HTMLVideoElement): void {
     setIsBuffering(true);
+    // Apply shuttle speed if active
+    const speed = shuttleSpeedRef.current;
+    if (speed > 0) {
+      video.playbackRate = Math.min(speed, 16);
+    } else if (speed === 0) {
+      video.playbackRate = 1;
+    }
     void video.play().then(() => {
       startPlaybackLoop();
     }).catch((playError) => {
@@ -433,18 +591,44 @@ export function usePlayback({
     clearVideoSource();
     setIsBuffering(false);
 
+    // Always clear previous gap audio before evaluating the new gap region
+    clearAudioElement();
+
+    // Check for audio clip at this frame (audio-only region)
+    const audioClip = findAudioClipAtFrame(frame);
+    if (audioClip) {
+      syncAudioElement(audioClip, frame, shouldPlay);
+    }
+
     if (!shouldPlay) {
       clearGapPlayback();
       return;
     }
 
-    const nextClip = findNextClipAfterFrame(frame);
-    if (!nextClip) {
-      stopPlaybackAtFrame(durationFramesRef.current);
+    // Find next boundary: end of current audio clip, next video clip, or next audio clip
+    const audioClipEnd = audioClip ? getClipEndFrame(audioClip) : Infinity;
+    const nextVideoClip = findNextClipAfterFrame(frame);
+    const nextAudioClip = findNextAudioClipAfterFrame(frame);
+
+    let nextBoundary = durationFramesRef.current;
+    if (audioClipEnd < nextBoundary) nextBoundary = audioClipEnd;
+    if (nextVideoClip && nextVideoClip.timeline_in_frame < nextBoundary) {
+      nextBoundary = nextVideoClip.timeline_in_frame;
+    }
+    if (nextAudioClip && nextAudioClip.timeline_in_frame < nextBoundary) {
+      nextBoundary = nextAudioClip.timeline_in_frame;
+    }
+
+    if (nextBoundary <= frame) {
+      if (frame < durationFramesRef.current) {
+        startGapPlayback(frame, durationFramesRef.current);
+      } else {
+        stopPlaybackAtFrame(durationFramesRef.current);
+      }
       return;
     }
 
-    startGapPlayback(frame, nextClip.timeline_in_frame);
+    startGapPlayback(frame, nextBoundary);
   }
 
   // ── Clip synchronization ──────────────────────────────────────────
@@ -459,6 +643,8 @@ export function usePlayback({
 
     clearGapPlayback();
     cancelFrameCallbacks();
+    // Clear any stale audio element from a previous gap region to prevent double playback
+    clearAudioElement();
 
     const mediaUrl = getMediaUrl(clip.asset_id);
     if (!mediaUrl) {
@@ -510,7 +696,7 @@ export function usePlayback({
   }
 
   function syncPlaybackToFrame(frame: number, shouldPlay: boolean): void {
-    const nextFrame = clamp(Math.round(frame), 0, durationFramesRef.current);
+    const nextFrame = clamp(Math.round(frame), startFrameRef.current, durationFramesRef.current);
     setPlayheadFrame(nextFrame);
 
     if (nextFrame >= durationFramesRef.current) {
@@ -541,11 +727,13 @@ export function usePlayback({
     cancelFrameCallbacks();
     pendingSourceSyncRef.current = null;
     pauseVideoElement();
+    audioRef.current?.pause();
     setIsPlaying(false);
   }
 
   function stop(): void {
     pause();
+    clearAudioElement();
   }
 
   async function togglePlayback(): Promise<void> {
@@ -769,25 +957,154 @@ export function usePlayback({
     activeClipRef.current = null;
     currentMediaUrlRef.current = null;
     transcodeFallbackAttemptedRef.current.clear();
-    setPlayheadFrame(0);
+    clearAudioElement();
+    setPlayheadFrame(startFrame);
     setIsBuffering(false);
     setIsGap(true);
     setError(null);
     setRenderStatus('idle');
     setPreviewStale(false);
     clearVideoSource();
-  }, [projectId]);
+  }, [projectId, startFrame]);
 
   useEffect(() => {
-    setPlayheadFrame((current) => clamp(current, 0, durationFrames));
-  }, [durationFrames]);
+    setPlayheadFrame((current) => clamp(current, startFrame, durationFrames));
+  }, [durationFrames, startFrame]);
 
   useEffect(() => {
     return () => {
       clearGapPlayback();
       cancelFrameCallbacks();
+      cancelReverseRaf();
+      clearAudioElement();
     };
   }, []);
+
+  // Initialize hidden audio element for audio-only playback regions
+  useEffect(() => {
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audioRef.current = audio;
+    return () => {
+      audio.pause();
+      audio.removeAttribute('src');
+      audioRef.current = null;
+    };
+  }, []);
+
+  // ── Phase 3: Step, Marks, Shuttle, Loop ─────────────────────────────
+
+  function stepFrame(delta: number): void {
+    const wasPlaying = isPlayingRef.current;
+    if (wasPlaying) pause();
+    const newFrame = clamp(
+      Math.round(playheadFrameRef.current + delta),
+      startFrameRef.current,
+      durationFramesRef.current,
+    );
+    syncPlaybackToFrame(newFrame, false);
+  }
+
+  function setMarkIn(): void {
+    setMarkInState(playheadFrameRef.current);
+  }
+
+  function setMarkOut(): void {
+    setMarkOutState(playheadFrameRef.current);
+  }
+
+  function clearMarkIn(): void { setMarkInState(null); }
+  function clearMarkOut(): void { setMarkOutState(null); }
+
+  function cancelReverseRaf(): void {
+    if (reverseRafRef.current !== null) {
+      window.cancelAnimationFrame(reverseRafRef.current);
+      reverseRafRef.current = null;
+    }
+  }
+
+  function startReverseShuttle(speed: number): void {
+    cancelReverseRaf();
+    let lastTime = performance.now();
+    let frameAccumulator = 0;
+
+    const tick = (now: number) => {
+      if (!isPlayingRef.current || shuttleSpeedRef.current >= 0) return;
+      const elapsed = (now - lastTime) / 1000;
+      lastTime = now;
+
+      // Accumulate fractional frames; only step when >= 1 whole frame
+      frameAccumulator += Math.abs(speed) * fpsRef.current * elapsed;
+      const wholeFrames = Math.floor(frameAccumulator);
+      if (wholeFrames < 1) {
+        reverseRafRef.current = window.requestAnimationFrame(tick);
+        return;
+      }
+      frameAccumulator -= wholeFrames;
+      const newFrame = Math.max(startFrameRef.current, playheadFrameRef.current - wholeFrames);
+
+      if (newFrame <= startFrameRef.current) {
+        stopPlaybackAtFrame(startFrameRef.current);
+        setShuttleSpeedState(0);
+        return;
+      }
+
+      // Loop detection (reverse, only if loop enabled)
+      if (loopEnabledRef.current) {
+        const mIn = markInRef.current;
+        const mOut = markOutRef.current;
+        if (mIn != null && newFrame <= mIn && mOut != null) {
+          syncPlaybackToFrame(mOut, false);
+          setPlayheadFrame(mOut);
+          reverseRafRef.current = window.requestAnimationFrame(tick);
+          return;
+        }
+      }
+
+      setPlayheadFrame(newFrame);
+      syncPlaybackToFrame(newFrame, false);
+      reverseRafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    reverseRafRef.current = window.requestAnimationFrame(tick);
+  }
+
+  function setShuttleSpeed(speed: number): void {
+    setShuttleSpeedState(speed);
+    const video = videoRef.current;
+    const audio = audioRef.current;
+
+    if (speed === 0) {
+      cancelReverseRaf();
+      cancelFrameCallbacks();
+      clearGapPlayback();
+      if (video) video.pause();
+      if (audio) audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    setIsPlaying(true);
+    setError(null);
+
+    if (speed > 0) {
+      cancelReverseRaf();
+      if (video && !isGap) {
+        video.playbackRate = Math.min(speed, 16);
+      }
+      if (audio && !audio.paused) {
+        audio.playbackRate = Math.min(speed, 16);
+      }
+      syncPlaybackToFrame(playheadFrameRef.current, true);
+    } else {
+      // Reverse playback — pause video and audio, use RAF to step backward
+      cancelFrameCallbacks();
+      clearGapPlayback();
+      if (video) video.pause();
+      if (audio) audio.pause();
+      startReverseShuttle(speed);
+    }
+  }
 
   const previewMode: 'source' | 'none' = sourceMapLoaded ? 'source' : 'none';
 
@@ -814,5 +1131,17 @@ export function usePlayback({
     handleVideoStalled,
     handleVideoEnded,
     handleVideoError,
+    // Phase 3: Shuttle, Marks, Loop, Step
+    shuttleSpeed,
+    markIn,
+    markOut,
+    loopEnabled,
+    setLoopEnabled,
+    stepFrame,
+    setMarkIn,
+    setMarkOut,
+    clearMarkIn,
+    clearMarkOut,
+    setShuttleSpeed,
   };
 }

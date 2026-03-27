@@ -44,6 +44,7 @@ export function useAiJob(
     onReviewComplete?: () => void;
     onRenderComplete?: () => void;
     onError?: (phase: AiJobPhase, error: string) => void;
+    onConflict?: (remoteRevision: string) => void;
   },
 ) {
   const [status, setStatus] = useState<AiJobStatus>('idle');
@@ -203,7 +204,9 @@ export function useAiJob(
 
       if (resp.status === 409) {
         setStatus('failed');
+        const conflictBody = await resp.json().catch(() => ({})) as { current_revision?: string };
         setError('Timeline was modified externally. Reload to get the latest version.');
+        callbacksRef.current?.onConflict?.(conflictBody.current_revision ?? 'unknown');
         return false;
       }
 

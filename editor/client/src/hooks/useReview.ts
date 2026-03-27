@@ -35,7 +35,9 @@ export interface AiContextResponse {
   };
 }
 
-export function useReview(projectId: string) {
+export function useReview(projectId: string, options?: {
+  onConflict?: (remoteRevision: string) => void;
+}) {
   const [report, setReport] = useState<ReviewReportResponse | null>(null);
   const [patch, setPatch] = useState<ReviewPatchResponse | null>(null);
   const [blueprint, setBlueprint] = useState<BlueprintResponse | null>(null);
@@ -114,6 +116,12 @@ export function useReview(projectId: string) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
+
+      if (res.status === 409) {
+        const body = (await res.json().catch(() => ({}))) as { current_revision?: string };
+        options?.onConflict?.(body.current_revision ?? 'unknown');
+        return null;
+      }
 
       if (!res.ok) {
         const body = (await res.json()) as { error?: string };

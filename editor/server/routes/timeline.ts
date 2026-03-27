@@ -34,55 +34,22 @@ export function computeTimelineRevision(content: string): string {
 
 export type EnsureWatchFn = (projectId: string, projectDir: string) => void;
 
-// ── Server-side normalization ─────────────────────────────────────
+import { normalizeTimeline, validateTimeline } from "../../shared/timeline-validation.js";
 
-interface TimelineClip {
-  clip_id: string;
-  timeline_in_frame: number;
-  timeline_duration_frames: number;
-  src_in_us: number;
-  src_out_us: number;
-  [key: string]: unknown;
-}
-
-interface TimelineTrack {
-  track_id: string;
-  clips: TimelineClip[];
-  [key: string]: unknown;
-}
+// ── Server-side normalization (delegates to shared module) ────────
 
 interface TimelineBody {
   sequence: { fps_num: number; fps_den: number; [key: string]: unknown };
-  tracks: { video: TimelineTrack[]; audio: TimelineTrack[] };
+  tracks: {
+    video: { track_id: string; clips: { clip_id: string; segment_id: string; asset_id: string; motivation: string; timeline_in_frame: number; timeline_duration_frames: number; src_in_us: number; src_out_us: number; [key: string]: unknown }[] }[];
+    audio: { track_id: string; clips: { clip_id: string; segment_id: string; asset_id: string; motivation: string; timeline_in_frame: number; timeline_duration_frames: number; src_in_us: number; src_out_us: number; [key: string]: unknown }[] }[];
+  };
   [key: string]: unknown;
-}
-
-function durationFramesFromSource(srcInUs: number, srcOutUs: number, fps: number): number {
-  const durationUs = srcOutUs - srcInUs;
-  return Math.max(1, Math.round((durationUs / 1_000_000) * fps));
 }
 
 /** Normalize a timeline: sort clips by timeline_in_frame, recalculate timeline_duration_frames. */
 export function normalizeTimelineServer(timeline: TimelineBody): TimelineBody {
-  const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
-
-  for (const group of [timeline.tracks.video, timeline.tracks.audio]) {
-    for (const track of group) {
-      track.clips = [...track.clips]
-        .map((clip) => ({
-          ...clip,
-          timeline_duration_frames: durationFramesFromSource(clip.src_in_us, clip.src_out_us, fps),
-        }))
-        .sort((a, b) => {
-          if (a.timeline_in_frame !== b.timeline_in_frame) {
-            return a.timeline_in_frame - b.timeline_in_frame;
-          }
-          return a.clip_id.localeCompare(b.clip_id);
-        });
-    }
-  }
-
-  return timeline;
+  return normalizeTimeline(timeline);
 }
 
 export function createTimelineRouter(
@@ -201,6 +168,17 @@ export function createTimelineRouter(
 
       // Normalize: clip sort + timeline_duration_frames recalculation
       const normalized = normalizeTimelineServer(req.body as TimelineBody);
+
+      // Shared overlap & structural validation (client/server parity)
+      const validationIssues = validateTimeline(normalized);
+      if (validationIssues.length > 0) {
+        releaseProjectLock(projectId, projDir);
+        res.status(400).json({
+          error: "Timeline validation failed",
+          details: validationIssues.map((i) => ({ path: i.path, message: i.message })),
+        });
+        return;
+      }
 
       // Create backup if file already exists
       let backupPath: string | undefined;

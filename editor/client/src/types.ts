@@ -59,6 +59,8 @@ export interface Clip {
   candidate_ref?: string;
   fallback_candidate_refs?: string[];
   metadata?: Record<string, unknown>;
+  /** Total source media duration in microseconds (from analysis). Used for hard stop. */
+  source_duration_us?: number;
 }
 
 export interface Track {
@@ -159,6 +161,47 @@ export interface SelectionState {
   clipId: string;
 }
 
+// ── Phase 1: Track header state & multi-selection ─────────────────
+
+export type TrackHeight = 'S' | 'M' | 'L';
+
+export const TRACK_HEIGHT_PX: Record<TrackHeight, number> = {
+  S: 32,
+  M: 64,
+  L: 128,
+};
+
+export interface TrackHeaderState {
+  locked: boolean;
+  muted: boolean;
+  solo: boolean;
+  syncLock: boolean;
+  height: TrackHeight;
+}
+
+export const DEFAULT_TRACK_HEADER_STATE: TrackHeaderState = {
+  locked: false,
+  muted: false,
+  solo: false,
+  syncLock: false,
+  height: 'M',
+};
+
+/** Waveform peaks data returned by server */
+export interface WaveformData {
+  peaks: number[];
+  sample_count: number;
+  duration_sec: number;
+  detail: 'coarse' | 'medium' | 'fine';
+}
+
+/** Snap target for magnetic snapping */
+export interface SnapTarget {
+  frame: number;
+  kind: 'playhead' | 'clip_in' | 'clip_out' | 'marker' | 'ruler_tick';
+  label?: string;
+}
+
 export interface EditorLane {
   laneId: string;
   label: string;
@@ -184,10 +227,8 @@ export interface PreviewResponse {
   generatedAt?: string;
 }
 
-export interface TimelineValidationIssue {
-  path: string;
-  message: string;
-}
+// Re-exported from shared module for backward compatibility
+export type { TimelineValidationIssue } from '@shared/timeline-validation';
 
 export interface TimelineSaveResult {
   ok: boolean;
@@ -247,6 +288,8 @@ export type PatchOpType =
 export interface PatchOperation {
   op: PatchOpType;
   target_clip_id?: string;
+  /** Target track for insert_segment (when no target_clip_id) */
+  target_track_id?: string;
   with_segment_id?: string;
   new_src_in_us?: number;
   new_src_out_us?: number;
@@ -298,6 +341,17 @@ export interface PatchApplyResponse {
 
 // ── History origin tracking (undo stack) ──────────────────────────
 
+export type TrimMode = 'selection' | 'ripple' | 'roll' | 'slip' | 'slide';
+
+export interface TrimTarget {
+  /** The clip whose edit point is being trimmed */
+  clipId: string;
+  trackId: string;
+  trackKind: 'video' | 'audio';
+  /** Which side of the clip is the active edit point */
+  side: 'head' | 'tail';
+}
+
 export type HistoryOrigin =
   | 'manual_edit'
   | 'manual_swap'
@@ -305,6 +359,13 @@ export type HistoryOrigin =
   | 'manual_audio'
   | 'patch_apply'
   | 'server_reload';
+
+/** Summary of clip-level changes (added/removed/modified counts). */
+export interface ChangesSummary {
+  added: number;
+  removed: number;
+  modified: number;
+}
 
 /** Client-side session baseline for diff comparison. Not persisted to server. */
 export interface SessionBaseline {
@@ -342,3 +403,7 @@ export interface SelectsResponse {
   revision?: string;
   data: SelectsCandidatesData | null;
 }
+
+// ── Shared confidence thresholds ──────────────────────────────────
+export const CONFIDENCE_HIGH = 0.8;
+export const CONFIDENCE_MEDIUM = 0.6;

@@ -148,6 +148,39 @@ export function createMediaRouter(projectsDir: string): Router {
     }
   });
 
+  // GET /api/projects/:id/media/probe/:assetId
+  // Returns { has_video, has_audio } via ffprobe — cross-browser reliable topology detection
+  router.get("/:id/media/probe/:assetId", async (req, res) => {
+    try {
+      const projectDir = safeProjectDir(projectsDir, req.params.id);
+      if (!projectDir) {
+        res.status(400).json({ error: "Invalid project ID" });
+        return;
+      }
+
+      const assetId = req.params.assetId;
+      const resolvedPath = resolveAssetPath(projectDir, assetId);
+      if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+        res.status(404).json({ error: "Asset not found", asset_id: assetId });
+        return;
+      }
+
+      const realPath = fs.realpathSync(resolvedPath);
+      const { audioCodec, videoCodec } = await probeCodecs(realPath);
+
+      res.json({
+        asset_id: assetId,
+        has_video: videoCodec !== null,
+        has_audio: audioCodec !== null,
+      });
+    } catch (err) {
+      console.error("[media] Error probing asset:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Probe failed" });
+      }
+    }
+  });
+
   // GET /api/projects/:id/media/:filename (backward-compat)
   router.get("/:id/media/:filename", async (req, res) => {
     try {

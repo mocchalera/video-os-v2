@@ -57,7 +57,7 @@ export default function CommandBar({
   onDismissError,
 }: CommandBarProps) {
   const isRunning = jobStatus === 'queued' || jobStatus === 'running';
-  const isDisabled = !hasTimeline || isRunning || dirty;
+  const isDisabled = !hasTimeline || isRunning;
   const pct = progressPercent(progress);
 
   return (
@@ -166,12 +166,6 @@ export default function CommandBar({
         </div>
       ) : null}
 
-      {/* ── Dirty warning for commands ──────────────── */}
-      {dirty && !isRunning ? (
-        <span className="text-[10px] text-[color:var(--warning)]">
-          Save first
-        </span>
-      ) : null}
     </div>
   );
 }

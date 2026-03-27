@@ -15,13 +15,21 @@ const ROLE_COLORS: Record<ClipRole, string> = {
 };
 
 const TRACK_COLORS: Record<string, string> = {
-  V1: '#5ea4ff',
-  V2: '#7cc0ff',
-  V3: '#9ad6ff',
-  A1: '#5bcf8b',
-  A2: '#b38aff',
-  A3: '#f4a340',
-  A4: '#ef6b9c',
+  V1: '#2563eb',  // blue-600
+  V2: '#3b82f6',
+  V3: '#60a5fa',
+  A1: '#f59e0b',  // amber-500
+  A2: '#d97706',
+  A3: '#b45309',
+  A4: '#92400e',
+};
+
+/** Track-kind base colors per design spec Phase 5 */
+const TRACK_KIND_COLORS: Record<string, string> = {
+  video: '#2563eb',    // blue-600
+  audio: '#f59e0b',    // amber-500
+  title: '#a855f7',    // purple-400
+  caption: '#2dd4bf',  // teal-400
 };
 
 const LANE_FILLS = ['rgba(16, 23, 34, 0.96)', 'rgba(12, 18, 28, 0.96)'];
@@ -43,7 +51,7 @@ export function getRoleColor(role: ClipRole): string {
 }
 
 export function getTrackColor(laneId: string, trackKind: 'video' | 'audio'): string {
-  return TRACK_COLORS[laneId] ?? (trackKind === 'video' ? '#3B82F6' : '#22C55E');
+  return TRACK_COLORS[laneId] ?? TRACK_KIND_COLORS[trackKind] ?? (trackKind === 'video' ? '#2563eb' : '#f59e0b');
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

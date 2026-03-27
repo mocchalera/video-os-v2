@@ -91,8 +91,8 @@ function resolveAssetPath(
 export function createThumbnailRouter(projectsDir: string): Router {
   const router = Router();
 
-  // GET /api/projects/:id/thumbnail/:clipId
-  router.get("/:id/thumbnail/:clipId", async (req, res) => {
+  // GET /api/projects/:id/thumbnail/by-clip/:clipId
+  router.get("/:id/thumbnail/by-clip/:clipId", async (req, res) => {
     const projectDir = safeProjectDir(projectsDir, req.params.id);
     if (!projectDir) {
       res.status(400).json({ error: "Invalid project ID" });
@@ -191,8 +191,8 @@ export function createThumbnailRouter(projectsDir: string): Router {
     }
   });
 
-  // GET /api/projects/:id/thumbnail/:assetId — Generate thumbnail by asset ID + frame_us
-  router.get("/:id/thumbnail/:assetId", async (req, res) => {
+  // GET /api/projects/:id/thumbnail/by-asset/:assetId — Generate thumbnail by asset ID + frame_us
+  router.get("/:id/thumbnail/by-asset/:assetId", async (req, res) => {
     const projectDir = safeProjectDir(projectsDir, req.params.id);
     if (!projectDir) {
       res.status(400).json({ error: "Invalid project ID" });

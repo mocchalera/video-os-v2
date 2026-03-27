@@ -7,14 +7,14 @@ import type {
   SessionBaseline,
   TimelineIR,
   TimelineSaveResult,
-  TimelineValidationIssue,
   Track,
 } from '../types';
 import {
-  getFps,
-  getTimelineClipEndFrame,
-  getTimelineDurationFrames,
-} from '../utils/time';
+  normalizeTimeline,
+  validateTimeline,
+  type TimelineValidationIssue,
+} from '@shared/timeline-validation';
+import { getFps } from '../utils/time';
 
 const HISTORY_LIMIT = 50;
 const SELECTED_PROJECT_KEY = 'video-os-editor.selected-project';
@@ -69,120 +69,7 @@ function writeStoredTimeline(projectId: string, timeline: TimelineIR): void {
   );
 }
 
-function normalizeTimeline(timeline: TimelineIR): TimelineIR {
-  const next = structuredClone(timeline);
-  const fps = getFps(next.sequence);
-
-  for (const group of [next.tracks.video, next.tracks.audio]) {
-    group.forEach((track) => {
-      track.clips = [...track.clips]
-        .map((clip) => ({
-          ...clip,
-          timeline_duration_frames: getTimelineDurationFrames(clip, fps),
-        }))
-        .sort((left, right) => {
-          if (left.timeline_in_frame !== right.timeline_in_frame) {
-            return left.timeline_in_frame - right.timeline_in_frame;
-          }
-
-          return left.clip_id.localeCompare(right.clip_id);
-        });
-    });
-  }
-
-  return next;
-}
-
-function sortTrackClips(track: Track): Clip[] {
-  return [...track.clips].sort((left, right) => {
-    if (left.timeline_in_frame !== right.timeline_in_frame) {
-      return left.timeline_in_frame - right.timeline_in_frame;
-    }
-
-    return left.clip_id.localeCompare(right.clip_id);
-  });
-}
-
-function validateOverlaps(
-  trackType: 'video' | 'audio',
-  track: Track,
-  fps: number,
-): TimelineValidationIssue[] {
-  const issues: TimelineValidationIssue[] = [];
-  const sortedClips = sortTrackClips(track);
-  let lastEndFrame = -1;
-
-  for (let index = 0; index < sortedClips.length; ) {
-    const groupStartFrame = sortedClips[index].timeline_in_frame;
-    const groupStartIndex = index;
-    let groupEndFrame = Number.POSITIVE_INFINITY;
-
-    while (
-      index < sortedClips.length &&
-      sortedClips[index].timeline_in_frame === groupStartFrame
-    ) {
-      groupEndFrame = Math.min(
-        groupEndFrame,
-        getTimelineClipEndFrame(sortedClips[index], fps),
-      );
-      index += 1;
-    }
-
-    const basePath = `${trackType}.${track.track_id}.clips[${groupStartIndex}]`;
-
-    if (lastEndFrame > groupStartFrame) {
-      issues.push({
-        path: `${basePath}.timeline_in_frame`,
-        message: `Track ${track.track_id} has overlapping clips.`,
-      });
-    }
-
-    // Legacy timelines can stack alternative candidates at the same start frame.
-    // Use the earliest end in that stack as the linear boundary for the next group.
-    lastEndFrame = Math.max(lastEndFrame, groupEndFrame);
-  }
-
-  return issues;
-}
-
-function validateTimeline(timeline: TimelineIR): TimelineValidationIssue[] {
-  const issues: TimelineValidationIssue[] = [];
-  const fps = getFps(timeline.sequence);
-
-  function checkTrack(trackType: 'video' | 'audio', track: Track): void {
-    sortTrackClips(track).forEach((clip, index) => {
-      const basePath = `${trackType}.${track.track_id}.clips[${index}]`;
-
-      if (!clip.clip_id || !clip.segment_id || !clip.asset_id || !clip.motivation) {
-        issues.push({
-          path: basePath,
-          message: 'clip_id, segment_id, asset_id, motivation are required.',
-        });
-      }
-
-      if (clip.src_in_us >= clip.src_out_us) {
-        issues.push({
-          path: `${basePath}.src_in_us`,
-          message: 'src_in_us must be less than src_out_us.',
-        });
-      }
-
-      if (clip.timeline_duration_frames < 1) {
-        issues.push({
-          path: `${basePath}.timeline_duration_frames`,
-          message: 'timeline_duration_frames must be at least 1.',
-        });
-      }
-    });
-
-    issues.push(...validateOverlaps(trackType, track, fps));
-  }
-
-  timeline.tracks.video.forEach((track) => checkTrack('video', track));
-  timeline.tracks.audio.forEach((track) => checkTrack('audio', track));
-
-  return issues;
-}
+// normalizeTimeline, validateTimeline, sortTrackClips are now in @shared/timeline-validation
 
 export function useTimeline() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -392,6 +279,18 @@ export function useTimeline() {
     }
 
     updater(clip);
+    const normalized = normalizeTimeline(nextTimeline);
+    setHistory((current) => ({
+      ...current,
+      present: normalized,
+    }));
+    setDirty(true);
+    dragDirtyRef.current = true;
+  }
+
+  /** Replace the entire present timeline without pushing to undo stack.
+   *  Used by trim tool during drag operations. */
+  function replacePresent(nextTimeline: TimelineIR): void {
     const normalized = normalizeTimeline(nextTimeline);
     setHistory((current) => ({
       ...current,
@@ -723,6 +622,14 @@ export function useTimeline() {
     await loadTimeline(projectId);
   }
 
+  /** Trigger conflict dialog from external 409 (patch apply, AI job). */
+  function triggerConflict(remoteRevision: string): void {
+    setConflict({
+      localRevision: timelineRevision ?? 'unknown',
+      remoteRevision,
+    });
+  }
+
   /** Dismiss the conflict dialog, keeping local changes (stay dirty). */
   function dismissConflict(): void {
     setConflict(null);
@@ -760,6 +667,8 @@ export function useTimeline() {
     setProjectId,
     updateClip,
     updateClipSilent,
+    replacePresent,
+    pushTimeline,
     beginDrag,
     endDrag,
     swapClip,
@@ -769,6 +678,7 @@ export function useTimeline() {
     reload,
     commitRemoteMutation,
     conflict,
+    triggerConflict,
     dismissConflict,
     resolveConflictWithReload,
   };

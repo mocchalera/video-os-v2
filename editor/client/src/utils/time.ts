@@ -110,3 +110,58 @@ export function formatFrameLabel(frame: number, fps: number): string {
 
   return `${seconds.toFixed(1)}s`;
 }
+
+/**
+ * Format frame number as SMPTE timecode: HH:MM:SS:FF
+ * Supports drop-frame for 29.97fps (DF format).
+ */
+export function formatTimecode(
+  frame: number,
+  fps: number,
+  dropFrame: boolean = false,
+): string {
+  if (frame < 0) frame = 0;
+
+  if (dropFrame && Math.abs(fps - 29.97) < 0.02) {
+    // Drop-frame timecode for 29.97fps
+    const d = Math.floor(frame / 17982);
+    const m = frame % 17982;
+    const adjustedFrame =
+      frame + 18 * d + 2 * Math.floor(Math.max(0, m - 2) / 1798);
+    const fr = adjustedFrame % 30;
+    const sec = Math.floor(adjustedFrame / 30) % 60;
+    const min = Math.floor(adjustedFrame / 1800) % 60;
+    const hr = Math.floor(adjustedFrame / 108000);
+    return `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')};${String(fr).padStart(2, '0')}`;
+  }
+
+  // Non-drop-frame
+  const roundedFps = Math.round(fps);
+  const fr = frame % roundedFps;
+  const totalSeconds = Math.floor(frame / roundedFps);
+  const sec = totalSeconds % 60;
+  const min = Math.floor(totalSeconds / 60) % 60;
+  const hr = Math.floor(totalSeconds / 3600);
+  return `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}:${String(fr).padStart(2, '0')}`;
+}
+
+/** Get the appropriate ruler tick step based on zoom level and fps */
+export function getRulerTickStep(fps: number, pxPerFrame: number): {
+  major: number;
+  minor: number;
+} {
+  const candidates = [
+    1,                        // 1 frame
+    5,                        // 5 frames
+    10,                       // 10 frames
+    Math.round(fps),          // 1 second
+    Math.round(fps * 5),      // 5 seconds
+    Math.round(fps * 10),     // 10 seconds
+    Math.round(fps * 30),     // 30 seconds
+    Math.round(fps * 60),     // 1 minute
+  ].filter((v, i, a) => v > 0 && a.indexOf(v) === i);
+
+  const major = candidates.find((step) => step * pxPerFrame >= 96) ?? Math.round(fps * 120);
+  const minor = Math.max(1, Math.round(major / 2));
+  return { major, minor };
+}
