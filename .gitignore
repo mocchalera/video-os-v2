@@ -47,6 +47,7 @@ Thumbs.db
 projects/*
 !projects/_template/
 !projects/demo/
+projects/demo/project_state.yaml
 
 # Local screenshots and visual debugging captures
 /editor-*.png
