@@ -31,6 +31,18 @@ import { ProgressTracker } from "../progress.js";
 import type { ProjectState, GateStatus } from "../state/reconcile.js";
 import { generateCandidateId } from "../compiler/candidate-ref.js";
 import { inferAutonomyMode } from "../autonomy.js";
+import {
+  audioStoryNodesForWindow,
+  computeAudioStoryGraphHash,
+  isP2AudioStoryGraphEnabled,
+  readAudioStoryGraph,
+} from "../artifacts/p2-audio-story-graph.js";
+import {
+  computeContinuityGraphHash,
+  continuityRisksForWindow,
+  isP3ContinuityPreferenceEnabled,
+  readContinuityGraph,
+} from "../artifacts/p3-continuity-graph.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -233,6 +245,12 @@ export async function runTriage(
 
   // 5.5 Canonicalize: assign candidate_id and normalize trim_hints
   canonicalizeSelects(agentResult.selects, projectId);
+  if (isP2AudioStoryGraphEnabled()) {
+    materializeAudioStoryGraphRefs(absDir, agentResult.selects);
+  }
+  if (isP3ContinuityPreferenceEnabled()) {
+    materializeContinuityRiskRefs(absDir, agentResult.selects);
+  }
 
   // 6. Draft selects_candidates.yaml
   const drafts: DraftFile[] = [
@@ -336,5 +354,50 @@ function canonicalizeSelects(
         }
       }
     }
+  }
+}
+
+function materializeAudioStoryGraphRefs(
+  projectDir: string,
+  selects: SelectsCandidates,
+): void {
+  const graph = readAudioStoryGraph(projectDir);
+  if (!graph) return;
+  const graphHash = computeAudioStoryGraphHash(graph);
+  for (const candidate of selects.candidates) {
+    const nodes = audioStoryNodesForWindow(graph, candidate.asset_id, candidate.src_in_us, candidate.src_out_us);
+    if (nodes.length === 0) continue;
+    const refs = nodes.map((node) => node.node_id);
+    candidate.evidence = Array.from(new Set([
+      ...(candidate.evidence ?? []),
+      `audio_story_graph_hash:${graphHash}`,
+      ...refs.map((ref) => `audio_story_node_ref:${ref}`),
+    ]));
+    const salience = nodes.some((node) => ["hook", "setup", "payoff", "reaction"].includes(node.story_role ?? ""));
+    if (salience) {
+      candidate.confidence = Math.min(1, Number((candidate.confidence + 0.02).toFixed(4)));
+    }
+  }
+}
+
+function materializeContinuityRiskRefs(
+  projectDir: string,
+  selects: SelectsCandidates,
+): void {
+  const graph = readContinuityGraph(projectDir);
+  if (!graph) return;
+  const graphHash = computeContinuityGraphHash(graph);
+  for (const candidate of selects.candidates) {
+    const risks = continuityRisksForWindow(graph, candidate.asset_id, candidate.src_in_us, candidate.src_out_us);
+    if (risks.length === 0) continue;
+    candidate.evidence = Array.from(new Set([
+      ...(candidate.evidence ?? []),
+      `continuity_graph_hash:${graphHash}`,
+      ...risks.map((risk) => `continuity_risk_ref:${risk.risk_id}`),
+    ]));
+    candidate.risks = Array.from(new Set([
+      ...candidate.risks,
+      ...risks.map((risk) => `${risk.type}:${risk.message}`),
+    ]));
   }
 }

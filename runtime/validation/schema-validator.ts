@@ -11,6 +11,17 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { resolvePolicy } from "../policy-resolver.js";
 import { buildSchemaVariant, finalizeViolations } from "./profiles.js";
+import {
+  computeNormalizedJsonHash,
+  validateAnalysisCoverageReport,
+  validateSourceMediaManifest,
+} from "../artifacts/p1-manifest-coverage.js";
+import {
+  validateAudioStoryGraph,
+} from "../artifacts/p2-audio-story-graph.js";
+import {
+  validateContinuityGraph,
+} from "../artifacts/p3-continuity-graph.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -127,6 +138,34 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     format: "json",
     optional: true,
     runnerChecks: [],
+  },
+  {
+    artifactPath: "02_media/source_media_manifest.json",
+    schemaFile: "source-media-manifest.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["source_manifest_fingerprint"],
+  },
+  {
+    artifactPath: "03_analysis/analysis_coverage_report.json",
+    schemaFile: "analysis-coverage-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["analysis_coverage_status"],
+  },
+  {
+    artifactPath: "03_analysis/audio_story_graph.json",
+    schemaFile: "audio-story-graph.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["audio_story_graph_integrity"],
+  },
+  {
+    artifactPath: "03_analysis/continuity_graph.json",
+    schemaFile: "continuity-graph.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["continuity_graph_integrity"],
   },
   {
     artifactPath: "03_analysis/segments.json",
@@ -296,6 +335,18 @@ export function validateProject(
           break;
         case "segment_src_time_check":
           runSegmentSrcTimeCheck(parsed.data, entry.artifactPath, violations);
+          break;
+        case "source_manifest_fingerprint":
+          runSourceManifestFingerprintCheck(parsed.data, entry.artifactPath, violations);
+          break;
+        case "analysis_coverage_status":
+          runAnalysisCoverageStatusCheck(parsed.data, entry.artifactPath, violations);
+          break;
+        case "audio_story_graph_integrity":
+          runAudioStoryGraphIntegrityCheck(parsed.data, absProject, entry.artifactPath, violations);
+          break;
+        case "continuity_graph_integrity":
+          runContinuityGraphIntegrityCheck(parsed.data, absProject, entry.artifactPath, violations);
           break;
       }
     }
@@ -666,3 +717,94 @@ function runTranscriptPathInvariants(
   }
 }
 
+function runSourceManifestFingerprintCheck(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const result = validateSourceMediaManifest(data);
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "source_manifest_fingerprint",
+      message,
+    });
+  }
+}
+
+function runAnalysisCoverageStatusCheck(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const result = validateAnalysisCoverageReport(data);
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "analysis_coverage_status",
+      message,
+    });
+  }
+}
+
+function runAudioStoryGraphIntegrityCheck(
+  data: unknown,
+  absProject: string,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const manifestPath = path.join(absProject, "02_media/source_media_manifest.json");
+  let manifestAssetIds: string[] | undefined;
+  let sourceMediaManifestHash: string | undefined;
+  if (fs.existsSync(manifestPath)) {
+    const parsed = safeParse(manifestPath, "json", [], "02_media/source_media_manifest.json");
+    if (parsed.ok) {
+      const manifest = parsed.data as { items?: Array<{ asset_id?: string }>; provenance?: { hash_policy?: { excluded_fields?: string[] } } };
+      manifestAssetIds = (manifest.items ?? [])
+        .map((item) => item.asset_id)
+        .filter((assetId): assetId is string => typeof assetId === "string");
+      const excludedFields = manifest.provenance?.hash_policy?.excluded_fields ?? [];
+      sourceMediaManifestHash = computeNormalizedJsonHash(manifest, excludedFields);
+    }
+  }
+
+  const result = validateAudioStoryGraph(data, { manifestAssetIds, sourceMediaManifestHash });
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "audio_story_graph_integrity",
+      message,
+    });
+  }
+}
+
+function runContinuityGraphIntegrityCheck(
+  data: unknown,
+  absProject: string,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const manifestPath = path.join(absProject, "02_media/source_media_manifest.json");
+  let manifestAssetIds: string[] | undefined;
+  let sourceMediaManifestHash: string | undefined;
+  if (fs.existsSync(manifestPath)) {
+    const parsed = safeParse(manifestPath, "json", [], "02_media/source_media_manifest.json");
+    if (parsed.ok) {
+      const manifest = parsed.data as { items?: Array<{ asset_id?: string }>; provenance?: { hash_policy?: { excluded_fields?: string[] } } };
+      manifestAssetIds = (manifest.items ?? [])
+        .map((item) => item.asset_id)
+        .filter((assetId): assetId is string => typeof assetId === "string");
+      const excludedFields = manifest.provenance?.hash_policy?.excluded_fields ?? [];
+      sourceMediaManifestHash = computeNormalizedJsonHash(manifest, excludedFields);
+    }
+  }
+
+  const result = validateContinuityGraph(data, { manifestAssetIds, sourceMediaManifestHash });
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "continuity_graph_integrity",
+      message,
+    });
+  }
+}

@@ -12,6 +12,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createHistoryEntry, type HistoryEntry } from "./history.js";
 import { validateProject } from "../validation/schema-validator.js";
 import { LiveAnalysisRepository } from "../mcp/repository.js";
+import {
+  isP1ManifestCoverageEnabled,
+  readCoverageSummary,
+} from "../artifacts/p1-manifest-coverage.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -698,6 +702,17 @@ function computeGates(
     doc.analysis_override.artifact_version === snapshot.hashes.analysis_artifact_version
   ) {
     analysisGate = "partial_override";
+  }
+  if (isP1ManifestCoverageEnabled()) {
+    const coverage = readCoverageSummary(projectDir);
+    if (coverage?.status === "ready") {
+      analysisGate = "ready";
+    } else if (
+      coverage?.status === "partial_override" &&
+      doc.analysis_override?.status === "active"
+    ) {
+      analysisGate = "partial_override";
+    }
   }
 
   // compile_gate: check unresolved_blockers for status:blocker

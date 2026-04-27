@@ -16,6 +16,12 @@ import { DEFAULT_VLM_CONCURRENCY } from "../pipeline/vlm-analysis.js";
 import type { ProjectState } from "../state/reconcile.js";
 import { ProgressTracker } from "../progress.js";
 import { runPreflight } from "../preflight.js";
+import {
+  buildAnalysisCoverageReport,
+  isP1ManifestCoverageEnabled,
+  writeAnalysisCoverageReport,
+  writeSourceMediaManifest,
+} from "../artifacts/p1-manifest-coverage.js";
 
 export interface AnalyzeCommandOptions {
   sourceFiles: string[];
@@ -109,6 +115,25 @@ export async function runAnalyze(
       currentState: previousState,
       concurrency: options.concurrency ?? DEFAULT_VLM_CONCURRENCY,
     });
+    const p1Artifacts: string[] = [];
+    if (isP1ManifestCoverageEnabled()) {
+      const projectId = ctx.doc.project_id || path.basename(ctx.projectDir);
+      const manifest = writeSourceMediaManifest({
+        projectDir: ctx.projectDir,
+        projectId,
+        sourceFiles: options.sourceFiles,
+        producer: "analysis-ingest",
+      });
+      const coverage = buildAnalysisCoverageReport({
+        projectId,
+        manifest,
+      });
+      writeAnalysisCoverageReport(ctx.projectDir, coverage);
+      p1Artifacts.push(
+        "02_media/source_media_manifest.json",
+        "03_analysis/analysis_coverage_report.json",
+      );
+    }
     pt.advance("03_analysis/assets.json");
 
     const reconcileResult = reconcileAndPersist(
@@ -117,8 +142,10 @@ export async function runAnalyze(
       "/analyze",
     );
     pt.advance("03_analysis/segments.json");
-    const artifactsCreated = runnerResult?.artifactsCreated
-      ?? collectExistingAnalyzeArtifacts(ctx.projectDir);
+    const artifactsCreated = [
+      ...(runnerResult?.artifactsCreated ?? collectExistingAnalyzeArtifacts(ctx.projectDir)),
+      ...p1Artifacts,
+    ];
     pt.complete(artifactsCreated);
 
     return {

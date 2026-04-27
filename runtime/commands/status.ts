@@ -16,6 +16,10 @@ import {
   type CommandError,
 } from "./shared.js";
 import type { ProjectState, GateStatus, ReconcileResult } from "../state/reconcile.js";
+import {
+  isP1ManifestCoverageEnabled,
+  readCoverageSummary,
+} from "../artifacts/p1-manifest-coverage.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -24,6 +28,14 @@ export interface StatusResult {
   error?: CommandError;
   currentState?: ProjectState;
   gates?: GateStatus;
+  coverage?: {
+    status: string;
+    requiredLaneCount: number;
+    readyLaneCount: number;
+    blockedLaneCount: number;
+    partialLaneCount: number;
+    reportPath: string;
+  };
   staleArtifacts?: string[];
   selfHealed?: boolean;
   previousState?: ProjectState;
@@ -101,6 +113,9 @@ export function runStatus(projectDir: string): StatusResult {
     success: true,
     currentState: reconcileResult.reconciled_state,
     gates: reconcileResult.gates,
+    coverage: isP1ManifestCoverageEnabled()
+      ? readCoverageSummary(ctx.projectDir)
+      : undefined,
     staleArtifacts: reconcileResult.stale_artifacts,
     selfHealed: reconcileResult.self_healed,
     previousState: reconcileResult.persisted_state,

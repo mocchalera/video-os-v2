@@ -15,6 +15,7 @@
  * LLM agent is injectable for testability.
  */
 
+import * as path from "node:path";
 import {
   initCommand,
   isCommandError,
@@ -24,6 +25,13 @@ import {
   type DraftFile,
 } from "./shared.js";
 import type { ProjectState } from "../state/reconcile.js";
+import {
+  readPreferenceEntries,
+  resolveActivePreference,
+  type EditorialPreferenceMemoryEntry,
+  type PreferenceType,
+} from "../artifacts/p3-preference-memory.js";
+import { isP3ContinuityPreferenceEnabled } from "../artifacts/p3-continuity-graph.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -89,6 +97,9 @@ export interface IntentAgentContext {
   projectDir: string;
   projectId: string;
   currentState: ProjectState;
+  editorialPreferenceMemory?: {
+    activeProjectPreferences: EditorialPreferenceMemoryEntry[];
+  };
 }
 
 export interface IntentAgentResult {
@@ -152,6 +163,9 @@ export async function runIntent(
     projectDir: absDir,
     projectId,
     currentState: previousState,
+    editorialPreferenceMemory: isP3ContinuityPreferenceEnabled()
+      ? preloadProjectPreferences(absDir)
+      : undefined,
   });
 
   // 3. If human declined readback, abort
@@ -225,4 +239,20 @@ export async function runIntent(
     newState: updatedDoc.current_state,
     promoted: promoteResult.promoted,
   };
+}
+
+function preloadProjectPreferences(projectDir: string): IntentAgentContext["editorialPreferenceMemory"] {
+  const preferencePath = path.join(projectDir, "00_project/editorial_preference_memory.jsonl");
+  const entries = readPreferenceEntries(preferencePath).entries.map((item) => item.entry);
+  const activeProjectPreferences = ([
+    "pacing",
+    "chronology",
+    "transition_style",
+    "repetition_tolerance",
+    "caption_density",
+    "delivery_preference",
+  ] as PreferenceType[])
+    .map((type) => resolveActivePreference(entries.filter((entry) => entry.scope === "project"), type).active)
+    .filter((entry): entry is EditorialPreferenceMemoryEntry => Boolean(entry));
+  return { activeProjectPreferences };
 }
