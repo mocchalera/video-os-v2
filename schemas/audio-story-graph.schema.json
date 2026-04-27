@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/audio-story-graph.schema.json",
+  "title": "Video OS Audio Story Graph",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "artifact_version",
+    "created_at",
+    "source_media_manifest_hash",
+    "inputs",
+    "nodes",
+    "edges",
+    "coverage",
+    "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "pattern": "^(analysis|projection)-v\\d+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_media_manifest_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "inputs": {
+      "type": "object",
+      "required": ["transcript_hashes", "audio_events_hash", "bgm_analysis_hash", "coverage_report_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "transcript_hashes": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+        },
+        "audio_events_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "bgm_analysis_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "coverage_report_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/audio-node" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/audio-edge" }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["status", "dialogue_lane", "audio_event_lane", "music_lane", "missing_inputs"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "partial", "skipped", "failed"] },
+        "dialogue_lane": { "type": "string", "enum": ["ready", "partial", "skipped", "failed"] },
+        "audio_event_lane": { "type": "string", "enum": ["ready", "partial", "skipped", "failed"] },
+        "music_lane": { "type": "string", "enum": ["ready", "partial", "skipped", "failed"] },
+        "missing_inputs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "provenance": { "$ref": "#/$defs/artifact-provenance" }
+  },
+  "$defs": {
+    "audio-node": {
+      "type": "object",
+      "required": ["node_id", "node_type", "asset_id", "start_us", "end_us", "refs", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "node_id": { "type": "string", "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$" },
+        "node_type": {
+          "type": "string",
+          "enum": [
+            "utterance",
+            "speaker_turn",
+            "silence",
+            "laughter",
+            "applause",
+            "music_section",
+            "impact",
+            "ambient_shift",
+            "emotion_lift",
+            "emotion_drop"
+          ]
+        },
+        "asset_id": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" },
+        "start_us": { "type": "integer", "minimum": 0 },
+        "end_us": { "type": "integer", "minimum": 0 },
+        "text": { "type": ["string", "null"] },
+        "story_role": {
+          "type": ["string", "null"],
+          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing", null]
+        },
+        "refs": {
+          "type": "object",
+          "required": ["transcript_ref", "speaker_ref", "audio_event_ref", "bgm_ref"],
+          "additionalProperties": false,
+          "properties": {
+            "transcript_ref": { "type": ["string", "null"], "pattern": "^(TR|UTT)_[A-Za-z0-9_-]+$" },
+            "speaker_ref": { "type": ["string", "null"], "pattern": "^SPK_[A-Za-z0-9_-]+$" },
+            "audio_event_ref": { "type": ["string", "null"], "pattern": "^AE_[A-Za-z0-9_-]+$" },
+            "bgm_ref": { "type": ["string", "null"], "pattern": "^BGM_[A-Za-z0-9_-]+$" }
+          }
+        },
+        "confidence": { "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record" }
+      }
+    },
+    "audio-edge": {
+      "type": "object",
+      "required": ["edge_id", "from_node_id", "to_node_id", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "edge_id": { "type": "string", "pattern": "^ASGEDGE_[A-Za-z0-9_-]+$" },
+        "from_node_id": { "type": "string", "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$" },
+        "to_node_id": { "type": "string", "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "precedes",
+            "responds_to",
+            "overlaps",
+            "supports_beat",
+            "contrasts_with",
+            "music_under",
+            "silence_after",
+            "payoff_for"
+          ]
+        }
+      }
+    },
+    "artifact-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["analysis-pipeline", "blueprint-projection"] },
+        "inputs": { "type": "array", "items": { "type": "object" } },
+        "hash_policy": { "type": "object" }
+      }
+    }
+  }
+}
