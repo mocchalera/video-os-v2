@@ -33,7 +33,14 @@ export interface RenderVideoClip {
   effects: RenderEffectSpec[];
 }
 
-export type TransitionType = "cut" | "crossfade" | "fade_to_black" | "j_cut" | "l_cut";
+export type TransitionType =
+  | "cut"
+  | "crossfade"
+  | "fade_to_black"
+  | "dip_to_white"
+  | "match_cut_soft"
+  | "j_cut"
+  | "l_cut";
 
 export interface RenderTransition {
   fromClipId: string;
@@ -462,7 +469,7 @@ export function buildRenderSpec(
 
   // ── Transitions (Phase 4) ──
   const SUPPORTED_TRANSITIONS: ReadonlySet<string> = new Set<TransitionType>([
-    "cut", "crossfade", "fade_to_black", "j_cut", "l_cut",
+    "cut", "crossfade", "fade_to_black", "dip_to_white", "match_cut_soft", "j_cut", "l_cut",
   ]);
   function isSupportedTransition(t: string): t is TransitionType {
     return SUPPORTED_TRANSITIONS.has(t);

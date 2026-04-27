@@ -4,6 +4,8 @@ export { CompositionRoot } from "./CompositionRoot.js";
 export { VideoTimeline } from "./VideoTimeline.js";
 // @ts-ignore TSX files are type-checked by tsconfig.remotion.json.
 export { TextOverlayLayer } from "./components/TextOverlayLayer.js";
+// @ts-ignore TSX files are type-checked by tsconfig.remotion.json.
+export { TransitionLayer } from "./components/TransitionLayer.js";
 export {
   REMOTION_COMPOSITION_ID,
   timelineToCompositionProps,
@@ -34,3 +36,9 @@ export type {
   TransitionPreset,
   TransitionPresetProps,
 } from "./styles/transition-presets.js";
+export { preflightTransition } from "./preflight-transitions.js";
+export type {
+  PreflightClipInput,
+  PreflightTransitionInput,
+  TransitionPreflightResult,
+} from "./preflight-transitions.js";

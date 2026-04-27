@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { OffthreadVideo, Sequence } from "remotion";
 import type { TimelineIR, TrackOutput } from "../../compiler/types.js";
 import { TextOverlayLayer } from "./components/TextOverlayLayer.js";
+import { TransitionLayer } from "./components/TransitionLayer.js";
 
 export interface VideoTimelineProps {
   timeline: TimelineIR;
@@ -57,10 +58,11 @@ export const VideoTimeline = ({ timeline, sourceMap }: VideoTimelineProps) => {
           );
         }),
       )}
-      {/*
-        Phase E/F: caption, audio, and transition rendering are intentionally
-        omitted here. Adjacent Sequences provide only implicit cut boundaries.
-      */}
+      <TransitionLayer
+        transitions={timeline.transitions ?? []}
+        tracks={timeline.tracks}
+        fps={fps}
+      />
       <TextOverlayLayer tracks={overlayTracks} fps={fps} />
     </>
   );
