@@ -107,6 +107,41 @@ export interface StatusResult {
   nextCommandReason?: string;
 }
 
+export interface PlanningGateInterpretation {
+  severity: "ok" | "warning" | "blocker";
+  blocksRuntime: boolean;
+  message: string;
+}
+
+export function interpretPlanningGate(planningGate: GateStatus["planning_gate"] | "partial_override" | string): PlanningGateInterpretation {
+  switch (planningGate) {
+    case "open":
+      return {
+        severity: "ok",
+        blocksRuntime: false,
+        message: "planning gate open",
+      };
+    case "partial_override":
+      return {
+        severity: "warning",
+        blocksRuntime: false,
+        message: "planning gate has partial operator override; continue with warning",
+      };
+    case "blocked":
+      return {
+        severity: "blocker",
+        blocksRuntime: true,
+        message: "planning gate blocked by unresolved uncertainty",
+      };
+    default:
+      return {
+        severity: "warning",
+        blocksRuntime: false,
+        message: `unknown planning gate '${planningGate}'; continue with warning`,
+      };
+  }
+}
+
 // ── Next Command Recommendation ──────────────────────────────────
 
 function recommendNextCommand(
@@ -140,7 +175,7 @@ function recommendNextCommand(
       if (gates.compile_gate === "blocked") {
         return { command: "resolve blockers", reason: "compile gate blocked — resolve unresolved_blockers" };
       }
-      if (gates.planning_gate === "blocked") {
+      if (interpretPlanningGate(gates.planning_gate).blocksRuntime) {
         return { command: "resolve uncertainties", reason: "planning gate blocked — resolve uncertainty_register" };
       }
       return { command: "resolve blockers", reason: "project is blocked" };

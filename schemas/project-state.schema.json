@@ -148,7 +148,7 @@
         },
         "planning_gate": {
           "type": "string",
-          "enum": ["open", "blocked"]
+          "enum": ["open", "blocked", "partial_override"]
         },
         "timeline_gate": {
           "type": "string",
