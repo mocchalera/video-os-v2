@@ -445,6 +445,8 @@ export function buildRenderSpec(
     for (const track of timeline.tracks.overlay) {
       for (const clip of sortClips(track.clips)) {
         const text =
+          ((clip.metadata?.overlay as { text?: unknown } | undefined)
+            ?.text as string) ??
           (clip.metadata?.text as string) ??
           (clip.metadata?.overlay_text as string) ??
           clip.clip_id;

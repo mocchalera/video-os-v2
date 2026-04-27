@@ -773,6 +773,8 @@ describe("Timeline IR Schema with Transitions", () => {
           to_clip_id: "c2",
           track_id: "V1",
           transition_type: "crossfade",
+          start_frame: 24,
+          duration_frames: 12,
           transition_params: {
             crossfade_sec: 0.5,
             cut_frame_before_snap: 24,
@@ -781,6 +783,14 @@ describe("Timeline IR Schema with Transitions", () => {
           },
           applied_skill_id: "crossfade_bridge",
           confidence: 0.75,
+          fallback: {
+            type: "cut",
+            reason: "renderer does not support crossfade",
+          },
+          metadata: {
+            degraded_reason: "preview renderer fallback",
+            remotion_ready: true,
+          },
         },
       ],
       provenance: {

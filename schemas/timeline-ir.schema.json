@@ -452,6 +452,14 @@
           "type": "integer",
           "minimum": 1
         },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
         "transition_params": {
           "type": "object",
           "properties": {
@@ -470,7 +478,26 @@
         },
         "applied_skill_id": { "type": "string" },
         "degraded_from_skill_id": { "type": ["string", "null"] },
-        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fallback": {
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+            },
+            "reason": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "degraded_reason": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": false
     },
