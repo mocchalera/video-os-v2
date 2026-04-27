@@ -28,6 +28,10 @@ import {
   isP4bDeliveryProfilesEnabled,
   readDeliveryProfileStatus,
 } from "../artifacts/p4b-delivery-profile.js";
+import {
+  isP4cConfidenceCalibrationEnabled,
+  readCalibrationReportStatus,
+} from "../artifacts/p4c-confidence-calibration.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -71,6 +75,15 @@ export interface StatusResult {
       path: string;
     }>;
     malformed: Array<{ path: string; errors: string[] }>;
+  };
+  confidenceCalibration?: {
+    enabled: boolean;
+    exists: boolean;
+    path: string;
+    eval_set_id?: string;
+    calibration_model_id?: string;
+    valid?: boolean;
+    errors?: string[];
   };
   staleArtifacts?: string[];
   selfHealed?: boolean;
@@ -157,6 +170,9 @@ export function runStatus(projectDir: string): StatusResult {
       : undefined,
     deliveryProfiles: isP4bDeliveryProfilesEnabled()
       ? readDeliveryProfileStatus(ctx.projectDir)
+      : undefined,
+    confidenceCalibration: isP4cConfidenceCalibrationEnabled()
+      ? readCalibrationReportStatus(ctx.projectDir)
       : undefined,
     staleArtifacts: reconcileResult.stale_artifacts,
     selfHealed: reconcileResult.self_healed,

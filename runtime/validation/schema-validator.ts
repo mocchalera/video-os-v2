@@ -147,6 +147,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "08_eval/confidence_calibration_report.json",
+    schemaFile: "confidence-calibration-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "03_analysis/assets.json",
     schemaFile: "assets.schema.json",
     format: "json",

@@ -167,6 +167,7 @@ function makeProject(): string {
 afterEach(() => {
   delete process.env.ENABLE_P4A_RELEASE_SAFETY;
   delete process.env.ENABLE_P4B_DELIVERY_PROFILES;
+  delete process.env.ENABLE_P4C_CONFIDENCE_CALIBRATION;
   delete process.env.RELEASE_SAFETY_MODE;
 });
 
@@ -379,6 +380,115 @@ describe("P4a release_safety_report", () => {
       check.status === "fail"
     )).toBe(true);
   });
+
+  it("adds a passing calibration check when required calibrated confidence has a fresh report", () => {
+    const projectDir = makeProject();
+    writeDeliveryProfileInputs(projectDir, "edge_calibrated_confidence_required.yaml", { integrated_lufs: -14, true_peak_dbtp: -1.2 });
+    writeCalibrationReport(projectDir);
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+    process.env.ENABLE_P4C_CONFIDENCE_CALIBRATION = "true";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      category: "delivery_profile",
+      check_id: "RSCHK_delivery_profile_DPROF_calibrated_confidence_confidence_calibration",
+      severity: "info",
+      status: "pass",
+    }));
+  });
+
+  it("adds a blocker calibration check when a public or external profile requires calibration and the report is absent", () => {
+    const projectDir = makeProject();
+    writeDeliveryProfileInputs(projectDir, "edge_calibrated_confidence_required.yaml", { integrated_lufs: -14, true_peak_dbtp: -1.2 });
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+    process.env.ENABLE_P4C_CONFIDENCE_CALIBRATION = "true";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      category: "delivery_profile",
+      check_id: "RSCHK_delivery_profile_DPROF_calibrated_confidence_confidence_calibration",
+      severity: "blocker",
+      status: "fail",
+    }));
+  });
+
+  it("adds a warning calibration check when the calibration report artifact versions are stale", () => {
+    const projectDir = makeProject();
+    writeDeliveryProfileInputs(projectDir, "edge_calibrated_confidence_required.yaml", { integrated_lufs: -14, true_peak_dbtp: -1.2 });
+    writeCalibrationReport(projectDir, {
+      artifact_versions: {
+        audio_story_graph_version: { version: "analysis-v1", hash: `sha256:${"0".repeat(64)}` },
+        continuity_graph_version: { version: "analysis-v1", hash: `sha256:${"1".repeat(64)}` },
+        assets_version: { version: "assets-v1", hash: `sha256:${"2".repeat(64)}` },
+      },
+    });
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+    process.env.ENABLE_P4C_CONFIDENCE_CALIBRATION = "true";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      category: "delivery_profile",
+      check_id: "RSCHK_delivery_profile_DPROF_calibrated_confidence_confidence_calibration",
+      severity: "warning",
+      status: "fail",
+    }));
+  });
+
+  it("keeps P4b delivery profile behavior unchanged when requires_calibrated_confidence is false", () => {
+    const projectDir = makeProject();
+    writeDeliveryProfileInputs(projectDir, "valid_youtube_16x9_public.yaml", { integrated_lufs: -14, true_peak_dbtp: -1.2 });
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+
+    const p4bOnly = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    }).checks.filter((check) => check.category === "delivery_profile");
+
+    process.env.ENABLE_P4C_CONFIDENCE_CALIBRATION = "true";
+    const p4cEnabled = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    }).checks.filter((check) => check.category === "delivery_profile");
+
+    expect(p4cEnabled).toEqual(p4bOnly);
+  });
+
+  it("keeps delivery profile calibration unevaluated when the P4c flag is off", () => {
+    const projectDir = makeProject();
+    writeDeliveryProfileInputs(projectDir, "edge_calibrated_confidence_required.yaml", { integrated_lufs: -14, true_peak_dbtp: -1.2 });
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks.some((check) => check.check_id.includes("confidence_calibration"))).toBe(false);
+  });
 });
 
 function writeDeliveryProfileInputs(
@@ -427,4 +537,50 @@ function writeDeliveryProfileInputs(
     path.resolve("tests/fixtures/delivery_profiles", fixtureName),
     path.join(profilesDir, fixtureName),
   );
+}
+
+function writeCalibrationReport(projectDir: string, overrides: Record<string, unknown> = {}): void {
+  const reportPath = path.join(projectDir, "08_eval/confidence_calibration_report.json");
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  const assetsPath = path.join(projectDir, "03_analysis/assets.json");
+  if (!fs.existsSync(assetsPath)) {
+    fs.writeFileSync(assetsPath, JSON.stringify({ project_id: "p4a-runtime", artifact_version: "assets-v1", items: [] }, null, 2));
+  }
+  const report = {
+    version: "1.0.0",
+    project_id: "p4a-runtime",
+    artifact_version: "calibration-report-v1",
+    created_at: "2026-04-27T00:00:00Z",
+    report_id: "CALRPT_release_safety",
+    eval_set_id: "EVALSET_release_safety",
+    calibration_model_id: "CALMOD_baseline_v1",
+    artifact_versions: {
+      audio_story_graph_version: { version: "analysis-v1", hash: sha256File(path.join(projectDir, "03_analysis/audio_story_graph.json")) },
+      continuity_graph_version: { version: "analysis-v1", hash: sha256File(path.join(projectDir, "03_analysis/continuity_graph.json")) },
+      assets_version: { version: "assets-v1", hash: sha256File(assetsPath) },
+    },
+    metrics: {
+      boundary_error_seconds: 0.1,
+      tag_precision: 0.9,
+      tag_recall: 0.85,
+      peak_timestamp_error_seconds: 0.2,
+      speaker_attribution_accuracy: 0.92,
+      continuity_match_precision: 0.88,
+      release_safety_false_negative_rate: 0.01,
+    },
+    buckets: [{ bucket: "high", sample_count: 10, observed_accuracy: 0.82, expected_accuracy: 0.85 }],
+    failures: [],
+    recommendations: [],
+    provenance: {
+      producer: "scripts/eval-confidence-calibration.ts",
+      inputs: [],
+      hash_policy: { algorithm: "sha256", canonicalization: "normalized-json-v1", excluded_fields: ["created_at"] },
+    },
+    ...overrides,
+  };
+  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+}
+
+function sha256File(filePath: string): string {
+  return `sha256:${createRequire(import.meta.url)("node:crypto").createHash("sha256").update(fs.readFileSync(filePath)).digest("hex")}`;
 }

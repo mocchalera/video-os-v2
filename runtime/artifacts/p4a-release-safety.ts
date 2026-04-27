@@ -11,6 +11,11 @@ import {
   type CaptionArtifact,
   type DeliveryReleaseMode,
 } from "./p4b-delivery-profile.js";
+import {
+  generateCalibrationCheck,
+  isP4cConfidenceCalibrationEnabled,
+  loadCalibrationReport,
+} from "./p4c-confidence-calibration.js";
 
 export type ReleaseSafetyMode = "dry_run" | "report_only" | "enforce";
 export type ReleaseSafetyProducer = "/package" | "/render";
@@ -359,7 +364,7 @@ function checkDeliveryProfile(projectDir: string, artifacts: Map<string, { data:
   }
   const loaded = loadDeliveryProfiles(projectDir);
   const packageManifest = artifacts.get("07_package/package_manifest.json")?.data;
-  return generateDeliveryProfileChecks({
+  const checks = generateDeliveryProfileChecks({
     projectDir,
     timeline: artifacts.get("05_timeline/timeline.json")?.data,
     packageManifest,
@@ -369,6 +374,13 @@ function checkDeliveryProfile(projectDir: string, artifacts: Map<string, { data:
     malformed: loaded.malformed,
     expectedReleaseMode: expectedReleaseModeFromProfiles(loaded.profiles.map((item) => item.profile)),
   });
+  if (!isP4cConfidenceCalibrationEnabled()) return checks;
+  const calibrationReport = loadCalibrationReport(projectDir);
+  for (const profile of loaded.profiles) {
+    const calibrationCheck = generateCalibrationCheck(profile, calibrationReport, projectDir);
+    if (calibrationCheck) checks.push(calibrationCheck);
+  }
+  return checks;
 }
 
 function captionArtifactsFromManifest(packageManifest: unknown): CaptionArtifact[] {
