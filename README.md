@@ -40,6 +40,7 @@ cp .env.example .env.local
 ```
 
 `.env.local` を編集して必要な API キーを設定してください。最低限、VLM を使う場合は `GEMINI_API_KEY`、Groq STT を使う場合は `GROQ_API_KEY` が必要です。
+`.env.local` は Git 管理対象外です。公開 issue や PR に API キー、素材ファイル、生成済み動画を含めないでください。
 
 ### 3. デモを実行
 
@@ -225,10 +226,22 @@ Creative Brief
 ## テスト
 
 ```bash
+npm run validate
 npm test
+npm run build
 ```
 
-2026-03-24 確認時点で `57` test files、`1659` tests がすべて通過しています。
+CI でも `validate -> test -> build` を実行します。テスト件数は開発中に変動するため、現在の正確な件数は `npm test` の出力を確認してください。
+`npm run validate` は公開デモ `projects/demo` を検証します。checkout 内のローカル作業プロジェクトも含めて確認したい場合は `npm run validate:all-local` を使ってください。
+
+## OSS と貢献
+
+- ライセンス: [MIT](LICENSE)
+- 貢献ガイド: [CONTRIBUTING.md](CONTRIBUTING.md)
+- セキュリティ報告: [SECURITY.md](SECURITY.md)
+- 公開前チェックリスト: [docs/oss-readiness.md](docs/oss-readiness.md)
+
+公開リポジトリに含める project data は `projects/_template/` と `projects/demo/` のみです。`projects/*`, `tmp/`, `.env.local`, 生成動画、contact sheet、ローカル解析結果は checkout 固有の作業データとして扱います。
 
 ## 技術スタック
 
@@ -250,4 +263,4 @@ npm test
 
 ## ライセンス
 
-このリポジトリにはまだ `LICENSE` ファイルがありません。配布や再利用を前提にする場合は、利用条件を明示してから扱ってください。
+MIT License. 詳細は [LICENSE](LICENSE) を参照してください。

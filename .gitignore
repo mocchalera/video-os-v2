@@ -48,6 +48,9 @@ projects/*
 !projects/_template/
 !projects/demo/
 
+# Local screenshots and visual debugging captures
+/editor-*.png
+
 # Large binary media files (even in tracked projects)
 *.mp4
 *.mov

@@ -2,10 +2,12 @@
   "name": "video-os-v2-spec",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "demo": "tsx scripts/demo.ts",
-    "validate": "tsx scripts/validate-schemas.ts",
+    "validate": "tsx scripts/validate-schemas.ts projects/demo",
+    "validate:all-local": "tsx scripts/validate-schemas.ts",
     "test": "vitest run",
     "build": "tsc",
     "preview": "tsx scripts/preview-segment.ts",
