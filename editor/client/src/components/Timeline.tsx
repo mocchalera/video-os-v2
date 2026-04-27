@@ -62,7 +62,7 @@ interface TimelineProps {
   onSeek: (frame: number) => void;
   onClearSelection: () => void;
   onSelectClip: (
-    trackKind: 'video' | 'audio',
+    trackKind: SelectionState['trackKind'],
     trackId: string,
     clip: Clip,
     event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },

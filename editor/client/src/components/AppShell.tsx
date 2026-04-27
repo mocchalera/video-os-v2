@@ -165,7 +165,9 @@ export default function AppShell({
   const fps = timeline ? getFps(timeline.sequence) : 24;
   const totalFrames = getTotalFrames(timeline);
   const trackCount = timeline
-    ? timeline.tracks.video.length + timeline.tracks.audio.length
+    ? timeline.tracks.video.length +
+      timeline.tracks.audio.length +
+      (timeline.tracks.caption?.length ?? 0)
     : 0;
 
   // ── Command Palette ──────────────────────────────────────────────────

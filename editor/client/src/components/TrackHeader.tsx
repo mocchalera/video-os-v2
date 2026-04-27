@@ -1,4 +1,9 @@
-import type { TrackHeaderState, TrackHeight, EditorLane } from '../types';
+import type {
+  EditorLane,
+  EditorTrackKind,
+  TrackHeaderState,
+  TrackHeight,
+} from '../types';
 import { TRACK_HEIGHT_PX } from '../types';
 
 interface TrackHeaderProps {
@@ -12,6 +17,20 @@ interface TrackHeaderProps {
 }
 
 const HEIGHT_LABELS: Record<TrackHeight, string> = { S: 'S', M: 'M', L: 'L' };
+const TRACK_APPEARANCE: Record<EditorTrackKind, { label: string; color: string }> = {
+  video: {
+    color: 'rgba(56, 189, 248, 0.8)',
+    label: 'Pic',
+  },
+  audio: {
+    color: 'rgba(251, 191, 36, 0.8)',
+    label: 'Aud',
+  },
+  caption: {
+    color: 'rgba(45, 212, 191, 0.8)',
+    label: 'Cap',
+  },
+};
 
 function IconButton({
   active,
@@ -53,6 +72,7 @@ export default function TrackHeader({
 }: TrackHeaderProps) {
   const heightPx = TRACK_HEIGHT_PX[state.height];
   const isCompact = state.height === 'S';
+  const appearance = TRACK_APPEARANCE[lane.trackKind];
 
   return (
     <div
@@ -66,16 +86,15 @@ export default function TrackHeader({
         {/* Track label + kind */}
         <div className="flex items-center gap-1.5">
           <span
-            className={`h-2 w-2 shrink-0 rounded-full ${
-              lane.trackKind === 'video' ? 'bg-sky-400/80' : 'bg-emerald-400/80'
-            }`}
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: appearance.color }}
           />
           <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.24em] text-neutral-100">
             {lane.label}
           </span>
           {!isCompact && (
             <span className="text-[9px] uppercase tracking-[0.16em] text-[color:var(--text-subtle)]">
-              {lane.trackKind === 'video' ? 'Pic' : 'Aud'}
+              {appearance.label}
             </span>
           )}
         </div>

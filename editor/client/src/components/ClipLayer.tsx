@@ -22,7 +22,7 @@ interface ClipLayerProps {
   confidenceFilter?: 'all' | 'low' | 'warnings';
   editorMode?: 'nle' | 'ai';
   onSelectClip: (
-    trackKind: 'video' | 'audio',
+    trackKind: EditorLane['trackKind'],
     trackId: string,
     clip: Clip,
     event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },

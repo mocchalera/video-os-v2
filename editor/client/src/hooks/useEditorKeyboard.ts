@@ -1,6 +1,12 @@
 import { useEffect, useEffectEvent, useRef } from 'react';
 import type { Clip, SelectionState, TimelineIR, TrimMode, TrimTarget } from '../types';
 
+function isMediaTrackKind(
+  trackKind: SelectionState['trackKind'],
+): trackKind is TrimTarget['trackKind'] {
+  return trackKind === 'video' || trackKind === 'audio';
+}
+
 /** Find a clip within the timeline for edit-point detection */
 function findClipForSel(
   timeline: TimelineIR | null,
@@ -329,7 +335,7 @@ export function useEditorKeyboard({
         event.preventDefault();
         const step = event.key === ',' ? (event.shiftKey ? -10 : -1) : (event.shiftKey ? 10 : 1);
         let fallback: TrimTarget | undefined;
-        if (!trimTarget && sel) {
+        if (!trimTarget && sel && isMediaTrackKind(sel.trackKind)) {
           let side: 'head' | 'tail' = 'tail';
           const clip = findClipForSel(timelineState.timeline, sel);
           if (clip) {
