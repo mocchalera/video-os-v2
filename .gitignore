@@ -5,6 +5,7 @@ build/
 .tsbuildinfo
 
 # Temporary files
+tmp/
 tmp-*/
 tests/tmp_*/
 coverage/
