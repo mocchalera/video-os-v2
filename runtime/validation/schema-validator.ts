@@ -140,6 +140,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_package/delivery_profiles/default.yaml",
+    schemaFile: "delivery-profile.schema.json",
+    format: "yaml",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "03_analysis/assets.json",
     schemaFile: "assets.schema.json",
     format: "json",
@@ -428,6 +435,34 @@ export function validateProject(
         }
 
         runTranscriptPathInvariants(parsed.data, file, relPath, violations);
+      }
+    }
+  }
+
+  const deliveryProfilesDir = path.join(absProject, "07_package/delivery_profiles");
+  if (fs.existsSync(deliveryProfilesDir)) {
+    const validate = getValidator("delivery-profile.schema.json");
+    if (validate) {
+      for (const file of fs.readdirSync(deliveryProfilesDir).sort()) {
+        if (!/\.ya?ml$/i.test(file)) continue;
+        const relPath = `07_package/delivery_profiles/${file}`;
+        if (relPath === "07_package/delivery_profiles/default.yaml") continue;
+        const filePath = path.join(deliveryProfilesDir, file);
+        const parsed = safeParse(filePath, "yaml", violations, relPath);
+        if (!parsed.ok) continue;
+
+        const valid = validate(parsed.data);
+        artifactsChecked += 1;
+        if (!valid && validate.errors) {
+          for (const err of validate.errors) {
+            violations.push({
+              artifact: relPath,
+              rule: "schema",
+              message: `${err.instancePath || "/"} ${err.message}`,
+              details: err,
+            });
+          }
+        }
       }
     }
   }

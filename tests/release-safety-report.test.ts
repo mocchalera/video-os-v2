@@ -166,6 +166,7 @@ function makeProject(): string {
 
 afterEach(() => {
   delete process.env.ENABLE_P4A_RELEASE_SAFETY;
+  delete process.env.ENABLE_P4B_DELIVERY_PROFILES;
   delete process.env.RELEASE_SAFETY_MODE;
 });
 
@@ -305,4 +306,125 @@ describe("P4a release_safety_report", () => {
     expect(canonicalTimelineHash()).toBe(before);
     expect(before).toBe("68c8d701302aa5150f8afd183de1a52711349834f4c9e267cb3544e26e01b100");
   });
+
+  it("keeps delivery_profile not_evaluated when the P4b flag is off", () => {
+    const projectDir = makeProject();
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      category: "delivery_profile",
+      status: "not_evaluated",
+      check_id: "RSCHK_delivery_profile_p4b",
+    }));
+  });
+
+  it("returns real delivery_profile checks when the P4b flag is on and artifacts match", () => {
+    const projectDir = makeProject();
+    writeDeliveryProfileInputs(projectDir, "valid_youtube_16x9_public.yaml", { integrated_lufs: -14, true_peak_dbtp: -1.2 });
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    const deliveryChecks = report.checks.filter((check) => check.category === "delivery_profile");
+    expect(deliveryChecks.length).toBeGreaterThan(1);
+    expect(deliveryChecks.every((check) => check.status !== "not_evaluated")).toBe(true);
+    expect(deliveryChecks.every((check) => check.status !== "fail")).toBe(true);
+  });
+
+  it("returns fatal delivery_profile severity when public profiles are absent", () => {
+    const projectDir = makeProject();
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      category: "delivery_profile",
+      check_id: "RSCHK_delivery_profile_required_absent",
+      severity: "fatal",
+      status: "fail",
+    }));
+  });
+
+  it("returns blocker delivery_profile severity when public loudness mismatches package QA metrics", () => {
+    const projectDir = makeProject();
+    writeDeliveryProfileInputs(projectDir, "valid_youtube_16x9_public.yaml", { integrated_lufs: -24, true_peak_dbtp: -1.2 });
+    process.env.ENABLE_P4B_DELIVERY_PROFILES = "true";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks.some((check) =>
+      check.category === "delivery_profile" &&
+      check.check_id.includes("audio") &&
+      check.severity === "blocker" &&
+      check.status === "fail"
+    )).toBe(true);
+  });
 });
+
+function writeDeliveryProfileInputs(
+  projectDir: string,
+  fixtureName: string,
+  metrics: { integrated_lufs: number; true_peak_dbtp: number },
+): void {
+  fs.writeFileSync(
+    path.join(projectDir, "05_timeline/timeline.json"),
+    JSON.stringify({
+      version: "tl_fixture_001",
+      project_id: "p4a-runtime",
+      created_at: "2026-04-26T00:00:00Z",
+      sequence: {
+        fps_num: 24,
+        fps_den: 1,
+        width: 1920,
+        height: 1080,
+        output_aspect_ratio: "16:9",
+      },
+      tracks: {
+        video: [{ clips: [{ timeline_in_frame: 0, timeline_duration_frames: 720 }] }],
+        caption: [{ clips: [{ caption_id: "CAP_001" }] }],
+      },
+    }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(projectDir, "07_package/qa-report.json"),
+    JSON.stringify({ passed: true, metrics }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(projectDir, "07_package/package_manifest.json"),
+    JSON.stringify({
+      version: "1.0.0",
+      project_id: "p4a-runtime",
+      artifacts: {
+        final_video: { path: "07_package/video/final.mp4" },
+        captions: [{ kind: "speech", delivery: "vtt", path: "07_package/captions/speech.vtt" }],
+        qa_report: { path: "07_package/qa-report.json" },
+      },
+    }, null, 2),
+  );
+  const profilesDir = path.join(projectDir, "07_package/delivery_profiles");
+  fs.mkdirSync(profilesDir, { recursive: true });
+  fs.copyFileSync(
+    path.resolve("tests/fixtures/delivery_profiles", fixtureName),
+    path.join(profilesDir, fixtureName),
+  );
+}

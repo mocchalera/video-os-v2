@@ -24,6 +24,10 @@ import {
   isP4aReleaseSafetyEnabled,
   readReleaseSafetySummary,
 } from "../artifacts/p4a-release-safety.js";
+import {
+  isP4bDeliveryProfilesEnabled,
+  readDeliveryProfileStatus,
+} from "../artifacts/p4b-delivery-profile.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -53,6 +57,20 @@ export interface StatusResult {
     };
     valid?: boolean;
     error?: string;
+  };
+  deliveryProfiles?: {
+    enabled: boolean;
+    directory: string;
+    count: number;
+    malformed_count: number;
+    profiles: Array<{
+      profile_id: string;
+      profile_name: string;
+      platform: string;
+      release_mode: string;
+      path: string;
+    }>;
+    malformed: Array<{ path: string; errors: string[] }>;
   };
   staleArtifacts?: string[];
   selfHealed?: boolean;
@@ -136,6 +154,9 @@ export function runStatus(projectDir: string): StatusResult {
       : undefined,
     releaseSafety: isP4aReleaseSafetyEnabled()
       ? formatReleaseSafetyStatus(ctx.projectDir)
+      : undefined,
+    deliveryProfiles: isP4bDeliveryProfilesEnabled()
+      ? readDeliveryProfileStatus(ctx.projectDir)
       : undefined,
     staleArtifacts: reconcileResult.stale_artifacts,
     selfHealed: reconcileResult.self_healed,

@@ -4,6 +4,13 @@ import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { computeNormalizedJsonHash } from "./p1-manifest-coverage.js";
 import { validateAgainstSchema } from "../commands/shared.js";
+import {
+  generateDeliveryProfileChecks,
+  isP4bDeliveryProfilesEnabled,
+  loadDeliveryProfiles,
+  type CaptionArtifact,
+  type DeliveryReleaseMode,
+} from "./p4b-delivery-profile.js";
 
 export type ReleaseSafetyMode = "dry_run" | "report_only" | "enforce";
 export type ReleaseSafetyProducer = "/package" | "/render";
@@ -153,7 +160,7 @@ export function buildReleaseSafetyReport(
     ...checkEditorialReview(projectDir, artifacts),
     checkSchemaValidation(projectDir, artifacts),
     checkTechnicalQa(projectDir, artifacts),
-    checkDeliveryProfile(projectDir),
+    ...checkDeliveryProfile(projectDir, artifacts),
     checkRights(projectDir, artifacts),
     checkPrivacy(projectDir, artifacts),
     checkSourceOfTruth(projectDir, sourceOfTruth),
@@ -346,8 +353,42 @@ function checkTechnicalQa(projectDir: string, artifacts: Map<string, { data: unk
   return check("technical_qa", qa.passed === false ? "blocker" : "info", qa.passed === false ? "fail" : "pass", "RSCHK_technical_qa", qa.passed === false ? "package QA failed" : "package QA passed or is advisory", [artifactRef(projectDir, relPath, false)]);
 }
 
-function checkDeliveryProfile(projectDir: string): ReleaseSafetyCheck {
-  return check("delivery_profile", "info", "not_evaluated", "RSCHK_delivery_profile_p4b", "delivery profile enforcement is deferred to P4b", [{ path: path.join(projectDir, "07_package/delivery_profiles/default.yaml"), hash: null, required: false }]);
+function checkDeliveryProfile(projectDir: string, artifacts: Map<string, { data: unknown; hash: string }>): ReleaseSafetyCheck[] {
+  if (!isP4bDeliveryProfilesEnabled()) {
+    return [check("delivery_profile", "info", "not_evaluated", "RSCHK_delivery_profile_p4b", "delivery profile enforcement is deferred to P4b", [{ path: path.join(projectDir, "07_package/delivery_profiles/default.yaml"), hash: null, required: false }])];
+  }
+  const loaded = loadDeliveryProfiles(projectDir);
+  const packageManifest = artifacts.get("07_package/package_manifest.json")?.data;
+  return generateDeliveryProfileChecks({
+    projectDir,
+    timeline: artifacts.get("05_timeline/timeline.json")?.data,
+    packageManifest,
+    packageQaReport: artifacts.get("07_package/qa-report.json")?.data,
+    captionArtifacts: captionArtifactsFromManifest(packageManifest),
+    profiles: loaded.profiles,
+    malformed: loaded.malformed,
+    expectedReleaseMode: expectedReleaseModeFromProfiles(loaded.profiles.map((item) => item.profile)),
+  });
+}
+
+function captionArtifactsFromManifest(packageManifest: unknown): CaptionArtifact[] {
+  const captions = (packageManifest as { artifacts?: { captions?: unknown[] } } | undefined)?.artifacts?.captions ?? [];
+  return captions
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map((item) => ({
+      path: typeof item.path === "string" ? item.path : "",
+      format: typeof item.delivery === "string"
+        ? item.delivery
+        : typeof item.kind === "string"
+          ? item.kind
+          : null,
+    }));
+}
+
+function expectedReleaseModeFromProfiles(profiles: Array<{ release_mode?: DeliveryReleaseMode }>): DeliveryReleaseMode {
+  if (profiles.some((profile) => profile.release_mode === "public")) return "public";
+  if (profiles.some((profile) => profile.release_mode === "external")) return "external";
+  return "public";
 }
 
 function checkRights(projectDir: string, artifacts: Map<string, { data: unknown; hash: string }>): ReleaseSafetyCheck {
