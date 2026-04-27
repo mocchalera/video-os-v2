@@ -20,6 +20,10 @@ import {
   isP1ManifestCoverageEnabled,
   readCoverageSummary,
 } from "../artifacts/p1-manifest-coverage.js";
+import {
+  isP4aReleaseSafetyEnabled,
+  readReleaseSafetySummary,
+} from "../artifacts/p4a-release-safety.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -35,6 +39,20 @@ export interface StatusResult {
     blockedLaneCount: number;
     partialLaneCount: number;
     reportPath: string;
+  };
+  releaseSafety?: {
+    exists: boolean;
+    reportPath?: string;
+    mode?: string;
+    summary?: {
+      status: string;
+      fatal_count: number;
+      blocker_count: number;
+      warning_count: number;
+      waived_count: number;
+    };
+    valid?: boolean;
+    error?: string;
   };
   staleArtifacts?: string[];
   selfHealed?: boolean;
@@ -116,10 +134,26 @@ export function runStatus(projectDir: string): StatusResult {
     coverage: isP1ManifestCoverageEnabled()
       ? readCoverageSummary(ctx.projectDir)
       : undefined,
+    releaseSafety: isP4aReleaseSafetyEnabled()
+      ? formatReleaseSafetyStatus(ctx.projectDir)
+      : undefined,
     staleArtifacts: reconcileResult.stale_artifacts,
     selfHealed: reconcileResult.self_healed,
     previousState: reconcileResult.persisted_state,
     nextCommand: command,
     nextCommandReason: reason,
+  };
+}
+
+function formatReleaseSafetyStatus(projectDir: string): NonNullable<StatusResult["releaseSafety"]> {
+  const summary = readReleaseSafetySummary(projectDir);
+  if (!summary) return { exists: false };
+  return {
+    exists: true,
+    reportPath: summary.path,
+    mode: summary.mode,
+    summary: summary.summary,
+    valid: summary.valid,
+    error: summary.error,
   };
 }

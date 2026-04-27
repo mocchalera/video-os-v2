@@ -52,6 +52,13 @@ import {
 import { assembleTimelineToMp4 } from "../render/assembler.js";
 import { runRenderPipeline } from "../render/pipeline.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
+import {
+  getReleaseSafetyMode,
+  isP4aReleaseSafetyEnabled,
+  runReleaseSafetyPreflight,
+  writeReleaseSafetyReport,
+  type ReleaseSafetyReport,
+} from "../artifacts/p4a-release-safety.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -60,6 +67,7 @@ export interface PackageCommandResult {
   error?: CommandError;
   qaReport?: QaReport;
   packageManifest?: PackageManifest;
+  releaseSafetyReport?: ReleaseSafetyReport;
   sourceOfTruth?: SourceOfTruth;
   stateTransitioned?: boolean;
 }
@@ -160,6 +168,30 @@ export async function packageCommand(
   fs.mkdirSync(path.join(packageDir, "audio"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "captions"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "logs"), { recursive: true });
+
+  let releaseSafetyReport: ReleaseSafetyReport | undefined;
+  if (isP4aReleaseSafetyEnabled()) {
+    try {
+      const releaseSafetyResult = runReleaseSafetyPreflight({
+        projectDir: absDir,
+        producer: commandName === "/render" ? "/render" : "/package",
+        mode: getReleaseSafetyMode(),
+        createdAt,
+        sourceOfTruth,
+      });
+      releaseSafetyReport = releaseSafetyResult.report;
+      writeReleaseSafetyReport(absDir, releaseSafetyReport);
+    } catch (err) {
+      return {
+        success: false,
+        sourceOfTruth,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: `Release safety preflight failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      };
+    }
+  }
 
   // 2. Read timeline and caption_policy
   const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
@@ -488,6 +520,7 @@ export async function packageCommand(
     return {
       success: false,
       qaReport,
+      releaseSafetyReport,
       sourceOfTruth,
       error: {
         code: "VALIDATION_FAILED",
@@ -549,6 +582,7 @@ export async function packageCommand(
     success: true,
     qaReport,
     packageManifest,
+    releaseSafetyReport,
     sourceOfTruth,
     stateTransitioned: true,
   };

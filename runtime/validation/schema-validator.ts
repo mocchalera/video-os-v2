@@ -133,6 +133,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_package/release_safety_report.yaml",
+    schemaFile: "release-safety-report.schema.json",
+    format: "yaml",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "03_analysis/assets.json",
     schemaFile: "assets.schema.json",
     format: "json",
