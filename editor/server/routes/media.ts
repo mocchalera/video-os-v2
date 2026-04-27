@@ -43,14 +43,25 @@ const BROWSER_COMPATIBLE_AUDIO_CODECS = new Set([
   "pcm_f32le",
 ]);
 
-/** Video codecs that browsers can natively decode. */
+/** Video codecs that browsers can natively decode in the containers we serve directly. */
 const BROWSER_COMPATIBLE_VIDEO_CODECS = new Set([
   "h264",
-  "hevc",
   "vp8",
   "vp9",
   "av1",
 ]);
+
+const DIRECT_PLAYBACK_CONTAINERS = new Set([
+  ".mp4",
+  ".webm",
+  ".mp3",
+  ".wav",
+  ".aac",
+  ".m4a",
+  ".flac",
+]);
+
+const TRANSCODE_CACHE_VERSION = "h264-aac-v2";
 
 /** In-flight transcoding promises keyed by cache path — prevents duplicate jobs. */
 const inflightTranscodes = new Map<string, Promise<string>>();
@@ -102,7 +113,7 @@ function getCacheKeyPath(
   const stat = fs.statSync(realPath);
   const hash = crypto
     .createHash("sha256")
-    .update(`${realPath}:${stat.mtimeMs}`)
+    .update(`${TRANSCODE_CACHE_VERSION}:${realPath}:${stat.mtimeMs}`)
     .digest("hex")
     .slice(0, 16);
   const cacheDir = path.join(projectDir, ".proxy-cache");
@@ -291,8 +302,12 @@ async function probeCodecs(filePath: string): Promise<ProbeResult> {
 
 async function checkNeedsTranscode(filePath: string): Promise<boolean> {
   try {
+    const ext = path.extname(filePath).toLowerCase();
     const { audioCodec, videoCodec } = await probeCodecs(filePath);
 
+    if (videoCodec && !DIRECT_PLAYBACK_CONTAINERS.has(ext)) {
+      return true;
+    }
     if (audioCodec && !BROWSER_COMPATIBLE_AUDIO_CODECS.has(audioCodec)) {
       return true;
     }
@@ -360,7 +375,7 @@ function serveDirect(
 function getCachePath(projectDir: string, filename: string): string {
   const cacheDir = path.join(projectDir, ".proxy-cache");
   const baseName = path.parse(filename).name;
-  return path.join(cacheDir, `${baseName}.mp4`);
+  return path.join(cacheDir, `${baseName}.${TRANSCODE_CACHE_VERSION}.mp4`);
 }
 
 async function serveTranscoded(
@@ -434,10 +449,15 @@ function transcode(inputPath: string, outputPath: string): Promise<string> {
     const proc = spawn("ffmpeg", [
       "-y",
       "-i", inputPath,
-      "-c:v", "copy",
+      "-map", "0:v:0?",
+      "-map", "0:a:0?",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "23",
+      "-pix_fmt", "yuv420p",
       "-c:a", "aac",
       "-b:a", "128k",
-      "-movflags", "frag_keyframe+empty_moov",
+      "-movflags", "+faststart",
       "-f", "mp4",
       tmpPath,
     ], { stdio: ["ignore", "ignore", "pipe"] });

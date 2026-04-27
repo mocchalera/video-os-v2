@@ -55,6 +55,7 @@ export function useSourcePlayback({ projectId, fps }: UseSourcePlaybackOptions) 
   const [markOutUs, setMarkOutState] = useState<number | null>(null);
   const [shuttleSpeed, setShuttleSpeedState] = useState(0);
   const [loopEnabled, setLoopEnabled] = useState(false);
+  const transcodeFallbackAttemptedRef = useRef<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [sourceMapLoaded, setSourceMapLoaded] = useState(false);
 
@@ -131,6 +132,13 @@ export function useSourcePlayback({ projectId, fps }: UseSourcePlaybackOptions) 
       entry.source_locator?.split('/').pop();
     if (!filename) return null;
     return `/api/projects/${projectId}/media/${encodeURIComponent(filename)}`;
+  }
+
+  function getTranscodeFallbackUrl(assetId: string): string | null {
+    const baseUrl = getMediaUrl(assetId);
+    if (!baseUrl) return null;
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${sep}transcode=1`;
   }
 
   function cancelAnimationFrames(): void {
@@ -405,6 +413,24 @@ export function useSourcePlayback({ projectId, fps }: UseSourcePlaybackOptions) 
     setIsPlaying(false);
     setIsBuffering(false);
     const video = videoRef.current;
+
+    if (
+      video?.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED &&
+      currentAsset &&
+      !transcodeFallbackAttemptedRef.current.has(currentAsset.assetId)
+    ) {
+      transcodeFallbackAttemptedRef.current.add(currentAsset.assetId);
+      const fallbackUrl = getTranscodeFallbackUrl(currentAsset.assetId);
+      if (fallbackUrl) {
+        setError(null);
+        setIsBuffering(true);
+        setCurrentAsset((prev) => prev ? { ...prev, mediaUrl: fallbackUrl } : prev);
+        video.src = fallbackUrl;
+        video.load();
+        return;
+      }
+    }
+
     const msg = video?.error
       ? `Source error: ${video.error.message || `code ${video.error.code}`}`
       : 'Source playback error';
@@ -427,6 +453,7 @@ export function useSourcePlayback({ projectId, fps }: UseSourcePlaybackOptions) 
     setMarkOutState(null);
     setShuttleSpeedState(0);
     setError(null);
+    transcodeFallbackAttemptedRef.current.clear();
   }, [projectId]);
 
   return {
