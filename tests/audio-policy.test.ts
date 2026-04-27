@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAudioMixArgs,
+  buildAudioTrimArgs,
   buildDuckingAudioMixFilter,
 } from "../runtime/render/assembler.js";
 import { compile } from "../runtime/compiler/index.js";
@@ -40,6 +41,21 @@ describe("audio policy", () => {
     expect(filter).toContain("sidechaincompress");
   });
 
+  it("raises original audio gain before mixing", () => {
+    const args = buildAudioTrimArgs(
+      "/tmp/source.mov",
+      "/tmp/a1.wav",
+      0,
+      4,
+      48_000,
+      2,
+      { mode: "ducking", nat_gain: 1.8 },
+    );
+
+    expect(args).toContain("-af");
+    expect(args[args.indexOf("-af") + 1]).toBe("volume=1.8000");
+  });
+
   it("defaults family-growth-recap briefs to ducking and emits original A1 audio", () => {
     const projectDir = makeMinimalProject();
     const result = compile({
@@ -57,7 +73,7 @@ describe("audio policy", () => {
     expect(result.timeline.tracks.audio.find((track) => track.track_id === "A2")?.clips[0]).toMatchObject({
       asset_id: "AST_BGM",
       role: "bgm",
-      audio_policy: { mode: "ducking" },
+      audio_policy: { mode: "ducking", bgm_gain: 0.35 },
     });
 
     fs.rmSync(projectDir, { recursive: true, force: true });

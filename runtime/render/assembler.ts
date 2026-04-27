@@ -291,13 +291,17 @@ export function buildAudioTrimArgs(
   endSec: number,
   sampleRate: number,
   audioChannels: 1 | 2,
+  audioPolicy?: ClipOutput["audio_policy"],
 ): string[] {
+  const gain = audioPolicy?.nat_gain ?? audioPolicy?.nat_sound_gain ?? 1;
+  const filters = gain > 0 && gain !== 1 ? [`volume=${gain.toFixed(4)}`] : [];
   return [
     "-y",
     "-ss", formatFfmpegTimestamp(startSec),
     "-to", formatFfmpegTimestamp(endSec),
     "-i", inputPath,
     "-vn",
+    ...(filters.length > 0 ? ["-af", filters.join(",")] : []),
     "-ac", String(audioChannels),
     "-ar", String(sampleRate),
     "-c:a", "pcm_s16le",
@@ -320,6 +324,10 @@ export function buildBgmAudioRenderArgs(
   const fadeInSec = Math.max(0, fadeInFrames / fps);
   const fadeOutSec = Math.max(0, Math.min(durationSec / 2, fadeOutFrames / fps));
   const filters: string[] = [];
+  const bgmGain = audioPolicy?.bgm_gain ?? 0.35;
+  if (bgmGain > 0 && bgmGain !== 1) {
+    filters.push(`volume=${bgmGain.toFixed(4)}`);
+  }
 
   if (fadeInSec > 0) {
     filters.push(`afade=t=in:d=${fadeInSec.toFixed(4)}`);
@@ -403,7 +411,7 @@ export function buildDuckingAudioMixFilter(
 
   mixGroup(originalLabels, "orig");
   mixGroup(bgmLabels, "bgm");
-  steps.push("[bgm][orig]sidechaincompress=threshold=0.08:ratio=8:attack=30:release=350:makeup=1[ducked]");
+  steps.push("[bgm][orig]sidechaincompress=threshold=0.04:ratio=5:attack=20:release=450:makeup=1[ducked]");
   steps.push("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0[aout]");
 
   return steps.join(";");
@@ -654,6 +662,7 @@ export async function assembleTimelineToMp4(
           plan.source_out_sec,
           sampleRate,
           audioChannels,
+          plan.audio_policy,
         );
       await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);

@@ -198,6 +198,7 @@ export function compile(opts: CompileOptions): CompileResult {
 
   const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen, durationPolicy, {
     timelineOrder,
+    beatOrder: normalized.beats.map((beat) => beat.beat_id),
     audioPolicy: audioPolicy.mode,
     bgmAssetId: blueprint.music_policy.bgm_asset_id,
     bgmSegmentId: blueprint.music_policy.bgm_segment_id,
