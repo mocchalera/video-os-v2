@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { OffthreadVideo, Sequence } from "remotion";
-import type { TimelineIR } from "../../compiler/types.js";
+import type { TimelineIR, TrackOutput } from "../../compiler/types.js";
+import { TextOverlayLayer } from "./components/TextOverlayLayer.js";
 
 export interface VideoTimelineProps {
   timeline: TimelineIR;
@@ -24,6 +25,7 @@ function objectFitForLetterboxPolicy(
 export const VideoTimeline = ({ timeline, sourceMap }: VideoTimelineProps) => {
   const fps = Math.round(timeline.sequence.fps_num / timeline.sequence.fps_den);
   const objectFit = objectFitForLetterboxPolicy(timeline.sequence.letterbox_policy);
+  const overlayTracks = (timeline.tracks as TimelineIR["tracks"] & { overlay?: TrackOutput[] }).overlay;
 
   return (
     <>
@@ -56,10 +58,10 @@ export const VideoTimeline = ({ timeline, sourceMap }: VideoTimelineProps) => {
         }),
       )}
       {/*
-        Phase D/E: overlay, caption, audio, and transition rendering are intentionally
+        Phase E/F: caption, audio, and transition rendering are intentionally
         omitted here. Adjacent Sequences provide only implicit cut boundaries.
       */}
+      <TextOverlayLayer tracks={overlayTracks} fps={fps} />
     </>
   );
 };
-

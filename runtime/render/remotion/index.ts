@@ -2,6 +2,8 @@
 export { CompositionRoot } from "./CompositionRoot.js";
 // @ts-ignore TSX files are type-checked by tsconfig.remotion.json.
 export { VideoTimeline } from "./VideoTimeline.js";
+// @ts-ignore TSX files are type-checked by tsconfig.remotion.json.
+export { TextOverlayLayer } from "./components/TextOverlayLayer.js";
 export {
   REMOTION_COMPOSITION_ID,
   timelineToCompositionProps,
@@ -16,6 +18,7 @@ export type {
 } from "./render-remotion.js";
 export { remotionDesignTokens } from "./styles/design-tokens.js";
 export {
+  getOverlayText,
   overlayPresets,
   resolveOverlayPreset,
 } from "./styles/overlay-presets.js";
