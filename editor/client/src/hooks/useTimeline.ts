@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { mockProjects, resolveMockTimeline } from '../mocks/mockData';
 import type {
   Clip,
+  EditorTrackKind,
   HistoryOrigin,
+  MediaTrackKind,
   ProjectSummary,
   SessionBaseline,
   TimelineIR,
@@ -69,6 +71,16 @@ function writeStoredTimeline(projectId: string, timeline: TimelineIR): void {
   );
 }
 
+function findTrackInTimeline(
+  timeline: TimelineIR,
+  trackKind: EditorTrackKind,
+  trackId: string,
+): Track | undefined {
+  return (timeline.tracks[trackKind] ?? []).find(
+    (candidate) => candidate.track_id === trackId,
+  );
+}
+
 // normalizeTimeline, validateTimeline, sortTrackClips are now in @shared/timeline-validation
 
 export function useTimeline() {
@@ -92,6 +104,10 @@ export function useTimeline() {
   const dragSnapshotRef = useRef<TimelineIR | null>(null);
   const dragDirtyRef = useRef(false);
   const saveRequestRef = useRef<Promise<TimelineSaveResult> | null>(null);
+  const validationIssues = useMemo(
+    () => (timeline ? validateTimeline(timeline) : []),
+    [timeline],
+  );
 
   useEffect(() => {
     void loadProjects();
@@ -235,7 +251,7 @@ export function useTimeline() {
   }
 
   function updateClip(
-    trackKind: 'video' | 'audio',
+    trackKind: EditorTrackKind,
     trackId: string,
     clipId: string,
     updater: (clip: Clip) => void,
@@ -245,9 +261,7 @@ export function useTimeline() {
     }
 
     const nextTimeline = structuredClone(timeline);
-    const track = nextTimeline.tracks[trackKind].find(
-      (candidate) => candidate.track_id === trackId,
-    );
+    const track = findTrackInTimeline(nextTimeline, trackKind, trackId);
     const clip = track?.clips.find((candidate) => candidate.clip_id === clipId);
 
     if (!track || !clip) {
@@ -259,7 +273,7 @@ export function useTimeline() {
   }
 
   function updateClipSilent(
-    trackKind: 'video' | 'audio',
+    trackKind: EditorTrackKind,
     trackId: string,
     clipId: string,
     updater: (clip: Clip) => void,
@@ -269,9 +283,7 @@ export function useTimeline() {
     }
 
     const nextTimeline = structuredClone(timeline);
-    const track = nextTimeline.tracks[trackKind].find(
-      (candidate) => candidate.track_id === trackId,
-    );
+    const track = findTrackInTimeline(nextTimeline, trackKind, trackId);
     const clip = track?.clips.find((candidate) => candidate.clip_id === clipId);
 
     if (!track || !clip) {
@@ -335,7 +347,7 @@ export function useTimeline() {
    * This is a manual edit (not an AI patch), tracked as 'manual_swap'.
    */
   function swapClip(
-    trackKind: 'video' | 'audio',
+    trackKind: MediaTrackKind,
     trackId: string,
     clipId: string,
     candidate: {
@@ -661,7 +673,7 @@ export function useTimeline() {
     sessionBaseline,
     historyOrigins,
     historySnapshots,
-    validationIssues: timeline ? validateTimeline(timeline) : [],
+    validationIssues,
     canUndo: history.past.length > 0,
     canRedo: history.future.length > 0,
     setProjectId,

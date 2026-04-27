@@ -1,7 +1,17 @@
-import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { Clip, PatchOperation, ReviewWarning, ReviewWeakness, TrackHeight, TrimMode, TrimTarget } from '../types';
+import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  Clip,
+  EditorTrackKind,
+  PatchOperation,
+  ReviewWarning,
+  ReviewWeakness,
+  TrackHeight,
+  TrimMode,
+  TrimTarget,
+} from '../types';
 import { CONFIDENCE_HIGH, CONFIDENCE_MEDIUM } from '../types';
 import { hexToRgba } from '../utils/draw';
+import { getCaptionText } from '../utils/editor-helpers';
 import { formatMicroseconds } from '../utils/time';
 import { useWaveform } from '../hooks/useWaveform';
 
@@ -40,7 +50,7 @@ interface ClipBlockProps {
   selected: boolean;
   color: string;
   overlay?: ClipOverlay;
-  trackKind: 'video' | 'audio';
+  trackKind: EditorTrackKind;
   trackId: string;
   trackHeight: TrackHeight;
   projectId: string | null;
@@ -172,9 +182,15 @@ export default memo(function ClipBlock({
   const topPad = 4;
   const bottomPad = 4;
   const clipHeight = laneHeight - topPad - bottomPad;
+  const isCaption = trackKind === 'caption';
+  const captionText = getCaptionText(clip);
+  // Caption clips do not support trim operations (trackKind is not MediaTrackKind).
+  const trimHandlesEnabled = !locked && !isCaption;
 
   // Waveform for audio tracks (and video audio in M/L height)
-  const showWaveform = trackKind === 'audio' || (trackKind === 'video' && trackHeight !== 'S');
+  const showWaveform =
+    !isCaption &&
+    (trackKind === 'audio' || (trackKind === 'video' && trackHeight !== 'S'));
   const waveform = useWaveform({
     projectId,
     assetId: clip.asset_id,
@@ -190,7 +206,7 @@ export default memo(function ClipBlock({
   }, [waveform.data, width, clipHeight, color, trackKind]);
 
   // Thumbnail for video tracks (only fetch when visible, with AbortController)
-  const showThumbnail = trackKind === 'video' && width > 40 && isVisible;
+  const showThumbnail = !isCaption && trackKind === 'video' && width > 40 && isVisible;
   useEffect(() => {
     if (!showThumbnail || !projectId) {
       setThumbUrl(null);
@@ -230,7 +246,7 @@ export default memo(function ClipBlock({
   }, [showThumbnail, projectId, clip.asset_id, clip.src_in_us, clip.src_out_us, trackHeight]);
 
   function handleTrimPointerDown(side: TrimSide, event: ReactPointerEvent<HTMLDivElement>): void {
-    if (locked) return;
+    if (locked || trackKind === 'caption') return;
     event.preventDefault();
     event.stopPropagation();
 
@@ -279,8 +295,9 @@ export default memo(function ClipBlock({
       : false;
   const showLowGlow = isLowConfidence && (confidenceFilter !== 'all' || editorMode === 'ai');
 
-  const label = clip.beat_id ?? clip.role;
-  const showMotivation = width > 140 && trackHeight !== 'S';
+  const label = isCaption ? 'Caption' : clip.beat_id ?? clip.role;
+  const showMotivation = !isCaption && width > 140 && trackHeight !== 'S';
+  const showCaptionPreview = isCaption && width > 56;
   const showDuration = width > 84;
   const showBadge = width > 44 && clip.confidence != null;
   const conf = confidenceColor(clip.confidence);
@@ -309,7 +326,7 @@ export default memo(function ClipBlock({
         cursor: locked ? 'not-allowed' : TRIM_CURSORS[trimMode].body,
         transition: 'opacity 100ms ease-out, border-color 120ms ease-out',
       }}
-      title={`${clip.clip_id}\n${clip.motivation}\nSource ${formatMicroseconds(clip.src_in_us, fps)} → ${formatMicroseconds(clip.src_out_us, fps)}${clip.confidence != null ? `\nConfidence: ${(clip.confidence * 100).toFixed(0)}%` : ''}`}
+      title={`${clip.clip_id}\n${isCaption ? captionText || '(empty caption)' : clip.motivation}\nSource ${formatMicroseconds(clip.src_in_us, fps)} → ${formatMicroseconds(clip.src_out_us, fps)}${clip.confidence != null ? `\nConfidence: ${(clip.confidence * 100).toFixed(0)}%` : ''}`}
       onPointerDown={(event) => {
         event.stopPropagation();
       }}
@@ -324,7 +341,7 @@ export default memo(function ClipBlock({
       }}
     >
       {/* Left trim handle — 8px hit area */}
-      {!locked && (
+      {trimHandlesEnabled && (
         <div
           className="absolute inset-y-0 left-0 z-10 transition-colors hover:bg-white/25"
           style={{ width: 8, cursor: TRIM_CURSORS[trimMode].edge }}
@@ -383,7 +400,21 @@ export default memo(function ClipBlock({
         </div>
 
         {/* Middle: motivation text */}
-        {showMotivation ? (
+        {showCaptionPreview ? (
+          <div className="flex-1 overflow-hidden rounded bg-black/10 px-2 py-1.5">
+            <div
+              className="whitespace-pre-wrap text-[11px] leading-snug text-slate-950/85"
+              style={{
+                display: '-webkit-box',
+                WebkitBoxOrient: 'vertical',
+                WebkitLineClamp: trackHeight === 'S' ? 1 : trackHeight === 'M' ? 2 : 4,
+                overflow: 'hidden',
+              }}
+            >
+              {captionText || '(empty caption)'}
+            </div>
+          </div>
+        ) : showMotivation ? (
           <div className="truncate text-[11px] font-medium leading-tight text-slate-950/80">
             {clip.motivation}
           </div>
@@ -400,7 +431,7 @@ export default memo(function ClipBlock({
       </div>
 
       {/* Right trim handle — 8px hit area */}
-      {!locked && (
+      {trimHandlesEnabled && (
         <div
           className="absolute inset-y-0 right-0 z-10 transition-colors hover:bg-white/25"
           style={{ width: 8, cursor: TRIM_CURSORS[trimMode].edge }}

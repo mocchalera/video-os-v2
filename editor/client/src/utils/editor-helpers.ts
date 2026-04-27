@@ -5,6 +5,15 @@ export const MAX_ZOOM = 24;
 export const MIN_ZOOM = 1.25;
 export const FALLBACK_ZOOM = 6;
 
+function getCaptionLaneLabel(trackId: string, index: number): string {
+  const suffix = trackId.match(/\d+/)?.[0] ?? String(index + 1);
+  return `Cap${suffix}`;
+}
+
+export function getCaptionText(clip: Clip): string {
+  return typeof clip.metadata?.text === 'string' ? clip.metadata.text : '';
+}
+
 export function buildLanes(timeline: TimelineIR | null): EditorLane[] {
   if (!timeline) {
     return [
@@ -16,6 +25,7 @@ export function buildLanes(timeline: TimelineIR | null): EditorLane[] {
 
   const lanes: EditorLane[] = [];
 
+  // Video tracks are always shown (even empty) as primary editing surface.
   for (const track of timeline.tracks.video) {
     lanes.push({
       laneId: track.track_id,
@@ -38,6 +48,18 @@ export function buildLanes(timeline: TimelineIR | null): EditorLane[] {
     }
   }
 
+  (timeline.tracks.caption ?? []).forEach((track, index) => {
+    if (track.clips.length > 0) {
+      lanes.push({
+        laneId: track.track_id,
+        label: getCaptionLaneLabel(track.track_id, index),
+        trackKind: 'caption',
+        trackId: track.track_id,
+        clips: track.clips,
+      });
+    }
+  });
+
   if (lanes.length === 0) {
     return [
       { laneId: 'V1', label: 'V1', trackKind: 'video', trackId: null, clips: [] },
@@ -59,7 +81,7 @@ export function findSelectedClip(
   selection: SelectionState | null,
 ): Clip | null {
   if (!timeline || !selection) return null;
-  const track = timeline.tracks[selection.trackKind].find(
+  const track = (timeline.tracks[selection.trackKind] ?? []).find(
     (candidate) => candidate.track_id === selection.trackId,
   );
   return track?.clips.find((candidate) => candidate.clip_id === selection.clipId) ?? null;
@@ -68,7 +90,11 @@ export function findSelectedClip(
 export function getTotalFrames(timeline: TimelineIR | null): number {
   if (!timeline) return 24 * 12;
   const startFrame = timeline.sequence.start_frame ?? 0;
-  const clipEnds = [...timeline.tracks.video, ...timeline.tracks.audio]
+  const clipEnds = [
+    ...timeline.tracks.video,
+    ...timeline.tracks.audio,
+    ...(timeline.tracks.caption ?? []),
+  ]
     .flatMap((track) => track.clips)
     .map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames);
   const markerFrames = (timeline.markers ?? []).map((marker) => marker.frame);
@@ -76,4 +102,3 @@ export function getTotalFrames(timeline: TimelineIR | null): number {
   // Empty timeline: returns start_frame (playhead sits at sequence origin).
   return Math.max(...clipEnds, ...markerFrames, startFrame, 1);
 }
-

@@ -19,6 +19,7 @@ const CHANGE_STYLES: Record<
   trimmed: { bg: 'rgba(245,158,11,0.08)', border: '#f59e0b', label: 'Trimmed' },
   swapped: { bg: 'rgba(6,182,212,0.08)', border: '#06b6d4', label: 'Swapped' },
   audio_adjusted: { bg: 'rgba(59,130,246,0.08)', border: '#3b82f6', label: 'Audio' },
+  content_edited: { bg: 'rgba(45,212,191,0.08)', border: '#2dd4bf', label: 'Text' },
   moved: { bg: 'rgba(168,85,247,0.08)', border: '#a855f7', label: 'Moved' },
   added: { bg: 'rgba(34,197,94,0.08)', border: '#22c55e', label: 'Added' },
   removed: { bg: 'rgba(239,68,68,0.08)', border: '#ef4444', label: 'Removed' },
@@ -159,6 +160,9 @@ export default function DiffPanel({ diffs, baselineRevision, remoteDiffs, remote
                       frame: {diff.baselineClip.timeline_in_frame} →{' '}
                       {diff.currentClip.timeline_in_frame}
                     </div>
+                  ) : null}
+                  {diff.changes.includes('content_edited') ? (
+                    <div>text: updated</div>
                   ) : null}
                 </div>
               ) : null}

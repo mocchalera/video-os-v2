@@ -5,6 +5,7 @@ export type DiffChangeType =
   | 'trimmed'
   | 'swapped'
   | 'audio_adjusted'
+  | 'content_edited'
   | 'moved'
   | 'added'
   | 'removed'
@@ -19,7 +20,11 @@ export interface ClipDiff {
 
 function getAllClips(timeline: TimelineIR): Map<string, Clip> {
   const map = new Map<string, Clip>();
-  for (const group of [timeline.tracks.video, timeline.tracks.audio]) {
+  for (const group of [
+    timeline.tracks.video,
+    timeline.tracks.audio,
+    timeline.tracks.caption ?? [],
+  ]) {
     for (const track of group) {
       for (const clip of track.clips) {
         map.set(clip.clip_id, clip);
@@ -63,7 +68,8 @@ function buildPatchAffectedClips(
             b.src_in_us !== a.src_in_us || b.src_out_us !== a.src_out_us ||
             b.timeline_in_frame !== a.timeline_in_frame ||
             // change_audio_policy: detect audio_policy changes
-            JSON.stringify(b.audio_policy ?? {}) !== JSON.stringify(a.audio_policy ?? {})) {
+            JSON.stringify(b.audio_policy ?? {}) !== JSON.stringify(a.audio_policy ?? {}) ||
+            JSON.stringify(b.metadata ?? {}) !== JSON.stringify(a.metadata ?? {})) {
           affected.add(clipId);
         }
       }
@@ -128,6 +134,14 @@ export function computeDiff(
       const curAudio = JSON.stringify(cur.audio_policy ?? {});
       if (baseAudio !== curAudio) {
         changes.push('audio_adjusted');
+      }
+
+      const baseText =
+        typeof base.metadata?.text === 'string' ? base.metadata.text : null;
+      const curText =
+        typeof cur.metadata?.text === 'string' ? cur.metadata.text : null;
+      if (baseText !== curText) {
+        changes.push('content_edited');
       }
 
       // Check for patch_apply origin:

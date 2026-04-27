@@ -1,4 +1,4 @@
-import type { ClipRole, EditorLane, Marker } from '../types';
+import type { ClipRole, EditorLane, Marker, TrackKind } from '../types';
 import { formatFrameLabel } from './time';
 
 const ROLE_COLORS: Record<ClipRole, string> = {
@@ -25,10 +25,10 @@ const TRACK_COLORS: Record<string, string> = {
 };
 
 /** Track-kind base colors per design spec Phase 5 */
-const TRACK_KIND_COLORS: Record<string, string> = {
+const TRACK_KIND_COLORS: Partial<Record<TrackKind, string>> = {
   video: '#2563eb',    // blue-600
   audio: '#f59e0b',    // amber-500
-  title: '#a855f7',    // purple-400
+  overlay: '#a855f7',  // purple-500
   caption: '#2dd4bf',  // teal-400
 };
 
@@ -50,8 +50,8 @@ export function getRoleColor(role: ClipRole): string {
   return ROLE_COLORS[role] ?? '#6B7280';
 }
 
-export function getTrackColor(laneId: string, trackKind: 'video' | 'audio'): string {
-  return TRACK_COLORS[laneId] ?? TRACK_KIND_COLORS[trackKind] ?? (trackKind === 'video' ? '#2563eb' : '#f59e0b');
+export function getTrackColor(laneId: string, trackKind: TrackKind): string {
+  return TRACK_COLORS[laneId] ?? TRACK_KIND_COLORS[trackKind] ?? '#6B7280';
 }
 
 export function hexToRgba(hex: string, alpha: number): string {

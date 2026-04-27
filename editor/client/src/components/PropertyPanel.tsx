@@ -1,19 +1,30 @@
 import { useState, type ReactNode } from 'react';
-import type { AudioPolicy, Clip, ReviewReportResponse } from '../types';
+import type {
+  AudioPolicy,
+  Clip,
+  ReviewReportResponse,
+  SelectionState,
+} from '../types';
 import { CONFIDENCE_HIGH, CONFIDENCE_MEDIUM } from '../types';
 import type { BlueprintResponse } from '../hooks/useReview';
+import { getCaptionText } from '../utils/editor-helpers';
 import { formatMicroseconds } from '../utils/time';
+import { DEFAULT_CAPTION_STYLE_PRESET, type CaptionStylePreset } from '@shared/caption-style-tokens';
 import AiDecisionPanel from './AiDecisionPanel';
 
 type PanelTab = 'properties' | 'ai-context' | 'review';
 
 interface PropertyPanelProps {
   clip: Clip | null;
+  trackKind: SelectionState['trackKind'] | null;
   fps: number;
   reviewReport: ReviewReportResponse | null;
   blueprint: BlueprintResponse | null;
   onUpdateAudioNumber: (field: keyof AudioPolicy, value: number) => void;
   onUpdateAudioBoolean: (field: keyof AudioPolicy, value: boolean) => void;
+  onUpdateCaptionText: (value: string) => void;
+  /** MINOR-1: Resolved caption style preset from RenderSpec */
+  captionStylePreset?: CaptionStylePreset;
 }
 
 interface SliderFieldProps {
@@ -121,16 +132,23 @@ function confidenceBadge(confidence: number | undefined) {
 
 function PropertiesTab({
   clip,
+  trackKind,
   fps,
   onUpdateAudioNumber,
   onUpdateAudioBoolean,
+  onUpdateCaptionText,
+  captionPreset,
 }: {
   clip: Clip;
+  trackKind: SelectionState['trackKind'];
   fps: number;
   onUpdateAudioNumber: (field: keyof AudioPolicy, value: number) => void;
   onUpdateAudioBoolean: (field: keyof AudioPolicy, value: boolean) => void;
+  onUpdateCaptionText: (value: string) => void;
+  captionPreset: CaptionStylePreset;
 }) {
   const audioPolicy = clip.audio_policy ?? {};
+  const captionText = getCaptionText(clip);
 
   return (
     <>
@@ -151,6 +169,10 @@ function PropertiesTab({
           <div className="flex justify-between gap-3">
             <span className="text-[color:var(--text-muted)]">Role</span>
             <span className="font-mono uppercase text-neutral-100">{clip.role}</span>
+          </div>
+          <div className="flex justify-between gap-3">
+            <span className="text-[color:var(--text-muted)]">Track</span>
+            <span className="font-mono uppercase text-neutral-100">{trackKind}</span>
           </div>
           <div className="flex justify-between gap-3">
             <span className="text-[color:var(--text-muted)]">Beat</span>
@@ -177,70 +199,135 @@ function PropertiesTab({
         </div>
       </PanelSection>
 
-      <PanelSection title="Audio">
-        <div className="space-y-4">
-          <SliderField
-            label="Nat Gain"
-            value={audioPolicy.nat_gain ?? 0}
-            min={-96}
-            max={12}
-            onChange={(value) => onUpdateAudioNumber('nat_gain', value)}
-          />
-          <SliderField
-            label="Nat Sound"
-            value={audioPolicy.nat_sound_gain ?? 0}
-            min={-96}
-            max={12}
-            onChange={(value) => onUpdateAudioNumber('nat_sound_gain', value)}
-          />
-          <SliderField
-            label="BGM Gain"
-            value={audioPolicy.bgm_gain ?? 0}
-            min={-96}
-            max={12}
-            onChange={(value) => onUpdateAudioNumber('bgm_gain', value)}
-          />
-          <SliderField
-            label="Duck"
-            value={audioPolicy.duck_music_db ?? 0}
-            min={-96}
-            max={0}
-            onChange={(value) => onUpdateAudioNumber('duck_music_db', value)}
-          />
-        </div>
-      </PanelSection>
+      {trackKind === 'caption' ? (
+        <>
+          <PanelSection title="Caption">
+            <label className="block">
+              <div className="mb-2 text-[12px] text-[color:var(--text-muted)]">Text</div>
+              <textarea
+                className="min-h-[140px] w-full resize-y rounded border border-white/[0.06] bg-black/20 px-3 py-2 text-[13px] leading-6 text-neutral-100 outline-none transition focus:border-[var(--accent)]"
+                value={captionText}
+                onChange={(event) => onUpdateCaptionText(event.target.value)}
+              />
+            </label>
+          </PanelSection>
+          <PanelSection title="Caption Style (Read-Only)">
+            <div className="space-y-2 text-[12px]">
+              <div className="flex justify-between gap-3">
+                <span className="text-[color:var(--text-muted)]">Font</span>
+                <span className="font-mono text-neutral-100">
+                  {captionPreset.fontFamily} {captionPreset.fontWeight}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[color:var(--text-muted)]">Size</span>
+                <span className="font-mono text-neutral-100">
+                  {captionPreset.fontSizePx1080}px @1080p
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[color:var(--text-muted)]">Fill</span>
+                <span className="flex items-center gap-1.5 font-mono text-neutral-100">
+                  <span
+                    className="inline-block h-3 w-3 rounded-sm border border-white/20"
+                    style={{ background: `#${captionPreset.fillRgba.slice(0, 6)}` }}
+                  />
+                  #{captionPreset.fillRgba.slice(0, 6)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[color:var(--text-muted)]">Outline</span>
+                <span className="flex items-center gap-1.5 font-mono text-neutral-100">
+                  <span
+                    className="inline-block h-3 w-3 rounded-sm border border-white/20"
+                    style={{ background: `#${captionPreset.outlineRgba.slice(0, 6)}` }}
+                  />
+                  {captionPreset.outlinePx1080}px
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[color:var(--text-muted)]">Alignment</span>
+                <span className="font-mono text-neutral-100">
+                  {captionPreset.alignment}
+                </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[color:var(--text-muted)]">Margin V</span>
+                <span className="font-mono text-neutral-100">
+                  {captionPreset.marginV1080}px
+                </span>
+              </div>
+            </div>
+          </PanelSection>
+        </>
+      ) : (
+        <>
+          <PanelSection title="Audio">
+            <div className="space-y-4">
+              <SliderField
+                label="Nat Gain"
+                value={audioPolicy.nat_gain ?? 0}
+                min={-96}
+                max={12}
+                onChange={(value) => onUpdateAudioNumber('nat_gain', value)}
+              />
+              <SliderField
+                label="Nat Sound"
+                value={audioPolicy.nat_sound_gain ?? 0}
+                min={-96}
+                max={12}
+                onChange={(value) => onUpdateAudioNumber('nat_sound_gain', value)}
+              />
+              <SliderField
+                label="BGM Gain"
+                value={audioPolicy.bgm_gain ?? 0}
+                min={-96}
+                max={12}
+                onChange={(value) => onUpdateAudioNumber('bgm_gain', value)}
+              />
+              <SliderField
+                label="Duck"
+                value={audioPolicy.duck_music_db ?? 0}
+                min={-96}
+                max={0}
+                onChange={(value) => onUpdateAudioNumber('duck_music_db', value)}
+              />
+            </div>
+          </PanelSection>
 
-      <PanelSection title="Fade">
-        <div className="space-y-4">
-          <NumberField
-            label="Fade In"
-            value={audioPolicy.fade_in_frames ?? 0}
-            min={0}
-            onChange={(value) =>
-              onUpdateAudioNumber('fade_in_frames', Math.max(0, value))
-            }
-          />
-          <NumberField
-            label="Fade Out"
-            value={audioPolicy.fade_out_frames ?? 0}
-            min={0}
-            onChange={(value) =>
-              onUpdateAudioNumber('fade_out_frames', Math.max(0, value))
-            }
-          />
-          <label className="flex items-center gap-3 py-1 text-[12px] text-neutral-200">
-            <input
-              type="checkbox"
-              className="accent-[var(--accent)]"
-              checked={audioPolicy.preserve_nat_sound ?? false}
-              onChange={(event) =>
-                onUpdateAudioBoolean('preserve_nat_sound', event.target.checked)
-              }
-            />
-            Preserve nat sound
-          </label>
-        </div>
-      </PanelSection>
+          <PanelSection title="Fade">
+            <div className="space-y-4">
+              <NumberField
+                label="Fade In"
+                value={audioPolicy.fade_in_frames ?? 0}
+                min={0}
+                onChange={(value) =>
+                  onUpdateAudioNumber('fade_in_frames', Math.max(0, value))
+                }
+              />
+              <NumberField
+                label="Fade Out"
+                value={audioPolicy.fade_out_frames ?? 0}
+                min={0}
+                onChange={(value) =>
+                  onUpdateAudioNumber('fade_out_frames', Math.max(0, value))
+                }
+              />
+              <label className="flex items-center gap-3 py-1 text-[12px] text-neutral-200">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--accent)]"
+                  checked={audioPolicy.preserve_nat_sound ?? false}
+                  onChange={(event) =>
+                    onUpdateAudioBoolean('preserve_nat_sound', event.target.checked)
+                  }
+                />
+                Preserve nat sound
+              </label>
+            </div>
+          </PanelSection>
+        </>
+      )}
     </>
   );
 }
@@ -317,9 +404,9 @@ function AiContextTab({
       {clipWeaknesses.length > 0 ? (
         <PanelSection title="Review Weaknesses">
           <div className="space-y-2">
-            {clipWeaknesses.map((w, i) => (
+            {clipWeaknesses.map((w) => (
               <div
-                key={i}
+                key={`${w.clip_id ?? clip.clip_id}:${w.severity}:${w.description}:${w.suggestion ?? ''}`}
                 className="rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-[11px]"
               >
                 <div className="flex items-center gap-2">
@@ -353,9 +440,9 @@ function AiContextTab({
       {clipWarnings.length > 0 ? (
         <PanelSection title="Review Warnings">
           <div className="space-y-2">
-            {clipWarnings.map((w, i) => (
+            {clipWarnings.map((w) => (
               <div
-                key={i}
+                key={`${w.clip_id ?? clip.clip_id}:${w.category}:${w.description}`}
                 className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px]"
               >
                 <span className="font-mono text-[9px] uppercase text-amber-400">
@@ -418,9 +505,9 @@ function ReviewTab({
       {report.strengths && report.strengths.length > 0 ? (
         <PanelSection title="Strengths">
           <ul className="space-y-1.5">
-            {report.strengths.map((s, i) => (
+            {report.strengths.map((s) => (
               <li
-                key={i}
+                key={`strength:${s}`}
                 className="flex items-start gap-2 text-[11px] leading-relaxed text-green-300"
               >
                 <span className="mt-0.5 shrink-0 text-green-500">+</span>
@@ -434,9 +521,9 @@ function ReviewTab({
       {report.fatal_issues && report.fatal_issues.length > 0 ? (
         <PanelSection title="Fatal Issues">
           <div className="space-y-2">
-            {report.fatal_issues.map((issue, i) => (
+            {report.fatal_issues.map((issue) => (
               <div
-                key={i}
+                key={`fatal:${issue}`}
                 className="rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300"
               >
                 {issue}
@@ -449,9 +536,9 @@ function ReviewTab({
       {report.weaknesses && report.weaknesses.length > 0 ? (
         <PanelSection title="Weaknesses">
           <div className="space-y-2">
-            {report.weaknesses.map((w, i) => (
+            {report.weaknesses.map((w) => (
               <div
-                key={i}
+                key={`${w.clip_id ?? w.beat_id ?? 'global'}:${w.severity}:${w.description}:${w.suggestion ?? ''}`}
                 className="rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-[11px]"
               >
                 <div className="flex items-center gap-2">
@@ -490,9 +577,9 @@ function ReviewTab({
       {report.warnings && report.warnings.length > 0 ? (
         <PanelSection title="Warnings">
           <div className="space-y-2">
-            {report.warnings.map((w, i) => (
+            {report.warnings.map((w) => (
               <div
-                key={i}
+                key={`${w.clip_id ?? 'global'}:${w.category}:${w.description}`}
                 className="rounded border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px]"
               >
                 <div className="flex items-center gap-2">
@@ -525,15 +612,20 @@ function ReviewTab({
 
 export default function PropertyPanel({
   clip,
+  trackKind,
   fps,
   reviewReport,
   blueprint,
   onUpdateAudioNumber,
   onUpdateAudioBoolean,
+  onUpdateCaptionText,
+  captionStylePreset,
 }: PropertyPanelProps) {
+  // MINOR-1: Use resolved preset from RenderSpec instead of hardcoded DEFAULT
+  const preset = captionStylePreset ?? DEFAULT_CAPTION_STYLE_PRESET;
   const [activeTab, setActiveTab] = useState<PanelTab>('properties');
 
-  if (!clip) {
+  if (!clip || !trackKind) {
     return (
       <aside className="flex h-full min-h-0 flex-col bg-transparent">
         <div className="border-b border-white/[0.06] px-5 py-3">
@@ -604,9 +696,12 @@ export default function PropertyPanel({
           <>
             <PropertiesTab
               clip={clip}
+              trackKind={trackKind}
               fps={fps}
               onUpdateAudioNumber={onUpdateAudioNumber}
               onUpdateAudioBoolean={onUpdateAudioBoolean}
+              onUpdateCaptionText={onUpdateCaptionText}
+              captionPreset={preset}
             />
             {/* AI Decision collapsible section in NLE Inspector */}
             <AiDecisionPanel

@@ -21,7 +21,7 @@ interface TrackLaneProps {
   /** Pre-computed link data for J/L-cut badges */
   linkDataMap?: Map<string, LinkData>;
   onSelectClip: (
-    trackKind: 'video' | 'audio',
+    trackKind: EditorLane['trackKind'],
     trackId: string,
     clip: Clip,
     event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },
