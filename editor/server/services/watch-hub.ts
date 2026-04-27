@@ -20,6 +20,11 @@ export interface ProjectSyncEvent {
   review_patch_revision?: string;
   source: ProjectSyncSource;
   changed_at: string;
+  /** Preview metadata (render.changed from preview-job-service) */
+  preview_status?: string;
+  preview_url?: string | null;
+  render_spec_hash?: string | null;
+  timeline_revision?: string | null;
 }
 
 type BroadcastFn = (event: ProjectSyncEvent) => void;
@@ -264,6 +269,11 @@ export class TimelineWatchHub {
       {
         relPath: "project_state.yaml",
         eventType: "project-state.changed",
+        lastHash: null,
+      },
+      {
+        relPath: path.join("05_timeline", "previews", "preview.json"),
+        eventType: "render.changed",
         lastHash: null,
       },
       {

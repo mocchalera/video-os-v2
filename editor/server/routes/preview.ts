@@ -1,53 +1,24 @@
 /**
- * Preview generation API route.
+ * Preview API route — Phase 1: exact preview via RenderSpec.
  *
- * POST /api/projects/:id/preview — Generate preview MP4 via ffmpeg
- * GET  /api/projects/:id/preview/:filename — Serve generated preview files
+ * POST /api/projects/:id/preview — Queue exact preview render job
+ * GET  /api/projects/:id/preview/status — Get current preview state
+ * GET  /api/projects/:id/preview/previews/:filename — Serve preview artifacts
+ * GET  /api/projects/:id/preview/:filename — Serve legacy preview files (backward compat)
  */
 
 import { Router } from "express";
-import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { safeProjectDir } from "../utils.js";
 import { computeTimelineRevision } from "./timeline.js";
+import {
+  buildRenderSpec,
+  type AssetPathResolver,
+} from "../../shared/render-spec.js";
+import type { PreviewJobService } from "../services/preview-job-service.js";
 
-interface AudioPolicy {
-  nat_sound_gain?: number;
-  nat_gain?: number;
-  bgm_gain?: number;
-  duck_music_db?: number;
-  preserve_nat_sound?: boolean;
-}
-
-interface TimelineClip {
-  clip_id: string;
-  asset_id: string;
-  src_in_us: number;
-  src_out_us: number;
-  timeline_in_frame: number;
-  timeline_duration_frames: number;
-  audio_policy?: AudioPolicy;
-}
-
-interface TimelineTrack {
-  track_id: string;
-  kind: string;
-  clips: TimelineClip[];
-}
-
-interface TimelineData {
-  sequence: {
-    fps_num: number;
-    fps_den: number;
-    width: number;
-    height: number;
-  };
-  tracks: {
-    video: TimelineTrack[];
-    audio: TimelineTrack[];
-  };
-}
+// ── Source map types ─────────────────────────────────────────────────
 
 interface SourceMapDoc {
   items: Array<{
@@ -57,79 +28,34 @@ interface SourceMapDoc {
   }>;
 }
 
-interface PreviewRequest {
-  mode: "range" | "clip" | "full";
-  startFrame?: number;
-  endFrame?: number;
-  clipId?: string;
-  resolution?: string;
-  timelineRevision?: string;
-}
+// ── Route factory ────────────────────────────────────────────────────
 
-function execFilePromise(
-  cmd: string,
-  args: string[],
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      cmd,
-      args,
-      { maxBuffer: 100 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        if (err) return reject(err);
-        resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
-      },
-    );
-  });
-}
-
-async function hasAudioStream(filePath: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFilePromise("ffprobe", [
-      "-v",
-      "error",
-      "-select_streams",
-      "a",
-      "-show_entries",
-      "stream=codec_type",
-      "-of",
-      "csv=p=0",
-      filePath,
-    ]);
-    return stdout.trim().includes("audio");
-  } catch {
-    return false;
-  }
-}
-
-function computeNatSoundGainDb(policy?: AudioPolicy): number | null {
-  if (!policy) return null;
-  const gain = policy.nat_sound_gain ?? policy.nat_gain ?? null;
-  if (gain === null || gain === undefined || gain === 0) return null;
-  return gain;
-}
-
-function resolveAssetPath(
-  sourceMap: SourceMapDoc,
-  assetId: string,
-): string | undefined {
-  const entry = sourceMap.items.find((i) => i.asset_id === assetId);
-  if (!entry) return undefined;
-
-  // Try local_source_path first, then source_locator
-  if (entry.local_source_path && fs.existsSync(entry.local_source_path)) {
-    return entry.local_source_path;
-  }
-  if (entry.source_locator && fs.existsSync(entry.source_locator)) {
-    return entry.source_locator;
-  }
-  return undefined;
-}
-
-export function createPreviewRouter(projectsDir: string): Router {
+export function createPreviewRouter(
+  projectsDir: string,
+  previewJobService: PreviewJobService,
+): Router {
   const router = Router();
 
-  // POST /api/projects/:id/preview
+  /**
+   * Resolve asset path from source_map.json.
+   */
+  function buildAssetResolver(
+    sourceMap: SourceMapDoc,
+  ): AssetPathResolver {
+    return (assetId: string) => {
+      const entry = sourceMap.items.find((i) => i.asset_id === assetId);
+      if (!entry) return undefined;
+      if (entry.local_source_path && fs.existsSync(entry.local_source_path)) {
+        return entry.local_source_path;
+      }
+      if (entry.source_locator && fs.existsSync(entry.source_locator)) {
+        return entry.source_locator;
+      }
+      return undefined;
+    };
+  }
+
+  // ── POST /api/projects/:id/preview ─────────────────────────────────
   router.post("/:id/preview", async (req, res) => {
     const projectId = req.params.id;
     const projectDir = safeProjectDir(projectsDir, projectId);
@@ -137,6 +63,7 @@ export function createPreviewRouter(projectsDir: string): Router {
       res.status(400).json({ error: "Invalid project ID" });
       return;
     }
+
     const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
     const sourceMapPath = path.join(projectDir, "02_media", "source_map.json");
 
@@ -145,11 +72,16 @@ export function createPreviewRouter(projectsDir: string): Router {
       return;
     }
 
-    const body = req.body as PreviewRequest;
-    if (!body.mode || !["range", "clip", "full"].includes(body.mode)) {
+    const body = req.body as {
+      mode?: string;
+      timelineRevision?: string;
+    };
+    const mode = body.mode ?? "full";
+
+    if (!["full", "range", "clip"].includes(mode)) {
       res.status(400).json({
         error: "Invalid request",
-        details: 'mode must be "range", "clip", or "full"',
+        details: 'mode must be "full", "range", or "clip"',
       });
       return;
     }
@@ -157,10 +89,8 @@ export function createPreviewRouter(projectsDir: string): Router {
     try {
       const timelineContent = fs.readFileSync(timelinePath, "utf-8");
       const timelineRevision = computeTimelineRevision(timelineContent);
-      if (
-        body.timelineRevision &&
-        body.timelineRevision !== timelineRevision
-      ) {
+
+      if (body.timelineRevision && body.timelineRevision !== timelineRevision) {
         res.status(409).json({
           error: "Timeline revision mismatch",
           current_revision: timelineRevision,
@@ -169,8 +99,7 @@ export function createPreviewRouter(projectsDir: string): Router {
         return;
       }
 
-      const timeline: TimelineData = JSON.parse(timelineContent);
-      const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
+      const timeline = JSON.parse(timelineContent);
 
       // Load source map
       let sourceMap: SourceMapDoc = { items: [] };
@@ -178,231 +107,125 @@ export function createPreviewRouter(projectsDir: string): Router {
         sourceMap = JSON.parse(fs.readFileSync(sourceMapPath, "utf-8"));
       }
 
-      // Get V1 video clips sorted by timeline position
-      const v1 = timeline.tracks.video[0];
-      if (!v1 || v1.clips.length === 0) {
-        res.status(400).json({ error: "No video clips in timeline" });
-        return;
-      }
-
-      let clips = [...v1.clips].sort(
-        (a, b) => a.timeline_in_frame - b.timeline_in_frame,
+      // Build RenderSpec
+      // MAJOR-4: Look for caption_approval.json in project directory
+      const captionApprovalPath = path.join(projectDir, "caption_approval.json");
+      const hasCaptionApproval = fs.existsSync(captionApprovalPath);
+      const resolveAssetPath = buildAssetResolver(sourceMap);
+      const renderSpec = buildRenderSpec(
+        timeline,
+        timelineRevision,
+        resolveAssetPath,
+        hasCaptionApproval
+          ? { captionApprovalPath }
+          : undefined,
       );
 
-      // Apply mode filter
-      if (body.mode === "clip") {
-        if (!body.clipId) {
-          res
-            .status(400)
-            .json({ error: "clipId required for mode=clip" });
-          return;
-        }
-        clips = clips.filter((c) => c.clip_id === body.clipId);
-        if (clips.length === 0) {
-          res.status(404).json({
-            error: "Clip not found",
-            details: `No clip with id ${body.clipId}`,
-          });
-          return;
-        }
-      } else if (body.mode === "range") {
-        const startFrame = body.startFrame ?? 0;
-        const endFrame = body.endFrame ?? Infinity;
-        clips = clips
-          .filter(
-            (c) =>
-              c.timeline_in_frame + c.timeline_duration_frames > startFrame &&
-              c.timeline_in_frame < endFrame,
-          )
-          .map((c) => {
-            // Trim clips to the requested range
-            const clipEnd =
-              c.timeline_in_frame + c.timeline_duration_frames;
-            const trimStart = Math.max(0, startFrame - c.timeline_in_frame);
-            const trimEnd = Math.max(
-              0,
-              clipEnd - endFrame,
-            );
-            if (trimStart === 0 && trimEnd === 0) return c;
+      // Queue render job (returns immediately)
+      const jobState = previewJobService.request(projectId, projectDir, renderSpec);
 
-            const srcDuration = c.src_out_us - c.src_in_us;
-            const frameRatio = srcDuration / c.timeline_duration_frames;
-            return {
-              ...c,
-              src_in_us: c.src_in_us + Math.round(trimStart * frameRatio),
-              src_out_us: c.src_out_us - Math.round(trimEnd * frameRatio),
-              timeline_in_frame: c.timeline_in_frame + trimStart,
-              timeline_duration_frames:
-                c.timeline_duration_frames - trimStart - trimEnd,
-            };
-          });
-
-        if (clips.length === 0) {
-          res.status(400).json({
-            error: "No clips in specified range",
-          });
-          return;
-        }
-      }
-
-      // Prepare output
-      const outputDir = path.join(projectDir, "05_timeline");
-      fs.mkdirSync(outputDir, { recursive: true });
-
-      const timestamp = Date.now();
-      const outputFilename = `preview-editor-${timestamp}.mp4`;
-      const outputPath = path.join(outputDir, outputFilename);
-
-      // Create temp directory for clip extraction
-      const tmpDir = path.join(outputDir, `.preview-tmp-${timestamp}`);
-      fs.mkdirSync(tmpDir, { recursive: true });
-
-      try {
-        const clipPaths: string[] = [];
-
-        // Extract each clip via ffmpeg
-        for (let i = 0; i < clips.length; i++) {
-          const clip = clips[i];
-          const sourcePath = resolveAssetPath(sourceMap, clip.asset_id);
-          if (!sourcePath) {
-            res.status(500).json({
-              error: `Source file not found for asset ${clip.asset_id}`,
-            });
-            return;
-          }
-
-          const startSec = clip.src_in_us / 1_000_000;
-          const durationSec =
-            (clip.src_out_us - clip.src_in_us) / 1_000_000;
-          const clipOutPath = path.join(
-            tmpDir,
-            `clip_${String(i).padStart(4, "0")}.mp4`,
-          );
-
-          const sourceHasAudio = await hasAudioStream(sourcePath);
-          const ffmpegArgs: string[] = ["-y"];
-
-          // Input: source video
-          ffmpegArgs.push(
-            "-ss",
-            startSec.toFixed(6),
-            "-i",
-            sourcePath,
-            "-t",
-            durationSec.toFixed(6),
-          );
-
-          if (!sourceHasAudio) {
-            // Silent audio source to fill missing audio track
-            ffmpegArgs.push(
-              "-f",
-              "lavfi",
-              "-i",
-              "anullsrc=channel_layout=stereo:sample_rate=48000",
-            );
-          }
-
-          // Video filter & codec
-          ffmpegArgs.push(
-            "-vf",
-            "scale=-2:720",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "28",
-          );
-
-          if (!sourceHasAudio) {
-            // Map video from source, audio from anullsrc
-            ffmpegArgs.push("-map", "0:v:0", "-map", "1:a:0");
-          }
-
-          // Audio normalization: optional gain + loudnorm to -16 LUFS
-          if (sourceHasAudio) {
-            const gainDb = computeNatSoundGainDb(clip.audio_policy);
-            const filters: string[] = [];
-            if (gainDb !== null) {
-              filters.push(`volume=${gainDb}dB`);
-            }
-            filters.push("loudnorm=I=-16:TP=-1.5:LRA=11");
-            ffmpegArgs.push("-af", filters.join(","));
-          }
-
-          // Audio codec — uniform format for concat compatibility
-          ffmpegArgs.push(
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-ar",
-            "48000",
-            "-ac",
-            "2",
-          );
-
-          if (!sourceHasAudio) {
-            ffmpegArgs.push("-shortest");
-          }
-
-          ffmpegArgs.push("-pix_fmt", "yuv420p", clipOutPath);
-
-          await execFilePromise("ffmpeg", ffmpegArgs);
-          clipPaths.push(clipOutPath);
-        }
-
-        // Concatenate clips
-        if (clipPaths.length === 1) {
-          fs.renameSync(clipPaths[0], outputPath);
-        } else {
-          const concatFilePath = path.join(tmpDir, "concat.txt");
-          const concatContent = clipPaths
-            .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
-            .join("\n");
-          fs.writeFileSync(concatFilePath, concatContent, "utf-8");
-
-          await execFilePromise("ffmpeg", [
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            concatFilePath,
-            "-c",
-            "copy",
-            outputPath,
-          ]);
-        }
-
-        // Calculate total duration
-        const totalFrames = clips.reduce(
-          (sum, c) => sum + c.timeline_duration_frames,
-          0,
-        );
-        const durationSec = totalFrames / fps;
-
-        res.json({
-          previewUrl: `/api/projects/${projectId}/preview/${outputFilename}?t=${timestamp}&rev=${encodeURIComponent(timelineRevision)}`,
-          clipCount: clips.length,
-          durationSec,
-          timelineRevision,
-          generatedAt: new Date(timestamp).toISOString(),
-        });
-      } finally {
-        // Clean up temp directory
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-      }
+      // MAJOR-3 (Phase 5 review R1): include `error` so the client can read
+      // `feature_disabled` when the flag is off and fall back to source.
+      res.json({
+        status: jobState.status,
+        timelineRevision,
+        renderSpecHash: renderSpec.renderSpecHash,
+        previewUrl: jobState.previewUrl,
+        warnings: jobState.warnings,
+        error: jobState.error,
+      });
     } catch (err) {
       res.status(500).json({
-        error: "Preview generation failed",
+        error: "Preview request failed",
         details: err instanceof Error ? err.message : String(err),
       });
     }
   });
 
-  // GET /api/projects/:id/preview/:filename — serve generated preview
+  // ── GET /api/projects/:id/preview/status ───────────────────────────
+  router.get("/:id/preview/status", (req, res) => {
+    const projectId = req.params.id;
+    const projDir = safeProjectDir(projectsDir, projectId);
+    if (!projDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+
+    const state = previewJobService.getState(projectId);
+
+    // Compute currentRenderSpecHash from the on-disk timeline so the client
+    // can verify whether the cached preview still matches the current state.
+    let currentRenderSpecHash: string | null = null;
+    try {
+      const timelinePath = path.join(projDir, "05_timeline", "timeline.json");
+      const sourceMapPath = path.join(projDir, "02_media", "source_map.json");
+      if (fs.existsSync(timelinePath)) {
+        const timelineContent = fs.readFileSync(timelinePath, "utf-8");
+        const timeline = JSON.parse(timelineContent);
+        let sourceMap: SourceMapDoc = { items: [] };
+        if (fs.existsSync(sourceMapPath)) {
+          sourceMap = JSON.parse(fs.readFileSync(sourceMapPath, "utf-8"));
+        }
+        const captionApprovalPath = path.join(projDir, "caption_approval.json");
+        const hasCaptionApproval = fs.existsSync(captionApprovalPath);
+        const resolveAssetPath = buildAssetResolver(sourceMap);
+        const currentRevision = computeTimelineRevision(timelineContent);
+        const currentSpec = buildRenderSpec(
+          timeline,
+          currentRevision,
+          resolveAssetPath,
+          hasCaptionApproval ? { captionApprovalPath } : undefined,
+        );
+        currentRenderSpecHash = currentSpec.renderSpecHash;
+      }
+    } catch {
+      // Non-critical — currentRenderSpecHash stays null
+    }
+
+    res.json({
+      timelineRevision: state.timelineRevision,
+      renderSpecHash: state.renderSpecHash,
+      currentRenderSpecHash,
+      status: state.status,
+      previewUrl: state.previewUrl,
+      warnings: state.warnings,
+      error: state.error,
+    });
+  });
+
+  // ── GET /api/projects/:id/preview/previews/:filename ───────────────
+  router.get("/:id/preview/previews/:filename", (req, res) => {
+    const projDir = safeProjectDir(projectsDir, req.params.id);
+    if (!projDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+
+    const filename = req.params.filename;
+    if (
+      filename.includes("..") ||
+      filename.includes("/") ||
+      filename.includes("%2F") ||
+      filename.includes("%2f") ||
+      filename.includes("\0")
+    ) {
+      res.status(400).json({ error: "Invalid filename" });
+      return;
+    }
+
+    const filePath = path.join(projDir, "05_timeline", "previews", filename);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: "Preview file not found" });
+      return;
+    }
+
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.sendFile(filePath);
+  });
+
+  // ── GET /api/projects/:id/preview/:filename (legacy compat) ────────
   router.get("/:id/preview/:filename", (req, res) => {
     const projDir = safeProjectDir(projectsDir, req.params.id);
     if (!projDir) {
@@ -412,14 +235,24 @@ export function createPreviewRouter(projectsDir: string): Router {
 
     const filename = req.params.filename;
 
-    // Prevent path traversal (including %2F decode attacks)
-    if (filename.includes("..") || filename.includes("/") || filename.includes("%2F") || filename.includes("%2f") || filename.includes("\0")) {
+    // "status" and "previews" are handled by other routes
+    if (filename === "status" || filename === "previews") {
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    if (
+      filename.includes("..") ||
+      filename.includes("/") ||
+      filename.includes("%2F") ||
+      filename.includes("%2f") ||
+      filename.includes("\0")
+    ) {
       res.status(400).json({ error: "Invalid filename" });
       return;
     }
 
     const filePath = path.join(projDir, "05_timeline", filename);
-
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: "Preview file not found" });
       return;

@@ -36,7 +36,11 @@ interface MinimalSequence {
 
 interface MinimalTimeline {
   sequence: MinimalSequence;
-  tracks: { video: MinimalTrack[]; audio: MinimalTrack[] };
+  tracks: {
+    video: MinimalTrack[];
+    audio: MinimalTrack[];
+    caption?: MinimalTrack[];
+  };
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────
@@ -92,7 +96,11 @@ export function normalizeTimeline<T extends MinimalTimeline>(timeline: T): T {
   const result: T = structuredClone(timeline);
   const fps = getFps(result.sequence);
 
-  for (const group of [result.tracks.video, result.tracks.audio]) {
+  for (const group of [
+    result.tracks.video,
+    result.tracks.audio,
+    result.tracks.caption ?? [],
+  ]) {
     for (const track of group) {
       track.clips = sortTrackClips(
         track.clips.map((clip) => ({
@@ -120,7 +128,7 @@ export function normalizeTimeline<T extends MinimalTimeline>(timeline: T): T {
  * overlaps are flagged.
  */
 export function validateOverlaps(
-  trackType: 'video' | 'audio',
+  trackType: 'video' | 'audio' | 'caption',
   track: MinimalTrack,
   fps: number,
 ): TimelineValidationIssue[] {
@@ -161,7 +169,7 @@ export function validateTimeline(timeline: MinimalTimeline): TimelineValidationI
   const issues: TimelineValidationIssue[] = [];
   const fps = getFps(timeline.sequence);
 
-  function checkTrack(trackType: 'video' | 'audio', track: MinimalTrack): void {
+  function checkTrack(trackType: 'video' | 'audio' | 'caption', track: MinimalTrack): void {
     sortTrackClips(track.clips).forEach((clip, index) => {
       const basePath = `${trackType}.${track.track_id}.clips[${index}]`;
 
@@ -192,6 +200,7 @@ export function validateTimeline(timeline: MinimalTimeline): TimelineValidationI
 
   timeline.tracks.video.forEach((track) => checkTrack('video', track));
   timeline.tracks.audio.forEach((track) => checkTrack('audio', track));
+  (timeline.tracks.caption ?? []).forEach((track) => checkTrack('caption', track));
 
   return issues;
 }

@@ -41,9 +41,15 @@ describe("render pipeline aspect ratio fitting", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("buildAspectRatioFitFilter generates scale+pad filter", () => {
+  it("buildAspectRatioFitFilter delegates to the shared filtergraph builder", () => {
+    // FATAL-1 fix (Phase 5 review R1): preview and final must serialize the
+    // video filter chain through the same shared builder. The legacy bespoke
+    // string `scale=...,pad=...:black` has been replaced with the shared
+    // builder's no-transform output, which uses ffmpeg's default pad colour
+    // (black) and appends format/setsar to keep concat streams uniform.
     expect(buildAspectRatioFitFilter(1920, 1080)).toBe(
-      "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
+      "scale=1920:1080:force_original_aspect_ratio=decrease," +
+        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1",
     );
   });
 

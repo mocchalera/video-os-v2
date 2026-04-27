@@ -14,6 +14,7 @@ import * as http from "node:http";
 import * as path from "node:path";
 import { createTimelineRouter } from "./routes/timeline.js";
 import { createPreviewRouter } from "./routes/preview.js";
+import { PreviewJobService } from "./services/preview-job-service.js";
 import { createMediaRouter } from "./routes/media.js";
 import { createThumbnailRouter } from "./routes/thumbnails.js";
 import { createReviewRouter } from "./routes/review.js";
@@ -193,8 +194,14 @@ const notifyWrite: typeof notifyWriteImpl = (...args) => notifyWriteImpl(...args
 let ensureWatchImpl: (projectId: string, projectDir: string) => void = () => {};
 const ensureWatch: typeof ensureWatchImpl = (...args) => ensureWatchImpl(...args);
 
+// Preview job service — uses late-binding broadcast, wired after socketHub creation
+let previewBroadcastImpl: (projectId: string, state: import("./services/preview-job-service.js").PreviewJobState) => void = () => {};
+const previewJobService = new PreviewJobService((projectId, state) => {
+  previewBroadcastImpl(projectId, state);
+}, resolvedProjectsDir);
+
 app.use("/api/projects", createTimelineRouter(resolvedProjectsDir, notifyWrite, ensureWatch));
-app.use("/api/projects", createPreviewRouter(resolvedProjectsDir));
+app.use("/api/projects", createPreviewRouter(resolvedProjectsDir, previewJobService));
 app.use("/api/projects", createMediaRouter(resolvedProjectsDir));
 app.use("/api/projects", createThumbnailRouter(resolvedProjectsDir));
 app.use("/api/projects", createReviewRouter(resolvedProjectsDir, notifyWrite));
@@ -244,6 +251,20 @@ const watchHub = new TimelineWatchHub((event) => {
 // Wire the notify callback now that watchHub exists
 notifyWriteImpl = (projectId, eventType, source) => {
   watchHub.notifyWrite(projectId, eventType, source);
+};
+
+// Wire preview broadcast now that socketHub exists
+previewBroadcastImpl = (projectId, state) => {
+  socketHub.broadcast({
+    type: "render.changed",
+    project_id: projectId,
+    source: "api-save",
+    changed_at: new Date().toISOString(),
+    preview_status: state.status,
+    preview_url: state.previewUrl,
+    render_spec_hash: state.renderSpecHash,
+    timeline_revision: state.timelineRevision,
+  });
 };
 
 // Wire the ensureWatch callback

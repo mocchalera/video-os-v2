@@ -4,7 +4,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ClipOutput, TimelineIR, TrackOutput } from "../compiler/types.js";
 import { loadSourceMap, type LoadedSourceMap } from "../media/source-map.js";
-import { buildAspectRatioFitFilter } from "./pipeline.js";
+import {
+  buildAspectRatioFitFilter,
+  buildVideoFitFilterFromTransform,
+  type ClipFilterTransform,
+} from "./pipeline.js";
+import {
+  isSupportedEffectType,
+  type RenderEffectSpec,
+} from "../../editor/shared/render-spec.js";
 
 export interface AssemblerOptions {
   projectDir: string;
@@ -124,6 +132,14 @@ export function buildConcatListContent(paths: string[]): string {
   return paths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n");
 }
 
+/**
+ * FATAL-1 (Phase 5 review R1): the per-clip filter graph must come from the
+ * shared filtergraph builder so the final assembly applies the same
+ * zoom/crop/position/effects that preview applies. The optional `transform`
+ * argument carries the clip's metadata-derived transform; when omitted
+ * (gap fills, callers without metadata) we fall back to the no-transform
+ * fit which is itself produced by the shared builder.
+ */
 export function buildVideoTrimArgs(
   inputPath: string,
   outputPath: string,
@@ -132,20 +148,98 @@ export function buildVideoTrimArgs(
   width: number,
   height: number,
   fps: number,
+  transform?: ClipFilterTransform,
 ): string[] {
+  const videoFilter = transform
+    ? buildVideoFitFilterFromTransform(width, height, transform)
+    : buildAspectRatioFitFilter(width, height);
   return [
     "-y",
     "-ss", formatFfmpegTimestamp(startSec),
     "-to", formatFfmpegTimestamp(endSec),
     "-i", inputPath,
     "-map", "0:v:0",
-    "-vf", buildAspectRatioFitFilter(width, height),
+    "-vf", videoFilter,
     "-an",
     "-r", String(fps),
     "-c:v", "libx264",
     "-pix_fmt", "yuv420p",
     outputPath,
   ];
+}
+
+/**
+ * Extract a ClipFilterTransform from a clip's metadata bag, mirroring the
+ * keys that buildRenderSpec reads. Anything missing or malformed degrades
+ * silently to "no transform" — preview does the same and emits a warning,
+ * but the assembler runs in a context where surfacing warnings to the user
+ * is the orchestrator's job.
+ */
+export function extractClipTransform(
+  clip: ClipOutput,
+): ClipFilterTransform | undefined {
+  const meta = clip.metadata;
+  if (!meta || typeof meta !== "object") return undefined;
+
+  const transform: ClipFilterTransform = {};
+  let touched = false;
+
+  const zoom = (meta as Record<string, unknown>).zoom;
+  if (typeof zoom === "number" && zoom > 0 && zoom !== 1) {
+    transform.zoom = zoom;
+    touched = true;
+  }
+
+  const cropRaw = (meta as Record<string, unknown>).crop;
+  if (cropRaw && typeof cropRaw === "object") {
+    const c = cropRaw as Record<string, unknown>;
+    if (
+      typeof c.x === "number" &&
+      typeof c.y === "number" &&
+      typeof c.width === "number" &&
+      typeof c.height === "number"
+    ) {
+      transform.crop = { x: c.x, y: c.y, width: c.width, height: c.height };
+      touched = true;
+    }
+  }
+
+  const posRaw = (meta as Record<string, unknown>).position;
+  if (posRaw && typeof posRaw === "object") {
+    const p = posRaw as Record<string, unknown>;
+    if (typeof p.x === "number" && typeof p.y === "number") {
+      transform.position = { x: p.x, y: p.y };
+      touched = true;
+    }
+  }
+
+  const renderMeta = (meta as Record<string, unknown>).render;
+  if (renderMeta && typeof renderMeta === "object") {
+    const effectsRaw = (renderMeta as Record<string, unknown>).effects;
+    if (Array.isArray(effectsRaw)) {
+      const effects: RenderEffectSpec[] = [];
+      for (const raw of effectsRaw) {
+        if (!raw || typeof raw !== "object") continue;
+        const r = raw as { type?: unknown; params?: unknown };
+        if (typeof r.type !== "string") continue;
+        if (!isSupportedEffectType(r.type)) continue;
+        if (r.type === "none") continue;
+        const params: Record<string, number | string> = {};
+        if (r.params && typeof r.params === "object") {
+          for (const [k, v] of Object.entries(r.params as Record<string, unknown>)) {
+            if (typeof v === "number" || typeof v === "string") params[k] = v;
+          }
+        }
+        effects.push({ type: r.type, params });
+      }
+      if (effects.length > 0) {
+        transform.effects = effects;
+        touched = true;
+      }
+    }
+  }
+
+  return touched ? transform : undefined;
 }
 
 export function buildGapVideoArgs(
@@ -412,6 +506,9 @@ export async function assembleTimelineToMp4(
       } else {
         const clip = findClipById(timeline.tracks.video, plan.clip_id!);
         const sourcePath = resolveClipSourcePath(resolver, clip);
+        // FATAL-1: derive per-clip transform from metadata so the final
+        // segment goes through the same shared filtergraph as preview.
+        const transform = extractClipTransform(clip);
         await runFfmpeg(execFileImpl, ffmpegBin, buildVideoTrimArgs(
           sourcePath,
           segmentPath,
@@ -420,6 +517,7 @@ export async function assembleTimelineToMp4(
           width,
           height,
           fps,
+          transform,
         ));
       }
       renderedVideoSegments.push(segmentPath);

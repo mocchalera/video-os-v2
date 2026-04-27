@@ -11,6 +11,17 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+// FATAL-1 (Phase 5 review R1): both preview and final must serialize the
+// video filter graph through the same shared builder so the byte-identical
+// parity guarantee actually holds. The runtime previously had a bespoke
+// scale+pad helper which diverged from preview the moment any clip carried
+// a zoom/crop/effect. We now delegate every "fit" call to the shared
+// filtergraph builder via a synthetic no-transform RenderVideoClip.
+import {
+  buildVideoClipFilterString,
+} from "../../editor/shared/filtergraph.js";
+import type { RenderVideoClip } from "../../editor/shared/render-spec.js";
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface RenderPipelineOptions {
@@ -87,15 +98,88 @@ function readTimelineSequenceConfig(timelinePath: string): TimelineSequenceConfi
   };
 }
 
+/**
+ * Build the fit filter for a clip that has no per-clip transform or effects.
+ *
+ * Internally constructs a synthetic RenderVideoClip (zoom=1, no crop, no
+ * position, no effects) and runs it through the shared filtergraph builder,
+ * so the resulting string is byte-identical to what preview-job-service
+ * generates for the same case. Both preview and final render now go through
+ * `shared/filtergraph.buildVideoClipFilterString`.
+ *
+ * The legacy `padColor` parameter is preserved for source compatibility but
+ * is now ignored — the shared builder always relies on ffmpeg's default pad
+ * color (black). Pass-through callers in this repo all used the default.
+ */
 export function buildAspectRatioFitFilter(
   outputWidth: number,
   outputHeight: number,
-  padColor = "black",
+  // Deprecated — kept only so older call sites continue to type-check.
+  // The shared filter builder uses ffmpeg's default pad color (black).
+  _padColor: string = "black",
 ): string {
-  return (
-    `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease,` +
-    `pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2:${padColor}`
+  void _padColor;
+  return buildVideoClipFilterString(
+    makeNoTransformClip(),
+    { width: outputWidth, height: outputHeight },
   );
+}
+
+/**
+ * Build the per-clip filter string from a transform descriptor sourced from
+ * timeline metadata. Used by the assembler so that final-render segments
+ * apply the same zoom/crop/position/effects as preview.
+ */
+export function buildVideoFitFilterFromTransform(
+  outputWidth: number,
+  outputHeight: number,
+  transform: ClipFilterTransform = {},
+): string {
+  const clip: RenderVideoClip = {
+    clipId: "fit",
+    assetId: "fit",
+    sourcePath: "",
+    timelineInFrame: 0,
+    durationFrames: 0,
+    sourceInSec: 0,
+    sourceOutSec: 0,
+    transform: {
+      mode: "cover",
+      anchor: "center",
+      zoom: typeof transform.zoom === "number" && transform.zoom > 0
+        ? transform.zoom
+        : 1,
+      ...(transform.crop ? { crop: transform.crop } : {}),
+      ...(transform.position ? { position: transform.position } : {}),
+    },
+    effects: transform.effects ?? [],
+  };
+  return buildVideoClipFilterString(clip, {
+    width: outputWidth,
+    height: outputHeight,
+  });
+}
+
+/** Subset of RenderVideoClip transform fields the assembler can pass through. */
+export interface ClipFilterTransform {
+  zoom?: number;
+  crop?: { x: number; y: number; width: number; height: number };
+  position?: { x: number; y: number };
+  effects?: RenderVideoClip["effects"];
+}
+
+function makeNoTransformClip(): RenderVideoClip {
+  return {
+    clipId: "fit",
+    assetId: "fit",
+    sourcePath: "",
+    timelineInFrame: 0,
+    durationFrames: 0,
+    sourceInSec: 0,
+    sourceOutSec: 0,
+    transform: { mode: "cover", zoom: 1, anchor: "center" },
+    effects: [],
+  };
 }
 
 async function fitVideoToTimeline(
