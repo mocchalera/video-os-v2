@@ -15,14 +15,21 @@
     "regen:premiere": "tsx scripts/regen-premiere-xml.ts"
   },
   "dependencies": {
+    "@remotion/bundler": "4.0.452",
+    "@remotion/renderer": "4.0.452",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "dotenv": "^17.3.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "remotion": "4.0.452",
     "typescript": "^5.7.0",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
     "tsx": "^4.19.0",
     "vitest": "^3.0.0"
   }
