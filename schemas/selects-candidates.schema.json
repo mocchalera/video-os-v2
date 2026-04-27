@@ -73,6 +73,16 @@
           "minLength": 1
         }
       ]
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "search_index_manifest_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": true
     }
   },
   "$defs": {

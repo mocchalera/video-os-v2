@@ -45,6 +45,12 @@ import {
   type ContinuityGraph,
   type ContinuityGraphRisk,
 } from "../artifacts/p3-continuity-graph.js";
+import {
+  hasSearchInfluence,
+  isP4dSearchIndexEnabled,
+  loadSearchIndexManifest,
+  materializeSearchHash,
+} from "../artifacts/p4d-segment-search-index.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -133,6 +139,10 @@ export interface SelectsCandidates {
   selection_notes?: string[];
   candidates: SelectCandidate[];
   editorial_summary?: EditorialSummary;
+  provenance?: {
+    search_index_manifest_hash?: string;
+    [key: string]: unknown;
+  };
 }
 
 /** The agent function signature — injectable for testing */
@@ -273,6 +283,12 @@ export async function runTriage(
   }
   if (isP3ContinuityPreferenceEnabled()) {
     materializeContinuityRiskRefs(absDir, agentResult.selects);
+  }
+  if (isP4dSearchIndexEnabled() && hasSearchInfluence(agentResult.selects)) {
+    const searchIndex = loadSearchIndexManifest(absDir);
+    if (searchIndex.manifest) {
+      materializeSearchHash(agentResult.selects as unknown as Record<string, unknown>, searchIndex.manifest.hash);
+    }
   }
 
   // 6. Draft selects_candidates.yaml

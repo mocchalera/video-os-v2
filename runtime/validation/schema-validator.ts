@@ -154,6 +154,20 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "03_analysis/search/segment_search_index_manifest.json",
+    schemaFile: "segment-search-index-manifest.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "03_analysis/search/segment_text_index.json",
+    schemaFile: "segment-text-index.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "03_analysis/assets.json",
     schemaFile: "assets.schema.json",
     format: "json",

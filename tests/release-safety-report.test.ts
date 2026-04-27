@@ -168,6 +168,8 @@ afterEach(() => {
   delete process.env.ENABLE_P4A_RELEASE_SAFETY;
   delete process.env.ENABLE_P4B_DELIVERY_PROFILES;
   delete process.env.ENABLE_P4C_CONFIDENCE_CALIBRATION;
+  delete process.env.ENABLE_P4D_SEARCH_INDEX;
+  delete process.env.SEARCH_INDEX_AUTONOMY;
   delete process.env.RELEASE_SAFETY_MODE;
 });
 
@@ -489,6 +491,62 @@ describe("P4a release_safety_report", () => {
 
     expect(report.checks.some((check) => check.check_id.includes("confidence_calibration"))).toBe(false);
   });
+
+  it("adds a blocker source_manifest check for stale search index when P4d full autonomy is enabled", () => {
+    const projectDir = makeProject();
+    writeStaleSearchIndexManifest(projectDir);
+    process.env.ENABLE_P4D_SEARCH_INDEX = "true";
+    process.env.SEARCH_INDEX_AUTONOMY = "full";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      category: "source_manifest",
+      check_id: "RSCHK_source_manifest_search_index_stale",
+      severity: "blocker",
+      status: "fail",
+    }));
+  });
+
+  it("adds a warning source_manifest check for stale search index in interactive mode", () => {
+    const projectDir = makeProject();
+    writeStaleSearchIndexManifest(projectDir);
+    process.env.ENABLE_P4D_SEARCH_INDEX = "true";
+    process.env.SEARCH_INDEX_AUTONOMY = "interactive";
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks).toContainEqual(expect.objectContaining({
+      category: "source_manifest",
+      check_id: "RSCHK_source_manifest_search_index_stale",
+      severity: "warning",
+      status: "fail",
+    }));
+  });
+
+  it("does not add search stale checks when the P4d feature flag is off", () => {
+    const projectDir = makeProject();
+    writeStaleSearchIndexManifest(projectDir);
+
+    const report = buildReleaseSafetyReport({
+      projectDir,
+      producer: "/package",
+      mode: "dry_run",
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(report.checks.some((check) => check.check_id === "RSCHK_source_manifest_search_index_stale")).toBe(false);
+  });
 });
 
 function writeDeliveryProfileInputs(
@@ -579,6 +637,59 @@ function writeCalibrationReport(projectDir: string, overrides: Record<string, un
     ...overrides,
   };
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+}
+
+function writeStaleSearchIndexManifest(projectDir: string): void {
+  fs.mkdirSync(path.join(projectDir, "03_analysis/search"), { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, "03_analysis/search/segment_text_index.json"),
+    JSON.stringify({
+      version: "1.0.0",
+      project_id: "p4a-runtime",
+      artifact_version: "text-index-v1",
+      created_at: "2026-04-27T00:00:00Z",
+      index_id: "SIDX_release_safety",
+      segments: [],
+      provenance: {
+        producer: "scripts/rebuild-segment-search-index.ts",
+        inputs: [],
+        hash_policy: { algorithm: "sha256", canonicalization: "normalized-json-v1", excluded_fields: ["created_at"] },
+      },
+    }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(projectDir, "03_analysis/search/segment_search_index_manifest.json"),
+    JSON.stringify({
+      version: "1.0.0",
+      project_id: "p4a-runtime",
+      artifact_version: "search-index-v1",
+      created_at: "2026-04-27T00:00:00Z",
+      index_id: "SIDX_release_safety",
+      inputs: {
+        source_media_manifest_hash: `sha256:${"0".repeat(64)}`,
+        assets_hash: `sha256:${"1".repeat(64)}`,
+        segments_hash: `sha256:${"2".repeat(64)}`,
+        transcripts_hashes: [],
+        audio_story_graph_hash: `sha256:${"3".repeat(64)}`,
+        continuity_graph_hash: `sha256:${"4".repeat(64)}`,
+        editorial_preference_memory_hash: null,
+        coverage_report_hash: `sha256:${"5".repeat(64)}`,
+      },
+      structure: [
+        { field: "transcript_text", source_prefix: "TR_", indexed: true, tokenizer: "japanese_morpheme" },
+      ],
+      text_index: {
+        path: "03_analysis/search/segment_text_index.json",
+        hash: `sha256:${"6".repeat(64)}`,
+      },
+      vector_shards: [],
+      provenance: {
+        producer: "scripts/rebuild-segment-search-index.ts",
+        inputs: [],
+        hash_policy: { algorithm: "sha256", canonicalization: "normalized-json-v1", excluded_fields: ["created_at"] },
+      },
+    }, null, 2),
+  );
 }
 
 function sha256File(filePath: string): string {

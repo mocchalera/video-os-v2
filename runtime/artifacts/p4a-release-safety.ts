@@ -16,6 +16,13 @@ import {
   isP4cConfidenceCalibrationEnabled,
   loadCalibrationReport,
 } from "./p4c-confidence-calibration.js";
+import {
+  currentSearchIndexInputHashes,
+  generateSearchStaleCheck,
+  getSearchIndexAutonomyMode,
+  isP4dSearchIndexEnabled,
+  loadSearchIndexManifest,
+} from "./p4d-segment-search-index.js";
 
 export type ReleaseSafetyMode = "dry_run" | "report_only" | "enforce";
 export type ReleaseSafetyProducer = "/package" | "/render";
@@ -173,6 +180,7 @@ export function buildReleaseSafetyReport(
     checkMusicAudio(projectDir, artifacts),
     checkPackageCompleteness(projectDir, artifacts),
     checkSourceManifest(projectDir, artifacts),
+    ...checkSearchIndexFreshness(projectDir),
   ];
   const waivers = options.waivers ?? [];
   const waivedChecks = applyWaivers(checks, waivers);
@@ -465,6 +473,30 @@ function checkSourceManifest(projectDir: string, artifacts: Map<string, { data: 
     return check("source_manifest", "blocker", "fail", "RSCHK_source_manifest_stale_refs", `stale source manifest hash refs: ${staleArtifacts.join(", ")}`, [artifactRef(projectDir, relPath, false), ...staleArtifacts.map((rel) => artifactRef(projectDir, rel, false))]);
   }
   return check("source_manifest", "info", "pass", "RSCHK_source_manifest_fresh", "source manifest refs are fresh", [artifactRef(projectDir, relPath, false)]);
+}
+
+function checkSearchIndexFreshness(projectDir: string): ReleaseSafetyCheck[] {
+  if (!isP4dSearchIndexEnabled()) return [];
+  const loaded = loadSearchIndexManifest(projectDir);
+  if (loaded.malformed.length > 0) {
+    const item = loaded.malformed[0];
+    return [check(
+      "source_manifest",
+      getSearchIndexAutonomyMode() === "full" ? "blocker" : "warning",
+      "fail",
+      "RSCHK_source_manifest_search_index_malformed",
+      `segment search index manifest malformed: ${loaded.malformed.flatMap((entry) => entry.errors).join("; ")}`,
+      [{ path: item.path, hash: item.hash, required: false }],
+    )];
+  }
+  if (!loaded.manifest) return [];
+  const stale = generateSearchStaleCheck(
+    loaded.manifest.manifest,
+    currentSearchIndexInputHashes(projectDir),
+    getSearchIndexAutonomyMode(),
+    projectDir,
+  );
+  return stale ? [stale] : [];
 }
 
 function applyWaivers(checks: ReleaseSafetyCheck[], waivers: ReleaseSafetyWaiver[]): ReleaseSafetyCheck[] {

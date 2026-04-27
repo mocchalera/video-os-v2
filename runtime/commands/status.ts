@@ -32,6 +32,10 @@ import {
   isP4cConfidenceCalibrationEnabled,
   readCalibrationReportStatus,
 } from "../artifacts/p4c-confidence-calibration.js";
+import {
+  isP4dSearchIndexEnabled,
+  readSearchIndexStatus,
+} from "../artifacts/p4d-segment-search-index.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -82,6 +86,17 @@ export interface StatusResult {
     path: string;
     eval_set_id?: string;
     calibration_model_id?: string;
+    valid?: boolean;
+    errors?: string[];
+  };
+  searchIndex?: {
+    enabled: boolean;
+    exists: boolean;
+    path: string;
+    index_id?: string;
+    hash?: string;
+    stale?: boolean;
+    stale_reasons?: string[];
     valid?: boolean;
     errors?: string[];
   };
@@ -173,6 +188,9 @@ export function runStatus(projectDir: string): StatusResult {
       : undefined,
     confidenceCalibration: isP4cConfidenceCalibrationEnabled()
       ? readCalibrationReportStatus(ctx.projectDir)
+      : undefined,
+    searchIndex: isP4dSearchIndexEnabled()
+      ? readSearchIndexStatus(ctx.projectDir)
       : undefined,
     staleArtifacts: reconcileResult.stale_artifacts,
     selfHealed: reconcileResult.self_healed,
