@@ -118,7 +118,7 @@ export interface PeakMoment {
   type: PeakType;
   confidence: number;
   description: string;
-  source_pass: "refine_filmstrip" | "precision_dense_frames" | "precision_proxy_clip";
+  source_pass: "refine_filmstrip" | "precision_dense_frames" | "precision_proxy_clip" | "degraded_ffmpeg_signals";
 }
 
 export interface RecommendedInOut {

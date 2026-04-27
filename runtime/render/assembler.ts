@@ -59,6 +59,8 @@ export interface AudioClipPlan {
   audio_policy?: ClipOutput["audio_policy"];
 }
 
+type TimelineAudioPolicyMode = "ducking" | "bgm_only" | "original_only";
+
 interface PreviewManifestClip {
   clip_id?: string;
   asset_id?: string;
@@ -365,6 +367,48 @@ export function buildAudioMixFilter(
   return steps.join(";");
 }
 
+export function buildDuckingAudioMixFilter(
+  plans: Array<{ delay_ms: number; isBgm: boolean }>,
+  audioChannels: 1 | 2,
+): string {
+  const delayExpr = (delayMs: number) =>
+    audioChannels === 1 ? `${delayMs}` : `${delayMs}|${delayMs}`;
+  const steps: string[] = [];
+  const originalLabels: string[] = [];
+  const bgmLabels: string[] = [];
+
+  for (let i = 0; i < plans.length; i++) {
+    const delayed = `d${i}`;
+    steps.push(`[${i + 1}:a]adelay=${delayExpr(plans[i].delay_ms)}[${delayed}]`);
+    if (plans[i].isBgm) {
+      bgmLabels.push(`[${delayed}]`);
+    } else {
+      originalLabels.push(`[${delayed}]`);
+    }
+  }
+
+  if (originalLabels.length === 0 || bgmLabels.length === 0) {
+    const labels = [`[0:a]`, ...originalLabels, ...bgmLabels].join("");
+    steps.push(`${labels}amix=inputs=${plans.length + 1}:duration=longest:dropout_transition=0[aout]`);
+    return steps.join(";");
+  }
+
+  const mixGroup = (labels: string[], output: string) => {
+    if (labels.length === 1) {
+      steps.push(`${labels[0]}anull[${output}]`);
+    } else {
+      steps.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0[${output}]`);
+    }
+  };
+
+  mixGroup(originalLabels, "orig");
+  mixGroup(bgmLabels, "bgm");
+  steps.push("[bgm][orig]sidechaincompress=threshold=0.08:ratio=8:attack=30:release=350:makeup=1[ducked]");
+  steps.push("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0[aout]");
+
+  return steps.join(";");
+}
+
 export function buildSilentAudioArgs(
   outputPath: string,
   totalDurationSec: number,
@@ -389,6 +433,7 @@ export function buildAudioMixArgs(
   sampleRate: number,
   audioChannels: 1 | 2,
   delaysMs: number[],
+  duckingPlans?: Array<{ delay_ms: number; isBgm: boolean }>,
 ): string[] {
   return [
     "-y",
@@ -396,7 +441,9 @@ export function buildAudioMixArgs(
     "-t", formatFfmpegTimestamp(totalDurationSec),
     "-i", `anullsrc=channel_layout=${audioChannels === 1 ? "mono" : "stereo"}:sample_rate=${sampleRate}`,
     ...inputPaths.flatMap((inputPath) => ["-i", inputPath]),
-    "-filter_complex", buildAudioMixFilter(delaysMs, audioChannels),
+    "-filter_complex", duckingPlans
+      ? buildDuckingAudioMixFilter(duckingPlans, audioChannels)
+      : buildAudioMixFilter(delaysMs, audioChannels),
     "-map", "[aout]",
     "-c:a", "aac",
     "-b:a", "192k",
@@ -532,6 +579,7 @@ export async function assembleTimelineToMp4(
   const resolver = createSourceResolver(projectDir, timelineDir);
   const videoPlans = buildVideoAssemblyPlan(timeline);
   const audioPlans = buildAudioAssemblyPlan(timeline);
+  const audioPolicyMode = getTimelineAudioPolicyMode(timeline);
   const totalDurationSec = totalFrames / fps;
 
   try {
@@ -575,12 +623,19 @@ export async function assembleTimelineToMp4(
 
     const renderedAudioSegments: string[] = [];
     const audioDelaysMs: number[] = [];
-    for (let i = 0; i < audioPlans.length; i++) {
-      const plan = audioPlans[i];
+    const duckingPlans: Array<{ delay_ms: number; isBgm: boolean }> = [];
+    const effectiveAudioPlans = audioPlans.filter((plan) => {
+      const isBgm = isBgmPlan(plan);
+      if (audioPolicyMode === "bgm_only") return isBgm;
+      if (audioPolicyMode === "original_only") return !isBgm;
+      return true;
+    });
+    for (let i = 0; i < effectiveAudioPlans.length; i++) {
+      const plan = effectiveAudioPlans[i];
       const clip = findClipById(timeline.tracks.audio, plan.clip_id);
       const sourcePath = resolveClipSourcePath(resolver, clip);
       const segmentPath = path.join(workingDir, `audio-segment-${String(i + 1).padStart(4, "0")}.wav`);
-      const isBgm = plan.role === "bgm" || plan.role === "music" || plan.track_id === "A2";
+      const isBgm = isBgmPlan(plan);
       const audioArgs = isBgm
         ? buildBgmAudioRenderArgs(
           sourcePath,
@@ -603,6 +658,7 @@ export async function assembleTimelineToMp4(
       await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);
       audioDelaysMs.push(plan.delay_ms);
+      duckingPlans.push({ delay_ms: plan.delay_ms, isBgm });
     }
 
     const mixedAudioPath = path.join(workingDir, "assembly.audio.m4a");
@@ -621,6 +677,7 @@ export async function assembleTimelineToMp4(
         sampleRate,
         audioChannels,
         audioDelaysMs,
+        audioPolicyMode === "ducking" ? duckingPlans : undefined,
       ));
     }
 
@@ -643,6 +700,18 @@ export async function assembleTimelineToMp4(
       fs.rmSync(workingDir, { recursive: true, force: true });
     }
   }
+}
+
+function getTimelineAudioPolicyMode(timeline: TimelineIR): TimelineAudioPolicyMode {
+  const raw = timeline.provenance.audio_policy?.mode;
+  if (raw === "bgm_only" || raw === "original_only" || raw === "ducking") {
+    return raw;
+  }
+  return "ducking";
+}
+
+function isBgmPlan(plan: AudioClipPlan): boolean {
+  return plan.role === "bgm" || plan.role === "music" || plan.track_id === "A2";
 }
 
 function findActiveVideoClip(

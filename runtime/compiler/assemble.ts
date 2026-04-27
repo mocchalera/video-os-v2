@@ -10,6 +10,7 @@
 
 import type {
   AssembledTimeline,
+  BriefAudioPolicy,
   DurationPolicy,
   Marker,
   NormalizedData,
@@ -23,6 +24,10 @@ import { getCandidateRef } from "./candidate-ref.js";
 
 export interface AssembleOptions {
   timelineOrder?: "chronological" | "editorial";
+  audioPolicy?: BriefAudioPolicy;
+  bgmAssetId?: string;
+  bgmSegmentId?: string;
+  bgmDurationSec?: number;
 }
 
 export function assemble(
@@ -290,6 +295,36 @@ export function assemble(
     reorderChronological(v1Clips, v2Clips, a1Clips, markers);
   }
 
+  if (options?.audioPolicy !== "bgm_only") {
+    addOriginalAudioForVideoClips([...v1Clips, ...v2Clips], a1Clips, options?.audioPolicy ?? "ducking", clipCounter);
+  }
+
+  if (options?.bgmAssetId && options.audioPolicy !== "original_only") {
+    const totalVideoFrames = Math.max(
+      0,
+      ...[...v1Clips, ...v2Clips].map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames),
+    );
+    a2Clips.push({
+      clip_id: "ACL_BGM_0001",
+      segment_id: options.bgmSegmentId ?? `${normalized.project_id}:bgm`,
+      asset_id: options.bgmAssetId,
+      src_in_us: 0,
+      src_out_us: Math.round((options.bgmDurationSec ?? totalVideoFrames / (fpsNum / fpsDen)) * 1_000_000),
+      timeline_in_frame: 0,
+      timeline_duration_frames: totalVideoFrames,
+      role: "bgm",
+      motivation: "background music bed",
+      beat_id: "music01",
+      fallback_segment_ids: [],
+      confidence: 1,
+      quality_flags: [],
+      audio_policy: {
+        mode: options.audioPolicy ?? "ducking",
+        duck_music_db: -18,
+      },
+    });
+  }
+
   const video: Track[] = [
     { track_id: "V1", kind: "video", clips: v1Clips },
     { track_id: "V2", kind: "video", clips: v2Clips },
@@ -297,7 +332,7 @@ export function assemble(
 
   const audio: Track[] = [
     { track_id: "A1", kind: "audio", clips: a1Clips },
-    { track_id: "A2", kind: "audio", clips: [] }, // Music: M1 empty
+    { track_id: "A2", kind: "audio", clips: a2Clips },
     { track_id: "A3", kind: "audio", clips: [] }, // Texture/room tone: M1 empty
   ];
 
@@ -499,4 +534,33 @@ function makeClip(
     candidate_ref: getCandidateRef(c),
     fallback_candidate_refs: fallbacks.candidate_refs,
   };
+}
+
+function addOriginalAudioForVideoClips(
+  videoClips: TimelineClip[],
+  a1Clips: TimelineClip[],
+  audioPolicy: BriefAudioPolicy,
+  startClipCounter: number,
+): void {
+  const existing = new Set(a1Clips.map((clip) => clipUsageKey(clip)));
+  let clipCounter = startClipCounter;
+
+  for (const videoClip of videoClips) {
+    const key = clipUsageKey(videoClip);
+    if (existing.has(key)) continue;
+
+    a1Clips.push({
+      ...videoClip,
+      clip_id: `ACL_${String(++clipCounter).padStart(4, "0")}`,
+      role: "nat_sound",
+      motivation: "original clip audio",
+      confidence: Math.max(videoClip.confidence, 0.9),
+      audio_policy: {
+        mode: audioPolicy,
+        preserve_nat_sound: true,
+        nat_gain: audioPolicy === "original_only" ? 1 : 0.95,
+      },
+    });
+    existing.add(key);
+  }
 }

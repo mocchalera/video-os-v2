@@ -175,6 +175,15 @@
             "max_duration_sec": { "type": ["number", "null"], "minimum": 0 }
           },
           "additionalProperties": false
+        },
+        "audio_policy": {
+          "type": "object",
+          "required": ["mode", "source"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["ducking", "bgm_only", "original_only"] },
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -299,6 +308,10 @@
         "audio_policy": {
           "type": "object",
           "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["ducking", "bgm_only", "original_only"]
+            },
             "duck_music_db": {
               "type": "number"
             },

@@ -67,6 +67,26 @@ export function computePeakSalienceBonus(
   return peakStrength * storyRoleWeight * typeMatchWeight;
 }
 
+export function computePeakPriorityBonus(candidate: Candidate): number {
+  const signals = candidate.peak_signals;
+  if (!signals) return 0;
+
+  const motion = clamp01(signals.motion ?? 0);
+  const audio = clamp01(signals.audio_rms ?? 0);
+  const speech = Math.min(1, (signals.speech_keyword?.length ?? 0) / 3);
+  const strongestSignal = Math.max(motion, audio, speech);
+
+  if (strongestSignal <= 0) return 0;
+
+  const roleWeight = candidate.role === "hero"
+    ? 1
+    : candidate.role === "support" || candidate.role === "dialogue"
+    ? 0.8
+    : 0.45;
+
+  return Number((0.35 * strongestSignal * roleWeight).toFixed(3));
+}
+
 export function scoreCandidates(
   normalized: NormalizedData,
   candidates: Candidate[],
@@ -233,6 +253,10 @@ function scoreCandidate(
   // 7. Peak salience bonus: candidate-specific, per design doc §11.2
   const peakSalienceBonus = computePeakSalienceBonus(candidate, beat);
 
+  // 7.5. Peak priority bonus: explicit selects_candidates peak_signals
+  // must be strong enough to reorder candidates toward the top.
+  const peakPriorityBonus = computePeakPriorityBonus(candidate);
+
   // 8. BGM downbeat proximity bonus + chorus-peak priority
   const bgmBonus = bgmContext
     ? computeBgmBonus(candidate, beat, bgmContext, usPerFrame)
@@ -267,6 +291,7 @@ function scoreCandidate(
     adjacencyPenalty +
     skillAdjustment +
     peakSalienceBonus +
+    peakPriorityBonus +
     bgmBonus;
 
   return {
@@ -280,9 +305,15 @@ function scoreCandidate(
       motif_reuse_penalty: motifReusePenalty,
       adjacency_penalty: adjacencyPenalty,
       peak_salience_bonus: peakSalienceBonus,
+      peak_priority_bonus: peakPriorityBonus,
       bgm_bonus: bgmBonus,
     },
   };
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 // ── BGM Downbeat Proximity Bonus + Chorus-Peak Priority ─────────────
