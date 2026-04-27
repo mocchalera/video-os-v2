@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/analysis-coverage-report.schema.json",
+  "title": "Video OS Analysis Coverage Report",
+  "type": "object",
+  "required": [
+    "version", "project_id", "artifact_version", "created_at", "source_media_manifest_hash",
+    "summary", "lanes", "assets", "blockers", "overrides", "provenance"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "pattern": "^analysis-v\\d+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_media_manifest_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "summary": {
+      "type": "object",
+      "required": ["status", "required_lane_count", "ready_lane_count", "blocked_lane_count", "partial_lane_count"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "partial_override", "blocked"] },
+        "required_lane_count": { "type": "integer", "minimum": 0 },
+        "ready_lane_count": { "type": "integer", "minimum": 0 },
+        "blocked_lane_count": { "type": "integer", "minimum": 0 },
+        "partial_lane_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/lane-status" }
+    },
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset-coverage" }
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/coverage-blocker" }
+    },
+    "overrides": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/override-ref" }
+    },
+    "provenance": { "$ref": "#/$defs/artifact-provenance" }
+  },
+  "$defs": {
+    "lane-status": {
+      "type": "object",
+      "required": ["lane_id", "status", "required", "consumer_impact", "asset_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "lane_id": {
+          "type": "string",
+          "enum": [
+            "source_manifest", "ffprobe", "segments", "contact_sheets", "filmstrips", "stt",
+            "diarization", "vlm_tags", "vlm_peaks", "audio_events", "bgm_analysis",
+            "audio_story_graph", "continuity_graph", "embeddings", "sync_quality"
+          ]
+        },
+        "status": { "type": "string", "enum": ["pending", "ready", "partial", "skipped", "failed", "waived"] },
+        "required": { "type": "boolean" },
+        "reason": { "type": ["string", "null"] },
+        "consumer_impact": { "type": "string", "enum": ["none", "status_only", "triage_warn", "planning_warn", "planning_block", "compile_block", "package_block"] },
+        "asset_ids": { "type": "array", "items": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" } },
+        "artifact_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "asset-coverage": {
+      "type": "object",
+      "required": ["asset_id", "status", "lanes"],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" },
+        "status": { "type": "string", "enum": ["ready", "partial", "blocked", "excluded"] },
+        "lanes": { "type": "array", "items": { "$ref": "#/$defs/lane-status" } }
+      }
+    },
+    "coverage-blocker": {
+      "type": "object",
+      "required": ["blocker_id", "severity", "lane_id", "asset_ids", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "blocker_id": { "type": "string", "pattern": "^COVBLK_[A-Za-z0-9_-]+$" },
+        "severity": { "type": "string", "enum": ["warning", "blocker"] },
+        "lane_id": { "type": "string" },
+        "asset_ids": { "type": "array", "items": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" } },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    },
+    "override-ref": {
+      "type": "object",
+      "required": ["override_id", "status", "scope", "approved_by", "approved_at"],
+      "additionalProperties": false,
+      "properties": {
+        "override_id": { "type": "string", "pattern": "^OVR_[A-Za-z0-9_-]+$" },
+        "status": { "type": "string", "enum": ["active", "stale", "expired"] },
+        "scope": { "type": "string", "minLength": 1 },
+        "approved_by": { "type": "string", "minLength": 1 },
+        "approved_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": ["string", "null"], "format": "date-time" },
+        "applies_to_artifact_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "artifact-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["scripts/analyze.ts", "analysis-pipeline"] },
+        "inputs": { "type": "array", "items": { "type": "object" } },
+        "hash_policy": { "type": "object" }
+      }
+    }
+  }
+}

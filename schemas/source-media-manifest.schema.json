@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/source-media-manifest.schema.json",
+  "title": "Video OS Source Media Manifest",
+  "type": "object",
+  "required": ["version", "project_id", "artifact_version", "created_at", "source_root", "items", "provenance"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "artifact_version": { "type": "string", "pattern": "^(analysis|manifest)-v\\d+$" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_root": {
+      "type": "object",
+      "required": ["locator", "locator_kind"],
+      "additionalProperties": false,
+      "properties": {
+        "locator": { "type": "string", "minLength": 1 },
+        "locator_kind": { "type": "string", "enum": ["local_path", "symlink", "external_drive", "cloud_uri", "mixed"] }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/source-item" }
+    },
+    "provenance": { "$ref": "#/$defs/artifact-provenance" }
+  },
+  "$defs": {
+    "source-item": {
+      "type": "object",
+      "required": [
+        "asset_id", "source_locator", "filename", "content_hash", "fingerprint", "size_bytes", "mtime",
+        "media_kind", "ingest_status", "rights_status", "privacy_status", "analysis_policy_ref",
+        "capture_started_at", "capture_timezone", "timecode_start", "timecode_format", "sample_rate",
+        "duration_us", "frame_rate_mode", "rotation", "audio_video_offset_ms", "clock_source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" },
+        "source_locator": { "type": "string", "minLength": 1 },
+        "filename": { "type": "string", "minLength": 1 },
+        "content_hash": { "type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$" },
+        "fingerprint": { "type": ["string", "null"], "minLength": 1 },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "mtime": { "type": "string", "format": "date-time" },
+        "media_kind": { "type": "string", "enum": ["video", "audio", "image", "sequence", "unknown"] },
+        "ingest_status": { "type": "string", "enum": ["ready", "missing", "stale", "unsupported", "excluded"] },
+        "rights_status": { "type": "string", "enum": ["unknown", "operator_declared_ok", "licensed", "restricted", "blocked"] },
+        "privacy_status": { "type": "string", "enum": ["unknown", "operator_declared_ok", "contains_people", "sensitive", "blocked"] },
+        "analysis_policy_ref": { "type": "string", "pattern": "^APOL_[A-Za-z0-9_-]+$" },
+        "capture_started_at": { "type": ["string", "null"], "format": "date-time" },
+        "capture_timezone": { "type": ["string", "null"], "minLength": 1 },
+        "timecode_start": { "type": ["string", "null"], "pattern": "^(\\d{2}:\\d{2}:\\d{2}[:;]\\d{2})$" },
+        "timecode_format": { "type": "string", "enum": ["none", "non_drop", "drop_frame", "inferred", "unknown"] },
+        "sample_rate": { "type": ["integer", "null"], "minimum": 1 },
+        "duration_us": { "type": ["integer", "null"], "minimum": 0 },
+        "frame_rate_mode": { "type": "string", "enum": ["cfr", "vfr", "audio_only", "unknown"] },
+        "rotation": { "type": ["integer", "null"], "enum": [0, 90, 180, 270, null] },
+        "audio_video_offset_ms": { "type": ["number", "null"] },
+        "clock_source": { "type": "string", "enum": ["file_metadata", "timecode_track", "operator_declared", "inferred", "unknown"] }
+      }
+    },
+    "artifact-provenance": {
+      "type": "object",
+      "required": ["producer", "inputs", "hash_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["init-project", "analysis-ingest", "ingest-command"] },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/input-ref" } },
+        "hash_policy": { "$ref": "#/$defs/hash-policy" }
+      }
+    },
+    "input-ref": {
+      "type": "object",
+      "required": ["path", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "hash-policy": {
+      "type": "object",
+      "required": ["algorithm", "canonicalization", "excluded_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "type": "string", "enum": ["sha256"] },
+        "canonicalization": { "type": "string", "enum": ["normalized-json-v1"] },
+        "excluded_fields": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
