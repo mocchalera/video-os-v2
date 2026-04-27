@@ -176,9 +176,11 @@
           },
           "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     }
   },
+  "additionalProperties": false,
   "$defs": {
     "track": {
       "type": "object",
