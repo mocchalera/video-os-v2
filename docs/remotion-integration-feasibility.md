@@ -1,5 +1,47 @@
 # Remotion Integration Feasibility Survey
 
+## Implementation Status
+
+Status: **Implemented** (Phases A through F + Phase G light landed).
+
+Commit chain:
+
+| Phase | Commit | Subject |
+|---|---|---|
+| A.5 | `6fef016` | docs: add Remotion integration feasibility survey |
+| B | `464175c` | feat(schema): extend transitions and canonicalize overlay metadata read order |
+| C1 | `0beac0e` | chore(deps): add Remotion and React for alternate assembly engine |
+| C2 | `14c9a2e` | feat(render): add Remotion alternate assembly engine skeleton |
+| C3 | `3b0c0e7` | feat(render): wire Remotion bundler+renderer for cuts-only assembly |
+| D | `eb13983` | feat(render): add Remotion TextOverlay preset registry and layer |
+| E | `38f159d` | feat(render): add Remotion transitions with handle preflight |
+| F | `56a0c19` | feat(render): wire alternate assembly engines into pipeline |
+
+Verification at landing time:
+
+- `npm run validate`: pass
+- `npm test` (default): 1919 passed / 14 skipped
+- `VOS_REMOTION_RENDER=1 npm test`: 1920 passed / 13 skipped
+- `npm run build`: pass
+- canonical hash of `projects/demo/05_timeline/timeline.json` (created_at excluded): `68c8d701302aa5150f8afd183de1a52711349834f4c9e267cb3544e26e01b100` (unchanged)
+
+How to opt in to Remotion as the alternate assembly engine:
+
+- Pass `opts.assemblyEngine = "remotion"` to `runRenderPipeline()`, OR
+- Set `VOS_RENDER_ENGINE=remotion` in the environment
+
+Required additional opts when no `assemblyPath` is provided:
+
+- `timelinePath`: path to timeline.json
+- `sourceMap`: `Record<asset_id, file_path>`
+- `assemblyOutputPath`: where Remotion should write assembly.mp4
+
+The existing ffmpeg assembler at `runtime/render/assembler.ts` is unchanged. The `ffmpeg` engine value is currently a stub that throws "not yet wired"; pre-build assembly.mp4 with the existing assembler step if you need the ffmpeg path.
+
+The original feasibility survey below remains the design rationale; it is preserved as written.
+
+---
+
 ## 1. Executive summary
 
 Verdict: Caution. Adding Remotion as an alternate assembly engine is feasible without disturbing the canonical ffmpeg assembler, because `runRenderPipeline()` already accepts a prebuilt `assemblyPath` and treats assembly as an upstream contract. The main caution is not the pipeline handoff; it is parity. The current final path applies clip transforms/effects through shared ffmpeg filtergraph code, while the existing Remotion stub is quarantined and not capable of rendering real timeline media. Phase B should therefore keep Remotion behind an explicit alternate-engine flag, preserve ffmpeg `caption_burn` as canonical SpeechCaption burn-in, and prove output-contract compatibility before touching canonical demo behavior.
