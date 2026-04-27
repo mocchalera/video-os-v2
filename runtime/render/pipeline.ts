@@ -21,6 +21,11 @@ import {
   buildVideoClipFilterString,
 } from "../../editor/shared/filtergraph.js";
 import type { RenderVideoClip } from "../../editor/shared/render-spec.js";
+import {
+  produceAssembly,
+  resolveAssemblyEngine,
+} from "./assembly-orchestrator.js";
+import type { AssemblyEngine } from "./assembly-orchestrator.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -30,6 +35,14 @@ export interface RenderPipelineOptions {
   captionApprovalPath?: string;
   musicCuesPath?: string;
   assemblyPath?: string; // Pre-built assembly.mp4 (skip Remotion step)
+  /** Alternate engine if assemblyPath is not pre-built */
+  assemblyEngine?: AssemblyEngine;
+  /** Engine input: asset_id -> source file map */
+  sourceMap?: Record<string, string>;
+  /** Where Remotion should write assembly.mp4 */
+  assemblyOutputPath?: string;
+  /** Optional bundle cache dir (Remotion) */
+  bundleCacheDir?: string;
   captionPolicy: {
     language: string;
     delivery_mode: "burn_in" | "sidecar" | "both";
@@ -429,18 +442,36 @@ export async function runRenderPipeline(
   const logs: Record<string, string> = {};
   const sidecarPaths: string[] = [];
 
-  // 2. Verify assembly path
-  if (!opts.assemblyPath) {
-    throw new Error(
-      "No assemblyPath provided. Remotion rendering is not available in M4 - " +
-      "provide a pre-built assembly.mp4",
-    );
+  // 2. Verify or produce assembly path
+  let assemblyPath: string;
+  if (opts.assemblyPath) {
+    if (!fs.existsSync(opts.assemblyPath)) {
+      throw new Error(`Assembly file not found: ${opts.assemblyPath}`);
+    }
+    assemblyPath = opts.assemblyPath;
+  } else {
+    const engine = resolveAssemblyEngine(opts.assemblyEngine);
+    if (!engine) {
+      throw new Error(
+        "No assemblyPath provided and no assembly engine selected. " +
+          "Either pass opts.assemblyPath, set opts.assemblyEngine, or set " +
+          "VOS_RENDER_ENGINE to 'remotion' or 'ffmpeg'.",
+      );
+    }
+    if (!opts.timelinePath || !opts.sourceMap || !opts.assemblyOutputPath) {
+      throw new Error(
+        "Alternate assembly engine requires timelinePath, sourceMap, and assemblyOutputPath options.",
+      );
+    }
+    const produced = await produceAssembly({
+      timelinePath: opts.timelinePath,
+      sourceMap: opts.sourceMap,
+      outputPath: opts.assemblyOutputPath,
+      engine: opts.assemblyEngine,
+      bundleCacheDir: opts.bundleCacheDir,
+    });
+    assemblyPath = produced.assemblyPath;
   }
-  if (!fs.existsSync(opts.assemblyPath)) {
-    throw new Error(`Assembly file not found: ${opts.assemblyPath}`);
-  }
-
-  const assemblyPath = opts.assemblyPath;
 
   // 3. Demux
   let rawVideoPath: string;
