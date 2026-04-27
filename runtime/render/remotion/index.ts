@@ -10,7 +10,10 @@ export type { RemotionCompositionProps } from "./timeline-to-props.js";
 export {
   renderRemotionAssembly,
 } from "./render-remotion.js";
-export type { RenderRemotionOptions } from "./render-remotion.js";
+export type {
+  RenderRemotionOptions,
+  RenderRemotionResult,
+} from "./render-remotion.js";
 export { remotionDesignTokens } from "./styles/design-tokens.js";
 export {
   overlayPresets,
