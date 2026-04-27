@@ -304,10 +304,10 @@ function createE2EReviewAgent(opts?: { withFatal?: boolean }): ReviewAgent {
         project_id: ctx.projectId,
         timeline_version: ctx.timelineVersion,
         summary_judgment: {
-          status: opts?.withFatal ? "blocked" : "needs_revision",
+          status: opts?.withFatal ? "blocked" : "approved",
           rationale: opts?.withFatal
             ? "Critical brief requirement missing."
-            : "Solid structure; minor trim and wind issues.",
+            : "Professional baseline checks passed.",
           confidence: 0.82,
         },
         strengths: [

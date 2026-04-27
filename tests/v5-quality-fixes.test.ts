@@ -288,6 +288,21 @@ describe("v5 Fix 3: Chronological Ordering", () => {
     expect(resolveTimelineOrder(blueprint)).toBe("chronological");
   });
 
+  it("resolveTimelineOrder respects creative brief order_policy when blueprint is unspecified", () => {
+    const blueprint = {} as unknown as EditBlueprint;
+    expect(resolveTimelineOrder(blueprint, undefined, { order_policy: "chronological" })).toBe("chronological");
+  });
+
+  it("resolveTimelineOrder infers chronological from family-growth-recap profile", () => {
+    const blueprint = {} as unknown as EditBlueprint;
+    expect(resolveTimelineOrder(blueprint, "family-growth-recap")).toBe("chronological");
+  });
+
+  it("resolveTimelineOrder infers chronological from family growth brief strategy", () => {
+    const blueprint = {} as unknown as EditBlueprint;
+    expect(resolveTimelineOrder(blueprint, undefined, { project: { strategy: "family growth recap" } })).toBe("chronological");
+  });
+
   it("resolveTimelineOrder infers chronological from story_arc strategy", () => {
     const blueprint = {
       story_arc: { strategy: "chronological" },

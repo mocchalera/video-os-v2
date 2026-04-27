@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
   assembleTimelineToMp4,
   buildAudioAssemblyPlan,
+  buildBgmAudioRenderArgs,
   buildVideoAssemblyPlan,
   type ExecFileLike,
   formatFfmpegTimestamp,
@@ -145,6 +146,26 @@ describe("ffmpeg assembler", () => {
 
     expect(result.outputPath).toBe(path.join(projectDir, "05_timeline", "assembly.mp4"));
     expect(fs.existsSync(result.outputPath)).toBe(true);
+  });
+
+  it("renders BGM clips with loop-to-picture duration and an ending fade", () => {
+    const args = buildBgmAudioRenderArgs(
+      "/music/theme.mp3",
+      "/tmp/bgm.wav",
+      0,
+      42,
+      48_000,
+      2,
+      24,
+      { bgm_fade_out_frames: 48 },
+    );
+
+    expect(args).toContain("-stream_loop");
+    expect(args).toContain("-1");
+    expect(args).toContain("-t");
+    expect(args).toContain("42");
+    const filter = args[args.indexOf("-af") + 1];
+    expect(filter).toContain("afade=t=out:st=40.0000:d=2.0000");
   });
 
   it("throws a clear error when ffmpeg is not available", async () => {

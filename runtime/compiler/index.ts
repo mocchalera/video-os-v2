@@ -176,7 +176,7 @@ export function compile(opts: CompileOptions): CompileResult {
   );
 
   // ── Phase 2.5: Resolve Timeline Order & Output Dimensions ────────
-  const timelineOrder = resolveTimelineOrder(blueprint, blueprint.resolved_profile?.id);
+  const timelineOrder = resolveTimelineOrder(blueprint, blueprint.resolved_profile?.id, brief);
   const sourceAssetIds = new Set(
     selects.candidates
       .map((candidate) => candidate.asset_id)

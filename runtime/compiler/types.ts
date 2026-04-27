@@ -36,6 +36,7 @@ export interface CreativeBrief {
   project: { id: string; title: string; strategy: string; runtime_target_sec?: number; duration_mode?: DurationMode };
   message: { primary: string; secondary?: string[] };
   emotion_curve: string[];
+  order_policy?: "chronological" | "editorial";
   editorial?: CreativeBriefEditorial;
   [key: string]: unknown;
 }

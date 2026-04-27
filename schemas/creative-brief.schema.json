@@ -115,6 +115,11 @@
         "minLength": 1
       }
     },
+    "order_policy": {
+      "type": "string",
+      "enum": ["chronological", "editorial"],
+      "description": "Default clip order when the blueprint does not specify timeline_order. Keepsake and family-growth-recap projects should use chronological."
+    },
     "must_have": {
       "type": "array",
       "minItems": 1,

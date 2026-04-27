@@ -1890,6 +1890,18 @@ function makeMockFatalReport(projectId: string): ReviewReport {
   });
 }
 
+function makeMockApprovedReport(projectId: string): ReviewReport {
+  return makeMockReviewReport(projectId, {
+    summary_judgment: {
+      status: "approved",
+      rationale: "Professional baseline checks passed.",
+      confidence: 0.9,
+    },
+    weaknesses: [],
+    warnings: [],
+  });
+}
+
 function createMockReviewAgent(overrides?: Partial<ReviewAgentResult>): ReviewAgent {
   return {
     async run(ctx) {
@@ -1946,7 +1958,9 @@ describe("/review command", () => {
 
     it("skips preview with skipPreview option", async () => {
       const tmpDir = createReviewReadyProject("compile-skip-preview");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -2095,7 +2109,9 @@ describe("/review command", () => {
 
     it("transitions to approved only after explicit operator acceptance", async () => {
       const tmpDir = createReviewReadyProject("clean-accepted");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -2111,7 +2127,32 @@ describe("/review command", () => {
       expect(doc.approval_record?.approved_by).toBe("operator");
     });
 
-    it("autonomy:full auto-approves clean review without operator acceptance", async () => {
+    it("autonomy:full does not auto-approve needs_revision even when fatal_issues is empty", async () => {
+      const tmpDir = createReviewReadyProject("needs-revision-auto-full");
+      const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
+      const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
+        autonomy?: { mode?: "full" | "collaborative" };
+      };
+      brief.autonomy = {
+        ...(brief.autonomy ?? {}),
+        mode: "full",
+      };
+      fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
+
+      const agent = createMockReviewAgent();
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.newState).toBe("critique_ready");
+
+      const doc = readProjectState(tmpDir)!;
+      expect(doc.current_state).toBe("critique_ready");
+      expect(doc.approval_record).toBeUndefined();
+    });
+
+    it("autonomy:full auto-approves approved clean review without operator acceptance", async () => {
       const tmpDir = createReviewReadyProject("clean-auto-full");
       const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
       const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
@@ -2124,7 +2165,9 @@ describe("/review command", () => {
       fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
 
       let operatorAcceptCalled = false;
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
         operatorAccept: async () => {
@@ -2221,7 +2264,9 @@ describe("/review command", () => {
 
     it("records approval_record.artifact_versions on clean approval", async () => {
       const tmpDir = createReviewReadyProject("approval-versions");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -2628,7 +2673,9 @@ describe("/review command", () => {
   describe("history and metadata", () => {
     it("records history entry on transition to approved", async () => {
       const tmpDir = createReviewReadyProject("history-approved");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -2664,7 +2711,9 @@ describe("/review command", () => {
 
     it("sets last_agent and last_command", async () => {
       const tmpDir = createReviewReadyProject("meta");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -2697,7 +2746,9 @@ describe("/review command", () => {
       expect(first.newState).toBe("critique_ready");
 
       // Second review from critique_ready → approved (no fatal + operator accept)
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
       const second = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T06:00:00Z",
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
@@ -2718,7 +2769,9 @@ describe("/review command", () => {
         history: [],
       });
 
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),

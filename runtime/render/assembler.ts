@@ -52,8 +52,11 @@ export interface AudioClipPlan {
   asset_id: string;
   source_in_sec: number;
   source_out_sec: number;
+  duration_sec: number;
   timeline_start_sec: number;
   delay_ms: number;
+  role?: string;
+  audio_policy?: ClipOutput["audio_policy"];
 }
 
 interface PreviewManifestClip {
@@ -300,6 +303,45 @@ export function buildAudioTrimArgs(
   ];
 }
 
+export function buildBgmAudioRenderArgs(
+  inputPath: string,
+  outputPath: string,
+  startSec: number,
+  durationSec: number,
+  sampleRate: number,
+  audioChannels: 1 | 2,
+  fps: number,
+  audioPolicy?: ClipOutput["audio_policy"],
+): string[] {
+  const fadeInFrames = audioPolicy?.bgm_fade_in_frames ?? audioPolicy?.fade_in_frames ?? 0;
+  const fadeOutFrames = audioPolicy?.bgm_fade_out_frames ?? audioPolicy?.fade_out_frames ?? Math.round(fps);
+  const fadeInSec = Math.max(0, fadeInFrames / fps);
+  const fadeOutSec = Math.max(0, Math.min(durationSec / 2, fadeOutFrames / fps));
+  const filters: string[] = [];
+
+  if (fadeInSec > 0) {
+    filters.push(`afade=t=in:d=${fadeInSec.toFixed(4)}`);
+  }
+  if (fadeOutSec > 0) {
+    const fadeStart = Math.max(0, durationSec - fadeOutSec);
+    filters.push(`afade=t=out:st=${fadeStart.toFixed(4)}:d=${fadeOutSec.toFixed(4)}`);
+  }
+
+  return [
+    "-y",
+    "-stream_loop", "-1",
+    "-ss", formatFfmpegTimestamp(startSec),
+    "-i", inputPath,
+    "-vn",
+    "-t", formatFfmpegTimestamp(durationSec),
+    ...(filters.length > 0 ? ["-af", filters.join(",")] : []),
+    "-ac", String(audioChannels),
+    "-ar", String(sampleRate),
+    "-c:a", "pcm_s16le",
+    outputPath,
+  ];
+}
+
 export function buildAudioMixFilter(
   delaysMs: number[],
   audioChannels: 1 | 2,
@@ -443,8 +485,11 @@ export function buildAudioAssemblyPlan(timeline: TimelineIR): AudioClipPlan[] {
         asset_id: clip.asset_id,
         source_in_sec: clip.src_in_us / 1_000_000,
         source_out_sec: clip.src_out_us / 1_000_000,
+        duration_sec: clip.timeline_duration_frames / fps,
         timeline_start_sec: clip.timeline_in_frame / fps,
         delay_ms: Math.round((clip.timeline_in_frame / fps) * 1000),
+        role: clip.role,
+        audio_policy: clip.audio_policy,
       });
     }
   }
@@ -535,14 +580,27 @@ export async function assembleTimelineToMp4(
       const clip = findClipById(timeline.tracks.audio, plan.clip_id);
       const sourcePath = resolveClipSourcePath(resolver, clip);
       const segmentPath = path.join(workingDir, `audio-segment-${String(i + 1).padStart(4, "0")}.wav`);
-      await runFfmpeg(execFileImpl, ffmpegBin, buildAudioTrimArgs(
-        sourcePath,
-        segmentPath,
-        plan.source_in_sec,
-        plan.source_out_sec,
-        sampleRate,
-        audioChannels,
-      ));
+      const isBgm = plan.role === "bgm" || plan.role === "music" || plan.track_id === "A2";
+      const audioArgs = isBgm
+        ? buildBgmAudioRenderArgs(
+          sourcePath,
+          segmentPath,
+          plan.source_in_sec,
+          plan.duration_sec,
+          sampleRate,
+          audioChannels,
+          fps,
+          plan.audio_policy,
+        )
+        : buildAudioTrimArgs(
+          sourcePath,
+          segmentPath,
+          plan.source_in_sec,
+          plan.source_out_sec,
+          sampleRate,
+          audioChannels,
+        );
+      await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);
       audioDelaysMs.push(plan.delay_ms);
     }

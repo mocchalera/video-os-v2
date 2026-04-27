@@ -4,7 +4,9 @@
  * Usage: npx tsx scripts/run-bgm-analysis.ts <audio-path> <project-path>
  */
 
-import { detectBgmBeats, writeBgmAnalysis } from "../runtime/connectors/bgm-beat-detector.js";
+import { analyzeBgm, writeBgmAnalysis } from "../runtime/media/bgm-analyzer.js";
+import fs from "node:fs";
+import path from "node:path";
 
 const audioPath = process.argv[2];
 const projectPath = process.argv[3] ?? "projects/demo";
@@ -14,10 +16,23 @@ if (!audioPath) {
   process.exit(1);
 }
 
-const analysis = detectBgmBeats({
+function resolveAssetId(projectDir: string, targetAudioPath: string): string {
+  const assetsPath = path.join(projectDir, "03_analysis", "assets.json");
+  if (!fs.existsSync(assetsPath)) return "AST_BGM";
+
+  const parsed = JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as {
+    items?: Array<{ asset_id?: string; filename?: string }>;
+  };
+  const targetBase = path.basename(targetAudioPath);
+  const match = parsed.items?.find((item) => item.filename === targetBase);
+  return match?.asset_id ?? "AST_BGM";
+}
+
+const analysis = analyzeBgm({
   audioPath,
+  projectDir: projectPath,
   projectId: projectPath.split("/").pop() ?? "unknown",
-  assetId: "AST_BGM_PIXEL_HEART",
+  assetId: resolveAssetId(projectPath, audioPath),
   sampleRate: 48000,
   meter: "4/4",
 });

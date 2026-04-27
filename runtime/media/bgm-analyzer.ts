@@ -618,38 +618,43 @@ export function analyzeBgm(opts: BgmAnalyzerOptions): BgmAnalysisResult {
       };
     }
 
-    // Partial result — got energy profile but not enough beats
+    // Degraded ready result — got duration/energy but not enough beat events.
+    // Downstream editing can still cut BGM to picture length and use a stable
+    // fallback grid instead of silently losing BGM awareness.
     const sections = estimateSectionsFromEnergy(profile, durationSec);
+    const { beats, downbeats } = generateBeatGrid(120, durationSec, meter);
     return {
       version: "1",
       project_id: opts.projectId,
-      analysis_status: "partial",
+      analysis_status: "ready",
       music_asset: { asset_id: opts.assetId, path: opts.audioPath, source_hash: sourceHash },
-      bpm: 0,
+      bpm: 120,
       meter,
       duration_sec: Math.round(durationSec * 100) / 100,
-      beats_sec: [],
-      downbeats_sec: [],
+      beats_sec: beats.map((b) => b.time_sec),
+      downbeats_sec: downbeats.map((d) => d.time_sec),
       sections,
-      beats: [],
-      provenance: { detector: "ffmpeg_ebur128", sample_rate_hz: sampleRate },
+      beats,
+      provenance: { detector: "ffmpeg_ebur128+fallback_grid", sample_rate_hz: sampleRate },
     };
   }
 
-  // Nothing worked — return partial with duration
+  // Nothing worked beyond duration — still return a ready fallback grid so
+  // BGM duration matching and conservative beat-snap scoring remain available.
+  const { beats, downbeats } = generateBeatGrid(120, durationSec, meter);
   return {
     version: "1",
     project_id: opts.projectId,
-    analysis_status: "partial",
+    analysis_status: "ready",
     music_asset: { asset_id: opts.assetId, path: opts.audioPath, source_hash: sourceHash },
-    bpm: 0,
+    bpm: 120,
     meter,
     duration_sec: Math.round(durationSec * 100) / 100,
-    beats_sec: [],
-    downbeats_sec: [],
+    beats_sec: beats.map((b) => b.time_sec),
+    downbeats_sec: downbeats.map((d) => d.time_sec),
     sections: fallbackSections(durationSec),
-    beats: [],
-    provenance: { detector: "ffmpeg_ebur128", sample_rate_hz: sampleRate },
+    beats,
+    provenance: { detector: "fallback_grid", sample_rate_hz: sampleRate },
   };
 }
 
