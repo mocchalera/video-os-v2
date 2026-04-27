@@ -89,7 +89,7 @@ export const DEFAULT_PEAK_POLICY: PeakDetectionPolicy = {
   coarse_max_candidates: 3,
   refine_max_segments_per_coarse: 2,
   max_energy_curve_points: 12,
-  model_alias: "gemini-2.0-flash",
+  model_alias: "gemini-2.5-flash",
   max_output_tokens: 2048,
 };
 

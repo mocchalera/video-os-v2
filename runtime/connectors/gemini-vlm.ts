@@ -587,6 +587,7 @@ export function createGeminiVlmFn(): VlmFn {
         generationConfig: {
           maxOutputTokens: options.maxOutputTokens,
           temperature: 0.1,
+          responseMimeType: "application/json",
         },
       }),
     });
