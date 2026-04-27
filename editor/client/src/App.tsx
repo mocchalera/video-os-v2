@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppShell from './components/AppShell';
-import EditorLayout, { type BottomTab } from './components/EditorLayout';
+import EditorLayout, { type BottomTab, type CaptionCue } from './components/EditorLayout';
 import { type EditorMode } from './components/HeaderBar';
 import { useAiJob } from './hooks/useAiJob';
 import { useAlternatives, type AlternativeCandidate } from './hooks/useAlternatives';
@@ -14,9 +14,27 @@ import { useTimeline } from './hooks/useTimeline';
 import { useTrackState } from './hooks/useTrackState';
 import { useSnap } from './hooks/useSnap';
 import { useTrimTool } from './hooks/useTrimTool';
-import type { AudioPolicy, ChangesSummary, Clip, SelectionState, TimelineIR, Track } from './types';
-import { buildLanes, computeAutoFitZoom, FALLBACK_ZOOM, findSelectedClip, getTotalFrames } from './utils/editor-helpers';
+import type {
+  AudioPolicy,
+  ChangesSummary,
+  Clip,
+  MediaTrackKind,
+  SelectionState,
+  TimelineIR,
+  Track,
+} from './types';
+import { buildLanes, computeAutoFitZoom, FALLBACK_ZOOM, findSelectedClip, getCaptionText, getTotalFrames } from './utils/editor-helpers';
+import { DEFAULT_CAPTION_STYLE_PRESET } from '@shared/caption-style-tokens';
 import { formatClockFromFrames, getFps, framesToMicroseconds, microsecondsToFrames } from './utils/time';
+
+const MEDIA_TRACK_KINDS: MediaTrackKind[] = ['video', 'audio'];
+const EDITOR_TRACK_KINDS: SelectionState['trackKind'][] = ['video', 'audio', 'caption'];
+
+function isMediaTrackKind(
+  trackKind: SelectionState['trackKind'],
+): trackKind is MediaTrackKind {
+  return trackKind === 'video' || trackKind === 'audio';
+}
 
 export default function App() {
   const [editorMode, setEditorMode] = useState<EditorMode>('nle');
@@ -34,8 +52,28 @@ export default function App() {
   const fps = timeline ? getFps(timeline.sequence) : 24;
   const lanes = useMemo(() => buildLanes(timeline), [timeline]);
   const totalFrames = useMemo(() => getTotalFrames(timeline), [timeline]);
+  // MAJOR-2: Build captionCues from timeline caption tracks so the data flow
+  // from App → EditorLayout is explicit (same source as EditorLayout fallback).
+  const captionCues = useMemo<CaptionCue[]>(() => {
+    const tracks = timeline?.tracks.caption ?? [];
+    const cues: CaptionCue[] = [];
+    for (const track of tracks) {
+      for (const clip of track.clips) {
+        const text = getCaptionText(clip);
+        if (text.length > 0) {
+          cues.push({
+            id: clip.clip_id,
+            text,
+            startFrame: clip.timeline_in_frame,
+            endFrame: clip.timeline_in_frame + clip.timeline_duration_frames,
+          });
+        }
+      }
+    }
+    return cues;
+  }, [timeline]);
   const selectedClip = findSelectedClip(timeline, sel.selection);
-  const playback = usePlayback({ projectId: ts.projectId, fps, durationFrames: totalFrames, startFrame: timeline?.sequence?.start_frame ?? 0, timeline, trackStates: trackState.stateMap });
+  const playback = usePlayback({ projectId: ts.projectId, fps, durationFrames: totalFrames, startFrame: timeline?.sequence?.start_frame ?? 0, timeline, trackStates: trackState.stateMap, timelineRevision: ts.timelineRevision });
   const sourcePlayback = useSourcePlayback({ projectId: ts.projectId, fps });
   const snap = useSnap({ lanes, markers: timeline?.markers ?? [], playheadFrame: playback.playheadFrame, fps, zoom });
   const review = useReview(ts.projectId, {
@@ -54,6 +92,7 @@ export default function App() {
     projectId: ts.projectId, localRevision: ts.timelineRevision, dirty: ts.dirty,
     onTimelineReload: async () => { await ts.reload(); },
     onReviewReload: () => { review.reload(); },
+    onPreviewChanged: (event) => { playback.handlePreviewChanged(event); },
   });
 
   // ── Trim tool ────────────────────────────────────────────────────────
@@ -147,7 +186,7 @@ export default function App() {
       // Insert a temporary clip on the target track (or first video track)
       const targetTrackId = op.target_track_id;
       let inserted = false;
-      for (const kind of ['video', 'audio'] as const) {
+      for (const kind of MEDIA_TRACK_KINDS) {
         for (const track of previewTl.tracks[kind]) {
           if (targetTrackId ? track.track_id === targetTrackId : kind === 'video' && !inserted) {
             const newClip: Clip = {
@@ -169,7 +208,7 @@ export default function App() {
       }
     } else if (op.op === 'remove_segment' && op.target_clip_id) {
       // Remove the target clip
-      for (const kind of ['video', 'audio'] as const) {
+      for (const kind of MEDIA_TRACK_KINDS) {
         for (const track of previewTl.tracks[kind]) {
           const idx = track.clips.findIndex(c => c.clip_id === op.target_clip_id);
           if (idx >= 0) track.clips.splice(idx, 1);
@@ -177,7 +216,7 @@ export default function App() {
       }
     } else if (op.op === 'change_audio_policy' && op.target_clip_id && op.audio_policy) {
       // Update audio policy on the target clip
-      for (const kind of ['video', 'audio'] as const) {
+      for (const kind of MEDIA_TRACK_KINDS) {
         for (const track of previewTl.tracks[kind]) {
           const clip = track.clips.find(c => c.clip_id === op.target_clip_id);
           if (clip) clip.audio_policy = { ...clip.audio_policy, ...op.audio_policy };
@@ -185,7 +224,7 @@ export default function App() {
       }
     } else if (op.target_clip_id) {
       // trim_segment, replace_segment, move_segment
-      for (const kind of ['video', 'audio'] as const) {
+      for (const kind of MEDIA_TRACK_KINDS) {
         for (const track of previewTl.tracks[kind]) {
           const clip = track.clips.find(c => c.clip_id === op.target_clip_id);
           if (!clip) continue;
@@ -243,7 +282,7 @@ export default function App() {
 
       // target_clip_id-based check (all other ops + insert with clip ref)
       if (!op.target_clip_id) return true;
-      for (const kind of ['video', 'audio'] as const) {
+      for (const kind of MEDIA_TRACK_KINDS) {
         for (const track of timeline.tracks[kind]) {
           if (track.clips.some(c => c.clip_id === op.target_clip_id)) {
             if (trackState.stateMap[track.track_id]?.locked) {
@@ -273,18 +312,44 @@ export default function App() {
   }
   function handleSwapClip(c: AlternativeCandidate): void {
     const s = sel.selection;
-    if (!s || aiJob.isRunning) return;
+    if (!s || aiJob.isRunning || !isMediaTrackKind(s.trackKind)) return;
     ts.swapClip(s.trackKind, s.trackId, s.clipId, {
       segment_id: c.segment_id, asset_id: c.asset_id, src_in_us: c.src_in_us, src_out_us: c.src_out_us,
       confidence: c.confidence, quality_flags: c.quality_flags, candidate_ref: c.segment_id, why_it_matches: c.why_it_matches,
     });
   }
+  // MAJOR 3: Flag to suppress the dirty→clean auto-preview when
+  // handleExportRender already triggers save + preview itself.
+  const exportRenderInFlightRef = useRef(false);
+
   async function handleExportRender(): Promise<void> {
     if (!timeline || aiJob.isRunning) return;
     let rev = ts.timelineRevision;
-    if (ts.dirty || ts.status === 'saving') { const sr = await ts.save(); if (!sr.ok) return; rev = sr.timelineRevision ?? rev; }
+    if (ts.dirty || ts.status === 'saving') {
+      exportRenderInFlightRef.current = true;
+      const sr = await ts.save();
+      if (!sr.ok) {
+        exportRenderInFlightRef.current = false;
+        return;
+      }
+      rev = sr.timelineRevision ?? rev;
+    }
+    // Request exact preview render — result arrives via WebSocket render.changed
     await playback.requestFullPreview({ timelineRevision: rev });
+    exportRenderInFlightRef.current = false;
   }
+
+  // Save → auto preview: after timeline save completes, auto-request preview
+  const prevDirtyRef = useRef(ts.dirty);
+  useEffect(() => {
+    const wasDirty = prevDirtyRef.current;
+    prevDirtyRef.current = ts.dirty;
+    // Detect transition from dirty → clean (save completed)
+    // MAJOR 3: Skip if handleExportRender is in-flight (it handles preview itself)
+    if (wasDirty && !ts.dirty && ts.timelineRevision && timeline && !exportRenderInFlightRef.current) {
+      void playback.requestFullPreview({ timelineRevision: ts.timelineRevision });
+    }
+  }, [ts.dirty, ts.timelineRevision]);
   // ── Insert / Overwrite (F9 / F10) ───────────────────────────────────
 
   const handleInsert = useCallback(() => {
@@ -364,7 +429,7 @@ export default function App() {
     }
 
     // Ripple sync-lock tracks
-    for (const kind of ['video', 'audio'] as const) {
+    for (const kind of MEDIA_TRACK_KINDS) {
       for (const track of nextTimeline.tracks[kind]) {
         const isPatched = kind === 'video'
           ? (createVideo && track.track_id === vTarget)
@@ -476,7 +541,7 @@ export default function App() {
   const handleToggleLink = useCallback(() => {
     if (!timeline || aiJob.isRunning) return;
     const primary = sel.selection;
-    if (!primary) return;
+    if (!primary || !isMediaTrackKind(primary.trackKind)) return;
 
     const clip = findSelectedClip(timeline, primary);
     if (!clip) return;
@@ -488,7 +553,7 @@ export default function App() {
       ts.pushTimeline(
         (() => {
           const tl = structuredClone(timeline);
-          for (const kind of ['video', 'audio'] as const) {
+          for (const kind of MEDIA_TRACK_KINDS) {
             for (const track of tl.tracks[kind]) {
               for (const c of track.clips) {
                 if (c.metadata?.link_group_id === existingGroup) {
@@ -537,9 +602,16 @@ export default function App() {
 
   function handleUpdateAudio(field: keyof AudioPolicy, value: number | boolean): void {
     const s = sel.selection;
-    if (!s || aiJob.isRunning) return;
+    if (!s || aiJob.isRunning || !isMediaTrackKind(s.trackKind)) return;
     ts.updateClip(s.trackKind, s.trackId, s.clipId, (clip) => {
       clip.audio_policy = { ...clip.audio_policy, [field]: typeof value === 'number' ? (Number.isFinite(value) ? value : 0) : value };
+    });
+  }
+  function handleUpdateCaptionText(value: string): void {
+    const s = sel.selection;
+    if (!s || aiJob.isRunning || s.trackKind !== 'caption') return;
+    ts.updateClip(s.trackKind, s.trackId, s.clipId, (clip) => {
+      clip.metadata = { ...clip.metadata, text: value };
     });
   }
   function handleMergeReload() { ts.conflict ? void ts.resolveConflictWithReload() : sync.acceptRemote(); setRemoteDiffs(null); }
@@ -570,8 +642,8 @@ export default function App() {
   const handleJumpToClip = useCallback((clipId: string) => {
     if (!timeline) return;
     // Find the clip in the timeline
-    for (const kind of ['video', 'audio'] as const) {
-      for (const track of timeline.tracks[kind]) {
+    for (const kind of EDITOR_TRACK_KINDS) {
+      for (const track of timeline.tracks[kind] ?? []) {
         const clip = track.clips.find((c) => c.clip_id === clipId);
         if (clip) {
           sel.selectClip({ trackKind: kind, trackId: track.track_id, clipId: clip.clip_id });
@@ -603,14 +675,12 @@ export default function App() {
     if (trackState.stateMap[s.trackId]?.locked) return;
 
     const nextTimeline = structuredClone(timeline);
-    for (const kind of ['video', 'audio'] as const) {
-      for (const track of nextTimeline.tracks[kind]) {
-        const idx = track.clips.findIndex(c => c.clip_id === s.clipId);
-        if (idx >= 0) {
-          track.clips.splice(idx, 1);
-          break;
-        }
-      }
+    const track = (nextTimeline.tracks[s.trackKind] ?? []).find(
+      (candidate) => candidate.track_id === s.trackId,
+    );
+    const idx = track?.clips.findIndex((candidate) => candidate.clip_id === s.clipId) ?? -1;
+    if (track && idx >= 0) {
+      track.clips.splice(idx, 1);
     }
     sel.clearSelection();
     ts.pushTimeline(nextTimeline);
@@ -627,35 +697,31 @@ export default function App() {
     let removedInFrame = -1;
     let removedDuration = 0;
     let removedTrackId: string | null = null;
-    let removedKind: 'video' | 'audio' | null = null;
+    let removedKind: SelectionState['trackKind'] | null = null;
 
     // Remove the clip and record its position
-    for (const kind of ['video', 'audio'] as const) {
-      for (const track of nextTimeline.tracks[kind]) {
-        const idx = track.clips.findIndex(c => c.clip_id === s.clipId);
-        if (idx >= 0) {
-          removedInFrame = track.clips[idx].timeline_in_frame;
-          removedDuration = track.clips[idx].timeline_duration_frames;
-          removedTrackId = track.track_id;
-          removedKind = kind;
-          track.clips.splice(idx, 1);
-          // Ripple: shift downstream clips on this track
-          for (const c of track.clips) {
-            if (c.timeline_in_frame >= removedInFrame) {
-              c.timeline_in_frame -= removedDuration;
-            }
-          }
-          break;
+    const selectedTrack = (nextTimeline.tracks[s.trackKind] ?? []).find(
+      (candidate) => candidate.track_id === s.trackId,
+    );
+    const idx = selectedTrack?.clips.findIndex((candidate) => candidate.clip_id === s.clipId) ?? -1;
+    if (selectedTrack && idx >= 0) {
+      removedInFrame = selectedTrack.clips[idx].timeline_in_frame;
+      removedDuration = selectedTrack.clips[idx].timeline_duration_frames;
+      removedTrackId = selectedTrack.track_id;
+      removedKind = s.trackKind;
+      selectedTrack.clips.splice(idx, 1);
+      for (const c of selectedTrack.clips) {
+        if (c.timeline_in_frame >= removedInFrame) {
+          c.timeline_in_frame -= removedDuration;
         }
       }
-      if (removedKind) break;
     }
 
-    if (removedKind && removedTrackId && removedDuration > 0) {
+    if (removedKind && removedTrackId && removedDuration > 0 && removedKind !== 'caption') {
       // Ripple sync-lock tracks — split straddling clips at editPoint
       const editPoint = removedInFrame;
       const delta = -removedDuration;
-      for (const kind of ['video', 'audio'] as const) {
+      for (const kind of MEDIA_TRACK_KINDS) {
         for (const track of nextTimeline.tracks[kind]) {
           if (track.track_id === removedTrackId) continue;
           const st = trackState.stateMap[track.track_id];
@@ -749,7 +815,7 @@ export default function App() {
   trimCommitRef.current = trim.commitTrim;
 
   const handleSelectClip = useCallback(
-    (tk: 'video' | 'audio', tid: string, clip: Clip, event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
+    (tk: SelectionState['trackKind'], tid: string, clip: Clip, event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => {
       if (event.shiftKey) {
         sel.addToSelection({ trackKind: tk, trackId: tid, clipId: clip.clip_id });
       } else if (event.metaKey || event.ctrlKey) {
@@ -825,6 +891,7 @@ export default function App() {
         timeline={timeline} fps={fps} lanes={lanes} totalFrames={totalFrames} zoom={zoom} onZoomChange={setZoom}
         projectId={ts.projectId || null}
         selectedClipId={selectedClipId} selectedClipIds={sel.selectedClipIds} selectedClip={selectedClip}
+        selectedTrackKind={sel.selection?.trackKind ?? null}
         onSelectClip={handleSelectClip}
         onClearSelection={sel.clearSelection}
         onMarqueeSelect={handleMarqueeSelect}
@@ -845,6 +912,7 @@ export default function App() {
         snapEnabled={snap.enabled}
         activeSnapGuide={snap.activeGuide}
         onUpdateAudioNumber={(f, v) => handleUpdateAudio(f, v)} onUpdateAudioBoolean={(f, v) => handleUpdateAudio(f, v)}
+        onUpdateCaptionText={handleUpdateCaptionText}
         reviewReport={review.report} reviewPatch={review.patch} reviewBlueprint={review.blueprint}
         dirty={ts.dirty} timelineRevision={ts.timelineRevision}
         sessionBaselineRevision={ts.sessionBaseline?.baselineRevision ?? null}
@@ -865,7 +933,9 @@ export default function App() {
         confidenceFilter={confidenceFilter}
         onConfidenceFilterChange={setConfidenceFilter}
         onPreviewPatch={handlePreviewPatch}
-        previewingPatchIndex={previewingPatchIndex} />
+        previewingPatchIndex={previewingPatchIndex}
+        captionCues={captionCues}
+        captionStylePreset={DEFAULT_CAPTION_STYLE_PRESET} />
     </AppShell>
   );
 }

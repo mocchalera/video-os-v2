@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Clip, PreviewResponse, TimelineIR, TrackHeaderState } from '../types';
+import type { Clip, ExactPreviewResponse, PreviewArtifactState, PreviewMode, PreviewStatusResponse, TimelineIR, TrackHeaderState } from '../types';
 import { clamp, framesToSeconds, secondsToFrames } from '../utils/time';
 
 interface UsePlaybackOptions {
@@ -11,6 +11,8 @@ interface UsePlaybackOptions {
   timeline: TimelineIR | null;
   /** Track states for mute/solo filtering. If omitted, all tracks play. */
   trackStates?: Record<string, TrackHeaderState>;
+  /** Current timeline revision from useTimeline (for preview hash comparison). */
+  timelineRevision?: string | null;
 }
 
 interface SourceMapAsset {
@@ -67,6 +69,7 @@ export function usePlayback({
   startFrame = 0,
   timeline,
   trackStates,
+  timelineRevision: currentTimelineRevision,
 }: UsePlaybackOptions) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const activeClipRef = useRef<Clip | null>(null);
@@ -80,6 +83,10 @@ export function usePlayback({
   const rafHandleRef = useRef<number | null>(null);
   /** Set of asset_ids for which transcode fallback has been attempted. */
   const transcodeFallbackAttemptedRef = useRef<Set<string>>(new Set());
+  /** MAJOR-2: renderSpecHash returned by the last requestFullPreview call.
+   *  Used to verify that incoming render.changed events and /preview/status
+   *  responses correspond to the current RenderSpec, not a stale one. */
+  const expectedRenderSpecHashRef = useRef<string | null>(null);
 
   // ── Audio-only playback (hidden <audio> element for video-gap regions) ──
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -97,7 +104,16 @@ export function usePlayback({
   >('idle');
   const [previewStale, setPreviewStale] = useState(false);
 
-  // ── Phase 3: Shuttle, Marks, Loop ──────────────────────────────────
+  // ── Phase 1: Exact preview state ────────────���─────────────────────
+  const exactVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [previewArtifact, setPreviewArtifact] = useState<PreviewArtifactState>({
+    renderSpecHash: null,
+    timelineRevision: null,
+    previewUrl: null,
+    status: 'idle',
+  });
+
+  // ── Phase 3: Shuttle, Marks, Loop ────────���─────────────────────────
   const [shuttleSpeed, setShuttleSpeedState] = useState(0);
   const [markIn, setMarkInState] = useState<number | null>(null);
   const [markOut, setMarkOutState] = useState<number | null>(null);
@@ -165,6 +181,8 @@ export function usePlayback({
   projectIdRef.current = projectId;
   const startFrameRef = useRef(startFrame);
   startFrameRef.current = startFrame;
+  const currentTimelineRevisionRef = useRef(currentTimelineRevision);
+  currentTimelineRevisionRef.current = currentTimelineRevision;
 
   // Check if requestVideoFrameCallback is available
   const hasRVFC = typeof HTMLVideoElement !== 'undefined' &&
@@ -412,6 +430,12 @@ export function usePlayback({
   }
 
   function handlePlayRejection(playError: unknown): void {
+    // AbortError occurs when pause()/new play() interrupts a pending play() —
+    // this is benign (e.g. during rapid mode switches) and must not surface
+    // as a user-facing error.
+    if (playError instanceof DOMException && playError.name === 'AbortError') {
+      return;
+    }
     stopPlaybackAtFrame(playheadFrameRef.current);
     setError(
       playError instanceof Error
@@ -719,10 +743,35 @@ export function usePlayback({
   async function play(): Promise<void> {
     setIsPlaying(true);
     setError(null);
+
+    if (previewModeRef.current === 'rendered_exact') {
+      const exactVideo = exactVideoRef.current;
+      if (exactVideo) {
+        try {
+          await exactVideo.play();
+        } catch (e) {
+          // Swallow AbortError: play() was interrupted by pause() or a new
+          // src assignment — benign during rapid mode switches.
+          if (e instanceof DOMException && e.name === 'AbortError') {
+            return;
+          }
+          setIsPlaying(false);
+          setError(e instanceof Error ? e.message : 'Playback failed');
+        }
+      }
+      return;
+    }
+
     syncPlaybackToFrame(playheadFrameRef.current, true);
   }
 
   function pause(): void {
+    if (previewModeRef.current === 'rendered_exact') {
+      exactVideoRef.current?.pause();
+      setIsPlaying(false);
+      return;
+    }
+
     clearGapPlayback();
     cancelFrameCallbacks();
     pendingSourceSyncRef.current = null;
@@ -732,8 +781,15 @@ export function usePlayback({
   }
 
   function stop(): void {
-    pause();
+    // Always stop both video elements
+    exactVideoRef.current?.pause();
+    clearGapPlayback();
+    cancelFrameCallbacks();
+    pendingSourceSyncRef.current = null;
+    pauseVideoElement();
+    audioRef.current?.pause();
     clearAudioElement();
+    setIsPlaying(false);
   }
 
   async function togglePlayback(): Promise<void> {
@@ -745,6 +801,17 @@ export function usePlayback({
   }
 
   function seekToFrame(frame: number): void {
+    const targetFrame = clamp(Math.round(frame), startFrameRef.current, durationFramesRef.current);
+
+    if (previewModeRef.current === 'rendered_exact') {
+      const exactVideo = exactVideoRef.current;
+      if (exactVideo) {
+        exactVideo.currentTime = framesToSeconds(targetFrame, fpsRef.current);
+      }
+      setPlayheadFrame(targetFrame);
+      return;
+    }
+
     const shouldResume = isPlayingRef.current;
     clearGapPlayback();
     cancelFrameCallbacks();
@@ -756,7 +823,7 @@ export function usePlayback({
 
   async function requestFullPreview(
     options: RequestFullPreviewOptions = {},
-  ): Promise<PreviewResponse | null> {
+  ): Promise<ExactPreviewResponse | null> {
     if (!projectId) return null;
 
     setRenderStatus('rendering');
@@ -768,9 +835,6 @@ export function usePlayback({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: 'full',
-          startFrame: 0,
-          endFrame: durationFrames,
-          resolution: '720p',
           timelineRevision: options.timelineRevision ?? undefined,
         }),
       });
@@ -784,12 +848,46 @@ export function usePlayback({
         );
       }
 
-      const payload = (await response.json()) as PreviewResponse;
-      setRenderStatus('ready');
-      setPreviewStale(false);
+      const payload = (await response.json()) as ExactPreviewResponse;
+
+      // MAJOR-3 (Phase 5 review R1): when programMonitorExactPreview is off
+      // the server returns status='idle' + error='feature_disabled'. Treat
+      // it as an instant fall-back to source_approx — not as an error and
+      // not as a pending render — so the UI keeps playing source video.
+      if (payload.status === 'idle') {
+        expectedRenderSpecHashRef.current = null;
+        setPreviewArtifact({
+          renderSpecHash: payload.renderSpecHash ?? null,
+          timelineRevision: payload.timelineRevision ?? null,
+          previewUrl: null,
+          status: 'idle',
+        });
+        setRenderStatus('idle');
+        setPreviewStale(false);
+        return payload;
+      }
+
+      // MAJOR-2: Store expected renderSpecHash for stale comparison
+      expectedRenderSpecHashRef.current = payload.renderSpecHash ?? null;
+
+      // Track preview artifact state
+      setPreviewArtifact({
+        renderSpecHash: payload.renderSpecHash,
+        timelineRevision: payload.timelineRevision,
+        previewUrl: payload.previewUrl ?? null,
+        status: payload.status === 'ready' ? 'ready' : 'rendering',
+      });
+
+      if (payload.status === 'ready' && payload.previewUrl) {
+        setRenderStatus('ready');
+        setPreviewStale(false);
+      }
+      // If queued/rendering, status will update via WebSocket render.changed
+
       return payload;
     } catch (err) {
       setRenderStatus('error');
+      setPreviewArtifact(prev => ({ ...prev, status: 'error' }));
       if (err instanceof TypeError) {
         setError('Preview API unavailable.');
       } else {
@@ -798,6 +896,63 @@ export function usePlayback({
         );
       }
       return null;
+    }
+  }
+
+  /**
+   * Handle a render.changed WebSocket event with preview metadata.
+   * Called by useProjectSync when it receives a render.changed event.
+   *
+   * MAJOR 2: Validates renderSpecHash and timelineRevision against current
+   * timeline state. If they don't match, keeps previewStale=true.
+   */
+  function handlePreviewChanged(event: {
+    preview_status?: string;
+    preview_url?: string;
+    render_spec_hash?: string;
+    timeline_revision?: string;
+  }): void {
+    if (!event.preview_status) return;
+
+    const status = event.preview_status as PreviewArtifactState['status'];
+    const previewUrl = event.preview_url ?? null;
+    const renderSpecHash = event.render_spec_hash ?? null;
+    const timelineRevision = event.timeline_revision ?? null;
+
+    setPreviewArtifact({
+      renderSpecHash,
+      timelineRevision,
+      previewUrl,
+      status,
+    });
+
+    if (status === 'ready') {
+      setRenderStatus('ready');
+      // MAJOR-2: currentRev null → timeline not yet loaded → keep stale, return
+      const currentRev = currentTimelineRevisionRef.current;
+      if (!currentRev) {
+        setPreviewStale(true);
+        return;
+      }
+      // MAJOR-2: timelineRevision must match
+      if (!timelineRevision || timelineRevision !== currentRev) {
+        setPreviewStale(true);
+      } else {
+        // MAJOR-2: timelineRevision matches — also verify renderSpecHash.
+        // If expectedRenderSpecHashRef is set (from requestFullPreview), the
+        // event's hash must match.  If no expected hash is available yet, the
+        // event hash alone can't be verified — keep stale to be safe.
+        const expectedHash = expectedRenderSpecHashRef.current;
+        if (!expectedHash || !renderSpecHash || renderSpecHash !== expectedHash) {
+          setPreviewStale(true);
+        } else {
+          setPreviewStale(false);
+        }
+      }
+    } else if (status === 'error') {
+      setRenderStatus('error');
+    } else if (status === 'rendering') {
+      setRenderStatus('rendering');
     }
   }
 
@@ -953,18 +1108,25 @@ export function usePlayback({
   // ── Lifecycle ─────────────────────────────────────────────────────
 
   useEffect(() => {
-    pause();
+    // Stop all playback (handles both exact and source modes)
+    stop();
     activeClipRef.current = null;
     currentMediaUrlRef.current = null;
     transcodeFallbackAttemptedRef.current.clear();
-    clearAudioElement();
     setPlayheadFrame(startFrame);
     setIsBuffering(false);
     setIsGap(true);
     setError(null);
     setRenderStatus('idle');
     setPreviewStale(false);
+    setPreviewArtifact({ renderSpecHash: null, timelineRevision: null, previewUrl: null, status: 'idle' });
     clearVideoSource();
+    // Also clear exact video to avoid stale artifact from previous project
+    const exactVideo = exactVideoRef.current;
+    if (exactVideo) {
+      exactVideo.removeAttribute('src');
+      exactVideo.load();
+    }
   }, [projectId, startFrame]);
 
   useEffect(() => {
@@ -1106,16 +1268,159 @@ export function usePlayback({
     }
   }
 
-  const previewMode: 'source' | 'none' = sourceMapLoaded ? 'source' : 'none';
+  // ── Preview mode resolution ──────────────────────────────────────────
+  // rendered_exact: preview artifact is ready and hash matches current revision
+  // source_approx: source playback fallback (dirty, rendering, or no preview)
+  // none: no source map and no preview
+  const previewMode: PreviewMode = useMemo(() => {
+    if (
+      previewArtifact.status === 'ready' &&
+      previewArtifact.previewUrl &&
+      !previewStale
+    ) {
+      return 'rendered_exact';
+    }
+    if (sourceMapLoaded) {
+      return 'source_approx';
+    }
+    return 'none';
+  }, [previewArtifact.status, previewArtifact.previewUrl, previewStale, sourceMapLoaded]);
+
+  const previewModeRef = useRef<PreviewMode>(previewMode);
+  previewModeRef.current = previewMode;
+
+  // ── FATAL 1: Exact video control — switch primary video element ────
+  // When entering rendered_exact mode, pause source and sync exact video.
+  // When leaving, pause exact video.
+  useEffect(() => {
+    if (previewMode === 'rendered_exact') {
+      // Pause source playback
+      cancelFrameCallbacks();
+      clearGapPlayback();
+      pauseVideoElement();
+      clearAudioElement();
+
+      // Sync exact video to current playhead position
+      const exactVideo = exactVideoRef.current;
+      if (exactVideo && previewArtifact.previewUrl) {
+        if (!exactVideo.src || !exactVideo.src.endsWith(previewArtifact.previewUrl)) {
+          exactVideo.src = previewArtifact.previewUrl;
+        }
+        exactVideo.currentTime = framesToSeconds(playheadFrameRef.current, fpsRef.current);
+      }
+    } else {
+      // Leaving exact mode — pause exact video
+      const exactVideo = exactVideoRef.current;
+      if (exactVideo) {
+        exactVideo.pause();
+      }
+    }
+    // previewArtifact.previewUrl included so a new render URL triggers
+    // src re-assignment even when already in rendered_exact mode.
+  }, [previewMode, previewArtifact.previewUrl]);
+
+  // ── MAJOR-6: Reset expected hash on project switch only ──────────
+  const prevProjectIdForHashRef = useRef<string | null>(null);
+
+  // ── MAJOR-6: Fetch /preview/status on project change ─────────────
+  // Depends on currentTimelineRevision AND timeline so we skip the fetch
+  // until the timeline has fully loaded (avoids stale-revision races).
+  useEffect(() => {
+    // MAJOR-6: All three must be truthy before we fetch.
+    if (!projectId || !currentTimelineRevision || !timeline) return;
+
+    // Reset expected hash only on actual project switch so that
+    // revision-only changes preserve the hash from requestFullPreview.
+    if (prevProjectIdForHashRef.current !== null && prevProjectIdForHashRef.current !== projectId) {
+      expectedRenderSpecHashRef.current = null;
+    }
+    prevProjectIdForHashRef.current = projectId;
+
+    let cancelled = false;
+
+    async function fetchPreviewStatus(): Promise<void> {
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/preview/status`);
+        if (!resp.ok || cancelled) return;
+        const data = (await resp.json()) as PreviewStatusResponse;
+        if (cancelled) return;
+
+        if (data.status === 'ready' && data.previewUrl) {
+          setPreviewArtifact({
+            renderSpecHash: data.renderSpecHash ?? null,
+            timelineRevision: data.timelineRevision ?? null,
+            previewUrl: data.previewUrl,
+            status: 'ready',
+          });
+          setRenderStatus('ready');
+
+          // MAJOR-2 + MAJOR-6: timelineRevision must match
+          const fetchedRev = data.timelineRevision ?? null;
+          if (!fetchedRev || fetchedRev !== currentTimelineRevision) {
+            setPreviewStale(true);
+          } else {
+            // MAJOR-2: Verify renderSpecHash against server-computed
+            // currentRenderSpecHash (built fresh from the on-disk timeline).
+            // This catches divergence from source_map or caption changes
+            // even when the timeline revision is unchanged.
+            const previewHash = data.renderSpecHash ?? null;
+            const currentHash = data.currentRenderSpecHash ?? null;
+            if (previewHash && currentHash && previewHash === currentHash) {
+              // Hash verified — seed expectedRef for future WS comparisons
+              expectedRenderSpecHashRef.current = previewHash;
+              setPreviewStale(false);
+            } else {
+              // currentRenderSpecHash missing or mismatch — cannot verify parity.
+              // Stay stale to prevent showing an unverified preview.
+              setPreviewStale(true);
+            }
+          }
+        }
+      } catch {
+        // Non-critical — preview status is best-effort on load
+      }
+    }
+
+    void fetchPreviewStatus();
+    return () => { cancelled = true; };
+  }, [projectId, currentTimelineRevision, timeline]);
+
+  // ── Exact video event handlers ────────────────────────────────────
+  function handleExactVideoTimeUpdate(): void {
+    const exactVideo = exactVideoRef.current;
+    if (!exactVideo || previewModeRef.current !== 'rendered_exact') return;
+    const frame = secondsToFrames(exactVideo.currentTime, fpsRef.current);
+    setPlayheadFrame(clamp(frame, startFrameRef.current, durationFramesRef.current));
+  }
+
+  function handleExactVideoLoadedMetadata(): void {
+    // Sync exact video to current playhead after metadata is available
+    const exactVideo = exactVideoRef.current;
+    if (!exactVideo || previewModeRef.current !== 'rendered_exact') return;
+    exactVideo.currentTime = framesToSeconds(playheadFrameRef.current, fpsRef.current);
+  }
+
+  function handleExactVideoEnded(): void {
+    setIsPlaying(false);
+  }
+
+  function handleExactVideoError(): void {
+    // Exact preview broken — fall back to source_approx
+    setPreviewArtifact(prev => ({ ...prev, status: 'error' }));
+    setRenderStatus('error');
+    setError('Preview video failed to load');
+  }
 
   return {
     videoRef,
+    exactVideoRef,
     playheadFrame,
     isPlaying,
     isBuffering,
     isGap,
     previewMode,
     previewStale,
+    previewArtifact,
     renderStatus,
     error,
     seekToFrame,
@@ -1123,6 +1428,7 @@ export function usePlayback({
     togglePlayback,
     requestFullPreview,
     markPreviewStale,
+    handlePreviewChanged,
     handleVideoLoadedMetadata,
     handleVideoCanPlayThrough,
     handleVideoTimeUpdate,
@@ -1131,6 +1437,11 @@ export function usePlayback({
     handleVideoStalled,
     handleVideoEnded,
     handleVideoError,
+    // Exact preview video handlers (FATAL 1)
+    handleExactVideoTimeUpdate,
+    handleExactVideoLoadedMetadata,
+    handleExactVideoEnded,
+    handleExactVideoError,
     // Phase 3: Shuttle, Marks, Loop, Step
     shuttleSpeed,
     markIn,

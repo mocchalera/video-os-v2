@@ -1,4 +1,6 @@
-export type TrackKind = 'video' | 'audio' | 'overlay' | 'caption';
+export type MediaTrackKind = 'video' | 'audio';
+export type EditorTrackKind = MediaTrackKind | 'caption';
+export type TrackKind = EditorTrackKind | 'overlay';
 
 export type ClipRole =
   | 'hero'
@@ -156,7 +158,7 @@ export interface ProjectSummary {
 }
 
 export interface SelectionState {
-  trackKind: 'video' | 'audio';
+  trackKind: EditorTrackKind;
   trackId: string;
   clipId: string;
 }
@@ -205,26 +207,52 @@ export interface SnapTarget {
 export interface EditorLane {
   laneId: string;
   label: string;
-  trackKind: 'video' | 'audio';
+  trackKind: EditorTrackKind;
   trackId: string | null;
   clips: Clip[];
 }
 
-export interface PreviewRequest {
-  mode: 'range' | 'clip' | 'full';
-  startFrame?: number;
-  endFrame?: number;
-  clipId?: string;
-  resolution?: '720p' | '1080p';
-  timelineRevision?: string;
+
+// ── Phase 1: Exact preview types ─────��───────────────────────────────
+
+/** ProgramMonitor display mode (Section 6.3 of parity design). */
+export type PreviewMode = 'rendered_exact' | 'source_approx' | 'none';
+
+/** Response from POST /api/projects/:id/preview (Phase 1 API). */
+export interface ExactPreviewResponse {
+  /**
+   * MAJOR-3 (Phase 5 review R1): `idle` is returned when the
+   * `programMonitorExactPreview` feature flag is OFF (Section 15.3). The
+   * client treats it as an instruction to fall back to source_approx
+   * playback rather than an error. The accompanying `error` field carries
+   * the machine-readable reason (`feature_disabled`).
+   */
+  status: 'idle' | 'queued' | 'rendering' | 'ready' | 'error';
+  timelineRevision: string;
+  renderSpecHash: string;
+  previewUrl?: string;
+  warnings?: string[];
+  error?: string;
 }
 
-export interface PreviewResponse {
-  previewUrl: string;
-  clipCount: number;
-  durationSec: number;
-  timelineRevision?: string;
-  generatedAt?: string;
+/** Response from GET /api/projects/:id/preview/status. */
+export interface PreviewStatusResponse {
+  timelineRevision: string | null;
+  renderSpecHash: string | null;
+  /** Hash computed fresh from the current on-disk timeline (for recovery verification). */
+  currentRenderSpecHash?: string | null;
+  status: 'idle' | 'rendering' | 'ready' | 'error';
+  previewUrl?: string;
+  warnings?: string[];
+  error?: string;
+}
+
+/** Preview artifact state tracked by usePlayback. */
+export interface PreviewArtifactState {
+  renderSpecHash: string | null;
+  timelineRevision: string | null;
+  previewUrl: string | null;
+  status: 'idle' | 'rendering' | 'ready' | 'error';
 }
 
 // Re-exported from shared module for backward compatibility
@@ -347,7 +375,7 @@ export interface TrimTarget {
   /** The clip whose edit point is being trimmed */
   clipId: string;
   trackId: string;
-  trackKind: 'video' | 'audio';
+  trackKind: MediaTrackKind;
   /** Which side of the clip is the active edit point */
   side: 'head' | 'tail';
 }

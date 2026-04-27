@@ -1,16 +1,25 @@
+import type { PreviewMode } from '../types';
+
 interface TransportBarProps {
   isPlaying: boolean;
   timecode: string;
   currentFrame: number;
-  previewMode: 'source' | 'none';
+  previewMode: PreviewMode;
   renderStatus: 'idle' | 'rendering' | 'ready' | 'error';
   previewStale: boolean;
   onTogglePlayback: () => void;
   onExportRender: () => void;
 }
 
-function chromeLabel(previewMode: 'source' | 'none'): string {
-  return previewMode === 'source' ? 'Source' : 'Offline';
+function chromeLabel(previewMode: PreviewMode): string {
+  switch (previewMode) {
+    case 'rendered_exact':
+      return 'Exact';
+    case 'source_approx':
+      return 'Source';
+    case 'none':
+      return 'Offline';
+  }
 }
 
 export default function TransportBar({
@@ -51,7 +60,7 @@ export default function TransportBar({
         className={`font-mono text-[10px] uppercase tracking-[0.18em] ${previewStale ? 'text-[color:var(--warning)]' : 'text-[color:var(--text-subtle)]'}`}
       >
         {renderStatus === 'rendering'
-          ? 'exporting\u2026'
+          ? 'rendering\u2026'
           : previewStale
             ? 'stale'
             : renderStatus}

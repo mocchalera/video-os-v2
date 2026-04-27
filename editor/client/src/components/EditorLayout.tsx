@@ -30,7 +30,17 @@ import ProgramMonitor from './ProgramMonitor';
 import TrimModeToolbar from './TrimModeToolbar';
 import TrimPreviewOverlay from './TrimPreviewOverlay';
 import Timeline, { type TimelineHandle } from './Timeline';
-import { MIN_ZOOM, MAX_ZOOM } from '../utils/editor-helpers';
+import { MIN_ZOOM, MAX_ZOOM, getCaptionText } from '../utils/editor-helpers';
+import { DEFAULT_CAPTION_STYLE_PRESET, buildCssCaptionStyle } from '@shared/caption-style-tokens';
+import type { CaptionStylePreset } from '@shared/caption-style-tokens';
+
+/** Minimal cue type matching RenderTextCue for CSS fallback caption parity. */
+export interface CaptionCue {
+  id: string;
+  text: string;
+  startFrame: number;
+  endFrame: number;
+}
 
 export type BottomTab = 'timeline' | 'patches' | 'alternatives' | 'diff';
 
@@ -42,7 +52,9 @@ interface EditorLayoutProps {
   // Playback
   playback: {
     videoRef: React.RefObject<HTMLVideoElement | null>;
-    previewMode: 'source' | 'none';
+    exactVideoRef: React.RefObject<HTMLVideoElement | null>;
+    previewMode: import('../types').PreviewMode;
+    previewArtifact: { previewUrl: string | null };
     renderStatus: 'idle' | 'rendering' | 'ready' | 'error';
     isPlaying: boolean;
     isBuffering: boolean;
@@ -59,6 +71,10 @@ interface EditorLayoutProps {
     handleVideoStalled: () => void;
     handleVideoEnded: () => void;
     handleVideoError: () => void;
+    handleExactVideoTimeUpdate: () => void;
+    handleExactVideoLoadedMetadata: () => void;
+    handleExactVideoEnded: () => void;
+    handleExactVideoError: () => void;
     togglePlayback: () => Promise<void>;
     shuttleSpeed: number;
     markIn: number | null;
@@ -98,8 +114,9 @@ interface EditorLayoutProps {
   selectedClipId: string | null;
   selectedClipIds: Set<string>;
   selectedClip: Clip | null;
+  selectedTrackKind: SelectionState['trackKind'] | null;
   onSelectClip: (
-    trackKind: 'video' | 'audio',
+    trackKind: SelectionState['trackKind'],
     trackId: string,
     clip: Clip,
     event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },
@@ -128,6 +145,7 @@ interface EditorLayoutProps {
   // Inspector
   onUpdateAudioNumber: (field: keyof AudioPolicy, value: number) => void;
   onUpdateAudioBoolean: (field: keyof AudioPolicy, value: boolean) => void;
+  onUpdateCaptionText: (value: string) => void;
   // Review
   reviewReport: ReviewReportResponse | null;
   reviewPatch: ReviewPatchResponse | null;
@@ -166,6 +184,14 @@ interface EditorLayoutProps {
   /** Patch preview */
   onPreviewPatch?: (filteredIndex: number) => void;
   previewingPatchIndex?: number | null;
+  /**
+   * MAJOR-2: Resolved caption cues from RenderSpec.text.speechCaptions.
+   * When provided, CSS fallback uses these instead of timeline.tracks.caption
+   * to ensure SRT and CSS caption text come from the same source.
+   */
+  captionCues?: CaptionCue[];
+  /** Resolved caption style preset from RenderSpec (MINOR-1) */
+  captionStylePreset?: CaptionStylePreset;
 }
 
 export default function EditorLayout({
@@ -185,6 +211,7 @@ export default function EditorLayout({
   selectedClipId,
   selectedClipIds,
   selectedClip,
+  selectedTrackKind,
   onSelectClip,
   onClearSelection,
   onMarqueeSelect,
@@ -206,6 +233,7 @@ export default function EditorLayout({
   activeSnapGuide,
   onUpdateAudioNumber,
   onUpdateAudioBoolean,
+  onUpdateCaptionText,
   reviewReport,
   reviewPatch,
   reviewBlueprint,
@@ -235,6 +263,8 @@ export default function EditorLayout({
   onConfidenceFilterChange,
   onPreviewPatch,
   previewingPatchIndex,
+  captionCues,
+  captionStylePreset,
 }: EditorLayoutProps) {
 
   const timelineRef = useRef<TimelineHandle>(null);
@@ -279,8 +309,8 @@ export default function EditorLayout({
       onJumpToClip(clipId);
       // Find the clip's frame to scroll to
       if (timeline) {
-        for (const kind of ['video', 'audio'] as const) {
-          for (const track of timeline.tracks[kind]) {
+        for (const kind of ['video', 'audio', 'caption'] as const) {
+          for (const track of timeline.tracks[kind] ?? []) {
             const clip = track.clips.find(c => c.clip_id === clipId);
             if (clip) {
               timelineRef.current?.scrollToFrame(clip.timeline_in_frame);
@@ -293,8 +323,59 @@ export default function EditorLayout({
   }, [onJumpToClip, timeline]);
 
   const totalTrackCount = timeline
-    ? timeline.tracks.video.length + timeline.tracks.audio.length
+    ? timeline.tracks.video.length +
+      timeline.tracks.audio.length +
+      (timeline.tracks.caption?.length ?? 0)
     : 0;
+  // Phase 2: Compute current video clip's zoom for CSS approximation in source_approx mode.
+  // Respects mute/solo state so the zoom matches the clip actually playing (same logic as usePlayback).
+  const activeClipZoom = useMemo(() => {
+    if (!timeline) return 1;
+    const hasVideoSolo = timeline.tracks.video.some(
+      (track) => trackStates[track.track_id]?.solo,
+    );
+    for (const track of timeline.tracks.video) {
+      const state = trackStates[track.track_id];
+      if (state) {
+        if (hasVideoSolo && !state.solo) continue;
+        if (!hasVideoSolo && state.muted) continue;
+      }
+      for (const clip of track.clips) {
+        const clipStart = clip.timeline_in_frame;
+        const clipEnd = clipStart + clip.timeline_duration_frames;
+        if (clipStart <= playback.playheadFrame && playback.playheadFrame < clipEnd) {
+          return typeof clip.metadata?.zoom === 'number' ? clip.metadata.zoom : 1;
+        }
+      }
+    }
+    return 1;
+  }, [timeline, playback.playheadFrame, trackStates]);
+
+  // MAJOR-2: Use RenderSpec-resolved captionCues when available so CSS
+  // fallback shows the same text as the SRT burn-in preview.
+  const activeCaptionText = useMemo(() => {
+    // Always use captionCues (RenderSpec-resolved) to match SRT burn-in.
+    // No fallback to timeline.tracks.caption — cues must be provided via props.
+    if (!captionCues) return null;
+    for (const cue of captionCues) {
+      if (cue.startFrame <= playback.playheadFrame && playback.playheadFrame < cue.endFrame) {
+        return cue.text.length > 0 ? cue.text : null;
+      }
+    }
+    return null;
+  }, [captionCues, timeline, playback.playheadFrame]);
+  // MAJOR 5 + MINOR-1: Compute CSS caption style from resolved CaptionStylePreset
+  const resolvedPreset = captionStylePreset ?? DEFAULT_CAPTION_STYLE_PRESET;
+  const captionStyle = useMemo(() => {
+    if (!timeline) return null;
+    const seq = timeline.sequence;
+    return buildCssCaptionStyle(resolvedPreset, {
+      width: seq.width,
+      height: seq.height,
+      fps: seq.fps_num / (seq.fps_den || 1),
+    });
+  }, [timeline?.sequence?.width, timeline?.sequence?.height, timeline?.sequence?.fps_num, timeline?.sequence?.fps_den, resolvedPreset]);
+
   const hiddenTrackCount = Math.max(0, totalTrackCount - lanes.length);
   const zoomLabel = zoom >= 2 ? `${zoom.toFixed(1)} px/f` : `${zoom.toFixed(2)} px/f`;
 
@@ -359,6 +440,9 @@ export default function EditorLayout({
             markOut={playback.markOut}
             transportTimecode={transportTimecode}
             currentFrame={playback.playheadFrame}
+            captionText={activeCaptionText}
+            captionStyle={captionStyle}
+            clipZoom={activeClipZoom}
             onExportRender={onExportRender}
           />
           <TrimPreviewOverlay
@@ -376,15 +460,19 @@ export default function EditorLayout({
           {mode === 'nle' ? (
             <PropertyPanel
               clip={selectedClip}
+              trackKind={selectedTrackKind}
               fps={fps}
               reviewReport={reviewReport}
               blueprint={reviewBlueprint}
               onUpdateAudioNumber={onUpdateAudioNumber}
               onUpdateAudioBoolean={onUpdateAudioBoolean}
+              onUpdateCaptionText={onUpdateCaptionText}
+              captionStylePreset={resolvedPreset}
             />
           ) : (
             <AiWorkspace
               selectedClip={selectedClip}
+              selectedTrackKind={selectedTrackKind}
               fps={fps}
               reviewReport={reviewReport}
               reviewPatch={reviewPatch}
@@ -402,10 +490,12 @@ export default function EditorLayout({
               sessionBaselineRevision={sessionBaselineRevision}
               onUpdateAudioNumber={onUpdateAudioNumber}
               onUpdateAudioBoolean={onUpdateAudioBoolean}
+              onUpdateCaptionText={onUpdateCaptionText}
               onPreviewAlternative={onPreviewAlternative}
               onJumpToClip={handleJumpToClip}
               onPreviewPatch={onPreviewPatch}
               previewingPatchIndex={previewingPatchIndex}
+              captionStylePreset={resolvedPreset}
             />
           )}
         </section></ErrorBoundary>
@@ -576,6 +666,7 @@ export default function EditorLayout({
 
 interface AiWorkspaceProps {
   selectedClip: Clip | null;
+  selectedTrackKind: SelectionState['trackKind'] | null;
   fps: number;
   reviewReport: ReviewReportResponse | null;
   reviewPatch: ReviewPatchResponse | null;
@@ -593,14 +684,17 @@ interface AiWorkspaceProps {
   sessionBaselineRevision: string | null;
   onUpdateAudioNumber: (field: keyof AudioPolicy, value: number) => void;
   onUpdateAudioBoolean: (field: keyof AudioPolicy, value: boolean) => void;
+  onUpdateCaptionText: (value: string) => void;
   onPreviewAlternative?: (candidate: AlternativeCandidate) => void;
   onJumpToClip?: (clipId: string) => void;
   onPreviewPatch?: (filteredIndex: number) => void;
   previewingPatchIndex?: number | null;
+  captionStylePreset?: CaptionStylePreset;
 }
 
 function AiWorkspace({
   selectedClip,
+  selectedTrackKind,
   fps,
   reviewReport,
   reviewPatch,
@@ -618,10 +712,12 @@ function AiWorkspace({
   sessionBaselineRevision,
   onUpdateAudioNumber,
   onUpdateAudioBoolean,
+  onUpdateCaptionText,
   onPreviewAlternative,
   onJumpToClip,
   onPreviewPatch,
   previewingPatchIndex,
+  captionStylePreset,
 }: AiWorkspaceProps) {
   const [aiTab, setAiTab] = useState<'decision' | 'patches' | 'alternatives' | 'diff' | 'inspector'>('decision');
 
@@ -688,11 +784,14 @@ function AiWorkspace({
         ) : (
           <PropertyPanel
             clip={selectedClip}
+            trackKind={selectedTrackKind}
             fps={fps}
             reviewReport={reviewReport}
             blueprint={reviewBlueprint}
             onUpdateAudioNumber={onUpdateAudioNumber}
             onUpdateAudioBoolean={onUpdateAudioBoolean}
+            onUpdateCaptionText={onUpdateCaptionText}
+            captionStylePreset={captionStylePreset}
           />
         )}
       </div>

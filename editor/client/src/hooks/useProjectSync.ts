@@ -34,6 +34,11 @@ interface RenderChangedEvent {
   project_id: string;
   source: ProjectSyncSource;
   changed_at: string;
+  // Phase 1: preview metadata (from preview-job-service broadcast)
+  preview_status?: string;
+  preview_url?: string;
+  render_spec_hash?: string;
+  timeline_revision?: string;
 }
 
 type ProjectSyncEvent =
@@ -55,6 +60,13 @@ interface UseProjectSyncOptions {
   onTimelineReload: () => Promise<void>;
   /** Callback to reload review artifacts. */
   onReviewReload: () => void;
+  /** Callback when preview render status changes via WebSocket. */
+  onPreviewChanged?: (event: {
+    preview_status?: string;
+    preview_url?: string;
+    render_spec_hash?: string;
+    timeline_revision?: string;
+  }) => void;
 }
 
 /**
@@ -72,6 +84,7 @@ export function useProjectSync({
   dirty,
   onTimelineReload,
   onReviewReload,
+  onPreviewChanged,
 }: UseProjectSyncOptions) {
   const [pendingRemoteRevision, setPendingRemoteRevision] = useState<string | null>(null);
   const [showMergeBanner, setShowMergeBanner] = useState(false);
@@ -85,6 +98,8 @@ export function useProjectSync({
   onTimelineReloadRef.current = onTimelineReload;
   const onReviewReloadRef = useRef(onReviewReload);
   onReviewReloadRef.current = onReviewReload;
+  const onPreviewChangedRef = useRef(onPreviewChanged);
+  onPreviewChangedRef.current = onPreviewChanged;
 
   const handleMessage = useCallback((data: unknown) => {
     const event = data as ProjectSyncEvent;
@@ -114,10 +129,17 @@ export function useProjectSync({
         break;
       }
 
-      case 'project-state.changed':
-      case 'render.changed': {
-        // Trigger review reload which also fetches project status
+      case 'project-state.changed': {
         onReviewReloadRef.current();
+        break;
+      }
+
+      case 'render.changed': {
+        onReviewReloadRef.current();
+        // Forward preview metadata to playback hook
+        if (event.preview_status && onPreviewChangedRef.current) {
+          onPreviewChangedRef.current(event);
+        }
         break;
       }
 
