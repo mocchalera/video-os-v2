@@ -57,7 +57,7 @@ function appendAudioStoryGraphReviewWarnings(projectDir: string, report?: Review
       details: "Report-only P2 planning signal: review whether setup audio was dropped before payoff.",
       evidence: graph.nodes
         .filter((node) => node.story_role === "setup")
-        .map((node) => `audio_story_node_ref:${node.node_id}`),
+        .map((node) => `audio_story_node_id:${node.node_id}`),
     });
     changed = true;
   }
@@ -85,7 +85,7 @@ function appendContinuityGraphReviewWarnings(projectDir: string, report?: Review
     summary: "Continuity graph flagged report-only continuity risks",
     severity: "warning",
     details: "Report-only P3 planning signal from continuity_graph risks.",
-    evidence: continuityBreaks.map((risk) => `continuity_risk_ref:${risk.risk_id}`),
+    evidence: continuityBreaks.map((risk) => `continuity_risk_id:${risk.risk_id}`),
   });
   return true;
 }

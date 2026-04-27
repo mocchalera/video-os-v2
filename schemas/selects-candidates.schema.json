@@ -133,6 +133,18 @@
           "minimum": 0,
           "maximum": 1
         },
+        "audio_story_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/audioStoryRef"
+          }
+        },
+        "continuity_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/continuityRef"
+          }
+        },
         "semantic_rank": {
           "type": "integer",
           "minimum": 1
@@ -244,6 +256,66 @@
           }
         }
       ],
+      "additionalProperties": false
+    },
+    "audioStoryRef": {
+      "type": "object",
+      "required": [
+        "node_id"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string",
+          "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing"]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidenceRecord"
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "continuityRef": {
+      "type": "object",
+      "required": [
+        "entity_id"
+      ],
+      "properties": {
+        "entity_id": {
+          "type": "string",
+          "pattern": "^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_[A-Za-z0-9_-]+$"
+        },
+        "risk_id": {
+          "type": "string",
+          "pattern": "^CONRISK_[A-Za-z0-9_-]+$"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "blocker"]
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "confidenceRecord": {
+      "type": "object",
+      "required": ["score", "source", "status"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" }
+      },
       "additionalProperties": false
     }
   },

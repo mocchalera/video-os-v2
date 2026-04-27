@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import * as os from "node:os";
 import { createRequire } from "node:module";
 import {
   buildContinuityGraph,
@@ -11,6 +12,8 @@ import {
   sortContinuityGraph,
   validateContinuityGraph,
 } from "../runtime/artifacts/p3-continuity-graph.js";
+import { materializeContinuityRiskRefs } from "../runtime/commands/triage.js";
+import { projectP3ContinuityPreferenceSignals } from "../runtime/commands/blueprint.js";
 
 const require_ = createRequire(import.meta.url);
 const Ajv2020 = require_("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -174,5 +177,62 @@ describe("P3 continuity_graph", () => {
 
     expect(isP3ContinuityPreferenceEnabled()).toBe(false);
     expect(canonicalTimelineHash()).toBe(before);
+  });
+
+  it("materializes continuity refs into first-class planning fields without wrapper evidence or risk strings", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "p3-first-class-"));
+    fs.mkdirSync(path.join(tmpDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "03_analysis/continuity_graph.json"),
+      JSON.stringify(readJson(path.join(FIXTURE_DIR, "edge_screen_direction_break.json")), null, 2),
+    );
+    const selects: any = {
+      version: "1.0.0",
+      project_id: "p3-first-class",
+      candidates: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_a",
+          src_in_us: 0,
+          src_out_us: 2000000,
+          role: "hero",
+          why_it_matches: "test",
+          risks: [],
+          confidence: 0.5,
+        },
+      ],
+    };
+
+    materializeContinuityRiskRefs(tmpDir, selects);
+
+    expect(selects.candidates[0].continuity_refs?.map((ref: { risk_id?: string }) => ref.risk_id)).toContain("CONRISK_axis_001");
+    expect(selects.candidates[0].continuity_refs?.[0].entity_id).toMatch(/^ENT_/);
+    expect(selects.candidates[0].evidence).toBeUndefined();
+    expect(selects.candidates[0].risks).toEqual([]);
+  });
+
+  it("projects continuity constraints into first-class blueprint fields without notes wrappers", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "p3-blueprint-first-class-"));
+    fs.mkdirSync(path.join(tmpDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "03_analysis/continuity_graph.json"),
+      JSON.stringify(readJson(path.join(FIXTURE_DIR, "edge_screen_direction_break.json")), null, 2),
+    );
+    const blueprint: any = {
+      version: "1.0.0",
+      project_id: "p3-first-class",
+      sequence_goals: ["test"],
+      beats: [{ id: "B01", label: "opening", target_duration_frames: 24, required_roles: ["hero"] }],
+      pacing: { opening_cadence: "a", middle_cadence: "b", ending_cadence: "c" },
+      music_policy: { start_sparse: true, allow_release_late: true, entry_beat: "B01" },
+      dialogue_policy: { preserve_natural_breath: true, avoid_wall_to_wall_voiceover: true },
+      transition_policy: { prefer_match_texture_over_flashy_fx: true },
+      ending_policy: { should_feel: "resolved" },
+      rejection_rules: ["none"],
+    };
+
+    expect(projectP3ContinuityPreferenceSignals(tmpDir, blueprint)).toBe(true);
+    expect(blueprint.beats[0].continuity_constraint?.enforced_entity_ids[0]).toMatch(/^ENT_/);
+    expect(blueprint.beats[0].notes).toBeUndefined();
   });
 });

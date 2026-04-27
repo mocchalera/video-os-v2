@@ -190,6 +190,18 @@
           "type": "string",
           "enum": ["hook", "setup", "experience", "closing"]
         },
+        "audio_story_role": {
+          "$ref": "#/$defs/audioStoryRole"
+        },
+        "continuity_constraint": {
+          "$ref": "#/$defs/continuityConstraint"
+        },
+        "applied_preferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/appliedPreference"
+          }
+        },
         "skill_hints": {
           "type": "array",
           "items": { "type": "string" }
@@ -225,6 +237,88 @@
         "texture",
         "dialogue"
       ]
+    },
+    "audioStoryRole": {
+      "type": "object",
+      "required": [
+        "node_id",
+        "role"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string",
+          "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing"]
+        },
+        "evidence_node_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$"
+          }
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "continuityConstraint": {
+      "type": "object",
+      "required": [
+        "chronology",
+        "enforced_entity_ids"
+      ],
+      "properties": {
+        "chronology": {
+          "type": "string",
+          "enum": ["chronological", "editorial_reorder", "deliberate_discontinuity"]
+        },
+        "enforced_entity_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_[A-Za-z0-9_-]+$"
+          }
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "appliedPreference": {
+      "type": "object",
+      "required": [
+        "entry_id",
+        "preference_type",
+        "consumed_offset",
+        "consumed_hash"
+      ],
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "pattern": "^EPM_[A-Za-z0-9_-]+$"
+        },
+        "preference_type": {
+          "type": "string",
+          "enum": ["pacing", "chronology", "transition_style", "repetition_tolerance", "bgm_loudness", "caption_density", "override_rationale", "delivery_preference", "redaction"]
+        },
+        "consumed_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "consumed_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
     },
     "pacing": {
       "type": "object",

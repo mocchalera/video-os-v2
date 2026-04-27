@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import * as os from "node:os";
 import { createRequire } from "node:module";
 import {
   buildAudioStoryGraph,
@@ -11,6 +12,8 @@ import {
   sortAudioStoryGraph,
   validateAudioStoryGraph,
 } from "../runtime/artifacts/p2-audio-story-graph.js";
+import { materializeAudioStoryGraphRefs } from "../runtime/commands/triage.js";
+import { projectAudioStoryRoles } from "../runtime/commands/blueprint.js";
 
 const require_ = createRequire(import.meta.url);
 const Ajv2020 = require_("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -172,5 +175,62 @@ describe("P2 audio_story_graph", () => {
 
     expect(isP2AudioStoryGraphEnabled()).toBe(false);
     expect(canonicalTimelineHash()).toBe(before);
+  });
+
+  it("materializes audio story refs into first-class planning fields without wrapper evidence", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "p2-first-class-"));
+    fs.mkdirSync(path.join(tmpDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "03_analysis/audio_story_graph.json"),
+      JSON.stringify(readJson(path.join(FIXTURE_DIR, "valid_dialogue_heavy.json")), null, 2),
+    );
+    const selects: any = {
+      version: "1.0.0",
+      project_id: "p2-first-class",
+      candidates: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_dialogue_001",
+          src_in_us: 0,
+          src_out_us: 2500000,
+          role: "hero",
+          why_it_matches: "test",
+          risks: [],
+          confidence: 0.5,
+        },
+      ],
+    };
+
+    materializeAudioStoryGraphRefs(tmpDir, selects);
+
+    expect(selects.candidates[0].audio_story_refs?.map((ref: { node_id: string }) => ref.node_id)).toContain("UTTREF_intro_001");
+    expect(selects.candidates[0].audio_story_refs?.[0].graph_hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(selects.candidates[0].evidence).toBeUndefined();
+  });
+
+  it("projects audio story roles into first-class blueprint fields without notes wrappers", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "p2-blueprint-first-class-"));
+    fs.mkdirSync(path.join(tmpDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, "03_analysis/audio_story_graph.json"),
+      JSON.stringify(readJson(path.join(FIXTURE_DIR, "valid_dialogue_heavy.json")), null, 2),
+    );
+    const blueprint: any = {
+      version: "1.0.0",
+      project_id: "p2-first-class",
+      sequence_goals: ["test"],
+      beats: [{ id: "B01", label: "setup", target_duration_frames: 24, required_roles: ["hero"] }],
+      pacing: { opening_cadence: "a", middle_cadence: "b", ending_cadence: "c" },
+      music_policy: { start_sparse: true, allow_release_late: true, entry_beat: "B01" },
+      dialogue_policy: { preserve_natural_breath: true, avoid_wall_to_wall_voiceover: true },
+      transition_policy: { prefer_match_texture_over_flashy_fx: true },
+      ending_policy: { should_feel: "resolved" },
+      rejection_rules: ["none"],
+    };
+
+    expect(projectAudioStoryRoles(tmpDir, blueprint)).toBe(true);
+    expect(blueprint.beats[0].audio_story_role).toMatchObject({ role: "setup" });
+    expect(blueprint.beats[0].audio_story_role?.evidence_node_ids).toContain("UTTREF_intro_001");
+    expect(blueprint.beats[0].notes).toBeUndefined();
   });
 });

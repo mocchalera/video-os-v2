@@ -42,6 +42,8 @@ import {
   continuityRisksForWindow,
   isP3ContinuityPreferenceEnabled,
   readContinuityGraph,
+  type ContinuityGraph,
+  type ContinuityGraphRisk,
 } from "../artifacts/p3-continuity-graph.js";
 
 // ── Types ────────────────────────────────────────────────────────
@@ -86,6 +88,8 @@ export interface SelectCandidate {
   why_it_matches: string;
   risks: string[];
   confidence: number;
+  audio_story_refs?: AudioStoryRef[];
+  continuity_refs?: ContinuityRef[];
   semantic_rank?: number;
   quality_flags?: string[];
   evidence?: string[];
@@ -100,6 +104,25 @@ export interface SelectCandidate {
   semantic_dedupe_key?: string;
   editorial_signals?: EditorialSignals;
   trim_hint?: TrimHint;
+}
+
+export interface AudioStoryRef {
+  node_id: string;
+  role?: "hook" | "setup" | "experience" | "payoff" | "reaction" | "closing";
+  confidence?: {
+    score: number;
+    source: string;
+    status: string;
+    label?: string;
+  };
+  graph_hash?: string;
+}
+
+export interface ContinuityRef {
+  entity_id: string;
+  risk_id?: string;
+  severity?: "info" | "warning" | "blocker";
+  graph_hash?: string;
 }
 
 export interface SelectsCandidates {
@@ -357,47 +380,116 @@ function canonicalizeSelects(
   }
 }
 
-function materializeAudioStoryGraphRefs(
+export function materializeAudioStoryGraphRefs(
   projectDir: string,
   selects: SelectsCandidates,
 ): void {
   const graph = readAudioStoryGraph(projectDir);
   if (!graph) return;
   const graphHash = computeAudioStoryGraphHash(graph);
+  let changed = false;
   for (const candidate of selects.candidates) {
     const nodes = audioStoryNodesForWindow(graph, candidate.asset_id, candidate.src_in_us, candidate.src_out_us);
     if (nodes.length === 0) continue;
-    const refs = nodes.map((node) => node.node_id);
-    candidate.evidence = Array.from(new Set([
-      ...(candidate.evidence ?? []),
-      `audio_story_graph_hash:${graphHash}`,
-      ...refs.map((ref) => `audio_story_node_ref:${ref}`),
-    ]));
+    candidate.audio_story_refs = uniqueAudioStoryRefs([
+      ...(candidate.audio_story_refs ?? []),
+      ...nodes.map((node) => ({
+        node_id: node.node_id,
+        ...(node.story_role ? { role: node.story_role } : {}),
+        confidence: node.confidence,
+        graph_hash: graphHash,
+      })),
+    ]);
+    changed = true;
     const salience = nodes.some((node) => ["hook", "setup", "payoff", "reaction"].includes(node.story_role ?? ""));
     if (salience) {
       candidate.confidence = Math.min(1, Number((candidate.confidence + 0.02).toFixed(4)));
     }
   }
+  if (changed) ensurePlanningMinorVersion(selects);
 }
 
-function materializeContinuityRiskRefs(
+export function materializeContinuityRiskRefs(
   projectDir: string,
   selects: SelectsCandidates,
 ): void {
   const graph = readContinuityGraph(projectDir);
   if (!graph) return;
   const graphHash = computeContinuityGraphHash(graph);
+  let changed = false;
   for (const candidate of selects.candidates) {
     const risks = continuityRisksForWindow(graph, candidate.asset_id, candidate.src_in_us, candidate.src_out_us);
     if (risks.length === 0) continue;
-    candidate.evidence = Array.from(new Set([
-      ...(candidate.evidence ?? []),
-      `continuity_graph_hash:${graphHash}`,
-      ...risks.map((risk) => `continuity_risk_ref:${risk.risk_id}`),
-    ]));
-    candidate.risks = Array.from(new Set([
-      ...candidate.risks,
-      ...risks.map((risk) => `${risk.type}:${risk.message}`),
-    ]));
+    candidate.continuity_refs = uniqueContinuityRefs([
+      ...(candidate.continuity_refs ?? []),
+      ...continuityRefsForRisks(graph, risks, graphHash),
+    ]);
+    changed = true;
   }
+  if (changed) ensurePlanningMinorVersion(selects);
+}
+
+function ensurePlanningMinorVersion(artifact: { version?: string }): void {
+  if (!artifact.version) return;
+  const match = artifact.version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (major === 1 && minor < 1) {
+    artifact.version = "1.1.0";
+  }
+}
+
+function uniqueAudioStoryRefs(refs: AudioStoryRef[]): AudioStoryRef[] {
+  const seen = new Set<string>();
+  const out: AudioStoryRef[] = [];
+  for (const ref of refs) {
+    const key = `${ref.node_id}:${ref.graph_hash ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
+}
+
+function uniqueContinuityRefs(refs: ContinuityRef[]): ContinuityRef[] {
+  const seen = new Set<string>();
+  const out: ContinuityRef[] = [];
+  for (const ref of refs) {
+    const key = `${ref.entity_id}:${ref.risk_id ?? ""}:${ref.graph_hash ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
+}
+
+function continuityRefsForRisks(
+  graph: ContinuityGraph,
+  risks: ContinuityGraphRisk[],
+  graphHash: string,
+): ContinuityRef[] {
+  const segmentToEntities = new Map(graph.segments.map((segment) => [segment.segment_id, segment.entity_ids]));
+  const refs: ContinuityRef[] = [];
+  for (const risk of risks) {
+    const entityIds = new Set<string>();
+    for (const ref of risk.refs) {
+      if (/^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_/.test(ref)) {
+        entityIds.add(ref);
+        continue;
+      }
+      for (const entityId of segmentToEntities.get(ref) ?? []) {
+        entityIds.add(entityId);
+      }
+    }
+    for (const entityId of entityIds) {
+      refs.push({
+        entity_id: entityId,
+        risk_id: risk.risk_id,
+        severity: risk.severity,
+        graph_hash: graphHash,
+      });
+    }
+  }
+  return refs;
 }

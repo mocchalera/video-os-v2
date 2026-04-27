@@ -10,6 +10,7 @@ import {
   readPreferenceEntriesWithConsumedOffset,
   resolveActivePreference,
 } from "../runtime/artifacts/p3-preference-memory.js";
+import { projectP3ContinuityPreferenceSignals } from "../runtime/commands/blueprint.js";
 
 const require_ = createRequire(import.meta.url);
 const Ajv2020 = require_("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -140,5 +141,38 @@ describe("P3 editorial_preference_memory", () => {
 
     expect(hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(hash).not.toBe(computePreferenceMemoryHash(reversed));
+  });
+
+  it("projects active preferences into first-class blueprint fields without notes wrappers", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "p3-pref-first-class-"));
+    fs.mkdirSync(path.join(tmpDir, "00_project"), { recursive: true });
+    fs.copyFileSync(
+      path.join(FIXTURE_DIR, "valid_active_pacing.jsonl"),
+      path.join(tmpDir, "00_project/editorial_preference_memory.jsonl"),
+    );
+    const raw = fs.readFileSync(path.join(tmpDir, "00_project/editorial_preference_memory.jsonl"), "utf-8");
+    const blueprint: any = {
+      version: "1.0.0",
+      project_id: "p3-pref-first-class",
+      sequence_goals: ["test"],
+      beats: [{ id: "B01", label: "opening", target_duration_frames: 24, required_roles: ["hero"] }],
+      pacing: { opening_cadence: "a", middle_cadence: "b", ending_cadence: "c" },
+      music_policy: { start_sparse: true, allow_release_late: true, entry_beat: "B01" },
+      dialogue_policy: { preserve_natural_breath: true, avoid_wall_to_wall_voiceover: true },
+      transition_policy: { prefer_match_texture_over_flashy_fx: true },
+      ending_policy: { should_feel: "resolved" },
+      rejection_rules: ["none"],
+    };
+
+    expect(projectP3ContinuityPreferenceSignals(tmpDir, blueprint)).toBe(true);
+    expect(blueprint.beats[0].applied_preferences).toEqual([
+      expect.objectContaining({
+        entry_id: "EPM_pacing_active",
+        preference_type: "pacing",
+        consumed_offset: Buffer.byteLength(raw, "utf-8"),
+        consumed_hash: computePreferenceMemoryHash(raw),
+      }),
+    ]);
+    expect(blueprint.beats[0].notes).toBeUndefined();
   });
 });

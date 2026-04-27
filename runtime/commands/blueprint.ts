@@ -22,6 +22,7 @@ import {
   readContinuityGraph,
 } from "../artifacts/p3-continuity-graph.js";
 import {
+  computePreferenceMemoryHash,
   readPreferenceEntries,
   resolveActivePreference,
   type PreferenceType,
@@ -55,7 +56,7 @@ export async function runBlueprint(
   return result;
 }
 
-function projectAudioStoryRoles(projectDir: string, blueprint?: EditBlueprint): boolean {
+export function projectAudioStoryRoles(projectDir: string, blueprint?: EditBlueprint): boolean {
   if (!blueprint) return false;
   const graph = readAudioStoryGraph(projectDir);
   if (!graph) return false;
@@ -68,12 +69,16 @@ function projectAudioStoryRoles(projectDir: string, blueprint?: EditBlueprint): 
     const label = String(beat.label ?? beat.id ?? "").toLowerCase();
     const role = chooseBeatRole(label, roles);
     if (!role) continue;
-    beat.story_role = role;
     const refs = roles.get(role) ?? [];
-    const suffix = `audio_story_graph:${graphHash} refs:${refs.slice(0, 3).join(",")}`;
-    beat.notes = beat.notes ? `${beat.notes}\n${suffix}` : suffix;
+    beat.audio_story_role = {
+      node_id: refs[0],
+      role,
+      evidence_node_ids: refs.slice(0, 3),
+      graph_hash: graphHash,
+    };
     changed = true;
   }
+  if (changed) ensurePlanningMinorVersion(blueprint);
   return changed;
 }
 
@@ -96,7 +101,7 @@ function chooseBeatRole(label: string, roles: Map<string, string[]>): string | n
   return roles.keys().next().value ?? null;
 }
 
-function projectP3ContinuityPreferenceSignals(projectDir: string, blueprint?: EditBlueprint): boolean {
+export function projectP3ContinuityPreferenceSignals(projectDir: string, blueprint?: EditBlueprint): boolean {
   if (!blueprint) return false;
   let changed = false;
   const beats = (blueprint as unknown as { beats?: Array<Record<string, unknown>> }).beats ?? [];
@@ -104,28 +109,74 @@ function projectP3ContinuityPreferenceSignals(projectDir: string, blueprint?: Ed
   const graph = readContinuityGraph(projectDir);
   if (graph && beats.length > 0) {
     const graphHash = computeContinuityGraphHash(graph);
-    const riskRefs = graph.risks.map((risk) => risk.risk_id);
-    if (riskRefs.length > 0) {
+    const enforcedEntityIds = collectEnforcedEntityIds(graph);
+    if (enforcedEntityIds.length > 0) {
+      const chronology = graph.edges.some((edge) => edge.type === "chronologically_before")
+        ? "chronological"
+        : graph.risks.some((risk) => risk.type === "chronology_uncertain" || risk.type === "axis_break")
+          ? "editorial_reorder"
+          : "chronological";
       for (const beat of beats) {
-        const suffix = `continuity_graph:${graphHash} risks:${riskRefs.slice(0, 3).join(",")}`;
-        beat.notes = beat.notes ? `${beat.notes}\n${suffix}` : suffix;
+        beat.continuity_constraint = {
+          chronology,
+          enforced_entity_ids: enforcedEntityIds,
+          graph_hash: graphHash,
+        };
         changed = true;
       }
     }
   }
 
   const preferencePath = path.join(projectDir, "00_project/editorial_preference_memory.jsonl");
-  const preferences = readPreferenceEntries(preferencePath).entries.map((item) => item.entry);
+  const preferenceRead = readPreferenceEntries(preferencePath);
+  const preferences = preferenceRead.entries.map((item) => item.entry);
   const active = (["pacing", "chronology", "transition_style"] as PreferenceType[])
     .map((type) => resolveActivePreference(preferences, type).active)
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   if (active.length > 0) {
+    const raw = fs.readFileSync(preferencePath, "utf-8");
+    const consumedHash = computePreferenceMemoryHash(raw);
     for (const beat of beats) {
-      const suffix = `editorial_preference_memory refs:${active.map((entry) => entry.entry_id).join(",")}`;
-      beat.notes = beat.notes ? `${beat.notes}\n${suffix}` : suffix;
+      beat.applied_preferences = active.map((entry) => ({
+        entry_id: entry.entry_id,
+        preference_type: entry.preference_type,
+        consumed_offset: preferenceRead.lastKnownGoodOffset,
+        consumed_hash: consumedHash,
+      }));
       changed = true;
     }
   }
 
+  if (changed) ensurePlanningMinorVersion(blueprint);
   return changed;
+}
+
+function ensurePlanningMinorVersion(artifact: { version?: string }): void {
+  if (!artifact.version) return;
+  const match = artifact.version.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  if (major === 1 && minor < 1) {
+    artifact.version = "1.1.0";
+  }
+}
+
+function collectEnforcedEntityIds(graph: NonNullable<ReturnType<typeof readContinuityGraph>>): string[] {
+  const riskRefs = new Set(graph.risks.flatMap((risk) => risk.refs));
+  const segmentToEntities = new Map(graph.segments.map((segment) => [segment.segment_id, segment.entity_ids]));
+  const entityIds = new Set<string>();
+  for (const ref of riskRefs) {
+    if (/^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_/.test(ref)) {
+      entityIds.add(ref);
+      continue;
+    }
+    for (const entityId of segmentToEntities.get(ref) ?? []) {
+      entityIds.add(entityId);
+    }
+  }
+  if (entityIds.size === 0) {
+    for (const entity of graph.entities) entityIds.add(entity.entity_id);
+  }
+  return Array.from(entityIds).sort();
 }
