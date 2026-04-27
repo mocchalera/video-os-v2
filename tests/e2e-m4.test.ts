@@ -323,6 +323,8 @@ describe("M4 E2E: packageCommand", () => {
     // QA report and manifest written to disk
     expect(fs.existsSync(path.join(projDir, "07_package/qa-report.json"))).toBe(true);
     expect(fs.existsSync(path.join(projDir, "07_package/package_manifest.json"))).toBe(true);
+    expect(result.deliverablePath).toBe(path.join(projDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projDir, "09_output", "final.mp4"))).toBe(true);
   });
 
   it("nle_finishing path: QA passes, transitions to packaged", async () => {
@@ -368,6 +370,8 @@ describe("M4 E2E: packageCommand", () => {
     expect(result.qaReport!.passed).toBe(true);
     expect(result.qaReport!.metrics.integrated_lufs).toBe(-16.0);
     expect(result.stateTransitioned).toBe(true);
+    expect(result.deliverablePath).toBe(path.join(projDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projDir, "09_output", "final.mp4"))).toBe(true);
 
     // State transitioned to packaged
     const stateRaw = fs.readFileSync(
@@ -570,6 +574,8 @@ describe("M4 E2E: full pipeline", () => {
     expect(
       fs.existsSync(path.join(projDir, "07_package/package_manifest.json")),
     ).toBe(true);
+    expect(packageResult.deliverablePath).toBe(path.join(projDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projDir, "09_output", "final.mp4"))).toBe(true);
 
     // State is packaged
     const stateRaw = fs.readFileSync(

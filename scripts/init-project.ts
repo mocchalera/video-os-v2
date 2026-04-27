@@ -19,6 +19,7 @@ const DIRECTORIES_TO_ENSURE = [
   "03_analysis",
   "07_export",
   "07_package",
+  "09_output",
 ];
 
 export interface InitProjectCliArgs {

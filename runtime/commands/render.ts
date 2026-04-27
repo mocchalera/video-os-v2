@@ -38,6 +38,7 @@ export async function runRender(
 
 function collectRenderArtifacts(projectDir: string): string[] {
   return [
+    "09_output/final.mp4",
     "07_package/qa-report.json",
     "07_package/package_manifest.json",
     "07_package/video/final.mp4",

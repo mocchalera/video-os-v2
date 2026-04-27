@@ -52,6 +52,7 @@ import {
 import { assembleTimelineToMp4 } from "../render/assembler.js";
 import { runRenderPipeline } from "../render/pipeline.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
+import { publishFinalVideo } from "../packaging/deliverable.js";
 import {
   getReleaseSafetyMode,
   isP4aReleaseSafetyEnabled,
@@ -68,6 +69,7 @@ export interface PackageCommandResult {
   qaReport?: QaReport;
   packageManifest?: PackageManifest;
   releaseSafetyReport?: ReleaseSafetyReport;
+  deliverablePath?: string;
   sourceOfTruth?: SourceOfTruth;
   stateTransitioned?: boolean;
 }
@@ -209,6 +211,7 @@ export async function packageCommand(
   let qaMeasurementVideoPath: string | undefined;
   let qaMeasurementAudioPath: string | undefined;
   let qaMeasurementAssemblyPath: string | undefined = options?.assemblyPath;
+  let finalVideoSourcePath: string | undefined;
   const defaultAssemblyPath = path.join(absDir, "05_timeline/assembly.mp4");
   if (!qaMeasurementAssemblyPath && fs.existsSync(defaultAssemblyPath)) {
     qaMeasurementAssemblyPath = defaultAssemblyPath;
@@ -319,6 +322,7 @@ export async function packageCommand(
         });
         qaMeasurementAssemblyPath = assemblyPath;
         qaMeasurementVideoPath = renderResult.finalVideoPath;
+        finalVideoSourcePath = renderResult.finalVideoPath;
         qaMeasurementAudioPath = renderResult.finalMixPath;
 
         // Check which artifacts the render produced
@@ -350,6 +354,9 @@ export async function packageCommand(
     if (!qaMeasurementVideoPath) {
       qaMeasurementVideoPath = path.join(packageDir, "video/final.mp4");
     }
+    if (!finalVideoSourcePath) {
+      finalVideoSourcePath = qaMeasurementVideoPath;
+    }
     if (!qaMeasurementAudioPath) {
       qaMeasurementAudioPath = path.join(packageDir, "audio/final_mix.wav");
     }
@@ -358,6 +365,7 @@ export async function packageCommand(
     // supplied_export_probe_valid (simplified)
     qaMeasurementVideoPath = options?.suppliedFinalPath ||
       path.join(packageDir, "video/final.mp4");
+    finalVideoSourcePath = qaMeasurementVideoPath;
     const suppliedExists = options?.suppliedFinalPath
       ? fs.existsSync(options.suppliedFinalPath)
       : fs.existsSync(path.join(packageDir, "video/final.mp4"));
@@ -533,6 +541,7 @@ export async function packageCommand(
   // 8. Build package manifest
   const editorialTimelineHash = computeFileHash(timelinePath);
   let packageManifest: PackageManifest;
+  const publishedFinalVideo = publishFinalVideo(absDir, finalVideoSourcePath!);
 
   if (sourceOfTruth === "engine_render") {
     packageManifest = buildEngineRenderManifest({
@@ -543,6 +552,7 @@ export async function packageCommand(
       captionApprovalHash: doc.artifact_hashes?.caption_approval_hash,
       musicCuesHash: doc.artifact_hashes?.music_cues_hash,
       captionPolicy,
+      finalVideoPath: publishedFinalVideo.path,
       createdAt,
     });
   } else {
@@ -554,8 +564,7 @@ export async function packageCommand(
       handoffId: doc.handoff_resolution?.handoff_id || "unknown",
       captionApprovalHash: doc.artifact_hashes?.caption_approval_hash,
       captionPolicy,
-      finalVideoPath: options?.suppliedFinalPath ||
-        path.join(packageDir, "video/final.mp4"),
+      finalVideoPath: publishedFinalVideo.path,
       qaReportPath: path.join(packageDir, "qa-report.json"),
       createdAt,
     });
@@ -583,6 +592,7 @@ export async function packageCommand(
     qaReport,
     packageManifest,
     releaseSafetyReport,
+    deliverablePath: publishedFinalVideo.path,
     sourceOfTruth,
     stateTransitioned: true,
   };

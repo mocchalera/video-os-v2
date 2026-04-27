@@ -184,6 +184,16 @@ UXP プラグイン:
 
 ラウンドトリップ diff engine は `trim_changed`, `reordered`, `deleted`, `added_unmapped` を検出します。`added_unmapped` は自動適用せず、手動レビュー前提です。
 
+## 書き出し先
+
+最終動画のユーザー向け保存先は常に次のパスです。
+
+```text
+projects/<project-id>/09_output/final.mp4
+```
+
+`07_package/` は QA、manifest、音声 stem、caption sidecar などの内部パッケージ用ディレクトリです。`/render` または `/package` は QA 通過後に最終動画を `09_output/final.mp4` へ発行します。
+
 ## アーキテクチャ
 
 ![自由を渡すには止まる設計が必要](docs/images/demo-05-result.jpg)

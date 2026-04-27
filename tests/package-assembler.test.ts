@@ -207,6 +207,8 @@ describe("package command assembler wiring", () => {
     expect(renderMock).toHaveBeenCalledWith(expect.objectContaining({
       assemblyPath,
     }));
+    expect(result.deliverablePath).toBe(path.join(projectDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projectDir, "09_output", "final.mp4"))).toBe(true);
   });
 
   it("reuses an existing 05_timeline/assembly.mp4", async () => {
@@ -234,5 +236,7 @@ describe("package command assembler wiring", () => {
     expect(renderMock).toHaveBeenCalledWith(expect.objectContaining({
       assemblyPath,
     }));
+    expect(result.deliverablePath).toBe(path.join(projectDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projectDir, "09_output", "final.mp4"))).toBe(true);
   });
 });

@@ -97,6 +97,7 @@ export function buildEngineRenderManifest(opts: {
   baseTimelineVersion: string;
   editorialTimelineHash: string;
   outputDir: string; // 07_package/
+  finalVideoPath?: string;
   captionApprovalHash?: string;
   musicCuesHash?: string;
   ffmpegVersion?: string;
@@ -107,7 +108,7 @@ export function buildEngineRenderManifest(opts: {
   const { outputDir, captionPolicy } = opts;
 
   // Final video
-  const finalVideoPath = path.join(outputDir, "video", "final.mp4");
+  const finalVideoPath = opts.finalVideoPath ?? path.join(outputDir, "video", "final.mp4");
   const finalVideo = artifactEntry(finalVideoPath);
   if (!finalVideo) {
     throw new Error(`Required artifact not found: ${finalVideoPath}`);
