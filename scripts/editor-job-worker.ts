@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   try {
     switch (phase) {
       case "compile": {
-        const result = runCompilePhase(resolvedDir, {
+        const result = await runCompilePhase(resolvedDir, {
           createdAt: options.created_at as string | undefined,
           fpsNum: options.fps_num as number | undefined,
         });

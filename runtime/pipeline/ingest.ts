@@ -38,7 +38,7 @@ import { segmentMap, segmentReduce } from "./stages/segment.js";
 import { derivativesMap, derivativesReduce } from "./stages/derivatives.js";
 import { resolveTranscribeFn, sttMap, sttReduce } from "./stages/stt.js";
 import { hydrateCachedVlmSegments, runParallelVlmAnalysis, vlmReduce, type VlmShard, type VlmAssetRunSummary, type VlmProgressReporter } from "./stages/vlm.js";
-import { peakMap, peakReduce, type PeakShard } from "./stages/peak.js";
+import { degradedPeakMap, peakMap, peakReduce, type PeakShard } from "./stages/peak.js";
 import { buildGapReport, buildManifestEntries } from "./stages/gap-report.js";
 
 // ── Re-exports for backward compatibility ──────────────────────────
@@ -82,6 +82,8 @@ export interface PipelineResult {
   vlmSummary?: VlmAssetRunSummary;
 }
 
+const DEFAULT_PEAK_STAGE_TIMEOUT_MS = 5 * 60 * 1000;
+
 // ── Main Pipeline ──────────────────────────────────────────────────
 
 export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult> {
@@ -117,10 +119,11 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   let totalStages = 6;
   if (!opts.skipStt) totalStages += 1;
   if (!opts.skipVlm) totalStages += 1;
-  if (!opts.skipVlm && !opts.skipPeak) totalStages += 1;
+  if (!opts.skipPeak) totalStages += 1;
   pt?.setTotal(totalStages);
 
   // ── Stage 1: Ingest ──
+  console.log("[pipeline] Stage 1/12 ingest.map starting");
   const allIngestShards = await ingestMap(sourceFiles, { projectRoot: absProjectDir, policyHash, ffmpegVersion });
   pt?.advance();
 
@@ -136,11 +139,13 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   }
 
   // ── Stage 2: Reduce ──
+  console.log("[pipeline] Stage 2/12 ingest.reduce writing assets");
   const { assetsJson: initialAssetsJson, sourceFileMap } = ingestReduce(newIngestShards, projectId, assetsPath);
   let assetsJson = initialAssetsJson;
   pt?.advance("assets.json");
 
   // ── Stage 3–4: Segment ──
+  console.log("[pipeline] Stage 3-4/12 segmentation starting");
   const segMapResult = await segmentMap(sourceFileMap, assetsJson.items, thresholds, { policyHash, ffmpegVersion });
   const segmentShards = segMapResult.shards;
   const segResult = segmentReduce(segmentShards, assetsJson, segmentsPath, assetsPath);
@@ -149,6 +154,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   pt?.advance("segments.json");
 
   // ── Stage 5–6: Derivatives ──
+  console.log("[pipeline] Stage 5-6/12 derivatives starting");
   const derivativeResults = await derivativesMap(sourceFileMap, assetsJson.items, segmentShards, outputDir);
   const derivResult = derivativesReduce(derivativeResults, assetsJson, segmentsJson, assetsPath, segmentsPath);
   assetsJson = derivResult.assets;
@@ -159,6 +165,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   let sttResults: Map<string, AssetSttResult> | undefined;
   const diarizeGapEntries: GapEntry[] = [];
   if (!opts.skipStt) {
+    console.log("[pipeline] Stage 7-8/12 STT starting");
     const result = await runSttStage(opts, policy, sourceFileMap, assetsJson, segmentsJson,
       projectId, outputDir, policyHash, assetsPath, segmentsPath, diarizeGapEntries);
     if (result) { assetsJson = result.assets; segmentsJson = result.segments; sttResults = result.sttResults; }
@@ -169,6 +176,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   let vlmShards: VlmShard[] | undefined;
   let vlmSummary: VlmAssetRunSummary | undefined;
   if (!opts.skipVlm) {
+    console.log("[pipeline] Stage 9-10/12 VLM starting");
     const result = await runVlmStage(opts, policy, assetsJson, segmentsJson, existingSegmentsJson,
       policyHash, segmentsPath, assetsPath);
     if (result) { assetsJson = result.assets; segmentsJson = result.segments; vlmShards = result.vlmShards; vlmSummary = result.vlmSummary; }
@@ -177,13 +185,31 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
   // ── Stage 11–12: Peak Detection ──
   let peakShards: PeakShard[] | undefined;
-  if (!opts.skipVlm && !opts.skipPeak && opts.vlmFn) {
+  if (!opts.skipPeak && !opts.skipVlm && opts.vlmFn) {
     const peakPolicy = (policy as Record<string, unknown>)["peak_detection"] as PeakDetectionPolicy | undefined;
-    console.log("[pipeline] Running VLM peak detection...");
-    peakShards = await peakMap(assetsJson, segmentsJson, derivativeResults, opts.vlmFn, peakPolicy ?? DEFAULT_PEAK_POLICY, outputDir, opts.contentHint);
+    console.log("[pipeline] Stage 11-12/12 VLM peak detection starting");
+    const timeoutMs = readPeakTimeoutMs();
+    try {
+      peakShards = await withTimeout(
+        peakMap(assetsJson, segmentsJson, derivativeResults, opts.vlmFn, peakPolicy ?? DEFAULT_PEAK_POLICY, outputDir, opts.contentHint),
+        timeoutMs,
+        `peak detection timed out after ${timeoutMs}ms`,
+      );
+    } catch (err) {
+      console.warn(`[pipeline] Peak detection degraded: ${err instanceof Error ? err.message : String(err)}`);
+      peakShards = await degradedPeakMap(assetsJson, segmentsJson, sourceFileMap);
+    }
     if (peakShards.length > 0) {
       segmentsJson = peakReduce(peakShards, segmentsJson, segmentsPath);
       console.log(`[pipeline] Peak detection: ${peakShards.filter((s) => s.peak_analysis).length}/${peakShards.length} segments enriched`);
+    }
+    pt?.advance();
+  } else if (!opts.skipPeak) {
+    console.log("[pipeline] Stage 11-12/12 degraded peak detection starting");
+    peakShards = await degradedPeakMap(assetsJson, segmentsJson, sourceFileMap);
+    if (peakShards.length > 0) {
+      segmentsJson = peakReduce(peakShards, segmentsJson, segmentsPath);
+      console.log(`[pipeline] Peak detection: ${peakShards.filter((s) => s.peak_analysis).length}/${peakShards.length} degraded segments enriched`);
     }
     pt?.advance();
   }
@@ -202,6 +228,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   }
 
   // ── Display names ──
+  console.log("[pipeline] Stage display-name starting");
   const displayNameInputs: DisplayNameInput[] = assetsJson.items
     .filter((asset) => sourceFileMap.has(asset.asset_id))
     .map((asset) => ({ asset, filePath: sourceFileMap.get(asset.asset_id)!, segments: segmentsJson.items.filter((s) => s.asset_id === asset.asset_id) }));
@@ -211,12 +238,14 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   pt?.advance();
 
   // ── Gap report ──
+  console.log("[pipeline] Stage gap-report starting");
   const newAssetItems = assetsJson.items.filter((a) => !cacheHitIds.has(a.asset_id));
   const gapReport = buildGapReport(newAssetItems, segmentShards, derivativeResults, segMapResult.detectorFailures, sttResults, vlmShards, peakShards);
   gapReport.entries.push(...diarizeGapEntries);
   atomicWriteYaml(gapReportPath, gapReport);
 
   // ── Media links + BGM ──
+  console.log("[pipeline] Stage media-links/BGM starting");
   let mediaSourceMap: MediaSourceMapDoc | undefined;
   let mediaSourceMapPath: string | undefined;
   if (!opts.skipBgmAnalysis) { runProjectBgmAnalysis({ sourceFiles, projectDir: absProjectDir, projectId }); }
@@ -230,6 +259,28 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   pt?.complete(["assets.json", "segments.json", "gap_report.yaml"]);
 
   return { assetsJson, segmentsJson, gapReport, outputDir, mediaSourceMap, mediaSourceMapPath, vlmSummary };
+}
+
+function readPeakTimeoutMs(): number {
+  const raw = Number.parseInt(process.env.VOS_PEAK_TIMEOUT_MS ?? "", 10);
+  if (Number.isInteger(raw) && raw > 0) return raw;
+  return DEFAULT_PEAK_STAGE_TIMEOUT_MS;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 // ── Private Helpers ────────────────────────────────────────────────

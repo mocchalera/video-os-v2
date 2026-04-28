@@ -16,14 +16,17 @@ import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from
 import { applyPatch } from "./patch.js";
 import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
+import { loadProfiles } from "../editorial/policy-resolver.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
 import { loadSourceMap } from "../media/source-map.js";
+import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
 import type { BgmScoringContext } from "./score.js";
 import type {
   CompileOptions,
   CompilerDefaults,
   CreativeBrief,
+  BriefAudioPolicy,
   DurationPolicy,
   EditBlueprint,
   SelectsCandidates,
@@ -56,6 +59,12 @@ export interface CompileResult {
     duration_delta_pct?: number;
   };
   duration_policy?: DurationPolicy;
+}
+
+interface ResolvedAudioPolicy {
+  mode: BriefAudioPolicy;
+  source: "explicit_brief" | "profile_default" | "global_default";
+  a1_loudnorm: boolean;
 }
 
 function findRepoRoot(from: string): string {
@@ -118,6 +127,7 @@ export function compile(opts: CompileOptions): CompileResult {
   const brief = readYaml<CreativeBrief>(briefPath);
   const blueprint = opts.blueprintOverride ?? readYaml<EditBlueprint>(blueprintPath);
   const selects = readYaml<SelectsCandidates>(selectsPath);
+  enrichSelectsWithAnalysisPeaks(selects, projectPath);
   const defaults = readYaml<CompilerDefaults>(defaultsPath);
 
   // ── Phase 0.5: Resolve Duration Policy ──────────────────────────
@@ -131,6 +141,8 @@ export function compile(opts: CompileOptions): CompileResult {
     brief,
     materialTotalSec,
   );
+  const audioPolicy = resolveAudioPolicy(brief, blueprint, repoRoot);
+  const captionPolicy = resolveCaptionPolicy(brief, blueprint, repoRoot);
 
   // ── Phase 1: Normalize ────────────────────────────────────────────
 
@@ -176,7 +188,7 @@ export function compile(opts: CompileOptions): CompileResult {
   );
 
   // ── Phase 2.5: Resolve Timeline Order & Output Dimensions ────────
-  const timelineOrder = resolveTimelineOrder(blueprint, blueprint.resolved_profile?.id);
+  const timelineOrder = resolveTimelineOrder(blueprint, blueprint.resolved_profile?.id, brief);
   const sourceAssetIds = new Set(
     selects.candidates
       .map((candidate) => candidate.asset_id)
@@ -189,6 +201,12 @@ export function compile(opts: CompileOptions): CompileResult {
 
   const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen, durationPolicy, {
     timelineOrder,
+    beatOrder: normalized.beats.map((beat) => beat.beat_id),
+    audioPolicy: audioPolicy.mode,
+    a1Loudnorm: audioPolicy.a1_loudnorm,
+    bgmAssetId: blueprint.music_policy.bgm_asset_id,
+    bgmSegmentId: blueprint.music_policy.bgm_segment_id,
+    bgmDurationSec: blueprint.music_policy.bgm_duration_sec,
   });
 
   // ── Phase 3.5: Adaptive Trim ────────────────────────────────────
@@ -283,12 +301,24 @@ export function compile(opts: CompileOptions): CompileResult {
     fpsNum,
     fpsDen,
     durationPolicy,
+    audioPolicy,
+    captionPolicy,
     transitions: adjacencyTransitions.length > 0 ? adjacencyTransitions : undefined,
     width: outputDims.width,
     height: outputDims.height,
     outputAspectRatio: outputDims.output_aspect_ratio,
     letterboxPolicy: outputDims.letterbox_policy,
   });
+
+  attachAutoCaptions(timelineIR, {
+    brief,
+    blueprint,
+    candidates: selects.candidates,
+    projectPath,
+    repoRoot,
+    fpsNum,
+    fpsDen,
+  }, captionPolicy);
 
   // ── Phase 5.5: Editorial Metadata ─────────────────────────────────
   // Attach skill metadata and provenance hashes when active skills exist.
@@ -320,6 +350,30 @@ export function compile(opts: CompileOptions): CompileResult {
               };
             }
           }
+        }
+      }
+    }
+  }
+
+  for (const trackGroup of [timelineIR.tracks.video, timelineIR.tracks.audio]) {
+    for (const track of trackGroup) {
+      for (const clip of track.clips) {
+        const matchingCandidate = selects.candidates.find(
+          (c) => c.segment_id === clip.segment_id &&
+            c.src_in_us === clip.src_in_us &&
+            c.src_out_us === clip.src_out_us,
+        ) ?? selects.candidates.find((c) => c.segment_id === clip.segment_id);
+        if (matchingCandidate?.peak_signals || matchingCandidate?.editorial_signals?.peak_strength_score != null) {
+          if (!clip.metadata) clip.metadata = {};
+          (clip.metadata as Record<string, unknown>).peak_signals = {
+            ...(matchingCandidate.peak_signals ?? {}),
+            ...(matchingCandidate.editorial_signals?.peak_strength_score != null
+              ? { peak_strength_score: matchingCandidate.editorial_signals.peak_strength_score }
+              : {}),
+            ...(matchingCandidate.editorial_signals?.peak_type
+              ? { peak_type: matchingCandidate.editorial_signals.peak_type }
+              : {}),
+          };
         }
       }
     }
@@ -369,4 +423,107 @@ export function compile(opts: CompileOptions): CompileResult {
     resolution: finalResolution,
     duration_policy: durationPolicy,
   };
+}
+
+function resolveAudioPolicy(
+  brief: CreativeBrief,
+  blueprint: EditBlueprint,
+  repoRoot: string,
+): ResolvedAudioPolicy {
+  if (brief.audio_policy) {
+    return {
+      mode: brief.audio_policy,
+      source: "explicit_brief",
+      a1_loudnorm: resolveA1Loudnorm(brief, blueprint, repoRoot),
+    };
+  }
+
+  const profileId = blueprint.resolved_profile?.id ?? brief.editorial?.profile_hint;
+  if (profileId) {
+    const profile = loadProfiles(path.join(repoRoot, "runtime/editorial/profiles")).get(profileId);
+    if (profile?.defaults.audio_policy) {
+      return {
+        mode: profile.defaults.audio_policy,
+        source: "profile_default",
+        a1_loudnorm: brief.a1_loudnorm ?? profile.defaults.a1_loudnorm ?? true,
+      };
+    }
+  }
+
+  return { mode: "ducking", source: "global_default", a1_loudnorm: brief.a1_loudnorm ?? true };
+}
+
+function resolveA1Loudnorm(
+  brief: CreativeBrief,
+  blueprint: EditBlueprint,
+  repoRoot: string,
+): boolean {
+  if (typeof brief.a1_loudnorm === "boolean") return brief.a1_loudnorm;
+  const profileId = blueprint.resolved_profile?.id ?? brief.editorial?.profile_hint;
+  if (profileId) {
+    const profile = loadProfiles(path.join(repoRoot, "runtime/editorial/profiles")).get(profileId);
+    if (typeof profile?.defaults.a1_loudnorm === "boolean") return profile.defaults.a1_loudnorm;
+  }
+  return true;
+}
+
+function enrichSelectsWithAnalysisPeaks(
+  selects: SelectsCandidates,
+  projectPath: string,
+): void {
+  const segmentsPath = path.join(projectPath, "03_analysis", "segments.json");
+  if (!fs.existsSync(segmentsPath)) return;
+
+  let segments: {
+    items?: Array<{
+      segment_id?: string;
+      peak_analysis?: {
+        support_signals?: {
+          motion_support_score?: number;
+          audio_support_score?: number;
+          fused_peak_score?: number;
+        };
+        peak_moments?: Array<{ type?: string; confidence?: number; source_pass?: string; peak_ref?: string }>;
+      };
+    }>;
+  };
+  try {
+    segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8"));
+  } catch {
+    return;
+  }
+
+  const byId = new Map((segments.items ?? []).map((segment) => [segment.segment_id, segment]));
+  for (const candidate of selects.candidates) {
+    const segment = byId.get(candidate.segment_id);
+    const support = segment?.peak_analysis?.support_signals;
+    const moment = segment?.peak_analysis?.peak_moments?.[0];
+    if (!support && !moment) continue;
+
+    candidate.peak_signals ??= {};
+    if (support?.motion_support_score != null) {
+      candidate.peak_signals.motion ??= clamp01(support.motion_support_score);
+    }
+    if (support?.audio_support_score != null) {
+      candidate.peak_signals.audio_rms ??= clamp01(support.audio_support_score);
+    }
+    candidate.editorial_signals ??= {};
+    if (support?.fused_peak_score != null) {
+      candidate.editorial_signals.peak_strength_score ??= clamp01(support.fused_peak_score);
+    }
+    if (moment?.type === "action_peak" || moment?.type === "emotional_peak" || moment?.type === "visual_peak") {
+      candidate.editorial_signals.peak_type ??= moment.type;
+    }
+    if (moment?.peak_ref) {
+      candidate.editorial_signals.peak_ref ??= moment.peak_ref;
+    }
+    if (moment?.source_pass) {
+      candidate.editorial_signals.peak_source_pass ??= moment.source_pass;
+    }
+  }
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }

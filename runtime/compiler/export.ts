@@ -7,6 +7,8 @@ import * as path from "node:path";
 import type { LoadedSourceMap } from "../media/source-map.js";
 import type {
   AssembledTimeline,
+  BriefCaptionPolicy,
+  BriefAudioPolicy,
   ClipOutput,
   DurationPolicy,
   MarkerOutput,
@@ -29,6 +31,15 @@ export interface ExportOptions {
   fpsNum?: number;
   fpsDen?: number;
   durationPolicy?: DurationPolicy;
+  audioPolicy?: {
+    mode: BriefAudioPolicy;
+    source: "explicit_brief" | "profile_default" | "global_default";
+    a1_loudnorm?: boolean;
+  };
+  captionPolicy?: {
+    mode: BriefCaptionPolicy;
+    source: "explicit_brief" | "profile_default" | "global_default";
+  };
   transitions?: TimelineTransition[];
   width?: number;
   height?: number;
@@ -120,6 +131,8 @@ export function buildTimelineIR(
             },
           }
         : {}),
+      ...(opts.audioPolicy ? { audio_policy: opts.audioPolicy } : {}),
+      ...(opts.captionPolicy ? { caption_policy: opts.captionPolicy } : {}),
     },
   };
 }
@@ -210,6 +223,8 @@ function toClipOutput(clip: {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  captions?: ClipOutput["captions"];
+  audio_policy?: ClipOutput["audio_policy"];
   candidate_ref?: string;
   fallback_candidate_refs?: string[];
   metadata?: Record<string, unknown>;
@@ -234,6 +249,12 @@ function toClipOutput(clip: {
   }
   if (clip.fallback_candidate_refs && clip.fallback_candidate_refs.length > 0) {
     output.fallback_candidate_refs = clip.fallback_candidate_refs;
+  }
+  if (clip.audio_policy) {
+    output.audio_policy = clip.audio_policy;
+  }
+  if (clip.captions && clip.captions.length > 0) {
+    output.captions = clip.captions;
   }
   if (clip.metadata && Object.keys(clip.metadata).length > 0) {
     output.metadata = clip.metadata;

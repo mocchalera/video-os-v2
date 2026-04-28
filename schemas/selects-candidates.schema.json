@@ -232,6 +232,18 @@
           },
           "additionalProperties": false
         },
+        "peak_signals": {
+          "type": "object",
+          "properties": {
+            "motion": { "type": "number", "minimum": 0, "maximum": 1 },
+            "audio_rms": { "type": "number", "minimum": 0, "maximum": 1 },
+            "speech_keyword": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "additionalProperties": false
+        },
         "trim_hint": {
           "type": "object",
           "properties": {
@@ -242,7 +254,19 @@
             "window_start_us": { "type": "integer", "minimum": 0 },
             "window_end_us": { "type": "integer", "minimum": 0 },
             "interest_point_label": { "type": "string" },
-            "interest_point_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            "interest_point_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "peak_ref": { "type": "string" },
+            "peak_type": {
+              "type": "string",
+              "enum": ["action_peak", "emotional_peak", "visual_peak"]
+            },
+            "center_source": {
+              "type": "string",
+              "enum": ["refine_filmstrip", "precision_dense_frames", "precision_proxy_clip", "interest_point_fallback", "midpoint_fallback"]
+            },
+            "rationale": { "type": "string" },
+            "recommended_in_us": { "type": "integer", "minimum": 0 },
+            "recommended_out_us": { "type": "integer", "minimum": 0 }
           },
           "additionalProperties": false
         }

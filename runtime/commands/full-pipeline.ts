@@ -155,7 +155,7 @@ export async function runFullPipeline(
     }
 
     if (phase === "compile") {
-      const compile = runCompilePhase(projectDir, options?.compile);
+      const compile = await runCompilePhase(projectDir, options?.compile);
       result.compile = compile;
       if (!compile.success) {
         return finishFailure(projectDir, result, compile.error);
@@ -178,7 +178,7 @@ export async function runFullPipeline(
       completedPhases.push("review");
 
       if (review.patch && review.patch.operations.length > 0) {
-        const patchCompile = runCompilePhase(projectDir, {
+        const patchCompile = await runCompilePhase(projectDir, {
           ...options?.compile,
           reviewPatch: review.patch,
         });

@@ -230,6 +230,10 @@ export interface ReviewCommandOptions {
   skipPreview?: boolean;
 }
 
+function isReviewApprovalEligible(report: ReviewReport): boolean {
+  return report.fatal_issues.length === 0 && report.summary_judgment.status === "approved";
+}
+
 export function validatePatchSafety(
   patch: ReviewPatch,
   timelineJson: unknown,
@@ -566,6 +570,7 @@ export async function runReview(
   }
 
   const hasFatal = agentResult.report.fatal_issues.length > 0;
+  const approvalEligible = isReviewApprovalEligible(agentResult.report);
   let newState: ProjectState;
   let approvalRecord: ApprovalRecord | undefined;
 
@@ -585,6 +590,8 @@ export async function runReview(
       options.approvedBy,
       options.overrideReason,
     );
+  } else if (!approvalEligible) {
+    newState = "critique_ready";
   } else {
     const operatorDecision = autonomyMode === "full"
       ? (() => {
@@ -632,6 +639,8 @@ export async function runReview(
     ? `creative override: ${options.overrideReason}`
     : hasFatal
       ? "critique ready — fatal issues found"
+      : !approvalEligible
+        ? `critique ready — review status is ${agentResult.report.summary_judgment.status}`
       : approvalRecord
         ? autonomyMode === "full"
           ? "approved — clean review auto-approved"

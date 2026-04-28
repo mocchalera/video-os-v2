@@ -5,6 +5,8 @@
 
 export type DurationMode = "strict" | "guide";
 export type CaptionPolicySource = "transcript" | "authored" | "none";
+export type BriefCaptionPolicy = "auto" | "manual" | "off";
+export type BriefAudioPolicy = "ducking" | "bgm_only" | "original_only";
 
 export interface DurationPolicy {
   mode: DurationMode;
@@ -36,6 +38,11 @@ export interface CreativeBrief {
   project: { id: string; title: string; strategy: string; runtime_target_sec?: number; duration_mode?: DurationMode };
   message: { primary: string; secondary?: string[] };
   emotion_curve: string[];
+  subject?: { birth_date?: string };
+  order_policy?: "chronological" | "editorial";
+  caption_policy?: BriefCaptionPolicy;
+  audio_policy?: BriefAudioPolicy;
+  a1_loudnorm?: boolean;
   editorial?: CreativeBriefEditorial;
   [key: string]: unknown;
 }
@@ -222,6 +229,12 @@ export interface EditorialSignals {
   peak_source_pass?: string;
 }
 
+export interface PeakSignals {
+  motion?: number;
+  audio_rms?: number;
+  speech_keyword?: string[];
+}
+
 export interface EditorialSummary {
   dominant_visual_mode?: "talking_head" | "screen_demo" | "event_broll" | "mixed" | "unknown";
   speaker_topology?: "solo_primary" | "interviewer_guest" | "multi_speaker" | "unknown";
@@ -250,6 +263,7 @@ export interface Candidate {
   speaker_role?: "primary" | "interviewer" | "secondary" | "unknown";
   semantic_dedupe_key?: string;
   editorial_signals?: EditorialSignals;
+  peak_signals?: PeakSignals;
   trim_hint?: TrimHint;
 }
 
@@ -301,6 +315,9 @@ export interface ProfileDefaults {
   active_editing_skills?: string[];
   quality_target_overrides?: Partial<QualityTargets>;
   trim_policy_overrides?: Partial<TrimPolicy>;
+  audio_policy?: BriefAudioPolicy;
+  a1_loudnorm?: boolean;
+  caption_policy?: BriefCaptionPolicy;
 }
 
 export interface ProfileDefinition {
@@ -369,6 +386,7 @@ export interface ScoredCandidate {
     motif_reuse_penalty: number;
     adjacency_penalty: number;
     peak_salience_bonus?: number;
+    peak_priority_bonus?: number;
     bgm_bonus?: number;
   };
 }
@@ -391,10 +409,19 @@ export interface TimelineClip {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  captions?: CaptionOverlay[];
+  audio_policy?: AudioPolicy;
   // M4.5 additive fields
   candidate_ref?: string;
   fallback_candidate_refs?: string[];
   metadata?: Record<string, unknown>;
+}
+
+export interface CaptionOverlay {
+  text: string;
+  in_frame: number;
+  out_frame: number;
+  style: "gentle-lower-third" | "simple-shadow";
 }
 
 export interface Track {
@@ -469,6 +496,15 @@ export interface TimelineIR {
       min_duration_sec: number;
       max_duration_sec: number | null;
     };
+    audio_policy?: {
+      mode: BriefAudioPolicy;
+      source: "explicit_brief" | "profile_default" | "global_default";
+      a1_loudnorm?: boolean;
+    };
+    caption_policy?: {
+      mode: BriefCaptionPolicy;
+      source: "explicit_brief" | "profile_default" | "global_default";
+    };
   };
 }
 
@@ -492,6 +528,7 @@ export interface ClipOutput {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  captions?: CaptionOverlay[];
   audio_policy?: AudioPolicy;
   // M4.5 additive fields
   candidate_ref?: string;
@@ -506,10 +543,12 @@ export interface MarkerOutput {
 }
 
 export interface AudioPolicy {
+  mode?: BriefAudioPolicy;
   duck_music_db?: number;
   nat_gain?: number;
   nat_sound_gain?: number;
   bgm_gain?: number;
+  a1_loudnorm?: boolean;
   preserve_nat_sound?: boolean;
   fade_in_frames?: number;
   fade_out_frames?: number;

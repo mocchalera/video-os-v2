@@ -6,7 +6,9 @@
  */
 
 import * as path from "node:path";
+import { execFile } from "node:child_process";
 import type { DerivativeResults } from "../../connectors/ffmpeg-derivatives.js";
+import type { SegmentItem } from "../../connectors/ffmpeg-segmenter.js";
 import {
   type PeakAnalysis,
   type PeakDetectionPolicy,
@@ -24,6 +26,12 @@ import {
 import type { VlmFn } from "../../connectors/gemini-vlm.js";
 import { atomicWriteJson } from "./_util.js";
 import type { AssetsJson, SegmentsJson } from "../pipeline-types.js";
+
+export interface DegradedPeakSignals {
+  motion?: number;
+  audio_rms?: number;
+  speech_keyword?: string[];
+}
 
 /** Per-segment peak detection result shard. */
 export interface PeakShard {
@@ -210,6 +218,138 @@ export async function peakMap(
   }
 
   return shards;
+}
+
+export async function degradedPeakMap(
+  assetsJson: AssetsJson,
+  segmentsJson: SegmentsJson,
+  sourceFileMap: Map<string, string>,
+): Promise<PeakShard[]> {
+  const shards: PeakShard[] = [];
+  console.log("[peak:fallback] Running degraded peak detection (motion/audio/transcript heuristics)...");
+
+  for (const asset of assetsJson.items) {
+    const sourcePath = sourceFileMap.get(asset.asset_id);
+    const assetSegments = segmentsJson.items.filter((s) => s.asset_id === asset.asset_id);
+    if (assetSegments.length === 0) continue;
+
+    for (const seg of assetSegments) {
+      const audioRms = sourcePath && asset.audio_stream
+        ? await estimateSegmentAudioRms(sourcePath, seg).catch(() => undefined)
+        : undefined;
+      const signals = derivePeakSignalsForSegment(seg, audioRms);
+      const strength = Math.max(signals.motion ?? 0, signals.audio_rms ?? 0, (signals.speech_keyword?.length ?? 0) > 0 ? 0.75 : 0);
+
+      if (strength < 0.35) continue;
+
+      const timestampUs = Math.round((seg.src_in_us + seg.src_out_us) / 2);
+      shards.push({
+        segment_id: seg.segment_id,
+        peak_analysis: {
+          peak_moments: [{
+            peak_ref: `PK_${seg.segment_id}_degraded`,
+            timestamp_us: timestampUs,
+            type: (signals.motion ?? 0) >= (signals.audio_rms ?? 0) ? "action_peak" : "emotional_peak",
+            confidence: round3(Math.min(0.85, Math.max(0.35, strength))),
+            description: "degraded fallback peak from local motion/audio/speech heuristics",
+            source_pass: "degraded_ffmpeg_signals",
+          }],
+          visual_energy_curve: [
+            { timestamp_us: seg.src_in_us, energy: round3(Math.max(0, (signals.motion ?? 0) * 0.6)), source: "degraded_motion_proxy" },
+            { timestamp_us: timestampUs, energy: round3(signals.motion ?? strength), source: "degraded_motion_proxy" },
+            { timestamp_us: seg.src_out_us, energy: round3(Math.max(0, (signals.motion ?? 0) * 0.6)), source: "degraded_motion_proxy" },
+          ],
+          support_signals: {
+            motion_support_score: round3(signals.motion ?? 0),
+            audio_support_score: round3(signals.audio_rms ?? 0),
+            fused_peak_score: round3(strength),
+          },
+          provenance: {
+            coarse_prompt_template_id: "degraded-fallback",
+            refine_prompt_template_id: "degraded-fallback",
+            precision_mode: "never",
+            fusion_version: "degraded-peak-fusion-v1",
+            support_signal_version: "ffmpeg-sad-rms-v1",
+          },
+        },
+      });
+    }
+  }
+
+  console.log(`[peak:fallback] Degraded peak detection: ${shards.length}/${segmentsJson.items.length} segments labeled`);
+  return shards;
+}
+
+export function derivePeakSignalsForSegment(
+  segment: SegmentItem,
+  audioRms?: number,
+): DegradedPeakSignals {
+  const boundaryScore = segment.confidence?.boundary?.score ?? 0;
+  const durationSec = Math.max(0.001, segment.duration_us / 1_000_000);
+  const shortActionBoost = durationSec <= 8 ? 0.15 : 0;
+  const motion = round3(Math.max(0, Math.min(1, boundaryScore + shortActionBoost)));
+  const speech_keyword = extractSpeechKeywords(
+    [segment.summary, segment.transcript_excerpt, ...(segment.tags ?? [])].join(" "),
+  );
+  return {
+    ...(motion > 0 ? { motion } : {}),
+    ...(audioRms != null ? { audio_rms: round3(audioRms) } : {}),
+    ...(speech_keyword.length > 0 ? { speech_keyword } : {}),
+  };
+}
+
+function extractSpeechKeywords(text: string): string[] {
+  const lower = text.toLowerCase();
+  const keywords = [
+    ["laugh", /laugh|laughter|smile|笑|笑顔|笑い/],
+    ["cheer", /cheer|applause|歓声|応援|拍手|すごい|がんば/],
+    ["voice", /voice|speech|speaker|parent|family|声|会話|パパ|ママ/],
+    ["success", /success|ride|bicycle|bike|こげ|漕|自転車|成功/],
+  ] as const;
+  return keywords.filter(([, pattern]) => pattern.test(lower)).map(([label]) => label);
+}
+
+async function estimateSegmentAudioRms(
+  sourcePath: string,
+  segment: SegmentItem,
+): Promise<number | undefined> {
+  const startSec = segment.src_in_us / 1_000_000;
+  const durationSec = Math.max(0.1, segment.duration_us / 1_000_000);
+  const { stderr } = await execFilePromise("ffmpeg", [
+    "-v", "info",
+    "-ss", String(startSec),
+    "-t", String(durationSec),
+    "-i", sourcePath,
+    "-vn",
+    "-af", "astats=metadata=1:reset=1",
+    "-f", "null",
+    "-",
+  ]);
+  const matches = [...stderr.matchAll(/RMS level dB:\s*(-?\d+(?:\.\d+)?)/g)];
+  const last = matches.at(-1)?.[1];
+  if (!last) return undefined;
+  const db = Number.parseFloat(last);
+  if (!Number.isFinite(db)) return undefined;
+  return Math.max(0, Math.min(1, (db + 60) / 60));
+}
+
+function execFilePromise(
+  cmd: string,
+  args: string[],
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err && !stderr) {
+        reject(err);
+        return;
+      }
+      resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+    });
+  });
+}
+
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 /**

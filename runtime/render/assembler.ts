@@ -52,9 +52,20 @@ export interface AudioClipPlan {
   asset_id: string;
   source_in_sec: number;
   source_out_sec: number;
+  duration_sec: number;
   timeline_start_sec: number;
   delay_ms: number;
+  role?: string;
+  audio_policy?: ClipOutput["audio_policy"];
 }
+
+export interface DuckingAudioMixPlan {
+  delay_ms: number;
+  isBgm: boolean;
+  a1_loudnorm?: boolean;
+}
+
+type TimelineAudioPolicyMode = "ducking" | "bgm_only" | "original_only";
 
 interface PreviewManifestClip {
   clip_id?: string;
@@ -279,6 +290,67 @@ export function buildVideoConcatArgs(
   ];
 }
 
+export function collectTimelineCaptions(timeline: TimelineIR): NonNullable<ClipOutput["captions"]> {
+  return timeline.tracks.video
+    .flatMap((track) => track.clips)
+    .flatMap((clip) => clip.captions ?? [])
+    .sort((a, b) => a.in_frame - b.in_frame);
+}
+
+export function buildCaptionDrawtextFilter(
+  captions: NonNullable<ClipOutput["captions"]>,
+  fps: number,
+  width: number,
+  height: number,
+): string {
+  return captions
+    .map((caption) => {
+      const startSec = caption.in_frame / fps;
+      const endSec = caption.out_frame / fps;
+      const preset = caption.style === "simple-shadow"
+        ? { fontSize: Math.round(height * 0.042), y: "h*0.82" }
+        : { fontSize: Math.round(height * 0.046), y: "h*0.80" };
+      return [
+        "drawtext=",
+        `text='${escapeDrawtext(caption.text)}'`,
+        ":font='Hiragino Sans'",
+        ":fontcolor=white",
+        `:fontsize=${Math.max(28, preset.fontSize)}`,
+        ":line_spacing=8",
+        ":box=1",
+        ":boxcolor=black@0.32",
+        ":boxborderw=18",
+        ":shadowcolor=black@0.8",
+        `:shadowx=${Math.max(2, Math.round(width * 0.002))}`,
+        `:shadowy=${Math.max(2, Math.round(width * 0.002))}`,
+        ":x=(w-text_w)/2",
+        `:y=${preset.y}`,
+        `:enable='between(t,${formatFfmpegTimestamp(startSec)},${formatFfmpegTimestamp(endSec)})'`,
+      ].join("");
+    })
+    .join(",");
+}
+
+export function buildCaptionOverlayArgs(
+  inputPath: string,
+  outputPath: string,
+  captions: NonNullable<ClipOutput["captions"]>,
+  fps: number,
+  width: number,
+  height: number,
+): string[] {
+  return [
+    "-y",
+    "-i", inputPath,
+    "-vf", buildCaptionDrawtextFilter(captions, fps, width, height),
+    "-an",
+    "-r", String(fps),
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    outputPath,
+  ];
+}
+
 export function buildAudioTrimArgs(
   inputPath: string,
   outputPath: string,
@@ -286,13 +358,60 @@ export function buildAudioTrimArgs(
   endSec: number,
   sampleRate: number,
   audioChannels: 1 | 2,
+  audioPolicy?: ClipOutput["audio_policy"],
 ): string[] {
+  const gain = audioPolicy?.nat_gain ?? audioPolicy?.nat_sound_gain ?? 1;
+  const filters = gain > 0 && gain !== 1 ? [`volume=${gain.toFixed(4)}`] : [];
   return [
     "-y",
     "-ss", formatFfmpegTimestamp(startSec),
     "-to", formatFfmpegTimestamp(endSec),
     "-i", inputPath,
     "-vn",
+    ...(filters.length > 0 ? ["-af", filters.join(",")] : []),
+    "-ac", String(audioChannels),
+    "-ar", String(sampleRate),
+    "-c:a", "pcm_s16le",
+    outputPath,
+  ];
+}
+
+export function buildBgmAudioRenderArgs(
+  inputPath: string,
+  outputPath: string,
+  startSec: number,
+  durationSec: number,
+  sampleRate: number,
+  audioChannels: 1 | 2,
+  fps: number,
+  audioPolicy?: ClipOutput["audio_policy"],
+): string[] {
+  const fadeInFrames = audioPolicy?.bgm_fade_in_frames ?? audioPolicy?.fade_in_frames ?? 0;
+  const fadeOutFrames = audioPolicy?.bgm_fade_out_frames ?? audioPolicy?.fade_out_frames ?? Math.round(fps);
+  const fadeInSec = Math.max(0, fadeInFrames / fps);
+  const fadeOutSec = Math.max(0, Math.min(durationSec / 2, fadeOutFrames / fps));
+  const filters: string[] = [];
+  const bgmGain = audioPolicy?.bgm_gain ?? 0.25;
+  if (bgmGain > 0 && bgmGain !== 1) {
+    filters.push(`volume=${bgmGain.toFixed(4)}`);
+  }
+
+  if (fadeInSec > 0) {
+    filters.push(`afade=t=in:d=${fadeInSec.toFixed(4)}`);
+  }
+  if (fadeOutSec > 0) {
+    const fadeStart = Math.max(0, durationSec - fadeOutSec);
+    filters.push(`afade=t=out:st=${fadeStart.toFixed(4)}:d=${fadeOutSec.toFixed(4)}`);
+  }
+
+  return [
+    "-y",
+    "-stream_loop", "-1",
+    "-ss", formatFfmpegTimestamp(startSec),
+    "-i", inputPath,
+    "-vn",
+    "-t", formatFfmpegTimestamp(durationSec),
+    ...(filters.length > 0 ? ["-af", filters.join(",")] : []),
     "-ac", String(audioChannels),
     "-ar", String(sampleRate),
     "-c:a", "pcm_s16le",
@@ -317,8 +436,58 @@ export function buildAudioMixFilter(
 
   const inputs = [`[0:a]`, ...labels].join("");
   steps.push(
-    `${inputs}amix=inputs=${delaysMs.length + 1}:duration=longest:dropout_transition=0[aout]`,
+    `${inputs}amix=inputs=${delaysMs.length + 1}:duration=longest:dropout_transition=0:normalize=0[aout]`,
   );
+
+  return steps.join(";");
+}
+
+export function buildDuckingAudioMixFilter(
+  plans: DuckingAudioMixPlan[],
+  audioChannels: 1 | 2,
+): string {
+  const delayExpr = (delayMs: number) =>
+    audioChannels === 1 ? `${delayMs}` : `${delayMs}|${delayMs}`;
+  const steps: string[] = [];
+  const originalLabels: string[] = [];
+  const bgmLabels: string[] = [];
+
+  for (let i = 0; i < plans.length; i++) {
+    const delayed = `d${i}`;
+    steps.push(`[${i + 1}:a]adelay=${delayExpr(plans[i].delay_ms)}[${delayed}]`);
+    if (plans[i].isBgm) {
+      bgmLabels.push(`[${delayed}]`);
+    } else {
+      originalLabels.push(`[${delayed}]`);
+    }
+  }
+
+  if (originalLabels.length === 0 || bgmLabels.length === 0) {
+    const labels = [`[0:a]`, ...originalLabels, ...bgmLabels].join("");
+    steps.push(`${labels}amix=inputs=${plans.length + 1}:duration=longest:dropout_transition=0:normalize=0[aout]`);
+    return steps.join(";");
+  }
+
+  const mixGroup = (labels: string[], output: string) => {
+    if (labels.length === 1) {
+      steps.push(`${labels[0]}anull[${output}]`);
+    } else {
+      steps.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0[${output}]`);
+    }
+  };
+
+  mixGroup(originalLabels, "origRaw");
+  mixGroup(bgmLabels, "bgm");
+  const shouldLoudnormA1 = plans.some((plan) => !plan.isBgm && plan.a1_loudnorm !== false);
+  if (shouldLoudnormA1) {
+    steps.push("[origRaw]loudnorm=I=-16:LRA=11:TP=-1.5[origMix]");
+  } else {
+    steps.push("[origRaw]anull[origMix]");
+  }
+  steps.push("[origMix]asplit=2[orig][scraw]");
+  steps.push("[scraw]lowpass=f=3000[sc]");
+  steps.push("[bgm][sc]sidechaincompress=threshold=0.05:ratio=4:attack=20:release=400:makeup=1:detection=rms[ducked]");
+  steps.push("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]");
 
   return steps.join(";");
 }
@@ -347,6 +516,7 @@ export function buildAudioMixArgs(
   sampleRate: number,
   audioChannels: 1 | 2,
   delaysMs: number[],
+  duckingPlans?: DuckingAudioMixPlan[],
 ): string[] {
   return [
     "-y",
@@ -354,7 +524,9 @@ export function buildAudioMixArgs(
     "-t", formatFfmpegTimestamp(totalDurationSec),
     "-i", `anullsrc=channel_layout=${audioChannels === 1 ? "mono" : "stereo"}:sample_rate=${sampleRate}`,
     ...inputPaths.flatMap((inputPath) => ["-i", inputPath]),
-    "-filter_complex", buildAudioMixFilter(delaysMs, audioChannels),
+    "-filter_complex", duckingPlans
+      ? buildDuckingAudioMixFilter(duckingPlans, audioChannels)
+      : buildAudioMixFilter(delaysMs, audioChannels),
     "-map", "[aout]",
     "-c:a", "aac",
     "-b:a", "192k",
@@ -373,7 +545,10 @@ export function buildFinalAssemblyMuxArgs(
     "-i", videoPath,
     "-i", audioPath,
     "-c:v", "copy",
-    "-c:a", "copy",
+    "-af", "loudnorm=I=-16:LRA=11:TP=-1.5",
+    "-ar", "48000",
+    "-c:a", "aac",
+    "-b:a", "192k",
     outputPath,
   ];
 }
@@ -443,8 +618,11 @@ export function buildAudioAssemblyPlan(timeline: TimelineIR): AudioClipPlan[] {
         asset_id: clip.asset_id,
         source_in_sec: clip.src_in_us / 1_000_000,
         source_out_sec: clip.src_out_us / 1_000_000,
+        duration_sec: clip.timeline_duration_frames / fps,
         timeline_start_sec: clip.timeline_in_frame / fps,
         delay_ms: Math.round((clip.timeline_in_frame / fps) * 1000),
+        role: clip.role,
+        audio_policy: clip.audio_policy,
       });
     }
   }
@@ -487,6 +665,7 @@ export async function assembleTimelineToMp4(
   const resolver = createSourceResolver(projectDir, timelineDir);
   const videoPlans = buildVideoAssemblyPlan(timeline);
   const audioPlans = buildAudioAssemblyPlan(timeline);
+  const audioPolicyMode = getTimelineAudioPolicyMode(timeline);
   const totalDurationSec = totalFrames / fps;
 
   try {
@@ -527,24 +706,64 @@ export async function assembleTimelineToMp4(
     fs.writeFileSync(concatListPath, buildConcatListContent(renderedVideoSegments), "utf-8");
     const videoOnlyPath = path.join(workingDir, "assembly.video.mp4");
     await runFfmpeg(execFileImpl, ffmpegBin, buildVideoConcatArgs(concatListPath, videoOnlyPath, fps));
+    const captions = collectTimelineCaptions(timeline);
+    const captionedVideoPath = captions.length > 0
+      ? path.join(workingDir, "assembly.video.captioned.mp4")
+      : videoOnlyPath;
+    if (captions.length > 0) {
+      await runFfmpeg(execFileImpl, ffmpegBin, buildCaptionOverlayArgs(
+        videoOnlyPath,
+        captionedVideoPath,
+        captions,
+        fps,
+        width,
+        height,
+      ));
+    }
 
     const renderedAudioSegments: string[] = [];
     const audioDelaysMs: number[] = [];
-    for (let i = 0; i < audioPlans.length; i++) {
-      const plan = audioPlans[i];
+    const duckingPlans: DuckingAudioMixPlan[] = [];
+    const effectiveAudioPlans = audioPlans.filter((plan) => {
+      const isBgm = isBgmPlan(plan);
+      if (audioPolicyMode === "bgm_only") return isBgm;
+      if (audioPolicyMode === "original_only") return !isBgm;
+      return true;
+    });
+    for (let i = 0; i < effectiveAudioPlans.length; i++) {
+      const plan = effectiveAudioPlans[i];
       const clip = findClipById(timeline.tracks.audio, plan.clip_id);
       const sourcePath = resolveClipSourcePath(resolver, clip);
       const segmentPath = path.join(workingDir, `audio-segment-${String(i + 1).padStart(4, "0")}.wav`);
-      await runFfmpeg(execFileImpl, ffmpegBin, buildAudioTrimArgs(
-        sourcePath,
-        segmentPath,
-        plan.source_in_sec,
-        plan.source_out_sec,
-        sampleRate,
-        audioChannels,
-      ));
+      const isBgm = isBgmPlan(plan);
+      const audioArgs = isBgm
+        ? buildBgmAudioRenderArgs(
+          sourcePath,
+          segmentPath,
+          plan.source_in_sec,
+          plan.duration_sec,
+          sampleRate,
+          audioChannels,
+          fps,
+          plan.audio_policy,
+        )
+        : buildAudioTrimArgs(
+          sourcePath,
+          segmentPath,
+          plan.source_in_sec,
+          plan.source_out_sec,
+          sampleRate,
+          audioChannels,
+          plan.audio_policy,
+        );
+      await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);
       audioDelaysMs.push(plan.delay_ms);
+      duckingPlans.push({
+        delay_ms: plan.delay_ms,
+        isBgm,
+        a1_loudnorm: isBgm ? undefined : plan.audio_policy?.a1_loudnorm,
+      });
     }
 
     const mixedAudioPath = path.join(workingDir, "assembly.audio.m4a");
@@ -563,12 +782,13 @@ export async function assembleTimelineToMp4(
         sampleRate,
         audioChannels,
         audioDelaysMs,
+        audioPolicyMode === "ducking" ? duckingPlans : undefined,
       ));
     }
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     await runFfmpeg(execFileImpl, ffmpegBin, buildFinalAssemblyMuxArgs(
-      videoOnlyPath,
+      captionedVideoPath,
       mixedAudioPath,
       outputPath,
     ));
@@ -585,6 +805,28 @@ export async function assembleTimelineToMp4(
       fs.rmSync(workingDir, { recursive: true, force: true });
     }
   }
+}
+
+function getTimelineAudioPolicyMode(timeline: TimelineIR): TimelineAudioPolicyMode {
+  const raw = timeline.provenance.audio_policy?.mode;
+  if (raw === "bgm_only" || raw === "original_only" || raw === "ducking") {
+    return raw;
+  }
+  return "ducking";
+}
+
+function escapeDrawtext(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/%/g, "\\%");
+}
+
+function isBgmPlan(plan: AudioClipPlan): boolean {
+  return plan.role === "bgm" || plan.role === "music" || plan.track_id === "A2";
 }
 
 function findActiveVideoClip(

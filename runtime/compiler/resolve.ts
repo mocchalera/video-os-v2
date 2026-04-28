@@ -108,9 +108,10 @@ export function resolve(
     const segmentUsage = new Map<string, { trackId: string; clipId: string }[]>();
     for (const track of allTracks) {
       for (const clip of track.clips) {
-        const list = segmentUsage.get(clipUsageKey(clip)) ?? [];
+        const usageKey = `${track.kind}:${clipUsageKey(clip)}`;
+        const list = segmentUsage.get(usageKey) ?? [];
         list.push({ trackId: track.track_id, clipId: clip.clip_id });
-        segmentUsage.set(clipUsageKey(clip), list);
+        segmentUsage.set(usageKey, list);
       }
     }
 

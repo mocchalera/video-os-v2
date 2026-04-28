@@ -10,6 +10,7 @@
 
 import type {
   AssembledTimeline,
+  BriefAudioPolicy,
   DurationPolicy,
   Marker,
   NormalizedData,
@@ -23,6 +24,12 @@ import { getCandidateRef } from "./candidate-ref.js";
 
 export interface AssembleOptions {
   timelineOrder?: "chronological" | "editorial";
+  beatOrder?: string[];
+  audioPolicy?: BriefAudioPolicy;
+  a1Loudnorm?: boolean;
+  bgmAssetId?: string;
+  bgmSegmentId?: string;
+  bgmDurationSec?: number;
 }
 
 export function assemble(
@@ -287,7 +294,45 @@ export function assemble(
   // For keepsake / event-recap profiles, reorder clips by source timestamp
   // (asset_id + src_in_us) instead of editorial score order.
   if (options?.timelineOrder === "chronological") {
-    reorderChronological(v1Clips, v2Clips, a1Clips, markers);
+    reorderChronological(v1Clips, v2Clips, a1Clips, markers, options.beatOrder);
+  }
+
+  if (options?.audioPolicy !== "bgm_only") {
+    addOriginalAudioForVideoClips(
+      [...v1Clips, ...v2Clips],
+      a1Clips,
+      options?.audioPolicy ?? "ducking",
+      clipCounter,
+      options?.a1Loudnorm ?? true,
+    );
+  }
+
+  if (options?.bgmAssetId && options.audioPolicy !== "original_only") {
+    const totalVideoFrames = Math.max(
+      0,
+      ...[...v1Clips, ...v2Clips].map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames),
+    );
+    a2Clips.push({
+      clip_id: "ACL_BGM_0001",
+      segment_id: options.bgmSegmentId ?? `${normalized.project_id}:bgm`,
+      asset_id: options.bgmAssetId,
+      src_in_us: 0,
+      src_out_us: Math.round((options.bgmDurationSec ?? totalVideoFrames / (fpsNum / fpsDen)) * 1_000_000),
+      timeline_in_frame: 0,
+      timeline_duration_frames: totalVideoFrames,
+      role: "bgm",
+      motivation: "background music bed",
+      beat_id: "music01",
+      fallback_segment_ids: [],
+      confidence: 1,
+      quality_flags: [],
+      audio_policy: {
+        mode: options.audioPolicy ?? "ducking",
+        duck_music_db: -18,
+        bgm_gain: 0.25,
+        a1_loudnorm: options.a1Loudnorm ?? true,
+      },
+    });
   }
 
   const video: Track[] = [
@@ -297,7 +342,7 @@ export function assemble(
 
   const audio: Track[] = [
     { track_id: "A1", kind: "audio", clips: a1Clips },
-    { track_id: "A2", kind: "audio", clips: [] }, // Music: M1 empty
+    { track_id: "A2", kind: "audio", clips: a2Clips },
     { track_id: "A3", kind: "audio", clips: [] }, // Texture/room tone: M1 empty
   ];
 
@@ -311,17 +356,28 @@ function reorderChronological(
   v2Clips: TimelineClip[],
   a1Clips: TimelineClip[],
   markers: Marker[],
+  beatOrder: string[] = [],
 ): void {
-  if (v1Clips.length <= 1) return;
+  const allVideoClips = [...v1Clips, ...v2Clips];
+  if (allVideoClips.length <= 1) return;
+  const beatIndex = new Map(beatOrder.map((beatId, index) => [beatId, index]));
 
-  // Sort V1 clips by source timestamp (asset_id then src_in_us)
-  v1Clips.sort((a, b) => {
+  // Sort final visual clips by resolved beat chronology first. Source timestamp
+  // remains the fallback for generic chronological projects without beat order.
+  allVideoClips.sort((a, b) => {
+    const beatCmp = (beatIndex.get(a.beat_id) ?? Number.MAX_SAFE_INTEGER) -
+      (beatIndex.get(b.beat_id) ?? Number.MAX_SAFE_INTEGER);
+    if (beatCmp !== 0) return beatCmp;
     const assetCmp = a.asset_id.localeCompare(b.asset_id);
     if (assetCmp !== 0) return assetCmp;
     return a.src_in_us - b.src_in_us;
   });
 
-  // Reassign V1 timeline positions sequentially
+  v1Clips.splice(0, v1Clips.length, ...allVideoClips);
+  v2Clips.splice(0, v2Clips.length);
+
+  // Reassign V1 timeline positions sequentially so the final render cannot
+  // expose V1 gaps or hidden V2 overlaps after peak-based selection.
   let frame = 0;
   for (const clip of v1Clips) {
     clip.timeline_in_frame = frame;
@@ -336,8 +392,9 @@ function reorderChronological(
     }
   }
 
-  // Reorder V2 and A1 clips to follow the new beat positions
-  for (const clips of [v2Clips, a1Clips]) {
+  // Reorder A1 clips to follow the new beat positions when audio was authored
+  // before this pass. Generated nat sound is added after chronological reorder.
+  for (const clips of [a1Clips]) {
     clips.sort((a, b) => {
       const posA = beatPositionMap.get(a.beat_id) ?? 0;
       const posB = beatPositionMap.get(b.beat_id) ?? 0;
@@ -499,4 +556,35 @@ function makeClip(
     candidate_ref: getCandidateRef(c),
     fallback_candidate_refs: fallbacks.candidate_refs,
   };
+}
+
+function addOriginalAudioForVideoClips(
+  videoClips: TimelineClip[],
+  a1Clips: TimelineClip[],
+  audioPolicy: BriefAudioPolicy,
+  startClipCounter: number,
+  a1Loudnorm: boolean,
+): void {
+  const existing = new Set(a1Clips.map((clip) => clipUsageKey(clip)));
+  let clipCounter = startClipCounter;
+
+  for (const videoClip of videoClips) {
+    const key = clipUsageKey(videoClip);
+    if (existing.has(key)) continue;
+
+    a1Clips.push({
+      ...videoClip,
+      clip_id: `ACL_${String(++clipCounter).padStart(4, "0")}`,
+      role: "nat_sound",
+      motivation: "original clip audio",
+      confidence: Math.max(videoClip.confidence, 0.9),
+      audio_policy: {
+        mode: audioPolicy,
+        preserve_nat_sound: true,
+        nat_gain: audioPolicy === "original_only" ? 1 : 1.8,
+        a1_loudnorm: a1Loudnorm,
+      },
+    });
+    existing.add(key);
+  }
 }
