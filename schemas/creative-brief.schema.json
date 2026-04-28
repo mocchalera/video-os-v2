@@ -125,6 +125,10 @@
       "enum": ["ducking", "bgm_only", "original_only"],
       "description": "Default final audio policy. If omitted, profile/template defaults may apply."
     },
+    "a1_loudnorm": {
+      "type": "boolean",
+      "description": "When true, normalize the original audio stem before ducking so family voices and ambient sound remain audible. Defaults may come from the selected profile."
+    },
     "must_have": {
       "type": "array",
       "minItems": 1,

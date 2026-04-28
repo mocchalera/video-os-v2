@@ -26,6 +26,7 @@ export interface AssembleOptions {
   timelineOrder?: "chronological" | "editorial";
   beatOrder?: string[];
   audioPolicy?: BriefAudioPolicy;
+  a1Loudnorm?: boolean;
   bgmAssetId?: string;
   bgmSegmentId?: string;
   bgmDurationSec?: number;
@@ -297,7 +298,13 @@ export function assemble(
   }
 
   if (options?.audioPolicy !== "bgm_only") {
-    addOriginalAudioForVideoClips([...v1Clips, ...v2Clips], a1Clips, options?.audioPolicy ?? "ducking", clipCounter);
+    addOriginalAudioForVideoClips(
+      [...v1Clips, ...v2Clips],
+      a1Clips,
+      options?.audioPolicy ?? "ducking",
+      clipCounter,
+      options?.a1Loudnorm ?? true,
+    );
   }
 
   if (options?.bgmAssetId && options.audioPolicy !== "original_only") {
@@ -323,6 +330,7 @@ export function assemble(
         mode: options.audioPolicy ?? "ducking",
         duck_music_db: -18,
         bgm_gain: 0.25,
+        a1_loudnorm: options.a1Loudnorm ?? true,
       },
     });
   }
@@ -555,6 +563,7 @@ function addOriginalAudioForVideoClips(
   a1Clips: TimelineClip[],
   audioPolicy: BriefAudioPolicy,
   startClipCounter: number,
+  a1Loudnorm: boolean,
 ): void {
   const existing = new Set(a1Clips.map((clip) => clipUsageKey(clip)));
   let clipCounter = startClipCounter;
@@ -573,6 +582,7 @@ function addOriginalAudioForVideoClips(
         mode: audioPolicy,
         preserve_nat_sound: true,
         nat_gain: audioPolicy === "original_only" ? 1 : 1.8,
+        a1_loudnorm: a1Loudnorm,
       },
     });
     existing.add(key);

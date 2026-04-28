@@ -33,6 +33,7 @@ export interface ExportOptions {
   audioPolicy?: {
     mode: BriefAudioPolicy;
     source: "explicit_brief" | "profile_default" | "global_default";
+    a1_loudnorm?: boolean;
   };
   transitions?: TimelineTransition[];
   width?: number;

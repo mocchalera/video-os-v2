@@ -39,6 +39,7 @@ export interface CreativeBrief {
   emotion_curve: string[];
   order_policy?: "chronological" | "editorial";
   audio_policy?: BriefAudioPolicy;
+  a1_loudnorm?: boolean;
   editorial?: CreativeBriefEditorial;
   [key: string]: unknown;
 }
@@ -312,6 +313,7 @@ export interface ProfileDefaults {
   quality_target_overrides?: Partial<QualityTargets>;
   trim_policy_overrides?: Partial<TrimPolicy>;
   audio_policy?: BriefAudioPolicy;
+  a1_loudnorm?: boolean;
 }
 
 export interface ProfileDefinition {
@@ -485,6 +487,7 @@ export interface TimelineIR {
     audio_policy?: {
       mode: BriefAudioPolicy;
       source: "explicit_brief" | "profile_default" | "global_default";
+      a1_loudnorm?: boolean;
     };
   };
 }
@@ -528,6 +531,7 @@ export interface AudioPolicy {
   nat_gain?: number;
   nat_sound_gain?: number;
   bgm_gain?: number;
+  a1_loudnorm?: boolean;
   preserve_nat_sound?: boolean;
   fade_in_frames?: number;
   fade_out_frames?: number;

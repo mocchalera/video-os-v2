@@ -181,7 +181,8 @@
           "required": ["mode", "source"],
           "properties": {
             "mode": { "type": "string", "enum": ["ducking", "bgm_only", "original_only"] },
-            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] }
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+            "a1_loudnorm": { "type": "boolean" }
           },
           "additionalProperties": false
         }
@@ -323,6 +324,9 @@
             },
             "bgm_gain": {
               "type": "number"
+            },
+            "a1_loudnorm": {
+              "type": "boolean"
             },
             "preserve_nat_sound": {
               "type": "boolean"

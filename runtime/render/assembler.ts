@@ -59,6 +59,12 @@ export interface AudioClipPlan {
   audio_policy?: ClipOutput["audio_policy"];
 }
 
+export interface DuckingAudioMixPlan {
+  delay_ms: number;
+  isBgm: boolean;
+  a1_loudnorm?: boolean;
+}
+
 type TimelineAudioPolicyMode = "ducking" | "bgm_only" | "original_only";
 
 interface PreviewManifestClip {
@@ -376,7 +382,7 @@ export function buildAudioMixFilter(
 }
 
 export function buildDuckingAudioMixFilter(
-  plans: Array<{ delay_ms: number; isBgm: boolean }>,
+  plans: DuckingAudioMixPlan[],
   audioChannels: 1 | 2,
 ): string {
   const delayExpr = (delayMs: number) =>
@@ -409,8 +415,14 @@ export function buildDuckingAudioMixFilter(
     }
   };
 
-  mixGroup(originalLabels, "origMix");
+  mixGroup(originalLabels, "origRaw");
   mixGroup(bgmLabels, "bgm");
+  const shouldLoudnormA1 = plans.some((plan) => !plan.isBgm && plan.a1_loudnorm !== false);
+  if (shouldLoudnormA1) {
+    steps.push("[origRaw]loudnorm=I=-16:LRA=11:TP=-1.5[origMix]");
+  } else {
+    steps.push("[origRaw]anull[origMix]");
+  }
   steps.push("[origMix]asplit=2[orig][scraw]");
   steps.push("[scraw]lowpass=f=3000[sc]");
   steps.push("[bgm][sc]sidechaincompress=threshold=0.05:ratio=4:attack=20:release=400:makeup=1:detection=rms[ducked]");
@@ -443,7 +455,7 @@ export function buildAudioMixArgs(
   sampleRate: number,
   audioChannels: 1 | 2,
   delaysMs: number[],
-  duckingPlans?: Array<{ delay_ms: number; isBgm: boolean }>,
+  duckingPlans?: DuckingAudioMixPlan[],
 ): string[] {
   return [
     "-y",
@@ -636,7 +648,7 @@ export async function assembleTimelineToMp4(
 
     const renderedAudioSegments: string[] = [];
     const audioDelaysMs: number[] = [];
-    const duckingPlans: Array<{ delay_ms: number; isBgm: boolean }> = [];
+    const duckingPlans: DuckingAudioMixPlan[] = [];
     const effectiveAudioPlans = audioPlans.filter((plan) => {
       const isBgm = isBgmPlan(plan);
       if (audioPolicyMode === "bgm_only") return isBgm;
@@ -672,7 +684,11 @@ export async function assembleTimelineToMp4(
       await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);
       audioDelaysMs.push(plan.delay_ms);
-      duckingPlans.push({ delay_ms: plan.delay_ms, isBgm });
+      duckingPlans.push({
+        delay_ms: plan.delay_ms,
+        isBgm,
+        a1_loudnorm: isBgm ? undefined : plan.audio_policy?.a1_loudnorm,
+      });
     }
 
     const mixedAudioPath = path.join(workingDir, "assembly.audio.m4a");

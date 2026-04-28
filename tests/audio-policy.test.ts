@@ -20,6 +20,7 @@ describe("audio policy", () => {
     );
 
     expect(filter).toContain("sidechaincompress");
+    expect(filter).toContain("[origRaw]loudnorm=I=-16:LRA=11:TP=-1.5[origMix]");
     expect(filter).toContain("[origMix]asplit=2[orig][scraw]");
     expect(filter).toContain("[scraw]lowpass=f=3000[sc]");
     expect(filter).toContain("[bgm][sc]sidechaincompress=threshold=0.05:ratio=4:attack=20:release=400:makeup=1:detection=rms");
@@ -41,7 +42,21 @@ describe("audio policy", () => {
     );
     const filter = args[args.indexOf("-filter_complex") + 1];
     expect(filter).toContain("sidechaincompress");
+    expect(filter).toContain("loudnorm=I=-16:LRA=11:TP=-1.5");
     expect(filter).toContain("normalize=0");
+  });
+
+  it("allows A1 stem loudnorm to be disabled", () => {
+    const filter = buildDuckingAudioMixFilter(
+      [
+        { delay_ms: 0, isBgm: false, a1_loudnorm: false },
+        { delay_ms: 0, isBgm: true },
+      ],
+      2,
+    );
+
+    expect(filter).not.toContain("loudnorm=I=-16");
+    expect(filter).toContain("[origRaw]anull[origMix]");
   });
 
   it("raises original audio gain before mixing", () => {
@@ -71,12 +86,16 @@ describe("audio policy", () => {
     expect(result.timeline.provenance.audio_policy).toEqual({
       mode: "ducking",
       source: "profile_default",
+      a1_loudnorm: true,
     });
     expect(result.timeline.tracks.audio.find((track) => track.track_id === "A1")?.clips.length).toBeGreaterThan(0);
+    expect(result.timeline.tracks.audio.find((track) => track.track_id === "A1")?.clips[0]).toMatchObject({
+      audio_policy: { mode: "ducking", a1_loudnorm: true },
+    });
     expect(result.timeline.tracks.audio.find((track) => track.track_id === "A2")?.clips[0]).toMatchObject({
       asset_id: "AST_BGM",
       role: "bgm",
-      audio_policy: { mode: "ducking", bgm_gain: 0.25 },
+      audio_policy: { mode: "ducking", bgm_gain: 0.25, a1_loudnorm: true },
     });
 
     fs.rmSync(projectDir, { recursive: true, force: true });

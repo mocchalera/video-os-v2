@@ -63,6 +63,7 @@ export interface CompileResult {
 interface ResolvedAudioPolicy {
   mode: BriefAudioPolicy;
   source: "explicit_brief" | "profile_default" | "global_default";
+  a1_loudnorm: boolean;
 }
 
 function findRepoRoot(from: string): string {
@@ -200,6 +201,7 @@ export function compile(opts: CompileOptions): CompileResult {
     timelineOrder,
     beatOrder: normalized.beats.map((beat) => beat.beat_id),
     audioPolicy: audioPolicy.mode,
+    a1Loudnorm: audioPolicy.a1_loudnorm,
     bgmAssetId: blueprint.music_policy.bgm_asset_id,
     bgmSegmentId: blueprint.music_policy.bgm_segment_id,
     bgmDurationSec: blueprint.music_policy.bgm_duration_sec,
@@ -416,18 +418,40 @@ function resolveAudioPolicy(
   repoRoot: string,
 ): ResolvedAudioPolicy {
   if (brief.audio_policy) {
-    return { mode: brief.audio_policy, source: "explicit_brief" };
+    return {
+      mode: brief.audio_policy,
+      source: "explicit_brief",
+      a1_loudnorm: resolveA1Loudnorm(brief, blueprint, repoRoot),
+    };
   }
 
   const profileId = blueprint.resolved_profile?.id ?? brief.editorial?.profile_hint;
   if (profileId) {
     const profile = loadProfiles(path.join(repoRoot, "runtime/editorial/profiles")).get(profileId);
     if (profile?.defaults.audio_policy) {
-      return { mode: profile.defaults.audio_policy, source: "profile_default" };
+      return {
+        mode: profile.defaults.audio_policy,
+        source: "profile_default",
+        a1_loudnorm: brief.a1_loudnorm ?? profile.defaults.a1_loudnorm ?? true,
+      };
     }
   }
 
-  return { mode: "ducking", source: "global_default" };
+  return { mode: "ducking", source: "global_default", a1_loudnorm: brief.a1_loudnorm ?? true };
+}
+
+function resolveA1Loudnorm(
+  brief: CreativeBrief,
+  blueprint: EditBlueprint,
+  repoRoot: string,
+): boolean {
+  if (typeof brief.a1_loudnorm === "boolean") return brief.a1_loudnorm;
+  const profileId = blueprint.resolved_profile?.id ?? brief.editorial?.profile_hint;
+  if (profileId) {
+    const profile = loadProfiles(path.join(repoRoot, "runtime/editorial/profiles")).get(profileId);
+    if (typeof profile?.defaults.a1_loudnorm === "boolean") return profile.defaults.a1_loudnorm;
+  }
+  return true;
 }
 
 function enrichSelectsWithAnalysisPeaks(

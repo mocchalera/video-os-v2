@@ -9,6 +9,7 @@ defaults:
   default_transition: "crossfade"
   crossfade_frames: 8
   audio_policy: ducking
+  a1_loudnorm: true
   active_editing_skills:
     - build_to_peak
     - cooldown_resolve
