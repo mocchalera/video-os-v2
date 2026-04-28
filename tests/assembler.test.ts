@@ -142,7 +142,7 @@ describe("ffmpeg assembler", () => {
     expect(audioMixCall).toBeDefined();
     const filter = audioMixCall!.args[audioMixCall!.args.indexOf("-filter_complex") + 1];
     expect(filter).toContain("adelay=4000|4000");
-    expect(filter).toContain("amix=inputs=5:duration=longest:dropout_transition=0[aout]");
+    expect(filter).toContain("amix=inputs=5:duration=longest:dropout_transition=0:normalize=0[aout]");
 
     expect(result.outputPath).toBe(path.join(projectDir, "05_timeline", "assembly.mp4"));
     expect(fs.existsSync(result.outputPath)).toBe(true);

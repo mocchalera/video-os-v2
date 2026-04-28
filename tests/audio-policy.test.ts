@@ -21,7 +21,7 @@ describe("audio policy", () => {
 
     expect(filter).toContain("sidechaincompress");
     expect(filter).toContain("[bgm][orig]sidechaincompress");
-    expect(filter).toContain("[orig][ducked]amix=inputs=2");
+    expect(filter).toContain("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0");
   });
 
   it("passes ducking plans into the ffmpeg mix args", () => {
@@ -39,6 +39,7 @@ describe("audio policy", () => {
     );
     const filter = args[args.indexOf("-filter_complex") + 1];
     expect(filter).toContain("sidechaincompress");
+    expect(filter).toContain("normalize=0");
   });
 
   it("raises original audio gain before mixing", () => {

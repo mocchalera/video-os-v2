@@ -369,7 +369,7 @@ export function buildAudioMixFilter(
 
   const inputs = [`[0:a]`, ...labels].join("");
   steps.push(
-    `${inputs}amix=inputs=${delaysMs.length + 1}:duration=longest:dropout_transition=0[aout]`,
+    `${inputs}amix=inputs=${delaysMs.length + 1}:duration=longest:dropout_transition=0:normalize=0[aout]`,
   );
 
   return steps.join(";");
@@ -397,7 +397,7 @@ export function buildDuckingAudioMixFilter(
 
   if (originalLabels.length === 0 || bgmLabels.length === 0) {
     const labels = [`[0:a]`, ...originalLabels, ...bgmLabels].join("");
-    steps.push(`${labels}amix=inputs=${plans.length + 1}:duration=longest:dropout_transition=0[aout]`);
+    steps.push(`${labels}amix=inputs=${plans.length + 1}:duration=longest:dropout_transition=0:normalize=0[aout]`);
     return steps.join(";");
   }
 
@@ -405,14 +405,14 @@ export function buildDuckingAudioMixFilter(
     if (labels.length === 1) {
       steps.push(`${labels[0]}anull[${output}]`);
     } else {
-      steps.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0[${output}]`);
+      steps.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0[${output}]`);
     }
   };
 
   mixGroup(originalLabels, "orig");
   mixGroup(bgmLabels, "bgm");
   steps.push("[bgm][orig]sidechaincompress=threshold=0.04:ratio=5:attack=20:release=450:makeup=1[ducked]");
-  steps.push("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0[aout]");
+  steps.push("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]");
 
   return steps.join(";");
 }
