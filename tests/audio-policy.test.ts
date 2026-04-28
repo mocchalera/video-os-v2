@@ -20,7 +20,9 @@ describe("audio policy", () => {
     );
 
     expect(filter).toContain("sidechaincompress");
-    expect(filter).toContain("[bgm][orig]sidechaincompress");
+    expect(filter).toContain("[origMix]asplit=2[orig][scraw]");
+    expect(filter).toContain("[scraw]lowpass=f=3000[sc]");
+    expect(filter).toContain("[bgm][sc]sidechaincompress=threshold=0.05:ratio=4:attack=20:release=400:makeup=1:detection=rms");
     expect(filter).toContain("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0");
   });
 
@@ -74,7 +76,7 @@ describe("audio policy", () => {
     expect(result.timeline.tracks.audio.find((track) => track.track_id === "A2")?.clips[0]).toMatchObject({
       asset_id: "AST_BGM",
       role: "bgm",
-      audio_policy: { mode: "ducking", bgm_gain: 0.35 },
+      audio_policy: { mode: "ducking", bgm_gain: 0.25 },
     });
 
     fs.rmSync(projectDir, { recursive: true, force: true });

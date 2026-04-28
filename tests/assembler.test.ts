@@ -6,6 +6,7 @@ import {
   assembleTimelineToMp4,
   buildAudioAssemblyPlan,
   buildBgmAudioRenderArgs,
+  buildFinalAssemblyMuxArgs,
   buildVideoAssemblyPlan,
   type ExecFileLike,
   formatFfmpegTimestamp,
@@ -166,6 +167,21 @@ describe("ffmpeg assembler", () => {
     expect(args).toContain("42");
     const filter = args[args.indexOf("-af") + 1];
     expect(filter).toContain("afade=t=out:st=40.0000:d=2.0000");
+  });
+
+  it("masters final audio with loudnorm during mux", () => {
+    const args = buildFinalAssemblyMuxArgs(
+      "/tmp/video.mp4",
+      "/tmp/audio.m4a",
+      "/tmp/final.mp4",
+    );
+
+    expect(args).toContain("-af");
+    expect(args[args.indexOf("-af") + 1]).toBe("loudnorm=I=-16:LRA=11:TP=-1.5");
+    expect(args).toContain("-ar");
+    expect(args[args.indexOf("-ar") + 1]).toBe("48000");
+    expect(args).toContain("-c:a");
+    expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
   });
 
   it("throws a clear error when ffmpeg is not available", async () => {

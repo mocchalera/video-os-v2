@@ -322,7 +322,7 @@ export function assemble(
       audio_policy: {
         mode: options.audioPolicy ?? "ducking",
         duck_music_db: -18,
-        bgm_gain: 0.35,
+        bgm_gain: 0.25,
       },
     });
   }

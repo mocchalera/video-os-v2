@@ -324,7 +324,7 @@ export function buildBgmAudioRenderArgs(
   const fadeInSec = Math.max(0, fadeInFrames / fps);
   const fadeOutSec = Math.max(0, Math.min(durationSec / 2, fadeOutFrames / fps));
   const filters: string[] = [];
-  const bgmGain = audioPolicy?.bgm_gain ?? 0.35;
+  const bgmGain = audioPolicy?.bgm_gain ?? 0.25;
   if (bgmGain > 0 && bgmGain !== 1) {
     filters.push(`volume=${bgmGain.toFixed(4)}`);
   }
@@ -409,9 +409,11 @@ export function buildDuckingAudioMixFilter(
     }
   };
 
-  mixGroup(originalLabels, "orig");
+  mixGroup(originalLabels, "origMix");
   mixGroup(bgmLabels, "bgm");
-  steps.push("[bgm][orig]sidechaincompress=threshold=0.04:ratio=5:attack=20:release=450:makeup=1[ducked]");
+  steps.push("[origMix]asplit=2[orig][scraw]");
+  steps.push("[scraw]lowpass=f=3000[sc]");
+  steps.push("[bgm][sc]sidechaincompress=threshold=0.05:ratio=4:attack=20:release=400:makeup=1:detection=rms[ducked]");
   steps.push("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]");
 
   return steps.join(";");
@@ -470,7 +472,10 @@ export function buildFinalAssemblyMuxArgs(
     "-i", videoPath,
     "-i", audioPath,
     "-c:v", "copy",
-    "-c:a", "copy",
+    "-af", "loudnorm=I=-16:LRA=11:TP=-1.5",
+    "-ar", "48000",
+    "-c:a", "aac",
+    "-b:a", "192k",
     outputPath,
   ];
 }
