@@ -373,7 +373,7 @@ describe("phase commands", () => {
     expect(result.error?.code).toBe("STATE_CHECK_FAILED");
   });
 
-  it("compile phase errors when upstream blockers are unresolved", () => {
+  it("compile phase errors when upstream blockers are unresolved", async () => {
     const tmpDir = createProject("compile-blocked", {
       state: "blocked",
       patches: {
@@ -393,7 +393,7 @@ describe("phase commands", () => {
       },
     });
 
-    const result = runCompilePhase(tmpDir);
+    const result = await runCompilePhase(tmpDir);
 
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("GATE_CHECK_FAILED");

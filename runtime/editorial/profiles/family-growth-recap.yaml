@@ -10,6 +10,7 @@ defaults:
   crossfade_frames: 8
   audio_policy: ducking
   a1_loudnorm: true
+  caption_policy: auto
   active_editing_skills:
     - build_to_peak
     - cooldown_resolve

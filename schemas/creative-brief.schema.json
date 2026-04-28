@@ -120,6 +120,22 @@
       "enum": ["chronological", "editorial"],
       "description": "Default clip order when the blueprint does not specify timeline_order. Keepsake and family-growth-recap projects should use chronological."
     },
+    "subject": {
+      "type": "object",
+      "properties": {
+        "birth_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Subject birth date used to derive age captions for family-growth/keepsake edits."
+        }
+      },
+      "additionalProperties": false
+    },
+    "caption_policy": {
+      "type": "string",
+      "enum": ["auto", "manual", "off"],
+      "description": "Whether the rough cut should auto-propose date/age/milestone captions, expect manual captions, or keep captions off."
+    },
     "audio_policy": {
       "type": "string",
       "enum": ["ducking", "bgm_only", "original_only"],
@@ -169,6 +185,24 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "skip_confirmations": {
+          "type": "boolean",
+          "description": "When true, pipeline confirmation prompts are completely skipped."
+        }
+      },
+      "additionalProperties": false
+    },
+    "confirmation_provenance": {
+      "type": "object",
+      "properties": {
+        "confirmed_at": { "type": "string", "format": "date-time" },
+        "source": { "type": "string", "enum": ["interactive_prompt", "non_interactive_default"] },
+        "caption_policy": { "type": "string", "enum": ["auto", "manual", "off"] },
+        "audio_policy": { "type": "string", "enum": ["ducking", "bgm_only", "original_only"] },
+        "questions": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": false

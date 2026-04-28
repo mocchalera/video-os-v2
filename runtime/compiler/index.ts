@@ -20,6 +20,7 @@ import { loadProfiles } from "../editorial/policy-resolver.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
 import { loadSourceMap } from "../media/source-map.js";
+import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
 import type { BgmScoringContext } from "./score.js";
 import type {
   CompileOptions,
@@ -141,6 +142,7 @@ export function compile(opts: CompileOptions): CompileResult {
     materialTotalSec,
   );
   const audioPolicy = resolveAudioPolicy(brief, blueprint, repoRoot);
+  const captionPolicy = resolveCaptionPolicy(brief, blueprint, repoRoot);
 
   // ── Phase 1: Normalize ────────────────────────────────────────────
 
@@ -300,12 +302,23 @@ export function compile(opts: CompileOptions): CompileResult {
     fpsDen,
     durationPolicy,
     audioPolicy,
+    captionPolicy,
     transitions: adjacencyTransitions.length > 0 ? adjacencyTransitions : undefined,
     width: outputDims.width,
     height: outputDims.height,
     outputAspectRatio: outputDims.output_aspect_ratio,
     letterboxPolicy: outputDims.letterbox_policy,
   });
+
+  attachAutoCaptions(timelineIR, {
+    brief,
+    blueprint,
+    candidates: selects.candidates,
+    projectPath,
+    repoRoot,
+    fpsNum,
+    fpsDen,
+  }, captionPolicy);
 
   // ── Phase 5.5: Editorial Metadata ─────────────────────────────────
   // Attach skill metadata and provenance hashes when active skills exist.

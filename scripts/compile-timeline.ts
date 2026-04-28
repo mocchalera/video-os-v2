@@ -15,6 +15,7 @@ import { loadSourceMap } from "../runtime/media/source-map.js";
 import { validateProject } from "./validate-schemas.js";
 import { ProgressTracker } from "../runtime/progress.js";
 import { generateTimelineOverview } from "../runtime/preview/timeline-overview.js";
+import { confirmBriefDefaults } from "../runtime/brief-confirmation.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ function parseArgs(): {
   fpsNum?: number;
   sourceMapPath?: string;
   skipPreview?: boolean;
+  skipConfirmations?: boolean;
+  forceConfirmations?: boolean;
 } {
   const args = process.argv.slice(2);
   let projectPath: string | undefined;
@@ -31,6 +34,8 @@ function parseArgs(): {
   let fpsNum: number | undefined;
   let sourceMapPath: string | undefined;
   let skipPreview = false;
+  let skipConfirmations: boolean | undefined;
+  let forceConfirmations = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--patch" && i + 1 < args.length) {
@@ -41,6 +46,12 @@ function parseArgs(): {
       sourceMapPath = args[++i];
     } else if (args[i] === "--skip-preview") {
       skipPreview = true;
+    } else if (args[i] === "--skip-confirmations" && i + 1 < args.length) {
+      const value = args[++i];
+      skipConfirmations = value === "true";
+      forceConfirmations = value === "false";
+    } else if (args[i] === "--skip-confirmations") {
+      skipConfirmations = true;
     } else if (!projectPath) {
       projectPath = args[i];
     }
@@ -48,12 +59,12 @@ function parseArgs(): {
 
   if (!projectPath) {
     console.error(
-      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>] [--skip-preview]",
+      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>] [--skip-preview] [--skip-confirmations true|false]",
     );
     process.exit(1);
   }
 
-  return { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview };
+  return { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations };
 }
 
 // ── Compile mode ────────────────────────────────────────────────────
@@ -63,6 +74,8 @@ async function runCompile(
   fpsNum?: number,
   sourceMapPath?: string,
   skipPreview?: boolean,
+  skipConfirmations?: boolean,
+  forceConfirmations?: boolean,
 ): Promise<void> {
   const pt = new ProgressTracker(projectPath, "compile", skipPreview ? 3 : 4);
 
@@ -85,6 +98,15 @@ async function runCompile(
   const briefRaw = fs.readFileSync(briefPath, "utf-8");
   const brief = parseYaml(briefRaw) as { created_at?: string };
   const createdAt = brief.created_at ?? "1970-01-01T00:00:00Z";
+  const confirmation = await confirmBriefDefaults(path.resolve(projectPath), {
+    skipConfirmations,
+    force: forceConfirmations,
+  });
+  if (confirmation.wrote) {
+    console.log(`Brief confirmation: caption_policy=${confirmation.captionPolicy}, audio_policy=${confirmation.audioPolicy}, source=${confirmation.source}`);
+  } else if (confirmation.skipped) {
+    console.log("Brief confirmation: skipped");
+  }
 
   // Compile
   const result = compile({
@@ -230,12 +252,12 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview } = parseArgs();
+  const { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations } = parseArgs();
 
   if (patchPath) {
     runPatch(projectPath, patchPath, sourceMapPath);
   } else {
-    await runCompile(projectPath, fpsNum, sourceMapPath, skipPreview);
+    await runCompile(projectPath, fpsNum, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations);
   }
 }
 

@@ -11,12 +11,14 @@ import {
 import { compile, type CompileResult, type ReviewPatch } from "../compiler/index.js";
 import type { ProjectState } from "../state/reconcile.js";
 import { ProgressTracker } from "../progress.js";
+import { confirmBriefDefaults, type BriefConfirmationOptions } from "../brief-confirmation.js";
 
 export interface CompileCommandOptions {
   createdAt?: string;
   fpsNum?: number;
   sourceMapPath?: string;
   reviewPatch?: ReviewPatch;
+  confirmations?: BriefConfirmationOptions;
 }
 
 export interface CompileCommandResult {
@@ -38,10 +40,10 @@ const ALLOWED_STATES: ProjectState[] = [
   "packaged",
 ];
 
-export function runCompilePhase(
+export async function runCompilePhase(
   projectDir: string,
   options?: CompileCommandOptions,
-): CompileCommandResult {
+): Promise<CompileCommandResult> {
   const pt = new ProgressTracker(projectDir, "compile", 3);
   const ctx = initCommand(projectDir, "/compile", ALLOWED_STATES);
   if (isCommandError(ctx)) {
@@ -74,6 +76,7 @@ export function runCompilePhase(
   }
 
   try {
+    await confirmBriefDefaults(ctx.projectDir, options?.confirmations);
     const compileResult = compile({
       projectPath: ctx.projectDir,
       createdAt: options?.createdAt ?? inferCreatedAt(ctx.projectDir),

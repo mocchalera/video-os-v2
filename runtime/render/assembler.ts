@@ -290,6 +290,67 @@ export function buildVideoConcatArgs(
   ];
 }
 
+export function collectTimelineCaptions(timeline: TimelineIR): NonNullable<ClipOutput["captions"]> {
+  return timeline.tracks.video
+    .flatMap((track) => track.clips)
+    .flatMap((clip) => clip.captions ?? [])
+    .sort((a, b) => a.in_frame - b.in_frame);
+}
+
+export function buildCaptionDrawtextFilter(
+  captions: NonNullable<ClipOutput["captions"]>,
+  fps: number,
+  width: number,
+  height: number,
+): string {
+  return captions
+    .map((caption) => {
+      const startSec = caption.in_frame / fps;
+      const endSec = caption.out_frame / fps;
+      const preset = caption.style === "simple-shadow"
+        ? { fontSize: Math.round(height * 0.042), y: "h*0.82" }
+        : { fontSize: Math.round(height * 0.046), y: "h*0.80" };
+      return [
+        "drawtext=",
+        `text='${escapeDrawtext(caption.text)}'`,
+        ":font='Hiragino Sans'",
+        ":fontcolor=white",
+        `:fontsize=${Math.max(28, preset.fontSize)}`,
+        ":line_spacing=8",
+        ":box=1",
+        ":boxcolor=black@0.32",
+        ":boxborderw=18",
+        ":shadowcolor=black@0.8",
+        `:shadowx=${Math.max(2, Math.round(width * 0.002))}`,
+        `:shadowy=${Math.max(2, Math.round(width * 0.002))}`,
+        ":x=(w-text_w)/2",
+        `:y=${preset.y}`,
+        `:enable='between(t,${formatFfmpegTimestamp(startSec)},${formatFfmpegTimestamp(endSec)})'`,
+      ].join("");
+    })
+    .join(",");
+}
+
+export function buildCaptionOverlayArgs(
+  inputPath: string,
+  outputPath: string,
+  captions: NonNullable<ClipOutput["captions"]>,
+  fps: number,
+  width: number,
+  height: number,
+): string[] {
+  return [
+    "-y",
+    "-i", inputPath,
+    "-vf", buildCaptionDrawtextFilter(captions, fps, width, height),
+    "-an",
+    "-r", String(fps),
+    "-c:v", "libx264",
+    "-pix_fmt", "yuv420p",
+    outputPath,
+  ];
+}
+
 export function buildAudioTrimArgs(
   inputPath: string,
   outputPath: string,
@@ -645,6 +706,20 @@ export async function assembleTimelineToMp4(
     fs.writeFileSync(concatListPath, buildConcatListContent(renderedVideoSegments), "utf-8");
     const videoOnlyPath = path.join(workingDir, "assembly.video.mp4");
     await runFfmpeg(execFileImpl, ffmpegBin, buildVideoConcatArgs(concatListPath, videoOnlyPath, fps));
+    const captions = collectTimelineCaptions(timeline);
+    const captionedVideoPath = captions.length > 0
+      ? path.join(workingDir, "assembly.video.captioned.mp4")
+      : videoOnlyPath;
+    if (captions.length > 0) {
+      await runFfmpeg(execFileImpl, ffmpegBin, buildCaptionOverlayArgs(
+        videoOnlyPath,
+        captionedVideoPath,
+        captions,
+        fps,
+        width,
+        height,
+      ));
+    }
 
     const renderedAudioSegments: string[] = [];
     const audioDelaysMs: number[] = [];
@@ -713,7 +788,7 @@ export async function assembleTimelineToMp4(
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     await runFfmpeg(execFileImpl, ffmpegBin, buildFinalAssemblyMuxArgs(
-      videoOnlyPath,
+      captionedVideoPath,
       mixedAudioPath,
       outputPath,
     ));
@@ -738,6 +813,16 @@ function getTimelineAudioPolicyMode(timeline: TimelineIR): TimelineAudioPolicyMo
     return raw;
   }
   return "ducking";
+}
+
+function escapeDrawtext(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .replace(/%/g, "\\%");
 }
 
 function isBgmPlan(plan: AudioClipPlan): boolean {
