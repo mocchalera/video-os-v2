@@ -4671,11 +4671,6 @@ private struct TimelinePanel: View {
 
             if let timeline {
                 TimelineRuler(timeline: timeline, playheadFrame: playheadFrame)
-                TimelineMarkerLane(
-                    markers: ProjectTimelineMarkerMap.build(timeline: timeline).markers,
-                    totalFrames: timeline.totalFrames,
-                    playheadFrame: playheadFrame
-                )
                 Text(audioWaveformStatus)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -4687,22 +4682,43 @@ private struct TimelinePanel: View {
                     in: 0...Double(max(timeline.totalFrames, 1)),
                     step: 1
                 )
-                ScrollView([.horizontal, .vertical]) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(timeline.displayTracks) { track in
-                            TimelineTrackRow(
-                                track: track,
+                GeometryReader { geometry in
+                    let labelWidth: CGFloat = 34
+                    let rowSpacing: CGFloat = 10
+                    let trailingPadding: CGFloat = 18
+                    let viewportLaneWidth = max(320, geometry.size.width - labelWidth - rowSpacing - trailingPadding)
+                    let laneWidth = max(viewportLaneWidth, CGFloat(timeline.totalFrames) * 3.2)
+
+                    ScrollView([.horizontal, .vertical]) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TimelineMarkerLane(
+                                markers: ProjectTimelineMarkerMap.build(timeline: timeline).markers,
                                 totalFrames: timeline.totalFrames,
-                                audioCues: audioCues.filter { $0.trackID == track.id },
-                                audioWaveforms: audioWaveforms.filter { $0.trackID == track.id },
-                                selectedClipID: $selectedClipID,
                                 playheadFrame: playheadFrame,
-                                onSelectClip: onSelectClip
+                                laneWidth: laneWidth
                             )
+                            ForEach(timeline.displayTracks) { track in
+                                TimelineTrackRow(
+                                    track: track,
+                                    totalFrames: timeline.totalFrames,
+                                    laneWidth: laneWidth,
+                                    audioCues: audioCues.filter { $0.trackID == track.id },
+                                    audioWaveforms: audioWaveforms.filter { $0.trackID == track.id },
+                                    selectedClipID: $selectedClipID,
+                                    playheadFrame: playheadFrame,
+                                    onSelectClip: onSelectClip
+                                )
+                            }
                         }
+                        .padding(.trailing, trailingPadding)
+                        .frame(
+                            minWidth: geometry.size.width,
+                            maxWidth: .infinity,
+                            alignment: .topLeading
+                        )
                     }
-                    .padding(.trailing, 18)
                 }
+                .frame(minHeight: 132, maxHeight: .infinity)
             } else {
                 TimelineEmptyState(status: status)
             }
@@ -4740,10 +4756,7 @@ private struct TimelineMarkerLane: View {
     var markers: [TimelineMarkerCue]
     var totalFrames: Int
     var playheadFrame: Int
-
-    private var laneWidth: CGFloat {
-        max(920, CGFloat(totalFrames) * 3.2)
-    }
+    var laneWidth: CGFloat
 
     var body: some View {
         HStack(spacing: 10) {
@@ -4817,15 +4830,12 @@ private struct TimelineMarkerChip: View {
 private struct TimelineTrackRow: View {
     var track: TimelineTrack
     var totalFrames: Int
+    var laneWidth: CGFloat
     var audioCues: [TimelineAudioCue]
     var audioWaveforms: [TimelineAudioWaveform]
     @Binding var selectedClipID: TimelineClip.ID?
     var playheadFrame: Int
     var onSelectClip: (TimelineClip.ID) -> Void
-
-    private var laneWidth: CGFloat {
-        max(920, CGFloat(totalFrames) * 3.2)
-    }
 
     var body: some View {
         HStack(spacing: 10) {
