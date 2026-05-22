@@ -2233,37 +2233,25 @@ struct ContentView: View {
     @State private var commandPaletteQuery = ""
 
     var body: some View {
-        HStack(spacing: 0) {
-            SidebarView(model: model)
-                .frame(width: 280)
+        VStack(spacing: 0) {
+            StudioTopBar(
+                selectedSurface: $model.selectedSurface,
+                onOpenCommandPalette: {
+                    commandPaletteQuery = ""
+                    isCommandPalettePresented = true
+                },
+                onRefresh: { model.refresh() }
+            )
+
             Divider()
+
+            ProjectShelf(model: model)
+
+            Divider()
+
             StudioWorkspaceView(model: model)
         }
         .frame(minWidth: 1180, minHeight: 760)
-        .toolbar {
-            ToolbarItemGroup {
-                Picker("Agent Surface", selection: $model.selectedSurface) {
-                    ForEach(StudioAgentSurface.allCases) { surface in
-                        Text(surface.rawValue).tag(surface)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 560)
-
-                Button {
-                    commandPaletteQuery = ""
-                    isCommandPalettePresented = true
-                } label: {
-                    Label("Command Palette", systemImage: "command")
-                }
-
-                Button {
-                    model.refresh()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-            }
-        }
         .sheet(isPresented: $isCommandPalettePresented) {
             StudioCommandPaletteView(
                 model: model,
@@ -2276,6 +2264,87 @@ struct ContentView: View {
             commandPaletteQuery = ""
             isCommandPalettePresented = true
         }
+    }
+}
+
+private struct ProjectShelf: View {
+    @ObservedObject var model: StudioViewModel
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Button {
+                    model.chooseAndInitializeProject()
+                } label: {
+                    Label(model.isInitializingProject ? "Creating" : "New Project", systemImage: "folder.badge.plus")
+                }
+                .disabled(model.isInitializingProject)
+
+                Divider()
+                    .frame(height: 24)
+
+                if model.projects.isEmpty {
+                    Label("No project folders", systemImage: "folder")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(model.projects) { project in
+                        Button {
+                            model.selectProject(project.id)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: project.hasTimeline ? "timeline.selection" : "folder")
+                                Text(project.name)
+                                    .lineLimit(1)
+                                Text(project.stateLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 2)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(project.id == model.selectedProjectID ? .accentColor : .secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
+private struct StudioTopBar: View {
+    @Binding var selectedSurface: StudioAgentSurface
+    var onOpenCommandPalette: () -> Void
+    var onRefresh: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Picker("Agent Surface", selection: $selectedSurface) {
+                ForEach(StudioAgentSurface.allCases) { surface in
+                    Text(surface.rawValue).tag(surface)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 720)
+
+            Spacer(minLength: 12)
+
+            Button(action: onOpenCommandPalette) {
+                Image(systemName: "command")
+            }
+            .help("Command Palette")
+
+            Button(action: onRefresh) {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help("Refresh Projects")
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.large)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
     }
 }
 
@@ -2589,62 +2658,6 @@ private struct StudioCommandPaletteItem: Identifiable {
 
     var searchText: String {
         ([title, subtitle] + keywords).joined(separator: " ")
-    }
-}
-
-private struct SidebarView: View {
-    @ObservedObject var model: StudioViewModel
-
-    var body: some View {
-        List {
-            Section {
-                Button {
-                    model.chooseAndInitializeProject()
-                } label: {
-                    if model.isInitializingProject {
-                        Label("Creating Project", systemImage: "hourglass")
-                    } else {
-                        Label("New Project from Source", systemImage: "folder.badge.plus")
-                    }
-                }
-                .disabled(model.isInitializingProject)
-                Text(model.projectInitializationStatus)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Section("Projects") {
-                ForEach(model.projects) { project in
-                    Button {
-                        model.selectProject(project.id)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: project.hasTimeline ? "timeline.selection" : "folder")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 16)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(project.name)
-                                    .lineLimit(1)
-                                Text(project.stateLabel)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .listRowBackground(
-                        project.id == model.selectedProjectID
-                            ? Color.accentColor.opacity(0.14)
-                            : Color.clear
-                    )
-                }
-            }
-        }
-        .listStyle(.sidebar)
     }
 }
 
