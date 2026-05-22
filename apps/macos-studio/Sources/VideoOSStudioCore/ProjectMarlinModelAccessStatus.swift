@@ -35,6 +35,23 @@ public struct ProjectMarlinModelAccessStatus: Equatable, Sendable {
 public enum ProjectMarlinModelAccessStatusReader {
     public static let defaultRepoID = "NemoStation/Marlin-2B"
 
+    public static func uncheckedStatus(
+        repositoryRoot: URL,
+        pythonBinary: String? = nil,
+        repoID: String = defaultRepoID
+    ) -> ProjectMarlinModelAccessStatus {
+        ProjectMarlinModelAccessStatus(
+            repositoryRoot: repositoryRoot,
+            pythonBinary: pythonBinary ?? ProjectMarlinRuntimeStatusReader.defaultPythonBinary(repositoryRoot: repositoryRoot),
+            repoID: repoID,
+            hasToken: huggingFaceToken(repositoryRoot: repositoryRoot) != nil,
+            checkedAccess: false,
+            accessAllowed: false,
+            error: nil,
+            stderr: ""
+        )
+    }
+
     public static func status(
         repositoryRoot: URL,
         pythonBinary: String? = nil,

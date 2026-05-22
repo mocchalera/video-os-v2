@@ -2,6 +2,18 @@ import XCTest
 @testable import VideoOSStudioCore
 
 final class ProjectMarlinModelAccessStatusTests: XCTestCase {
+    func testUncheckedStatusDoesNotProbeModelAccess() throws {
+        let root = temporaryRoot("marlin-model-access-unchecked")
+
+        let status = ProjectMarlinModelAccessStatusReader.uncheckedStatus(repositoryRoot: root, pythonBinary: "python3")
+
+        XCTAssertFalse(status.isReadyForLiveMarlin)
+        XCTAssertEqual(status.readinessLabel, "HF_TOKEN missing")
+        XCTAssertFalse(status.checkedAccess)
+        XCTAssertFalse(status.accessAllowed)
+        XCTAssertEqual(status.pythonBinary, "python3")
+    }
+
     func testStatusReportsMissingTokenFromEmptyRepository() throws {
         let root = temporaryRoot("marlin-model-access-missing")
 

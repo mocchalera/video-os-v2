@@ -74,7 +74,23 @@ case "$MODE" in
       pgrep -x "$APP_NAME" >/dev/null
       WINDOW_COUNT="$(swift -e 'import CoreGraphics; let windows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []; let count = windows.filter { window in guard (window[kCGWindowOwnerName as String] as? String) == "'"$APP_NAME"'", (window[kCGWindowLayer as String] as? Int) == 0, (window[kCGWindowName as String] as? String) == "Video OS Studio", let bounds = window[kCGWindowBounds as String] as? [String: Any], let width = bounds["Width"] as? Int, let height = bounds["Height"] as? Int else { return false }; return width >= 1000 && height >= 700 }.count; print(count)')"
       if [[ "$WINDOW_COUNT" -lt 1 ]]; then
-        WINDOW_COUNT="$(osascript -e 'tell application "System Events" to tell process "'"$APP_NAME"'" to count (every window whose name is "Video OS Studio" and value of attribute "AXMinimized" is false and size is greater than or equal to {1000, 700})' 2>/dev/null || printf '0')"
+        WINDOW_COUNT="$(osascript <<APPLESCRIPT 2>/dev/null || printf '0'
+tell application "System Events"
+  tell process "$APP_NAME"
+    repeat with candidateWindow in windows
+      if name of candidateWindow is "Video OS Studio" then
+        set windowSize to size of candidateWindow
+        set isMinimized to value of attribute "AXMinimized" of candidateWindow
+        if isMinimized is false and item 1 of windowSize >= 1000 and item 2 of windowSize >= 700 then
+          return 1
+        end if
+      end if
+    end repeat
+  end tell
+end tell
+return 0
+APPLESCRIPT
+)"
       fi
       if [[ "$WINDOW_COUNT" -ge 1 ]]; then
         break

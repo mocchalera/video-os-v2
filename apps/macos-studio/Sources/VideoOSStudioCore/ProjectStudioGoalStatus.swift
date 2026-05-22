@@ -72,7 +72,11 @@ public struct ProjectStudioGoalStatus: Equatable, Sendable {
 }
 
 public enum ProjectStudioGoalStatusReader {
-    public static func status(repositoryRoot: URL, projectURL: URL) -> ProjectStudioGoalStatus {
+    public static func status(
+        repositoryRoot: URL,
+        projectURL: URL,
+        marlinModelAccessStatus: ProjectMarlinModelAccessStatus? = nil
+    ) -> ProjectStudioGoalStatus {
         let fileManager = FileManager.default
         let projectID = projectURL.lastPathComponent
         let packageSwiftExists = fileManager.fileExists(atPath: repositoryRoot.appendingPathComponent("Package.swift").path)
@@ -86,7 +90,7 @@ public enum ProjectStudioGoalStatusReader {
         let pipeline = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
         let marlin = ProjectMarlinEvaluationStatusReader.status(projectURL: projectURL, repositoryRoot: repositoryRoot)
         let marlinDefault = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: repositoryRoot)
-        let marlinModelAccess = ProjectMarlinModelAccessStatusReader.status(repositoryRoot: repositoryRoot)
+        let marlinModelAccess = marlinModelAccessStatus ?? ProjectMarlinModelAccessStatusReader.status(repositoryRoot: repositoryRoot)
         let representativePlan = ProjectMarlinRepresentativePlanReader.plan(repositoryRoot: repositoryRoot)
         let evidence = ProjectEvidenceStore.load(projectURL: projectURL)
         let handoff = ProjectEditorPacketExporter.plan(repositoryRoot: repositoryRoot, projectURL: projectURL, assets: evidence.assets)

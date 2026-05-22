@@ -70,7 +70,7 @@ final class StudioViewModel: ObservableObject {
     @Published var marlinRepresentativePlan = ProjectMarlinRepresentativePlanReader.plan(repositoryRoot: URL(fileURLWithPath: "/"))
     @Published var marlinEvaluationRunPlan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
     @Published var marlinRuntimeStatus = ProjectMarlinRuntimeStatusReader.uncheckedStatus(repositoryRoot: URL(fileURLWithPath: "/"))
-    @Published var marlinModelAccessStatus = ProjectMarlinModelAccessStatusReader.status(repositoryRoot: URL(fileURLWithPath: "/"))
+    @Published var marlinModelAccessStatus = ProjectMarlinModelAccessStatusReader.uncheckedStatus(repositoryRoot: URL(fileURLWithPath: "/"))
     @Published var marlinEvaluationRunStatus = "No project selected."
     @Published var isRunningMarlinEvaluation = false
     @Published var audioStoryGraphRunPlan = ProjectAudioStoryGraphRunPlanner.plan(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
@@ -87,7 +87,11 @@ final class StudioViewModel: ObservableObject {
     @Published var libraryReadinessStatus = ProjectLibraryReadinessStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
     @Published var pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
     @Published var studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
-    @Published var studioGoalStatus = ProjectStudioGoalStatusReader.status(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
+    @Published var studioGoalStatus = ProjectStudioGoalStatusReader.status(
+        repositoryRoot: URL(fileURLWithPath: "/"),
+        projectURL: URL(fileURLWithPath: "/"),
+        marlinModelAccessStatus: ProjectMarlinModelAccessStatusReader.uncheckedStatus(repositoryRoot: URL(fileURLWithPath: "/"))
+    )
     @Published var studioReadinessActionStatus = "Select an action from Studio Readiness to run the next operational step."
     @Published var planningStatus = ProjectPlanningStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
     @Published var indexStatus = ProjectIndexStatus(indexURL: URL(fileURLWithPath: "/"), exists: false, documentCount: 0, updatedAt: nil)
@@ -118,6 +122,7 @@ final class StudioViewModel: ObservableObject {
         let root = ProjectScanner.locateRepositoryRoot()
         repositoryRoot = root
         appServerPlan = CodexAppServerLaunchPlan(workspace: root)
+        marlinModelAccessStatus = ProjectMarlinModelAccessStatusReader.uncheckedStatus(repositoryRoot: root)
         installCommandObservers()
         Task { @MainActor in
             self.refresh()
@@ -327,6 +332,9 @@ final class StudioViewModel: ObservableObject {
                 if !self.userSelectedProject, let preferredReadyProjectID, self.selectedProjectID != preferredReadyProjectID {
                     self.selectProject(preferredReadyProjectID, userInitiated: false)
                 }
+                if let selectedProject = self.selectedProject {
+                    self.studioGoalStatus = self.makeStudioGoalStatus(projectURL: selectedProject.path)
+                }
             }
         }
     }
@@ -356,6 +364,14 @@ final class StudioViewModel: ObservableObject {
                 ? "Ready to evaluate \(marlinEvaluationRunPlan.sourceCount) source files."
                 : "Marlin model access is not ready: \(marlinModelAccessStatus.readinessLabel).")
             : "Marlin live runtime is not ready: \(marlinRuntimeStatus.readinessLabel)."
+    }
+
+    private func makeStudioGoalStatus(projectURL: URL) -> ProjectStudioGoalStatus {
+        ProjectStudioGoalStatusReader.status(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            marlinModelAccessStatus: marlinModelAccessStatus
+        )
     }
 
     var marlinAuthReadinessLabel: String {
@@ -498,7 +514,7 @@ final class StudioViewModel: ObservableObject {
             libraryReadinessStatus = ProjectLibraryReadinessStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
             pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
             studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
-            studioGoalStatus = ProjectStudioGoalStatusReader.status(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
+            studioGoalStatus = makeStudioGoalStatus(projectURL: URL(fileURLWithPath: "/"))
             studioReadinessActionStatus = "No project selected."
             planningStatus = ProjectPlanningStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
             analysisRunPlan = ProjectAnalysisRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
@@ -558,7 +574,7 @@ final class StudioViewModel: ObservableObject {
         reviewArtifactStatus = ProjectReviewArtifactStatusReader.status(projectURL: project.path)
         pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: project.path)
         studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: project.path)
-        studioGoalStatus = ProjectStudioGoalStatusReader.status(repositoryRoot: repositoryRoot, projectURL: project.path)
+        studioGoalStatus = makeStudioGoalStatus(projectURL: project.path)
         studioReadinessActionStatus = "Studio readiness loaded for \(project.name)."
         marlinEvaluationStatus = ProjectMarlinEvaluationStatusReader.status(projectURL: project.path, repositoryRoot: repositoryRoot)
         marlinEvaluationRunPlan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: project.path, assets: evidenceStore?.assets)
@@ -787,7 +803,7 @@ final class StudioViewModel: ObservableObject {
         reviewArtifactStatus = ProjectReviewArtifactStatusReader.status(projectURL: projectURL)
         pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
         studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
-        studioGoalStatus = ProjectStudioGoalStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        studioGoalStatus = makeStudioGoalStatus(projectURL: projectURL)
     }
 
     func scrubPlayhead(to frame: Int) {
@@ -1208,7 +1224,7 @@ final class StudioViewModel: ObservableObject {
         marlinEvaluationQueue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: repositoryRoot)
         marlinRepresentativePlan = ProjectMarlinRepresentativePlanReader.plan(repositoryRoot: repositoryRoot)
         if let selectedProject {
-            studioGoalStatus = ProjectStudioGoalStatusReader.status(repositoryRoot: repositoryRoot, projectURL: selectedProject.path)
+            studioGoalStatus = makeStudioGoalStatus(projectURL: selectedProject.path)
         }
         studioReadinessActionStatus = "Refreshed representative Marlin evaluation plan: \(marlinRepresentativePlan.coveredBucketCount)/\(marlinRepresentativePlan.targetBucketCount) buckets covered."
     }
@@ -1222,7 +1238,7 @@ final class StudioViewModel: ObservableObject {
                 ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: $0.path)
             } ?? studioReadinessStatus
             studioGoalStatus = selectedProject.map {
-                ProjectStudioGoalStatusReader.status(repositoryRoot: repositoryRoot, projectURL: $0.path)
+                makeStudioGoalStatus(projectURL: $0.path)
             } ?? studioGoalStatus
             marlinEvaluationRunStatus = result.wrotePolicy
                 ? "Applied Marlin-first temporal VLM policy: \(result.previousPolicyLabel) -> \(result.nextPolicyLabel)."
@@ -1923,10 +1939,7 @@ final class StudioViewModel: ObservableObject {
                             repositoryRoot: self.repositoryRoot,
                             projectURL: selectedProject.path
                         )
-                        self.studioGoalStatus = ProjectStudioGoalStatusReader.status(
-                            repositoryRoot: self.repositoryRoot,
-                            projectURL: selectedProject.path
-                        )
+                        self.studioGoalStatus = self.makeStudioGoalStatus(projectURL: selectedProject.path)
                     }
                     if result.succeeded, let indexSummary = result.indexSummary {
                         self.marlinEvaluationRunStatus = "Queued Marlin evaluation completed for \(item.id); refreshed \(indexSummary.searchDocumentCount) search documents."
