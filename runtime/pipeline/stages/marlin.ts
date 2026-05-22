@@ -255,12 +255,21 @@ export function loadMarlinAssetInputs(projectDir: string, sourceFiles: string[])
     }));
   }
 
-  return items
+  const inputs = items
     .filter((item): item is AssetDocItem & { asset_id: string } => Boolean(item.asset_id))
     .map((item, index) => ({
       assetId: item.asset_id,
       sourcePath: resolveAssetSourcePath(absProjectDir, item, sourceCandidates[index], sourceCandidates),
     }));
+
+  if (sourceCandidates.length === 0) {
+    return inputs;
+  }
+
+  const selected = inputs.filter((input) =>
+    sourceCandidates.some((candidate) => pathsReferToSameSource(input.sourcePath, candidate))
+  );
+  return selected.length > 0 ? selected : inputs;
 }
 
 function bestMarlinPeakForSegment(
@@ -428,6 +437,12 @@ function resolveAssetSourcePath(
   }
 
   return indexedFallback ?? path.resolve(projectDir, item.filename ?? "unknown-source");
+}
+
+function pathsReferToSameSource(left: string, right: string): boolean {
+  const normalizedLeft = path.resolve(left);
+  const normalizedRight = path.resolve(right);
+  return normalizedLeft === normalizedRight || path.basename(normalizedLeft) === path.basename(normalizedRight);
 }
 
 function normalizeQueries(queries: string[] | undefined): string[] {

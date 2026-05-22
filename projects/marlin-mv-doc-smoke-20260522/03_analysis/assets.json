@@ -1,0 +1,34 @@
+{
+  "project_id": "marlin-mv-doc-smoke-20260522",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "asset_id": "AST_MV_BLUE",
+      "filename": "D4892.MP4",
+      "duration_us": 2000000,
+      "has_transcript": false,
+      "transcript_ref": "TR_AST_MV_BLUE",
+      "segments": 1,
+      "segment_ids": ["SEG_AST_MV_BLUE_0001"],
+      "quality_flags": [],
+      "tags": ["music", "beat", "documentary", "growth"],
+      "display_name": "Blue beat setup",
+      "role_guess": "music-beat-setup",
+      "source_locator": "../ax1-participant-voices-20260401/02_media/synthetic/D4892.MP4"
+    },
+    {
+      "asset_id": "AST_MV_GREEN",
+      "filename": "D4887.MP4",
+      "duration_us": 2000000,
+      "has_transcript": false,
+      "transcript_ref": "TR_AST_MV_GREEN",
+      "segments": 1,
+      "segment_ids": ["SEG_AST_MV_GREEN_0001"],
+      "quality_flags": [],
+      "tags": ["music", "beat", "documentary", "growth", "reveal"],
+      "display_name": "Green growth reveal",
+      "role_guess": "documentary-growth-reveal",
+      "source_locator": "../ax1-participant-voices-20260401/02_media/synthetic/D4887.MP4"
+    }
+  ]
+}

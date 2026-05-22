@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "project_id": "marlin-mv-doc-smoke-20260522",
+  "media_dir": "02_media",
+  "generated_at": "2026-05-22T12:05:00+09:00",
+  "items": [
+    {
+      "asset_id": "AST_MV_BLUE",
+      "source_locator": "../ax1-participant-voices-20260401/02_media/synthetic/D4892.MP4",
+      "local_source_path": "../ax1-participant-voices-20260401/02_media/synthetic/D4892.MP4",
+      "link_path": "../ax1-participant-voices-20260401/02_media/synthetic/D4892.MP4",
+      "display_name": "Blue beat setup",
+      "kind": "asset",
+      "link_type": "relative-reference"
+    },
+    {
+      "asset_id": "AST_MV_GREEN",
+      "source_locator": "../ax1-participant-voices-20260401/02_media/synthetic/D4887.MP4",
+      "local_source_path": "../ax1-participant-voices-20260401/02_media/synthetic/D4887.MP4",
+      "link_path": "../ax1-participant-voices-20260401/02_media/synthetic/D4887.MP4",
+      "display_name": "Green growth reveal",
+      "kind": "asset",
+      "link_type": "relative-reference"
+    }
+  ]
+}

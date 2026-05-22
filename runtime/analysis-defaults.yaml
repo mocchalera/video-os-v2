@@ -40,11 +40,11 @@ vlm:
   parse_retry_max: 1
 
 marlin:
-  enabled: false
+  enabled: true
   model_alias: NemoStation/Marlin-2B
   model_snapshot: "required_for_canonical_runs"
   connector_version: marlin-local-v1
-  mode: hybrid
+  mode: primary
   role: temporal_semantics
   worker_path: python/marlin_worker.py
   mock: false

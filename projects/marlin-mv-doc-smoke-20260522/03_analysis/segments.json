@@ -1,0 +1,145 @@
+{
+  "project_id": "marlin-mv-doc-smoke-20260522",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "segment_id": "SEG_AST_MV_BLUE_0001",
+      "asset_id": "AST_MV_BLUE",
+      "src_in_us": 0,
+      "src_out_us": 2000000,
+      "summary": "Opening setup for a beat-synced documentary-growth smoke sequence.",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "music",
+        "beat",
+        "documentary",
+        "growth"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 250000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        }
+      ],
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_MV_BLUE_0001",
+            "timestamp_us": 250000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 1000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 250000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 2000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_MV_GREEN_0001",
+      "asset_id": "AST_MV_GREEN",
+      "src_in_us": 0,
+      "src_out_us": 2000000,
+      "summary": "Reveal moment for a beat-synced documentary-growth smoke sequence.",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "music",
+        "beat",
+        "documentary",
+        "growth",
+        "reveal"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 1000000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        }
+      ],
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_MV_GREEN_0001",
+            "timestamp_us": 1000000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 2000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 1000000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 2000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    }
+  ]
+}

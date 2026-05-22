@@ -18,6 +18,7 @@ export interface MarlinWorkerClientOptions {
   device?: string;
   mock?: boolean;
   cwd?: string;
+  requestTimeoutMs?: number;
 }
 
 export class MarlinWorkerClient implements MarlinFn {
@@ -116,10 +117,28 @@ export class MarlinWorkerClient implements MarlinFn {
 
     const id = this.nextId++;
     const payload = JSON.stringify({ id, method, params }) + "\n";
+    const timeoutMs = this.options.requestTimeoutMs ?? parsePositiveInt(process.env.VOS_MARLIN_REQUEST_TIMEOUT_MS) ?? 300_000;
     const promise = new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        const diagnostics = summarizeDiagnostics(this.stderrBuffer);
+        reject(
+          new Error(
+            `Marlin worker request timed out after ${timeoutMs}ms for ${method}${diagnostics ? `: ${diagnostics}` : ""}`
+          )
+        );
+        this.process?.kill();
+        this.process = null;
+      }, timeoutMs);
       this.pending.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
+        resolve: (value) => {
+          clearTimeout(timeout);
+          resolve(value as T);
+        },
+        reject: (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        },
       });
     });
     proc.stdin.write(payload);
@@ -178,6 +197,12 @@ function summarizeDiagnostics(stderr: string): string {
     return `${gated} Set HF_TOKEN in .env.local after accepting model access.`;
   }
   return lines.slice(-4).join(" / ");
+}
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export function createMarlinWorkerClient(options?: MarlinWorkerClientOptions): MarlinFn {

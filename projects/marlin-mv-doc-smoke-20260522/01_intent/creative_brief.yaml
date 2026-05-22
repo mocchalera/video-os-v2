@@ -1,0 +1,18 @@
+version: "1"
+project:
+  title: Marlin MV Documentary Representative Smoke
+  strategy: synthetic representative check for music beat and documentary growth coverage
+  format: mv-documentary-smoke
+message:
+  primary: Verify that Marlin temporal semantics can promote a music-driven documentary-growth project.
+audience:
+  primary: studio operator
+emotion_curve:
+  - setup
+  - reveal
+  - growth
+must_have:
+  - BGM beat sync
+  - music video timing
+  - chronological documentary growth
+  - family growth story

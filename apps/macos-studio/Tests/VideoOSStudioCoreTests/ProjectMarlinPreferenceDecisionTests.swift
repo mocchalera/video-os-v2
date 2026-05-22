@@ -19,6 +19,7 @@ final class ProjectMarlinPreferenceDecisionTests: XCTestCase {
         let root = try makeMarlinPreferenceRepository()
         try writePreferenceProject(root: root, id: "interview", includeMarlinPeak: true)
         try writePreferenceProject(root: root, id: "music-video", includeMarlinPeak: true)
+        try writeUnevaluatedPreferenceProject(root: root, id: "unedited-backlog")
 
         let decision = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: root)
 
@@ -28,6 +29,8 @@ final class ProjectMarlinPreferenceDecisionTests: XCTestCase {
         XCTAssertEqual(decision.representativeTargetBucketCount, 3)
         XCTAssertEqual(decision.blockedEvaluatedProjectCount, 0)
         XCTAssertEqual(decision.decisionLabel, "ready for Marlin-first temporal VLM")
+        XCTAssertEqual(decision.totalSegmentCount, 9)
+        XCTAssertEqual(decision.evaluatedSegmentCount, 6)
         XCTAssertEqual(decision.aggregateCoverageRatio, 1.0 / 3.0, accuracy: 0.001)
         XCTAssertTrue(decision.canPreferMarlinAsDefault)
     }
@@ -190,6 +193,54 @@ private func writePreferenceProject(
           "src_in_us": 6000000,
           "src_out_us": 9000000,
           "summary": "ending",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        }
+      ]
+    }
+    """.write(to: project.appendingPathComponent("03_analysis/segments.json"), atomically: true, encoding: .utf8)
+}
+
+private func writeUnevaluatedPreferenceProject(root: URL, id: String) throws {
+    let project = root.appendingPathComponent("projects/\(id)")
+    try FileManager.default.createDirectory(at: project.appendingPathComponent("01_intent"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: project.appendingPathComponent("03_analysis"), withIntermediateDirectories: true)
+    try writePreferenceBrief(project: project, id: id)
+    try """
+    {
+      "project_id": "\(id)",
+      "artifact_version": "1",
+      "items": [
+        {
+          "segment_id": "S001",
+          "asset_id": "A001",
+          "src_in_us": 0,
+          "src_out_us": 3000000,
+          "summary": "backlog opening",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        },
+        {
+          "segment_id": "S002",
+          "asset_id": "A001",
+          "src_in_us": 3000000,
+          "src_out_us": 6000000,
+          "summary": "backlog middle",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        },
+        {
+          "segment_id": "S003",
+          "asset_id": "A001",
+          "src_in_us": 6000000,
+          "src_out_us": 9000000,
+          "summary": "backlog ending",
           "transcript_excerpt": "",
           "quality_flags": [],
           "tags": [],

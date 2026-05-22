@@ -97,7 +97,7 @@ public enum ProjectStudioGoalStatusReader {
         let nativeSurfacesReady = packageSwiftExists && guiTargetExists && cliTargetExists && runScriptExists
         let codexRuntimeReady = packageJSONExists && fileManager.fileExists(atPath: repositoryRoot.appendingPathComponent("apps/macos-studio/Sources/VideoOSStudioCore/CodexAppServerProtocol.swift").path)
         let materialRAGReady = library.analysisReady && library.mediaReady && library.ragReady
-        let marlinReady = marlin.canPreferMarlin && marlinDefault.canPreferMarlinAsDefault
+        let marlinReady = marlinModelAccess.isReadyForLiveMarlin && marlinDefault.canPreferMarlinAsDefault
         let audioReady = library.audioReady
         let roughCutReady = planning.readinessLabel == "planning ready" && pipeline.hasTimeline
         let nativeEditorReady = library.timelineExists && library.mediaReady && handoff.canExportPacket

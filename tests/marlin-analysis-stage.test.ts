@@ -69,6 +69,40 @@ describe("Marlin analysis stage", () => {
     ]);
   });
 
+  it("limits asset inputs to explicitly provided source files when they match assets", () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, "media"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/assets.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            asset_id: "AST_A",
+            filename: "clip-a.mp4",
+            source_locator: "media/clip-a.mp4",
+          },
+          {
+            asset_id: "AST_B",
+            filename: "clip-b.mp4",
+            source_locator: "media/clip-b.mp4",
+          },
+        ],
+      }),
+    );
+
+    const inputs = loadMarlinAssetInputs(projectDir, ["media/clip-b.mp4"]);
+
+    expect(inputs).toEqual([
+      {
+        assetId: "AST_B",
+        sourcePath: path.join(projectDir, "media/clip-b.mp4"),
+      },
+    ]);
+  });
+
   it("writes schema-valid marlin_events.json from caption and find passes", async () => {
     const projectDir = makeTempProject();
     fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });

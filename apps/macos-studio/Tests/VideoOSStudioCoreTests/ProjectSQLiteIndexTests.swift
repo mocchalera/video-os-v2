@@ -52,6 +52,22 @@ final class ProjectSQLiteIndexTests: XCTestCase {
 
         XCTAssertEqual(try ProjectSQLiteIndex.search(projectURL: root, query: "   "), [])
     }
+
+    func testRebuildScopesMarlinFindResultIDsByAsset() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-sqlite-index-marlin-duplicate-finds-\(UUID().uuidString)")
+        let analysisDir = root.appendingPathComponent("03_analysis")
+        try FileManager.default.createDirectory(at: analysisDir, withIntermediateDirectories: true)
+        try sqliteFixtureDuplicateMarlinFinds.write(to: analysisDir.appendingPathComponent("marlin_events.json"), atomically: true, encoding: .utf8)
+
+        let summary = try ProjectSQLiteIndex.rebuild(projectURL: root)
+        let results = try ProjectSQLiteIndex.search(projectURL: root, query: "strongest action")
+
+        XCTAssertEqual(summary.marlinFindResultCount, 2)
+        XCTAssertEqual(results.filter { $0.kind == "marlin_find" }.count, 2)
+        XCTAssertTrue(results.contains { $0.assetID == "AST_BLUE" })
+        XCTAssertTrue(results.contains { $0.assetID == "AST_GREEN" })
+    }
 }
 
 private func writeSQLiteFixtureProject(at root: URL) throws {
@@ -262,6 +278,50 @@ private let sqliteFixtureMarlin = """
           "span_end_us": 2300000,
           "format_ok": true,
           "confidence": 0.72
+        }
+      ]
+    }
+  ]
+}
+"""
+
+private let sqliteFixtureDuplicateMarlinFinds = """
+{
+  "project_id": "demo",
+  "artifact_version": "marlin-events-v1",
+  "model": {
+    "provider": "marlin",
+    "model_alias": "NemoStation/Marlin-2B",
+    "model_snapshot": "local"
+  },
+  "items": [
+    {
+      "asset_id": "AST_BLUE",
+      "source_path": "02_media/source/blue.mp4",
+      "scene": "solid blue frame",
+      "events": [],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 0,
+          "span_end_us": 2000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 2.0."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_GREEN",
+      "source_path": "02_media/source/green.mp4",
+      "scene": "solid green frame",
+      "events": [],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 0,
+          "span_end_us": 2000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 2.0."
         }
       ]
     }

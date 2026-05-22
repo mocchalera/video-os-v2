@@ -346,13 +346,14 @@ public enum ProjectSQLiteIndex {
             }
 
             for result in assetEvents.findResults {
+                let resultID = "\(assetEvents.assetID):\(result.id)"
                 try database.run(
                     "INSERT INTO marlin_find_results(result_id, asset_id, query, span_start_us, span_end_us, confidence, raw) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [.text(result.id), .text(assetEvents.assetID), .text(result.query), .optionalInt(result.spanStartUS), .optionalInt(result.spanEndUS), .optionalDouble(result.confidence), .optionalText(result.raw)]
+                    [.text(resultID), .text(assetEvents.assetID), .text(result.query), .optionalInt(result.spanStartUS), .optionalInt(result.spanEndUS), .optionalDouble(result.confidence), .optionalText(result.raw)]
                 )
                 try insertSearchDocument(
                     database,
-                    id: "marlin-find:\(assetEvents.assetID):\(result.id)",
+                    id: "marlin-find:\(resultID)",
                     kind: "marlin_find",
                     assetID: assetEvents.assetID,
                     segmentID: nil,

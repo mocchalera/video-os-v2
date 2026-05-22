@@ -49,9 +49,21 @@ public struct ProjectMarlinPreferenceDecision: Equatable, Sendable {
         projects.reduce(0) { $0 + $1.coveredSegmentCount }
     }
 
+    public var evaluatedSegmentCount: Int {
+        projects
+            .filter { !$0.isMockArtifact && ($0.eventCount + $0.findResultCount) > 0 }
+            .reduce(0) { $0 + $1.segmentCount }
+    }
+
+    public var evaluatedCoveredSegmentCount: Int {
+        projects
+            .filter { !$0.isMockArtifact && ($0.eventCount + $0.findResultCount) > 0 }
+            .reduce(0) { $0 + $1.coveredSegmentCount }
+    }
+
     public var aggregateCoverageRatio: Double {
-        guard totalSegmentCount > 0 else { return 0 }
-        return Double(totalCoveredSegmentCount) / Double(totalSegmentCount)
+        guard evaluatedSegmentCount > 0 else { return 0 }
+        return Double(evaluatedCoveredSegmentCount) / Double(evaluatedSegmentCount)
     }
 
     public var representativeCandidateBucketCount: Int {
