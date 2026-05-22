@@ -39,6 +39,24 @@ vlm:
   segment_visual_frame_cap: 90
   parse_retry_max: 1
 
+marlin:
+  enabled: false
+  model_alias: NemoStation/Marlin-2B
+  model_snapshot: "required_for_canonical_runs"
+  connector_version: marlin-local-v1
+  mode: hybrid
+  role: temporal_semantics
+  worker_path: python/marlin_worker.py
+  mock: false
+  output_artifact: 03_analysis/marlin_events.json
+  chunk_target_us: 120000000
+  chunk_overlap_us: 5000000
+  default_find_queries:
+    - "the strongest action moment"
+    - "the strongest emotional reaction"
+    - "a clear visual reveal"
+    - "a person enters or exits"
+
 stt:
   model_alias: whisper-large-v3-turbo
   model_snapshot: "required_for_canonical_runs"
@@ -71,6 +89,7 @@ parallelism:
   ffmpeg_jobs: 4
   stt_jobs: 2
   vlm_jobs: 2
+  marlin_jobs: 1
 
 gap_policy:
   max_retries: 2

@@ -4,7 +4,7 @@
   "title": "Video OS Analysis Policy",
   "type": "object",
   "required": [
-    "version", "policy_name", "classification", "sampling", "vlm", "stt",
+    "version", "policy_name", "classification", "sampling", "vlm", "marlin", "stt",
     "quality_thresholds", "parallelism", "gap_policy", "cache"
   ],
   "additionalProperties": false,
@@ -122,6 +122,42 @@
         "parse_retry_max": { "type": "integer", "minimum": 0 }
       }
     },
+    "marlin": {
+      "type": "object",
+      "required": [
+        "enabled", "model_alias", "model_snapshot", "connector_version", "mode",
+        "role", "worker_path", "mock", "output_artifact", "chunk_target_us",
+        "chunk_overlap_us", "default_find_queries"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "model_alias": { "type": "string", "minLength": 1 },
+        "model_snapshot": { "type": "string" },
+        "connector_version": { "type": "string", "minLength": 1 },
+        "mode": {
+          "type": "string",
+          "enum": ["hybrid", "primary", "fallback"]
+        },
+        "role": {
+          "type": "string",
+          "enum": ["temporal_semantics"]
+        },
+        "worker_path": { "type": "string", "minLength": 1 },
+        "mock": { "type": "boolean" },
+        "output_artifact": {
+          "type": "string",
+          "enum": ["03_analysis/marlin_events.json"]
+        },
+        "chunk_target_us": { "type": "integer", "minimum": 0 },
+        "chunk_overlap_us": { "type": "integer", "minimum": 0 },
+        "default_find_queries": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "stt": {
       "type": "object",
       "required": [
@@ -187,12 +223,13 @@
     },
     "parallelism": {
       "type": "object",
-      "required": ["ffmpeg_jobs", "stt_jobs", "vlm_jobs"],
+      "required": ["ffmpeg_jobs", "stt_jobs", "vlm_jobs", "marlin_jobs"],
       "additionalProperties": false,
       "properties": {
         "ffmpeg_jobs": { "type": "integer", "minimum": 1 },
         "stt_jobs": { "type": "integer", "minimum": 1 },
-        "vlm_jobs": { "type": "integer", "minimum": 1 }
+        "vlm_jobs": { "type": "integer", "minimum": 1 },
+        "marlin_jobs": { "type": "integer", "minimum": 1 }
       }
     },
     "gap_policy": {

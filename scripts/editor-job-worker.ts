@@ -150,12 +150,22 @@ async function main(): Promise<void> {
       }
 
       case "render": {
-        const result = await runRender(resolvedDir);
+        const result = await runRender(resolvedDir, {
+          skipRender: options.skip_render === true,
+          assemblyPath: options.assembly_path as string | undefined,
+          suppliedFinalPath: options.supplied_final_path as string | undefined,
+        });
         writeResult({
           success: result.success,
           phase: "render",
           error: result.error?.message,
-          artifacts: [],
+          sourceOfTruth: result.sourceOfTruth,
+          deliverablePath: result.deliverablePath,
+          progressPath: result.progressPath,
+          artifacts: [
+            result.deliverablePath,
+            result.progressPath,
+          ].filter(Boolean),
         });
         process.exit(result.success ? 0 : 1);
         break;

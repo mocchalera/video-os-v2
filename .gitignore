@@ -2,6 +2,8 @@
 node_modules/
 dist/
 build/
+.venv/
+python/.venv-marlin/
 .tsbuildinfo
 
 # Temporary files
@@ -42,12 +44,15 @@ Thumbs.db
 # Tool-specific directories
 .claude/
 .codex/
+.build/
 
 # Project-specific results
 projects/*
 !projects/_template/
 !projects/demo/
 projects/demo/project_state.yaml
+projects/*/03_analysis/search/
+projects/*/09_output/
 
 # Local screenshots and visual debugging captures
 /editor-*.png

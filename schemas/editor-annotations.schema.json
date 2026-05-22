@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/editor-annotations.schema.json",
+  "title": "Editor Handoff Annotations",
+  "type": "object",
+  "required": ["version", "project_id", "updated_at", "notes"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "editor-annotations-v1"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/clipNote"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "clipNote": {
+      "type": "object",
+      "required": [
+        "clip_id",
+        "track_id",
+        "track_kind",
+        "asset_id",
+        "segment_id",
+        "timeline_in_frame",
+        "timeline_out_frame",
+        "timecode_in",
+        "timecode_out",
+        "note",
+        "handoff_instruction",
+        "author",
+        "updated_at"
+      ],
+      "properties": {
+        "clip_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "track_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "track_kind": {
+          "type": "string",
+          "enum": ["video", "audio", "overlay", "caption"]
+        },
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "segment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeline_in_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_out_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timecode_in": {
+          "type": "string",
+          "pattern": "^[0-9]{2}:[0-9]{2}:[0-9]{2}:[0-9]{2}$"
+        },
+        "timecode_out": {
+          "type": "string",
+          "pattern": "^[0-9]{2}:[0-9]{2}:[0-9]{2}:[0-9]{2}$"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        },
+        "handoff_instruction": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

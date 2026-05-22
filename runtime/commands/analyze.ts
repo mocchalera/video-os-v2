@@ -22,6 +22,14 @@ import {
   writeAnalysisCoverageReport,
   writeSourceMediaManifest,
 } from "../artifacts/p1-manifest-coverage.js";
+import {
+  createMarlinFnFromEnvironment,
+  marlinModelFromEnvironment,
+  marlinQueriesFromEnvironment,
+  MARLIN_EVENTS_RELATIVE_PATH,
+  runMarlinAnalysis,
+  shouldRunMarlinAnalysis,
+} from "../pipeline/stages/marlin.js";
 
 export interface AnalyzeCommandOptions {
   sourceFiles: string[];
@@ -29,6 +37,7 @@ export interface AnalyzeCommandOptions {
   skipVlm?: boolean;
   skipDiarize?: boolean;
   skipPeak?: boolean;
+  skipMarlin?: boolean;
   skipMediaLink?: boolean;
   skipPreflight?: boolean;
   skipBgmAnalysis?: boolean;
@@ -68,6 +77,7 @@ const ANALYZE_ARTIFACT_CANDIDATES = [
   "03_analysis/segments.json",
   "03_analysis/gap_report.yaml",
   "03_analysis/bgm_analysis.json",
+  MARLIN_EVENTS_RELATIVE_PATH,
 ];
 
 export async function runAnalyze(
@@ -193,6 +203,22 @@ class DefaultAnalyzeRunner implements AnalyzeRunner {
       noCache: ctx.noCache,
       clearCache: ctx.clearCache,
     });
+
+    if (!ctx.skipMarlin && shouldRunMarlinAnalysis(ctx.projectDir)) {
+      const marlinFn = createMarlinFnFromEnvironment(ctx.projectDir);
+      try {
+        await runMarlinAnalysis({
+          projectDir: ctx.projectDir,
+          projectId: ctx.projectId || path.basename(ctx.projectDir),
+          sourceFiles: ctx.sourceFiles,
+          marlinFn,
+          model: marlinModelFromEnvironment(ctx.projectDir),
+          queries: marlinQueriesFromEnvironment(ctx.projectDir),
+        });
+      } finally {
+        await marlinFn.close?.();
+      }
+    }
 
     return {
       artifactsCreated: collectExistingAnalyzeArtifacts(ctx.projectDir),

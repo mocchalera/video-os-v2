@@ -1,0 +1,289 @@
+import XCTest
+@testable import VideoOSStudioCore
+
+final class ProjectStudioReadinessStatusTests: XCTestCase {
+    func testStatusReportsIngestNeededForEmptyProject() throws {
+        let (root, project) = try temporaryStudioProject("videoos-studio-empty")
+        try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+
+        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+
+        XCTAssertEqual(status.readinessLabel, "needs ingest")
+        XCTAssertEqual(status.scoreLabel, "1/9")
+        XCTAssertEqual(status.marlinDefaultLabel, "not evaluated")
+        XCTAssertEqual(status.capabilities.first?.id, "codex-runtime")
+        XCTAssertTrue(status.capabilities.first?.isReady == true)
+        XCTAssertTrue(status.nextAction.contains("Run analysis"))
+        XCTAssertEqual(status.nextCommand, "swift run videoos-studio-cli analysis-run demo")
+        XCTAssertEqual(status.capability("material-rag")?.nextCommand, "swift run videoos-studio-cli analysis-run demo")
+        XCTAssertEqual(status.capability("audio-story")?.nextCommand, "swift run videoos-studio-cli audio-story-run demo")
+        XCTAssertEqual(status.actionQueue.first?.id, "material-rag")
+        XCTAssertEqual(status.actionQueue.first?.command, "swift run videoos-studio-cli analysis-run demo")
+    }
+
+    func testStatusSurfacesReviewPatchAsNextAction() throws {
+        let (root, project) = try temporaryStudioProject("videoos-studio-review")
+        try writeStudioFixture(
+            root: root,
+            project: project,
+            currentState: "critique_ready",
+            reviewStatus: "needs_revision",
+            patchOperations: 2
+        )
+
+        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+
+        XCTAssertEqual(status.readinessLabel, "needs revision pass")
+        XCTAssertEqual(status.pipelineLabel, "needs revision pass")
+        XCTAssertEqual(status.marlinLabel, "candidate for preferred VLM")
+        XCTAssertEqual(status.marlinDefaultLabel, "needs representative coverage")
+        XCTAssertTrue(status.marlinDefaultDetail.contains("1/1 candidate projects"))
+        XCTAssertEqual(status.capability("rough-cut-review")?.readinessLabel, "needs revision pass")
+        XCTAssertEqual(status.nextAction, "Apply the review patch, then run Review again before render.")
+        XCTAssertEqual(status.nextCommand, "swift run videoos-studio-cli compile-run demo --review-patch")
+        XCTAssertEqual(status.actionQueue.first?.id, "rough-cut-review")
+        XCTAssertEqual(status.actionQueue.first?.command, "swift run videoos-studio-cli compile-run demo --review-patch")
+        XCTAssertTrue(status.actionQueue.contains { $0.id == "marlin-default" && !$0.isBlocking })
+    }
+
+    func testStatusReportsStudioReadyWhenApprovedAndRunnable() throws {
+        let (root, project) = try temporaryStudioProject("videoos-studio-approved")
+        try writeStudioFixture(
+            root: root,
+            project: project,
+            currentState: "approved",
+            reviewStatus: "approved",
+            patchOperations: 0
+        )
+
+        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+
+        XCTAssertEqual(status.readinessLabel, "studio ready")
+        XCTAssertEqual(status.scoreLabel, "9/9")
+        XCTAssertEqual(status.marlinDefaultLabel, "needs representative coverage")
+        XCTAssertNil(status.nextCommand)
+        XCTAssertTrue(status.capability("final-render")?.isReady == true)
+        XCTAssertTrue(status.capability("editor-handoff")?.isReady == true)
+        XCTAssertEqual(status.actionQueue.map(\.id), ["marlin-default"])
+    }
+
+    private func temporaryStudioProject(_ prefix: String) throws -> (URL, URL) {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
+        let project = root.appendingPathComponent("projects/demo")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        return (root, project)
+    }
+}
+
+private extension ProjectStudioReadinessStatus {
+    func capability(_ id: String) -> ProjectStudioReadinessCapability? {
+        capabilities.first { $0.id == id }
+    }
+}
+
+private func writeStudioFixture(
+    root: URL,
+    project: URL,
+    currentState: String,
+    reviewStatus: String,
+    patchOperations: Int
+) throws {
+    try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+    try "worker".write(to: root.appendingPathComponent("scripts/editor-job-worker.ts"), atomically: true, encoding: .utf8)
+
+    try writeStudioAnalysisFixture(project: project)
+    _ = try ProjectSQLiteIndex.rebuild(projectURL: project)
+
+    try FileManager.default.createDirectory(at: project.appendingPathComponent("01_intent"), withIntermediateDirectories: true)
+    try "primary_message: Keep the quiet reset.\n".write(to: project.appendingPathComponent("01_intent/creative_brief.yaml"), atomically: true, encoding: .utf8)
+    try "items: []\n".write(to: project.appendingPathComponent("01_intent/unresolved_blockers.yaml"), atomically: true, encoding: .utf8)
+    try FileManager.default.createDirectory(at: project.appendingPathComponent("04_plan"), withIntermediateDirectories: true)
+    try "items: []\n".write(to: project.appendingPathComponent("04_plan/selects_candidates.yaml"), atomically: true, encoding: .utf8)
+    try "beats: []\n".write(to: project.appendingPathComponent("04_plan/edit_blueprint.yaml"), atomically: true, encoding: .utf8)
+
+    try FileManager.default.createDirectory(at: project.appendingPathComponent("05_timeline"), withIntermediateDirectories: true)
+    try "{}".write(to: project.appendingPathComponent("05_timeline/timeline.json"), atomically: true, encoding: .utf8)
+
+    try FileManager.default.createDirectory(at: project.appendingPathComponent("06_review"), withIntermediateDirectories: true)
+    try """
+    summary_judgment:
+      status: \(reviewStatus)
+    """.write(to: project.appendingPathComponent("06_review/review_report.yaml"), atomically: true, encoding: .utf8)
+    let operations = (0..<patchOperations)
+        .map { "{ \"op\": \"add_marker\", \"reason\": \"review\", \"label\": \"marker\($0)\" }" }
+        .joined(separator: ",")
+    try """
+    {
+      "timeline_version": "1",
+      "operations": [\(operations)]
+    }
+    """.write(to: project.appendingPathComponent("06_review/review_patch.json"), atomically: true, encoding: .utf8)
+
+    try """
+    current_state: \(currentState)
+    gates:
+      analysis_gate: ready
+      planning_gate: open
+      compile_gate: open
+      timeline_gate: open
+      review_gate: open
+      packaging_gate: blocked
+    last_updated: 2026-05-22T00:00:00Z
+    """.write(to: project.appendingPathComponent("project_state.yaml"), atomically: true, encoding: .utf8)
+}
+
+private func writeStudioAnalysisFixture(project: URL) throws {
+    let analysisDir = project.appendingPathComponent("03_analysis")
+    let transcriptDir = analysisDir.appendingPathComponent("transcripts")
+    let sourceDir = project.appendingPathComponent("02_media/source")
+    try FileManager.default.createDirectory(at: transcriptDir, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+    try Data().write(to: sourceDir.appendingPathComponent("interview.mov"))
+
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "asset_id": "AST_001",
+          "filename": "interview.mov",
+          "role_guess": "interview",
+          "duration_us": 12000000,
+          "has_transcript": true,
+          "transcript_ref": "TR_AST_001",
+          "segment_ids": ["SEG_001", "SEG_002", "SEG_003"],
+          "quality_flags": [],
+          "tags": ["interview", "quiet"]
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("assets.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "segment_id": "SEG_001",
+          "asset_id": "AST_001",
+          "src_in_us": 0,
+          "src_out_us": 3000000,
+          "summary": "opening quiet reset",
+          "transcript_excerpt": "I came here to get quiet again.",
+          "quality_flags": [],
+          "tags": ["interview"],
+          "interest_points": [],
+          "peak_analysis": {
+            "selected_peak_us": 1500000,
+            "confidence": 0.82,
+            "provenance": {
+              "precision_mode": "marlin_temporal_semantics",
+              "fusion_version": "marlin-segment-peak-v1"
+            }
+          }
+        },
+        {
+          "segment_id": "SEG_002",
+          "asset_id": "AST_001",
+          "src_in_us": 3000000,
+          "src_out_us": 6000000,
+          "summary": "middle",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        },
+        {
+          "segment_id": "SEG_003",
+          "asset_id": "AST_001",
+          "src_in_us": 6000000,
+          "src_out_us": 9000000,
+          "summary": "ending",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("segments.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "analysis-v1",
+      "transcript_ref": "TR_AST_001",
+      "asset_id": "AST_001",
+      "items": [
+        {
+          "speaker": "S1",
+          "start_us": 1200000,
+          "end_us": 4400000,
+          "text": "I came here to get quiet again."
+        }
+      ]
+    }
+    """.write(to: transcriptDir.appendingPathComponent("TR_AST_001.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "event_id": "AE_001",
+          "asset_id": "AST_001",
+          "type": "dialogue_emphasis",
+          "start_us": 1000000,
+          "end_us": 2000000,
+          "label": "soft emphasis",
+          "confidence": { "score": 0.8, "source": "fixture", "status": "ok" }
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("audio_events.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "1",
+      "model": {
+        "provider": "marlin",
+        "model_alias": "NemoStation/Marlin-2B",
+        "model_snapshot": "test-snapshot",
+        "connector_version": "marlin-local-v1"
+      },
+      "items": [
+        {
+          "asset_id": "AST_001",
+          "source_path": "02_media/source/interview.mov",
+          "scene": "interview",
+          "caption": "subject pauses before a quiet reset",
+          "events": [
+            {
+              "event_id": "MEV_001",
+              "start_us": 1000000,
+              "end_us": 2000000,
+              "description": "quiet emotional peak",
+              "confidence": 0.86,
+              "source_pass": "marlin_caption"
+            }
+          ],
+          "find_results": [
+            {
+              "query": "strongest quiet reset",
+              "span_start_us": 1000000,
+              "span_end_us": 2000000,
+              "format_ok": true,
+              "confidence": 0.8
+            }
+          ]
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("marlin_events.json"), atomically: true, encoding: .utf8)
+}

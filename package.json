@@ -12,7 +12,8 @@
     "build": "tsc",
     "preview": "tsx scripts/preview-segment.ts",
     "export:premiere": "tsx scripts/export-premiere-xml.ts",
-    "regen:premiere": "tsx scripts/regen-premiere-xml.ts"
+    "regen:premiere": "tsx scripts/regen-premiere-xml.ts",
+    "marlin:evaluate": "tsx scripts/marlin-evaluate.ts"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.452",

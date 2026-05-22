@@ -219,10 +219,14 @@
             "surprise_signal": { "type": "number", "minimum": 0, "maximum": 1 },
             "hope_signal": { "type": "number", "minimum": 0, "maximum": 1 },
             "peak_strength_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "motion_energy_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "audio_energy_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "peak_ref": { "type": "string" },
             "peak_type": {
               "type": "string",
               "enum": ["action_peak", "emotional_peak", "visual_peak"]
             },
+            "peak_source_pass": { "type": "string" },
             "face_detected": { "type": "boolean" },
             "visual_tags": {
               "type": "array",

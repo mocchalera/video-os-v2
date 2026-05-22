@@ -21,6 +21,7 @@ import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjace
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
 import { loadSourceMap } from "../media/source-map.js";
 import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
+import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
 import type { BgmScoringContext } from "./score.js";
 import type {
   CompileOptions,
@@ -127,7 +128,7 @@ export function compile(opts: CompileOptions): CompileResult {
   const brief = readYaml<CreativeBrief>(briefPath);
   const blueprint = opts.blueprintOverride ?? readYaml<EditBlueprint>(blueprintPath);
   const selects = readYaml<SelectsCandidates>(selectsPath);
-  enrichSelectsWithAnalysisPeaks(selects, projectPath);
+  materializePeakSignalsFromSegments(projectPath, selects);
   const defaults = readYaml<CompilerDefaults>(defaultsPath);
 
   // ── Phase 0.5: Resolve Duration Policy ──────────────────────────
@@ -465,65 +466,4 @@ function resolveA1Loudnorm(
     if (typeof profile?.defaults.a1_loudnorm === "boolean") return profile.defaults.a1_loudnorm;
   }
   return true;
-}
-
-function enrichSelectsWithAnalysisPeaks(
-  selects: SelectsCandidates,
-  projectPath: string,
-): void {
-  const segmentsPath = path.join(projectPath, "03_analysis", "segments.json");
-  if (!fs.existsSync(segmentsPath)) return;
-
-  let segments: {
-    items?: Array<{
-      segment_id?: string;
-      peak_analysis?: {
-        support_signals?: {
-          motion_support_score?: number;
-          audio_support_score?: number;
-          fused_peak_score?: number;
-        };
-        peak_moments?: Array<{ type?: string; confidence?: number; source_pass?: string; peak_ref?: string }>;
-      };
-    }>;
-  };
-  try {
-    segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8"));
-  } catch {
-    return;
-  }
-
-  const byId = new Map((segments.items ?? []).map((segment) => [segment.segment_id, segment]));
-  for (const candidate of selects.candidates) {
-    const segment = byId.get(candidate.segment_id);
-    const support = segment?.peak_analysis?.support_signals;
-    const moment = segment?.peak_analysis?.peak_moments?.[0];
-    if (!support && !moment) continue;
-
-    candidate.peak_signals ??= {};
-    if (support?.motion_support_score != null) {
-      candidate.peak_signals.motion ??= clamp01(support.motion_support_score);
-    }
-    if (support?.audio_support_score != null) {
-      candidate.peak_signals.audio_rms ??= clamp01(support.audio_support_score);
-    }
-    candidate.editorial_signals ??= {};
-    if (support?.fused_peak_score != null) {
-      candidate.editorial_signals.peak_strength_score ??= clamp01(support.fused_peak_score);
-    }
-    if (moment?.type === "action_peak" || moment?.type === "emotional_peak" || moment?.type === "visual_peak") {
-      candidate.editorial_signals.peak_type ??= moment.type;
-    }
-    if (moment?.peak_ref) {
-      candidate.editorial_signals.peak_ref ??= moment.peak_ref;
-    }
-    if (moment?.source_pass) {
-      candidate.editorial_signals.peak_source_pass ??= moment.source_pass;
-    }
-  }
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(1, value));
 }

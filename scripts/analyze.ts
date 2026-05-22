@@ -17,6 +17,13 @@ import { pathToFileURL } from "node:url";
 import { runPipeline } from "../runtime/pipeline/ingest.js";
 import { createGeminiVlmFn } from "../runtime/connectors/gemini-vlm.js";
 import {
+  createMarlinFnFromEnvironment,
+  marlinModelFromEnvironment,
+  marlinQueriesFromEnvironment,
+  runMarlinAnalysis,
+  shouldRunMarlinAnalysis,
+} from "../runtime/pipeline/stages/marlin.js";
+import {
   DEFAULT_VLM_CONCURRENCY,
   type VlmProgressReporter,
 } from "../runtime/pipeline/vlm-analysis.js";
@@ -31,6 +38,7 @@ function parseArgs(argv: string[]): {
   skipVlm: boolean;
   skipDiarize: boolean;
   skipPeak: boolean;
+  skipMarlin: boolean;
   skipMediaLink: boolean;
   skipPreflight: boolean;
   language: string | undefined;
@@ -47,6 +55,7 @@ function parseArgs(argv: string[]): {
   let skipVlm = false;
   let skipDiarize = false;
   let skipPeak = false;
+  let skipMarlin = false;
   let skipMediaLink = false;
   let skipPreflight = false;
   let language: string | undefined;
@@ -68,6 +77,8 @@ function parseArgs(argv: string[]): {
       skipDiarize = true;
     } else if (arg === "--skip-peak") {
       skipPeak = true;
+    } else if (arg === "--skip-marlin") {
+      skipMarlin = true;
     } else if (arg === "--skip-media-link") {
       skipMediaLink = true;
     } else if (arg === "--skip-preflight") {
@@ -99,6 +110,7 @@ Options:
   --skip-vlm         Skip visual language model stage
   --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
   --skip-peak        Skip VLM peak detection stage
+  --skip-marlin      Skip Marlin-2B temporal semantic pass
   --skip-media-link  Skip 02_media symlink generation
   --skip-preflight   Skip pre-flight environment checks
   --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
@@ -131,6 +143,7 @@ Options:
     skipVlm,
     skipDiarize,
     skipPeak,
+    skipMarlin,
     skipMediaLink,
     skipPreflight,
     language,
@@ -160,6 +173,7 @@ async function main(): Promise<void> {
     skipVlm,
     skipDiarize,
     skipPeak,
+    skipMarlin,
     skipMediaLink,
     skipPreflight,
     language,
@@ -193,6 +207,7 @@ async function main(): Promise<void> {
   if (skipVlm) console.log("[analyze] VLM: skipped");
   if (skipDiarize) console.log("[analyze] Diarization: skipped");
   if (skipPeak) console.log("[analyze] Peak detection: skipped");
+  if (skipMarlin) console.log("[analyze] Marlin: skipped");
   if (skipMediaLink) console.log("[analyze] Media links: skipped");
   if (language) console.log(`[analyze] Language: ${language}`);
   if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
@@ -229,6 +244,23 @@ async function main(): Promise<void> {
     noCache,
     clearCache,
   });
+
+  if (!skipMarlin && shouldRunMarlinAnalysis(projectDir)) {
+    console.log("[analyze] Marlin: running temporal semantic pass");
+    const marlinFn = createMarlinFnFromEnvironment(projectDir);
+    try {
+      await runMarlinAnalysis({
+        sourceFiles,
+        projectDir,
+        projectId: path.basename(path.resolve(projectDir)),
+        marlinFn,
+        model: marlinModelFromEnvironment(projectDir),
+        queries: marlinQueriesFromEnvironment(projectDir),
+      });
+    } finally {
+      await marlinFn.close?.();
+    }
+  }
 
   if (result.vlmSummary) {
     console.log(

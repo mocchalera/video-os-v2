@@ -133,6 +133,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_handoff/editor_annotations.json",
+    schemaFile: "editor-annotations.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "07_package/release_safety_report.yaml",
     schemaFile: "release-safety-report.schema.json",
     format: "yaml",
@@ -201,6 +208,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     format: "json",
     optional: true,
     runnerChecks: ["continuity_graph_integrity"],
+  },
+  {
+    artifactPath: "03_analysis/marlin_events.json",
+    schemaFile: "marlin-events.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
   },
   {
     artifactPath: "03_analysis/segments.json",

@@ -51,6 +51,7 @@ import {
   loadSearchIndexManifest,
   materializeSearchHash,
 } from "../artifacts/p4d-segment-search-index.js";
+import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -63,6 +64,12 @@ export interface TrimHint {
   window_end_us?: number;
   interest_point_label?: string;
   interest_point_confidence?: number;
+  peak_ref?: string;
+  peak_type?: "action_peak" | "emotional_peak" | "visual_peak";
+  center_source?: "refine_filmstrip" | "precision_dense_frames" | "precision_proxy_clip" | "interest_point_fallback" | "midpoint_fallback";
+  rationale?: string;
+  recommended_in_us?: number;
+  recommended_out_us?: number;
 }
 
 export interface EditorialSignals {
@@ -76,6 +83,10 @@ export interface EditorialSignals {
   face_detected?: boolean;
   visual_tags?: string[];
   semantic_cluster_id?: string;
+  peak_ref?: string;
+  peak_strength_score?: number;
+  peak_type?: "action_peak" | "emotional_peak" | "visual_peak";
+  peak_source_pass?: string;
 }
 
 export interface EditorialSummary {
@@ -276,7 +287,8 @@ export async function runTriage(
     };
   }
 
-  // 5.5 Canonicalize: assign candidate_id and normalize trim_hints
+  // 5.5 Materialize deterministic analysis signals, then canonicalize.
+  materializePeakSignalsFromSegments(absDir, agentResult.selects);
   canonicalizeSelects(agentResult.selects, projectId);
   if (isP2AudioStoryGraphEnabled()) {
     materializeAudioStoryGraphRefs(absDir, agentResult.selects);
