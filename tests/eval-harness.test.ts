@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   loadBlueprint,
@@ -173,15 +175,63 @@ describe("blueprint agreement", () => {
 // ── golden registry ─────────────────────────────────────────────────
 
 describe("golden registry", () => {
+  // Project artifacts under projects/ are mostly gitignored, so the test
+  // builds a synthetic repo root instead of depending on local-only state
+  // (a fresh clone or worktree has no approved projects on disk).
   it("discovers approved projects with full artifacts", () => {
-    const goldens = discoverGoldenProjects(repoRoot);
-    const fumoto = goldens.find((g) => g.project_id === "fumoto-growth");
-    expect(fumoto).toBeDefined();
-    expect(fumoto?.tier).toBe("human");
-    expect(fumoto?.has_timeline).toBe(true);
-    // Unapproved projects must not appear.
-    expect(goldens.find((g) => g.project_id === "demo")).toBeUndefined();
-    expect(goldens.find((g) => g.project_id === "_template")).toBeUndefined();
+    const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "golden-registry-"));
+    try {
+      const write = (rel: string, content: string) => {
+        const p = path.join(fakeRoot, rel);
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, content);
+      };
+      const projectFiles = (id: string) => {
+        write(`projects/${id}/04_plan/selects_candidates.yaml`, "version: '1'");
+        write(`projects/${id}/04_plan/edit_blueprint.yaml`, "version: '1'");
+        write(`projects/${id}/05_timeline/timeline.json`, "{}");
+      };
+
+      // Human-approved golden.
+      projectFiles("human-approved");
+      write(
+        "projects/human-approved/project_state.yaml",
+        'approval_record:\n  approved_by: operator\n  approved_at: "2026-06-12T00:00:00Z"\n',
+      );
+      // Agent-approved golden.
+      projectFiles("agent-approved");
+      write(
+        "projects/agent-approved/project_state.yaml",
+        "approval_record:\n  approved_by: codex\n",
+      );
+      // Unapproved project and the template must not appear.
+      projectFiles("unapproved");
+      write("projects/unapproved/project_state.yaml", "current_state: draft\n");
+      projectFiles("_template");
+      write(
+        "projects/_template/project_state.yaml",
+        "approval_record:\n  approved_by: operator\n",
+      );
+      // Approved but missing timeline must not appear.
+      write("projects/no-timeline/04_plan/selects_candidates.yaml", "version: '1'");
+      write("projects/no-timeline/04_plan/edit_blueprint.yaml", "version: '1'");
+      write(
+        "projects/no-timeline/project_state.yaml",
+        "approval_record:\n  approved_by: operator\n",
+      );
+
+      const goldens = discoverGoldenProjects(fakeRoot);
+      const human = goldens.find((g) => g.project_id === "human-approved");
+      expect(human).toBeDefined();
+      expect(human?.tier).toBe("human");
+      expect(human?.has_timeline).toBe(true);
+      expect(goldens.find((g) => g.project_id === "agent-approved")?.tier).toBe("agent");
+      expect(goldens.find((g) => g.project_id === "unapproved")).toBeUndefined();
+      expect(goldens.find((g) => g.project_id === "_template")).toBeUndefined();
+      expect(goldens.find((g) => g.project_id === "no-timeline")).toBeUndefined();
+    } finally {
+      fs.rmSync(fakeRoot, { recursive: true, force: true });
+    }
   });
 });
 
