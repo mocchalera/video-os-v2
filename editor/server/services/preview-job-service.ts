@@ -16,7 +16,10 @@ import {
   buildVideoClipFilterString,
   buildTransitionSpec,
   buildTransitionChainArgs,
+  applyTransitionAudioExtensions,
+  buildGapAwareTransitionChainInputs,
   type TransitionChainInput,
+  type TransitionChainTimelineInput,
   type TransitionSpec,
 } from "../../shared/filtergraph.js";
 import { buildAssForceStyle } from "../../shared/caption-style-tokens.js";
@@ -722,7 +725,41 @@ export class PreviewJobService {
       const transitionIndexes = resolveTransitionIndexes(
         spec.video.transitions, videoClips, fps,
       );
-      const useTransitionGraph = transitionIndexes.length > 0;
+      const baseChainInputs: TransitionChainTimelineInput[] = [];
+      for (const clip of videoClips) {
+        const sourceHasAudio = await hasAudioStream(clip.sourcePath, job);
+        const audioClip = spec.audio.dialogueClips.find(
+          (ac) => ac.clipId === clip.clipId || ac.assetId === clip.assetId,
+        );
+        baseChainInputs.push({
+          kind: "source",
+          clipId: clip.clipId,
+          timelineInFrame: clip.timelineInFrame,
+          durationFrames: clip.durationFrames,
+          sourcePath: clip.sourcePath,
+          sourceInSec: clip.sourceInSec,
+          durationSec: clip.sourceOutSec - clip.sourceInSec,
+          videoFilter: buildVideoClipFilterString(clip, { width, height }),
+          hasAudio: sourceHasAudio,
+          gainDb: audioClip?.gainDb,
+        });
+      }
+      const audioExtendedInputs = applyTransitionAudioExtensions(
+        baseChainInputs,
+        transitionIndexes,
+      );
+      const gapAwareChain = buildGapAwareTransitionChainInputs(
+        audioExtendedInputs,
+        { fps, width, height },
+      );
+      const chainTransitionIndexes = transitionIndexes.flatMap((t) => {
+        const fromIndex = gapAwareChain.clipIndexToChainIndex.get(t.fromIndex);
+        const toIndex = gapAwareChain.clipIndexToChainIndex.get(t.toIndex);
+        if (fromIndex === undefined || toIndex === undefined) return [];
+        return [{ ...t, fromIndex, toIndex }];
+      });
+      const useTransitionGraph =
+        chainTransitionIndexes.length > 0 || gapAwareChain.hasGaps;
       const overlapsSec = useTransitionGraph
         ? computeOverlapsSec(videoClips.length, transitionIndexes)
         : undefined;
@@ -802,26 +839,12 @@ export class PreviewJobService {
         // its source and join through the shared graph in ONE encode. The
         // final assembler renders transitioned timelines through the same
         // builder, so cross-path frames stay within the SSIM budget.
-        const chainInputs: TransitionChainInput[] = [];
-        for (const clip of videoClips) {
-          const sourceHasAudio = await hasAudioStream(clip.sourcePath, job);
-          const audioClip = spec.audio.dialogueClips.find(
-            (ac) => ac.clipId === clip.clipId || ac.assetId === clip.assetId,
-          );
-          chainInputs.push({
-            sourcePath: clip.sourcePath,
-            sourceInSec: clip.sourceInSec,
-            durationSec: clip.sourceOutSec - clip.sourceInSec,
-            videoFilter: buildVideoClipFilterString(clip, { width, height }),
-            hasAudio: sourceHasAudio,
-            gainDb: audioClip?.gainDb,
-          });
-        }
+        const chainInputs: TransitionChainInput[] = gapAwareChain.inputs;
 
         const chainArgs = buildTransitionChainArgs({
           inputs: chainInputs,
-          clipDurationsSec,
-          transitions: transitionIndexes,
+          clipDurationsSec: gapAwareChain.clipDurationsSec,
+          transitions: chainTransitionIndexes,
           includeAudio: true,
           videoEncodeArgs: x264Args(INTERMEDIATE_X264),
           audioCodecArgs: ["-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2"],

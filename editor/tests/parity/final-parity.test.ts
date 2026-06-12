@@ -10,8 +10,9 @@
  *            (assembly → demux → caption burn → audio master → mux)
  *
  * — and asserts the section 13.3 acceptance criteria across paths for
- * three scenarios: straight cuts, a crossfade transition, and a
- * caption burn from a canonical caption_approval.json:
+ * five scenarios: straight cuts, a crossfade transition, a j-cut, a
+ * gap-containing crossfade timeline, and a caption burn from a canonical
+ * caption_approval.json:
  *   - video SSIM ≥ 0.999
  *   - duration delta ≤ 1 frame
  *   - integrated LUFS diff ≤ 0.1 LU
@@ -96,12 +97,15 @@ function makeClip(
 interface TimelineOptions {
   /** Overlap c1→c2 by this many frames and declare a crossfade. */
   crossfadeFrames?: number;
+  /** Hard-cut picture while incoming audio leads by this many frames. */
+  jCutFrames?: number;
 }
 
 /** Canonical-shaped timeline: two V1 clips, A1 mirrors V1. */
 function buildTimeline(opts: TimelineOptions = {}): Record<string, unknown> {
   const overlap = opts.crossfadeFrames ?? 0;
   const c2Start = 60 - overlap;
+  const jCutFrames = opts.jCutFrames ?? 0;
   const videoClips = [
     makeClip("c1", 0, 2_000_000, 0),
     makeClip("c2", 2_000_000, 4_000_000, c2Start),
@@ -126,20 +130,83 @@ function buildTimeline(opts: TimelineOptions = {}): Record<string, unknown> {
       video: [{ track_id: "V1", kind: "video", clips: videoClips }],
       audio: [{ track_id: "A1", kind: "audio", clips: audioClips }],
     },
-    ...(overlap > 0
+    ...(overlap > 0 || jCutFrames > 0
       ? {
           transitions: [
-            {
-              transition_id: "TR_0001",
-              from_clip_id: "c1",
-              to_clip_id: "c2",
-              track_id: "V1",
-              transition_type: "crossfade",
-              transition_frames: overlap,
-            },
+            jCutFrames > 0
+              ? {
+                  transition_id: "TR_0001",
+                  from_clip_id: "c1",
+                  to_clip_id: "c2",
+                  track_id: "V1",
+                  transition_type: "j_cut",
+                  transition_frames: jCutFrames,
+                  transition_params: {
+                    audio_overlap_sec: jCutFrames / FPS,
+                  },
+                }
+              : {
+                  transition_id: "TR_0001",
+                  from_clip_id: "c1",
+                  to_clip_id: "c2",
+                  track_id: "V1",
+                  transition_type: "crossfade",
+                  transition_frames: overlap,
+                },
           ],
         }
       : {}),
+    markers: [],
+    provenance: {
+      brief_path: "test",
+      blueprint_path: "test",
+      selects_path: "test",
+      compiler_version: "final-parity-test",
+    },
+  };
+}
+
+function buildGapCrossfadeTimeline(): Record<string, unknown> {
+  const gapFrames = 30;
+  const crossfadeFrames = 15;
+  const c2Start = 60 + gapFrames;
+  const c3Start = c2Start + 60 - crossfadeFrames;
+  const videoClips = [
+    makeClip("c1", 0, 2_000_000, 0),
+    makeClip("c2", 2_000_000, 4_000_000, c2Start),
+    makeClip("c3", 1_000_000, 3_000_000, c3Start),
+  ];
+  const audioClips = [
+    makeClip("a1", 0, 2_000_000, 0),
+    makeClip("a2", 2_000_000, 4_000_000, c2Start),
+    makeClip("a3", 1_000_000, 3_000_000, c3Start),
+  ];
+  return {
+    version: "1",
+    project_id: "final-parity",
+    created_at: "2026-06-12T00:00:00.000Z",
+    sequence: {
+      name: "final parity gap crossfade",
+      fps_num: FPS,
+      fps_den: 1,
+      width: 640,
+      height: 360,
+      start_frame: 0,
+    },
+    tracks: {
+      video: [{ track_id: "V1", kind: "video", clips: videoClips }],
+      audio: [{ track_id: "A1", kind: "audio", clips: audioClips }],
+    },
+    transitions: [
+      {
+        transition_id: "TR_0001",
+        from_clip_id: "c2",
+        to_clip_id: "c3",
+        track_id: "V1",
+        transition_type: "crossfade",
+        transition_frames: crossfadeFrames,
+      },
+    ],
     markers: [],
     provenance: {
       brief_path: "test",
@@ -290,6 +357,14 @@ const SCENARIOS: Scenario[] = [
   {
     name: "crossfade",
     timeline: () => buildTimeline({ crossfadeFrames: 15 }),
+  },
+  {
+    name: "j_cut",
+    timeline: () => buildTimeline({ jCutFrames: 15 }),
+  },
+  {
+    name: "gap_crossfade",
+    timeline: buildGapCrossfadeTimeline,
   },
   {
     name: "captions",

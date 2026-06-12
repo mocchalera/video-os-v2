@@ -329,7 +329,7 @@ export function buildVideoTransitionGraph(
   clipDurationsSec: number[],
   transitions: Array<{ spec: TransitionSpec; fromIndex: number; toIndex: number }>,
 ): { filterChain: string; outputLabel: string } {
-  if (clipCount <= 1 || transitions.length === 0) {
+  if (clipCount <= 1) {
     return { filterChain: "", outputLabel: "[v0]" };
   }
 
@@ -395,7 +395,7 @@ export function buildAudioTransitionGraph(
   clipDurationsSec: number[],
   transitions: Array<{ spec: TransitionSpec; fromIndex: number; toIndex: number }>,
 ): { filterChain: string; outputLabel: string } {
-  if (clipCount <= 1 || transitions.length === 0) {
+  if (clipCount <= 1) {
     return { filterChain: "", outputLabel: "[a0]" };
   }
 
@@ -420,14 +420,16 @@ export function buildAudioTransitionGraph(
       accDurSec = accDurSec - dur + clipDurationsSec[i];
     } else if (spec?.audio.method === "audio_lead" && spec.audio.audioLeadSec) {
       // j_cut: incoming audio starts leadSec before the video cut.
-      // Use adelay + amix (both at full volume, no crossfade).
+      // Use adelay + amix (both at full volume, no crossfade). Callers
+      // extend the incoming audio input by leadSec so the mixed output keeps
+      // the same duration as the hard-cut picture.
       const leadSec = spec.audio.audioLeadSec;
       const delayMs = Math.max(0, Math.round((accDurSec - leadSec) * 1000));
       parts.push(
         `[a${i}]adelay=${delayMs}|${delayMs}[a${i}d];` +
         `${prevLabel}[a${i}d]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0${outLabel}`,
       );
-      accDurSec = accDurSec - leadSec + clipDurationsSec[i];
+      accDurSec += clipDurationsSec[i];
     } else if (spec?.audio.method === "audio_trail" && spec.audio.audioTrailSec) {
       // l_cut: outgoing audio continues trailSec after the video cut.
       // Use apad (hold outgoing) + adelay + amix.
@@ -458,8 +460,9 @@ export function buildAudioTransitionGraph(
 // ── Single-generation transition chain (cross-path parity) ──────────
 
 export interface TransitionChainInput {
-  sourcePath: string;
-  sourceInSec: number;
+  kind?: "source" | "gap";
+  sourcePath?: string;
+  sourceInSec?: number;
   durationSec: number;
   /** Per-clip video filter chain (from buildVideoClipFilterString). */
   videoFilter: string;
@@ -467,6 +470,16 @@ export interface TransitionChainInput {
   hasAudio: boolean;
   /** Optional nat-audio gain in dB. */
   gainDb?: number | null;
+  /** Audio-only source trim start. Defaults to sourceInSec. */
+  audioSourceInSec?: number;
+  /** Audio-only source duration. Defaults to durationSec. */
+  audioDurationSec?: number;
+  /** Gap input config. Used only when kind === "gap". */
+  gap?: {
+    width: number;
+    height: number;
+    fps: number;
+  };
 }
 
 export interface TransitionChainOptions {
@@ -486,6 +499,181 @@ export interface TransitionChainOptions {
   outputPath: string;
 }
 
+export interface TransitionAudioExtensionInput {
+  sourceInSec: number;
+  durationSec: number;
+}
+
+export interface TransitionAudioExtension {
+  audioSourceInSec: number;
+  audioDurationSec: number;
+  timelineStartShiftSec: number;
+}
+
+export function computeTransitionAudioExtensions(
+  inputs: TransitionAudioExtensionInput[],
+  transitions: Array<{
+    spec: TransitionSpec;
+    fromIndex: number;
+    toIndex: number;
+  }>,
+): Map<number, TransitionAudioExtension> {
+  const extensions = new Map<number, TransitionAudioExtension>();
+
+  const getExtension = (index: number): TransitionAudioExtension => {
+    const existing = extensions.get(index);
+    if (existing) return existing;
+    const base = inputs[index];
+    const created: TransitionAudioExtension = {
+      audioSourceInSec: base.sourceInSec,
+      audioDurationSec: base.durationSec,
+      timelineStartShiftSec: 0,
+    };
+    extensions.set(index, created);
+    return created;
+  };
+
+  for (const transition of transitions) {
+    if (
+      transition.spec.audio.method === "audio_lead" &&
+      transition.spec.audio.audioLeadSec
+    ) {
+      const leadSec = Math.max(0, transition.spec.audio.audioLeadSec);
+      const input = inputs[transition.toIndex];
+      if (!input || leadSec <= 0) continue;
+      const ext = getExtension(transition.toIndex);
+      const nextSourceIn = Math.max(0, input.sourceInSec - leadSec);
+      const actualLeadSec = input.sourceInSec - nextSourceIn;
+      ext.audioSourceInSec = Math.min(ext.audioSourceInSec, nextSourceIn);
+      ext.audioDurationSec = Math.max(
+        ext.audioDurationSec,
+        input.durationSec + actualLeadSec,
+      );
+      ext.timelineStartShiftSec = Math.min(
+        ext.timelineStartShiftSec,
+        -leadSec,
+      );
+    } else if (
+      transition.spec.audio.method === "audio_trail" &&
+      transition.spec.audio.audioTrailSec
+    ) {
+      const trailSec = Math.max(0, transition.spec.audio.audioTrailSec);
+      const input = inputs[transition.fromIndex];
+      if (!input || trailSec <= 0) continue;
+      const ext = getExtension(transition.fromIndex);
+      ext.audioDurationSec = Math.max(
+        ext.audioDurationSec,
+        input.durationSec + trailSec,
+      );
+    }
+  }
+
+  return extensions;
+}
+
+export function applyTransitionAudioExtensions<T extends TransitionChainInput>(
+  inputs: T[],
+  transitions: Array<{
+    spec: TransitionSpec;
+    fromIndex: number;
+    toIndex: number;
+  }>,
+): T[] {
+  const extensions = computeTransitionAudioExtensions(
+    inputs.map((input) => ({
+      sourceInSec: input.sourceInSec ?? 0,
+      durationSec: input.durationSec,
+    })),
+    transitions,
+  );
+
+  return inputs.map((input, index) => {
+    const ext = extensions.get(index);
+    if (!ext) return input;
+    return {
+      ...input,
+      audioSourceInSec: ext.audioSourceInSec,
+      audioDurationSec: ext.audioDurationSec,
+    };
+  });
+}
+
+export interface TransitionChainTimelineInput extends TransitionChainInput {
+  clipId: string;
+  timelineInFrame: number;
+  durationFrames: number;
+}
+
+export interface GapAwareTransitionChainPlan {
+  inputs: TransitionChainInput[];
+  clipDurationsSec: number[];
+  clipIndexToChainIndex: Map<number, number>;
+  hasGaps: boolean;
+}
+
+export function buildGapAwareTransitionChainInputs(
+  clipInputs: TransitionChainTimelineInput[],
+  opts: {
+    fps: number;
+    width: number;
+    height: number;
+    startFrame?: number;
+    totalFrames?: number;
+  },
+): GapAwareTransitionChainPlan {
+  const ordered = clipInputs
+    .map((input, originalIndex) => ({ input, originalIndex }))
+    .sort((a, b) => {
+      const byStart = a.input.timelineInFrame - b.input.timelineInFrame;
+      return byStart !== 0 ? byStart : a.originalIndex - b.originalIndex;
+    });
+
+  const inputs: TransitionChainInput[] = [];
+  const clipIndexToChainIndex = new Map<number, number>();
+  let cursor = opts.startFrame ?? 0;
+  let hasGaps = false;
+
+  const pushGap = (durationFrames: number): void => {
+    if (durationFrames <= 0) return;
+    hasGaps = true;
+    inputs.push({
+      kind: "gap",
+      durationSec: durationFrames / opts.fps,
+      videoFilter: "format=yuv420p,setsar=1",
+      hasAudio: false,
+      gap: {
+        width: opts.width,
+        height: opts.height,
+        fps: opts.fps,
+      },
+    });
+  };
+
+  for (const { input, originalIndex } of ordered) {
+    const start = input.timelineInFrame;
+    if (start > cursor) {
+      pushGap(start - cursor);
+    }
+    clipIndexToChainIndex.set(originalIndex, inputs.length);
+    inputs.push({
+      ...input,
+      kind: input.kind ?? "source",
+    });
+    cursor = Math.max(cursor, input.timelineInFrame + input.durationFrames);
+  }
+
+  if (opts.totalFrames !== undefined && opts.totalFrames > cursor) {
+    pushGap(opts.totalFrames - cursor);
+  }
+
+  return {
+    inputs,
+    clipDurationsSec: inputs.map((input) => input.durationSec),
+    clipIndexToChainIndex,
+    hasGaps,
+  };
+}
+
 /**
  * Build ONE ffmpeg invocation that trims every clip straight from its
  * source, applies the per-clip filter chain, and joins the clips through
@@ -499,28 +687,61 @@ export interface TransitionChainOptions {
 export function buildTransitionChainArgs(opts: TransitionChainOptions): string[] {
   const args: string[] = ["-y"];
 
-  // Source inputs, trimmed at the demuxer (-ss/-t before -i).
+  // Source inputs, trimmed at the demuxer (-ss/-t before -i). Gap inputs are
+  // black lavfi sources with the same dimensions and fps as buildGapVideoArgs.
   for (const input of opts.inputs) {
-    args.push(
-      "-ss", input.sourceInSec.toFixed(6),
-      "-t", input.durationSec.toFixed(6),
-      "-i", input.sourcePath,
-    );
+    if (input.kind === "gap") {
+      if (!input.gap) {
+        throw new Error("Transition chain gap input is missing dimensions");
+      }
+      args.push(
+        "-f", "lavfi",
+        "-t", input.durationSec.toFixed(6),
+        "-i", `color=c=black:s=${input.gap.width}x${input.gap.height}:r=${input.gap.fps}`,
+      );
+    } else {
+      if (!input.sourcePath) {
+        throw new Error("Transition chain source input is missing sourcePath");
+      }
+      args.push(
+        "-ss", (input.sourceInSec ?? 0).toFixed(6),
+        "-t", input.durationSec.toFixed(6),
+        "-i", input.sourcePath,
+      );
+    }
   }
 
   // Silent stand-ins for sources without audio, appended after the real
-  // inputs so video stream indexes stay 0..N-1.
+  // inputs so video stream indexes stay 0..N-1. When audio needs a different
+  // trim range from video (j_cut/l_cut), append an audio-only source input.
   const audioInputIndex: number[] = [];
   let nextExtraIndex = opts.inputs.length;
   if (opts.includeAudio) {
     for (const input of opts.inputs) {
-      if (input.hasAudio) {
+      const audioDurationSec = input.audioDurationSec ?? input.durationSec;
+      const needsSeparateAudioInput =
+        input.kind !== "gap" &&
+        input.hasAudio &&
+        (
+          input.audioSourceInSec !== undefined ||
+          input.audioDurationSec !== undefined
+        );
+
+      if (needsSeparateAudioInput && input.sourcePath) {
+        audioInputIndex.push(nextExtraIndex);
+        args.push(
+          "-ss", (input.audioSourceInSec ?? input.sourceInSec ?? 0).toFixed(6),
+          "-t", audioDurationSec.toFixed(6),
+          "-i", input.sourcePath,
+        );
+        nextExtraIndex += 1;
+      } else if (input.kind !== "gap" && input.hasAudio) {
         audioInputIndex.push(-1); // own stream
       } else {
         audioInputIndex.push(nextExtraIndex);
         args.push(
           "-f", "lavfi",
-          "-t", input.durationSec.toFixed(6),
+          "-t", audioDurationSec.toFixed(6),
           "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
         );
         nextExtraIndex += 1;
@@ -531,7 +752,7 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
   // Label bindings: [i:v] → per-clip filters → [vN]; audio → [aN].
   const parts: string[] = [];
   opts.inputs.forEach((input, i) => {
-    parts.push(`[${i}:v]${input.videoFilter}[v${i}]`);
+    parts.push(`[${i}:v]${input.videoFilter},settb=AVTB,setpts=PTS-STARTPTS[v${i}]`);
   });
   if (opts.includeAudio) {
     opts.inputs.forEach((input, i) => {
