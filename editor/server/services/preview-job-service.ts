@@ -9,7 +9,6 @@
  */
 
 import { execFile, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RenderSpec, RenderTextCue, RenderVideoClip, RenderTransition, PreviewArtifactMeta } from "../../shared/render-spec.js";
@@ -352,30 +351,6 @@ function isExactPreviewEnabled(): boolean {
   return !["0", "false", "no", "off"].includes(v.toLowerCase());
 }
 
-function stampPlaybackContract(projectDir: string): void {
-  const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
-  const manifestPath = path.join(projectDir, "05_timeline", "preview-manifest.json");
-  if (!fs.existsSync(timelinePath)) return;
-
-  let manifest: Record<string, unknown> = { version: "1" };
-  if (fs.existsSync(manifestPath)) {
-    try {
-      manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Record<string, unknown>;
-    } catch {
-      manifest = { version: "1" };
-    }
-  }
-
-  const timelineHash = createHash("sha256")
-    .update(fs.readFileSync(timelinePath))
-    .digest("hex")
-    .slice(0, 16);
-  manifest.base_timeline_hash = timelineHash;
-  manifest.updated_at = new Date().toISOString();
-  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
-}
-
 // ── Service ──────────────────────────────────────────────────────────
 
 export class PreviewJobService {
@@ -699,7 +674,6 @@ export class PreviewJobService {
             };
             this.states.set(projectId, state);
             if (this.jobs.get(projectId) === job) this.jobs.delete(projectId);
-            stampPlaybackContract(projectDir);
 
             // Persist refreshed warnings into preview.json (best-effort).
             try {
@@ -1063,7 +1037,6 @@ export class PreviewJobService {
         videoPath: outputFilename,
       };
       fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf-8");
-      stampPlaybackContract(projectDir);
 
       const state: PreviewJobState = {
         status: "ready",
