@@ -312,9 +312,10 @@ swift test
 
 Next slices:
 
-1. Run a real render and verify preview/final media appears in `09_output/editor_packet/media/` from the GUI flow.
+1. ~~Run a real render and verify preview/final media appears in `09_output/editor_packet/media/` from the GUI flow.~~ Done (2026-06-12): `studio-acceptance-smoke` passes end-to-end, and a real-project re-render through the same `ProjectRenderRunner` path works after aligning Gate 10 with this doc (runtime/packaging/gate10.ts now accepts `packaged` for re-renders, matching the Swift planner).
 2. Run a real local Marlin-2B evaluation on representative interview and music-video footage, then use `marlin-status` coverage and segment-peak evidence before flipping it from opt-in to preferred default.
-3. Split the growing native `ContentView.swift` into focused Agent, Editor, Media, and Inspector view files once the current workflow surfaces stabilize.
+3. ~~Split the growing native `ContentView.swift` into focused Agent, Editor, Media, and Inspector view files once the current workflow surfaces stabilize.~~ Done (2026-06-12): split into StudioViewModel / ViewerViews / AgentInspectorViews / ProjectInspectorViews / ClipInspectorViews / MediaPanelViews / TimelineViews / SettingsView; ContentView.swift now holds only the root layout, shelf, top bar, command palette, and workspace.
+4. Stabilize the playback contract: make `preview-manifest.json` the explicit playback source of truth for GUI review so what the operator approves matches what the engine renders (see editor-v3-design.md / editor-preview-render-parity-design.md).
 
 ## 9. Verification Gates
 
