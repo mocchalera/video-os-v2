@@ -64,6 +64,14 @@ describe("Gate 10", () => {
     expect(result.errors.some((e) => e.includes("approved"))).toBe(true);
   });
 
+  it("passes for re-render of an already-packaged project", () => {
+    const state = validProjectState();
+    state.current_state = "packaged";
+    const result = checkGate10(state);
+    expect(result.passed).toBe(true);
+    expect(result.errors).toHaveLength(0);
+  });
+
   it("fails if handoff not decided", () => {
     const state = validProjectState();
     state.handoff_resolution.status = "pending";

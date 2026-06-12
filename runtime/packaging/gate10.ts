@@ -92,7 +92,7 @@ function isMusicCuesStale(
  * Check Gate 10 preconditions for packaging.
  *
  * Rules:
- * - current_state must be "approved"
+ * - current_state must be "approved" (or "packaged" for re-renders)
  * - approval_record.status must be "clean" or "creative_override"
  * - handoff_resolution.status must be "decided"
  * - handoff_resolution.source_of_truth_decision must be
@@ -112,10 +112,16 @@ export function checkGate10(projectState: {
 }, options?: Gate10Options): Gate10Check {
   const errors: string[] = [];
 
-  // current_state must be "approved"
-  if (projectState.current_state !== "approved") {
+  // current_state must be "approved", or "packaged" for a re-render of an
+  // already-packaged project (macos-studio-architecture.md: the render worker
+  // runs "against approved or already packaged projects while keeping Gate 10").
+  // Re-edits demote the state, so "packaged" always implies a prior clean pass.
+  if (
+    projectState.current_state !== "approved" &&
+    projectState.current_state !== "packaged"
+  ) {
     errors.push(
-      `current_state must be "approved", got "${projectState.current_state}"`,
+      `current_state must be "approved" or "packaged", got "${projectState.current_state}"`,
     );
   }
 
