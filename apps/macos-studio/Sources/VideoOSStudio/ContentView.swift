@@ -445,6 +445,7 @@ private struct StudioWorkspaceView: View {
             HStack(spacing: 0) {
                 ViewerPanel(
                     project: model.selectedProject,
+                    playbackContract: model.playbackContractStatus,
                     selection: model.programTimelineClip ?? model.selectedTimelineClip,
                     media: model.programMediaReference,
                     audioMedia: model.programAudioMediaReference,

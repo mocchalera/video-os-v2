@@ -63,6 +63,7 @@ final class StudioViewModel: ObservableObject {
     @Published var renderRunPlan = ProjectRenderRunPlanner.plan(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
     @Published var renderRunStatus = "No project selected."
     @Published var isRunningRender = false
+    @Published var playbackContractStatus = ProjectPlaybackContractStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
     @Published var policyStatus = ProjectAnalysisPolicyStatusReader.status(repositoryRoot: URL(fileURLWithPath: "/"))
     @Published var marlinEvaluationStatus = ProjectMarlinEvaluationStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
     @Published var marlinPreferenceDecision = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: URL(fileURLWithPath: "/"))
@@ -495,6 +496,7 @@ final class StudioViewModel: ObservableObject {
             renderRunPlan = ProjectRenderRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
             renderRunStatus = "No project selected."
             isRunningRender = false
+            playbackContractStatus = ProjectPlaybackContractStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
             policyStatus = ProjectAnalysisPolicyStatusReader.status(repositoryRoot: repositoryRoot)
             marlinEvaluationStatus = ProjectMarlinEvaluationStatusReader.status(projectURL: URL(fileURLWithPath: "/"), repositoryRoot: repositoryRoot)
             marlinEvaluationRunPlan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
@@ -568,6 +570,7 @@ final class StudioViewModel: ObservableObject {
         renderRunStatus = renderRunPlan.canRun
             ? "Ready to render/package final output."
             : "Render is not runnable: \(renderRunPlan.readinessLabel)."
+        playbackContractStatus = ProjectPlaybackContractStatusReader.status(projectURL: project.path)
         policyStatus = ProjectAnalysisPolicyStatusReader.status(repositoryRoot: repositoryRoot)
         intentSummary = ProjectIntentSummaryReader.summary(projectURL: project.path)
         intentAlignmentStatus = ProjectIntentAlignmentStatusReader.status(projectURL: project.path)

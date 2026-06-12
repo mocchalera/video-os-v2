@@ -316,6 +316,8 @@ Next slices:
 2. Run a real local Marlin-2B evaluation on representative interview and music-video footage, then use `marlin-status` coverage and segment-peak evidence before flipping it from opt-in to preferred default.
 3. ~~Split the growing native `ContentView.swift` into focused Agent, Editor, Media, and Inspector view files once the current workflow surfaces stabilize.~~ Done (2026-06-12): split into StudioViewModel / ViewerViews / AgentInspectorViews / ProjectInspectorViews / ClipInspectorViews / MediaPanelViews / TimelineViews / SettingsView; ContentView.swift now holds only the root layout, shelf, top bar, command palette, and workspace.
 4. Stabilize the playback contract: make `preview-manifest.json` the explicit playback source of truth for GUI review so what the operator approves matches what the engine renders (see editor-v3-design.md / editor-preview-render-parity-design.md).
+   - Increment 1 done (2026-06-12): the compiler stamps `base_timeline_hash` into preview-manifest.json; `runtime/preview/playback-contract.ts` and `ProjectPlaybackContractStatusReader` (same sha256-16 definition, cross-verified) classify exact / stale / legacy_manifest / missing; the viewer shows an Exact/Stale preview badge and the CLI exposes `playback-contract-status`. Existing manifests report `legacy_manifest` until their next compile.
+   - Remaining: exact-preview artifact generation from the shared RenderSpec path, and the same staleness badge in the web editor ProgramMonitor (parity design phases).
 
 ## 9. Verification Gates
 

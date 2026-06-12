@@ -5,6 +5,7 @@ import VideoOSStudioCore
 
 struct ViewerPanel: View {
     var project: ProjectSummary?
+    var playbackContract: ProjectPlaybackContractStatus?
     var selection: TimelineClipSelection?
     var media: ProjectMediaReference?
     var audioMedia: ProjectMediaReference?
@@ -33,6 +34,9 @@ struct ViewerPanel: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                if project != nil, let playbackContract {
+                    PlaybackContractBadge(status: playbackContract)
+                }
                 Label(project?.hasReview == true ? "Reviewed" : "Draft", systemImage: project?.hasReview == true ? "checkmark.seal" : "circle.dotted")
                     .labelStyle(.titleAndIcon)
                     .foregroundStyle(project?.hasReview == true ? .green : .secondary)
@@ -73,6 +77,47 @@ struct ViewerPanel: View {
             return "\(media.assetID) / \(media.filename) / \(media.sourceRangeLabel)"
         }
         return project?.path.path ?? "projects/ 配下にプロジェクトがありません"
+    }
+}
+
+/// Tells the operator whether what they see in the viewer is approval-grade
+/// (preview manifest derived from the current timeline) or approximate.
+struct PlaybackContractBadge: View {
+    let status: ProjectPlaybackContractStatus
+
+    var body: some View {
+        Label(label, systemImage: icon)
+            .labelStyle(.titleAndIcon)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(tint)
+            .help(status.recommendation)
+            .accessibilityLabel("Playback contract: \(label)")
+    }
+
+    private var label: String {
+        switch status.state {
+        case .exact: return "Exact preview"
+        case .stale: return "Stale preview"
+        case .legacyManifest: return "Unverified preview"
+        case .missingManifest: return "No preview manifest"
+        case .missingTimeline: return "No timeline"
+        }
+    }
+
+    private var icon: String {
+        switch status.state {
+        case .exact: return "checkmark.shield"
+        case .stale: return "exclamationmark.triangle"
+        case .legacyManifest, .missingManifest, .missingTimeline: return "questionmark.diamond"
+        }
+    }
+
+    private var tint: Color {
+        switch status.state {
+        case .exact: return .green
+        case .stale: return .orange
+        case .legacyManifest, .missingManifest, .missingTimeline: return .secondary
+        }
     }
 }
 

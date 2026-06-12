@@ -5,6 +5,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { LoadedSourceMap } from "../media/source-map.js";
+import { computeFileHash16 } from "../preview/playback-contract.js";
 import type {
   AssembledTimeline,
   BriefCaptionPolicy,
@@ -176,10 +177,19 @@ export function writePreviewManifest(
     fs.mkdirSync(outDir, { recursive: true });
   }
 
+  // Playback contract: record which timeline.json this manifest was
+  // derived from, so review surfaces can detect stale previews.
+  const timelinePath = path.join(outDir, "timeline.json");
+  const baseTimelineHash = fs.existsSync(timelinePath)
+    ? computeFileHash16(timelinePath)
+    : null;
+
   const manifest = {
     version: "1",
     project_id: timeline.project_id,
     created_at: timeline.created_at,
+    compiler_version: COMPILER_VERSION,
+    ...(baseTimelineHash ? { base_timeline_hash: baseTimelineHash } : {}),
     sequence: timeline.sequence,
     clips: timeline.tracks.video
       .flatMap((t) => t.clips)
