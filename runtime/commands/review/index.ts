@@ -21,7 +21,12 @@ import {
   writeProjectState,
 } from "../../state/reconcile.js";
 import type { CompileResult } from "../../compiler/index.js";
+import type { TimelineIR } from "../../compiler/types.js";
 import { readCreativeBriefAutonomyMode } from "../../autonomy.js";
+import {
+  runReviewMetrics,
+  type ReviewMetricsArtifact,
+} from "../../review/metrics.js";
 import {
   runReviewExistingTimelinePreflight,
   runReviewPreflight,
@@ -183,6 +188,7 @@ export interface ReviewCommandResult {
   report?: ReviewReport;
   patch?: ReviewPatch;
   patchSafety?: PatchSafetyResult;
+  reviewMetrics?: ReviewMetricsArtifact;
   compileResult?: CompileResult;
   preflight?: ReviewPreflightResult;
   previousState?: ProjectState;
@@ -192,7 +198,7 @@ export interface ReviewCommandResult {
 }
 
 export interface ReviewPreflightStep {
-  step: "compile" | "preview" | "qc";
+  step: "compile" | "preview" | "qc" | "metrics";
   status: "completed" | "skipped";
   detail: string;
   artifactPath?: string;
@@ -204,6 +210,7 @@ export interface ReviewPreflightResult {
   previewPath?: string;
   overviewPath?: string;
   qcSummaryPath: string;
+  metricsPath?: string;
 }
 
 export interface ReviewOperatorDecision {
@@ -456,6 +463,7 @@ export async function runReview(
   let timelineJson: unknown;
   let timelineVersion = "unknown";
   let preflight: ReviewPreflightResult;
+  let reviewMetrics: ReviewMetricsArtifact | undefined;
   const skipPreview = options?.skipPreview ?? false;
 
   try {
@@ -485,13 +493,36 @@ export async function runReview(
       message: `Deterministic preflight failed: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
-  pt.advance("timeline.json");
+
+  try {
+    const metricsResult = runReviewMetrics(absDir, {
+      timeline: compileResult.timeline as TimelineIR,
+    });
+    reviewMetrics = metricsResult.metrics;
+    preflight.metricsPath = metricsResult.outputPath;
+    preflight.steps.push({
+      step: "metrics",
+      status: "completed",
+      detail: "Generated deterministic review_metrics.json before critic review.",
+      artifactPath: metricsResult.outputPath,
+    });
+  } catch (err) {
+    return fail("metrics", {
+      code: "GATE_CHECK_FAILED",
+      message: `Deterministic review metrics failed: ${err instanceof Error ? err.message : String(err)}`,
+    }, {
+      compileResult,
+      preflight,
+    });
+  }
+  pt.advance("review_metrics.json");
 
   const humanNotesResult = readHumanNotes(absDir);
   if (humanNotesResult.error) {
     return fail("human_notes", humanNotesResult.error, {
       compileResult,
       preflight,
+      reviewMetrics,
     });
   }
   const humanNotes = humanNotesResult.humanNotes;
@@ -566,6 +597,7 @@ export async function runReview(
     }, {
       compileResult,
       preflight,
+      reviewMetrics,
     });
   }
 
@@ -621,6 +653,7 @@ export async function runReview(
         }, {
           compileResult,
           preflight,
+          reviewMetrics,
         });
       }
       newState = "approved";
@@ -655,12 +688,13 @@ export async function runReview(
     note,
   );
 
-  pt.complete(["review_report.yaml", "review_patch.json"]);
+  pt.complete(["review_metrics.json", "review_report.yaml", "review_patch.json"]);
   return {
     success: true,
     report: agentResult.report,
     patch: safePatch,
     patchSafety,
+    reviewMetrics,
     compileResult,
     preflight,
     previousState,

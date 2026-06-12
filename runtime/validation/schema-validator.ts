@@ -133,6 +133,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "06_review/review_metrics.json",
+    schemaFile: "review-metrics.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "07_handoff/editor_annotations.json",
     schemaFile: "editor-annotations.schema.json",
     format: "json",
