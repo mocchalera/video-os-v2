@@ -64,25 +64,37 @@ craft 上のトレードオフは Walter Murch の Rule of Six で並べる。
 
 ## やること（ステップ）
 
-### Step 1: preflight の成否と artifact を確認する
+### Step 1: deterministic metrics を生成して確認する
+
+- まず `npx tsx scripts/review-metrics.ts <project-dir>` を実行し、`06_review/review_metrics.json` を生成する
+- `/review` コマンド経由では preflight 後、critic agent の前に `review_metrics.json` が自動生成される
+- `review_metrics.json` の `checks[].status` が `fail` / `warn` の項目は、`review_report.yaml` の `fatal_issues` / `warnings` / `mismatches_to_blueprint` に機械的に転記する
+- LLM は metrics が測れない主観的判断に集中する:
+  - カットの気持ちよさ
+  - 物語の説得力
+  - 感情の立ち上がり / 余韻
+  - 2D / 3D continuity を犠牲にしてでも emotion / story を優先すべき箇所
+- 定量チェックを LLM の注意力に依存させない。Rule of Six のうち、決定論的に測れる違反は `review_metrics.json` を正とする
+
+### Step 2: preflight の成否と artifact を確認する
 
 - 現在の `05_timeline/timeline.json` を正とする
 - `05_timeline/review.mp4` と `05_timeline/review-qc-summary.json` を確認する
 - `review.mp4` が placeholder の場合は、`summary_judgment.rationale` や `details` で inference ベースの評価であることを曖昧にしない
 
-### Step 2: factual mismatch を先に切る
+### Step 3: factual mismatch を先に切る
 
 - `must_have`, `must_avoid`, `message.primary`, `audience.primary`, `emotion_curve` を確認する
 - `edit_blueprint.yaml` の beat purpose, required role coverage, pacing intent と `timeline.json` の実際を照合する
 - factual mismatch を見落としたまま taste の話に進まない
 
-### Step 3: rubric に沿って評価する
+### Step 4: rubric に沿って評価する
 
 - `references/review-rubric.md` の構成 / 感情 / リズム / 技術チェックを順番に見る
 - 重要な指摘にはできるだけ `evidence`, `affected_beat_ids`, `affected_clip_ids` を付ける
 - 直接観測と推論を混ぜない
 
-### Step 4: `review_report.yaml` を作る
+### Step 5: `review_report.yaml` を作る
 
 必須 section:
 
@@ -95,7 +107,7 @@ craft 上のトレードオフは Walter Murch の Rule of Six で並べる。
 - `mismatches_to_blueprint`
 - `recommended_next_pass`
 
-### Step 5: 判定を決める
+### Step 6: 判定を決める
 
 #### `PASS`
 
@@ -168,6 +180,7 @@ safe に直せない場合:
 
 ## 出力 artifact
 
+- `06_review/review_metrics.json`
 - `06_review/review_report.yaml`
 - `06_review/review_patch.json`
 - `05_timeline/review.mp4`
