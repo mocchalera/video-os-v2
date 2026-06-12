@@ -172,26 +172,16 @@ public enum ProjectMarlinModelAccessStatusReader {
         currentDirectory: URL,
         environment: [String: String]
     ) -> ProcessResult {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.currentDirectoryURL = currentDirectory
-        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
         do {
-            try process.run()
-            process.waitUntilExit()
+            let output = try SubprocessRunner.run(
+                executablePath: executable.path,
+                arguments: arguments,
+                currentDirectoryURL: currentDirectory,
+                environment: ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+            )
+            return ProcessResult(stdout: output.stdout, stderr: output.stderr)
         } catch {
             return ProcessResult(stdout: "", stderr: String(describing: error))
         }
-
-        let stdout = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return ProcessResult(stdout: stdout, stderr: stderr)
     }
 }

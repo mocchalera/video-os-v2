@@ -374,22 +374,12 @@ public enum ProjectHandoffExporter {
         arguments: [String],
         workingDirectory: URL
     ) throws -> (status: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = arguments
-        process.currentDirectoryURL = workingDirectory
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-        process.waitUntilExit()
-
-        let stdoutText = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderrText = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        return (process.terminationStatus, stdoutText, stderrText)
+        let output = try SubprocessRunner.run(
+            executablePath: executableURL.path,
+            arguments: arguments,
+            currentDirectoryURL: workingDirectory
+        )
+        return (output.exitCode, output.stdout, output.stderr)
     }
 
     private static func makeTemporarySourceMapIfNeeded(plan: ProjectHandoffExportPlan) throws -> URL? {

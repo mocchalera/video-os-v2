@@ -150,22 +150,14 @@ public enum ProjectInitializer {
         workingDirectory: URL,
         arguments: [String]
     ) throws -> ProjectInitializationProcessResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = arguments
-        process.currentDirectoryURL = workingDirectory
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        try process.run()
-        process.waitUntilExit()
-
+        let output = try SubprocessRunner.run(
+            arguments: arguments,
+            currentDirectoryURL: workingDirectory
+        )
         return ProjectInitializationProcessResult(
-            status: process.terminationStatus,
-            stdout: String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
-            stderr: String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            status: output.exitCode,
+            stdout: output.stdout,
+            stderr: output.stderr
         )
     }
 }

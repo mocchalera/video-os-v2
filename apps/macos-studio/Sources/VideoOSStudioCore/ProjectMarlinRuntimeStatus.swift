@@ -303,21 +303,13 @@ public enum ProjectMarlinRuntimeStatusReader {
         arguments: [String],
         currentDirectory: URL
     ) -> (stdout: String, stderr: String) {
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.currentDirectoryURL = currentDirectory
-        let output = Pipe()
-        let error = Pipe()
-        process.standardOutput = output
-        process.standardError = error
-
         do {
-            try process.run()
-            process.waitUntilExit()
-            let stdout = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return (stdout, stderr)
+            let output = try SubprocessRunner.run(
+                executablePath: executable.path,
+                arguments: arguments,
+                currentDirectoryURL: currentDirectory
+            )
+            return (output.stdout, output.stderr)
         } catch {
             return ("", String(describing: error))
         }

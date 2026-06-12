@@ -196,26 +196,14 @@ public enum ProjectMarlinEvaluationRunner {
     }
 
     private static func runProcess(cwd: URL, arguments: [String]) throws -> ProjectMarlinEvaluationRunResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = arguments
-        process.currentDirectoryURL = cwd
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        let stdout = String(data: outputPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let stderr = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-
+        let output = try SubprocessRunner.run(
+            arguments: arguments,
+            currentDirectoryURL: cwd
+        )
         return ProjectMarlinEvaluationRunResult(
-            exitCode: process.terminationStatus,
-            standardOutput: stdout,
-            standardError: stderr
+            exitCode: output.exitCode,
+            standardOutput: output.stdout,
+            standardError: output.stderr
         )
     }
 }
