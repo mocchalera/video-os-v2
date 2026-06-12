@@ -250,8 +250,19 @@ interface CaptionApprovalCue {
   end_frame: number;
 }
 
+/** Canonical shape per schemas/caption-approval.schema.json. */
+interface CanonicalSpeechCaption {
+  caption_id?: string;
+  text: string;
+  timeline_in_frame: number;
+  timeline_duration_frames: number;
+}
+
 interface CaptionApprovalDoc {
-  cues: CaptionApprovalCue[];
+  /** Canonical field (caption-approval.schema.json) — preferred. */
+  speech_captions?: CanonicalSpeechCaption[];
+  /** Legacy editor-draft shape, kept for backward compatibility. */
+  cues?: CaptionApprovalCue[];
   style_preset?: CaptionStylePreset;
 }
 
@@ -409,7 +420,22 @@ export function buildRenderSpec(
         const doc: CaptionApprovalDoc = JSON.parse(
           fs.readFileSync(captionApprovalPath, "utf-8"),
         );
-        if (Array.isArray(doc.cues)) {
+        // Canonical shape first: the caption pipeline and final render read
+        // speech_captions, so the exact preview must honor the same field.
+        if (Array.isArray(doc.speech_captions)) {
+          for (const cap of doc.speech_captions) {
+            speechCaptions.push({
+              id: cap.caption_id ?? `cap-${cap.timeline_in_frame}`,
+              text: cap.text,
+              startFrame: cap.timeline_in_frame,
+              endFrame: cap.timeline_in_frame + cap.timeline_duration_frames,
+            });
+          }
+          captionApprovalLoaded = true;
+          if (doc.style_preset) {
+            captionStylePreset = doc.style_preset;
+          }
+        } else if (Array.isArray(doc.cues)) {
           for (const cue of doc.cues) {
             speechCaptions.push({
               id: cue.id ?? `cap-${cue.start_frame}`,

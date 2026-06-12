@@ -454,3 +454,126 @@ export function buildAudioTransitionGraph(
     outputLabel: prevLabel,
   };
 }
+
+// ── Single-generation transition chain (cross-path parity) ──────────
+
+export interface TransitionChainInput {
+  sourcePath: string;
+  sourceInSec: number;
+  durationSec: number;
+  /** Per-clip video filter chain (from buildVideoClipFilterString). */
+  videoFilter: string;
+  /** Whether the source file carries an audio stream. */
+  hasAudio: boolean;
+  /** Optional nat-audio gain in dB. */
+  gainDb?: number | null;
+}
+
+export interface TransitionChainOptions {
+  inputs: TransitionChainInput[];
+  clipDurationsSec: number[];
+  transitions: Array<{
+    spec: TransitionSpec;
+    fromIndex: number;
+    toIndex: number;
+  }>;
+  /** false → video-only output (-an); audio handled elsewhere. */
+  includeAudio: boolean;
+  /** Encoder args for the single video generation, e.g. x264Args(...). */
+  videoEncodeArgs: string[];
+  /** Audio codec args when includeAudio, e.g. ["-c:a","pcm_s16le",...]. */
+  audioCodecArgs?: string[];
+  outputPath: string;
+}
+
+/**
+ * Build ONE ffmpeg invocation that trims every clip straight from its
+ * source, applies the per-clip filter chain, and joins the clips through
+ * the shared transition graphs — a single encode generation.
+ *
+ * Both the exact preview and the final assembler must render transitioned
+ * timelines through this builder: if either path pre-encodes clips and
+ * then re-encodes them through the graph, that extra lossy generation
+ * alone pushes cross-path SSIM below the 0.999 acceptance bar.
+ */
+export function buildTransitionChainArgs(opts: TransitionChainOptions): string[] {
+  const args: string[] = ["-y"];
+
+  // Source inputs, trimmed at the demuxer (-ss/-t before -i).
+  for (const input of opts.inputs) {
+    args.push(
+      "-ss", input.sourceInSec.toFixed(6),
+      "-t", input.durationSec.toFixed(6),
+      "-i", input.sourcePath,
+    );
+  }
+
+  // Silent stand-ins for sources without audio, appended after the real
+  // inputs so video stream indexes stay 0..N-1.
+  const audioInputIndex: number[] = [];
+  let nextExtraIndex = opts.inputs.length;
+  if (opts.includeAudio) {
+    for (const input of opts.inputs) {
+      if (input.hasAudio) {
+        audioInputIndex.push(-1); // own stream
+      } else {
+        audioInputIndex.push(nextExtraIndex);
+        args.push(
+          "-f", "lavfi",
+          "-t", input.durationSec.toFixed(6),
+          "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+        );
+        nextExtraIndex += 1;
+      }
+    }
+  }
+
+  // Label bindings: [i:v] → per-clip filters → [vN]; audio → [aN].
+  const parts: string[] = [];
+  opts.inputs.forEach((input, i) => {
+    parts.push(`[${i}:v]${input.videoFilter}[v${i}]`);
+  });
+  if (opts.includeAudio) {
+    opts.inputs.forEach((input, i) => {
+      const srcIndex = audioInputIndex[i] === -1 ? i : audioInputIndex[i];
+      const gain =
+        input.gainDb !== null && input.gainDb !== undefined && input.gainDb !== 0
+          ? `volume=${input.gainDb}dB`
+          : "anull";
+      parts.push(`[${srcIndex}:a]${gain}[a${i}]`);
+    });
+  }
+
+  const { filterChain: videoChain, outputLabel: videoOut } =
+    buildVideoTransitionGraph(
+      opts.inputs.length,
+      opts.clipDurationsSec,
+      opts.transitions,
+    );
+  if (videoChain) parts.push(videoChain);
+
+  let audioOut: string | null = null;
+  if (opts.includeAudio) {
+    const audio = buildAudioTransitionGraph(
+      opts.inputs.length,
+      opts.clipDurationsSec,
+      opts.transitions,
+    );
+    if (audio.filterChain) parts.push(audio.filterChain);
+    audioOut = audio.outputLabel;
+  }
+
+  args.push("-filter_complex", parts.join(";"));
+  args.push("-map", videoOut);
+  if (opts.includeAudio && audioOut) {
+    args.push("-map", audioOut);
+  } else {
+    args.push("-an");
+  }
+  args.push(...opts.videoEncodeArgs);
+  if (opts.includeAudio && opts.audioCodecArgs) {
+    args.push(...opts.audioCodecArgs);
+  }
+  args.push("-pix_fmt", "yuv420p", opts.outputPath);
+  return args;
+}

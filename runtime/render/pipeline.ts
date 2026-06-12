@@ -23,6 +23,10 @@ import {
 import type { RenderVideoClip } from "../../editor/shared/render-spec.js";
 import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 import {
+  DEFAULT_CAPTION_STYLE_PRESET,
+  buildAssForceStyle,
+} from "../../editor/shared/caption-style-tokens.js";
+import {
   produceAssembly,
   resolveAssemblyEngine,
 } from "./assembly-orchestrator.js";
@@ -296,18 +300,31 @@ export async function burnCaptions(
   rawVideoPath: string,
   srtPath: string,
   outputPath: string,
+  sequence?: { width: number; height: number; fps: number },
 ): Promise<string> {
   ensureDir(path.dirname(outputPath));
 
   // Escape path separators for the subtitles filter
   const escapedSrtPath = srtPath
     .replace(/\\/g, "\\\\")
-    .replace(/:/g, "\\:");
+    .replace(/:/g, "\\:")
+    .replace(/'/g, "'\\''");
+
+  // Parity: the exact preview burns with the shared caption style preset
+  // and the shared intermediate encode profile — the final burn must match
+  // or the operator approves captions that render differently.
+  let vf = `subtitles='${escapedSrtPath}'`;
+  if (sequence) {
+    const forceStyle = buildAssForceStyle(DEFAULT_CAPTION_STYLE_PRESET, sequence);
+    vf += `:force_style='${forceStyle}'`;
+  }
 
   await execFilePromise("ffmpeg", [
     "-y",
     "-i", rawVideoPath,
-    "-vf", `subtitles=${escapedSrtPath}`,
+    "-vf", vf,
+    ...x264Args(INTERMEDIATE_X264),
+    "-pix_fmt", "yuv420p",
     outputPath,
   ]);
 
@@ -596,7 +613,12 @@ export async function runRenderPipeline(
 
     const captionedVideoPath = path.join(videoDir, "captioned_video.mp4");
     try {
-      await burnCaptions(rawVideoPath, srtForBurn, captionedVideoPath);
+      const seq = readTimelineSequenceConfig(opts.timelinePath);
+      await burnCaptions(rawVideoPath, srtForBurn, captionedVideoPath, {
+        width: seq.width,
+        height: seq.height,
+        fps,
+      });
       currentVideoPath = captionedVideoPath;
       logs["caption_burn"] = writeLog(
         logsDir,

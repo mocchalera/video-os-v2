@@ -15,8 +15,8 @@ import type { RenderSpec, RenderTextCue, RenderVideoClip, RenderTransition, Prev
 import {
   buildVideoClipFilterString,
   buildTransitionSpec,
-  buildVideoTransitionGraph,
-  buildAudioTransitionGraph,
+  buildTransitionChainArgs,
+  type TransitionChainInput,
   type TransitionSpec,
 } from "../../shared/filtergraph.js";
 import { buildAssForceStyle } from "../../shared/caption-style-tokens.js";
@@ -717,7 +717,20 @@ export class PreviewJobService {
       const warnings: string[] = [...(spec.warnings ?? [])];
       const { width, height, fps } = spec.sequence;
 
-      for (let i = 0; i < videoClips.length; i++) {
+      // ── Phase 4: Resolve transitions (before clip rendering — the
+      // transition path renders straight from sources in one generation) ──
+      const transitionIndexes = resolveTransitionIndexes(
+        spec.video.transitions, videoClips, fps,
+      );
+      const useTransitionGraph = transitionIndexes.length > 0;
+      const overlapsSec = useTransitionGraph
+        ? computeOverlapsSec(videoClips.length, transitionIndexes)
+        : undefined;
+      const clipDurationsSec = videoClips.map(
+        (c) => c.sourceOutSec - c.sourceInSec,
+      );
+
+      for (let i = 0; !useTransitionGraph && i < videoClips.length; i++) {
         if (job.aborted) { if (this.jobs.get(projectId) === job) this.jobs.delete(projectId); return; }
 
         const clip = videoClips[i];
@@ -781,57 +794,46 @@ export class PreviewJobService {
 
       if (job.aborted) { if (this.jobs.get(projectId) === job) this.jobs.delete(projectId); return; }
 
-      // ── Phase 4: Resolve transitions ──
-      const transitionIndexes = resolveTransitionIndexes(
-        spec.video.transitions, videoClips, fps,
-      );
-      const useTransitionGraph = transitionIndexes.length > 0;
-      const overlapsSec = useTransitionGraph
-        ? computeOverlapsSec(videoClips.length, transitionIndexes)
-        : undefined;
-      const clipDurationsSec = videoClips.map(
-        (c) => c.sourceOutSec - c.sourceInSec,
-      );
-
       // ── Concatenate clips (transition-aware) ──
       const concatPath = path.join(tmpDir, "concat_raw.mov");
 
-      if (clipPaths.length === 1) {
-        fs.copyFileSync(clipPaths[0], concatPath);
-      } else if (useTransitionGraph) {
-        // filter_complex: video + audio transition graphs
-        const inputArgs: string[] = ["-y"];
-        for (const p of clipPaths) {
-          inputArgs.push("-i", p);
+      if (useTransitionGraph) {
+        // Single-generation transition chain: trim every clip straight from
+        // its source and join through the shared graph in ONE encode. The
+        // final assembler renders transitioned timelines through the same
+        // builder, so cross-path frames stay within the SSIM budget.
+        const chainInputs: TransitionChainInput[] = [];
+        for (const clip of videoClips) {
+          const sourceHasAudio = await hasAudioStream(clip.sourcePath, job);
+          const audioClip = spec.audio.dialogueClips.find(
+            (ac) => ac.clipId === clip.clipId || ac.assetId === clip.assetId,
+          );
+          chainInputs.push({
+            sourcePath: clip.sourcePath,
+            sourceInSec: clip.sourceInSec,
+            durationSec: clip.sourceOutSec - clip.sourceInSec,
+            videoFilter: buildVideoClipFilterString(clip, { width, height }),
+            hasAudio: sourceHasAudio,
+            gainDb: audioClip?.gainDb,
+          });
         }
 
-        const { filterChain: videoChain, outputLabel: videoOut } =
-          buildVideoTransitionGraph(
-            clipPaths.length, clipDurationsSec, transitionIndexes,
-          );
-        const { filterChain: audioChain, outputLabel: audioOut } =
-          buildAudioTransitionGraph(
-            clipPaths.length, clipDurationsSec, transitionIndexes,
-          );
+        const chainArgs = buildTransitionChainArgs({
+          inputs: chainInputs,
+          clipDurationsSec,
+          transitions: transitionIndexes,
+          includeAudio: true,
+          videoEncodeArgs: x264Args(INTERMEDIATE_X264),
+          audioCodecArgs: ["-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2"],
+          outputPath: concatPath,
+        });
 
-        const filterComplex = [videoChain, audioChain]
-          .filter(Boolean)
-          .join(";");
-
-        inputArgs.push(
-          "-filter_complex", filterComplex,
-          "-map", videoOut,
-          "-map", audioOut,
-          ...x264Args(INTERMEDIATE_X264),
-          "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
-          "-pix_fmt", "yuv420p",
-          concatPath,
-        );
-
-        const concatExec = execFileWithChild("ffmpeg", inputArgs);
+        const concatExec = execFileWithChild("ffmpeg", chainArgs);
         job.activeChild = concatExec.child;
         await concatExec.promise;
         job.activeChild = null;
+      } else if (clipPaths.length === 1) {
+        fs.copyFileSync(clipPaths[0], concatPath);
       } else {
         // Fast path: concat demuxer (stream copy, no transitions)
         const concatFilePath = path.join(tmpDir, "concat.txt");
@@ -975,7 +977,9 @@ export class PreviewJobService {
 
         finalArgs.push(
           "-vf", `subtitles='${escapedSrt}':force_style='${forceStyle}'`,
-          "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+          // Parity: caption burn is the only re-encode of the artifact —
+          // it must use the same profile as the final path's burn.
+          ...x264Args(INTERMEDIATE_X264),
         );
       } else {
         finalArgs.push("-c:v", "copy");

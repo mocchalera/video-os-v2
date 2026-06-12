@@ -20,7 +20,9 @@ export interface X264Profile {
 /**
  * Near-lossless intermediate generation (segments, gaps, transition
  * composites). crf 14 is visually transparent; veryfast keeps clip-level
- * encodes cheap without the quality cliff of ultrafast.
+ * encodes cheap without the quality cliff of ultrafast. Cross-path parity
+ * additionally requires both paths to spend the SAME number of encode
+ * generations on every frame (see buildTransitionChainArgs).
  */
 export const INTERMEDIATE_X264: X264Profile = {
   preset: "veryfast",

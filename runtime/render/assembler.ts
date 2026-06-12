@@ -14,6 +14,12 @@ import {
   type RenderEffectSpec,
 } from "../../editor/shared/render-spec.js";
 import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
+import {
+  buildTransitionSpec,
+  buildTransitionChainArgs,
+  type TransitionChainInput,
+} from "../../editor/shared/filtergraph.js";
+import type { RenderTransition } from "../../editor/shared/render-spec.js";
 
 export interface AssemblerOptions {
   projectDir: string;
@@ -362,6 +368,11 @@ export function buildCaptionOverlayArgs(
   ];
 }
 
+export interface AudioTransitionFades {
+  fadeInSec?: number;
+  fadeOutSec?: number;
+}
+
 export function buildAudioTrimArgs(
   inputPath: string,
   outputPath: string,
@@ -370,9 +381,19 @@ export function buildAudioTrimArgs(
   sampleRate: number,
   audioChannels: 1 | 2,
   audioPolicy?: ClipOutput["audio_policy"],
+  fades?: AudioTransitionFades,
 ): string[] {
   const gain = audioPolicy?.nat_gain ?? audioPolicy?.nat_sound_gain ?? 1;
   const filters = gain > 0 && gain !== 1 ? [`volume=${gain.toFixed(4)}`] : [];
+  // Transition parity: linear afade in/out summed by amix reproduces the
+  // preview path's acrossfade (both default to the "tri" curve).
+  if (fades?.fadeInSec && fades.fadeInSec > 0) {
+    filters.push(`afade=t=in:st=0:d=${fades.fadeInSec.toFixed(6)}`);
+  }
+  if (fades?.fadeOutSec && fades.fadeOutSec > 0) {
+    const fadeStart = Math.max(0, endSec - startSec - fades.fadeOutSec);
+    filters.push(`afade=t=out:st=${fadeStart.toFixed(6)}:d=${fades.fadeOutSec.toFixed(6)}`);
+  }
   return [
     "-y",
     "-ss", formatFfmpegTimestamp(startSec),
@@ -617,6 +638,117 @@ export function buildVideoAssemblyPlan(timeline: TimelineIR): VideoSegmentPlan[]
   return plans;
 }
 
+// ── Transition windows (preview/final parity) ───────────────────────
+
+export interface TransitionWindow {
+  start_frame: number;
+  end_frame: number;
+  from_clip: ClipOutput;
+  to_clip: ClipOutput;
+  /** xfade transition name from the shared TransitionSpec (e.g. "fade"). */
+  xfade_transition: string;
+}
+
+/**
+ * Derive xfade-capable transition windows from timeline.transitions.
+ *
+ * The compiler lays transitioned clips out with overlapping
+ * timeline_in_frame ranges; the exact preview blends that overlap via the
+ * shared transition graph. The assembler previously hard-cut inside the
+ * overlap, which broke cross-path SSIM. Transition types whose shared spec
+ * is not an xfade (j_cut/l_cut/cut) keep the hard-cut behavior.
+ */
+export function collectTransitionWindows(timeline: TimelineIR): TransitionWindow[] {
+  const transitions = timeline.transitions ?? [];
+  if (transitions.length === 0) return [];
+
+  const fps = getTimelineFps(timeline);
+  const clipsById = new Map<string, ClipOutput>();
+  for (const track of timeline.tracks.video) {
+    for (const clip of track.clips) {
+      clipsById.set(clip.clip_id, clip);
+    }
+  }
+
+  const windows: TransitionWindow[] = [];
+  for (const t of transitions) {
+    const fromClip = clipsById.get(t.from_clip_id);
+    const toClip = clipsById.get(t.to_clip_id);
+    if (!fromClip || !toClip) continue;
+
+    const overlapStart = toClip.timeline_in_frame;
+    const overlapEnd = fromClip.timeline_in_frame + fromClip.timeline_duration_frames;
+    if (overlapEnd <= overlapStart) continue;
+
+    const renderTransition: RenderTransition = {
+      fromClipId: t.from_clip_id,
+      toClipId: t.to_clip_id,
+      type: t.transition_type as RenderTransition["type"],
+      durationFrames: t.transition_frames ?? overlapEnd - overlapStart,
+    };
+    const spec = buildTransitionSpec(renderTransition, fps);
+    if (spec.video.method !== "xfade") continue;
+
+    windows.push({
+      start_frame: overlapStart,
+      end_frame: overlapEnd,
+      from_clip: fromClip,
+      to_clip: toClip,
+      xfade_transition: spec.video.xfadeTransition ?? "fade",
+    });
+  }
+  return windows;
+}
+
+/**
+ * Derive afade in/out durations for an audio clip whose boundaries fall on
+ * a transition window (canonical compile mirrors A1 to V1, so timing-based
+ * matching is sufficient — audio clip ids differ from the video clip ids
+ * the transitions reference).
+ */
+export function computeAudioFades(
+  plan: { timeline_start_sec: number; duration_sec: number },
+  windows: TransitionWindow[],
+  fps: number,
+): AudioTransitionFades | undefined {
+  const epsilon = 1e-3;
+  const clipStart = plan.timeline_start_sec;
+  const clipEnd = plan.timeline_start_sec + plan.duration_sec;
+  let fadeInSec: number | undefined;
+  let fadeOutSec: number | undefined;
+  for (const w of windows) {
+    const wStart = w.start_frame / fps;
+    const wEnd = w.end_frame / fps;
+    const wDur = wEnd - wStart;
+    if (Math.abs(clipStart - wStart) < epsilon) fadeInSec = wDur;
+    if (Math.abs(clipEnd - wEnd) < epsilon) fadeOutSec = wDur;
+  }
+  if (!fadeInSec && !fadeOutSec) return undefined;
+  return { fadeInSec, fadeOutSec };
+}
+
+/** ffmpeg args blending two same-length segments with xfade. */
+export function buildXfadeArgs(
+  inputAPath: string,
+  inputBPath: string,
+  outputPath: string,
+  durationSec: number,
+  transition: string,
+): string[] {
+  return [
+    "-y",
+    "-i", inputAPath,
+    "-i", inputBPath,
+    "-filter_complex",
+    `[0:v][1:v]xfade=transition=${transition}:duration=${durationSec.toFixed(6)}:offset=0[v]`,
+    "-map", "[v]",
+    "-an",
+    ...x264Args(INTERMEDIATE_X264),
+    "-pix_fmt", "yuv420p",
+    outputPath,
+  ];
+}
+
 export function buildAudioAssemblyPlan(timeline: TimelineIR): AudioClipPlan[] {
   const fps = getTimelineFps(timeline);
   const plans: AudioClipPlan[] = [];
@@ -676,13 +808,23 @@ export async function assembleTimelineToMp4(
   const resolver = createSourceResolver(projectDir, timelineDir, opts.sourceOverrides);
   const videoPlans = buildVideoAssemblyPlan(timeline);
   const audioPlans = buildAudioAssemblyPlan(timeline);
+  const transitionWindows = collectTransitionWindows(timeline);
   const audioPolicyMode = getTimelineAudioPolicyMode(timeline);
   const totalDurationSec = totalFrames / fps;
 
   try {
     const renderedVideoSegments: string[] = [];
 
-    for (let i = 0; i < videoPlans.length; i++) {
+    // Single-generation transition chain (cross-path parity): when the
+    // timeline has xfade transitions and no gaps, render the whole video
+    // through the same shared graph the exact preview uses — pre-encoding
+    // segments and blending them adds a lossy generation that pushes
+    // cross-path SSIM below the acceptance bar. Gap-containing timelines
+    // fall back to the windowed segment path below.
+    const hasGaps = videoPlans.some((p) => p.kind === "gap");
+    const useWholeChain = transitionWindows.length > 0 && !hasGaps;
+
+    for (let i = 0; !useWholeChain && i < videoPlans.length; i++) {
       const plan = videoPlans[i];
       const segmentPath = path.join(workingDir, `video-segment-${String(i + 1).padStart(4, "0")}.mp4`);
       if (plan.kind === "gap") {
@@ -694,29 +836,117 @@ export async function assembleTimelineToMp4(
           fps,
         ));
       } else {
-        const clip = findClipById(timeline.tracks.video, plan.clip_id!);
-        const sourcePath = resolveClipSourcePath(resolver, clip);
-        // FATAL-1: derive per-clip transform from metadata so the final
-        // segment goes through the same shared filtergraph as preview.
-        const transform = extractClipTransform(clip);
-        await runFfmpeg(execFileImpl, ffmpegBin, buildVideoTrimArgs(
-          sourcePath,
-          segmentPath,
-          plan.source_in_sec!,
-          plan.source_out_sec!,
-          width,
-          height,
-          fps,
-          transform,
-        ));
+        const window = transitionWindows.find(
+          (w) => w.start_frame === plan.start_frame && w.end_frame === plan.end_frame,
+        );
+        if (window) {
+          // Transition overlap: blend both clips with the shared xfade spec
+          // so the window matches the exact preview frame-for-frame.
+          const durationSec = (window.end_frame - window.start_frame) / fps;
+          const halfPaths: string[] = [];
+          for (const [suffix, clip] of [
+            ["a", window.from_clip],
+            ["b", window.to_clip],
+          ] as const) {
+            const half = path.join(
+              workingDir,
+              `video-segment-${String(i + 1).padStart(4, "0")}-xfade-${suffix}.mp4`,
+            );
+            const range = getClipSourceRange(clip, plan.start_frame, plan.end_frame, fps);
+            await runFfmpeg(execFileImpl, ffmpegBin, buildVideoTrimArgs(
+              resolveClipSourcePath(resolver, clip),
+              half,
+              range.startSec,
+              range.endSec,
+              width,
+              height,
+              fps,
+              extractClipTransform(clip),
+            ));
+            halfPaths.push(half);
+          }
+          await runFfmpeg(execFileImpl, ffmpegBin, buildXfadeArgs(
+            halfPaths[0],
+            halfPaths[1],
+            segmentPath,
+            durationSec,
+            window.xfade_transition,
+          ));
+        } else {
+          const clip = findClipById(timeline.tracks.video, plan.clip_id!);
+          const sourcePath = resolveClipSourcePath(resolver, clip);
+          // FATAL-1: derive per-clip transform from metadata so the final
+          // segment goes through the same shared filtergraph as preview.
+          const transform = extractClipTransform(clip);
+          await runFfmpeg(execFileImpl, ffmpegBin, buildVideoTrimArgs(
+            sourcePath,
+            segmentPath,
+            plan.source_in_sec!,
+            plan.source_out_sec!,
+            width,
+            height,
+            fps,
+            transform,
+          ));
+        }
       }
       renderedVideoSegments.push(segmentPath);
     }
 
-    const concatListPath = path.join(workingDir, "video.concat.txt");
-    fs.writeFileSync(concatListPath, buildConcatListContent(renderedVideoSegments), "utf-8");
     const videoOnlyPath = path.join(workingDir, "assembly.video.mp4");
-    await runFfmpeg(execFileImpl, ffmpegBin, buildVideoConcatArgs(concatListPath, videoOnlyPath, fps));
+    if (useWholeChain) {
+      const orderedClips = timeline.tracks.video
+        .flatMap((track) => track.clips)
+        .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame);
+      const idToIndex = new Map(orderedClips.map((c, idx) => [c.clip_id, idx]));
+
+      const chainTransitions = (timeline.transitions ?? []).flatMap((t) => {
+        const fromIndex = idToIndex.get(t.from_clip_id);
+        const toIndex = idToIndex.get(t.to_clip_id);
+        if (fromIndex === undefined || toIndex === undefined) return [];
+        const fromClip = orderedClips[fromIndex];
+        const toClip = orderedClips[toIndex];
+        const overlapFrames =
+          fromClip.timeline_in_frame + fromClip.timeline_duration_frames -
+          toClip.timeline_in_frame;
+        const spec = buildTransitionSpec(
+          {
+            fromClipId: t.from_clip_id,
+            toClipId: t.to_clip_id,
+            type: t.transition_type as RenderTransition["type"],
+            durationFrames: t.transition_frames ?? Math.max(0, overlapFrames),
+          },
+          fps,
+        );
+        return [{ spec, fromIndex, toIndex }];
+      });
+
+      const chainInputs: TransitionChainInput[] = orderedClips.map((clip) => {
+        const transform = extractClipTransform(clip);
+        return {
+          sourcePath: resolveClipSourcePath(resolver, clip),
+          sourceInSec: clip.src_in_us / 1_000_000,
+          durationSec: (clip.src_out_us - clip.src_in_us) / 1_000_000,
+          videoFilter: transform
+            ? buildVideoFitFilterFromTransform(width, height, transform)
+            : buildAspectRatioFitFilter(width, height),
+          hasAudio: false,
+        };
+      });
+
+      await runFfmpeg(execFileImpl, ffmpegBin, buildTransitionChainArgs({
+        inputs: chainInputs,
+        clipDurationsSec: chainInputs.map((input) => input.durationSec),
+        transitions: chainTransitions,
+        includeAudio: false,
+        videoEncodeArgs: x264Args(INTERMEDIATE_X264),
+        outputPath: videoOnlyPath,
+      }));
+    } else {
+      const concatListPath = path.join(workingDir, "video.concat.txt");
+      fs.writeFileSync(concatListPath, buildConcatListContent(renderedVideoSegments), "utf-8");
+      await runFfmpeg(execFileImpl, ffmpegBin, buildVideoConcatArgs(concatListPath, videoOnlyPath, fps));
+    }
     const captions = collectTimelineCaptions(timeline);
     const captionedVideoPath = captions.length > 0
       ? path.join(workingDir, "assembly.video.captioned.mp4")
@@ -766,6 +996,7 @@ export async function assembleTimelineToMp4(
           sampleRate,
           audioChannels,
           plan.audio_policy,
+          computeAudioFades(plan, transitionWindows, fps),
         );
       await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);
