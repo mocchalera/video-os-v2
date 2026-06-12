@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "demo": "tsx scripts/demo.ts",
+    "eval": "tsx scripts/eval.ts",
     "validate": "tsx scripts/validate-schemas.ts projects/demo",
     "validate:all-local": "tsx scripts/validate-schemas.ts",
     "test": "vitest run",

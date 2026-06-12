@@ -1,0 +1,250 @@
+#!/usr/bin/env tsx
+/**
+ * CLI entry point for the editorial agreement eval harness.
+ *
+ * Usage:
+ *   npx tsx scripts/eval.ts --list
+ *   npx tsx scripts/eval.ts --self projects/fumoto-growth
+ *   npx tsx scripts/eval.ts --all [--min-score 80]
+ *   npx tsx scripts/eval.ts --candidate <dir> --golden <dir> [--judge]
+ *
+ * Core logic lives in runtime/eval/. This file is a thin CLI adapter.
+ */
+
+import { config as dotenvConfig } from "dotenv";
+dotenvConfig({ path: ".env.local" });
+dotenvConfig();
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  discoverGoldenProjects,
+  evaluateCandidateAgainstGolden,
+  renderMarkdownReport,
+  selfEvaluateGolden,
+  type EvalReport,
+} from "../runtime/eval/index.js";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+
+const USAGE = `Usage: npx tsx scripts/eval.ts <mode> [options]
+
+Modes (choose one):
+  --list                       List discovered golden projects
+  --self <project-dir>         Recompile a golden's inputs and compare to its approved timeline
+  --all                        Run --self across every discovered golden
+  --candidate <dir> --golden <dir>
+                               Compare a candidate run against a golden project
+
+Options:
+  --judge                      Also run the Gemini LLM judge (needs GEMINI_API_KEY)
+  --min-score <n>              Exit non-zero when any overall score falls below n (0-100)
+  --out <dir>                  Report output directory (default: reports/eval)
+  --no-write                   Print to stdout only, write no report files
+  --help, -h                   Show this help`;
+
+export interface EvalCliArgs {
+  help: boolean;
+  list: boolean;
+  all: boolean;
+  self: string | null;
+  candidate: string | null;
+  golden: string | null;
+  judge: boolean;
+  minScore: number | null;
+  out: string;
+  write: boolean;
+}
+
+export function parseArgs(argv: string[]): EvalCliArgs {
+  const args: EvalCliArgs = {
+    help: false,
+    list: false,
+    all: false,
+    self: null,
+    candidate: null,
+    golden: null,
+    judge: false,
+    minScore: null,
+    out: "reports/eval",
+    write: true,
+  };
+
+  const takeValue = (flag: string, i: number, list: string[]): string => {
+    const next = list[i + 1];
+    if (!next || next.startsWith("--")) {
+      throw new Error(`Missing value for ${flag}`);
+    }
+    return next;
+  };
+
+  const rest = argv.slice(2);
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i];
+    switch (arg) {
+      case "--help":
+      case "-h":
+        args.help = true;
+        break;
+      case "--list":
+        args.list = true;
+        break;
+      case "--all":
+        args.all = true;
+        break;
+      case "--self":
+        args.self = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--candidate":
+        args.candidate = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--golden":
+        args.golden = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--judge":
+        args.judge = true;
+        break;
+      case "--min-score": {
+        const raw = takeValue(arg, i, rest);
+        const value = Number(raw);
+        if (!Number.isFinite(value) || value < 0 || value > 100) {
+          throw new Error(`Invalid --min-score: ${raw} (expected 0-100)`);
+        }
+        args.minScore = value;
+        i += 1;
+        break;
+      }
+      case "--out":
+        args.out = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--no-write":
+        args.write = false;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}\n\n${USAGE}`);
+    }
+  }
+  return args;
+}
+
+function writeReports(report: EvalReport, outDir: string): { jsonPath: string; mdPath: string } {
+  fs.mkdirSync(outDir, { recursive: true });
+  const stamp = report.evaluated_at.replace(/[:.]/g, "-");
+  const base = `${report.mode}-${report.candidate_project.replace(/[^\w-]+/g, "_")}-${stamp}`;
+  const jsonPath = path.join(outDir, `${base}.json`);
+  const mdPath = path.join(outDir, `${base}.md`);
+  fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2));
+  fs.writeFileSync(mdPath, renderMarkdownReport(report));
+  return { jsonPath, mdPath };
+}
+
+function printSummaryLine(report: EvalReport): void {
+  const verdict = report.pass === null ? "" : report.pass ? "  PASS" : "  FAIL";
+  const stages = Object.entries(report.stages)
+    .map(([name, s]) => `${name}=${(s.score * 100).toFixed(0)}`)
+    .join(" ");
+  console.log(
+    `  ${report.golden_project.padEnd(42)} ${String(report.overall_score).padStart(5)} / 100  (${stages})${verdict}`,
+  );
+}
+
+export async function main(argv: string[] = process.argv): Promise<number> {
+  const args = parseArgs(argv);
+  if (args.help) {
+    console.log(USAGE);
+    return 0;
+  }
+
+  const outDir = path.resolve(repoRoot, args.out);
+
+  if (args.list) {
+    const goldens = discoverGoldenProjects(repoRoot);
+    if (goldens.length === 0) {
+      console.log("No golden projects found (need approval_record in project_state.yaml).");
+      return 0;
+    }
+    console.log("Golden projects:");
+    for (const g of goldens) {
+      console.log(
+        `  ${g.project_id.padEnd(42)} tier=${g.tier.padEnd(6)} approved_by=${g.approved_by}`,
+      );
+    }
+    return 0;
+  }
+
+  const reports: EvalReport[] = [];
+
+  if (args.candidate || args.golden) {
+    if (!args.candidate || !args.golden) {
+      throw new Error("--candidate and --golden must be used together");
+    }
+    const report = await evaluateCandidateAgainstGolden(
+      path.resolve(args.candidate),
+      path.resolve(args.golden),
+      { judge: args.judge, minScore: args.minScore },
+    );
+    reports.push(report);
+  } else if (args.self) {
+    const { report } = await selfEvaluateGolden(path.resolve(args.self), {
+      judge: args.judge,
+      minScore: args.minScore,
+    });
+    reports.push(report);
+  } else if (args.all) {
+    const goldens = discoverGoldenProjects(repoRoot);
+    if (goldens.length === 0) {
+      console.log("No golden projects found — nothing to evaluate.");
+      return 0;
+    }
+    for (const g of goldens) {
+      try {
+        const { report } = await selfEvaluateGolden(g.project_dir, {
+          judge: args.judge,
+          minScore: args.minScore,
+        });
+        reports.push(report);
+      } catch (err) {
+        console.error(`  ${g.project_id}: eval failed — ${(err as Error).message}`);
+      }
+    }
+  } else {
+    console.log(USAGE);
+    return 1;
+  }
+
+  console.log("\nEditorial agreement results:");
+  for (const report of reports) {
+    printSummaryLine(report);
+    if (args.write) {
+      const { mdPath } = writeReports(report, outDir);
+      console.log(`    report: ${path.relative(repoRoot, mdPath)}`);
+    }
+  }
+
+  const failed = reports.filter((r) => r.pass === false);
+  if (failed.length > 0) {
+    console.error(`\n${failed.length} run(s) below --min-score ${args.minScore}.`);
+    return 1;
+  }
+  return 0;
+}
+
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((err) => {
+      console.error(`eval failed: ${(err as Error).message}`);
+      process.exitCode = 1;
+    });
+}
