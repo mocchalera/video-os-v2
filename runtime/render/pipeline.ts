@@ -21,6 +21,7 @@ import {
   buildVideoClipFilterString,
 } from "../../editor/shared/filtergraph.js";
 import type { RenderVideoClip } from "../../editor/shared/render-spec.js";
+import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 import {
   produceAssembly,
   resolveAssemblyEngine,
@@ -195,20 +196,50 @@ function makeNoTransformClip(): RenderVideoClip {
   };
 }
 
+/** Probe the video stream dimensions of a file. */
+async function probeVideoDimensions(
+  inputPath: string,
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const result = await execFilePromise("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height",
+      "-of", "csv=p=0",
+      inputPath,
+    ]);
+    const [w, h] = result.stdout.trim().split(",").map(Number);
+    if (Number.isFinite(w) && Number.isFinite(h)) return { width: w, height: h };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function fitVideoToTimeline(
   inputPath: string,
   outputPath: string,
   timelinePath: string,
 ): Promise<string> {
   const sequence = readTimelineSequenceConfig(timelinePath);
-  const videoFilter = buildAspectRatioFitFilter(sequence.width, sequence.height);
 
+  // Parity: when the assembly is already at the sequence dimensions
+  // (always true for the shared-filtergraph assembler), re-encoding here
+  // would add a lossy generation the preview path does not have. Skip.
+  const dims = await probeVideoDimensions(inputPath);
+  if (dims && dims.width === sequence.width && dims.height === sequence.height) {
+    fs.copyFileSync(inputPath, outputPath);
+    return outputPath;
+  }
+
+  const videoFilter = buildAspectRatioFitFilter(sequence.width, sequence.height);
   await execFilePromise("ffmpeg", [
     "-y",
     "-i", inputPath,
     "-vf", videoFilter,
     "-an",
-    "-c:v", "libx264",
+    // Same near-lossless intermediate profile as the preview path.
+    ...x264Args(INTERMEDIATE_X264),
     "-pix_fmt", "yuv420p",
     outputPath,
   ]);
@@ -617,13 +648,26 @@ export async function runRenderPipeline(
       );
     }
   } else {
-    // No music cues: raw dialogue is the final mix
-    fs.copyFileSync(rawDialoguePath, finalMixPath);
-    logs["audio_mix"] = writeLog(
-      logsDir,
-      "audio_mix",
-      "No music cues provided, raw dialogue used as final mix",
-    );
+    // No music cues: master the raw dialogue directly. Skipping loudnorm
+    // here broke the playback contract — the exact preview is always
+    // mastered to the shared targets (-16 LUFS / LRA 7 / TP -1.5), so an
+    // unmastered final would not sound like what the operator approved.
+    try {
+      const { masterAudio } = await import("../audio/mastering.js");
+      await masterAudio(rawDialoguePath, finalMixPath);
+      logs["audio_mix"] = writeLog(
+        logsDir,
+        "audio_mix",
+        "No music cues; raw dialogue mastered with shared loudnorm defaults",
+      );
+    } catch (err) {
+      fs.copyFileSync(rawDialoguePath, finalMixPath);
+      logs["audio_mix"] = writeLog(
+        logsDir,
+        "audio_mix",
+        `Mastering unavailable, using raw dialogue as final mix: ${String(err)}`,
+      );
+    }
   }
 
   // 7. Final mux

@@ -1,5 +1,7 @@
+import * as path from "node:path";
 import type { RenderRemotionResult } from "./remotion/render-remotion.js";
 import { renderRemotionAssembly } from "./remotion/render-remotion.js";
+import { assembleTimelineToMp4 } from "./assembler.js";
 
 export type AssemblyEngine = "remotion" | "ffmpeg";
 
@@ -43,8 +45,15 @@ export async function produceAssembly(
     });
     return { assemblyPath: result.assemblyPath, engine: "remotion" };
   }
-  throw new Error(
-    "ffmpeg assembly engine is not yet wired in this commit. " +
-      "Use engine='remotion' or pre-build assembly.mp4 manually.",
-  );
+  // ffmpeg engine: deterministic ffmpeg assembler that shares the preview
+  // filtergraph builders (FATAL-1 parity path). The timeline lives at
+  // <project>/05_timeline/timeline.json, so the project root is two up.
+  const projectDir = path.dirname(path.dirname(path.resolve(opts.timelinePath)));
+  const result = await assembleTimelineToMp4({
+    projectDir,
+    timelinePath: opts.timelinePath,
+    outputPath: opts.outputPath,
+    sourceOverrides: opts.sourceMap,
+  });
+  return { assemblyPath: result.outputPath, engine: "ffmpeg" };
 }

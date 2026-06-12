@@ -13,6 +13,7 @@ import {
   isSupportedEffectType,
   type RenderEffectSpec,
 } from "../../editor/shared/render-spec.js";
+import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 
 export interface AssemblerOptions {
   projectDir: string;
@@ -24,6 +25,12 @@ export interface AssemblerOptions {
   cleanupTemp?: boolean;
   workingDirRoot?: string;
   execFileImpl?: ExecFileLike;
+  /**
+   * Explicit asset_id -> source file map. Takes precedence over the
+   * project-derived resolution (preview manifest, source map, assets.json).
+   * Lets the orchestrator pass the same sourceMap it gives Remotion.
+   */
+  sourceOverrides?: Record<string, string>;
 }
 
 export interface AssemblyResult {
@@ -87,6 +94,7 @@ interface SourceResolverContext {
   previewByClipId: Map<string, PreviewManifestClip>;
   previewByAssetId: Map<string, PreviewManifestClip[]>;
   assetsById: Map<string, AssetsManifestEntry>;
+  sourceOverrides?: Record<string, string>;
 }
 
 interface ExecResult {
@@ -173,7 +181,9 @@ export function buildVideoTrimArgs(
     "-vf", videoFilter,
     "-an",
     "-r", String(fps),
-    "-c:v", "libx264",
+    // Parity: segment encodes must use the same near-lossless profile as
+    // the preview path so cross-path frames share encoder settings.
+    ...x264Args(INTERMEDIATE_X264),
     "-pix_fmt", "yuv420p",
     outputPath,
   ];
@@ -266,7 +276,7 @@ export function buildGapVideoArgs(
     "-i", `color=c=black:s=${width}x${height}:r=${fps}`,
     "-t", formatFfmpegTimestamp(durationSec),
     "-an",
-    "-c:v", "libx264",
+    ...x264Args(INTERMEDIATE_X264),
     "-pix_fmt", "yuv420p",
     outputPath,
   ];
@@ -275,17 +285,18 @@ export function buildGapVideoArgs(
 export function buildVideoConcatArgs(
   concatListPath: string,
   outputPath: string,
-  fps: number,
+  _fps: number,
 ): string[] {
+  // Parity: segments are already encoded with identical codec parameters
+  // (same size/fps/pix_fmt/profile), so concat must stream-copy. A second
+  // lossy generation here is what degraded preview⇄final SSIM to ~0.92.
   return [
     "-y",
     "-f", "concat",
     "-safe", "0",
     "-i", concatListPath,
     "-an",
-    "-r", String(fps),
-    "-c:v", "libx264",
-    "-pix_fmt", "yuv420p",
+    "-c:v", "copy",
     outputPath,
   ];
 }
@@ -662,7 +673,7 @@ export async function assembleTimelineToMp4(
   const workingDirRoot = opts.workingDirRoot ?? os.tmpdir();
   const workingDir = fs.mkdtempSync(path.join(workingDirRoot, "vos-assembler-"));
   const timelineDir = path.dirname(timelinePath);
-  const resolver = createSourceResolver(projectDir, timelineDir);
+  const resolver = createSourceResolver(projectDir, timelineDir, opts.sourceOverrides);
   const videoPlans = buildVideoAssemblyPlan(timeline);
   const audioPlans = buildAudioAssemblyPlan(timeline);
   const audioPolicyMode = getTimelineAudioPolicyMode(timeline);
@@ -880,6 +891,7 @@ function findClipById(
 function createSourceResolver(
   projectDir: string,
   timelineDir: string,
+  sourceOverrides?: Record<string, string>,
 ): SourceResolverContext {
   const previewPath = path.join(projectDir, "05_timeline", "preview-manifest.json");
   const assetsPath = path.join(projectDir, "03_analysis", "assets.json");
@@ -917,6 +929,7 @@ function createSourceResolver(
     previewByClipId,
     previewByAssetId,
     assetsById,
+    sourceOverrides,
   };
 }
 
@@ -930,6 +943,7 @@ function resolveClipSourcePath(
   const asset = ctx.assetsById.get(clip.asset_id);
 
   const candidateStrings = [
+    ctx.sourceOverrides?.[clip.asset_id],
     ...readClipSourceHints(clip),
     previewClip?.local_source_path,
     previewClip?.source_locator,

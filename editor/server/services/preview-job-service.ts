@@ -20,6 +20,7 @@ import {
   type TransitionSpec,
 } from "../../shared/filtergraph.js";
 import { buildAssForceStyle } from "../../shared/caption-style-tokens.js";
+import { INTERMEDIATE_X264, x264Args } from "../../shared/encode-profiles.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -721,7 +722,11 @@ export class PreviewJobService {
 
         const clip = videoClips[i];
         const durationSec = clip.sourceOutSec - clip.sourceInSec;
-        const clipOutPath = path.join(tmpDir, `clip_${String(i).padStart(4, "0")}.mp4`);
+        // Intermediates use PCM audio in .mov: AAC's 1024-sample priming
+        // delay becomes an edit list that the concat demuxer turns into a
+        // ~21ms video start offset, breaking A/V parity with the final
+        // render. PCM has no encoder delay, and it saves an AAC generation.
+        const clipOutPath = path.join(tmpDir, `clip_${String(i).padStart(4, "0")}.mov`);
 
         const sourceHasAudio = await hasAudioStream(clip.sourcePath, job);
         const ffmpegArgs: string[] = ["-y"];
@@ -739,12 +744,7 @@ export class PreviewJobService {
 
         // Video: Phase 2 — use shared filter builder for zoom/crop/position parity
         const vf = buildVideoClipFilterString(clip, { width, height });
-        ffmpegArgs.push(
-          "-vf", vf,
-          "-c:v", "libx264",
-          "-preset", "ultrafast",
-          "-crf", "23",
-        );
+        ffmpegArgs.push("-vf", vf, ...x264Args(INTERMEDIATE_X264));
 
         if (!sourceHasAudio) {
           ffmpegArgs.push("-map", "0:v:0", "-map", "1:a:0");
@@ -763,7 +763,7 @@ export class PreviewJobService {
         }
 
         ffmpegArgs.push(
-          "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+          "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
         );
 
         if (!sourceHasAudio) {
@@ -794,7 +794,7 @@ export class PreviewJobService {
       );
 
       // ── Concatenate clips (transition-aware) ──
-      const concatPath = path.join(tmpDir, "concat_raw.mp4");
+      const concatPath = path.join(tmpDir, "concat_raw.mov");
 
       if (clipPaths.length === 1) {
         fs.copyFileSync(clipPaths[0], concatPath);
@@ -822,8 +822,8 @@ export class PreviewJobService {
           "-filter_complex", filterComplex,
           "-map", videoOut,
           "-map", audioOut,
-          "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
-          "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2",
+          ...x264Args(INTERMEDIATE_X264),
+          "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
           "-pix_fmt", "yuv420p",
           concatPath,
         );
