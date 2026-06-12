@@ -9,6 +9,7 @@ import {
   normalizeMarlinAssetEvents,
 } from "../../connectors/marlin-normalize.js";
 import { atomicWriteJson, readJsonIfExists } from "./_util.js";
+import { prepareMarlinProxy } from "./marlin-proxy.js";
 
 export const MARLIN_EVENTS_RELATIVE_PATH = "03_analysis/marlin_events.json";
 
@@ -127,10 +128,14 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
 
   const items = [];
   for (const asset of assetInputs) {
-    const caption = await opts.marlinFn.caption(asset.sourcePath);
+    // Bounded proxy: never hand an unbounded-resolution source to the
+    // worker (marlin-proxy.ts). Timestamps are unaffected — the proxy
+    // keeps the source duration, so spans map 1:1 onto the original.
+    const proxy = await prepareMarlinProxy(absProjectDir, asset.sourcePath);
+    const caption = await opts.marlinFn.caption(proxy.evaluationPath);
     const findResults = [];
     for (const query of queries) {
-      findResults.push(await opts.marlinFn.find(asset.sourcePath, query));
+      findResults.push(await opts.marlinFn.find(proxy.evaluationPath, query));
     }
     items.push(
       normalizeMarlinAssetEvents({
