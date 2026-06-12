@@ -247,6 +247,21 @@ export interface PreviewStatusResponse {
   error?: string;
 }
 
+export type PlaybackContractState =
+  | 'exact'
+  | 'stale'
+  | 'legacy_manifest'
+  | 'missing_manifest'
+  | 'missing_timeline';
+
+/** Response from GET /api/projects/:id/preview/contract. */
+export interface PlaybackContractStatusResponse {
+  state: PlaybackContractState;
+  timeline_hash: string | null;
+  manifest_base_timeline_hash: string | null;
+  recommendation: string;
+}
+
 /** Preview artifact state tracked by usePlayback. */
 export interface PreviewArtifactState {
   renderSpecHash: string | null;

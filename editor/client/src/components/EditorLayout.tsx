@@ -62,6 +62,7 @@ interface EditorLayoutProps {
     error: string | null;
     playheadFrame: number;
     previewStale: boolean;
+    playbackContract: import('../types').PlaybackContractStatusResponse | null;
     seekToFrame: (frame: number) => void;
     handleVideoLoadedMetadata: () => void;
     handleVideoCanPlayThrough: () => void;

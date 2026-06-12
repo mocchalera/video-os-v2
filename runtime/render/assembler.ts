@@ -17,7 +17,11 @@ import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles
 import {
   buildTransitionSpec,
   buildTransitionChainArgs,
+  buildGapAwareTransitionChainInputs,
+  computeTransitionAudioExtensions,
   type TransitionChainInput,
+  type TransitionChainTimelineInput,
+  type TransitionAudioExtension,
 } from "../../editor/shared/filtergraph.js";
 import type { RenderTransition } from "../../editor/shared/render-spec.js";
 
@@ -727,6 +731,93 @@ export function computeAudioFades(
   return { fadeInSec, fadeOutSec };
 }
 
+function collectTransitionAudioExtensionsByVideoClip(
+  timeline: TimelineIR,
+): Map<string, TransitionAudioExtension> {
+  const fps = getTimelineFps(timeline);
+  const orderedClips = timeline.tracks.video
+    .flatMap((track) => track.clips)
+    .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame);
+  const idToIndex = new Map(orderedClips.map((clip, index) => [clip.clip_id, index]));
+
+  const transitions = (timeline.transitions ?? []).flatMap((t) => {
+    const fromIndex = idToIndex.get(t.from_clip_id);
+    const toIndex = idToIndex.get(t.to_clip_id);
+    if (fromIndex === undefined || toIndex === undefined) return [];
+    const fromClip = orderedClips[fromIndex];
+    const toClip = orderedClips[toIndex];
+    const overlapFrames =
+      fromClip.timeline_in_frame + fromClip.timeline_duration_frames -
+      toClip.timeline_in_frame;
+    const spec = buildTransitionSpec(
+      {
+        fromClipId: t.from_clip_id,
+        toClipId: t.to_clip_id,
+        type: t.transition_type as RenderTransition["type"],
+        durationFrames: t.transition_frames ?? Math.max(0, overlapFrames),
+      },
+      fps,
+    );
+    return [{ spec, fromIndex, toIndex }];
+  });
+
+  const byIndex = computeTransitionAudioExtensions(
+    orderedClips.map((clip) => ({
+      sourceInSec: clip.src_in_us / 1_000_000,
+      durationSec: (clip.src_out_us - clip.src_in_us) / 1_000_000,
+    })),
+    transitions,
+  );
+
+  const byClipId = new Map<string, TransitionAudioExtension>();
+  for (const [index, extension] of byIndex) {
+    const clip = orderedClips[index];
+    if (clip) byClipId.set(clip.clip_id, extension);
+  }
+  return byClipId;
+}
+
+function findMirroredVideoClipForAudioPlan(
+  timeline: TimelineIR,
+  plan: AudioClipPlan,
+  fps: number,
+): ClipOutput | undefined {
+  const epsilon = 1e-3;
+  for (const track of timeline.tracks.video) {
+    for (const clip of track.clips) {
+      if (clip.clip_id === plan.clip_id) return clip;
+      const clipStartSec = clip.timeline_in_frame / fps;
+      const clipDurationSec = clip.timeline_duration_frames / fps;
+      if (
+        Math.abs(clipStartSec - plan.timeline_start_sec) < epsilon &&
+        Math.abs(clipDurationSec - plan.duration_sec) < (1 / fps + epsilon)
+      ) {
+        return clip;
+      }
+    }
+  }
+  return undefined;
+}
+
+function applyTransitionAudioExtensionToPlan(
+  plan: AudioClipPlan,
+  extension: TransitionAudioExtension | undefined,
+): AudioClipPlan {
+  if (!extension) return plan;
+  const timelineStartSec = Math.max(
+    0,
+    plan.timeline_start_sec + extension.timelineStartShiftSec,
+  );
+  return {
+    ...plan,
+    source_in_sec: extension.audioSourceInSec,
+    source_out_sec: extension.audioSourceInSec + extension.audioDurationSec,
+    duration_sec: extension.audioDurationSec,
+    timeline_start_sec: timelineStartSec,
+    delay_ms: Math.round(timelineStartSec * 1000),
+  };
+}
+
 /** ffmpeg args blending two same-length segments with xfade. */
 export function buildXfadeArgs(
   inputAPath: string,
@@ -815,14 +906,66 @@ export async function assembleTimelineToMp4(
   try {
     const renderedVideoSegments: string[] = [];
 
-    // Single-generation transition chain (cross-path parity): when the
-    // timeline has xfade transitions and no gaps, render the whole video
-    // through the same shared graph the exact preview uses — pre-encoding
-    // segments and blending them adds a lossy generation that pushes
-    // cross-path SSIM below the acceptance bar. Gap-containing timelines
-    // fall back to the windowed segment path below.
-    const hasGaps = videoPlans.some((p) => p.kind === "gap");
-    const useWholeChain = transitionWindows.length > 0 && !hasGaps;
+    // Single-generation transition chain (cross-path parity): render every
+    // timeline with declared transitions through the same shared graph the
+    // exact preview uses. Gap inputs become black lavfi segments inside that
+    // graph instead of forcing a divergent windowed fallback.
+    const orderedClips = timeline.tracks.video
+      .flatMap((track) => track.clips)
+      .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame);
+    const idToIndex = new Map(orderedClips.map((c, idx) => [c.clip_id, idx]));
+
+    const clipChainTransitions = (timeline.transitions ?? []).flatMap((t) => {
+      const fromIndex = idToIndex.get(t.from_clip_id);
+      const toIndex = idToIndex.get(t.to_clip_id);
+      if (fromIndex === undefined || toIndex === undefined) return [];
+      const fromClip = orderedClips[fromIndex];
+      const toClip = orderedClips[toIndex];
+      const overlapFrames =
+        fromClip.timeline_in_frame + fromClip.timeline_duration_frames -
+        toClip.timeline_in_frame;
+      const spec = buildTransitionSpec(
+        {
+          fromClipId: t.from_clip_id,
+          toClipId: t.to_clip_id,
+          type: t.transition_type as RenderTransition["type"],
+          durationFrames: t.transition_frames ?? Math.max(0, overlapFrames),
+        },
+        fps,
+      );
+      if (spec.video.method === "cut" && spec.audio.method === "cut") {
+        return [];
+      }
+      return [{ spec, fromIndex, toIndex }];
+    });
+
+    const clipChainInputs: TransitionChainTimelineInput[] = orderedClips.map((clip) => {
+      const transform = extractClipTransform(clip);
+      return {
+        kind: "source",
+        clipId: clip.clip_id,
+        timelineInFrame: clip.timeline_in_frame,
+        durationFrames: clip.timeline_duration_frames,
+        sourcePath: resolveClipSourcePath(resolver, clip),
+        sourceInSec: clip.src_in_us / 1_000_000,
+        durationSec: (clip.src_out_us - clip.src_in_us) / 1_000_000,
+        videoFilter: transform
+          ? buildVideoFitFilterFromTransform(width, height, transform)
+          : buildAspectRatioFitFilter(width, height),
+        hasAudio: false,
+      };
+    });
+    const gapAwareChain = buildGapAwareTransitionChainInputs(
+      clipChainInputs,
+      { fps, width, height, totalFrames },
+    );
+    const chainTransitions = clipChainTransitions.flatMap((t) => {
+      const fromIndex = gapAwareChain.clipIndexToChainIndex.get(t.fromIndex);
+      const toIndex = gapAwareChain.clipIndexToChainIndex.get(t.toIndex);
+      if (fromIndex === undefined || toIndex === undefined) return [];
+      return [{ ...t, fromIndex, toIndex }];
+    });
+    const useWholeChain = chainTransitions.length > 0;
 
     for (let i = 0; !useWholeChain && i < videoPlans.length; i++) {
       const plan = videoPlans[i];
@@ -895,48 +1038,9 @@ export async function assembleTimelineToMp4(
 
     const videoOnlyPath = path.join(workingDir, "assembly.video.mp4");
     if (useWholeChain) {
-      const orderedClips = timeline.tracks.video
-        .flatMap((track) => track.clips)
-        .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame);
-      const idToIndex = new Map(orderedClips.map((c, idx) => [c.clip_id, idx]));
-
-      const chainTransitions = (timeline.transitions ?? []).flatMap((t) => {
-        const fromIndex = idToIndex.get(t.from_clip_id);
-        const toIndex = idToIndex.get(t.to_clip_id);
-        if (fromIndex === undefined || toIndex === undefined) return [];
-        const fromClip = orderedClips[fromIndex];
-        const toClip = orderedClips[toIndex];
-        const overlapFrames =
-          fromClip.timeline_in_frame + fromClip.timeline_duration_frames -
-          toClip.timeline_in_frame;
-        const spec = buildTransitionSpec(
-          {
-            fromClipId: t.from_clip_id,
-            toClipId: t.to_clip_id,
-            type: t.transition_type as RenderTransition["type"],
-            durationFrames: t.transition_frames ?? Math.max(0, overlapFrames),
-          },
-          fps,
-        );
-        return [{ spec, fromIndex, toIndex }];
-      });
-
-      const chainInputs: TransitionChainInput[] = orderedClips.map((clip) => {
-        const transform = extractClipTransform(clip);
-        return {
-          sourcePath: resolveClipSourcePath(resolver, clip),
-          sourceInSec: clip.src_in_us / 1_000_000,
-          durationSec: (clip.src_out_us - clip.src_in_us) / 1_000_000,
-          videoFilter: transform
-            ? buildVideoFitFilterFromTransform(width, height, transform)
-            : buildAspectRatioFitFilter(width, height),
-          hasAudio: false,
-        };
-      });
-
       await runFfmpeg(execFileImpl, ffmpegBin, buildTransitionChainArgs({
-        inputs: chainInputs,
-        clipDurationsSec: chainInputs.map((input) => input.durationSec),
+        inputs: gapAwareChain.inputs,
+        clipDurationsSec: gapAwareChain.clipDurationsSec,
         transitions: chainTransitions,
         includeAudio: false,
         videoEncodeArgs: x264Args(INTERMEDIATE_X264),
@@ -965,6 +1069,8 @@ export async function assembleTimelineToMp4(
     const renderedAudioSegments: string[] = [];
     const audioDelaysMs: number[] = [];
     const duckingPlans: DuckingAudioMixPlan[] = [];
+    const audioExtensionsByVideoClip =
+      collectTransitionAudioExtensionsByVideoClip(timeline);
     const effectiveAudioPlans = audioPlans.filter((plan) => {
       const isBgm = isBgmPlan(plan);
       if (audioPolicyMode === "bgm_only") return isBgm;
@@ -972,11 +1078,20 @@ export async function assembleTimelineToMp4(
       return true;
     });
     for (let i = 0; i < effectiveAudioPlans.length; i++) {
-      const plan = effectiveAudioPlans[i];
+      const basePlan = effectiveAudioPlans[i];
+      const isBgm = isBgmPlan(basePlan);
+      const mirroredVideoClip = isBgm
+        ? undefined
+        : findMirroredVideoClipForAudioPlan(timeline, basePlan, fps);
+      const plan = applyTransitionAudioExtensionToPlan(
+        basePlan,
+        mirroredVideoClip
+          ? audioExtensionsByVideoClip.get(mirroredVideoClip.clip_id)
+          : undefined,
+      );
       const clip = findClipById(timeline.tracks.audio, plan.clip_id);
       const sourcePath = resolveClipSourcePath(resolver, clip);
       const segmentPath = path.join(workingDir, `audio-segment-${String(i + 1).padStart(4, "0")}.wav`);
-      const isBgm = isBgmPlan(plan);
       const audioArgs = isBgm
         ? buildBgmAudioRenderArgs(
           sourcePath,

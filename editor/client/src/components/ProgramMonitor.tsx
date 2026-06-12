@@ -1,5 +1,5 @@
 import { formatClockFromFrames } from '../utils/time';
-import type { PreviewMode } from '../types';
+import type { PlaybackContractStatusResponse, PreviewMode } from '../types';
 import PreviewPlayer from './PreviewPlayer';
 import TransportBar from './TransportBar';
 
@@ -20,6 +20,7 @@ interface ProgramMonitorProps {
     error: string | null;
     playheadFrame: number;
     previewStale: boolean;
+    playbackContract: PlaybackContractStatusResponse | null;
     handleVideoLoadedMetadata: () => void;
     handleVideoCanPlayThrough: () => void;
     handleVideoTimeUpdate: () => void;
@@ -82,6 +83,7 @@ export default function ProgramMonitor({
           isGap={playback.isGap}
           error={playback.error}
           previewStale={playback.previewStale}
+          playbackContract={playback.playbackContract}
           clipZoom={clipZoom}
           onLoadedMetadata={playback.handleVideoLoadedMetadata}
           onCanPlayThrough={playback.handleVideoCanPlayThrough}

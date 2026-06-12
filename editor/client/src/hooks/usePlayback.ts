@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Clip, ExactPreviewResponse, PreviewArtifactState, PreviewMode, PreviewStatusResponse, TimelineIR, TrackHeaderState } from '../types';
+import type { Clip, ExactPreviewResponse, PlaybackContractStatusResponse, PreviewArtifactState, PreviewMode, PreviewStatusResponse, TimelineIR, TrackHeaderState } from '../types';
 import { clamp, framesToSeconds, secondsToFrames } from '../utils/time';
 
 interface UsePlaybackOptions {
@@ -112,6 +112,8 @@ export function usePlayback({
     previewUrl: null,
     status: 'idle',
   });
+  const [playbackContract, setPlaybackContract] =
+    useState<PlaybackContractStatusResponse | null>(null);
 
   // ── Phase 3: Shuttle, Marks, Loop ────────���─────────────────────────
   const [shuttleSpeed, setShuttleSpeedState] = useState(0);
@@ -821,6 +823,19 @@ export function usePlayback({
     syncPlaybackToFrame(frame, shouldResume);
   }
 
+  async function refreshPlaybackContract(): Promise<PlaybackContractStatusResponse | null> {
+    if (!projectId) return null;
+    try {
+      const response = await fetch(`/api/projects/${projectId}/preview/contract`);
+      if (!response.ok) return null;
+      const payload = (await response.json()) as PlaybackContractStatusResponse;
+      setPlaybackContract(payload);
+      return payload;
+    } catch {
+      return null;
+    }
+  }
+
   async function requestFullPreview(
     options: RequestFullPreviewOptions = {},
   ): Promise<ExactPreviewResponse | null> {
@@ -828,6 +843,15 @@ export function usePlayback({
 
     setRenderStatus('rendering');
     setError(null);
+    setPreviewStale(true);
+    setPlaybackContract(prev => prev
+      ? {
+          ...prev,
+          state: 'stale',
+          recommendation: 'Timeline changed after the preview manifest was generated. Recompile before approving.',
+        }
+      : prev,
+    );
 
     try {
       const response = await fetch(`/api/projects/${projectId}/preview`, {
@@ -881,6 +905,7 @@ export function usePlayback({
       if (payload.status === 'ready' && payload.previewUrl) {
         setRenderStatus('ready');
         setPreviewStale(false);
+        void refreshPlaybackContract();
       }
       // If queued/rendering, status will update via WebSocket render.changed
 
@@ -947,6 +972,7 @@ export function usePlayback({
           setPreviewStale(true);
         } else {
           setPreviewStale(false);
+          void refreshPlaybackContract();
         }
       }
     } else if (status === 'error') {
@@ -958,6 +984,14 @@ export function usePlayback({
 
   function markPreviewStale(): void {
     setPreviewStale(true);
+    setPlaybackContract(prev => prev
+      ? {
+          ...prev,
+          state: 'stale',
+          recommendation: 'Timeline changed after the preview manifest was generated. Recompile before approving.',
+        }
+      : prev,
+    );
   }
 
   // ── Video event handlers ──────────────────────────────────────────
@@ -1385,6 +1419,20 @@ export function usePlayback({
     return () => { cancelled = true; };
   }, [projectId, currentTimelineRevision, timeline]);
 
+  useEffect(() => {
+    if (!projectId || !currentTimelineRevision || !timeline) return;
+    let cancelled = false;
+    async function run(): Promise<void> {
+      const status = await refreshPlaybackContract();
+      if (cancelled || !status) return;
+      if (status.state === 'stale') {
+        setPreviewStale(true);
+      }
+    }
+    void run();
+    return () => { cancelled = true; };
+  }, [projectId, currentTimelineRevision, timeline]);
+
   // ── Exact video event handlers ────────────────────────────────────
   function handleExactVideoTimeUpdate(): void {
     const exactVideo = exactVideoRef.current;
@@ -1420,6 +1468,7 @@ export function usePlayback({
     isGap,
     previewMode,
     previewStale,
+    playbackContract,
     previewArtifact,
     renderStatus,
     error,
