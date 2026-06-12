@@ -28,7 +28,9 @@ sampling:
     sample_fps: 1
 
 vlm:
-  model_alias: gemini-2.0-flash
+  # Cost-effective vision model for high-volume frame analysis.
+  # (gemini-2.0-flash was sunset; "latest" aliases track pricier tiers.)
+  model_alias: gemini-2.5-flash-lite
   model_snapshot: "required_for_canonical_runs"
   input_mode: frame_bundle_plus_text_context
   response_format: json_schema_v1

@@ -576,7 +576,9 @@ export function createGeminiVlmFn(): VlmFn {
     // Add text prompt
     parts.push({ text: prompt });
 
-    const model = options.model || "gemini-2.0-flash";
+    // gemini-2.0-flash was sunset (404 as of 2026-06). Default to the
+    // cost-effective vision tier; analysis-defaults.yaml model_alias overrides.
+    const model = options.model || "gemini-2.5-flash-lite";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
