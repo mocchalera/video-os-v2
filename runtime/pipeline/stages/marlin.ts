@@ -149,7 +149,23 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
     );
   }
 
-  const artifact = createMarlinEventsArtifact({ projectId: opts.projectId, model, items });
+  // Incremental evidence: merge with any existing artifact so partial
+  // evaluations accumulate instead of overwriting. Items for assets
+  // re-evaluated in this run replace their previous entries; items for
+  // assets not in this run are preserved. Representative coverage can
+  // then be built up across several bounded runs.
+  const existing = readJsonIfExists<MarlinEventsArtifact>(outputPath);
+  const evaluatedAssetIds = new Set(items.map((item) => item.asset_id));
+  const preserved = (existing?.items ?? []).filter(
+    (item) => !evaluatedAssetIds.has(item.asset_id),
+  );
+  const mergedItems = [...preserved, ...items];
+
+  const artifact = createMarlinEventsArtifact({
+    projectId: opts.projectId,
+    model,
+    items: mergedItems,
+  });
   atomicWriteJson(outputPath, artifact);
   applyMarlinEventsToSegments(absProjectDir, artifact);
   return outputPath;
