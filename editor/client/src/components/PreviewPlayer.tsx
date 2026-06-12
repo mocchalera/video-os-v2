@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import type { PreviewMode } from '../types';
+import type { PlaybackContractStatusResponse, PreviewMode } from '../types';
 
 interface PreviewPlayerProps {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -12,6 +12,7 @@ interface PreviewPlayerProps {
   isGap: boolean;
   error: string | null;
   previewStale: boolean;
+  playbackContract: PlaybackContractStatusResponse | null;
   /** Phase 2: Current clip zoom for CSS approximation in source_approx mode. */
   clipZoom: number;
   onLoadedMetadata: () => void;
@@ -52,6 +53,40 @@ function modeDotColor(mode: PreviewMode, isPlaying: boolean): string {
   }
 }
 
+type ContractBadgeTone = 'exact' | 'stale' | 'unverified';
+
+function contractBadgeTone(
+  contract: PlaybackContractStatusResponse | null,
+  previewStale: boolean,
+  previewMode: PreviewMode,
+): ContractBadgeTone {
+  if (previewStale || contract?.state === 'stale') return 'stale';
+  if (contract?.state === 'exact' && previewMode === 'rendered_exact') return 'exact';
+  return 'unverified';
+}
+
+function contractBadgeLabel(tone: ContractBadgeTone): string {
+  switch (tone) {
+    case 'exact':
+      return 'Exact preview';
+    case 'stale':
+      return 'Stale preview';
+    case 'unverified':
+      return 'Unverified preview';
+  }
+}
+
+function contractBadgeClass(tone: ContractBadgeTone): string {
+  switch (tone) {
+    case 'exact':
+      return 'border-emerald-400/25 bg-emerald-950/65 text-emerald-300';
+    case 'stale':
+      return 'border-amber-400/25 bg-amber-950/70 text-amber-300';
+    case 'unverified':
+      return 'border-slate-400/20 bg-slate-950/65 text-slate-300';
+  }
+}
+
 export default function PreviewPlayer({
   videoRef,
   exactVideoRef,
@@ -63,6 +98,7 @@ export default function PreviewPlayer({
   isGap,
   error,
   previewStale,
+  playbackContract,
   clipZoom,
   onLoadedMetadata,
   onCanPlayThrough,
@@ -79,6 +115,7 @@ export default function PreviewPlayer({
 }: PreviewPlayerProps) {
   const isExact = previewMode === 'rendered_exact';
   const isSource = previewMode === 'source_approx';
+  const badgeTone = contractBadgeTone(playbackContract, previewStale, previewMode);
 
   return (
     <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
@@ -197,14 +234,15 @@ export default function PreviewPlayer({
       ) : null}
 
       {/* Mode indicator */}
-      <div className="pointer-events-none absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-[#cbd5e1]">
+      <div
+        className={`pointer-events-none absolute top-2 left-2 flex items-center gap-1.5 border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] ${contractBadgeClass(badgeTone)}`}
+        title={playbackContract?.recommendation}
+      >
         <span
           className={`h-1.5 w-1.5 rounded-full ${modeDotColor(previewMode, isPlaying)}`}
         />
-        {modeLabel(previewMode)}
-        {previewStale && previewMode === 'source_approx' ? (
-          <span className="ml-1 text-[color:var(--warning)]">stale</span>
-        ) : null}
+        {contractBadgeLabel(badgeTone)}
+        <span className="ml-1 text-slate-400">{modeLabel(previewMode)}</span>
       </div>
 
       {/* Error bar */}

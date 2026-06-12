@@ -28,6 +28,19 @@ interface SourceMapDoc {
   }>;
 }
 
+type PlaybackContractModule = {
+  evaluatePlaybackContract: (projectPath: string) => unknown;
+};
+
+async function evaluateRuntimePlaybackContract(projectPath: string): Promise<unknown> {
+  const runtimeModuleUrl = new URL(
+    "../../../runtime/preview/playback-contract.js",
+    import.meta.url,
+  ).href;
+  const mod = await import(runtimeModuleUrl) as PlaybackContractModule;
+  return mod.evaluatePlaybackContract(projectPath);
+}
+
 // ── Route factory ────────────────────────────────────────────────────
 
 export function createPreviewRouter(
@@ -193,6 +206,25 @@ export function createPreviewRouter(
     });
   });
 
+  // ── GET /api/projects/:id/preview/contract ────────────────────────
+  router.get("/:id/preview/contract", async (req, res) => {
+    const projectId = req.params.id;
+    const projDir = safeProjectDir(projectsDir, projectId);
+    if (!projDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+
+    try {
+      res.json(await evaluateRuntimePlaybackContract(projDir));
+    } catch (err) {
+      res.status(500).json({
+        error: "Playback contract evaluation failed",
+        details: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   // ── GET /api/projects/:id/preview/previews/:filename ───────────────
   router.get("/:id/preview/previews/:filename", (req, res) => {
     const projDir = safeProjectDir(projectsDir, req.params.id);
@@ -235,8 +267,8 @@ export function createPreviewRouter(
 
     const filename = req.params.filename;
 
-    // "status" and "previews" are handled by other routes
-    if (filename === "status" || filename === "previews") {
+    // "status", "contract", and "previews" are handled by other routes
+    if (filename === "status" || filename === "contract" || filename === "previews") {
       res.status(404).json({ error: "Not found" });
       return;
     }
