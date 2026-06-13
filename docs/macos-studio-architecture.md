@@ -325,6 +325,7 @@ Next slices:
 
 The product is not done on a green build alone. Each milestone needs at least:
 
+- `npm run verify` — the aggregate Node gate (typecheck, full vitest, demo schema validation, demo review metrics). `npm run verify -- --full` additionally runs the golden agreement eval (`eval --all --min-score`) and the PARITY=1 preview/final render-parity suite. Agents should treat a red verify as "not done".
 - Swift build for GUI and CLI.
 - Node `npm run build`.
 - Schema validation for demo artifacts.

@@ -10,6 +10,7 @@
     "validate": "tsx scripts/validate-schemas.ts projects/demo",
     "validate:all-local": "tsx scripts/validate-schemas.ts",
     "test": "vitest run",
+    "verify": "tsx scripts/verify.ts",
     "build": "tsc",
     "preview": "tsx scripts/preview-segment.ts",
     "export:premiere": "tsx scripts/export-premiere-xml.ts",
