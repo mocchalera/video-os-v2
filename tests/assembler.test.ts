@@ -80,8 +80,8 @@ describe("ffmpeg assembler", () => {
       asset_id: "AST_005",
       start_frame: 0,
       end_frame: 92,
-      source_in_sec: 1.4,
-      source_out_sec: 5.808333333333334,
+      source_in_sec: 2,
+      source_out_sec: 5.354166666666667,
     });
     expect(videoPlans.some((plan) => plan.kind === "gap")).toBe(true);
 

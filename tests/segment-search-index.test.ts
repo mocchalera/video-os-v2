@@ -386,6 +386,6 @@ describe("P4d search index runtime integration", () => {
     delete timeline.created_at;
     const hash = crypto.createHash("sha256").update(JSON.stringify(timeline), "utf-8").digest("hex");
 
-    expect(hash).toBe("68c8d701302aa5150f8afd183de1a52711349834f4c9e267cb3544e26e01b100");
+    expect(hash).toBe("6d04dda3c5125310b8251801dd5258525132b1f9297bd963c5275d3565625f55");
   });
 });

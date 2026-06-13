@@ -5,7 +5,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { compile } from "../runtime/compiler/index.js";
 import { resolve } from "../runtime/compiler/resolve.js";
 import { validateProject } from "../scripts/validate-schemas.js";
-import type { AssembledTimeline, Candidate, TimelineClip } from "../runtime/compiler/types.js";
+import type { AssembledTimeline, Candidate, ClipOutput, TimelineClip } from "../runtime/compiler/types.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -147,14 +147,28 @@ describe("Timeline Compiler", () => {
 
   it("no duplicate source-range usage across all tracks", () => {
     const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
-    const allClips = [
-      ...result.timeline.tracks.video.flatMap((t) => t.clips),
-      ...result.timeline.tracks.audio.flatMap((t) => t.clips),
+    const videoClips = result.timeline.tracks.video.flatMap((t) => t.clips);
+    const audioClips = result.timeline.tracks.audio.flatMap((t) => t.clips);
+
+    // A1 nat-sound mirrors intentionally reuse their video clip's source range
+    // (addOriginalAudioForVideoClips), so they are excluded from the duplicate
+    // check but must each map back to an actual video clip.
+    // ClipOutput covers both the assembled (TimelineClip) and exported shapes here.
+    const usageKey = (c: ClipOutput) => `${c.segment_id}:${c.src_in_us}:${c.src_out_us}`;
+    const natSoundMirrors = audioClips.filter((c) => c.motivation === "original clip audio");
+    const editorialClips = [
+      ...videoClips,
+      ...audioClips.filter((c) => c.motivation !== "original clip audio"),
     ];
 
-    const usageKeys = allClips.map((c) => `${c.segment_id}:${c.src_in_us}:${c.src_out_us}`);
+    const usageKeys = editorialClips.map(usageKey);
     const unique = new Set(usageKeys);
     expect(usageKeys.length).toBe(unique.size);
+
+    const videoKeys = new Set(videoClips.map(usageKey));
+    for (const mirror of natSoundMirrors) {
+      expect(videoKeys.has(usageKey(mirror))).toBe(true);
+    }
   });
 
   it("all clips have src_in_us < src_out_us", () => {

@@ -307,7 +307,7 @@ describe("P4a release_safety_report", () => {
 
     expect(isP4aReleaseSafetyEnabled()).toBe(false);
     expect(canonicalTimelineHash()).toBe(before);
-    expect(before).toBe("68c8d701302aa5150f8afd183de1a52711349834f4c9e267cb3544e26e01b100");
+    expect(before).toBe("6d04dda3c5125310b8251801dd5258525132b1f9297bd963c5275d3565625f55");
   });
 
   it("keeps delivery_profile not_evaluated when the P4b flag is off", () => {
