@@ -141,10 +141,13 @@ describe("produceAssembly", () => {
     outputPath: "/tmp/assembly.mp4",
   };
 
-  it("throws for the unwired ffmpeg engine", async () => {
+  it("routes the ffmpeg engine to the deterministic assembler", async () => {
+    // The ffmpeg engine is wired (cross-path parity work): the orchestrator
+    // must dispatch to assembleTimelineToMp4, which fails on the missing
+    // timeline file rather than rejecting the engine choice.
     await expect(
       produceAssembly({ ...baseOpts, engine: "ffmpeg" }),
-    ).rejects.toThrow("ffmpeg assembly engine is not yet wired");
+    ).rejects.toThrow(/ENOENT|timeline/);
   });
 
   it("throws when no engine resolves", async () => {

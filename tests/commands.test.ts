@@ -1948,7 +1948,7 @@ describe("/review command", () => {
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/timeline.json"))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/review-qc-summary.json"))).toBe(true);
       // Preview steps: compile, preview (skipped due to no source files), qc
-      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc"]);
+      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics"]);
       // No source files in test fixture → preview degrades gracefully
       expect(result.preflight!.steps[1].status).toBe("skipped");
       // Gap report contains overview and/or preview degradation messages
@@ -1969,7 +1969,7 @@ describe("/review command", () => {
 
       expect(result.success).toBe(true);
       expect(result.preflight).toBeDefined();
-      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc"]);
+      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics"]);
       expect(result.preflight!.steps[1].status).toBe("skipped");
       expect(result.preflight!.steps[1].detail).toContain("--skip-preview");
       expect(result.preflight!.gapReport[0]).toContain("skipped via --skip-preview");

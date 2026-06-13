@@ -642,7 +642,7 @@ describe("Pipeline: VLM enrichment integration", () => {
       const conf = seg.confidence as Record<string, { score: number; source: string; status: string }>;
       expect(conf.summary.score).toBeGreaterThanOrEqual(0);
       expect(conf.summary.score).toBeLessThanOrEqual(1);
-      expect(conf.summary.source).toBe("gemini-2.0-flash");
+      expect(conf.summary.source).toBe("gemini-2.5-flash-lite");
       expect(conf.summary.status).toBe("ready");
     }
   });
@@ -658,7 +658,7 @@ describe("Pipeline: VLM enrichment integration", () => {
       expect(prov.summary.method).toBe("gemini_frame_bundle");
       expect(prov.summary.connector_version).toBe(VLM_CONNECTOR_VERSION);
       expect(prov.summary.prompt_hash).toMatch(/^[0-9a-f]{16}$/);
-      expect(prov.summary.model_alias).toBe("gemini-2.0-flash");
+      expect(prov.summary.model_alias).toBe("gemini-2.5-flash-lite");
     }
   });
 

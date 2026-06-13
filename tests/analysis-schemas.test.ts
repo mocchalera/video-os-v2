@@ -579,8 +579,9 @@ describe("M2 Phase 1 — analysis schemas", () => {
       expect(vlm.model_snapshot).toBe("gemini-2.0-flash-20250301");
       expect(parallelism.vlm_jobs).toBe(4);
 
-      // Non-overridden values preserved
-      expect(vlm.model_alias).toBe("gemini-2.0-flash");
+      // Non-overridden values preserved (default moved off the sunset
+      // gemini-2.0-flash to the cost-effective vision tier)
+      expect(vlm.model_alias).toBe("gemini-2.5-flash-lite");
       expect(parallelism.ffmpeg_jobs).toBe(4);
       expect(parallelism.stt_jobs).toBe(2);
     });
