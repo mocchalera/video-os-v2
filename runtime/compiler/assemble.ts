@@ -107,19 +107,29 @@ export function assemble(
     });
 
     if (isGuide) {
-      // Guide mode: place ALL available support/texture clips
+      // Guide mode: place available support/texture clips as V2 inserts,
+      // SEQUENCED within the beat window. Previously every insert was
+      // placed at `currentFrame`, so a beat with N support/texture
+      // candidates stacked N clips at the identical start time — e.g.
+      // five clips all at 170.0s — which is not a playable overlay, just
+      // an overflow dump. Each insert now starts where the previous one
+      // ended and the run is capped at the beat boundary; surplus
+      // candidates are left unused (and stay available to later beats).
       const allSupport = pickAvailable(
         supportCandidates,
         usedClips,
         prevV2Asset,
         params.adjacency_penalty,
       );
+      const beatEndFrame = currentFrame + beat.target_duration_frames;
+      let v2Frame = currentFrame;
       for (const sc of allSupport) {
+        if (v2Frame >= beatEndFrame) break; // keep V2 inserts inside the beat
         const clip = makeClip(
           sc,
           beat.beat_id,
-          currentFrame,
-          beat.target_duration_frames,
+          v2Frame,
+          beatEndFrame - v2Frame,
           ++clipCounter,
           { segment_ids: [], candidate_refs: [] },
           usPerFrame,
@@ -127,6 +137,7 @@ export function assemble(
         v2Clips.push(clip);
         usedClips.add(clipUsageKey(sc.candidate));
         prevV2Asset = sc.candidate.asset_id;
+        v2Frame += clip.timeline_duration_frames; // sequence, do not stack
       }
     } else {
       // Strict mode: pick best 1
