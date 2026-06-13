@@ -289,6 +289,26 @@ describe("llm judge plumbing", () => {
     expect(prompt).toContain("agreement_with_golden");
   });
 
+  it("frames multi-track video as layered overlay, not overlapping clips", () => {
+    // Regression: the judge once scored a V1+V2 overlay edit 0/10, calling
+    // it "unplayable — multiple clips at the same start time". The prompt
+    // must label upper tracks as overlay and sort within a track by time.
+    const multi = clone(demoTimeline) as TimelineIR;
+    const base = multi.tracks.video[0];
+    multi.tracks.video.push({
+      track_id: "V2",
+      kind: "video",
+      clips: [
+        { ...base.clips[0], clip_id: "OV_0001", timeline_in_frame: base.clips[0].timeline_in_frame },
+      ],
+    });
+    const prompt = buildJudgePrompt({ brief: null, golden: demoTimeline, candidate: multi });
+    expect(prompt).toContain("Video track V2");
+    expect(prompt).toContain("overlay");
+    // Both the description block and the rubric warn against the misread.
+    expect(prompt.match(/overlay/gi)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
   it("extracts RetryInfo delays from 429 bodies", () => {
     const body = '{"error": {"details": [{"@type": ".../RetryInfo", "retryDelay": "46s"}]}}';
     expect(parseRetryDelayMs(body)).toBe(46_000);

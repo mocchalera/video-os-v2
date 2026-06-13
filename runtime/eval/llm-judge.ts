@@ -22,13 +22,27 @@ interface JudgeInput {
 
 function describeTimeline(timeline: TimelineIR): string {
   const fps = timeline.sequence.fps_num / (timeline.sequence.fps_den || 1);
+  const videoTracks = timeline.tracks.video ?? [];
   const lines: string[] = [];
-  for (const track of timeline.tracks.video ?? []) {
-    for (const clip of track.clips) {
+  // Group by track and sort within a track by start time. Without this the
+  // judge sees V1 then V2 clips interleaved out of order and misreads an
+  // overlay layer (V2 B-roll over V1) as multiple clips "at the same start
+  // time" — i.e. an unplayable cut — when it is a normal multi-track edit.
+  if (videoTracks.length > 1) {
+    lines.push(
+      `(Multi-track edit: V1 is the base cut; V2+ are overlay/B-roll layered ON TOP of V1, played simultaneously — not a sequential-playback error.)`,
+    );
+  }
+  for (const track of videoTracks) {
+    lines.push(`Video track ${track.track_id} (${track.clips.length} clips):`);
+    const clips = [...track.clips].sort(
+      (a, b) => a.timeline_in_frame - b.timeline_in_frame,
+    );
+    for (const clip of clips) {
       const start = (clip.timeline_in_frame / fps).toFixed(1);
       const dur = (clip.timeline_duration_frames / fps).toFixed(1);
       lines.push(
-        `- [${clip.beat_id}] ${start}s +${dur}s role=${clip.role} segment=${clip.segment_id} motivation="${clip.motivation}"`,
+        `  [${track.track_id} ${clip.beat_id}] ${start}s +${dur}s role=${clip.role} segment=${clip.segment_id} motivation="${clip.motivation}"`,
       );
     }
   }
@@ -60,6 +74,7 @@ export function buildJudgePrompt(input: JudgeInput): string {
     describeTimeline(input.candidate),
     "",
     "## Scoring rubric (0-10 each, integers)",
+    "Multiple video tracks (V1, V2, ...) are layered, not sequential: V2+ clips play ON TOP of V1 as overlay/B-roll. Do NOT treat overlapping start times across tracks as a playback error.",
     "- emotion: does the candidate preserve the emotional arc the brief asks for?",
     "- story: does the clip order tell the intended story (setup → experience → payoff)?",
     "- rhythm: is the pacing of cut lengths appropriate for the cadence and channel?",
