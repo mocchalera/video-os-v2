@@ -22,7 +22,7 @@ import {
   type TransitionChainTimelineInput,
   type TransitionSpec,
 } from "../../shared/filtergraph.js";
-import { buildAssForceStyle } from "../../shared/caption-style-tokens.js";
+import { buildAssDocument, parseSrtCues } from "../../shared/caption-style-tokens.js";
 import { INTERMEDIATE_X264, x264Args } from "../../shared/encode-profiles.js";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -990,19 +990,24 @@ export class PreviewJobService {
         const srtPath = path.join(tmpDir, "captions.srt");
         fs.writeFileSync(srtPath, srtContent, "utf-8");
 
-        const forceStyle = buildAssForceStyle(
-          spec.text.stylePreset, { width, height, fps },
+        // Parity: convert the SRT to a styled ASS via the same builder the
+        // final render uses (buildAssDocument). The explicit PlayResX/Y +
+        // preset produce identical caption position/wrap across paths, where
+        // SRT + force_style alone left libass on its 384x288 default PlayRes.
+        const assContent = buildAssDocument(
+          parseSrtCues(srtContent),
+          spec.text.stylePreset,
+          { width, height, fps },
         );
-        const escapedSrt = srtPath
+        const assPath = path.join(tmpDir, "captions.ass");
+        fs.writeFileSync(assPath, assContent, "utf-8");
+        const escapedAss = assPath
           .replace(/\\/g, "\\\\")
           .replace(/:/g, "\\:")
           .replace(/'/g, "'\\''");
 
         finalArgs.push(
-          // Parity: same force_style AND same original_size as the final
-          // path's burn (runtime/render/pipeline.burnCaptions). original_size
-          // pins ASS PlayRes to the real frame so MarginV/alignment match.
-          "-vf", `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${forceStyle}'`,
+          "-vf", `subtitles='${escapedAss}'`,
           // Caption burn is the only re-encode of the artifact — it must use
           // the same profile as the final path's burn.
           ...x264Args(INTERMEDIATE_X264),

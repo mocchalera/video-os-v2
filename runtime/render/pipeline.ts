@@ -23,7 +23,8 @@ import {
 import type { RenderVideoClip } from "../../editor/shared/render-spec.js";
 import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 import {
-  buildAssForceStyle,
+  buildAssDocument,
+  parseSrtCues,
   resolveCaptionStylePreset,
 } from "../../editor/shared/caption-style-tokens.js";
 import {
@@ -305,27 +306,28 @@ export async function burnCaptions(
 ): Promise<string> {
   ensureDir(path.dirname(outputPath));
 
-  // Escape path separators for the subtitles filter
-  const escapedSrtPath = srtPath
+  // Parity: the exact preview and the final burn share buildAssDocument, so
+  // captions render identically. burn-in converts the SRT to a styled ASS
+  // with an explicit PlayResX/Y header — SRT + force_style alone leaves
+  // libass on its 384x288 default PlayRes, which scaled MarginV up and
+  // floated a bottom lower-third into mid-frame. styling_class selects the
+  // per-project preset (position/width/wrap); unknown classes fall back to
+  // the default. When no sequence is given, fall back to plain SRT burn.
+  let subtitlePath = srtPath;
+  if (sequence) {
+    const preset = resolveCaptionStylePreset(stylingClass);
+    const srtContent = fs.readFileSync(srtPath, "utf-8");
+    const assContent = buildAssDocument(parseSrtCues(srtContent), preset, sequence);
+    subtitlePath = srtPath.replace(/\.srt$/i, "") + ".burn.ass";
+    fs.writeFileSync(subtitlePath, assContent, "utf-8");
+  }
+
+  const escapedSubtitlePath = subtitlePath
     .replace(/\\/g, "\\\\")
     .replace(/:/g, "\\:")
     .replace(/'/g, "'\\''");
 
-  // Parity: the exact preview burns with the shared caption style preset
-  // and the shared intermediate encode profile — the final burn must match
-  // or the operator approves captions that render differently.
-  //
-  // original_size pins the ASS PlayRes to the real frame, so MarginV and the
-  // alignment are interpreted at the sequence resolution rather than ffmpeg's
-  // 384x288 default — without it a bottom-center lower-third floated up into
-  // mid-frame. styling_class selects the per-project preset (position/width/
-  // wrap); unknown classes fall back to the default preset.
-  let vf = `subtitles='${escapedSrtPath}'`;
-  if (sequence) {
-    const preset = resolveCaptionStylePreset(stylingClass);
-    const forceStyle = buildAssForceStyle(preset, sequence);
-    vf += `:original_size=${sequence.width}x${sequence.height}:force_style='${forceStyle}'`;
-  }
+  const vf = `subtitles='${escapedSubtitlePath}'`;
 
   await execFilePromise("ffmpeg", [
     "-y",

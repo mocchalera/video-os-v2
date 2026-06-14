@@ -4,6 +4,8 @@ import {
   CAPTION_STYLE_PRESETS,
   resolveCaptionStylePreset,
   buildAssForceStyle,
+  buildAssDocument,
+  parseSrtCues,
 } from "../editor/shared/caption-style-tokens.js";
 
 /**
@@ -54,5 +56,32 @@ describe("caption style preset registry", () => {
     );
     // 36 * (720/1080) = 24
     expect(style720).toContain("MarginV=24");
+  });
+});
+
+describe("ASS document generation (burn-in)", () => {
+  it("pins PlayRes to the frame and carries preset style + WrapStyle", () => {
+    const ass = buildAssDocument(
+      [{ startSec: 1, endSec: 3.5, text: "行1\n行2" }],
+      resolveCaptionStylePreset("clean-lower-third"),
+      { width: 1920, height: 1080, fps: 30 },
+    );
+    expect(ass).toContain("PlayResX: 1920");
+    expect(ass).toContain("PlayResY: 1080");
+    expect(ass).toContain("WrapStyle: 2");
+    // Style row ends with ...,Alignment,MarginL,MarginR,MarginV,Encoding
+    expect(ass).toMatch(/Style: Default,Arial,24,[^\n]*,2,96,96,36,1/);
+    expect(ass).toContain(
+      "Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,行1\\N行2",
+    );
+  });
+
+  it("parseSrtCues round-trips timing and manual line breaks", () => {
+    const srt =
+      "1\n00:00:01,000 --> 00:00:03,500\nA\nB\n\n2\n00:00:04,000 --> 00:00:05,000\nC\n";
+    const cues = parseSrtCues(srt);
+    expect(cues).toHaveLength(2);
+    expect(cues[0]).toMatchObject({ startSec: 1, endSec: 3.5, text: "A\nB" });
+    expect(cues[1]).toMatchObject({ startSec: 4, endSec: 5, text: "C" });
   });
 });

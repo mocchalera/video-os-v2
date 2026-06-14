@@ -165,6 +165,108 @@ export function buildAssForceStyle(
   return parts.join(",");
 }
 
+// ── Full ASS document builder ────────────────────────────────────────
+
+/** ASS timestamp: H:MM:SS.cc (centiseconds). */
+function assTimestamp(seconds: number): string {
+  const cs = Math.max(0, Math.round(seconds * 100));
+  const h = Math.floor(cs / 360000);
+  const m = Math.floor((cs % 360000) / 6000);
+  const s = Math.floor((cs % 6000) / 100);
+  const c = cs % 100;
+  return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(c).padStart(2, "0")}`;
+}
+
+export interface AssCaptionCue {
+  startSec: number;
+  endSec: number;
+  /** May contain "\n" for manual line breaks (converted to ASS "\N"). */
+  text: string;
+}
+
+/**
+ * Build a complete ASS subtitle document with an explicit PlayResX/Y header.
+ *
+ * burn-in MUST use this rather than SRT + force_style: when ffmpeg converts
+ * an SRT it gives libass a default 384x288 PlayRes, so MarginV is scaled up
+ * (e.g. 36 -> ~135px) and a bottom lower-third floats into mid-frame.
+ * Pinning PlayResX/Y to the real frame makes MarginV/alignment exact, and
+ * the style carries WrapStyle so approved line layout is preserved. The same
+ * builder feeds the exact preview and the final render, keeping parity.
+ */
+export function buildAssDocument(
+  cues: AssCaptionCue[],
+  preset: CaptionStylePreset,
+  sequence: SequenceInfo,
+): string {
+  const scale = sequence.height / 1080;
+  const fontSize = Math.round(preset.fontSizePx1080 * scale);
+  const outline = Math.round(preset.outlinePx1080 * scale * 10) / 10;
+  const shadow = Math.round(preset.shadowPx1080 * scale * 10) / 10;
+  const marginV = Math.round(preset.marginV1080 * scale);
+  const marginH = Math.round((sequence.width * (1 - preset.maxWidthRatio)) / 2);
+  const primary = rgbaToAss(preset.fillRgba);
+  const outlineColour = rgbaToAss(preset.outlineRgba);
+  const bold = preset.fontWeight >= 700 ? -1 : 0; // ASS: -1 = true
+  const alignment = assAlignment(preset.alignment);
+  const wrapStyle = preset.wrapStyle ?? 0;
+
+  const lines: string[] = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    `PlayResX: ${sequence.width}`,
+    `PlayResY: ${sequence.height}`,
+    `WrapStyle: ${wrapStyle}`,
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: Default,${preset.fontFamily},${fontSize},${primary},${primary},${outlineColour},&H00000000,${bold},0,0,0,100,100,0,0,1,${outline},${shadow},${alignment},${marginH},${marginH},${marginV},1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+  ];
+
+  for (const cue of cues) {
+    const text = cue.text.replace(/\r?\n/g, "\\N");
+    lines.push(
+      `Dialogue: 0,${assTimestamp(cue.startSec)},${assTimestamp(cue.endSec)},Default,,0,0,0,,${text}`,
+    );
+  }
+
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Parse SRT content into ASS cues. Lets the existing SRT generators stay
+ * unchanged: the render path keeps producing the sidecar SRT and converts
+ * it to a styled ASS just before burn-in via buildAssDocument.
+ */
+export function parseSrtCues(srt: string): AssCaptionCue[] {
+  const cues: AssCaptionCue[] = [];
+  const toSec = (h: string, m: string, s: string, ms: string): number =>
+    Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000;
+  for (const block of srt.trim().split(/\r?\n\s*\r?\n/)) {
+    const blockLines = block.split(/\r?\n/);
+    const timeIdx = blockLines.findIndex((l) =>
+      /\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(l),
+    );
+    if (timeIdx === -1) continue;
+    const m = blockLines[timeIdx].match(
+      /(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2}),(\d{3})/,
+    );
+    if (!m) continue;
+    const text = blockLines.slice(timeIdx + 1).join("\n").trim();
+    if (!text) continue;
+    cues.push({
+      startSec: toSec(m[1], m[2], m[3], m[4]),
+      endSec: toSec(m[5], m[6], m[7], m[8]),
+      text,
+    });
+  }
+  return cues;
+}
+
 // ── CSS style builder ────────────────────────────────────────────────
 
 /**
