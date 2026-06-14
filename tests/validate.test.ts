@@ -1000,12 +1000,22 @@ describe("validate-schemas", () => {
       expect(transcriptViolations).toHaveLength(0);
     });
 
-    it("validates rokutaro-growth-20260323 manual artifacts in standard profile", () => {
-      const result = validateProject("projects/rokutaro-growth-20260323");
+    // This is a compatibility check against a real, operator-local project
+    // that is gitignored (projects/* is ignored except demo/sample/_template),
+    // so it is absent in a fresh checkout / CI / worktree. Skip when missing
+    // rather than fail, so `npm run verify` is a trustworthy gate everywhere —
+    // it still runs wherever the operator actually has the project on disk.
+    const MANUAL_COMPAT_PROJECT = "projects/rokutaro-growth-20260323";
+    const manualCompatIt = fs.existsSync(MANUAL_COMPAT_PROJECT) ? it : it.skip;
+    manualCompatIt(
+      "validates rokutaro-growth-20260323 manual artifacts in standard profile",
+      () => {
+        const result = validateProject(MANUAL_COMPAT_PROJECT);
 
-      expect(result.valid).toBe(true);
-      expect(result.error_count).toBe(0);
-      expect(result.violations).toHaveLength(0);
-    });
+        expect(result.valid).toBe(true);
+        expect(result.error_count).toBe(0);
+        expect(result.violations).toHaveLength(0);
+      },
+    );
   });
 });
