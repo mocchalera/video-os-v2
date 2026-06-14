@@ -50,6 +50,8 @@ Thumbs.db
 projects/*
 !projects/_template/
 !projects/demo/
+!projects/sample/
+!projects/sample/**
 projects/demo/project_state.yaml
 projects/*/03_analysis/search/
 projects/*/09_output/
