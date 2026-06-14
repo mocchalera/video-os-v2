@@ -143,6 +143,12 @@
       "enum": ["chronological", "editorial"],
       "default": "editorial",
       "description": "Clip ordering strategy: chronological sorts by source timestamp, editorial uses score-based placement"
+    },
+    "track_layout": {
+      "type": "string",
+      "enum": ["single", "multi"],
+      "default": "single",
+      "description": "Video track layout: single keeps hero/support/texture on V1, multi preserves V2 inserts"
     }
   },
   "$defs": {

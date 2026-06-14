@@ -4,6 +4,7 @@
 // ── Duration Mode types ─────────────────────────────────────────────
 
 export type DurationMode = "strict" | "guide";
+export type TrackLayout = "single" | "multi";
 export type CaptionPolicySource = "transcript" | "authored" | "none";
 export type BriefCaptionPolicy = "auto" | "manual" | "off";
 export type BriefAudioPolicy = "ducking" | "bgm_only" | "original_only";
@@ -185,6 +186,8 @@ export interface EditBlueprint {
   duration_policy?: DurationPolicy;
   // Timeline ordering: chronological (source timestamp) or editorial (score-based)
   timeline_order?: "chronological" | "editorial";
+  // Track layout: single keeps visual story on V1; multi preserves overlay-style V2 inserts.
+  track_layout?: TrackLayout;
   [key: string]: unknown;
 }
 
