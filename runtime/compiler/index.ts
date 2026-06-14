@@ -144,6 +144,7 @@ export function compile(opts: CompileOptions): CompileResult {
   );
   const audioPolicy = resolveAudioPolicy(brief, blueprint, repoRoot);
   const captionPolicy = resolveCaptionPolicy(brief, blueprint, repoRoot);
+  const trackLayout = blueprint.track_layout ?? "single";
 
   // ── Phase 1: Normalize ────────────────────────────────────────────
 
@@ -203,6 +204,7 @@ export function compile(opts: CompileOptions): CompileResult {
   const assembled = assemble(normalized, rankedTable, defaults.scoring, fpsNum, fpsDen, durationPolicy, {
     timelineOrder,
     beatOrder: normalized.beats.map((beat) => beat.beat_id),
+    trackLayout,
     audioPolicy: audioPolicy.mode,
     a1Loudnorm: audioPolicy.a1_loudnorm,
     bgmAssetId: blueprint.music_policy.bgm_asset_id,

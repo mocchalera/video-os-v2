@@ -19,12 +19,14 @@ import type {
   ScoringParams,
   TimelineClip,
   Track,
+  TrackLayout,
 } from "./types.js";
 import { getCandidateRef } from "./candidate-ref.js";
 
 export interface AssembleOptions {
   timelineOrder?: "chronological" | "editorial";
   beatOrder?: string[];
+  trackLayout?: TrackLayout;
   audioPolicy?: BriefAudioPolicy;
   a1Loudnorm?: boolean;
   bgmAssetId?: string;
@@ -42,6 +44,7 @@ export function assemble(
   options?: AssembleOptions,
 ): AssembledTimeline {
   const isGuide = durationPolicy?.mode === "guide";
+  const layout = options?.trackLayout ?? "single";
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const v1Clips: TimelineClip[] = []; // primary narrative (hero)
   const v2Clips: TimelineClip[] = []; // support / inserts
@@ -72,94 +75,124 @@ export function assemble(
     // Collect candidates by role for this beat, applying adjacency penalty
     const byRole = groupByRole(beatCandidates);
 
-    // V1: hero clips (always pick best 1)
-    const heroClip = pickBest(
-      byRole.get("hero") ?? [],
-      usedClips,
-      prevV1Asset,
-      params.adjacency_penalty,
-    );
-    if (heroClip) {
-      const clip = makeClip(
-        heroClip,
-        beat.beat_id,
-        currentFrame,
-        beat.target_duration_frames,
-        ++clipCounter,
-        getRunnersUp(byRole.get("hero") ?? [], heroClip, usedClips),
-        usPerFrame,
-      );
-      v1Clips.push(clip);
-      usedClips.add(clipUsageKey(heroClip.candidate));
-      prevV1Asset = heroClip.candidate.asset_id;
-    }
-
-    // V2: support + texture clips
-    const supportCandidates = [
-      ...(byRole.get("support") ?? []),
-      ...(byRole.get("texture") ?? []),
-    ];
-    // Re-sort after merging (stable sort)
-    supportCandidates.sort((a, b) => {
-      const diff = b.score - a.score;
-      if (diff !== 0) return diff;
-      return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
-    });
-
-    if (isGuide) {
-      // Guide mode: place available support/texture clips as V2 inserts,
-      // SEQUENCED within the beat window. Previously every insert was
-      // placed at `currentFrame`, so a beat with N support/texture
-      // candidates stacked N clips at the identical start time — e.g.
-      // five clips all at 170.0s — which is not a playable overlay, just
-      // an overflow dump. Each insert now starts where the previous one
-      // ended and the run is capped at the beat boundary; surplus
-      // candidates are left unused (and stay available to later beats).
-      const allSupport = pickAvailable(
-        supportCandidates,
-        usedClips,
-        prevV2Asset,
-        params.adjacency_penalty,
-      );
+    if (layout === "single") {
+      const visualCandidates = getV1FirstCandidates(byRole);
       const beatEndFrame = currentFrame + beat.target_duration_frames;
-      let v2Frame = currentFrame;
-      for (const sc of allSupport) {
-        if (v2Frame >= beatEndFrame) break; // keep V2 inserts inside the beat
+      let v1Frame = currentFrame;
+
+      while (v1Frame < beatEndFrame) {
+        const visualClip: ScoredCandidate | undefined = pickAvailableV1First(
+          visualCandidates,
+          usedClips,
+          prevV1Asset,
+          params.adjacency_penalty,
+        )[0];
+        if (!visualClip) break;
+
         const clip = makeClip(
-          sc,
+          visualClip,
           beat.beat_id,
-          v2Frame,
-          beatEndFrame - v2Frame,
+          v1Frame,
+          beatEndFrame - v1Frame,
           ++clipCounter,
           { segment_ids: [], candidate_refs: [] },
           usPerFrame,
         );
-        v2Clips.push(clip);
-        usedClips.add(clipUsageKey(sc.candidate));
-        prevV2Asset = sc.candidate.asset_id;
-        v2Frame += clip.timeline_duration_frames; // sequence, do not stack
+        v1Clips.push(clip);
+        usedClips.add(clipUsageKey(visualClip.candidate));
+        prevV1Asset = visualClip.candidate.asset_id;
+        v1Frame += clip.timeline_duration_frames;
       }
     } else {
-      // Strict mode: pick best 1
-      const supportClip = pickBest(
-        supportCandidates,
+      // V1: hero clips (always pick best 1)
+      const heroClip = pickBest(
+        byRole.get("hero") ?? [],
         usedClips,
-        prevV2Asset,
+        prevV1Asset,
         params.adjacency_penalty,
       );
-      if (supportClip) {
+      if (heroClip) {
         const clip = makeClip(
-          supportClip,
+          heroClip,
           beat.beat_id,
           currentFrame,
           beat.target_duration_frames,
           ++clipCounter,
-          getRunnersUp(supportCandidates, supportClip, usedClips),
+          getRunnersUp(byRole.get("hero") ?? [], heroClip, usedClips),
           usPerFrame,
         );
-        v2Clips.push(clip);
-        usedClips.add(clipUsageKey(supportClip.candidate));
-        prevV2Asset = supportClip.candidate.asset_id;
+        v1Clips.push(clip);
+        usedClips.add(clipUsageKey(heroClip.candidate));
+        prevV1Asset = heroClip.candidate.asset_id;
+      }
+
+      // V2: support + texture clips
+      const supportCandidates = [
+        ...(byRole.get("support") ?? []),
+        ...(byRole.get("texture") ?? []),
+      ];
+      // Re-sort after merging (stable sort)
+      supportCandidates.sort((a, b) => {
+        const diff = b.score - a.score;
+        if (diff !== 0) return diff;
+        return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
+      });
+
+      if (isGuide) {
+        // Guide mode: place available support/texture clips as V2 inserts,
+        // SEQUENCED within the beat window. Previously every insert was
+        // placed at `currentFrame`, so a beat with N support/texture
+        // candidates stacked N clips at the identical start time — e.g.
+        // five clips all at 170.0s — which is not a playable overlay, just
+        // an overflow dump. Each insert now starts where the previous one
+        // ended and the run is capped at the beat boundary; surplus
+        // candidates are left unused (and stay available to later beats).
+        const allSupport = pickAvailable(
+          supportCandidates,
+          usedClips,
+          prevV2Asset,
+          params.adjacency_penalty,
+        );
+        const beatEndFrame = currentFrame + beat.target_duration_frames;
+        let v2Frame = currentFrame;
+        for (const sc of allSupport) {
+          if (v2Frame >= beatEndFrame) break; // keep V2 inserts inside the beat
+          const clip = makeClip(
+            sc,
+            beat.beat_id,
+            v2Frame,
+            beatEndFrame - v2Frame,
+            ++clipCounter,
+            { segment_ids: [], candidate_refs: [] },
+            usPerFrame,
+          );
+          v2Clips.push(clip);
+          usedClips.add(clipUsageKey(sc.candidate));
+          prevV2Asset = sc.candidate.asset_id;
+          v2Frame += clip.timeline_duration_frames; // sequence, do not stack
+        }
+      } else {
+        // Strict mode: pick best 1
+        const supportClip = pickBest(
+          supportCandidates,
+          usedClips,
+          prevV2Asset,
+          params.adjacency_penalty,
+        );
+        if (supportClip) {
+          const clip = makeClip(
+            supportClip,
+            beat.beat_id,
+            currentFrame,
+            beat.target_duration_frames,
+            ++clipCounter,
+            getRunnersUp(supportCandidates, supportClip, usedClips),
+            usPerFrame,
+          );
+          v2Clips.push(clip);
+          usedClips.add(clipUsageKey(supportClip.candidate));
+          prevV2Asset = supportClip.candidate.asset_id;
+        }
       }
     }
 
@@ -207,26 +240,28 @@ export function assemble(
       }
     }
 
-    // Transition clips go to V2 as well
-    const transitionClip = pickBest(
-      byRole.get("transition") ?? [],
-      usedClips,
-      prevV2Asset,
-      params.adjacency_penalty,
-    );
-    if (transitionClip) {
-      const clip = makeClip(
-        transitionClip,
-        beat.beat_id,
-        currentFrame,
-        beat.target_duration_frames,
-        ++clipCounter,
-        getRunnersUp(byRole.get("transition") ?? [], transitionClip, usedClips),
-        usPerFrame,
+    if (layout === "multi") {
+      // Transition clips go to V2 as well
+      const transitionClip = pickBest(
+        byRole.get("transition") ?? [],
+        usedClips,
+        prevV2Asset,
+        params.adjacency_penalty,
       );
-      v2Clips.push(clip);
-      usedClips.add(clipUsageKey(transitionClip.candidate));
-      prevV2Asset = transitionClip.candidate.asset_id;
+      if (transitionClip) {
+        const clip = makeClip(
+          transitionClip,
+          beat.beat_id,
+          currentFrame,
+          beat.target_duration_frames,
+          ++clipCounter,
+          getRunnersUp(byRole.get("transition") ?? [], transitionClip, usedClips),
+          usPerFrame,
+        );
+        v2Clips.push(clip);
+        usedClips.add(clipUsageKey(transitionClip.candidate));
+        prevV2Asset = transitionClip.candidate.asset_id;
+      }
     }
 
     // Frame advancement
@@ -250,7 +285,7 @@ export function assemble(
   // ── Guide mode: global fill pass ────────────────────────────────────
   // Place any remaining unused candidates that appear in the ranked table.
   // This ensures material coverage (important for keepsake profiles).
-  if (isGuide) {
+  if (isGuide && layout === "multi") {
     const unusedMap = new Map<string, ScoredCandidate>();
     for (const [, scored] of rankedTable) {
       for (const sc of scored) {
@@ -450,6 +485,31 @@ function groupByRole(
   return groups;
 }
 
+const V1_FIRST_ROLE_PRIORITY = new Map([
+  ["hero", 0],
+  ["support", 1],
+  ["texture", 2],
+]);
+
+function getV1FirstCandidates(
+  byRole: Map<string, ScoredCandidate[]>,
+): ScoredCandidate[] {
+  return [
+    ...(byRole.get("hero") ?? []),
+    ...(byRole.get("support") ?? []),
+    ...(byRole.get("texture") ?? []),
+  ].sort(compareV1FirstCandidates);
+}
+
+function compareV1FirstCandidates(a: ScoredCandidate, b: ScoredCandidate): number {
+  const roleDiff = (V1_FIRST_ROLE_PRIORITY.get(a.candidate.role) ?? Number.MAX_SAFE_INTEGER) -
+    (V1_FIRST_ROLE_PRIORITY.get(b.candidate.role) ?? Number.MAX_SAFE_INTEGER);
+  if (roleDiff !== 0) return roleDiff;
+  const scoreDiff = b.score - a.score;
+  if (scoreDiff !== 0) return scoreDiff;
+  return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
+}
+
 /**
  * Unique key for a candidate's source range.
  * Uses segment_id + src_in_us + src_out_us so that different sub-ranges
@@ -512,6 +572,27 @@ function pickAvailable(
     if (diff !== 0) return diff;
     return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
   });
+
+  return available;
+}
+
+function pickAvailableV1First(
+  candidates: ScoredCandidate[],
+  usedClips: Set<string>,
+  prevAsset: string | null,
+  adjacencyPenalty: number,
+): ScoredCandidate[] {
+  const available = candidates
+    .filter((c) => !usedClips.has(clipUsageKey(c.candidate)))
+    .map((c) => {
+      let adjustedScore = c.score;
+      if (prevAsset !== null && c.candidate.asset_id === prevAsset) {
+        adjustedScore -= adjacencyPenalty;
+      }
+      return { ...c, score: adjustedScore };
+    });
+
+  available.sort(compareV1FirstCandidates);
 
   return available;
 }
