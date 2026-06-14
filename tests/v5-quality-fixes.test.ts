@@ -230,7 +230,9 @@ describe("v5 Fix 2: Guide Mode Clip Fill", () => {
   let tmpDir: string;
 
   beforeAll(() => {
-    tmpDir = createTempProject();
+    tmpDir = createTempProject({
+      blueprintOverrides: { track_layout: "multi" },
+    });
   });
 
   afterAll(() => {
