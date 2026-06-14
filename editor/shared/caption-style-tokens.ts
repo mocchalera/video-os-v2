@@ -27,6 +27,13 @@ export interface CaptionStylePreset {
   outlinePx1080: number;
   /** Shadow depth in pixels at 1080p reference */
   shadowPx1080: number;
+  /**
+   * ASS WrapStyle: 0=smart, 1=end-of-line, 2=no auto-wrap (manual breaks
+   * only), 3=smart-wide. Undefined leaves ffmpeg's default. Captions are
+   * already line-broken upstream (runtime/caption/line-breaker), so 2 keeps
+   * the approved 2-line layout instead of letting ffmpeg re-wrap to 3 lines.
+   */
+  wrapStyle?: 0 | 1 | 2 | 3;
   alignment: "bottom_center" | "center" | "top_center";
   /** Bottom margin in pixels at 1080p reference */
   marginV1080: number;
@@ -53,11 +60,42 @@ export const DEFAULT_CAPTION_STYLE_PRESET: CaptionStylePreset = {
   outlineRgba: "000000FF",
   outlinePx1080: 2,
   shadowPx1080: 0,
+  wrapStyle: 2,
   alignment: "bottom_center",
   marginV1080: 44,
   maxWidthRatio: 0.88,
   safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
 };
+
+// ── Preset registry (caption_policy.styling_class -> preset) ──────────
+
+/**
+ * Named presets selectable per project via caption_policy.styling_class.
+ * Lets operators tune subtitle position/width/wrap per work without code
+ * changes — pick a styling_class in the blueprint and the render path
+ * resolves it here. Unknown classes fall back to the default preset.
+ */
+export const CAPTION_STYLE_PRESETS: Record<string, CaptionStylePreset> = {
+  default: DEFAULT_CAPTION_STYLE_PRESET,
+  "clean-lower-third": {
+    ...DEFAULT_CAPTION_STYLE_PRESET,
+    presetId: "clean-lower-third",
+    marginV1080: 36,
+    maxWidthRatio: 0.9,
+    wrapStyle: 2,
+  },
+};
+
+/** Resolve a caption style preset from a caption_policy styling_class. */
+export function resolveCaptionStylePreset(stylingClass?: string): CaptionStylePreset {
+  if (
+    stylingClass &&
+    Object.prototype.hasOwnProperty.call(CAPTION_STYLE_PRESETS, stylingClass)
+  ) {
+    return CAPTION_STYLE_PRESETS[stylingClass];
+  }
+  return DEFAULT_CAPTION_STYLE_PRESET;
+}
 
 // ── ASS force_style builder ──────────────────────────────────────────
 
@@ -119,6 +157,10 @@ export function buildAssForceStyle(
     `MarginL=${Math.round(sequence.width * (1 - preset.maxWidthRatio) / 2)}`,
     `MarginR=${Math.round(sequence.width * (1 - preset.maxWidthRatio) / 2)}`,
   ];
+
+  if (preset.wrapStyle !== undefined) {
+    parts.push(`WrapStyle=${preset.wrapStyle}`);
+  }
 
   return parts.join(",");
 }

@@ -23,8 +23,8 @@ import {
 import type { RenderVideoClip } from "../../editor/shared/render-spec.js";
 import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 import {
-  DEFAULT_CAPTION_STYLE_PRESET,
   buildAssForceStyle,
+  resolveCaptionStylePreset,
 } from "../../editor/shared/caption-style-tokens.js";
 import {
   produceAssembly,
@@ -301,6 +301,7 @@ export async function burnCaptions(
   srtPath: string,
   outputPath: string,
   sequence?: { width: number; height: number; fps: number },
+  stylingClass?: string,
 ): Promise<string> {
   ensureDir(path.dirname(outputPath));
 
@@ -313,10 +314,17 @@ export async function burnCaptions(
   // Parity: the exact preview burns with the shared caption style preset
   // and the shared intermediate encode profile — the final burn must match
   // or the operator approves captions that render differently.
+  //
+  // original_size pins the ASS PlayRes to the real frame, so MarginV and the
+  // alignment are interpreted at the sequence resolution rather than ffmpeg's
+  // 384x288 default — without it a bottom-center lower-third floated up into
+  // mid-frame. styling_class selects the per-project preset (position/width/
+  // wrap); unknown classes fall back to the default preset.
   let vf = `subtitles='${escapedSrtPath}'`;
   if (sequence) {
-    const forceStyle = buildAssForceStyle(DEFAULT_CAPTION_STYLE_PRESET, sequence);
-    vf += `:force_style='${forceStyle}'`;
+    const preset = resolveCaptionStylePreset(stylingClass);
+    const forceStyle = buildAssForceStyle(preset, sequence);
+    vf += `:original_size=${sequence.width}x${sequence.height}:force_style='${forceStyle}'`;
   }
 
   await execFilePromise("ffmpeg", [
@@ -614,11 +622,13 @@ export async function runRenderPipeline(
     const captionedVideoPath = path.join(videoDir, "captioned_video.mp4");
     try {
       const seq = readTimelineSequenceConfig(opts.timelinePath);
-      await burnCaptions(rawVideoPath, srtForBurn, captionedVideoPath, {
-        width: seq.width,
-        height: seq.height,
-        fps,
-      });
+      await burnCaptions(
+        rawVideoPath,
+        srtForBurn,
+        captionedVideoPath,
+        { width: seq.width, height: seq.height, fps },
+        captionPolicy.styling_class,
+      );
       currentVideoPath = captionedVideoPath;
       logs["caption_burn"] = writeLog(
         logsDir,

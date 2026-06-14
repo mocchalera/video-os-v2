@@ -999,9 +999,12 @@ export class PreviewJobService {
           .replace(/'/g, "'\\''");
 
         finalArgs.push(
-          "-vf", `subtitles='${escapedSrt}':force_style='${forceStyle}'`,
-          // Parity: caption burn is the only re-encode of the artifact —
-          // it must use the same profile as the final path's burn.
+          // Parity: same force_style AND same original_size as the final
+          // path's burn (runtime/render/pipeline.burnCaptions). original_size
+          // pins ASS PlayRes to the real frame so MarginV/alignment match.
+          "-vf", `subtitles='${escapedSrt}':original_size=${width}x${height}:force_style='${forceStyle}'`,
+          // Caption burn is the only re-encode of the artifact — it must use
+          // the same profile as the final path's burn.
           ...x264Args(INTERMEDIATE_X264),
         );
       } else {
