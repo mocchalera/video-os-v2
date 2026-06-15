@@ -144,6 +144,38 @@ describe("runCoverageForcedSelection", () => {
     expect(result.rounds).toBe(1);
     expect(result.coverage).toBeUndefined();
   });
+
+  it("keeps the previous selection when a feedback round fails instead of crashing", async () => {
+    let callCount = 0;
+    const agent: TriageAgent = {
+      async run(ctx) {
+        callCount += 1;
+        if (ctx.coverageFeedback) {
+          throw new Error("LLM triage response was not valid JSON after retry");
+        }
+        return { selects: selects(["SEG_001"]), confirmed: true }; // sparse round 0
+      },
+    };
+
+    const result = await runCoverageForcedSelection(agent, context(), brief(), segments());
+
+    expect(callCount).toBe(2); // round 0 ok, round 1 throws -> caught
+    expect(result.skipped).toBe(false);
+    expect(result.result.selects.candidates.map((c) => c.segment_id)).toEqual(["SEG_001"]); // round 0 kept
+    expect(result.coverage).toBeDefined();
+    expect(result.passed).toBe(false);
+  });
+
+  it("propagates a round-0 failure (no prior selection to keep)", async () => {
+    const agent: TriageAgent = {
+      async run() {
+        throw new Error("LLM unavailable");
+      },
+    };
+    await expect(runCoverageForcedSelection(agent, context(), brief(), segments())).rejects.toThrow(
+      "LLM unavailable",
+    );
+  });
 });
 
 function copyContext(ctx: TriageAgentContext): TriageAgentContext {

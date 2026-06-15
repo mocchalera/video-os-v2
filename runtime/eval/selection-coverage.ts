@@ -14,8 +14,32 @@ export const NON_CONTENT_SUMMARY_MARKERS = [
   "視聴ありがとう",
 ] as const;
 
+// Some brief must_haves are production directives (captions, music, audio mix,
+// ending transition) rather than footage moments — they cannot be satisfied by
+// selecting a segment, so they must not be flagged as selection gaps.
+export const PRODUCTION_DIRECTIVE_MARKERS = [
+  "テロップ",
+  "bgm",
+  "音楽",
+  "ミックス",
+  "環境音",
+  "フェードアウト",
+  "全編",
+  "caption",
+  "subtitle",
+  "fade out",
+  "fade-out",
+  "music",
+] as const;
+
 const US_PER_SEC = 1_000_000;
 const MUST_HAVE_NOTE = "low-confidence (cross-language)";
+const PRODUCTION_DIRECTIVE_NOTE = "production directive — not a selection target";
+
+function isProductionDirective(item: string): boolean {
+  const normalized = item.normalize("NFKC").toLowerCase();
+  return PRODUCTION_DIRECTIVE_MARKERS.some((marker) => normalized.includes(marker.toLowerCase()));
+}
 
 export interface SelectionCoverageSegment {
   segment_id: string;
@@ -57,6 +81,8 @@ export interface ClusterCoverage {
 export interface MustHaveCoverage {
   item: string;
   matched: boolean;
+  /** False for production directives (caption/music/mix/fade) that no segment selection can satisfy. */
+  selectable: boolean;
   note: string;
 }
 
@@ -272,11 +298,19 @@ export function analyzeSelectionCoverage(
 
   const segmentById = new Map(segments.map((segment) => [segment.segment_id, segment]));
   const searchText = searchableCandidateText(active, segmentById);
-  const mustHaveCoverage = mustHaveItems(brief).map((item): MustHaveCoverage => ({
-    item,
-    matched: itemMatchesSearchText(item, searchText),
-    note: MUST_HAVE_NOTE,
-  }));
+  const mustHaveCoverage = mustHaveItems(brief).map((item): MustHaveCoverage => {
+    if (isProductionDirective(item)) {
+      // A caption/music/mix/fade directive is not a selection target — mark it
+      // satisfied for selection purposes so it never reads as a selection gap.
+      return { item, matched: true, selectable: false, note: PRODUCTION_DIRECTIVE_NOTE };
+    }
+    return {
+      item,
+      matched: itemMatchesSearchText(item, searchText),
+      selectable: true,
+      note: MUST_HAVE_NOTE,
+    };
+  });
 
   const gaps: string[] = [];
   if (density.sparse) {
@@ -293,7 +327,7 @@ export function analyzeSelectionCoverage(
     );
   }
   for (const coverage of mustHaveCoverage) {
-    if (!coverage.matched) gaps.push(`must_have uncertain: ${coverage.item}`);
+    if (coverage.selectable && !coverage.matched) gaps.push(`must_have uncertain: ${coverage.item}`);
   }
 
   const densityScore = subscore(density.value, DENSITY_MIN);

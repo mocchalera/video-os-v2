@@ -265,7 +265,24 @@ export async function runCoverageForcedSelection(
 
   for (let round = 0; ; round += 1) {
     const runCtx = feedback ? { ...baseCtx, coverageFeedback: feedback } : baseCtx;
-    result = await agent.run(runCtx);
+    const priorResult = result;
+    const priorCoverage = finalCoverage;
+    try {
+      result = await agent.run(runCtx);
+    } catch (err) {
+      // Round 0 has no prior selection to fall back to — propagate the failure.
+      if (round === 0 || !priorResult) throw err;
+      // A feedback round failed (e.g. the LLM returned malformed output): keep
+      // the best selection so far rather than crashing the whole pipeline.
+      const message = err instanceof Error ? err.message : String(err);
+      log?.(
+        `[triage:coverage] round=${round} re-selection failed (${message}); keeping previous round's selection`,
+      );
+      result = priorResult;
+      finalCoverage = priorCoverage;
+      passed = priorCoverage ? coveragePasses(priorCoverage) : false;
+      break;
+    }
     rounds = round + 1;
 
     if (!hasAnalyzableSelects(result.selects)) {

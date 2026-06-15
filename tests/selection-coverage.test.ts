@@ -153,15 +153,34 @@ describe("analyzeSelectionCoverage", () => {
       {
         item: "自転車に乗れた達成シーン",
         matched: true,
+        selectable: true,
         note: "low-confidence (cross-language)",
       },
       {
         item: "歩行の初めての瞬間",
         matched: false,
+        selectable: true,
         note: "low-confidence (cross-language)",
       },
     ]);
     expect(report.gaps).toContain("must_have uncertain: 歩行の初めての瞬間");
+  });
+
+  it("does not flag production directives (caption/music/mix/fade) as selection gaps", () => {
+    const report = analyzeSelectionCoverage(
+      selects([candidate("SEG_1", "hero", 10)]),
+      brief(10, [
+        "撮影日テロップ（YYYY.MM形式）",
+        "BGM「名前のない坂」全編使用",
+        "動画の声・環境音のミックス",
+        "フェードアウトで終わる",
+      ]),
+      [segment("SEG_1", "child rides a bicycle")],
+    );
+
+    // All four are production directives — none should produce a must_have gap.
+    expect(report.must_have_coverage.every((c) => c.selectable === false)).toBe(true);
+    expect(report.gaps.some((g) => g.startsWith("must_have uncertain:"))).toBe(false);
   });
 });
 
