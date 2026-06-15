@@ -13,6 +13,10 @@ import {
   isSupportedEffectType,
   type RenderEffectSpec,
 } from "../../editor/shared/render-spec.js";
+import {
+  dialogueCutFadeSec,
+  TALKING_HEAD_PACING_SKILL_ID,
+} from "../../editor/shared/dialogue-cut-fade.js";
 import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 import {
   buildTransitionSpec,
@@ -375,6 +379,7 @@ export function buildCaptionOverlayArgs(
 export interface AudioTransitionFades {
   fadeInSec?: number;
   fadeOutSec?: number;
+  dialogueCutFadeSec?: number;
 }
 
 export function buildAudioTrimArgs(
@@ -389,14 +394,23 @@ export function buildAudioTrimArgs(
 ): string[] {
   const gain = audioPolicy?.nat_gain ?? audioPolicy?.nat_sound_gain ?? 1;
   const filters = gain > 0 && gain !== 1 ? [`volume=${gain.toFixed(4)}`] : [];
+  const fadeInSec = Math.max(
+    fades?.fadeInSec ?? 0,
+    fades?.dialogueCutFadeSec ?? 0,
+  );
+  const fadeOutSec = Math.max(
+    fades?.fadeOutSec ?? 0,
+    fades?.dialogueCutFadeSec ?? 0,
+  );
   // Transition parity: linear afade in/out summed by amix reproduces the
-  // preview path's acrossfade (both default to the "tri" curve).
-  if (fades?.fadeInSec && fades.fadeInSec > 0) {
-    filters.push(`afade=t=in:st=0:d=${fades.fadeInSec.toFixed(6)}`);
+  // preview path's acrossfade (both default to the "tri" curve). Dialogue cut
+  // fades share the same afade pair and are max-merged per edge.
+  if (fadeInSec > 0) {
+    filters.push(`afade=t=in:st=0:d=${fadeInSec.toFixed(6)}`);
   }
-  if (fades?.fadeOutSec && fades.fadeOutSec > 0) {
-    const fadeStart = Math.max(0, endSec - startSec - fades.fadeOutSec);
-    filters.push(`afade=t=out:st=${fadeStart.toFixed(6)}:d=${fades.fadeOutSec.toFixed(6)}`);
+  if (fadeOutSec > 0) {
+    const fadeStart = Math.max(0, endSec - startSec - fadeOutSec);
+    filters.push(`afade=t=out:st=${fadeStart.toFixed(6)}:d=${fadeOutSec.toFixed(6)}`);
   }
   return [
     "-y",
@@ -901,6 +915,10 @@ export async function assembleTimelineToMp4(
   const audioPlans = buildAudioAssemblyPlan(timeline);
   const transitionWindows = collectTransitionWindows(timeline);
   const audioPolicyMode = getTimelineAudioPolicyMode(timeline);
+  const dialogueCutFadeEnabled = timelineHasAppliedSkill(
+    timeline,
+    TALKING_HEAD_PACING_SKILL_ID,
+  );
   const totalDurationSec = totalFrames / fps;
 
   try {
@@ -1092,6 +1110,10 @@ export async function assembleTimelineToMp4(
       const clip = findClipById(timeline.tracks.audio, plan.clip_id);
       const sourcePath = resolveClipSourcePath(resolver, clip);
       const segmentPath = path.join(workingDir, `audio-segment-${String(i + 1).padStart(4, "0")}.wav`);
+      const transitionFades = computeAudioFades(plan, transitionWindows, fps);
+      const speechCutFadeSec = isBgm
+        ? 0
+        : dialogueCutFadeSec(plan.duration_sec, dialogueCutFadeEnabled);
       const audioArgs = isBgm
         ? buildBgmAudioRenderArgs(
           sourcePath,
@@ -1111,7 +1133,7 @@ export async function assembleTimelineToMp4(
           sampleRate,
           audioChannels,
           plan.audio_policy,
-          computeAudioFades(plan, transitionWindows, fps),
+          mergeAudioFades(transitionFades, speechCutFadeSec),
         );
       await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);
@@ -1184,6 +1206,35 @@ function escapeDrawtext(value: string): string {
 
 function isBgmPlan(plan: AudioClipPlan): boolean {
   return plan.role === "bgm" || plan.role === "music" || plan.track_id === "A2";
+}
+
+function mergeAudioFades(
+  transitionFades: AudioTransitionFades | undefined,
+  dialogueFadeSec: number,
+): AudioTransitionFades | undefined {
+  if (dialogueFadeSec <= 0) return transitionFades;
+  return {
+    ...(transitionFades ?? {}),
+    dialogueCutFadeSec: dialogueFadeSec,
+  };
+}
+
+function timelineHasAppliedSkill(timeline: TimelineIR, skillId: string): boolean {
+  const tracks = [
+    ...timeline.tracks.video,
+    ...timeline.tracks.audio,
+  ];
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      const editorial = (clip.metadata as Record<string, unknown> | undefined)?.editorial;
+      if (!editorial || typeof editorial !== "object") continue;
+      const appliedSkills = (editorial as { applied_skills?: unknown }).applied_skills;
+      if (Array.isArray(appliedSkills) && appliedSkills.includes(skillId)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 function findActiveVideoClip(

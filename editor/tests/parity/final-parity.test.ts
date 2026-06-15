@@ -99,6 +99,8 @@ interface TimelineOptions {
   crossfadeFrames?: number;
   /** Hard-cut picture while incoming audio leads by this many frames. */
   jCutFrames?: number;
+  /** Enable talking_head_pacing metadata on mirrored video/audio clips. */
+  talkingHeadPacing?: boolean;
 }
 
 /** Canonical-shaped timeline: two V1 clips, A1 mirrors V1. */
@@ -106,13 +108,28 @@ function buildTimeline(opts: TimelineOptions = {}): Record<string, unknown> {
   const overlap = opts.crossfadeFrames ?? 0;
   const c2Start = 60 - overlap;
   const jCutFrames = opts.jCutFrames ?? 0;
+  const withTalkingHeadPacing = <T extends ReturnType<typeof makeClip>>(
+    clip: T,
+    role?: string,
+  ): T => {
+    const base = role ? { ...clip, role } : clip;
+    if (!opts.talkingHeadPacing) return base as T;
+    return {
+      ...base,
+      metadata: {
+        editorial: {
+          applied_skills: ["talking_head_pacing"],
+        },
+      },
+    } as T;
+  };
   const videoClips = [
-    makeClip("c1", 0, 2_000_000, 0),
-    makeClip("c2", 2_000_000, 4_000_000, c2Start),
+    withTalkingHeadPacing(makeClip("c1", 0, 2_000_000, 0)),
+    withTalkingHeadPacing(makeClip("c2", 2_000_000, 4_000_000, c2Start)),
   ];
   const audioClips = [
-    makeClip("a1", 0, 2_000_000, 0),
-    makeClip("a2", 2_000_000, 4_000_000, c2Start),
+    withTalkingHeadPacing(makeClip("a1", 0, 2_000_000, 0), "nat_sound"),
+    withTalkingHeadPacing(makeClip("a2", 2_000_000, 4_000_000, c2Start), "nat_sound"),
   ];
   return {
     version: "1",
@@ -354,6 +371,10 @@ interface Scenario {
 
 const SCENARIOS: Scenario[] = [
   { name: "cuts", timeline: () => buildTimeline() },
+  {
+    name: "talking_head_cuts",
+    timeline: () => buildTimeline({ talkingHeadPacing: true }),
+  },
   {
     name: "crossfade",
     timeline: () => buildTimeline({ crossfadeFrames: 15 }),

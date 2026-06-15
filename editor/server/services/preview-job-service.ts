@@ -11,7 +11,14 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { RenderSpec, RenderTextCue, RenderVideoClip, RenderTransition, PreviewArtifactMeta } from "../../shared/render-spec.js";
+import type {
+  RenderSpec,
+  RenderTextCue,
+  RenderVideoClip,
+  RenderTransition,
+  RenderAudioClip,
+  PreviewArtifactMeta,
+} from "../../shared/render-spec.js";
 import {
   buildVideoClipFilterString,
   buildTransitionSpec,
@@ -24,6 +31,7 @@ import {
 } from "../../shared/filtergraph.js";
 import { buildAssDocument, parseSrtCues } from "../../shared/caption-style-tokens.js";
 import { INTERMEDIATE_X264, x264Args } from "../../shared/encode-profiles.js";
+import { dialogueCutFadeSec } from "../../shared/dialogue-cut-fade.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -94,6 +102,102 @@ async function hasAudioStream(filePath: string, job?: ActiveJob): Promise<boolea
     if (job) job.activeChild = null;
     return false;
   }
+}
+
+function isDialogueCutFadeEnabled(spec: RenderSpec): boolean {
+  return spec.audio.dialogue_cut_fade_ms > 0;
+}
+
+function isBgmAudio(role: string | undefined, trackId: string | undefined): boolean {
+  return role === "bgm" || role === "music" || trackId === "A2";
+}
+
+function findMatchingAudioClip(
+  spec: RenderSpec,
+  videoClip: RenderVideoClip,
+): RenderAudioClip | undefined {
+  return spec.audio.dialogueClips.find((ac) => ac.clipId === videoClip.clipId)
+    ?? spec.audio.dialogueClips.find(
+      (ac) =>
+        ac.assetId === videoClip.assetId &&
+        ac.timelineInFrame === videoClip.timelineInFrame &&
+        ac.durationFrames === videoClip.durationFrames,
+    )
+    ?? spec.audio.dialogueClips.find((ac) => ac.assetId === videoClip.assetId);
+}
+
+function buildPreviewClipAudioFilters(
+  audioClip: RenderAudioClip | undefined,
+  durationSec: number,
+  dialogueCutFadeEnabled: boolean,
+): string[] {
+  const filters: string[] = [];
+  const gainDb = audioClip?.gainDb;
+  if (gainDb !== null && gainDb !== undefined && gainDb !== 0) {
+    filters.push(`volume=${gainDb}dB`);
+  }
+
+  const fadeSec = audioClip && !isBgmAudio(audioClip.role, audioClip.trackId)
+    ? dialogueCutFadeSec(durationSec, dialogueCutFadeEnabled)
+    : 0;
+  if (fadeSec > 0) {
+    filters.push(`afade=t=in:st=0:d=${fadeSec.toFixed(6)}`);
+    filters.push(`afade=t=out:st=${Math.max(0, durationSec - fadeSec).toFixed(6)}:d=${fadeSec.toFixed(6)}`);
+  }
+  return filters;
+}
+
+function applyDialogueCutFadesToChainInputs(
+  inputs: TransitionChainInput[],
+  transitions: Array<{
+    spec: TransitionSpec;
+    fromIndex: number;
+    toIndex: number;
+  }>,
+  dialogueCutFadeEnabled: boolean,
+): TransitionChainInput[] {
+  if (!dialogueCutFadeEnabled) return inputs;
+
+  const transitionFadeInByIndex = new Map<number, number>();
+  const transitionFadeOutByIndex = new Map<number, number>();
+  for (const transition of transitions) {
+    if (
+      transition.spec.audio.method !== "acrossfade" ||
+      !transition.spec.audio.crossfadeDurationSec
+    ) {
+      continue;
+    }
+    const durationSec = transition.spec.audio.crossfadeDurationSec;
+    transitionFadeOutByIndex.set(
+      transition.fromIndex,
+      Math.max(transitionFadeOutByIndex.get(transition.fromIndex) ?? 0, durationSec),
+    );
+    transitionFadeInByIndex.set(
+      transition.toIndex,
+      Math.max(transitionFadeInByIndex.get(transition.toIndex) ?? 0, durationSec),
+    );
+  }
+
+  return inputs.map((input, index) => {
+    if (
+      input.kind === "gap" ||
+      !input.hasAudio ||
+      isBgmAudio(input.audioRole, input.audioTrackId)
+    ) {
+      return input;
+    }
+    const durationSec = input.audioDurationSec ?? input.durationSec;
+    const fadeSec = dialogueCutFadeSec(durationSec, true);
+    if (fadeSec <= 0) return input;
+
+    const transitionFadeInSec = transitionFadeInByIndex.get(index) ?? 0;
+    const transitionFadeOutSec = transitionFadeOutByIndex.get(index) ?? 0;
+    return {
+      ...input,
+      ...(transitionFadeInSec >= fadeSec ? {} : { audioFadeInSec: fadeSec }),
+      ...(transitionFadeOutSec >= fadeSec ? {} : { audioFadeOutSec: fadeSec }),
+    };
+  });
 }
 
 // ── Audio Mastering (Phase 4: Audio Parity) ─────────────────────────
@@ -728,9 +832,7 @@ export class PreviewJobService {
       const baseChainInputs: TransitionChainTimelineInput[] = [];
       for (const clip of videoClips) {
         const sourceHasAudio = await hasAudioStream(clip.sourcePath, job);
-        const audioClip = spec.audio.dialogueClips.find(
-          (ac) => ac.clipId === clip.clipId || ac.assetId === clip.assetId,
-        );
+        const audioClip = findMatchingAudioClip(spec, clip);
         baseChainInputs.push({
           kind: "source",
           clipId: clip.clipId,
@@ -742,6 +844,8 @@ export class PreviewJobService {
           videoFilter: buildVideoClipFilterString(clip, { width, height }),
           hasAudio: sourceHasAudio,
           gainDb: audioClip?.gainDb,
+          audioRole: audioClip?.role,
+          audioTrackId: audioClip?.trackId,
         });
       }
       const audioExtendedInputs = applyTransitionAudioExtensions(
@@ -760,6 +864,7 @@ export class PreviewJobService {
       });
       const useTransitionGraph =
         chainTransitionIndexes.length > 0 || gapAwareChain.hasGaps;
+      const dialogueCutFadeEnabled = isDialogueCutFadeEnabled(spec);
       const overlapsSec = useTransitionGraph
         ? computeOverlapsSec(videoClips.length, transitionIndexes)
         : undefined;
@@ -801,14 +906,16 @@ export class PreviewJobService {
         }
 
         // Audio: Phase 1 = source pass-through (no loudnorm)
-        // Only apply per-clip gain if specified
+        // Apply per-clip gain and speech hard-cut edge fades when specified.
         if (sourceHasAudio) {
-          const audioClip = spec.audio.dialogueClips.find(
-            (ac) => ac.clipId === clip.clipId || ac.assetId === clip.assetId,
+          const audioClip = findMatchingAudioClip(spec, clip);
+          const audioFilters = buildPreviewClipAudioFilters(
+            audioClip,
+            durationSec,
+            dialogueCutFadeEnabled,
           );
-          const gainDb = audioClip?.gainDb;
-          if (gainDb !== null && gainDb !== undefined && gainDb !== 0) {
-            ffmpegArgs.push("-af", `volume=${gainDb}dB`);
+          if (audioFilters.length > 0) {
+            ffmpegArgs.push("-af", audioFilters.join(","));
           }
         }
 
@@ -839,7 +946,11 @@ export class PreviewJobService {
         // its source and join through the shared graph in ONE encode. The
         // final assembler renders transitioned timelines through the same
         // builder, so cross-path frames stay within the SSIM budget.
-        const chainInputs: TransitionChainInput[] = gapAwareChain.inputs;
+        const chainInputs: TransitionChainInput[] = applyDialogueCutFadesToChainInputs(
+          gapAwareChain.inputs,
+          chainTransitionIndexes,
+          dialogueCutFadeEnabled,
+        );
 
         const chainArgs = buildTransitionChainArgs({
           inputs: chainInputs,

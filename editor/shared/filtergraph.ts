@@ -470,6 +470,12 @@ export interface TransitionChainInput {
   hasAudio: boolean;
   /** Optional nat-audio gain in dB. */
   gainDb?: number | null;
+  /** Audio role/track metadata, used by callers to decide speech-cut fades. */
+  audioRole?: string;
+  audioTrackId?: string;
+  /** Optional per-input edge fades applied before transition graph joins. */
+  audioFadeInSec?: number;
+  audioFadeOutSec?: number;
   /** Audio-only source trim start. Defaults to sourceInSec. */
   audioSourceInSec?: number;
   /** Audio-only source duration. Defaults to durationSec. */
@@ -757,11 +763,7 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
   if (opts.includeAudio) {
     opts.inputs.forEach((input, i) => {
       const srcIndex = audioInputIndex[i] === -1 ? i : audioInputIndex[i];
-      const gain =
-        input.gainDb !== null && input.gainDb !== undefined && input.gainDb !== 0
-          ? `volume=${input.gainDb}dB`
-          : "anull";
-      parts.push(`[${srcIndex}:a]${gain}[a${i}]`);
+      parts.push(`[${srcIndex}:a]${buildAudioInputFilter(input)}[a${i}]`);
     });
   }
 
@@ -797,4 +799,28 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
   }
   args.push("-pix_fmt", "yuv420p", opts.outputPath);
   return args;
+}
+
+function buildAudioInputFilter(input: TransitionChainInput): string {
+  const filters: string[] = [];
+  if (
+    input.gainDb !== null &&
+    input.gainDb !== undefined &&
+    input.gainDb !== 0
+  ) {
+    filters.push(`volume=${input.gainDb}dB`);
+  }
+
+  if (input.audioFadeInSec !== undefined && input.audioFadeInSec > 0) {
+    filters.push(`afade=t=in:st=0:d=${input.audioFadeInSec.toFixed(6)}`);
+  }
+  if (input.audioFadeOutSec !== undefined && input.audioFadeOutSec > 0) {
+    const durationSec = input.audioDurationSec ?? input.durationSec;
+    const fadeStart = Math.max(0, durationSec - input.audioFadeOutSec);
+    filters.push(
+      `afade=t=out:st=${fadeStart.toFixed(6)}:d=${input.audioFadeOutSec.toFixed(6)}`,
+    );
+  }
+
+  return filters.length > 0 ? filters.join(",") : "anull";
 }

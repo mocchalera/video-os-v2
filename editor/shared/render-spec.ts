@@ -12,6 +12,10 @@ import {
   type CaptionStylePreset,
   DEFAULT_CAPTION_STYLE_PRESET,
 } from "./caption-style-tokens.js";
+import {
+  DIALOGUE_CUT_FADE_DEFAULT_MS,
+  TALKING_HEAD_PACING_SKILL_ID,
+} from "./dialogue-cut-fade.js";
 
 // ── Sub-types ────────────────────────────────────────────────────────
 
@@ -65,6 +69,8 @@ export interface RenderAudioClip {
   clipId: string;
   assetId: string;
   sourcePath: string;
+  trackId: string;
+  role?: string;
   timelineInFrame: number;
   durationFrames: number;
   sourceInSec: number;
@@ -160,6 +166,7 @@ export interface RenderSpec {
   };
   audio: {
     dialogueClips: RenderAudioClip[];
+    dialogue_cut_fade_ms: number;
     bgm?: RenderBgmSpec;
     mastering: MasteringDefaults;
   };
@@ -185,6 +192,7 @@ export interface PreviewArtifactMeta {
 interface MinimalClip {
   clip_id: string;
   asset_id: string;
+  role?: string;
   src_in_us: number;
   src_out_us: number;
   timeline_in_frame: number;
@@ -305,6 +313,12 @@ export function buildRenderSpec(
     timeline.sequence.fps_num / (timeline.sequence.fps_den || 1);
   const { width, height } = timeline.sequence;
   const sampleRate = timeline.sequence.sample_rate ?? 48000;
+  const dialogueCutFadeMs = timelineHasAppliedSkill(
+    timeline,
+    TALKING_HEAD_PACING_SKILL_ID,
+  )
+    ? DIALOGUE_CUT_FADE_DEFAULT_MS
+    : 0;
 
   // ── Video clips ──
   const videoClips: RenderVideoClip[] = [];
@@ -398,6 +412,8 @@ export function buildRenderSpec(
         clipId: clip.clip_id,
         assetId: clip.asset_id,
         sourcePath,
+        trackId: track.track_id,
+        role: clip.role,
         timelineInFrame: clip.timeline_in_frame,
         durationFrames: clip.timeline_duration_frames,
         sourceInSec: clip.src_in_us / 1_000_000,
@@ -597,6 +613,7 @@ export function buildRenderSpec(
     },
     audio: {
       dialogueClips: audioClips,
+      dialogue_cut_fade_ms: dialogueCutFadeMs,
       ...(bgmSpec ? { bgm: bgmSpec } : {}),
       mastering: {
         targetLufs: -16,
@@ -610,6 +627,31 @@ export function buildRenderSpec(
 
   spec.renderSpecHash = computeRenderSpecHash(spec);
   return spec;
+}
+
+function timelineHasAppliedSkill(
+  timeline: MinimalTimeline,
+  skillId: string,
+): boolean {
+  const tracks: MinimalTrack[] = [
+    ...timeline.tracks.video,
+    ...timeline.tracks.audio,
+    ...(timeline.tracks.caption ?? []),
+    ...(timeline.tracks.overlay ?? []),
+  ];
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      if (clipHasAppliedSkill(clip, skillId)) return true;
+    }
+  }
+  return false;
+}
+
+function clipHasAppliedSkill(clip: MinimalClip, skillId: string): boolean {
+  const editorial = clip.metadata?.editorial;
+  if (!editorial || typeof editorial !== "object") return false;
+  const appliedSkills = (editorial as { applied_skills?: unknown }).applied_skills;
+  return Array.isArray(appliedSkills) && appliedSkills.includes(skillId);
 }
 
 // ── Hash ──────────────────────────────────────────────────────────────
