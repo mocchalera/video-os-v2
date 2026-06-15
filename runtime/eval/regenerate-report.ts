@@ -1,0 +1,113 @@
+// Creative regeneration report — turns the scalar selects-agreement score into
+// an actionable divergence narrative: which human-selected moments the AI MISSED
+// (especially must-haves), which it ADDED, and the role/rank/beat agreement. The
+// routine eval only recompiles approved plans (compiler regression); this is for
+// the candidate-vs-golden mode where a freshly regenerated selection is scored
+// against a human-approved golden, so we can see WHERE the AI's judgement
+// diverges from a human's, not just by how much.
+
+import type { Candidate, SelectsCandidates } from "../artifacts/types.js";
+import { evaluateSelectsAgreement } from "./selects-agreement.js";
+import type { SelectsAgreementReport } from "./types.js";
+
+export interface SegmentEvidence {
+  segment_id: string;
+  summary?: string;
+  transcript_excerpt?: string;
+  tags?: string[];
+}
+
+export interface RegenerationReport {
+  agreement: SelectsAgreementReport;
+  missed: Candidate[];
+  missedMustHave: Candidate[];
+  extra: Candidate[];
+  markdown: string;
+}
+
+/** A human-selected moment is "must-have" when the brief flagged it or the
+ * operator was near-certain — missing one of these is the costliest error. */
+export function isMustHave(c: Candidate): boolean {
+  const evidence = (c.evidence ?? []) as string[];
+  if (evidence.some((e) => /must[_-]?have/i.test(String(e)))) return true;
+  return (c.confidence ?? 0) >= 0.95;
+}
+
+function pct(value: number | null | undefined): string {
+  return value === null || value === undefined ? "n/a" : `${(value * 100).toFixed(1)}%`;
+}
+
+function describeMoment(c: Candidate, seg: SegmentEvidence | undefined): string {
+  const quote = seg?.transcript_excerpt?.trim();
+  const summary = seg?.summary?.trim();
+  const detail = quote ? `“${quote}”` : summary ?? "(no transcript/summary)";
+  const why = c.why_it_matches ? ` — why: ${c.why_it_matches}` : "";
+  const role = c.role ? ` [${c.role}]` : "";
+  const conf = c.confidence !== undefined ? ` (conf ${c.confidence})` : "";
+  return `${c.segment_id}${role}${conf}: ${detail}${why}`;
+}
+
+/**
+ * Score a regenerated selection against a human-approved golden and render an
+ * actionable markdown report. `segments` supplies transcript/summary evidence so
+ * missed/added moments read as content, not bare IDs.
+ */
+export function buildSelectsRegenerationReport(
+  goldenSelects: SelectsCandidates,
+  candidateSelects: SelectsCandidates,
+  segments: SegmentEvidence[],
+  meta: { goldenProject: string; candidateProject: string; evaluatedAt: string },
+): RegenerationReport {
+  const agreement = evaluateSelectsAgreement(goldenSelects, candidateSelects);
+  const segById = new Map(segments.map((s) => [s.segment_id, s]));
+  const goldenBySeg = new Map(goldenSelects.candidates.map((c) => [c.segment_id, c]));
+  const candidateBySeg = new Map(candidateSelects.candidates.map((c) => [c.segment_id, c]));
+
+  const missed = agreement.missing_from_candidate
+    .map((id) => goldenBySeg.get(id))
+    .filter((c): c is Candidate => Boolean(c));
+  const extra = agreement.extra_in_candidate
+    .map((id) => candidateBySeg.get(id))
+    .filter((c): c is Candidate => Boolean(c));
+  const missedMustHave = missed.filter(isMustHave);
+
+  const lines: string[] = [];
+  lines.push(`# Creative regeneration — selects agreement`);
+  lines.push("");
+  lines.push(`- golden (human): \`${meta.goldenProject}\``);
+  lines.push(`- candidate (regenerated): \`${meta.candidateProject}\``);
+  lines.push(`- evaluated_at: ${meta.evaluatedAt}`);
+  lines.push("");
+  lines.push(`## Scores`);
+  lines.push(`- **composite: ${(agreement.score * 100).toFixed(1)} / 100**`);
+  lines.push(`- selection F1: ${pct(agreement.f1)} (precision ${pct(agreement.precision)}, recall ${pct(agreement.recall)})`);
+  lines.push(`- role agreement (matched): ${pct(agreement.role_agreement)}`);
+  lines.push(`- rank correlation: ${agreement.rank_correlation === null ? "n/a" : agreement.rank_correlation.toFixed(3)}`);
+  lines.push(`- beat-eligibility overlap: ${pct(agreement.beat_eligibility_overlap)}`);
+  lines.push(`- counts: golden ${agreement.golden_count}, candidate ${agreement.candidate_count}, matched ${agreement.matched_count}`);
+  lines.push("");
+
+  lines.push(`## ❗ Missed must-have moments (${missedMustHave.length})`);
+  lines.push(`Human flagged these as essential; the AI did not select them. Highest-priority gap.`);
+  if (missedMustHave.length === 0) {
+    lines.push(`- none — the AI covered every must-have moment.`);
+  } else {
+    for (const c of missedMustHave) lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}`);
+  }
+  lines.push("");
+
+  const otherMissed = missed.filter((c) => !isMustHave(c));
+  lines.push(`## Missed moments (${otherMissed.length})`);
+  lines.push(`Human selected, AI omitted (non-must-have).`);
+  if (otherMissed.length === 0) lines.push(`- none.`);
+  else for (const c of otherMissed) lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}`);
+  lines.push("");
+
+  lines.push(`## Added moments (${extra.length})`);
+  lines.push(`AI selected, human did not. Could be a defensible alternative or noise.`);
+  if (extra.length === 0) lines.push(`- none.`);
+  else for (const c of extra) lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}`);
+  lines.push("");
+
+  return { agreement, missed, missedMustHave, extra, markdown: lines.join("\n") };
+}
