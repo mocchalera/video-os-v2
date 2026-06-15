@@ -20,17 +20,24 @@ export interface SegmentEvidence {
 export interface RegenerationReport {
   agreement: SelectsAgreementReport;
   missed: Candidate[];
-  missedMustHave: Candidate[];
+  missedCritical: Candidate[];
   extra: Candidate[];
   markdown: string;
 }
 
 /** A human-selected moment is "must-have" when the brief flagged it or the
- * operator was near-certain — missing one of these is the costliest error. */
+ * operator was near-certain. */
 export function isMustHave(c: Candidate): boolean {
   const evidence = (c.evidence ?? []) as string[];
   if (evidence.some((e) => /must[_-]?have/i.test(String(e)))) return true;
   return (c.confidence ?? 0) >= 0.95;
+}
+
+/** A miss is "critical" when the human treated the moment as essential —
+ * a must-have, OR a hero-role moment that carries a beat. Dropping either
+ * clearly hurts the cut, so these are the highest-priority selection errors. */
+export function isCritical(c: Candidate): boolean {
+  return isMustHave(c) || c.role === "hero";
 }
 
 function pct(value: number | null | undefined): string {
@@ -69,7 +76,7 @@ export function buildSelectsRegenerationReport(
   const extra = agreement.extra_in_candidate
     .map((id) => candidateBySeg.get(id))
     .filter((c): c is Candidate => Boolean(c));
-  const missedMustHave = missed.filter(isMustHave);
+  const missedCritical = missed.filter(isCritical);
 
   const lines: string[] = [];
   lines.push(`# Creative regeneration — selects agreement`);
@@ -87,18 +94,21 @@ export function buildSelectsRegenerationReport(
   lines.push(`- counts: golden ${agreement.golden_count}, candidate ${agreement.candidate_count}, matched ${agreement.matched_count}`);
   lines.push("");
 
-  lines.push(`## ❗ Missed must-have moments (${missedMustHave.length})`);
-  lines.push(`Human flagged these as essential; the AI did not select them. Highest-priority gap.`);
-  if (missedMustHave.length === 0) {
-    lines.push(`- none — the AI covered every must-have moment.`);
+  lines.push(`## ❗ Missed critical moments (${missedCritical.length})`);
+  lines.push(`Human treated these as essential (must-have or hero-role); the AI did not select them. Highest-priority gap.`);
+  if (missedCritical.length === 0) {
+    lines.push(`- none — the AI covered every critical moment.`);
   } else {
-    for (const c of missedMustHave) lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}`);
+    for (const c of missedCritical) {
+      const tag = isMustHave(c) ? " «must-have»" : " «hero»";
+      lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}${tag}`);
+    }
   }
   lines.push("");
 
-  const otherMissed = missed.filter((c) => !isMustHave(c));
+  const otherMissed = missed.filter((c) => !isCritical(c));
   lines.push(`## Missed moments (${otherMissed.length})`);
-  lines.push(`Human selected, AI omitted (non-must-have).`);
+  lines.push(`Human selected, AI omitted (supporting/texture).`);
   if (otherMissed.length === 0) lines.push(`- none.`);
   else for (const c of otherMissed) lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}`);
   lines.push("");
@@ -109,5 +119,5 @@ export function buildSelectsRegenerationReport(
   else for (const c of extra) lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}`);
   lines.push("");
 
-  return { agreement, missed, missedMustHave, extra, markdown: lines.join("\n") };
+  return { agreement, missed, missedCritical, extra, markdown: lines.join("\n") };
 }

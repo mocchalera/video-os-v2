@@ -104,7 +104,7 @@ function score(goldenDir: string, candidateDir: string, now: Date): void {
   const a = report.agreement;
   console.log(`Creative regeneration — ${path.basename(golden)}`);
   console.log(`  composite ${(a.score * 100).toFixed(1)}/100 | F1 ${(a.f1 * 100).toFixed(1)}% (P ${(a.precision * 100).toFixed(0)}/R ${(a.recall * 100).toFixed(0)})`);
-  console.log(`  missed must-have: ${report.missedMustHave.length} | missed total: ${report.missed.length} | added: ${report.extra.length}`);
+  console.log(`  missed critical (must-have/hero): ${report.missedCritical.length} | missed total: ${report.missed.length} | added: ${report.extra.length}`);
   console.log(`  report: ${path.relative(repoRoot(), outPath)}`);
 }
 

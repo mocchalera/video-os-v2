@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildSelectsRegenerationReport,
   isMustHave,
+  isCritical,
   type SegmentEvidence,
 } from "../runtime/eval/regenerate-report.js";
 import type { Candidate, SelectsCandidates } from "../runtime/artifacts/types.js";
@@ -27,11 +28,18 @@ function cand(overrides: Partial<Candidate>): Candidate {
 const selects = (candidates: Candidate[]): SelectsCandidates =>
   ({ version: "1", project_id: "p", candidates } as unknown as SelectsCandidates);
 
-describe("isMustHave", () => {
+describe("isMustHave / isCritical", () => {
   it("flags brief must-have evidence and near-certain confidence", () => {
-    expect(isMustHave(cand({ evidence: ["brief.must_have"] }))).toBe(true);
-    expect(isMustHave(cand({ confidence: 0.98 }))).toBe(true);
-    expect(isMustHave(cand({ confidence: 0.7, evidence: ["brief.message"] }))).toBe(false);
+    expect(isMustHave(cand({ role: "support", evidence: ["brief.must_have"] }))).toBe(true);
+    expect(isMustHave(cand({ role: "support", confidence: 0.98 }))).toBe(true);
+    expect(isMustHave(cand({ role: "support", confidence: 0.7, evidence: ["brief.message"] }))).toBe(false);
+  });
+
+  it("treats hero-role moments as critical even when not must-have", () => {
+    const hero = cand({ role: "hero", confidence: 0.9, evidence: ["brief.message"] });
+    expect(isMustHave(hero)).toBe(false);
+    expect(isCritical(hero)).toBe(true); // dropping a hero moment is a critical miss
+    expect(isCritical(cand({ role: "texture", confidence: 0.7, evidence: [] }))).toBe(false);
   });
 });
 
@@ -55,14 +63,14 @@ describe("buildSelectsRegenerationReport", () => {
     evaluatedAt: "2026-06-15T00:00:00.000Z",
   });
 
-  it("separates matched, missed-must-have, and added moments", () => {
+  it("separates matched, missed-critical, and added moments", () => {
     expect(report.agreement.matched_count).toBe(1); // SEG_A exact match
-    expect(report.missedMustHave.map((c) => c.segment_id)).toEqual(["SEG_B"]);
+    expect(report.missedCritical.map((c) => c.segment_id)).toEqual(["SEG_B"]);
     expect(report.extra.map((c) => c.segment_id)).toEqual(["SEG_C"]);
   });
 
   it("surfaces the missed moment's transcript and the human rationale", () => {
-    expect(report.markdown).toContain("Missed must-have moments (1)");
+    expect(report.markdown).toContain("Missed critical moments (1)");
     expect(report.markdown).toContain("SEG_B");
     expect(report.markdown).toContain("やった、できた！");
     expect(report.markdown).toContain("初成功の瞬間");
