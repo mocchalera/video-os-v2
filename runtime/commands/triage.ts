@@ -31,6 +31,8 @@ import { ProgressTracker } from "../progress.js";
 import type { ProjectState, GateStatus } from "../state/reconcile.js";
 import { generateCandidateId } from "../compiler/candidate-ref.js";
 import { inferAutonomyMode } from "../autonomy.js";
+import { loadCreativeBrief } from "../artifacts/loaders.js";
+import type { CreativeBrief, SelectsCandidates as ArtifactSelectsCandidates } from "../artifacts/types.js";
 import {
   audioStoryNodesForWindow,
   computeAudioStoryGraphHash,
@@ -52,6 +54,11 @@ import {
   materializeSearchHash,
 } from "../artifacts/p4d-segment-search-index.js";
 import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
+import {
+  analyzeSelectionCoverage,
+  type SelectionCoverageReport,
+  type SelectionCoverageSegment,
+} from "../eval/selection-coverage.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -161,11 +168,18 @@ export interface TriageAgent {
   run(ctx: TriageAgentContext): Promise<TriageAgentResult>;
 }
 
+export interface TriageCoverageFeedback {
+  round: number;
+  gaps: string[];
+  previous_selection_count: number;
+}
+
 export interface TriageAgentContext {
   projectDir: string;
   projectId: string;
   currentState: ProjectState;
   analysisGate: GateStatus["analysis_gate"];
+  coverageFeedback?: TriageCoverageFeedback;
 }
 
 export interface TriageAgentResult {
@@ -183,7 +197,17 @@ export interface TriageCommandResult {
   promoted?: string[];
 }
 
+export interface CoverageForcedSelectionResult {
+  result: TriageAgentResult;
+  coverage?: SelectionCoverageReport;
+  rounds: number;
+  passed: boolean;
+  skipped: boolean;
+}
+
 // ── Command Implementation ───────────────────────────────────────
+
+export const COVERAGE_MAX_ROUNDS = 2;
 
 /**
  * Allowed start states: media_analyzed or later.
@@ -202,6 +226,96 @@ const ALLOWED_STATES: ProjectState[] = [
   "approved",
   "packaged",
 ];
+
+type CoverageLogger = (message: string) => void;
+
+export function coveragePasses(coverage: SelectionCoverageReport): boolean {
+  return !coverage.density.sparse && !coverage.cluster_coverage.some((cluster) => cluster.under_sampled);
+}
+
+export async function runCoverageForcedSelection(
+  agent: TriageAgent,
+  ctx: TriageAgentContext,
+  brief?: CreativeBrief,
+  segmentEvidence?: SelectionCoverageSegment[],
+  maxRounds = COVERAGE_MAX_ROUNDS,
+  log?: CoverageLogger,
+): Promise<CoverageForcedSelectionResult> {
+  const baseCtx: TriageAgentContext = {
+    projectDir: ctx.projectDir,
+    projectId: ctx.projectId,
+    currentState: ctx.currentState,
+    analysisGate: ctx.analysisGate,
+  };
+  const boundedMaxRounds = Math.max(0, Math.floor(maxRounds));
+
+  if (!brief || !segmentEvidence) {
+    log?.("[triage:coverage] coverage skipped: missing brief or segments");
+    const result = await agent.run(baseCtx);
+    log?.("[triage:coverage] coverage rounds=1, passed=false, final_score=n/a");
+    return { result, rounds: 1, passed: false, skipped: true };
+  }
+
+  let feedback: TriageCoverageFeedback | undefined;
+  let previousActiveSegmentIds: Set<string> | undefined;
+  let result: TriageAgentResult | undefined;
+  let finalCoverage: SelectionCoverageReport | undefined;
+  let passed = false;
+  let rounds = 0;
+
+  for (let round = 0; ; round += 1) {
+    const runCtx = feedback ? { ...baseCtx, coverageFeedback: feedback } : baseCtx;
+    result = await agent.run(runCtx);
+    rounds = round + 1;
+
+    if (!hasAnalyzableSelects(result.selects)) {
+      log?.(`[triage:coverage] coverage skipped: unanalyzable selects at round=${round}`);
+      log?.(`[triage:coverage] coverage rounds=${rounds}, passed=false, final_score=n/a`);
+      return { result, rounds, passed: false, skipped: true };
+    }
+
+    const activeSegmentIds = activeSegmentIdSet(result.selects);
+    finalCoverage = analyzeSelectionCoverage(
+      result.selects as unknown as ArtifactSelectsCandidates,
+      brief,
+      segmentEvidence,
+    );
+    passed = coveragePasses(finalCoverage);
+    log?.(
+      `[triage:coverage] round=${round} score=${formatCoverageScore(finalCoverage.score)} ` +
+        `gaps=${finalCoverage.gaps.length} passed=${passed}`,
+    );
+
+    if (passed) break;
+
+    if (previousActiveSegmentIds && sameStringSets(activeSegmentIds, previousActiveSegmentIds)) {
+      log?.(`[triage:coverage] no improvement at round=${round}; active_segment_ids unchanged`);
+      break;
+    }
+
+    if (round >= boundedMaxRounds) break;
+
+    previousActiveSegmentIds = activeSegmentIds;
+    feedback = {
+      round: round + 1,
+      gaps: finalCoverage.gaps,
+      previous_selection_count: finalCoverage.density.selected_count,
+    };
+  }
+
+  log?.(
+    `[triage:coverage] coverage rounds=${rounds}, passed=${passed}, ` +
+      `final_score=${finalCoverage ? formatCoverageScore(finalCoverage.score) : "n/a"}`,
+  );
+
+  return {
+    result: result!,
+    coverage: finalCoverage,
+    rounds,
+    passed,
+    skipped: false,
+  };
+}
 
 export async function runTriage(
   projectDir: string,
@@ -259,18 +373,29 @@ export async function runTriage(
       },
     };
   }
-  const briefContent = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
+  const briefRaw = fs.readFileSync(briefPath, "utf-8");
+  const briefContent = parseYaml(briefRaw) as {
     autonomy?: { mode?: "full" | "collaborative"; must_ask?: string[] };
   };
   const autonomyMode = inferAutonomyMode(briefContent);
+  const coverageBrief = loadCoverageBrief(briefPath);
+  const segmentEvidence = loadCoverageSegments(absDir);
 
   // 4. Run agent (LLM or mock)
-  const agentResult = await agent.run({
-    projectDir: absDir,
-    projectId,
-    currentState: previousState,
-    analysisGate: gates.analysis_gate,
-  });
+  const selectionResult = await runCoverageForcedSelection(
+    agent,
+    {
+      projectDir: absDir,
+      projectId,
+      currentState: previousState,
+      analysisGate: gates.analysis_gate,
+    },
+    coverageBrief,
+    segmentEvidence,
+    COVERAGE_MAX_ROUNDS,
+    (message) => console.log(message),
+  );
+  const agentResult = selectionResult.result;
   pt.advance();
 
   // 5. Gate 4: candidate board approval
@@ -357,6 +482,78 @@ export async function runTriage(
     newState: updatedDoc.current_state,
     promoted: promoteResult.promoted,
   };
+}
+
+function loadCoverageBrief(briefPath: string): CreativeBrief | undefined {
+  try {
+    return loadCreativeBrief(briefPath);
+  } catch {
+    return undefined;
+  }
+}
+
+function loadCoverageSegments(projectDir: string): SelectionCoverageSegment[] | undefined {
+  const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+  if (!fs.existsSync(segmentsPath)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as { items?: unknown };
+    if (!Array.isArray(parsed.items)) return undefined;
+    return parsed.items.flatMap((item): SelectionCoverageSegment[] => {
+      if (!item || typeof item !== "object") return [];
+      const segment = item as { segment_id?: unknown; summary?: unknown };
+      if (typeof segment.segment_id !== "string" || segment.segment_id.length === 0) return [];
+      return [
+        {
+          segment_id: segment.segment_id,
+          ...(typeof segment.summary === "string" ? { summary: segment.summary } : {}),
+        },
+      ];
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function hasAnalyzableSelects(selects: unknown): selects is SelectsCandidates {
+  if (!selects || typeof selects !== "object") return false;
+  const candidates = (selects as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates)) return false;
+  return candidates.every((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    const c = candidate as {
+      segment_id?: unknown;
+      role?: unknown;
+      src_in_us?: unknown;
+      src_out_us?: unknown;
+    };
+    return (
+      typeof c.segment_id === "string" &&
+      typeof c.role === "string" &&
+      typeof c.src_in_us === "number" &&
+      typeof c.src_out_us === "number"
+    );
+  });
+}
+
+function activeSegmentIdSet(selects: SelectsCandidates): Set<string> {
+  const ids = new Set<string>();
+  for (const candidate of selects.candidates) {
+    if (candidate.role === "reject") continue;
+    ids.add(candidate.segment_id);
+  }
+  return ids;
+}
+
+function sameStringSets(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const value of a) {
+    if (!b.has(value)) return false;
+  }
+  return true;
+}
+
+function formatCoverageScore(score: number): string {
+  return Number.isFinite(score) ? (score * 100).toFixed(1) : "n/a";
 }
 
 // ── M4.5 Canonicalization ──────────────────────────────────────────
