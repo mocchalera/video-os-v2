@@ -6,8 +6,12 @@
 // against a human-approved golden, so we can see WHERE the AI's judgement
 // diverges from a human's, not just by how much.
 
-import type { Candidate, SelectsCandidates } from "../artifacts/types.js";
+import type { Candidate, CreativeBrief, SelectsCandidates } from "../artifacts/types.js";
 import { evaluateSelectsAgreement } from "./selects-agreement.js";
+import {
+  analyzeSelectionCoverage,
+  type SelectionCoverageReport,
+} from "./selection-coverage.js";
 import type { SelectsAgreementReport } from "./types.js";
 
 export interface SegmentEvidence {
@@ -19,6 +23,7 @@ export interface SegmentEvidence {
 
 export interface RegenerationReport {
   agreement: SelectsAgreementReport;
+  coverage?: SelectionCoverageReport;
   missed: Candidate[];
   missedCritical: Candidate[];
   extra: Candidate[];
@@ -54,6 +59,38 @@ function describeMoment(c: Candidate, seg: SegmentEvidence | undefined): string 
   return `${c.segment_id}${role}${conf}: ${detail}${why}`;
 }
 
+function renderCoverageLines(coverage: SelectionCoverageReport): string[] {
+  const runtime = coverage.runtime_coverage;
+  const roles = coverage.role_distribution;
+  const density = coverage.density;
+  const lines: string[] = [];
+  lines.push(`## Coverage`);
+  lines.push(`- **score: ${(coverage.score * 100).toFixed(1)} / 100**`);
+  lines.push(
+    `- runtime selected/target: ${runtime.selected_sec.toFixed(1)}s / ${runtime.target_sec.toFixed(
+      1,
+    )}s (${(runtime.ratio * 100).toFixed(1)}%)`,
+  );
+  lines.push(
+    `- roles: hero ${roles.hero}, support ${roles.support}, texture ${roles.texture}, transition ${roles.transition}, dialogue ${roles.dialogue}`,
+  );
+  lines.push(
+    `- density: ${density.selected_count}/${density.segment_pool_size} (${(
+      density.value * 100
+    ).toFixed(1)}%)`,
+  );
+  const sampledClusters = coverage.cluster_coverage.filter((cluster) => cluster.under_sampled);
+  lines.push(`- dense clusters under-sampled: ${sampledClusters.length}`);
+  if (coverage.gaps.length === 0) {
+    lines.push(`- gaps: none`);
+  } else {
+    lines.push(`- gaps:`);
+    for (const gap of coverage.gaps) lines.push(`  - ${gap}`);
+  }
+  lines.push("");
+  return lines;
+}
+
 /**
  * Score a regenerated selection against a human-approved golden and render an
  * actionable markdown report. `segments` supplies transcript/summary evidence so
@@ -64,8 +101,10 @@ export function buildSelectsRegenerationReport(
   candidateSelects: SelectsCandidates,
   segments: SegmentEvidence[],
   meta: { goldenProject: string; candidateProject: string; evaluatedAt: string },
+  brief?: CreativeBrief,
 ): RegenerationReport {
   const agreement = evaluateSelectsAgreement(goldenSelects, candidateSelects);
+  const coverage = brief ? analyzeSelectionCoverage(candidateSelects, brief, segments) : undefined;
   const segById = new Map(segments.map((s) => [s.segment_id, s]));
   const goldenBySeg = new Map(goldenSelects.candidates.map((c) => [c.segment_id, c]));
   const candidateBySeg = new Map(candidateSelects.candidates.map((c) => [c.segment_id, c]));
@@ -94,6 +133,10 @@ export function buildSelectsRegenerationReport(
   lines.push(`- counts: golden ${agreement.golden_count}, candidate ${agreement.candidate_count}, matched ${agreement.matched_count}`);
   lines.push("");
 
+  if (coverage) {
+    lines.push(...renderCoverageLines(coverage));
+  }
+
   lines.push(`## ❗ Missed critical moments (${missedCritical.length})`);
   lines.push(`Human treated these as essential (must-have or hero-role); the AI did not select them. Highest-priority gap.`);
   if (missedCritical.length === 0) {
@@ -119,5 +162,5 @@ export function buildSelectsRegenerationReport(
   else for (const c of extra) lines.push(`- ${describeMoment(c, segById.get(c.segment_id))}`);
   lines.push("");
 
-  return { agreement, missed, missedCritical, extra, markdown: lines.join("\n") };
+  return { agreement, coverage, missed, missedCritical, extra, markdown: lines.join("\n") };
 }

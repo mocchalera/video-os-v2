@@ -32,6 +32,8 @@ export { composeEvalReport, renderMarkdownReport } from "./report.js";
 export { evaluateSelectsAgreement } from "./selects-agreement.js";
 export { evaluateBlueprintAgreement } from "./blueprint-agreement.js";
 export { evaluateTimelineAgreement } from "./timeline-agreement.js";
+export { analyzeSelectionCoverage } from "./selection-coverage.js";
+export type { SelectionCoverageReport } from "./selection-coverage.js";
 export * from "./types.js";
 
 const ARTIFACT_PATHS = {

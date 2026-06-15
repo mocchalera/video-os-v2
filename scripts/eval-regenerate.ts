@@ -20,14 +20,17 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { loadSelects } from "../runtime/artifacts/loaders.js";
+import { loadCreativeBrief, loadSelects } from "../runtime/artifacts/loaders.js";
+import type { CreativeBrief } from "../runtime/artifacts/types.js";
 import {
   buildSelectsRegenerationReport,
   type SegmentEvidence,
 } from "../runtime/eval/regenerate-report.js";
+import type { SelectionCoverageReport } from "../runtime/eval/selection-coverage.js";
 import { classifyTranscriptQuality } from "../runtime/analysis/transcript-quality.js";
 
 const SELECTS_REL = "04_plan/selects_candidates.yaml";
+const BRIEF_REL = "01_intent/creative_brief.yaml";
 const SEGMENTS_REL = "03_analysis/segments.json";
 // Copied into the blind scratch — deliberately excludes 04_plan / 05_timeline.
 const BLIND_COPY_ENTRIES = ["01_intent", "03_analysis", "STYLE.md"];
@@ -49,6 +52,23 @@ function loadSegmentsEvidence(projectDir: string): SegmentEvidence[] {
     transcript_excerpt: s.transcript_excerpt,
     tags: s.tags,
   }));
+}
+
+function loadBriefIfPresent(projectDir: string): CreativeBrief | undefined {
+  const p = path.join(projectDir, BRIEF_REL);
+  return fs.existsSync(p) ? loadCreativeBrief(p) : undefined;
+}
+
+function coverageGapCategories(coverage: SelectionCoverageReport): string[] {
+  const categories: string[] = [];
+  if (coverage.density.sparse) categories.push("density");
+  if (coverage.cluster_coverage.some((cluster) => cluster.under_sampled)) {
+    categories.push("cluster");
+  }
+  if (coverage.must_have_coverage.some((item) => !item.matched)) {
+    categories.push("must_have");
+  }
+  return categories;
 }
 
 /**
@@ -127,6 +147,7 @@ function score(goldenDir: string, candidateDir: string, now: Date): void {
       candidateProject: path.basename(candidate),
       evaluatedAt: now.toISOString(),
     },
+    loadBriefIfPresent(golden),
   );
 
   const outDir = path.join(repoRoot(), "reports/eval");
@@ -139,6 +160,13 @@ function score(goldenDir: string, candidateDir: string, now: Date): void {
   console.log(`Creative regeneration — ${path.basename(golden)}`);
   console.log(`  composite ${(a.score * 100).toFixed(1)}/100 | F1 ${(a.f1 * 100).toFixed(1)}% (P ${(a.precision * 100).toFixed(0)}/R ${(a.recall * 100).toFixed(0)})`);
   console.log(`  missed critical (must-have/hero): ${report.missedCritical.length} | missed total: ${report.missed.length} | added: ${report.extra.length}`);
+  if (report.coverage) {
+    const categories = coverageGapCategories(report.coverage);
+    const categoryText = categories.length > 0 ? categories.join("/") : "none";
+    console.log(
+      `  coverage score ${report.coverage.score.toFixed(2)} | gaps: ${report.coverage.gaps.length} (${categoryText})`,
+    );
+  }
   console.log(`  report: ${path.relative(repoRoot(), outPath)}`);
 }
 
