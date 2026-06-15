@@ -293,3 +293,165 @@ export function applyAdaptiveTrim(
 
   return trimResults;
 }
+
+// ── Utterance-boundary snapping (talking_head_pacing increment 1) ──────────
+// Pure, deterministic. Snaps a clip's in/out to the nearest transcript utterance
+// edge so cuts land on phrase boundaries instead of mid-word — this is what
+// makes review metric audio.speech_cut pass. Operates on the existing single
+// clip; no within-beat IR. Filler excision / pause tightening remain deferred.
+
+export interface UtteranceSpan {
+  start_us: number;
+  end_us: number;
+}
+
+// Mirror of review's audio.speech_cut guard: a boundary strictly inside an
+// utterance (> 80ms from both edges) counts as a speech cut. Snapping onto an
+// exact edge therefore always clears the guard.
+const SPEECH_CUT_GUARD_US = 80_000;
+
+/** Sorted, de-duplicated utterance edge timestamps for one asset. */
+export function utteranceBoundaryTimestamps(utterances: UtteranceSpan[]): number[] {
+  const set = new Set<number>();
+  for (const u of utterances) {
+    if (u.end_us <= u.start_us) continue;
+    set.add(u.start_us);
+    set.add(u.end_us);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+/**
+ * A point is "inside speech" if it falls within the guarded interior of ANY
+ * utterance. Transcripts can carry overlapping utterances (diarization / STT
+ * redundancy), so a boundary that sits exactly on one utterance's edge may still
+ * be mid-word for an overlapping neighbour — this checks them all, matching the
+ * review metric's behaviour.
+ */
+function insideAnyUtterance(value: number, utterances: UtteranceSpan[], guardUs: number): boolean {
+  for (const u of utterances) {
+    if (value > u.start_us + guardUs && value < u.end_us - guardUs) return true;
+  }
+  return false;
+}
+
+/**
+ * Nearest CLEAN utterance edge to `value` within tolerance — "clean" meaning it
+ * clears every overlapping utterance's guard, so moving the cut there actually
+ * satisfies audio.speech_cut. Returns null when `value` is already clean or no
+ * clean edge is reachable. Ties resolve to the smaller timestamp (edges are
+ * ascending, first-wins).
+ */
+function nearestCleanBoundary(
+  value: number,
+  boundaries: number[],
+  utterances: UtteranceSpan[],
+  toleranceUs: number,
+  guardUs: number,
+): number | null {
+  if (!insideAnyUtterance(value, utterances, guardUs)) return null; // already clean
+  let best: number | null = null;
+  let bestDist = Infinity;
+  for (const b of boundaries) {
+    const dist = Math.abs(b - value);
+    if (dist > toleranceUs) continue;
+    if (insideAnyUtterance(b, utterances, guardUs)) continue; // edge still mid-speech
+    if (dist < bestDist) {
+      best = b;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
+export interface UtteranceSnapResult {
+  src_in_us: number;
+  src_out_us: number;
+  snapped_in: boolean;
+  snapped_out: boolean;
+}
+
+/**
+ * Snap [srcIn, srcOut] to the nearest CLEAN utterance edges within tolerance.
+ * A boundary only moves to a point that clears every overlapping utterance, so a
+ * snap never trades one speech cut for another. Returns null when nothing moved.
+ * Keeps in < out with at least the guard window of duration so snapping never
+ * inverts or collapses a clip.
+ */
+export function snapRangeToUtteranceBoundaries(
+  srcInUs: number,
+  srcOutUs: number,
+  utterances: UtteranceSpan[],
+  toleranceUs: number,
+): UtteranceSnapResult | null {
+  if (utterances.length === 0 || toleranceUs <= 0) return null;
+  const boundaries = utteranceBoundaryTimestamps(utterances);
+  if (boundaries.length === 0) return null;
+  const guardUs = SPEECH_CUT_GUARD_US;
+  const minDurationUs = guardUs * 2 + 1;
+
+  let snappedIn = srcInUs;
+  let snappedOut = srcOutUs;
+
+  const inTarget = nearestCleanBoundary(srcInUs, boundaries, utterances, toleranceUs, guardUs);
+  if (inTarget !== null && inTarget >= 0 && inTarget < snappedOut - minDurationUs) {
+    snappedIn = inTarget;
+  }
+
+  const outTarget = nearestCleanBoundary(srcOutUs, boundaries, utterances, toleranceUs, guardUs);
+  if (outTarget !== null && outTarget > snappedIn + minDurationUs) {
+    snappedOut = outTarget;
+  }
+
+  if (snappedIn === srcInUs && snappedOut === srcOutUs) return null;
+  return {
+    src_in_us: snappedIn,
+    src_out_us: snappedOut,
+    snapped_in: snappedIn !== srcInUs,
+    snapped_out: snappedOut !== srcOutUs,
+  };
+}
+
+/**
+ * Apply utterance-boundary snapping to every clip whose source asset has a
+ * transcript. Mutates clips in place and records provenance under a sibling
+ * metadata.talking_head_pacing key (Phase 5.5 owns metadata.editorial). The
+ * snap-skill metadata tag is emitted separately by getSkillMetadataTags.
+ * Returns the number of clips adjusted.
+ */
+export function applyUtteranceSnap(
+  clips: TimelineClip[],
+  utteranceMap: Map<string, UtteranceSpan[]>,
+  toleranceUs: number,
+  metadataTags: string[] = [],
+): number {
+  let snappedCount = 0;
+
+  for (const clip of clips) {
+    const utterances = utteranceMap.get(clip.asset_id);
+    if (!utterances || utterances.length === 0) continue;
+
+    const result = snapRangeToUtteranceBoundaries(
+      clip.src_in_us,
+      clip.src_out_us,
+      utterances,
+      toleranceUs,
+    );
+    if (!result) continue;
+
+    clip.src_in_us = result.src_in_us;
+    clip.src_out_us = result.src_out_us;
+    snappedCount++;
+
+    if (!clip.metadata) clip.metadata = {};
+    const meta = clip.metadata as Record<string, unknown>;
+    meta.talking_head_pacing = {
+      snapped_in: result.snapped_in,
+      snapped_out: result.snapped_out,
+      tolerance_us: toleranceUs,
+      ...(metadataTags.length > 0 ? { tags: [...metadataTags].sort() } : {}),
+    };
+  }
+
+  return snappedCount;
+}

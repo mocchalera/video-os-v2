@@ -9,13 +9,13 @@ import { parse as parseYaml } from "yaml";
 import { normalize } from "./normalize.js";
 import { scoreCandidates } from "./score.js";
 import { assemble } from "./assemble.js";
-import { applyAdaptiveTrim } from "./trim.js";
+import { applyAdaptiveTrim, applyUtteranceSnap, type UtteranceSpan } from "./trim.js";
 import { applyDurationAdjust } from "./duration-adjust.js";
 import { resolve } from "./resolve.js";
 import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
 import { applyPatch } from "./patch.js";
 import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
-import { activateSkills, computeRegistryHash, getSkillMetadataTags } from "../editorial/skill-registry.js";
+import { activateSkills, computeRegistryHash, getSkillMetadataTags, getUtteranceSnapConfig } from "../editorial/skill-registry.js";
 import { loadProfiles } from "../editorial/policy-resolver.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
@@ -66,6 +66,46 @@ interface ResolvedAudioPolicy {
   mode: BriefAudioPolicy;
   source: "explicit_brief" | "profile_default" | "global_default";
   a1_loudnorm: boolean;
+}
+
+/**
+ * Load transcript utterance spans per asset from 03_analysis/transcripts.
+ * Deterministic (files sorted, spans sorted). Returns an empty map when the
+ * directory is absent so the compiler stays hermetic for projects without
+ * speech analysis. Mirrors the review-side transcript reader.
+ */
+function loadProjectUtterances(projectPath: string): Map<string, UtteranceSpan[]> {
+  const dir = path.join(projectPath, "03_analysis", "transcripts");
+  const map = new Map<string, UtteranceSpan[]>();
+  if (!fs.existsSync(dir)) return map;
+  const files = fs.readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .sort((a, b) => a.localeCompare(b));
+  for (const file of files) {
+    let parsed: { asset_id?: string; items?: Array<{ start_us?: number; end_us?: number }> };
+    try {
+      parsed = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
+    } catch {
+      continue;
+    }
+    const assetId = parsed.asset_id;
+    if (!assetId || !Array.isArray(parsed.items)) continue;
+    const spans: UtteranceSpan[] = [];
+    for (const item of parsed.items) {
+      if (
+        typeof item.start_us === "number" &&
+        typeof item.end_us === "number" &&
+        item.end_us > item.start_us
+      ) {
+        spans.push({ start_us: item.start_us, end_us: item.end_us });
+      }
+    }
+    if (spans.length > 0) {
+      spans.sort((a, b) => a.start_us - b.start_us || a.end_us - b.end_us);
+      map.set(assetId, spans);
+    }
+  }
+  return map;
 }
 
 function findRepoRoot(from: string): string {
@@ -225,6 +265,25 @@ export function compile(opts: CompileOptions): CompileResult {
 
   // ── Phase 3.5b: Duration Adjustment (strict mode) ───────────────
   applyDurationAdjust(assembled, normalized.beats, selects.candidates, durationPolicy, fpsNum, fpsDen);
+
+  // ── Phase 3.5c: Utterance-boundary snap (talking_head_pacing) ───
+  // When a snapping skill is active and the project has transcripts, move clip
+  // in/out onto the nearest utterance edge so dialogue cuts land on phrase
+  // boundaries (review metric audio.speech_cut). Runs after duration adjust so
+  // it sees the final clip set; resolve (Phase 4) then sanitizes any overlap.
+  // No-op for projects without transcripts or when no snap skill is active —
+  // which keeps every non-talking-head golden byte-identical.
+  const snapConfig = getUtteranceSnapConfig(activeSkills);
+  if (snapConfig) {
+    const utteranceMap = loadProjectUtterances(projectPath);
+    if (utteranceMap.size > 0) {
+      const snapClips = [
+        ...assembled.tracks.video.flatMap((t) => t.clips),
+        ...assembled.tracks.audio.flatMap((t) => t.clips),
+      ];
+      applyUtteranceSnap(snapClips, utteranceMap, snapConfig.toleranceUs, snapConfig.metadataTags);
+    }
+  }
 
   // ── Phase 4: Resolve constraints ──────────────────────────────────
 

@@ -293,6 +293,15 @@ export interface SkillEffect {
   trim_bias?: number;
   duration_bias_frames?: number;
   metadata_tags?: string[];
+  /**
+   * talking_head_pacing increment 1: snap clip in/out to the nearest
+   * transcript utterance boundary so cuts land on phrase edges instead of
+   * mid-word (satisfies review metric audio.speech_cut). Pure trim refinement;
+   * filler excision / pause tightening remain deferred (need within-beat IR).
+   */
+  utterance_boundary_snap?: boolean;
+  /** Max distance (us) a clip boundary may move to reach an utterance edge. */
+  utterance_snap_tolerance_us?: number;
 }
 
 export interface SkillDefinition {

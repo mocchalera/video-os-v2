@@ -12,6 +12,8 @@ skill_suppressions:
   - j_cut_lead_in
   - l_cut_reaction_hold
   - cutaway_repair
-  - talking_head_pacing
 skill_enforcements:
   - axis_hold_dialogue
+  # talking_head_pacing (utterance-boundary snapping) is core to interview edits:
+  # cuts must land on phrase boundaries, not mid-word.
+  - talking_head_pacing
