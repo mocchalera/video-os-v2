@@ -76,12 +76,38 @@ export const DEFAULT_CAPTION_STYLE_PRESET: CaptionStylePreset = {
  * resolves it here. Unknown classes fall back to the default preset.
  */
 export const CAPTION_STYLE_PRESETS: Record<string, CaptionStylePreset> = {
+  // Font sizes are 1080p-reference px (% of frame height); buildAssDocument
+  // scales them to the real resolution. The genre sets the right ratio:
+  // talking-head/digest captions are the subject so they read large;
+  // cinematic captions stay restrained; vertical SNS captions are oversized.
   default: DEFAULT_CAPTION_STYLE_PRESET,
   "clean-lower-third": {
     ...DEFAULT_CAPTION_STYLE_PRESET,
     presetId: "clean-lower-third",
+    fontSizePx1080: 48, // 4.4% — talking-head / digest: read-the-quote large
+    lineHeightPx1080: 60,
     marginV1080: 36,
     maxWidthRatio: 0.9,
+    wrapStyle: 2,
+  },
+  cinematic: {
+    ...DEFAULT_CAPTION_STYLE_PRESET,
+    presetId: "cinematic",
+    fontSizePx1080: 36, // 3.3% — film/doc: restrained, sits higher off the edge
+    lineHeightPx1080: 46,
+    marginV1080: 60,
+    maxWidthRatio: 0.8,
+    wrapStyle: 2,
+  },
+  "sns-vertical": {
+    ...DEFAULT_CAPTION_STYLE_PRESET,
+    presetId: "sns-vertical",
+    fontWeight: 700,
+    fontSizePx1080: 64, // 5.9% — vertical short-form: oversized, bold
+    lineHeightPx1080: 80,
+    outlinePx1080: 3,
+    marginV1080: 120, // clear of platform UI chrome at the bottom
+    maxWidthRatio: 0.92,
     wrapStyle: 2,
   },
 };

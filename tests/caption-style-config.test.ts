@@ -25,12 +25,23 @@ describe("caption style preset registry", () => {
     expect(CAPTION_STYLE_PRESETS["clean-lower-third"].presetId).toBe("clean-lower-third");
   });
 
-  it("resolves clean-lower-third to a lower, no-wrap lower-third", () => {
+  it("resolves clean-lower-third to a lower, larger, no-wrap lower-third", () => {
     const p = resolveCaptionStylePreset("clean-lower-third");
     expect(p.presetId).toBe("clean-lower-third");
     expect(p.alignment).toBe("bottom_center");
+    expect(p.fontSizePx1080).toBe(48); // talking-head: read-the-quote large
     expect(p.marginV1080).toBe(36);
     expect(p.wrapStyle).toBe(2);
+  });
+
+  it("offers genre presets with size scaling to match the medium", () => {
+    // The user's insight: appropriate caption size is genre-dependent.
+    const digest = resolveCaptionStylePreset("clean-lower-third").fontSizePx1080;
+    const cinematic = resolveCaptionStylePreset("cinematic").fontSizePx1080;
+    const sns = resolveCaptionStylePreset("sns-vertical").fontSizePx1080;
+    expect(cinematic).toBeLessThan(digest); // film captions stay restrained
+    expect(sns).toBeGreaterThan(digest); // vertical short-form is oversized
+    expect(resolveCaptionStylePreset("sns-vertical").fontWeight).toBe(700);
   });
 
   it("falls back to default for unknown or undefined styling_class", () => {
@@ -70,7 +81,8 @@ describe("ASS document generation (burn-in)", () => {
     expect(ass).toContain("PlayResY: 1080");
     expect(ass).toContain("WrapStyle: 2");
     // Style row ends with ...,Alignment,MarginL,MarginR,MarginV,Encoding
-    expect(ass).toMatch(/Style: Default,Arial,24,[^\n]*,2,96,96,36,1/);
+    // clean-lower-third at 1080p: 48px, alignment 2, MarginL/R 96, MarginV 36
+    expect(ass).toMatch(/Style: Default,Arial,48,[^\n]*,2,96,96,36,1/);
     expect(ass).toContain(
       "Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,行1\\N行2",
     );
