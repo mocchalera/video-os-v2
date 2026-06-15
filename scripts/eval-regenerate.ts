@@ -25,6 +25,7 @@ import {
   buildSelectsRegenerationReport,
   type SegmentEvidence,
 } from "../runtime/eval/regenerate-report.js";
+import { classifyTranscriptQuality } from "../runtime/analysis/transcript-quality.js";
 
 const SELECTS_REL = "04_plan/selects_candidates.yaml";
 const SEGMENTS_REL = "03_analysis/segments.json";
@@ -50,7 +51,36 @@ function loadSegmentsEvidence(projectDir: string): SegmentEvidence[] {
   }));
 }
 
-function prep(goldenDir: string, outDir?: string): void {
+/**
+ * Structural intervention (deterministic): mark segments whose STT is
+ * unreliable (Whisper hallucination / mojibake / babble) and blank the noise so
+ * the triager judges those segments on their visual summary instead of being
+ * misled. This is the fix under test by the creative-regeneration loop.
+ */
+function cleanScratchTranscripts(scratch: string): { total: number; flagged: number } {
+  const p = path.join(scratch, SEGMENTS_REL);
+  if (!fs.existsSync(p)) return { total: 0, flagged: 0 };
+  const data = JSON.parse(fs.readFileSync(p, "utf-8")) as {
+    items?: Array<Record<string, unknown>>;
+    segments?: Array<Record<string, unknown>>;
+  };
+  const items = data.items ?? data.segments ?? [];
+  let flagged = 0;
+  for (const s of items) {
+    const r = classifyTranscriptQuality(s.transcript_excerpt as string | undefined);
+    s.transcript_quality = r.quality;
+    if (r.quality === "ok") {
+      if (r.usableText) s.transcript_excerpt = r.usableText;
+    } else {
+      s.transcript_excerpt = "[transcript unreliable — judge this segment on its visual summary]";
+      flagged += 1;
+    }
+  }
+  fs.writeFileSync(p, JSON.stringify(data, null, 2));
+  return { total: items.length, flagged };
+}
+
+function prep(goldenDir: string, outDir?: string, cleanTranscripts = false): void {
   const golden = path.resolve(goldenDir);
   const scratch = path.resolve(
     outDir ?? path.join(repoRoot(), "reports/eval/regen-scratch", path.basename(golden)),
@@ -68,6 +98,10 @@ function prep(goldenDir: string, outDir?: string): void {
   console.log(`Blind scratch ready: ${scratch}`);
   console.log(`  contains: ${BLIND_COPY_ENTRIES.filter((e) => fs.existsSync(path.join(scratch, e))).join(", ")}`);
   console.log(`  (04_plan / 05_timeline intentionally absent — the agent must not see the answer)`);
+  if (cleanTranscripts) {
+    const { total, flagged } = cleanScratchTranscripts(scratch);
+    console.log(`  transcript-quality cleaning: ${flagged}/${total} segments had unreliable STT blanked (judge on visuals)`);
+  }
   console.log("");
   console.log(`Next: run the footage-triager agent against ${scratch} so it writes`);
   console.log(`  ${path.join(scratch, SELECTS_REL)}`);
@@ -119,7 +153,7 @@ function main(argv: string[]): void {
   if (has("--prep")) {
     const golden = val("--prep");
     if (!golden) throw new Error("--prep requires a golden project dir");
-    prep(golden, val("--out"));
+    prep(golden, val("--out"), has("--clean-transcripts"));
     return;
   }
   if (has("--score")) {
