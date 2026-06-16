@@ -95,11 +95,62 @@
             },
             "quality_flags": {
               "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+            },
+            "visual_quality": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
             }
           },
           "additionalProperties": false
         },
+        "visual_quality": { "$ref": "#/$defs/visual-quality" },
         "peak_analysis": { "$ref": "#/$defs/peak-analysis" }
+      }
+    },
+    "visual-quality": {
+      "type": "object",
+      "required": ["scores", "labels"],
+      "additionalProperties": false,
+      "properties": {
+        "scores": {
+          "type": "object",
+          "required": [
+            "light_quality", "subject_prominence", "emotional_expression",
+            "composition_score", "motion_quality"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "light_quality": { "type": "number", "minimum": 0, "maximum": 1 },
+            "subject_prominence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "emotional_expression": { "type": "number", "minimum": 0, "maximum": 1 },
+            "composition_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "motion_quality": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "labels": {
+          "type": "object",
+          "required": [
+            "lighting_style", "composition_tags", "expression_tags", "motion_tags"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "lighting_style": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "composition_tags": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "expression_tags": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "motion_tags": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
       }
     },
     "peak-moment": {

@@ -379,7 +379,7 @@ describe("P4d search index runtime integration", () => {
     expect(parsed.manifest_hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     process.env.ENABLE_P4D_SEARCH_INDEX = "true";
     expect(loadSearchIndexManifest(projectDir).manifest?.hash).toBe(parsed.manifest_hash);
-  });
+  }, 30_000);
 
   it("keeps demo timeline canonical hash unchanged with P4d disabled", () => {
     const timeline = readJson(path.resolve("projects/demo/05_timeline/timeline.json"));

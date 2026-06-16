@@ -6,6 +6,7 @@
  *   npx tsx scripts/analyze.ts <source-files...> --project <project-dir>
  *   npx tsx scripts/analyze.ts video1.mp4 video2.mov --project projects/my-project
  *   npx tsx scripts/analyze.ts video.mp4 --project projects/test --skip-stt --skip-vlm
+ *   npx tsx scripts/analyze.ts --project projects/test --vlm-only
  */
 
 import { config as dotenvConfig } from "dotenv";
@@ -41,8 +42,10 @@ function parseArgs(argv: string[]): {
   skipMarlin: boolean;
   skipMediaLink: boolean;
   skipPreflight: boolean;
+  vlmOnly: boolean;
   language: string | undefined;
   sttProvider: string | undefined;
+  sttStrategy: "full" | "skip" | "auto";
   contentHint: string | undefined;
   concurrency: number;
   noCache: boolean;
@@ -58,8 +61,10 @@ function parseArgs(argv: string[]): {
   let skipMarlin = false;
   let skipMediaLink = false;
   let skipPreflight = false;
+  let vlmOnly = false;
   let language: string | undefined;
   let sttProvider: string | undefined;
+  let sttStrategy: "full" | "skip" | "auto" = "full";
   let contentHint: string | undefined;
   let concurrency = DEFAULT_VLM_CONCURRENCY;
   let noCache = false;
@@ -71,6 +76,7 @@ function parseArgs(argv: string[]): {
       projectDir = args[++i] ?? "";
     } else if (arg === "--skip-stt") {
       skipStt = true;
+      sttStrategy = "skip";
     } else if (arg === "--skip-vlm") {
       skipVlm = true;
     } else if (arg === "--skip-diarize") {
@@ -83,10 +89,20 @@ function parseArgs(argv: string[]): {
       skipMediaLink = true;
     } else if (arg === "--skip-preflight") {
       skipPreflight = true;
+    } else if (arg === "--vlm-only") {
+      vlmOnly = true;
     } else if (arg === "--language" || arg === "-l") {
       language = args[++i] ?? undefined;
     } else if (arg === "--stt-provider") {
       sttProvider = args[++i] ?? undefined;
+    } else if (arg === "--stt-strategy") {
+      const value = args[++i] ?? "";
+      if (!isSttStrategy(value)) {
+        console.error('Error: --stt-strategy must be one of "full", "skip", or "auto"');
+        process.exit(1);
+      }
+      sttStrategy = value;
+      if (sttStrategy === "skip") skipStt = true;
     } else if (arg === "--content-hint") {
       contentHint = args[++i] ?? undefined;
     } else if (arg === "--concurrency") {
@@ -106,7 +122,9 @@ function parseArgs(argv: string[]): {
 Options:
   --project, -p      Project directory (required)
   --concurrency      Concurrent VLM asset jobs (default: ${DEFAULT_VLM_CONCURRENCY})
+  --vlm-only         Re-run VLM enrichment and peak detection from existing assets/segments
   --skip-stt         Skip speech-to-text stage
+  --stt-strategy     STT strategy: "full", "skip", or "auto" (default: "full")
   --skip-vlm         Skip visual language model stage
   --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
   --skip-peak        Skip VLM peak detection stage
@@ -131,7 +149,7 @@ Options:
     process.exit(1);
   }
 
-  if (sourceFiles.length === 0) {
+  if (sourceFiles.length === 0 && !vlmOnly) {
     console.error("Error: at least one source file is required");
     process.exit(1);
   }
@@ -146,13 +164,19 @@ Options:
     skipMarlin,
     skipMediaLink,
     skipPreflight,
+    vlmOnly,
     language,
     sttProvider,
+    sttStrategy,
     contentHint,
     concurrency,
     noCache,
     clearCache,
   };
+}
+
+function isSttStrategy(value: string): value is "full" | "skip" | "auto" {
+  return value === "full" || value === "skip" || value === "auto";
 }
 
 function formatDuration(durationMs: number): string {
@@ -176,8 +200,10 @@ async function main(): Promise<void> {
     skipMarlin,
     skipMediaLink,
     skipPreflight,
+    vlmOnly,
     language,
     sttProvider,
+    sttStrategy,
     contentHint,
     concurrency,
     noCache,
@@ -185,7 +211,7 @@ async function main(): Promise<void> {
   } = parseArgs(process.argv);
 
   // ── Pre-flight checks ──────────────────────────────────────────
-  if (!skipPreflight) {
+  if (!skipPreflight && !vlmOnly) {
     // Use the directory of the first source file as the source folder
     const sourceFolder = path.dirname(path.resolve(sourceFiles[0]));
     console.log("[analyze] Running pre-flight checks...");
@@ -203,7 +229,9 @@ async function main(): Promise<void> {
 
   console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
   console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);
+  if (vlmOnly) console.log("[analyze] Mode: VLM only");
   if (skipStt) console.log("[analyze] STT: skipped");
+  if (!skipStt && sttStrategy !== "full") console.log(`[analyze] STT strategy: ${sttStrategy}`);
   if (skipVlm) console.log("[analyze] VLM: skipped");
   if (skipDiarize) console.log("[analyze] Diarization: skipped");
   if (skipPeak) console.log("[analyze] Peak detection: skipped");
@@ -234,9 +262,11 @@ async function main(): Promise<void> {
     skipVlm,
     skipDiarize,
     skipPeak,
+    vlmOnly,
     vlmFn,
     sttLanguageOverride: language,
     sttProvider,
+    sttStrategy,
     contentHint,
     skipMediaLink,
     vlmConcurrency: concurrency,
@@ -245,7 +275,7 @@ async function main(): Promise<void> {
     clearCache,
   });
 
-  if (!skipMarlin && shouldRunMarlinAnalysis(projectDir)) {
+  if (!vlmOnly && !skipMarlin && shouldRunMarlinAnalysis(projectDir)) {
     console.log("[analyze] Marlin: running temporal semantic pass");
     const marlinFn = createMarlinFnFromEnvironment(projectDir);
     try {

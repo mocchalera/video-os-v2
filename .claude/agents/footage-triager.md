@@ -7,7 +7,7 @@ tools:
 - Glob
 - Grep
 - Bash
-model: haiku
+model: sonnet
 permissionMode: default
 maxTurns: 10
 effort: medium

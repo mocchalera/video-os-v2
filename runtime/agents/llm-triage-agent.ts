@@ -16,7 +16,7 @@ import type {
 export type LlmCompleter = (prompt: string) => Promise<string>;
 export { extractJsonObject } from "./llm-json.js";
 
-export const DEFAULT_TRIAGE_MODEL = "gemini-2.5-flash";
+export const DEFAULT_TRIAGE_MODEL = "gemini-2.5-flash-lite";
 export const UNRELIABLE_TRANSCRIPT_TEXT = "[unreliable — judge on visuals]";
 
 const BRIEF_REL = "01_intent/creative_brief.yaml";

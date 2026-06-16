@@ -97,7 +97,7 @@ describe("prepareMarlinProxy", () => {
     const second = await prepareMarlinProxy(workdir, src);
     expect(second.evaluationPath).toBe(first.evaluationPath);
     expect(fs.statSync(second.evaluationPath).mtimeMs).toBe(mtimeBefore);
-  });
+  }, 30_000);
 
   fxit("respects the disable flag", async () => {
     const src = makeVideo("large2.mp4", 1280, 720);

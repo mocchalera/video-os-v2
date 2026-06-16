@@ -70,7 +70,7 @@ const MOCK_VLM_POLICY: VlmPolicy = {
   model_snapshot: "test-snapshot-vlm",
   input_mode: "frame_bundle_plus_text_context",
   response_format: "json_schema_v1",
-  prompt_template_id: "m2-segment-v1",
+  prompt_template_id: "m2-segment-v2",
   max_frame_width_px: 1024,
   segment_visual_token_budget_max: 8192,
   segment_visual_output_tokens_max: 512,
@@ -559,7 +559,7 @@ describe("Constants", () => {
   });
 
   it("has prompt template ID", () => {
-    expect(PROMPT_TEMPLATE_ID).toBe("m2-segment-v1");
+    expect(PROMPT_TEMPLATE_ID).toBe("m2-segment-v2");
   });
 });
 

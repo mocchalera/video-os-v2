@@ -16,6 +16,8 @@ import {
   type VlmEnrichmentResult,
   type VlmFn,
   type VlmPolicy,
+  type VlmVisualQuality,
+  PROMPT_TEMPLATE_ID,
   VLM_CONNECTOR_VERSION,
   adjustFpsForBudget,
   computeFrameCount,
@@ -108,6 +110,13 @@ interface VlmAssetPlan {
   liveSegments: SegmentItem[];
 }
 
+type SegmentWithVisualQuality = SegmentItem & {
+  visual_quality?: VlmVisualQuality;
+  provenance: SegmentItem["provenance"] & {
+    visual_quality?: Record<string, string>;
+  };
+};
+
 // ── Concurrency Helpers ────────────────────────────────────────────
 
 const sleep = (ms: number): Promise<void> =>
@@ -185,10 +194,19 @@ export function hydrateCachedVlmSegments(
       continue;
     }
 
+    const cachedVisualQuality = (cached as SegmentWithVisualQuality).visual_quality;
+    const cachedVisualQualityProvenance =
+      (cached.provenance as Record<string, Record<string, string> | undefined>).visual_quality;
+    const canReuseVisualQuality = cachedVisualQuality !== undefined &&
+      hasReusableProvenance(cachedVisualQualityProvenance, options, expectedPromptHash);
+
     segment.summary = cached.summary;
     segment.tags = [...cached.tags];
     segment.quality_flags = [...new Set([...segment.quality_flags, ...cached.quality_flags])];
     segment.interest_points = (cached.interest_points ?? []).map((point) => ({ ...point }));
+    if (canReuseVisualQuality) {
+      (segment as SegmentWithVisualQuality).visual_quality = cloneVisualQuality(cachedVisualQuality);
+    }
     segment.confidence = {
       ...segment.confidence,
       ...(cached.confidence.summary ? { summary: { ...cached.confidence.summary } } : {}),
@@ -203,6 +221,9 @@ export function hydrateCachedVlmSegments(
       ...(cached.provenance.tags ? { tags: { ...cached.provenance.tags } } : {}),
       ...(cached.provenance.quality_flags
         ? { quality_flags: { ...cached.provenance.quality_flags } }
+        : {}),
+      ...(canReuseVisualQuality && cachedVisualQualityProvenance
+        ? { visual_quality: { ...cachedVisualQualityProvenance } }
         : {}),
     };
     cachedSegmentIds.add(segment.segment_id);
@@ -368,6 +389,9 @@ export function vlmReduce(
       ? [...new Set([...seg.quality_flags, ...out.quality_flags])]
       : seg.quality_flags;
     seg.interest_points = out.interest_points;
+    if (out.visual_quality) {
+      (seg as SegmentWithVisualQuality).visual_quality = out.visual_quality;
+    }
 
     // Confidence records
     if (!seg.confidence) {
@@ -406,12 +430,16 @@ export function vlmReduce(
       }),
       model_alias: shard.result.model_alias,
       model_snapshot: shard.result.model_snapshot,
+      prompt_template_id: PROMPT_TEMPLATE_ID,
       prompt_hash: shard.result.prompt_hash,
       response_format: responseFormat,
     };
     (seg.provenance as Record<string, unknown>).summary = vlmProvenance;
     (seg.provenance as Record<string, unknown>).tags = vlmProvenance;
     (seg.provenance as Record<string, unknown>).quality_flags = vlmProvenance;
+    if (out.visual_quality) {
+      (seg.provenance as Record<string, unknown>).visual_quality = vlmProvenance;
+    }
   }
 
   // Update asset role_guess based on combined STT + VLM evidence
@@ -525,6 +553,9 @@ function hasReusableProvenance(
   if (provenance.stage !== "vlm") return false;
   if (provenance.connector_version !== VLM_CONNECTOR_VERSION) return false;
   if (provenance.model_snapshot !== options.vlmPolicy.model_snapshot) return false;
+  if (provenance.prompt_template_id && provenance.prompt_template_id !== PROMPT_TEMPLATE_ID) {
+    return false;
+  }
   if (provenance.prompt_hash !== expectedPromptHash) return false;
   if (provenance.policy_hash && provenance.policy_hash !== options.policyHash) return false;
   if (
@@ -534,4 +565,16 @@ function hasReusableProvenance(
     return false;
   }
   return true;
+}
+
+function cloneVisualQuality(visualQuality: VlmVisualQuality): VlmVisualQuality {
+  return {
+    scores: { ...visualQuality.scores },
+    labels: {
+      lighting_style: [...visualQuality.labels.lighting_style],
+      composition_tags: [...visualQuality.labels.composition_tags],
+      expression_tags: [...visualQuality.labels.expression_tags],
+      motion_tags: [...visualQuality.labels.motion_tags],
+    },
+  };
 }

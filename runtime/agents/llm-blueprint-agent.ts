@@ -21,7 +21,7 @@ import type {
 import { parseLlmResponse } from "./llm-json.js";
 import type { LlmCompleter } from "./llm-triage-agent.js";
 
-export const DEFAULT_BLUEPRINT_MODEL = "gemini-2.5-flash";
+export const DEFAULT_BLUEPRINT_MODEL = "gemini-2.5-flash-lite";
 
 const VALID_ROLES = new Set<Role>(["hero", "support", "transition", "texture", "dialogue"]);
 const VALID_SELECT_ROLES = new Set<Role | "reject">(["hero", "support", "transition", "texture", "dialogue", "reject"]);

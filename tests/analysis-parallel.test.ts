@@ -22,7 +22,7 @@ const vlmPolicy: VlmPolicy = {
   model_snapshot: "gemini-2.0-flash-202603",
   input_mode: "frame_bundle_plus_text_context",
   response_format: "json_schema_v1",
-  prompt_template_id: "m2-segment-v1",
+  prompt_template_id: "m2-segment-v2",
   max_frame_width_px: 1024,
   segment_visual_token_budget_max: 8192,
   segment_visual_output_tokens_max: 512,

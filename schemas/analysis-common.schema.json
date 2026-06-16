@@ -43,6 +43,7 @@
         "request_hash": { "type": "string", "minLength": 1 },
         "model_alias": { "type": "string" },
         "model_snapshot": { "type": "string" },
+        "prompt_template_id": { "type": "string" },
         "prompt_hash": { "type": "string" },
         "response_format": { "type": "string" },
         "chunking_strategy": { "type": "string" },
