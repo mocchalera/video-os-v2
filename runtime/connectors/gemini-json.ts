@@ -1,10 +1,24 @@
-/** Shared Gemini JSON text connector. */
+/** Shared Gemini JSON connector. */
+
+import * as fs from "node:fs";
 
 export interface GeminiJsonOptions {
   maxOutputTokens?: number;
   temperature?: number;
   retryLabel?: string;
 }
+
+export interface GeminiImagePathInput {
+  path: string;
+  mimeType: string;
+}
+
+export interface GeminiInlineImageInput {
+  data: string;
+  mimeType: string;
+}
+
+export type GeminiMultimodalImageInput = GeminiImagePathInput | GeminiInlineImageInput;
 
 /** Parse RetryInfo.retryDelay ("46s") out of a 429 body; null if absent. */
 export function parseRetryDelayMs(body: string): number | null {
@@ -16,10 +30,29 @@ export function parseRetryDelayMs(body: string): number | null {
 const MAX_RETRIES = 2;
 const MAX_RETRY_DELAY_MS = 70_000;
 
-export async function callGeminiJson(
+function imageData(image: GeminiMultimodalImageInput): string {
+  if ("data" in image) return image.data;
+  return fs.readFileSync(image.path).toString("base64");
+}
+
+function buildParts(prompt: string, images: GeminiMultimodalImageInput[]): Array<Record<string, unknown>> {
+  if (images.length === 0) return [{ text: prompt }];
+  return [
+    ...images.map((image) => ({
+      inline_data: {
+        mime_type: image.mimeType,
+        data: imageData(image),
+      },
+    })),
+    { text: prompt },
+  ];
+}
+
+async function callGeminiGenerateContent(
   prompt: string,
   model: string,
   options: GeminiJsonOptions = {},
+  images: GeminiMultimodalImageInput[] = [],
 ): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -36,7 +69,7 @@ export async function callGeminiJson(
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ parts: buildParts(prompt, images) }],
         generationConfig: {
           maxOutputTokens,
           temperature,
@@ -66,4 +99,21 @@ export async function callGeminiJson(
     }
     throw new Error(`Gemini API error ${response.status}: ${body}`);
   }
+}
+
+export async function callGeminiJson(
+  prompt: string,
+  model: string,
+  options: GeminiJsonOptions = {},
+): Promise<string> {
+  return callGeminiGenerateContent(prompt, model, options);
+}
+
+export async function callGeminiMultimodal(
+  prompt: string,
+  images: GeminiMultimodalImageInput[],
+  model: string,
+  options: GeminiJsonOptions = {},
+): Promise<string> {
+  return callGeminiGenerateContent(prompt, model, options, images);
 }

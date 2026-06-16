@@ -2,7 +2,7 @@
 /**
  * Headless in-runtime LLM triage.
  *
- *   npx tsx scripts/triage-llm.ts <projectDir> [--model <model>]
+ *   npx tsx scripts/triage-llm.ts <projectDir> [--model <model>] [--text-only-triage]
  */
 
 import * as path from "node:path";
@@ -10,17 +10,19 @@ import { pathToFileURL } from "node:url";
 import { createLlmTriageAgent } from "../runtime/agents/llm-triage-agent.js";
 import { runTriage } from "../runtime/commands/triage.js";
 
-const USAGE = "Usage: npx tsx scripts/triage-llm.ts <projectDir> [--model <model>]";
+const USAGE = "Usage: npx tsx scripts/triage-llm.ts <projectDir> [--model <model>] [--text-only-triage]";
 
 interface Args {
   projectDir: string;
   model?: string;
+  textOnlyTriage: boolean;
 }
 
 export function parseArgs(argv: string[]): Args {
   const args = argv.slice(2);
   let projectDir: string | undefined;
   let model: string | undefined;
+  let textOnlyTriage = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -33,13 +35,17 @@ export function parseArgs(argv: string[]): Args {
       i += 1;
       continue;
     }
+    if (arg === "--text-only-triage") {
+      textOnlyTriage = true;
+      continue;
+    }
     if (arg.startsWith("--")) throw new Error(`Unknown argument: ${arg}`);
     if (projectDir) throw new Error(`Unexpected extra argument: ${arg}`);
     projectDir = arg;
   }
 
   if (!projectDir) throw new Error(USAGE);
-  return { projectDir, model };
+  return { projectDir, model, textOnlyTriage };
 }
 
 export async function main(argv: string[] = process.argv): Promise<number> {
@@ -52,7 +58,10 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   }
 
   const projectDir = path.resolve(args.projectDir);
-  const agent = createLlmTriageAgent(args.model ? { model: args.model } : {});
+  const agent = createLlmTriageAgent({
+    ...(args.model ? { model: args.model } : {}),
+    textOnlyTriage: args.textOnlyTriage,
+  });
   const result = await runTriage(projectDir, agent);
   if (!result.success) {
     console.error(`triage-llm failed: ${result.error?.message ?? "unknown error"}`);

@@ -6,9 +6,13 @@ import { stringify as stringifyYaml } from "yaml";
 import {
   UNRELIABLE_TRANSCRIPT_TEXT,
   createLlmTriageAgent,
+  loadCompactSegmentEvidence,
+  type LlmImagePart,
   type LlmCompleter,
 } from "../runtime/agents/llm-triage-agent.js";
+import { callGeminiMultimodal } from "../runtime/connectors/gemini-json.js";
 import type { TriageAgentContext } from "../runtime/commands/triage.js";
+import { parseArgs } from "../scripts/triage-llm.js";
 
 const tempDirs: string[] = [];
 
@@ -79,6 +83,19 @@ function defaultSegments(): Array<Record<string, unknown>> {
       transcript_excerpt: "That was the first ride.",
     },
   ];
+}
+
+function segmentsWithFilmstrips(): Array<Record<string, unknown>> {
+  return defaultSegments().map((segment) => ({
+    ...segment,
+    filmstrip_path: `filmstrips/${String(segment.segment_id)}.png`,
+  }));
+}
+
+function writeFilmstrip(projectDir: string, relPath: string, content = "fake-png"): void {
+  const targetPath = path.join(projectDir, "03_analysis", relPath);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, content, "utf-8");
 }
 
 function context(projectDir: string, overrides: Partial<TriageAgentContext> = {}): TriageAgentContext {
@@ -235,6 +252,215 @@ describe("createLlmTriageAgent", () => {
     expect(result.selects.candidates[0]).toMatchObject({
       segment_id: "SEG_001",
       role: "support",
+    });
+  });
+
+  it("resolves filmstrip paths relative to the project analysis directory", () => {
+    const projectDir = createProject("filmstrip-resolve", segmentsWithFilmstrips());
+
+    const segments = loadCompactSegmentEvidence(projectDir);
+
+    expect(segments[0].filmstrip_path).toBe(path.join(projectDir, "03_analysis/filmstrips/SEG_001.png"));
+    expect(segments[1].filmstrip_path).toBe(path.join(projectDir, "03_analysis/filmstrips/SEG_002.png"));
+  });
+
+  it("passes resolved filmstrip images to the LLM with image-to-segment prompt refs", async () => {
+    const projectDir = createProject("filmstrip-images", segmentsWithFilmstrips());
+    writeFilmstrip(projectDir, "filmstrips/SEG_001.png", "filmstrip-one");
+    writeFilmstrip(projectDir, "filmstrips/SEG_002.png", "filmstrip-two");
+    const preparedPaths: string[] = [];
+    let prompt = "";
+    let images: LlmImagePart[] | undefined;
+    const agent = createLlmTriageAgent({
+      imagePreparer: async (imagePath, mimeType) => {
+        preparedPaths.push(imagePath);
+        return { data: Buffer.from(path.basename(imagePath)).toString("base64"), mimeType };
+      },
+      llm: async (nextPrompt, nextImages) => {
+        prompt = nextPrompt;
+        images = nextImages;
+        return responseFor("SEG_001");
+      },
+    });
+
+    await agent.run(context(projectDir));
+
+    expect(preparedPaths).toEqual([
+      path.join(projectDir, "03_analysis/filmstrips/SEG_001.png"),
+      path.join(projectDir, "03_analysis/filmstrips/SEG_002.png"),
+    ]);
+    expect(images).toHaveLength(2);
+    expect(images?.[0]).toEqual({
+      data: Buffer.from("SEG_001.png").toString("base64"),
+      mimeType: "image/png",
+    });
+    expect(prompt).toContain("You can see filmstrip images for each segment");
+    expect(prompt).toContain('"image_index": 1');
+    expect(prompt).toContain('"segment_id": "SEG_001"');
+    expect(prompt).toContain('"image_index": 2');
+    expect(prompt).toContain('"segment_id": "SEG_002"');
+  });
+
+  it("falls back to text-only LLM calls when filmstrip files are missing", async () => {
+    const projectDir = createProject("filmstrip-missing", segmentsWithFilmstrips());
+    let prompt = "";
+    let images: LlmImagePart[] | undefined;
+    let imagePreparerCalls = 0;
+    const agent = createLlmTriageAgent({
+      imagePreparer: async () => {
+        imagePreparerCalls += 1;
+        return { data: "unused", mimeType: "image/png" };
+      },
+      llm: async (nextPrompt, nextImages) => {
+        prompt = nextPrompt;
+        images = nextImages;
+        return responseFor("SEG_001");
+      },
+    });
+
+    await agent.run(context(projectDir));
+
+    expect(imagePreparerCalls).toBe(0);
+    expect(images).toBeUndefined();
+    expect(prompt).toContain("No filmstrip images are attached");
+  });
+
+  it("honors text-only triage even when filmstrip files exist", async () => {
+    const projectDir = createProject("text-only", segmentsWithFilmstrips());
+    writeFilmstrip(projectDir, "filmstrips/SEG_001.png");
+    writeFilmstrip(projectDir, "filmstrips/SEG_002.png");
+    let images: LlmImagePart[] | undefined;
+    let imagePreparerCalls = 0;
+    const agent = createLlmTriageAgent({
+      textOnlyTriage: true,
+      imagePreparer: async () => {
+        imagePreparerCalls += 1;
+        return { data: "unused", mimeType: "image/png" };
+      },
+      llm: async (_nextPrompt, nextImages) => {
+        images = nextImages;
+        return responseFor("SEG_001");
+      },
+    });
+
+    await agent.run(context(projectDir));
+
+    expect(imagePreparerCalls).toBe(0);
+    expect(images).toBeUndefined();
+  });
+
+  it("batches multimodal triage and merges parsed candidates", async () => {
+    const projectDir = createProject("filmstrip-batches", segmentsWithFilmstrips());
+    writeFilmstrip(projectDir, "filmstrips/SEG_001.png");
+    writeFilmstrip(projectDir, "filmstrips/SEG_002.png");
+    const calls: Array<{ prompt: string; images?: LlmImagePart[] }> = [];
+    const agent = createLlmTriageAgent({
+      multimodalBatchSize: 1,
+      imagePreparer: async (imagePath, mimeType) => ({ data: Buffer.from(imagePath).toString("base64"), mimeType }),
+      llm: async (nextPrompt, nextImages) => {
+        calls.push({ prompt: nextPrompt, images: nextImages });
+        return responseFor(nextPrompt.includes('"segment_id": "SEG_002"') ? "SEG_002" : "SEG_001");
+      },
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0].prompt).toContain("segment batch 1/2");
+    expect(calls[1].prompt).toContain("segment batch 2/2");
+    expect(calls[0].images).toHaveLength(1);
+    expect(calls[1].images).toHaveLength(1);
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual(["SEG_001", "SEG_002"]);
+  });
+});
+
+describe("callGeminiMultimodal", () => {
+  it("sends inline image data with header-based API key auth", async () => {
+    const projectDir = createProject("gemini-multimodal");
+    const imagePath = path.join(projectDir, "filmstrip.png");
+    fs.writeFileSync(imagePath, "image-bytes", "utf-8");
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.GEMINI_API_KEY;
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+      }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key";
+      const result = await callGeminiMultimodal(
+        "choose clips",
+        [{ path: imagePath, mimeType: "image/png" }],
+        "gemini-2.5-flash-lite",
+        { maxOutputTokens: 123, temperature: 0.2 },
+      );
+
+      expect(result).toBe('{"ok":true}');
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0].input)).not.toContain("test-key");
+      expect((calls[0].init?.headers as Record<string, string>)["x-goog-api-key"]).toBe("test-key");
+      const body = JSON.parse(String(calls[0].init?.body)) as {
+        contents: Array<{ parts: Array<Record<string, unknown>> }>;
+        generationConfig: Record<string, unknown>;
+      };
+      expect(body.contents[0].parts).toEqual([
+        {
+          inline_data: {
+            mime_type: "image/png",
+            data: Buffer.from("image-bytes").toString("base64"),
+          },
+        },
+        { text: "choose clips" },
+      ]);
+      expect(body.generationConfig).toMatchObject({
+        maxOutputTokens: 123,
+        temperature: 0.2,
+        responseMimeType: "application/json",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = originalApiKey;
+    }
+  });
+
+  it("falls back to a text-only Gemini request when no images are provided", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalApiKey = process.env.GEMINI_API_KEY;
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"textOnly":true}' }] } }],
+      }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key";
+      const result = await callGeminiMultimodal("text prompt", [], "gemini-2.5-flash-lite");
+
+      expect(result).toBe('{"textOnly":true}');
+      const body = JSON.parse(String(calls[0].init?.body)) as {
+        contents: Array<{ parts: Array<Record<string, unknown>> }>;
+      };
+      expect(body.contents[0].parts).toEqual([{ text: "text prompt" }]);
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalApiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = originalApiKey;
+    }
+  });
+});
+
+describe("triage-llm CLI args", () => {
+  it("parses --text-only-triage", () => {
+    expect(parseArgs(["node", "triage-llm", "projects/demo", "--text-only-triage"])).toEqual({
+      projectDir: "projects/demo",
+      model: undefined,
+      textOnlyTriage: true,
     });
   });
 });

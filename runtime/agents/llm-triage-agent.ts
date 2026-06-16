@@ -1,9 +1,12 @@
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import { classifyTranscriptQuality } from "../analysis/transcript-quality.js";
 import { loadCreativeBrief } from "../artifacts/loaders.js";
 import type { CreativeBrief, EditorialSummary } from "../artifacts/types.js";
-import { callGeminiJson } from "../connectors/gemini-json.js";
+import { callGeminiMultimodal, type GeminiInlineImageInput } from "../connectors/gemini-json.js";
 import { parseLlmResponse } from "./llm-json.js";
 import type {
   SelectCandidate,
@@ -13,14 +16,20 @@ import type {
   TriageCoverageFeedback,
 } from "../commands/triage.js";
 
-export type LlmCompleter = (prompt: string) => Promise<string>;
+export type LlmImagePart = GeminiInlineImageInput;
+export type LlmCompleter = (prompt: string, images?: LlmImagePart[]) => Promise<string>;
 export { extractJsonObject } from "./llm-json.js";
 
 export const DEFAULT_TRIAGE_MODEL = "gemini-2.5-flash-lite";
 export const UNRELIABLE_TRANSCRIPT_TEXT = "[unreliable — judge on visuals]";
 
 const BRIEF_REL = "01_intent/creative_brief.yaml";
+const ANALYSIS_REL = "03_analysis";
 const SEGMENTS_REL = "03_analysis/segments.json";
+const FILMSTRIP_MAX_WIDTH_PX = 512;
+const MULTIMODAL_BATCH_SEGMENTS = 15;
+const MULTIMODAL_BATCH_DELAY_MS = 5_000;
+const execFileAsync = promisify(execFile);
 
 const VALID_ROLES = new Set<SelectCandidate["role"]>([
   "hero",
@@ -53,12 +62,43 @@ export interface CompactSegmentEvidence {
   tags: string[];
   peak: CompactPeakEvidence;
   transcript: string;
+  filmstrip_path?: string;
+}
+
+export interface TriageFilmstripImageRef {
+  image_index: number;
+  segment_id: string;
+  asset_id: string;
+  filmstrip_path: string;
+  mime_type: string;
+}
+
+export type FilmstripImagePreparer = (imagePath: string, mimeType: string) => Promise<LlmImagePart | null>;
+
+interface PreparedFilmstripImages {
+  images: LlmImagePart[];
+  refs: TriageFilmstripImageRef[];
+}
+
+interface TriageBatchInfo {
+  index: number;
+  count: number;
 }
 
 interface TriagePromptInput {
   brief: CreativeBrief;
   segments: CompactSegmentEvidence[];
   coverageFeedback?: TriageCoverageFeedback;
+  filmstripImages?: TriageFilmstripImageRef[];
+  batch?: TriageBatchInfo;
+}
+
+export interface CreateLlmTriageAgentOptions {
+  llm?: LlmCompleter;
+  model?: string;
+  textOnlyTriage?: boolean;
+  imagePreparer?: FilmstripImagePreparer;
+  multimodalBatchSize?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -101,6 +141,90 @@ function normalizeTranscript(raw: unknown): string {
   return quality.quality === "ok" ? quality.usableText : UNRELIABLE_TRANSCRIPT_TEXT;
 }
 
+function mimeTypeForPath(imagePath: string): string {
+  const ext = path.extname(imagePath).toLowerCase();
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  return "image/png";
+}
+
+function resolveFilmstripPath(projectDir: string, filmstripPath: string): string {
+  if (path.isAbsolute(filmstripPath)) return filmstripPath;
+  const normalized = filmstripPath.replace(/\\/g, "/");
+  if (normalized === ANALYSIS_REL || normalized.startsWith(`${ANALYSIS_REL}/`)) {
+    return path.join(projectDir, filmstripPath);
+  }
+  return path.join(projectDir, ANALYSIS_REL, filmstripPath);
+}
+
+export async function defaultFilmstripImagePreparer(
+  imagePath: string,
+  mimeType: string,
+): Promise<LlmImagePart | null> {
+  let tempDir: string | undefined;
+  let readPath = imagePath;
+  let outputMimeType = mimeType;
+  try {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-triage-filmstrip-"));
+    const outPath = path.join(tempDir, `${path.basename(imagePath, path.extname(imagePath))}.png`);
+    try {
+      await execFileAsync("ffmpeg", [
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        imagePath,
+        "-vf",
+        `scale=${FILMSTRIP_MAX_WIDTH_PX}:-1:force_original_aspect_ratio=decrease`,
+        "-frames:v",
+        "1",
+        outPath,
+      ]);
+      if (fs.existsSync(outPath)) {
+        readPath = outPath;
+        outputMimeType = "image/png";
+      }
+    } catch {
+      readPath = imagePath;
+      outputMimeType = mimeType;
+    }
+    return {
+      data: fs.readFileSync(readPath).toString("base64"),
+      mimeType: outputMimeType,
+    };
+  } catch {
+    return null;
+  } finally {
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+export async function prepareFilmstripImages(
+  segments: CompactSegmentEvidence[],
+  imagePreparer: FilmstripImagePreparer = defaultFilmstripImagePreparer,
+): Promise<PreparedFilmstripImages> {
+  const images: LlmImagePart[] = [];
+  const refs: TriageFilmstripImageRef[] = [];
+
+  for (const segment of segments) {
+    if (!segment.filmstrip_path || !fs.existsSync(segment.filmstrip_path)) continue;
+    const mimeType = mimeTypeForPath(segment.filmstrip_path);
+    const image = await imagePreparer(segment.filmstrip_path, mimeType);
+    if (!image) continue;
+    images.push(image);
+    refs.push({
+      image_index: images.length,
+      segment_id: segment.segment_id,
+      asset_id: segment.asset_id,
+      filmstrip_path: segment.filmstrip_path,
+      mime_type: image.mimeType,
+    });
+  }
+
+  return { images, refs };
+}
+
 function extractPeakEvidence(segment: Record<string, unknown>): CompactPeakEvidence {
   const peakAnalysis = isRecord(segment.peak_analysis) ? segment.peak_analysis : {};
   const moments = Array.isArray(peakAnalysis.peak_moments) ? peakAnalysis.peak_moments : [];
@@ -136,6 +260,7 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
         tags: stringArray(item.tags),
         peak: extractPeakEvidence(item),
         transcript: normalizeTranscript(item.transcript_excerpt ?? item.transcript),
+        filmstrip_path: stringValue(item.filmstrip_path),
       },
     ];
   });
@@ -159,7 +284,13 @@ export function loadCompactSegmentEvidence(projectDir: string): CompactSegmentEv
   if (segments.length === 0) {
     throw new Error(`segments.json has no valid segment evidence: ${segmentsPath}`);
   }
-  return segments;
+  return segments.map((segment) => {
+    if (!segment.filmstrip_path) return segment;
+    return {
+      ...segment,
+      filmstrip_path: resolveFilmstripPath(projectDir, segment.filmstrip_path),
+    };
+  });
 }
 
 function briefMustHave(brief: CreativeBrief): string[] {
@@ -170,6 +301,31 @@ function buildCoverageFeedbackPreamble(feedback: TriageCoverageFeedback | undefi
   if (!feedback) return [];
   return [
     `前回の選定で以下の不足が出た。必ず是正せよ: ${JSON.stringify(feedback.gaps)}。特に under-sampled な montage クラスタを増やし、sparse を解消せよ。前回選定数=${feedback.previous_selection_count}`,
+    "",
+  ];
+}
+
+function buildFilmstripPromptLines(refs: TriageFilmstripImageRef[] | undefined): string[] {
+  if (!refs || refs.length === 0) {
+    return [
+      "No filmstrip images are attached for this request. Fall back to the text summaries, tags, peaks, and transcript quality flags.",
+    ];
+  }
+  return [
+    "You can see filmstrip images for each segment listed below. These segments ARE the entire available footage pool — select the best candidates from what is available, even if no segment is a perfect match for the brief.",
+    "Use visual information (lighting, composition, subject, action) alongside the text summary to make selection decisions. Text summaries may be generic; the filmstrip gives you ground truth.",
+    "The image_index field is 1-based and matches the order of attached image parts.",
+    "",
+    "## Attached filmstrip images",
+    JSON.stringify(refs, null, 2),
+  ];
+}
+
+function buildBatchPromptLines(batch: TriageBatchInfo | undefined): string[] {
+  if (!batch || batch.count <= 1) return [];
+  return [
+    "## Batch",
+    `This is segment batch ${batch.index}/${batch.count}. Select the strongest candidates from this batch only; candidates from all batches will be merged after parsing.`,
     "",
   ];
 }
@@ -192,6 +348,9 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     ...buildCoverageFeedbackPreamble(input.coverageFeedback),
     "You are the footage-triager for Video OS. Select source segments for a rough-cut candidate board.",
     "Work from the creative brief and the segment evidence only. Prefer visual evidence over unreliable transcript text.",
+    ...buildFilmstripPromptLines(input.filmstripImages),
+    "",
+    ...buildBatchPromptLines(input.batch),
     "",
     "## Creative brief",
     JSON.stringify(briefPayload, null, 2),
@@ -205,6 +364,7 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- Include a clear opening and a clear ending.",
     "- Maintain enough breadth across assets, visual modes, and story beats for the target runtime.",
     "- Do not discard dense repetition just because shots are similar: montage clusters can be important. Sample them proportionally and avoid sparse coverage.",
+    "- IMPORTANT: You must select candidates. An empty candidates array is never acceptable. These segments are the only available footage — choose the best from what exists, not against an ideal.",
     "",
     "## Output",
     "Respond with JSON only. Markdown code fences are tolerated, but do not add prose outside JSON.",
@@ -321,12 +481,13 @@ function buildRepairPrompt(originalPrompt: string, raw: string, error: unknown):
 async function completeWithSingleJsonRetry(
   llm: LlmCompleter,
   prompt: string,
+  images?: LlmImagePart[],
 ): Promise<Record<string, unknown>> {
-  const first = await llm(prompt);
+  const first = await llm(prompt, images);
   try {
     return parseLlmTriageResponse(first);
   } catch (firstError) {
-    const second = await llm(buildRepairPrompt(prompt, first, firstError));
+    const second = await llm(buildRepairPrompt(prompt, first, firstError), images);
     try {
       return parseLlmTriageResponse(second);
     } catch (secondError) {
@@ -336,24 +497,88 @@ async function completeWithSingleJsonRetry(
   }
 }
 
-export function createLlmTriageAgent(opts: { llm?: LlmCompleter; model?: string } = {}): TriageAgent {
+function chunkSegments<T>(items: T[], batchSize: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    chunks.push(items.slice(i, i + batchSize));
+  }
+  return chunks;
+}
+
+function mergeParsedTriageResponses(responses: Array<Record<string, unknown>>): Record<string, unknown> {
+  if (responses.length <= 1) return responses[0] ?? {};
+
+  const selectionNotes = responses.flatMap((response) => stringArray(response.selection_notes));
+  const candidates = responses.flatMap((response) => (
+    Array.isArray(response.candidates) ? response.candidates : []
+  ));
+  const editorialSummary = responses
+    .map((response) => sanitizeEditorialSummary(response.editorial_summary))
+    .find((summary): summary is EditorialSummary => summary !== undefined);
+
+  return {
+    ...(selectionNotes.length > 0 ? { selection_notes: selectionNotes } : {}),
+    ...(editorialSummary ? { editorial_summary: editorialSummary } : {}),
+    candidates,
+  };
+}
+
+export function createLlmTriageAgent(opts: CreateLlmTriageAgentOptions = {}): TriageAgent {
   const model = opts.model ?? process.env.TRIAGE_MODEL ?? DEFAULT_TRIAGE_MODEL;
+  const textOnlyTriage = opts.textOnlyTriage ?? false;
+  const multimodalBatchSize = Math.max(1, Math.trunc(opts.multimodalBatchSize ?? MULTIMODAL_BATCH_SEGMENTS));
+  const imagePreparer = opts.imagePreparer ?? defaultFilmstripImagePreparer;
   // A breadth selection (20+ candidates with rationale) is a large JSON; the
   // default 8k output budget truncates it mid-object on coverage-feedback
   // rounds, so request a generous ceiling.
   const llm =
-    opts.llm ?? ((prompt: string) => callGeminiJson(prompt, model, { retryLabel: "triage-llm", maxOutputTokens: 32768 }));
+    opts.llm ?? ((prompt: string, images?: LlmImagePart[]) => (
+      callGeminiMultimodal(prompt, images ?? [], model, { retryLabel: "triage-llm", maxOutputTokens: 32768 })
+    ));
 
   return {
     async run(ctx: TriageAgentContext) {
       const brief = loadCreativeBrief(path.join(ctx.projectDir, BRIEF_REL));
       const segments = loadCompactSegmentEvidence(ctx.projectDir);
-      const prompt = buildLlmTriagePrompt({
-        brief,
-        segments,
-        coverageFeedback: ctx.coverageFeedback,
-      });
-      const parsed = await completeWithSingleJsonRetry(llm, prompt);
+      const segmentBatches = textOnlyTriage || segments.length <= multimodalBatchSize
+        ? [segments]
+        : chunkSegments(segments, multimodalBatchSize);
+      const parsedBatches: Array<Record<string, unknown>> = [];
+
+      for (let i = 0; i < segmentBatches.length; i += 1) {
+        if (i > 0 && !textOnlyTriage) {
+          await new Promise((resolve) => setTimeout(resolve, MULTIMODAL_BATCH_DELAY_MS));
+        }
+        const batchSegments = segmentBatches[i];
+        const prepared = textOnlyTriage
+          ? { images: [], refs: [] }
+          : await prepareFilmstripImages(batchSegments, imagePreparer);
+        const prompt = buildLlmTriagePrompt({
+          brief,
+          segments: batchSegments,
+          coverageFeedback: ctx.coverageFeedback,
+          filmstripImages: prepared.refs,
+          batch: segmentBatches.length > 1 ? { index: i + 1, count: segmentBatches.length } : undefined,
+        });
+        const hasImages = prepared.images.length > 0;
+        console.error(`[triage:multimodal] batch=${i+1}/${segmentBatches.length} segments=${batchSegments.length} images=${prepared.images.length} mode=${hasImages ? "multimodal" : "text-only"}`);
+        const batchResult = await completeWithSingleJsonRetry(
+          llm,
+          prompt,
+          hasImages ? prepared.images : undefined,
+        );
+        const batchCandidates = Array.isArray(batchResult.candidates) ? batchResult.candidates.length : 0;
+        console.error(`[triage:multimodal] batch=${i+1} parsed_candidates=${batchCandidates}`);
+        if (batchCandidates === 0) {
+          const keys = Object.keys(batchResult);
+          const sample = JSON.stringify(batchResult).slice(0, 500);
+          console.error(`[triage:multimodal] empty batch keys=${keys.join(",")} sample=${sample}`);
+          const rawCands = Array.isArray(batchResult.candidates) ? batchResult.candidates : [];
+          console.error(`[triage:multimodal] raw_candidates_count=${rawCands.length} first=${JSON.stringify(rawCands[0])?.slice(0,300)}`);
+        }
+        parsedBatches.push(batchResult);
+      }
+      const parsed = mergeParsedTriageResponses(parsedBatches);
       return {
         selects: selectsFromLlmResponse(parsed, ctx.projectId, segments),
         confirmed: true,
