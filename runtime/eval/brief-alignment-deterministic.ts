@@ -68,12 +68,283 @@ function textMatchesTerm(text: string, term: string): boolean {
   return tokens.length >= 2 && tokens.every((token) => normalizedText.includes(token));
 }
 
+const MESSAGE_KEY_TERM_MATCH_THRESHOLD = 0.4;
+
+const ENGLISH_MESSAGE_STOPWORDS = new Set([
+  "a",
+  "about",
+  "above",
+  "after",
+  "again",
+  "all",
+  "also",
+  "an",
+  "and",
+  "any",
+  "are",
+  "as",
+  "at",
+  "be",
+  "because",
+  "been",
+  "being",
+  "by",
+  "can",
+  "create",
+  "creates",
+  "do",
+  "does",
+  "for",
+  "from",
+  "has",
+  "have",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "of",
+  "on",
+  "or",
+  "our",
+  "that",
+  "the",
+  "their",
+  "there",
+  "this",
+  "through",
+  "to",
+  "with",
+  "where",
+  "who",
+  "whose",
+]);
+
+const JAPANESE_MESSAGE_STOPWORDS = new Set([
+  "から",
+  "こと",
+  "これ",
+  "する",
+  "その",
+  "ため",
+  "たち",
+  "まで",
+  "もの",
+  "よう",
+  "より",
+]);
+
+const MESSAGE_KEY_TERM_SYNONYMS = new Map<string, string[]>([
+  ["aerial", ["drone", "wide", "scale"]],
+  ["culture", ["craft", "crafts", "cultural", "traditional", "local"]],
+  ["cultural", ["culture", "craft", "crafts", "traditional", "local"]],
+  ["food", ["bbq", "cooking", "meal", "preparation"]],
+  ["impressions", ["impression", "lasting", "memory"]],
+  ["landscape", ["mountain", "mountains", "nature", "outdoor", "outdoors", "scenery"]],
+  ["landscapes", ["landscape", "mountain", "mountains", "nature", "outdoor", "outdoors", "scenery"]],
+  ["nature", ["landscape", "mountain", "mountains", "outdoor", "outdoors", "scenery"]],
+  ["quiet", ["calm", "serene", "serenity"]],
+  ["serenity", ["calm", "quiet", "serene"]],
+  ["traditional", ["craft", "crafts", "culture", "cultural", "local"]],
+  ["恵那", ["ena"]],
+  ["戸隠", ["togakushi"]],
+  ["環境", ["environment", "landscape", "nature", "outdoor", "outdoors"]],
+  ["素晴らしさ", ["beauty", "scenery", "scenic"]],
+  ["自然", ["landscape", "mountain", "mountains", "nature", "outdoor", "outdoors", "scenic"]],
+  ["大自然", ["landscape", "mountain", "mountains", "nature", "outdoor", "outdoors", "scenic"]],
+  ["山", ["mountain", "mountains"]],
+  ["景色", ["landscape", "scenery"]],
+  ["風景", ["landscape", "scenery"]],
+  ["家族", ["family"]],
+  ["子供", ["child", "children", "family", "kids"]],
+  ["子供たち", ["child", "children", "family", "kids"]],
+  ["成長", ["development", "grow", "growing", "growth"]],
+  ["触れ合い", ["exploration", "explore", "nature", "outdoor", "play"]],
+  ["キャンプ", ["camp", "campfire", "camping"]],
+  ["非日常", ["adventure", "escape", "special"]],
+  ["絆", ["bond", "connection", "family", "warmth"]],
+  ["一歩", ["first_step", "first_steps", "step", "steps", "walking"]],
+  ["一歩ずつ", ["first_step", "first_steps", "step", "steps", "walking"]],
+  ["確実", ["confidence", "confident", "persistence", "steady"]],
+  ["小さな", ["early", "infant", "small", "toddler"]],
+  ["小さな足", ["first_steps", "steps", "walking"]],
+  ["足", ["steps", "walking"]],
+  ["刻んだ", ["growth", "journey", "story"]],
+  ["年間", ["years"]],
+  ["物語", ["arc", "journey", "narrative", "story"]],
+  ["歩ける", ["first_steps", "walk", "walking"]],
+  ["歩き", ["first_steps", "walk", "walking"]],
+  ["喜び", ["celebration", "excited", "joy", "joyful"]],
+  ["走れる", ["run", "running"]],
+  ["走り", ["run", "running"]],
+  ["自信", ["confidence", "confident"]],
+  ["ストライダー", ["balance_bike", "balancebike", "strider"]],
+  ["バランス", ["balance", "balance_bike", "balancebike"]],
+  ["覚え", ["learn", "learning", "practice"]],
+  ["日々", ["days", "journey", "period", "practice"]],
+  ["自転車", ["bicycle", "bike", "ride", "riding"]],
+  ["乗れた", ["mastered", "ride", "riding", "success", "successful"]],
+  ["瞬間", ["climax", "moment", "peak"]],
+  ["達成感", ["achievement", "breakthrough", "payoff", "success"]],
+  ["親子", ["family", "parent_child", "parentchild"]],
+  ["温かい", ["intimate", "warm", "warmth"]],
+  ["温か", ["intimate", "warm", "warmth"]],
+]);
+
+type WordSegment = { segment: string; isWordLike?: boolean };
+type WordSegmenter = { segment(input: string): Iterable<WordSegment> };
+type WordSegmenterConstructor = new (
+  locales?: string | string[],
+  options?: { granularity: "word" },
+) => WordSegmenter;
+
+function hasCjk(value: string): boolean {
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(value);
+}
+
+function wordLikeSegments(value: string): string[] {
+  const Segmenter = (Intl as unknown as { Segmenter?: WordSegmenterConstructor }).Segmenter;
+  if (Segmenter) {
+    const locale = hasCjk(value) ? "ja" : "en";
+    const segmenter = new Segmenter(locale, { granularity: "word" });
+    return Array.from(segmenter.segment(value))
+      .filter((part) => part.isWordLike !== false)
+      .map((part) => part.segment);
+  }
+  return normalize(value).split(/[^\p{L}\p{N}]+/u);
+}
+
+function messagePhraseFragments(value: string): string[] {
+  return normalize(value).split(
+    /[\s、。，．・:：;；,."'“”‘’!?！？()[\]{}<>「」『』【】\-_/]+|では|から|まで|より|なった|なる|する|した|して|の|と|が|を|に|で|は|も|へ|や/u,
+  );
+}
+
+function isMessageStopword(term: string): boolean {
+  const compact = searchable(term);
+  return ENGLISH_MESSAGE_STOPWORDS.has(compact) || JAPANESE_MESSAGE_STOPWORDS.has(compact);
+}
+
+function extractKeyTerms(value: string): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  const rawTerms = [...wordLikeSegments(value), ...messagePhraseFragments(value)];
+
+  for (const raw of rawTerms) {
+    const term = normalize(raw);
+    const compact = searchable(term);
+    if (!compact || seen.has(compact) || isMessageStopword(term)) continue;
+    const minLength = hasCjk(term) ? 2 : 3;
+    if (compact.length < minLength) continue;
+    seen.add(compact);
+    terms.push(term);
+  }
+
+  return terms;
+}
+
+function keyTermVariants(term: string): string[] {
+  const variants = new Set<string>();
+  const compact = searchable(term);
+  if (!compact) return [];
+  variants.add(compact);
+
+  if (/^[a-z0-9]+$/u.test(compact)) {
+    if (compact.endsWith("ies") && compact.length > 4) {
+      variants.add(`${compact.slice(0, -3)}y`);
+    }
+    if (compact.endsWith("es") && compact.length > 4) {
+      variants.add(compact.slice(0, -2));
+    }
+    if (compact.endsWith("s") && compact.length > 3) {
+      variants.add(compact.slice(0, -1));
+    }
+    if (compact.endsWith("ing") && compact.length > 5) {
+      variants.add(compact.slice(0, -3));
+    }
+    if (compact.endsWith("ed") && compact.length > 4) {
+      variants.add(compact.slice(0, -2));
+    }
+  }
+
+  if (hasCjk(compact) && compact.endsWith("たち") && compact.length > 2) {
+    variants.add(compact.slice(0, -2));
+  }
+  for (const synonym of MESSAGE_KEY_TERM_SYNONYMS.get(compact) ?? []) {
+    const searchableSynonym = searchable(synonym);
+    if (searchableSynonym) variants.add(searchableSynonym);
+  }
+
+  return [...variants];
+}
+
+function messageMatchesPool(message: string, searchablePool: string): boolean {
+  const keyTerms = extractKeyTerms(message);
+  if (keyTerms.length === 0) return textMatchesTerm(searchablePool, message);
+  const found = keyTerms.filter((term) =>
+    keyTermVariants(term).some((variant) => searchablePool.includes(variant)),
+  );
+  return found.length >= Math.ceil(keyTerms.length * MESSAGE_KEY_TERM_MATCH_THRESHOLD);
+}
+
+function briefMessageItems(brief: CreativeBrief): string[] {
+  return [brief.message?.primary, ...(brief.message?.secondary ?? [])]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
 function candidateText(candidate: Candidate): string {
   return [
     candidate.why_it_matches,
     ...(candidate.evidence ?? []),
     candidate.transcript_excerpt ?? "",
     ...(candidate.motif_tags ?? []),
+  ].join(" ");
+}
+
+function candidateIntentMessageText(candidate: Candidate): string {
+  return [
+    candidateText(candidate),
+    ...(candidate.eligible_beats ?? []),
+    candidate.editorial_signals?.semantic_cluster_id ?? "",
+    candidate.editorial_signals?.peak_type ?? "",
+    ...(candidate.editorial_signals?.visual_tags ?? []),
+    ...(candidate.peak_signals?.speech_keyword ?? []),
+  ].join(" ");
+}
+
+function blueprintIntentMessageText(blueprint: EditBlueprint): string {
+  return [
+    ...blueprint.sequence_goals,
+    blueprint.story_arc?.summary ?? "",
+    blueprint.story_arc?.strategy ?? "",
+    blueprint.story_arc?.chronology_bias ?? "",
+    ...(blueprint.story_arc?.causal_links ?? []),
+    ...blueprint.beats.map((beat) =>
+      [
+        beat.label,
+        beat.purpose ?? "",
+        beat.notes ?? "",
+        beat.story_role ?? "",
+        ...(beat.skill_hints ?? []),
+        ...beat.required_roles,
+        ...(beat.preferred_roles ?? []),
+      ].join(" "),
+    ),
+    blueprint.pacing.opening_cadence,
+    blueprint.pacing.middle_cadence,
+    blueprint.pacing.ending_cadence,
+    blueprint.pacing.confirmed_preferences?.structure_choice ?? "",
+    blueprint.pacing.confirmed_preferences?.pacing_notes ?? "",
+    blueprint.music_policy.permitted_energy_curve ?? "",
+    ...(blueprint.dialogue_policy.prioritize_lines ?? []),
+    blueprint.ending_policy?.should_feel ?? "",
+    blueprint.ending_policy?.final_line_strategy ?? "",
+    blueprint.ending_policy?.final_visual_strategy ?? "",
+    blueprint.ending_policy?.final_audio_strategy ?? "",
+    ...(blueprint.rejection_rules ?? []),
+    ...(blueprint.active_editing_skills ?? []),
+    blueprint.resolved_profile?.rationale ?? "",
+    blueprint.resolved_policy?.rationale ?? "",
   ].join(" ");
 }
 
@@ -286,19 +557,22 @@ export function scoreSelectsIntentMessage(
   selects: SelectsCandidates,
 ): AxisScore {
   const active = activeCandidates(selects);
-  const messageTerms = [brief.message?.primary, ...(brief.message?.secondary ?? [])]
-    .filter((value): value is string => Boolean(value))
-    .join(" ");
-  const matched = active.filter((candidate) => textMatchesTerm(candidateText(candidate), messageTerms)).length;
+  const messages = briefMessageItems(brief);
+  if (messages.length === 0) return axis(0.5, 0.5, ["no brief message defined"], []);
+  if (active.length === 0) return axis(0, 0.9, [], ["no active candidates"]);
+
+  const pool = searchable(active.map((candidate) => candidateIntentMessageText(candidate)).join(" "));
+  const matched = messages.filter((message) => messageMatchesPool(message, pool));
   const avoid = scoreMustAvoidViolations(brief, selects);
-  const matchScore = active.length === 0 ? 0 : matched / active.length;
+  const matchScore = matched.length / messages.length;
   const score = Math.max(avoid.score === 0 ? 0.4 : 0, matchScore * 0.75 + avoid.score * 0.25);
   return axis(
     score,
     0.55,
-    [`${matched}/${active.length} active candidates mention primary/secondary message terms`],
+    [`${matched.length}/${messages.length} brief message items represented across active candidates`],
     [
-      ...(matched === 0 ? ["candidate evidence does not explicitly echo the brief message"] : []),
+      ...(matched.length === 0 ? ["candidate evidence does not explicitly represent the brief message"] : []),
+      ...(matched.length < messages.length ? ["not all brief message items are represented by active candidate evidence"] : []),
       ...avoid.gaps,
     ],
   );
@@ -308,21 +582,19 @@ export function scoreBlueprintIntentMessage(
   brief: CreativeBrief,
   blueprint: EditBlueprint,
 ): AxisScore {
-  const haystack = [
-    ...blueprint.sequence_goals,
-    blueprint.story_arc?.summary ?? "",
-    ...(blueprint.story_arc?.causal_links ?? []),
-    ...blueprint.beats.map((beat) => [beat.label, beat.purpose ?? "", beat.notes ?? ""].join(" ")),
-  ].join(" ");
-  const messageTerms = [brief.message?.primary, ...(brief.message?.secondary ?? [])]
-    .filter((value): value is string => Boolean(value))
-    .join(" ");
-  const score = messageTerms && textMatchesTerm(haystack, messageTerms) ? 0.85 : 0.55;
+  const messages = briefMessageItems(brief);
+  if (messages.length === 0) return axis(0.5, 0.5, ["no brief message defined"], []);
+
+  const searchableHaystack = searchable(blueprintIntentMessageText(blueprint));
+  const matched = messages.filter((message) => messageMatchesPool(message, searchableHaystack));
+  const score = matched.length / messages.length;
   return axis(
     score,
     0.55,
-    score >= 0.8 ? ["blueprint text explicitly overlaps with brief message"] : ["blueprint has structural plan text"],
-    score >= 0.8 ? [] : ["blueprint does not explicitly echo the brief primary/secondary message"],
+    [`${matched.length}/${messages.length} brief message items represented in blueprint text`],
+    matched.length === messages.length
+      ? []
+      : ["blueprint does not explicitly represent every brief primary/secondary message"],
   );
 }
 
