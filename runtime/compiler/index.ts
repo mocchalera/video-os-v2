@@ -322,6 +322,7 @@ export function compile(opts: CompileOptions): CompileResult {
     trackLayout,
     audioPolicy: audioPolicy.mode,
     a1Loudnorm: audioPolicy.a1_loudnorm,
+    clusterContinuity: !isMontageOrderingBrief(brief),
     bgmAssetId: blueprint.music_policy.bgm_asset_id,
     bgmSegmentId: blueprint.music_policy.bgm_segment_id,
     bgmDurationSec: blueprint.music_policy.bgm_duration_sec,
@@ -563,6 +564,17 @@ export function compile(opts: CompileOptions): CompileResult {
     resolution: finalResolution,
     duration_policy: durationPolicy,
   };
+}
+
+function isMontageOrderingBrief(brief: CreativeBrief): boolean {
+  const orderPolicy = (brief as { order_policy?: unknown }).order_policy;
+  if (orderPolicy === "montage") return true;
+
+  const editorial = brief.editorial as ({ profile?: unknown; profile_hint?: unknown } | undefined);
+  const profileValues = [editorial?.profile, editorial?.profile_hint];
+  return profileValues.some((value) =>
+    typeof value === "string" && value.toLowerCase().includes("montage")
+  );
 }
 
 function resolveAudioPolicy(

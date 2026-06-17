@@ -167,24 +167,176 @@ describe("V1-first track layout", () => {
     expect(v2.clips.map((clip) => clip.segment_id)).toEqual(["seg_texture", "seg_support"]);
     expect(v2.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 10]);
   });
+
+  it("groups same semantic clusters together within a beat", () => {
+    const normalized = makeNormalized(50);
+    const table: RankedCandidateTable = new Map([
+      [
+        "b01",
+        [
+          score("seg_fishing_1", "AST_F1", "support", 1.0, "b01", "fishing"),
+          score("seg_campfire", "AST_C1", "support", 0.9, "b01", "campfire"),
+          score("seg_park", "AST_P1", "support", 0.8, "b01", "park"),
+          score("seg_fishing_2", "AST_F2", "support", 0.7, "b01", "fishing"),
+          score("seg_fishing_3", "AST_F3", "support", 0.6, "b01", "fishing"),
+        ],
+      ],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only" },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual([
+      "seg_fishing_1",
+      "seg_fishing_2",
+      "seg_fishing_3",
+      "seg_campfire",
+      "seg_park",
+    ]);
+    expect(v1.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 10, 20, 30, 40]);
+  });
+
+  it("keeps score order when clips have no cluster and unique asset prefixes", () => {
+    const normalized = makeNormalized(30);
+    const table: RankedCandidateTable = new Map([
+      [
+        "b01",
+        [
+          score("seg_one", "ONE", "support", 1.0),
+          score("seg_two", "TWO", "support", 0.9),
+          score("seg_three", "THREE", "support", 0.8),
+        ],
+      ],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only" },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual([
+      "seg_one",
+      "seg_two",
+      "seg_three",
+    ]);
+  });
+
+  it("can skip cluster grouping for montage ordering", () => {
+    const normalized = makeNormalized(40);
+    const table: RankedCandidateTable = new Map([
+      [
+        "b01",
+        [
+          score("seg_fishing_1", "AST_F1", "support", 1.0, "b01", "fishing"),
+          score("seg_campfire_1", "AST_C1", "support", 0.9, "b01", "campfire"),
+          score("seg_fishing_2", "AST_F2", "support", 0.8, "b01", "fishing"),
+          score("seg_campfire_2", "AST_C2", "support", 0.7, "b01", "campfire"),
+        ],
+      ],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only", clusterContinuity: false },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual([
+      "seg_fishing_1",
+      "seg_campfire_1",
+      "seg_fishing_2",
+      "seg_campfire_2",
+    ]);
+  });
+
+  it("moves a matching next-beat cluster to the boundary for continuity", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 30 },
+      { beat_id: "b02", target_duration_frames: 30 },
+    ]);
+    const table: RankedCandidateTable = new Map([
+      [
+        "b01",
+        [
+          score("seg_a1", "AST_A1", "support", 1.0, "b01", "A"),
+          score("seg_a2", "AST_A2", "support", 0.9, "b01", "A"),
+          score("seg_a3", "AST_A3", "support", 0.8, "b01", "A"),
+        ],
+      ],
+      [
+        "b02",
+        [
+          score("seg_b1", "AST_B1", "support", 1.0, "b02", "B"),
+          score("seg_c1", "AST_C1", "support", 0.9, "b02", "C"),
+          score("seg_a4", "AST_A4", "support", 0.8, "b02", "A"),
+        ],
+      ],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only", beatOrder: ["b01", "b02"] },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual([
+      "seg_a1",
+      "seg_a2",
+      "seg_a3",
+      "seg_a4",
+      "seg_b1",
+      "seg_c1",
+    ]);
+    expect(v1.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 10, 20, 30, 40, 50]);
+  });
 });
 
 function makeNormalized(targetDurationFrames: number): NormalizedData {
+  return makeNormalizedWithBeats([
+    { beat_id: "b01", target_duration_frames: targetDurationFrames },
+  ]);
+}
+
+function makeNormalizedWithBeats(
+  beats: Array<{ beat_id: string; target_duration_frames: number }>,
+): NormalizedData {
   return {
     project_id: "v1-first",
     project_title: "V1 First",
-    total_duration_frames: targetDurationFrames,
-    role_quotas: { hero: 1, support: 2, transition: 0, texture: 1, dialogue: 0 },
-    beats: [
-      {
-        beat_id: "b01",
-        label: "Beat 1",
-        target_duration_frames: targetDurationFrames,
-        required_roles: ["hero"],
-        preferred_roles: ["support", "texture"],
-        purpose: "test",
-      },
-    ],
+    total_duration_frames: beats.reduce((sum, beat) => sum + beat.target_duration_frames, 0),
+    role_quotas: { hero: 0, support: beats.length, transition: 0, texture: 0, dialogue: 0 },
+    beats: beats.map((beat, index) => ({
+      beat_id: beat.beat_id,
+      label: `Beat ${index + 1}`,
+      target_duration_frames: beat.target_duration_frames,
+      required_roles: ["hero"],
+      preferred_roles: ["support", "texture"],
+      purpose: "test",
+    })),
   };
 }
 
@@ -193,9 +345,11 @@ function score(
   assetId: string,
   role: "hero" | "support" | "texture",
   candidateScore: number,
+  beatId = "b01",
+  semanticClusterId?: string,
 ): ScoredCandidate {
   return {
-    beat_id: "b01",
+    beat_id: beatId,
     score: candidateScore,
     candidate: {
       segment_id: segmentId,
@@ -207,6 +361,9 @@ function score(
       risks: [],
       confidence: 0.9,
       semantic_rank: 1,
+      editorial_signals: semanticClusterId
+        ? { semantic_cluster_id: semanticClusterId }
+        : undefined,
     },
     breakdown: {
       semantic_rank_score: candidateScore,
