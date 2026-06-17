@@ -1,9 +1,37 @@
-import { describe, expect, it, vi } from "vitest";
-import { enrichSelectsFromAnalysis, type SegmentItem } from "../runtime/agents/triage-enrichment.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  agglomerativeClusters,
+  enrichSelectsFromAnalysis,
+  refineClusters,
+  type SegmentItem,
+} from "../runtime/agents/triage-enrichment.js";
 import { validateAgainstSchema } from "../runtime/commands/shared.js";
 import type { Candidate, SelectsCandidates } from "../runtime/artifacts/types.js";
 
 type CandidateWithRejection = Candidate & { rejection_reason?: string };
+
+function mockSemanticEmbeddings(vectorsByText: Record<string, number[]>): void {
+  vi.doMock("../runtime/eval/semantic-match.js", () => ({
+    embedTexts: vi.fn(async (texts: string[], prefix: "query" | "passage" = "passage") => {
+      expect(prefix).toBe("passage");
+      return texts.map((text) => new Float32Array(vectorsByText[text] ?? [0, 0, 1]));
+    }),
+  }));
+}
+
+function mockSemanticEmbeddingFailure(): void {
+  vi.doMock("../runtime/eval/semantic-match.js", () => ({
+    embedTexts: vi.fn(async () => {
+      throw new Error("embedding model unavailable");
+    }),
+  }));
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetModules();
+  vi.doUnmock("../runtime/eval/semantic-match.js");
+});
 
 describe("enrichSelectsFromAnalysis", () => {
   it("copies peak_analysis fields into editorial and peak signals", () => {
@@ -317,6 +345,89 @@ describe("enrichSelectsFromAnalysis", () => {
 
     const validation = validateAgainstSchema(enriched, "selects-candidates.schema.json");
     expect(validation.valid, validation.errors.join("; ")).toBe(true);
+  });
+});
+
+describe("refineClusters", () => {
+  it("assigns the same semantic_cluster_id to candidates with similar VLM summaries", async () => {
+    mockSemanticEmbeddings({
+      "person fishing by river": [1, 0, 0],
+      "person casting fishing line": [0.96, 0.04, 0],
+      "person walking in park": [0, 1, 0],
+    });
+
+    const refined = await refineClusters(
+      selects([
+        candidate("SEG_FISH_1", { editorial_signals: { semantic_cluster_id: "outdoor_people" } }),
+        candidate("SEG_FISH_2", { editorial_signals: { semantic_cluster_id: "outdoor_people" } }),
+        candidate("SEG_WALK", { editorial_signals: { semantic_cluster_id: "outdoor_people" } }),
+      ]),
+      [
+        segment("SEG_FISH_1", { summary: "person fishing by river", tags: ["outdoor", "person", "river"] }),
+        segment("SEG_FISH_2", { summary: "person casting fishing line", tags: ["outdoor", "person"] }),
+        segment("SEG_WALK", { summary: "person walking in park", tags: ["outdoor", "person", "park"] }),
+      ],
+    );
+
+    const clusterIds = refined.candidates.map((item) => item.editorial_signals?.semantic_cluster_id);
+    expect(clusterIds[0]).toBe(clusterIds[1]);
+    expect(clusterIds[0]).toContain("fishing");
+    expect(clusterIds[2]).not.toBe(clusterIds[0]);
+    expect(clusterIds[2]).toBe("park_walk");
+  });
+
+  it("keeps dissimilar summaries in different clusters", () => {
+    const clusters = agglomerativeClusters(
+      [new Float32Array([1, 0]), new Float32Array([0, 1])],
+      ["person fishing by river", "person walking in park"],
+      0.85,
+    );
+
+    expect(clusters.get(0)).not.toBe(clusters.get(1));
+  });
+
+  it("falls back to keyword-derived clusters when embeddings are unavailable", async () => {
+    mockSemanticEmbeddingFailure();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const refined = await refineClusters(
+      selects([
+        candidate("SEG_001", { editorial_signals: { semantic_cluster_id: "outdoor_people" } }),
+        candidate("SEG_002"),
+      ]),
+      [
+        segment("SEG_001", {
+          summary: "person fishing by river",
+          tags: ["outdoor", "person", "river"],
+        }),
+        segment("SEG_002", {
+          summary: "person walking in park",
+          tags: ["outdoor", "person", "park"],
+        }),
+      ],
+    );
+
+    expect(refined.candidates[0].editorial_signals?.semantic_cluster_id).toBe("outdoor_people");
+    expect(refined.candidates[1].editorial_signals?.semantic_cluster_id).toBe("outdoor_people");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("embedding refinement skipped"));
+  });
+
+  it("names clusters from distinctive non-generic summary terms", () => {
+    const clusters = agglomerativeClusters(
+      [new Float32Array([1, 0]), new Float32Array([0.99, 0.01])],
+      [
+        "wide shot of a person near campfire at night",
+        "friends sit around campfire after sunset",
+      ],
+      0.85,
+    );
+
+    const clusterId = clusters.get(0);
+    expect(clusterId).toBe(clusters.get(1));
+    expect(clusterId).toContain("campfire");
+    expect(clusterId).not.toContain("person");
+    expect(clusterId).not.toContain("shot");
+    expect(clusterId?.split("_").length).toBeLessThanOrEqual(3);
   });
 });
 

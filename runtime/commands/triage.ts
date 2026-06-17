@@ -55,6 +55,7 @@ import {
 } from "../artifacts/p4d-segment-search-index.js";
 import {
   enrichSelectsFromAnalysis,
+  refineClusters,
   type SegmentItem as EnrichmentSegmentItem,
 } from "../agents/triage-enrichment.js";
 import {
@@ -492,8 +493,12 @@ export async function runTriage(
   // 5.5 Materialize deterministic analysis signals, then canonicalize.
   const enrichmentSegments = loadAnalysisSegments(absDir);
   if (enrichmentSegments && hasCandidateArray(agentResult.selects)) {
-    agentResult.selects = enrichSelectsFromAnalysis(
+    const enrichedSelects = enrichSelectsFromAnalysis(
       agentResult.selects as unknown as ArtifactSelectsCandidates,
+      enrichmentSegments,
+    );
+    agentResult.selects = await refineClusters(
+      enrichedSelects,
       enrichmentSegments,
     ) as unknown as SelectsCandidates;
   }
