@@ -97,6 +97,7 @@ describe("runCoverageForcedSelection", () => {
       previous_selection_count: 1,
     });
     expect(calls[1].coverageFeedback?.gaps.some((gap) => gap.startsWith("selection sparse:"))).toBe(true);
+    expect(calls[1].coverageFeedback?.brief_alignment_gaps?.some((gap) => gap.axis === "narrative_structure")).toBe(true);
     expect(result.skipped).toBe(false);
     expect(result.rounds).toBe(2);
     expect(result.passed).toBe(true);
@@ -185,6 +186,9 @@ function copyContext(ctx: TriageAgentContext): TriageAgentContext {
       ? {
           ...ctx.coverageFeedback,
           gaps: [...ctx.coverageFeedback.gaps],
+          brief_alignment_gaps: ctx.coverageFeedback.brief_alignment_gaps
+            ? ctx.coverageFeedback.brief_alignment_gaps.map((gap) => ({ ...gap }))
+            : undefined,
         }
       : undefined,
   };

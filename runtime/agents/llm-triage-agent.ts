@@ -350,10 +350,15 @@ function briefMustHave(brief: CreativeBrief): string[] {
 
 function buildCoverageFeedbackPreamble(feedback: TriageCoverageFeedback | undefined): string[] {
   if (!feedback) return [];
-  return [
+  const lines = [
     `前回の選定で以下の不足が出た。必ず是正せよ: ${JSON.stringify(feedback.gaps)}。特に under-sampled な montage クラスタを増やし、sparse を解消せよ。前回選定数=${feedback.previous_selection_count}`,
-    "",
   ];
+  if (feedback.brief_alignment_gaps && feedback.brief_alignment_gaps.length > 0) {
+    lines.push(
+      `brief-alignment の不足も必ず是正せよ: ${JSON.stringify(feedback.brief_alignment_gaps)}。各 feedback を candidates の evidence / why_it_matches / eligible_beats / editorial_signals で具体的に満たせ。`,
+    );
+  }
+  return [...lines, ""];
 }
 
 function buildFilmstripPromptLines(refs: TriageFilmstripImageRef[] | undefined): string[] {

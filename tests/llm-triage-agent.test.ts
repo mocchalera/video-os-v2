@@ -200,6 +200,12 @@ describe("createLlmTriageAgent", () => {
           "selection sparse: 1/8 segments (13%)",
           "dense cluster (5 similar shots) under-sampled: picked 1/5 -- montage candidate may be missing",
         ],
+        brief_alignment_gaps: [
+          {
+            axis: "must_have_coverage",
+            feedback: "must_have 'aerial/drone landscape shots' has no matching candidate evidence",
+          },
+        ],
         previous_selection_count: 1,
       },
     }));
@@ -207,6 +213,8 @@ describe("createLlmTriageAgent", () => {
     expect(prompt).toContain("前回の選定で以下の不足が出た。必ず是正せよ");
     expect(prompt).toContain("selection sparse: 1/8 segments");
     expect(prompt).toContain("under-sampled な montage クラスタを増やし");
+    expect(prompt).toContain("brief-alignment の不足も必ず是正せよ");
+    expect(prompt).toContain("aerial/drone landscape shots");
     expect(prompt).toContain("前回選定数=1");
   });
 

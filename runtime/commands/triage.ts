@@ -62,6 +62,10 @@ import {
   type SelectionCoverageReport,
   type SelectionCoverageSegment,
 } from "../eval/selection-coverage.js";
+import {
+  quickBriefAlignmentCheck,
+  type BriefAlignmentQuickResult,
+} from "../eval/brief-alignment-quick.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -174,6 +178,7 @@ export interface TriageAgent {
 export interface TriageCoverageFeedback {
   round: number;
   gaps: string[];
+  brief_alignment_gaps?: Array<{ axis: string; feedback: string }>;
   previous_selection_count: number;
 }
 
@@ -236,6 +241,10 @@ export function coveragePasses(coverage: SelectionCoverageReport): boolean {
   return !coverage.density.sparse && !coverage.cluster_coverage.some((cluster) => cluster.under_sampled);
 }
 
+function alignmentQuickPasses(alignment: BriefAlignmentQuickResult): boolean {
+  return alignment.score >= 0.5;
+}
+
 export async function runCoverageForcedSelection(
   agent: TriageAgent,
   ctx: TriageAgentContext,
@@ -263,6 +272,7 @@ export async function runCoverageForcedSelection(
   let previousActiveSegmentIds: Set<string> | undefined;
   let result: TriageAgentResult | undefined;
   let finalCoverage: SelectionCoverageReport | undefined;
+  let finalAlignment: BriefAlignmentQuickResult | undefined;
   let passed = false;
   let rounds = 0;
 
@@ -283,7 +293,7 @@ export async function runCoverageForcedSelection(
       );
       result = priorResult;
       finalCoverage = priorCoverage;
-      passed = priorCoverage ? coveragePasses(priorCoverage) : false;
+      passed = Boolean(priorCoverage && finalAlignment && coveragePasses(priorCoverage) && alignmentQuickPasses(finalAlignment));
       break;
     }
     rounds = round + 1;
@@ -300,11 +310,20 @@ export async function runCoverageForcedSelection(
       brief,
       segmentEvidence,
     );
-    passed = coveragePasses(finalCoverage);
+    finalAlignment = quickBriefAlignmentCheck(
+      brief,
+      result.selects as unknown as ArtifactSelectsCandidates,
+      segmentEvidence as EnrichmentSegmentItem[],
+    );
+    passed = coveragePasses(finalCoverage) && alignmentQuickPasses(finalAlignment);
     log?.(
       `[triage:coverage] round=${round} score=${formatCoverageScore(finalCoverage.score)} ` +
-        `gaps=${finalCoverage.gaps.length} passed=${passed}`,
+        `gaps=${finalCoverage.gaps.length} alignment_score=${formatCoverageScore(finalAlignment.score)} ` +
+        `alignment_gaps=${finalAlignment.gaps.length} passed=${passed}`,
     );
+    for (const gap of finalAlignment.gaps) {
+      log?.(`[triage:brief-alignment] ${gap.axis}: ${gap.feedback}`);
+    }
 
     if (passed) break;
 
@@ -319,6 +338,10 @@ export async function runCoverageForcedSelection(
     feedback = {
       round: round + 1,
       gaps: finalCoverage.gaps,
+      brief_alignment_gaps: finalAlignment.gaps.map((gap) => ({
+        axis: gap.axis,
+        feedback: gap.feedback,
+      })),
       previous_selection_count: finalCoverage.density.selected_count,
     };
   }
