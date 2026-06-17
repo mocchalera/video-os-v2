@@ -29,9 +29,12 @@ export interface AssembleOptions {
   trackLayout?: TrackLayout;
   audioPolicy?: BriefAudioPolicy;
   a1Loudnorm?: boolean;
+  clusterContinuity?: boolean;
   bgmAssetId?: string;
   bgmSegmentId?: string;
   bgmDurationSec?: number;
+  maxDurationFrames?: number;
+  log?: (message: string) => void;
 }
 
 export function assemble(
@@ -52,6 +55,13 @@ export function assemble(
   const a2Clips: TimelineClip[] = []; // music (M1: empty allowed)
   const a3Clips: TimelineClip[] = []; // texture / room tone (M1: empty allowed)
   const markers: Marker[] = [];
+  const clusterByClipId = new Map<string, string>();
+  const clusterContinuity = options?.clusterContinuity ?? true;
+  const maxDurationFrames =
+    typeof options?.maxDurationFrames === "number" && options.maxDurationFrames > 0
+      ? Math.floor(options.maxDurationFrames)
+      : undefined;
+  let durationCapDroppedClips = 0;
 
   // Track used segments to apply adjacency penalty and prevent overuse
   const usedClips = new Set<string>();
@@ -62,7 +72,12 @@ export function assemble(
   let prevV1Asset: string | null = null;
   let prevV2Asset: string | null = null;
 
+  beatLoop:
   for (const beat of normalized.beats) {
+    if (maxDurationFrames != null && currentFrame >= maxDurationFrames) {
+      break;
+    }
+
     const beatCandidates = rankedTable.get(beat.beat_id) ?? [];
 
     // Add beat boundary marker
@@ -86,6 +101,7 @@ export function assemble(
           usedClips,
           prevV1Asset,
           params.adjacency_penalty,
+          clusterContinuity,
         )[0];
         if (!visualClip) break;
 
@@ -98,8 +114,14 @@ export function assemble(
           { segment_ids: [], candidate_refs: [] },
           usPerFrame,
         );
-        v1Clips.push(clip);
+        const placed = placeClipWithinCap(v1Clips, clip, maxDurationFrames);
         usedClips.add(clipUsageKey(visualClip.candidate));
+        if (!placed) {
+          durationCapDroppedClips += 1;
+          if (maxDurationFrames != null && v1Frame >= maxDurationFrames) break;
+          continue;
+        }
+        registerClipCluster(clusterByClipId, clip, visualClip);
         prevV1Asset = visualClip.candidate.asset_id;
         v1Frame += clip.timeline_duration_frames;
       }
@@ -121,9 +143,13 @@ export function assemble(
           getRunnersUp(byRole.get("hero") ?? [], heroClip, usedClips),
           usPerFrame,
         );
-        v1Clips.push(clip);
-        usedClips.add(clipUsageKey(heroClip.candidate));
-        prevV1Asset = heroClip.candidate.asset_id;
+        if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
+          registerClipCluster(clusterByClipId, clip, heroClip);
+          usedClips.add(clipUsageKey(heroClip.candidate));
+          prevV1Asset = heroClip.candidate.asset_id;
+        } else {
+          durationCapDroppedClips += 1;
+        }
       }
 
       // V2: support + texture clips
@@ -152,6 +178,7 @@ export function assemble(
           usedClips,
           prevV2Asset,
           params.adjacency_penalty,
+          clusterContinuity,
         );
         const beatEndFrame = currentFrame + beat.target_duration_frames;
         let v2Frame = currentFrame;
@@ -166,10 +193,15 @@ export function assemble(
             { segment_ids: [], candidate_refs: [] },
             usPerFrame,
           );
-          v2Clips.push(clip);
-          usedClips.add(clipUsageKey(sc.candidate));
-          prevV2Asset = sc.candidate.asset_id;
-          v2Frame += clip.timeline_duration_frames; // sequence, do not stack
+          if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
+            registerClipCluster(clusterByClipId, clip, sc);
+            usedClips.add(clipUsageKey(sc.candidate));
+            prevV2Asset = sc.candidate.asset_id;
+            v2Frame += clip.timeline_duration_frames; // sequence, do not stack
+          } else {
+            durationCapDroppedClips += 1;
+            usedClips.add(clipUsageKey(sc.candidate));
+          }
         }
       } else {
         // Strict mode: pick best 1
@@ -189,9 +221,13 @@ export function assemble(
             getRunnersUp(supportCandidates, supportClip, usedClips),
             usPerFrame,
           );
-          v2Clips.push(clip);
-          usedClips.add(clipUsageKey(supportClip.candidate));
-          prevV2Asset = supportClip.candidate.asset_id;
+          if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
+            registerClipCluster(clusterByClipId, clip, supportClip);
+            usedClips.add(clipUsageKey(supportClip.candidate));
+            prevV2Asset = supportClip.candidate.asset_id;
+          } else {
+            durationCapDroppedClips += 1;
+          }
         }
       }
     }
@@ -204,6 +240,7 @@ export function assemble(
         usedClips,
         null,
         0,
+        clusterContinuity,
       );
       for (const sc of allDialogue) {
         const clip = makeClip(
@@ -215,8 +252,13 @@ export function assemble(
           { segment_ids: [], candidate_refs: [] },
           usPerFrame,
         );
-        a1Clips.push(clip);
-        usedClips.add(clipUsageKey(sc.candidate));
+        if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
+          registerClipCluster(clusterByClipId, clip, sc);
+          usedClips.add(clipUsageKey(sc.candidate));
+        } else {
+          durationCapDroppedClips += 1;
+          usedClips.add(clipUsageKey(sc.candidate));
+        }
       }
     } else {
       const dialogueClip = pickBest(
@@ -235,8 +277,12 @@ export function assemble(
           getRunnersUp(byRole.get("dialogue") ?? [], dialogueClip, usedClips),
           usPerFrame,
         );
-        a1Clips.push(clip);
-        usedClips.add(clipUsageKey(dialogueClip.candidate));
+        if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
+          registerClipCluster(clusterByClipId, clip, dialogueClip);
+          usedClips.add(clipUsageKey(dialogueClip.candidate));
+        } else {
+          durationCapDroppedClips += 1;
+        }
       }
     }
 
@@ -258,9 +304,13 @@ export function assemble(
           getRunnersUp(byRole.get("transition") ?? [], transitionClip, usedClips),
           usPerFrame,
         );
-        v2Clips.push(clip);
-        usedClips.add(clipUsageKey(transitionClip.candidate));
-        prevV2Asset = transitionClip.candidate.asset_id;
+        if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
+          registerClipCluster(clusterByClipId, clip, transitionClip);
+          usedClips.add(clipUsageKey(transitionClip.candidate));
+          prevV2Asset = transitionClip.candidate.asset_id;
+        } else {
+          durationCapDroppedClips += 1;
+        }
       }
     }
 
@@ -279,6 +329,10 @@ export function assemble(
       currentFrame += Math.max(maxClipDuration, beat.target_duration_frames);
     } else {
       currentFrame += beat.target_duration_frames;
+    }
+    if (maxDurationFrames != null && currentFrame >= maxDurationFrames) {
+      currentFrame = maxDurationFrames;
+      break beatLoop;
     }
   }
 
@@ -305,6 +359,7 @@ export function assemble(
     const lastBeatId = normalized.beats[normalized.beats.length - 1]?.beat_id ?? "fill";
 
     for (const sc of unused) {
+      if (maxDurationFrames != null && currentFrame >= maxDurationFrames) break;
       const sourceDurationUs = sc.candidate.src_out_us - sc.candidate.src_in_us;
       const sourceDurationFrames = Math.ceil(sourceDurationUs / usPerFrame);
 
@@ -326,14 +381,20 @@ export function assemble(
         fallback_candidate_refs: [],
       };
 
-      if (sc.candidate.role === "dialogue") {
-        a1Clips.push(clip);
-      } else {
-        v2Clips.push(clip);
-      }
       usedClips.add(clipUsageKey(sc.candidate));
-      currentFrame += sourceDurationFrames;
+      const targetTrack = sc.candidate.role === "dialogue" ? a1Clips : v2Clips;
+      if (placeClipWithinCap(targetTrack, clip, maxDurationFrames)) {
+        registerClipCluster(clusterByClipId, clip, sc);
+        currentFrame += sourceDurationFrames;
+      } else {
+        durationCapDroppedClips += 1;
+      }
     }
+  }
+
+  if (clusterContinuity) {
+    reorderClusterContinuity(v1Clips, clusterByClipId, options?.beatOrder);
+    reorderClusterContinuity(v2Clips, clusterByClipId, options?.beatOrder);
   }
 
   // ── Chronological reorder ───────────────────────────────────────────
@@ -341,6 +402,12 @@ export function assemble(
   // (asset_id + src_in_us) instead of editorial score order.
   if (options?.timelineOrder === "chronological") {
     reorderChronological(v1Clips, v2Clips, a1Clips, markers, options.beatOrder);
+  }
+
+  if (maxDurationFrames != null) {
+    durationCapDroppedClips += dropClipsBeyondCap(v1Clips, maxDurationFrames);
+    durationCapDroppedClips += dropClipsBeyondCap(v2Clips, maxDurationFrames);
+    durationCapDroppedClips += dropClipsBeyondCap(a1Clips, maxDurationFrames);
   }
 
   if (options?.audioPolicy !== "bgm_only") {
@@ -381,6 +448,11 @@ export function assemble(
     });
   }
 
+  if (maxDurationFrames != null && durationCapDroppedClips > 0) {
+    const log = options?.log ?? console.warn;
+    log(`Duration cap dropped ${durationCapDroppedClips} clip(s) beyond ${maxDurationFrames} frames`);
+  }
+
   const video: Track[] = [
     { track_id: "V1", kind: "video", clips: v1Clips },
     { track_id: "V2", kind: "video", clips: v2Clips },
@@ -393,6 +465,137 @@ export function assemble(
   ];
 
   return { tracks: { video, audio }, markers };
+}
+
+function placeClipWithinCap(
+  clips: TimelineClip[],
+  clip: TimelineClip,
+  maxDurationFrames?: number,
+): boolean {
+  if (
+    maxDurationFrames != null &&
+    clip.timeline_in_frame + clip.timeline_duration_frames > maxDurationFrames
+  ) {
+    return false;
+  }
+  clips.push(clip);
+  return true;
+}
+
+function dropClipsBeyondCap(clips: TimelineClip[], maxDurationFrames: number): number {
+  const keep = clips.filter(
+    (clip) => clip.timeline_in_frame + clip.timeline_duration_frames <= maxDurationFrames,
+  );
+  const dropped = clips.length - keep.length;
+  if (dropped > 0) {
+    clips.splice(0, clips.length, ...keep);
+  }
+  return dropped;
+}
+
+// ── Cluster continuity reorder ───────────────────────────────────────
+
+function registerClipCluster(
+  clusterByClipId: Map<string, string>,
+  clip: TimelineClip,
+  scored: ScoredCandidate,
+): void {
+  clusterByClipId.set(clip.clip_id, getCandidateClusterKey(scored.candidate));
+}
+
+function reorderClusterContinuity(
+  clips: TimelineClip[],
+  clusterByClipId: Map<string, string>,
+  beatOrder: string[] = [],
+): void {
+  if (clips.length <= 1) return;
+
+  const beatIndex = new Map(beatOrder.map((beatId, index) => [beatId, index]));
+  const groups = new Map<string, TimelineClip[]>();
+  for (const clip of clips) {
+    const beatClips = groups.get(clip.beat_id) ?? [];
+    beatClips.push(clip);
+    groups.set(clip.beat_id, beatClips);
+  }
+
+  const orderedBeats = [...groups.keys()].sort((a, b) => {
+    const indexA = beatIndex.get(a) ?? Number.MAX_SAFE_INTEGER;
+    const indexB = beatIndex.get(b) ?? Number.MAX_SAFE_INTEGER;
+    if (indexA !== indexB) return indexA - indexB;
+    const firstA = groups.get(a)?.[0]?.timeline_in_frame ?? 0;
+    const firstB = groups.get(b)?.[0]?.timeline_in_frame ?? 0;
+    return firstA - firstB;
+  });
+
+  const orderedByBeat = new Map<string, TimelineClip[]>();
+  for (const beatId of orderedBeats) {
+    const beatClips = groups.get(beatId) ?? [];
+    const ordered = orderClusterBlocks(beatClips, (clip) =>
+      clusterByClipId.get(clip.clip_id) ?? getClipClusterFallback(clip)
+    );
+    orderedByBeat.set(beatId, ordered);
+  }
+
+  for (let i = 0; i < orderedBeats.length - 1; i += 1) {
+    const current = orderedByBeat.get(orderedBeats[i]) ?? [];
+    const next = orderedByBeat.get(orderedBeats[i + 1]) ?? [];
+    if (current.length < 2 || next.length === 0) continue;
+
+    const currentStartCluster = clusterByClipId.get(current[0].clip_id) ?? getClipClusterFallback(current[0]);
+    const currentEndCluster = clusterByClipId.get(current[current.length - 1].clip_id) ??
+      getClipClusterFallback(current[current.length - 1]);
+    const nextStartCluster = clusterByClipId.get(next[0].clip_id) ?? getClipClusterFallback(next[0]);
+    if (currentEndCluster === nextStartCluster || currentStartCluster !== currentEndCluster) continue;
+
+    const nextMatchingIndex = next.findIndex((clip) =>
+      (clusterByClipId.get(clip.clip_id) ?? getClipClusterFallback(clip)) === currentEndCluster
+    );
+    if (nextMatchingIndex <= 0) continue;
+
+    const [matching] = next.splice(nextMatchingIndex, 1);
+    next.unshift(matching);
+  }
+
+  const nextClips: TimelineClip[] = [];
+  for (const beatId of orderedBeats) {
+    const beatClips = orderedByBeat.get(beatId) ?? [];
+    retimeBeatClips(beatClips);
+    nextClips.push(...beatClips);
+  }
+
+  clips.splice(0, clips.length, ...nextClips);
+}
+
+function orderClusterBlocks<T>(items: T[], clusterFor: (item: T) => string): T[] {
+  if (items.length <= 1) return [...items];
+
+  const groups = new Map<string, { cluster: string; firstIndex: number; items: T[] }>();
+  items.forEach((item, index) => {
+    const cluster = clusterFor(item);
+    const group = groups.get(cluster);
+    if (group) {
+      group.items.push(item);
+    } else {
+      groups.set(cluster, { cluster, firstIndex: index, items: [item] });
+    }
+  });
+
+  return [...groups.values()]
+    .sort((a, b) => {
+      const sizeDiff = b.items.length - a.items.length;
+      if (sizeDiff !== 0) return sizeDiff;
+      return a.firstIndex - b.firstIndex;
+    })
+    .flatMap((group) => group.items);
+}
+
+function retimeBeatClips(clips: TimelineClip[]): void {
+  if (clips.length <= 1) return;
+  let frame = Math.min(...clips.map((clip) => clip.timeline_in_frame));
+  for (const clip of clips) {
+    clip.timeline_in_frame = frame;
+    frame += clip.timeline_duration_frames;
+  }
 }
 
 // ── Chronological reorder ─────────────────────────────────────────────
@@ -520,6 +723,21 @@ function clipUsageKey(c: { segment_id: string; src_in_us: number; src_out_us: nu
   return `${c.segment_id}:${c.src_in_us}:${c.src_out_us}`;
 }
 
+function getCandidateClusterKey(candidate: ScoredCandidate["candidate"]): string {
+  const cluster = candidate.editorial_signals?.semantic_cluster_id?.trim();
+  if (cluster) return `cluster:${cluster}`;
+  return getAssetPrefixCluster(candidate.asset_id);
+}
+
+function getClipClusterFallback(clip: TimelineClip): string {
+  return getAssetPrefixCluster(clip.asset_id);
+}
+
+function getAssetPrefixCluster(assetId: string): string {
+  const prefix = assetId.split(/[_:-]/)[0] || assetId;
+  return `asset:${prefix}`;
+}
+
 function pickBest(
   candidates: ScoredCandidate[],
   usedClips: Set<string>,
@@ -556,6 +774,7 @@ function pickAvailable(
   usedClips: Set<string>,
   prevAsset: string | null,
   adjacencyPenalty: number,
+  clusterContinuity: boolean,
 ): ScoredCandidate[] {
   const available = candidates
     .filter((c) => !usedClips.has(clipUsageKey(c.candidate)))
@@ -573,7 +792,9 @@ function pickAvailable(
     return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
   });
 
-  return available;
+  return clusterContinuity
+    ? orderClusterBlocks(available, (sc) => getCandidateClusterKey(sc.candidate))
+    : available;
 }
 
 function pickAvailableV1First(
@@ -581,6 +802,7 @@ function pickAvailableV1First(
   usedClips: Set<string>,
   prevAsset: string | null,
   adjacencyPenalty: number,
+  clusterContinuity: boolean,
 ): ScoredCandidate[] {
   const available = candidates
     .filter((c) => !usedClips.has(clipUsageKey(c.candidate)))
@@ -594,7 +816,9 @@ function pickAvailableV1First(
 
   available.sort(compareV1FirstCandidates);
 
-  return available;
+  return clusterContinuity
+    ? orderClusterBlocks(available, (sc) => getCandidateClusterKey(sc.candidate))
+    : available;
 }
 
 function getRunnersUp(

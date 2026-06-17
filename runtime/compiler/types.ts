@@ -580,8 +580,12 @@ export interface CompileOptions {
   repoRoot?: string;
   blueprintOverride?: EditBlueprint;
   reviewPatch?: import("./patch.js").ReviewPatch;
+  /** Optional BGM duration cap, in microseconds. When set, assembly will not exceed it. */
+  bgm_duration_us?: number;
   /** Timeline framerate numerator (default: 24). Use 30 for 29.97fps source material. */
   fpsNum?: number;
   /** Optional source map override for preview-manifest media locators. */
   sourceMapPath?: string;
+  /** Optional compiler logger for non-fatal compile notes. */
+  log?: (message: string) => void;
 }

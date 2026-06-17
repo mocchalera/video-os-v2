@@ -20,6 +20,7 @@ import { loadProfiles } from "../editorial/policy-resolver.js";
 import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
 import { loadSourceMap } from "../media/source-map.js";
+import { extractDurationUs, runFfprobe } from "../connectors/ffprobe.js";
 import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
 import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
 import type { BgmScoringContext } from "./score.js";
@@ -27,6 +28,7 @@ import type {
   CompileOptions,
   CompilerDefaults,
   CreativeBrief,
+  AssembledTimeline,
   BriefAudioPolicy,
   DurationPolicy,
   EditBlueprint,
@@ -60,6 +62,12 @@ export interface CompileResult {
     duration_delta_pct?: number;
   };
   duration_policy?: DurationPolicy;
+}
+
+export interface DetectedBgm {
+  filePath: string;
+  filename: string;
+  durationUs: number;
 }
 
 interface ResolvedAudioPolicy {
@@ -152,6 +160,68 @@ function readSourceVideoDimensions(
   }
 }
 
+export async function detectProjectBgm(
+  projectPath: string,
+  log: (message: string) => void = console.warn,
+): Promise<DetectedBgm | undefined> {
+  const mediaDir = path.join(path.resolve(projectPath), "02_media");
+  if (!fs.existsSync(mediaDir)) return undefined;
+
+  const bgmFiles = fs.readdirSync(mediaDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name)
+    .filter((name) => /^bgm.*\.(mp3|wav)$/i.test(name))
+    .sort((a, b) => a.localeCompare(b));
+
+  for (const filename of bgmFiles) {
+    const filePath = path.join(mediaDir, filename);
+    try {
+      const durationUs = extractDurationUs(await runFfprobe(filePath));
+      if (durationUs > 0) return { filePath, filename, durationUs };
+      log(`Warning: skipping BGM candidate ${filename}: ffprobe returned no duration`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log(`Warning: skipping BGM candidate ${filename}: ${message}`);
+    }
+  }
+
+  return undefined;
+}
+
+function resolveBgmDurationUs(opts: CompileOptions, blueprint: EditBlueprint): number | undefined {
+  if (typeof opts.bgm_duration_us === "number" && opts.bgm_duration_us > 0) {
+    return opts.bgm_duration_us;
+  }
+  if (typeof blueprint.music_policy.bgm_duration_sec === "number" && blueprint.music_policy.bgm_duration_sec > 0) {
+    return Math.round(blueprint.music_policy.bgm_duration_sec * 1_000_000);
+  }
+  return undefined;
+}
+
+function enforceDurationCapAfterTimingAdjustments(
+  assembled: AssembledTimeline,
+  maxDurationFrames: number | undefined,
+  log: ((message: string) => void) | undefined,
+): void {
+  if (maxDurationFrames == null) return;
+
+  let dropped = 0;
+  for (const track of [...assembled.tracks.video, ...assembled.tracks.audio]) {
+    const kept = track.clips.filter(
+      (clip) => clip.timeline_in_frame + clip.timeline_duration_frames <= maxDurationFrames,
+    );
+    dropped += track.clips.length - kept.length;
+    if (kept.length !== track.clips.length) {
+      track.clips.splice(0, track.clips.length, ...kept);
+    }
+  }
+
+  if (dropped > 0) {
+    const emit = log ?? console.warn;
+    emit(`Duration cap dropped ${dropped} clip(s) after timing adjustments beyond ${maxDurationFrames} frames`);
+  }
+}
+
 export function compile(opts: CompileOptions): CompileResult {
   const projectPath = path.resolve(opts.projectPath);
   const repoRoot = opts.repoRoot
@@ -204,6 +274,11 @@ export function compile(opts: CompileOptions): CompileResult {
   // For source material at 30fps, pass fpsNum: 30 via compile options.
   const fpsNum = opts.fpsNum ?? 24;
   const fpsDen = 1;
+  const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
+  const bgmDurationUs = resolveBgmDurationUs(opts, blueprint);
+  const maxDurationFrames = bgmDurationUs
+    ? Math.floor(bgmDurationUs / usPerFrame)
+    : undefined;
 
   // Load BGM analysis for beat-synchronized scoring and snap decisions.
   // Canonical path is 03_analysis/bgm_analysis.json; the loader keeps a legacy fallback.
@@ -250,6 +325,8 @@ export function compile(opts: CompileOptions): CompileResult {
     bgmAssetId: blueprint.music_policy.bgm_asset_id,
     bgmSegmentId: blueprint.music_policy.bgm_segment_id,
     bgmDurationSec: blueprint.music_policy.bgm_duration_sec,
+    maxDurationFrames,
+    log: opts.log,
   });
 
   // ── Phase 3.5: Adaptive Trim ────────────────────────────────────
@@ -260,7 +337,6 @@ export function compile(opts: CompileOptions): CompileResult {
     ...assembled.tracks.video.flatMap((t) => t.clips),
     ...assembled.tracks.audio.flatMap((t) => t.clips),
   ];
-  const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   applyAdaptiveTrim(allAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame);
 
   // ── Phase 3.5b: Duration Adjustment (strict mode) ───────────────
@@ -284,6 +360,8 @@ export function compile(opts: CompileOptions): CompileResult {
       applyUtteranceSnap(snapClips, utteranceMap, snapConfig.toleranceUs, snapConfig.metadataTags);
     }
   }
+
+  enforceDurationCapAfterTimingAdjustments(assembled, maxDurationFrames, opts.log);
 
   // ── Phase 4: Resolve constraints ──────────────────────────────────
 

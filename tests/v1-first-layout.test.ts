@@ -105,6 +105,38 @@ describe("V1-first track layout", () => {
     }
   });
 
+  it("drops clips that would exceed maxDurationFrames without placing partial clips", () => {
+    const normalized = makeNormalized(40);
+    const table: RankedCandidateTable = new Map([
+      [
+        "b01",
+        [
+          score("seg_hero", "AST_A", "hero", 0.9),
+          score("seg_support", "AST_B", "support", 0.8),
+          score("seg_texture", "AST_C", "texture", 0.7),
+        ],
+      ],
+    ]);
+    const logs: string[] = [];
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only", maxDurationFrames: 25, log: (message) => logs.push(message) },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_hero", "seg_support"]);
+    expect(v1.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 10]);
+    expect(v1.clips.every((clip) => clip.timeline_duration_frames === 10)).toBe(true);
+    expect(Math.max(...v1.clips.map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames))).toBeLessThanOrEqual(25);
+    expect(logs).toEqual(["Duration cap dropped 1 clip(s) beyond 25 frames"]);
+  });
+
   it("multi mode preserves hero on V1 and support/texture on V2", () => {
     const normalized = makeNormalized(30);
     const table: RankedCandidateTable = new Map([

@@ -7,7 +7,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { compile, applyPatch } from "../runtime/compiler/index.js";
+import { compile, applyPatch, detectProjectBgm } from "../runtime/compiler/index.js";
 import { writePreviewManifest } from "../runtime/compiler/export.js";
 import type { ReviewPatch } from "../runtime/compiler/patch.js";
 import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
@@ -108,12 +108,21 @@ async function runCompile(
     console.log("Brief confirmation: skipped");
   }
 
+  const bgm = await detectProjectBgm(projectPath);
+  if (bgm) {
+    const durationSec = bgm.durationUs / 1_000_000;
+    console.log(
+      `BGM detected: ${bgm.filename} (${durationSec.toFixed(1)}s) — capping timeline at ${Math.floor(durationSec)}s`,
+    );
+  }
+
   // Compile
   const result = compile({
     projectPath,
     createdAt,
     fpsNum,
     sourceMapPath,
+    bgm_duration_us: bgm?.durationUs,
   });
   pt.advance("timeline.json");
 
