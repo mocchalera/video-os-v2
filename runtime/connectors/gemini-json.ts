@@ -98,8 +98,7 @@ async function callGeminiGenerateContent(
     }
 
     const body = await response.text();
-    // Free-tier per-minute quotas return 429 with a RetryInfo hint.
-    if (response.status === 429 && attempt < MAX_RETRIES) {
+    if ((response.status === 429 || response.status === 503) && attempt < MAX_RETRIES) {
       const delayMs = Math.min(
         parseRetryDelayMs(body) ?? 30_000,
         MAX_RETRY_DELAY_MS,
