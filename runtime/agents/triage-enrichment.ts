@@ -8,7 +8,7 @@ type ClusterEntry = {
   summary: string;
 };
 
-const DEFAULT_CLUSTER_SIMILARITY_THRESHOLD = 0.85;
+const DEFAULT_CLUSTER_SIMILARITY_THRESHOLD = 0.92;
 
 export type SegmentItem = BaseSegmentItem & {
   visual_quality?: {
@@ -62,7 +62,10 @@ export async function refineClusters(
     const candidate = selects.candidates[candidateIndex];
     if (candidate.role === "reject") continue;
     const segment = segmentsById.get(candidate.segment_id);
-    const summary = segment?.summary?.trim();
+    const motifs = (candidate.motif_tags ?? []).join(", ");
+    const firstEvidence = (candidate.evidence ?? [])[0] ?? "";
+    const segSummary = segment?.summary?.trim() ?? "";
+    const summary = [motifs, firstEvidence, segSummary].filter(Boolean).join(". ");
     if (!summary) continue;
     entries.push({ candidateIndex, summary });
   }
