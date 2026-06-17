@@ -189,7 +189,7 @@ async function evaluateSelectsStage(
   const base: Record<BriefAlignmentAxis, AxisScore> = {
     intent_message_alignment: scoreSelectsIntentMessage(brief, selects),
     must_have_coverage: await scoreMustHaveCoverageWithSemantic(brief, selects, segments),
-    emotion_curve_alignment: scoreSelectsEmotionCurve(selects),
+    emotion_curve_alignment: scoreSelectsEmotionCurve(brief, selects),
     narrative_structure: scoreSelectsNarrative(selects),
     pacing_coherence: scoreSelectsPacing(brief, selects),
     visual_variety_and_focus: scoreVisualVariety(selects, segments),

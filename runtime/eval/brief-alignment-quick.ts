@@ -27,7 +27,7 @@ export interface BriefAlignmentGap {
 
 const DEFAULT_THRESHOLDS: Partial<Record<BriefAlignmentAxis, number>> = {
   must_have_coverage: 0.9,
-  emotion_curve_alignment: 0.5,
+  emotion_curve_alignment: 0.8,
   narrative_structure: 0.5,
   visual_variety_and_focus: 0.6,
 };
@@ -49,7 +49,7 @@ export function quickBriefAlignmentCheck(
   const resolvedThresholds = { ...DEFAULT_THRESHOLDS, ...thresholds };
   const axisScores: Record<(typeof QUICK_AXES)[number], number> = {
     must_have_coverage: scoreMustHaveCoverage(brief, selects, segments).score,
-    emotion_curve_alignment: scoreSelectsEmotionCurve(selects).score,
+    emotion_curve_alignment: scoreSelectsEmotionCurve(brief, selects).score,
     narrative_structure: scoreNarrativeStructure(active),
     visual_variety_and_focus: scoreVisualVariety(selects, segments).score,
   };
@@ -80,7 +80,7 @@ export async function quickBriefAlignmentCheckWithSemantic(
   const mustHaveAxis = await scoreMustHaveCoverageWithSemantic(brief, selects, segments);
   const axisScores: Record<(typeof QUICK_AXES)[number], number> = {
     must_have_coverage: mustHaveAxis.score,
-    emotion_curve_alignment: scoreSelectsEmotionCurve(selects).score,
+    emotion_curve_alignment: scoreSelectsEmotionCurve(brief, selects).score,
     narrative_structure: scoreNarrativeStructure(active),
     visual_variety_and_focus: scoreVisualVariety(selects, segments).score,
   };

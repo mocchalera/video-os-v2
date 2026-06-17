@@ -312,6 +312,54 @@ function candidateIntentMessageText(candidate: Candidate): string {
   ].join(" ");
 }
 
+const EMOTION_CURVE_SYNONYMS = new Map<string, string[]>([
+  ["awe", ["wonder"]],
+  ["calm", ["serene", "serenity"]],
+  ["discover", ["discovery", "explore", "exploration"]],
+  ["discovery", ["discover", "explore", "exploration"]],
+  ["exploration", ["discover", "discovery", "explore"]],
+  ["explore", ["discover", "discovery", "exploration"]],
+  ["immerse", ["immersion", "immersive"]],
+  ["immersion", ["immerse", "immersive"]],
+  ["immersive", ["immerse", "immersion"]],
+  ["serene", ["calm", "serenity"]],
+  ["serenity", ["calm", "serene"]],
+  ["warm", ["warmth"]],
+  ["warmth", ["warm"]],
+  ["wonder", ["awe"]],
+  ["驚き", ["awe", "surprise", "wonder"]],
+  ["温か", ["intimate", "warm", "warmth"]],
+  ["温かい", ["intimate", "warm", "warmth"]],
+  ["温かさ", ["intimate", "warm", "warmth"]],
+  ["静けさ", ["calm", "quiet", "serene", "serenity"]],
+  ["発見", ["discover", "discovery", "explore", "exploration"]],
+  ["没入", ["immerse", "immersion", "immersive"]],
+]);
+
+function emotionCurveVariants(term: string): string[] {
+  const variants = new Set<string>();
+  const compact = searchable(term);
+  if (!compact) return [];
+  variants.add(term);
+  for (const synonym of EMOTION_CURVE_SYNONYMS.get(compact) ?? []) {
+    variants.add(synonym);
+  }
+  return [...variants];
+}
+
+function textMatchesEmotionCurveTerm(text: string, term: string): boolean {
+  return emotionCurveVariants(term).some((variant) => textMatchesTerm(text, variant));
+}
+
+function candidateEmotionCurveText(candidate: Candidate): string {
+  return [
+    ...(candidate.eligible_beats ?? []),
+    ...(candidate.motif_tags ?? []),
+    ...(candidate.evidence ?? []),
+    candidate.why_it_matches,
+  ].join(" ");
+}
+
 function blueprintIntentMessageText(blueprint: EditBlueprint): string {
   return [
     ...blueprint.sequence_goals,
@@ -628,18 +676,20 @@ export function scoreBlueprintEmotionCurve(
   );
 }
 
-export function scoreSelectsEmotionCurve(selects: SelectsCandidates): AxisScore {
+function hasEditorialEmotionSignal(candidate: Candidate): boolean {
+  const signals = candidate.editorial_signals;
+  return Boolean(
+    signals?.afterglow_score
+      || signals?.reaction_intensity_score
+      || signals?.surprise_signal
+      || signals?.hope_signal
+      || signals?.peak_strength_score,
+  );
+}
+
+function scoreSelectsEmotionCurveLegacy(selects: SelectsCandidates): AxisScore {
   const active = activeCandidates(selects);
-  const withSignals = active.filter((candidate) => {
-    const signals = candidate.editorial_signals;
-    return Boolean(
-      signals?.afterglow_score
-        || signals?.reaction_intensity_score
-        || signals?.surprise_signal
-        || signals?.hope_signal
-        || signals?.peak_strength_score,
-    );
-  }).length;
+  const withSignals = active.filter(hasEditorialEmotionSignal).length;
   const heroOrDialogue = active.filter((candidate) => candidate.role === "hero" || candidate.role === "dialogue").length;
   const score = active.length === 0 ? 0 : (withSignals / active.length) * 0.5 + clamp01(heroOrDialogue / Math.max(1, Math.ceil(active.length / 3))) * 0.5;
   return axis(
@@ -647,5 +697,59 @@ export function scoreSelectsEmotionCurve(selects: SelectsCandidates): AxisScore 
     0.45,
     [`${withSignals}/${active.length} active candidates carry emotion/peak signals`],
     withSignals === 0 ? ["selects expose little deterministic emotion-curve evidence"] : [],
+  );
+}
+
+export function scoreSelectsEmotionCurve(
+  brief: CreativeBrief,
+  selects: SelectsCandidates,
+): AxisScore;
+export function scoreSelectsEmotionCurve(selects: SelectsCandidates): AxisScore;
+export function scoreSelectsEmotionCurve(
+  briefOrSelects: CreativeBrief | SelectsCandidates,
+  maybeSelects?: SelectsCandidates,
+): AxisScore {
+  if (!maybeSelects) {
+    return scoreSelectsEmotionCurveLegacy(briefOrSelects as SelectsCandidates);
+  }
+
+  const brief = briefOrSelects as CreativeBrief;
+  const selects = maybeSelects;
+  const active = activeCandidates(selects);
+  if (active.length === 0) {
+    return axis(0, 0.45, [], ["no active selected candidates"]);
+  }
+
+  const curve = stringArray(brief.emotion_curve);
+  const searchableText = active.map(candidateEmotionCurveText).join(" ");
+  const matched = curve.filter((term) => textMatchesEmotionCurveTerm(searchableText, term));
+  const withSignals = active.filter(hasEditorialEmotionSignal).length;
+  const withEligibleBeats = active.filter((candidate) => (candidate.eligible_beats ?? []).length > 0).length;
+
+  const emotionCurveCoverage = curve.length === 0 ? 0.5 : matched.length / curve.length;
+  const editorialSignalsPresence = withSignals / active.length;
+  const eligibleBeatsRichness = withEligibleBeats / active.length;
+  const score =
+    emotionCurveCoverage * 0.6
+    + editorialSignalsPresence * 0.2
+    + eligibleBeatsRichness * 0.2;
+
+  return axis(
+    score,
+    withEligibleBeats > 0 ? 0.7 : 0.45,
+    [
+      curve.length > 0
+        ? `${matched.length}/${curve.length} brief emotion_curve terms found in candidate beats/evidence`
+        : "brief has no emotion_curve terms",
+      `${withSignals}/${active.length} active candidates carry emotion/peak signals`,
+      `${withEligibleBeats}/${active.length} active candidates carry eligible_beats`,
+    ],
+    [
+      ...(curve.length > 0 && matched.length < curve.length
+        ? [`missing emotion_curve evidence for: ${curve.filter((term) => !matched.includes(term)).join(", ")}`]
+        : []),
+      ...(withSignals === 0 ? ["selects expose little deterministic emotion/peak signal data"] : []),
+      ...(withEligibleBeats === 0 ? ["eligible_beats are missing from active candidates"] : []),
+    ],
   );
 }
