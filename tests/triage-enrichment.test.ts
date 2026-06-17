@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { enrichSelectsFromAnalysis, type SegmentItem } from "../runtime/agents/triage-enrichment.js";
 import { validateAgainstSchema } from "../runtime/commands/shared.js";
 import type { Candidate, SelectsCandidates } from "../runtime/artifacts/types.js";
+
+type CandidateWithRejection = Candidate & { rejection_reason?: string };
 
 describe("enrichSelectsFromAnalysis", () => {
   it("copies peak_analysis fields into editorial and peak signals", () => {
@@ -78,6 +80,69 @@ describe("enrichSelectsFromAnalysis", () => {
       "wide_landscape",
       "quiet_smile",
       "slow_walking",
+    ]);
+  });
+
+  it("auto-rejects candidates whose source segment is below the technical quality threshold", () => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const enriched = enrichSelectsFromAnalysis(selects([candidate("SEG_BAD", { role: "hero" })]), [
+        segment("SEG_BAD", {
+          visual_quality: {
+            scores: {
+              light_quality: 0.7,
+              composition_score: 0.1,
+              subject_prominence: 0.15,
+            },
+          },
+        }),
+      ]);
+
+      expect(enriched.candidates[0]).toMatchObject({
+        role: "reject",
+        rejection_reason: "auto-rejected: technical quality below threshold",
+      });
+      expect(logSpy).toHaveBeenCalledWith(
+        "[triage:quality-gate] rejected 1 candidates due to low technical quality",
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("does not auto-reject good clips or clips without visual quality scores", () => {
+    const enriched = enrichSelectsFromAnalysis(
+      selects([
+        candidate("SEG_GOOD", { role: "hero" }),
+        candidate("SEG_NO_VQ", { role: "support" }),
+        candidate("SEG_PARTIAL", { role: "transition" }),
+      ]),
+      [
+        segment("SEG_GOOD", {
+          visual_quality: {
+            scores: {
+              light_quality: 0.7,
+              composition_score: 0.8,
+              subject_prominence: 0.75,
+            },
+          },
+        }),
+        segment("SEG_NO_VQ"),
+        segment("SEG_PARTIAL", {
+          visual_quality: {
+            scores: {
+              composition_score: 0.1,
+            },
+          },
+        }),
+      ],
+    );
+
+    expect(enriched.candidates.map((item) => item.role)).toEqual(["hero", "support", "transition"]);
+    expect(enriched.candidates.map((item) => (item as CandidateWithRejection).rejection_reason)).toEqual([
+      undefined,
+      undefined,
+      undefined,
     ]);
   });
 

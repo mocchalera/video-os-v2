@@ -585,6 +585,63 @@ describe("compactSegmentEvidence", () => {
       interest_point_labels: ["sun breaks over ridge", "camera tilts to valley"],
     });
   });
+
+  it("injects a technical quality tag into summaries for clearly poor visual quality", () => {
+    const segments = compactSegmentEvidence([
+      {
+        segment_id: "SEG_POOR",
+        asset_id: "AST_POOR",
+        src_in_us: 0,
+        src_out_us: 5_000_000,
+        summary: "Dark empty handheld shot.",
+        tags: ["interior"],
+        visual_quality: {
+          scores: {
+            light_quality: 0.1,
+            composition_score: 0.2,
+            subject_prominence: 0.15,
+          },
+        },
+      },
+    ]);
+
+    expect(segments[0].summary).toBe("[TECHNICALLY_POOR] Dark empty handheld shot.");
+  });
+
+  it("does not inject a technical quality tag when visual quality is acceptable or incomplete", () => {
+    const segments = compactSegmentEvidence([
+      {
+        segment_id: "SEG_GOOD",
+        asset_id: "AST_GOOD",
+        src_in_us: 0,
+        src_out_us: 5_000_000,
+        summary: "Subject visible in a usable composition.",
+        visual_quality: {
+          scores: {
+            light_quality: 0.8,
+            composition_score: 0.7,
+            subject_prominence: 0.6,
+          },
+        },
+      },
+      {
+        segment_id: "SEG_INCOMPLETE",
+        asset_id: "AST_INCOMPLETE",
+        src_in_us: 5_000_000,
+        src_out_us: 8_000_000,
+        summary: "Scores do not include all quality fields.",
+        visual_quality: {
+          scores: {
+            composition_score: 0.1,
+            subject_prominence: 0.1,
+          },
+        },
+      },
+    ]);
+
+    expect(segments[0].summary).toBe("Subject visible in a usable composition.");
+    expect(segments[1].summary).toBe("Scores do not include all quality fields.");
+  });
 });
 
 describe("buildLlmTriagePrompt", () => {
@@ -631,6 +688,8 @@ describe("buildLlmTriagePrompt", () => {
     expect(prompt).toContain("Evidence must include at least one specific visual observation");
     expect(prompt).toContain("selection_notes must include notes about intended emotional progression");
     expect(prompt).toContain("selection_notes must note the intended pacing approach");
+    expect(prompt).toContain("Reject technically unusable footage");
+    expect(prompt).toContain("composition_score < 0.3 AND subject_prominence < 0.3");
   });
 });
 

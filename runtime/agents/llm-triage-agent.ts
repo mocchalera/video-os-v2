@@ -288,6 +288,19 @@ function compactVisualQuality(value: unknown): CompactVisualQuality | undefined 
   };
 }
 
+function isTechnicallyPoorVisualQuality(visualQuality: CompactVisualQuality | undefined): boolean {
+  const scores = visualQuality?.scores;
+  return Boolean(
+    scores &&
+      scores.composition_score !== undefined &&
+      scores.subject_prominence !== undefined &&
+      scores.light_quality !== undefined &&
+      scores.composition_score < 0.25 &&
+      scores.subject_prominence < 0.25 &&
+      scores.light_quality < 0.25,
+  );
+}
+
 function compactInterestPointLabels(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((point) => {
@@ -308,13 +321,17 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
     if (srcInUs < 0 || srcOutUs <= srcInUs) return [];
     const visualQuality = compactVisualQuality(item.visual_quality);
     const interestPointLabels = compactInterestPointLabels(item.interest_points);
+    const summary = stringValue(item.summary) ?? "";
+    const compactSummary = isTechnicallyPoorVisualQuality(visualQuality)
+      ? `[TECHNICALLY_POOR] ${summary}`.trim()
+      : summary;
     return [
       {
         segment_id: segmentId,
         asset_id: assetId,
         src_in_us: srcInUs,
         src_out_us: srcOutUs,
-        summary: stringValue(item.summary) ?? "",
+        summary: compactSummary,
         tags: stringArray(item.tags),
         peak: extractPeakEvidence(item),
         transcript: normalizeTranscript(item.transcript_excerpt ?? item.transcript),
@@ -432,6 +449,8 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- Include a clear opening and a clear ending.",
     "- Maintain enough breadth across assets, visual modes, and story beats for the target runtime.",
     "- Do not discard dense repetition just because shots are similar: montage clusters can be important. Sample them proportionally and avoid sparse coverage.",
+    "- Reject technically unusable footage: assign role='reject' with rejection_reason for clips that are out of focus, have severe camera shake, are mostly black/overexposed, or show no identifiable subject.",
+    "- If visual_quality scores are available in the segment evidence, reject candidates with composition_score < 0.3 AND subject_prominence < 0.3.",
     "- IMPORTANT: You must select candidates. An empty candidates array is never acceptable. These segments are the only available footage — choose the best from what exists, not against an ideal.",
     "",
     "## Output",

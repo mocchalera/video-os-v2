@@ -2,6 +2,7 @@ import type { SegmentItem as BaseSegmentItem } from "../connectors/ffmpeg-segmen
 import type { Candidate, SelectsCandidates } from "../artifacts/types.js";
 
 type PeakType = "action_peak" | "emotional_peak" | "visual_peak";
+type CandidateWithRejection = Candidate & { rejection_reason?: string };
 
 export type SegmentItem = BaseSegmentItem & {
   visual_quality?: {
@@ -26,15 +27,23 @@ export function enrichSelectsFromAnalysis(
   segments: SegmentItem[],
 ): SelectsCandidates {
   const segmentsById = new Map(segments.map((segment) => [segment.segment_id, segment]));
+  let qualityRejectedCount = 0;
 
-  return {
+  const enriched = {
     ...selects,
     candidates: selects.candidates.map((candidate) => {
       const segment = segmentsById.get(candidate.segment_id);
       if (!segment) return cloneCandidate(candidate);
-      return enrichCandidate(candidate, segment);
+      const enrichedCandidate = enrichCandidate(candidate, segment);
+      const gatedCandidate = applyQualityGate(enrichedCandidate, segment);
+      if (gatedCandidate.role === "reject" && enrichedCandidate.role !== "reject") {
+        qualityRejectedCount += 1;
+      }
+      return gatedCandidate;
     }),
   };
+  console.error(`[triage:quality-gate] rejected ${qualityRejectedCount} candidates due to low technical quality`);
+  return enriched;
 }
 
 function enrichCandidate(candidate: Candidate, segment: SegmentItem): Candidate {
@@ -92,6 +101,18 @@ function enrichCandidate(candidate: Candidate, segment: SegmentItem): Candidate 
   }
 
   return next;
+}
+
+function applyQualityGate(candidate: Candidate, segment: SegmentItem): Candidate {
+  const scores = segment.visual_quality?.scores;
+  if (!scores || !isScore(scores.composition_score) || !isScore(scores.subject_prominence)) return candidate;
+  if (scores.composition_score >= 0.2 || scores.subject_prominence >= 0.2) return candidate;
+  const rejected: CandidateWithRejection = {
+    ...candidate,
+    role: "reject",
+    rejection_reason: "auto-rejected: technical quality below threshold",
+  };
+  return rejected;
 }
 
 function cloneCandidate(candidate: Candidate): Candidate {
