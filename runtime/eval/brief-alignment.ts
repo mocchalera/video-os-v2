@@ -93,19 +93,30 @@ function scoreSelectsPacing(brief: CreativeBrief, selects: SelectsCandidates): A
 function scoreSelectsNarrative(selects: SelectsCandidates): AxisScore {
   const active = selects.candidates.filter((candidate) => candidate.role !== "reject");
   const roles = new Set(active.map((candidate) => candidate.role));
+  const hasBeats = active.some((c) => c.eligible_beats && c.eligible_beats.length > 0);
   const hasOpening = active.some(
     (candidate) => candidate.role === "hero" || candidate.eligible_beats?.some((beat) => /hook|opening|setup/i.test(beat)),
   );
-  const hasClosing = active.some((candidate) => candidate.eligible_beats?.some((beat) => /closing|ending|payoff/i.test(beat)));
-  const score = clamp01((roles.size / Math.min(4, Math.max(1, active.length))) * 0.5 + (hasOpening ? 0.3 : 0) + (hasClosing ? 0.2 : 0));
-  return fallbackAxis(
-    score,
-    [`${roles.size} role types represented in selects`],
-    [
-      ...(hasOpening ? [] : ["selects do not expose a clear hook/opening candidate"]),
-      ...(hasClosing ? [] : ["selects do not expose a clear closing/payoff candidate"]),
-    ],
+  const hasMiddle = active.some(
+    (candidate) => candidate.eligible_beats?.some((beat) => /experience|development|immersion|middle/i.test(beat)),
   );
+  const hasClosing = active.some((candidate) => candidate.eligible_beats?.some((beat) => /closing|ending|payoff|release/i.test(beat)));
+  const functionCount = [hasOpening, hasMiddle, hasClosing].filter(Boolean).length;
+  const score = clamp01((roles.size / Math.min(4, Math.max(1, active.length))) * 0.3 + (functionCount / 3) * 0.7);
+  const confidence = hasBeats ? 0.75 : 0.45;
+  const evidence = [
+    `${roles.size} role types represented in selects`,
+    ...(hasBeats ? [`eligible_beats present on ${active.filter((c) => c.eligible_beats?.length).length}/${active.length} candidates`] : []),
+    ...(hasOpening ? ["hook/opening function detected"] : []),
+    ...(hasMiddle ? ["experience/development function detected"] : []),
+    ...(hasClosing ? ["closing/payoff function detected"] : []),
+  ];
+  const gaps = [
+    ...(hasOpening ? [] : ["selects do not expose a clear hook/opening candidate"]),
+    ...(hasMiddle ? [] : ["selects do not expose experience/development candidates"]),
+    ...(hasClosing ? [] : ["selects do not expose a clear closing/payoff candidate"]),
+  ];
+  return { score: round3(clamp01(score)), confidence, judge_source: "deterministic", evidence, gaps };
 }
 
 function computeStageScore(axes: Record<BriefAlignmentAxis, AxisScore>): number {
