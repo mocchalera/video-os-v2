@@ -57,6 +57,12 @@ export async function refineClusters(
   segments: SegmentItem[],
 ): Promise<SelectsCandidates> {
   const segmentsById = new Map(segments.map((segment) => [segment.segment_id, segment]));
+
+  const hasMotifs = selects.candidates.some((c) => c.role !== "reject" && c.motif_tags && c.motif_tags.length > 0);
+  if (hasMotifs) {
+    return refineClustersByMotifTags(selects, segmentsById);
+  }
+
   const entries: ClusterEntry[] = [];
   for (let candidateIndex = 0; candidateIndex < selects.candidates.length; candidateIndex += 1) {
     const candidate = selects.candidates[candidateIndex];
@@ -99,6 +105,22 @@ export async function refineClusters(
     console.warn(`[triage:semantic-clusters] embedding refinement skipped (${message})`);
     return applyFallbackClusters(selects, segmentsById);
   }
+}
+
+function refineClustersByMotifTags(
+  selects: SelectsCandidates,
+  segmentsById: Map<string, SegmentItem>,
+): SelectsCandidates {
+  const candidates = selects.candidates.map((candidate) => {
+    if (candidate.role === "reject") return candidate;
+    const motifs = (candidate.motif_tags ?? []).filter(isNonEmptyString);
+    const segment = segmentsById.get(candidate.segment_id);
+    const clusterId = motifs[0] ?? (segment ? deriveSemanticClusterId(segment) : "unknown");
+    const editorial = { ...(candidate.editorial_signals ?? {}) };
+    editorial.semantic_cluster_id = clusterId;
+    return { ...candidate, editorial_signals: editorial };
+  });
+  return { ...selects, candidates };
 }
 
 export function agglomerativeClusters(
