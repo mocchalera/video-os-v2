@@ -216,6 +216,13 @@ function truncateForPrompt(value: string | null): string {
 }
 
 export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
+  const targetSec = runtimeTargetSec(input.briefContent) ?? 60;
+  const fps = 24;
+  const totalFrames = Math.round(targetSec * fps);
+  const hookFrames = Math.round(totalFrames * 0.08);
+  const middleFrames = Math.round(totalFrames * 0.7);
+  const closingFrames = Math.round(totalFrames * 0.12);
+
   const outputExample = {
     version: "1",
     project_id: input.projectId,
@@ -229,7 +236,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
         id: "b01",
         label: "hook",
         purpose: "establish the emotional promise",
-        target_duration_frames: 120,
+        target_duration_frames: hookFrames,
         required_roles: ["hero"],
         preferred_roles: ["support", "texture"],
         story_role: "hook",
@@ -244,7 +251,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
       middle_cadence: "varied",
       ending_cadence: "resolved",
       max_shot_length_frames: 180,
-      default_duration_target_sec: 60,
+      default_duration_target_sec: targetSec,
     },
     story_arc: {
       summary: "one sentence story arc",
@@ -287,9 +294,9 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
       mode: "guide",
       source: "explicit_brief",
       target_source: "explicit_brief",
-      target_duration_sec: 60,
-      min_duration_sec: 42,
-      max_duration_sec: 78,
+      target_duration_sec: targetSec,
+      min_duration_sec: Math.round(targetSec * 0.75),
+      max_duration_sec: Math.round(targetSec * 1.25),
       hard_gate: false,
       protect_vlm_peaks: true,
     },
@@ -318,6 +325,14 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
     "## Required output",
     "JSON のみを返してください。Markdown、説明文、前後テキストは不要です。",
     "EditBlueprint の主要フィールドだけを出力してください。additionalProperties:false の schema にない未知フィールドは出力しないでください。",
+    "",
+    "## Duration rules",
+    `Target runtime is ${targetSec}s (${totalFrames} frames at ${fps}fps).`,
+    `The sum of all beat target_duration_frames MUST equal approximately ${totalFrames} frames.`,
+    "Create enough beats (typically 4-8) so that each beat has 20-60 seconds of content.",
+    "Each beat should reference multiple candidates via candidate_plan — use primary + fallbacks to fill the beat duration.",
+    `Example: for a ${targetSec}s video with 5 beats, each beat averages ${Math.round(targetSec / 5)}s (${Math.round(totalFrames / 5)} frames).`,
+    "",
     "Shape example:",
     JSON.stringify(outputExample, null, 2),
   ].join("\n");
