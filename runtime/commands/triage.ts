@@ -53,7 +53,10 @@ import {
   loadSearchIndexManifest,
   materializeSearchHash,
 } from "../artifacts/p4d-segment-search-index.js";
-import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
+import {
+  enrichSelectsFromAnalysis,
+  type SegmentItem as EnrichmentSegmentItem,
+} from "../agents/triage-enrichment.js";
 import {
   analyzeSelectionCoverage,
   type SelectionCoverageReport,
@@ -430,7 +433,13 @@ export async function runTriage(
   }
 
   // 5.5 Materialize deterministic analysis signals, then canonicalize.
-  materializePeakSignalsFromSegments(absDir, agentResult.selects);
+  const enrichmentSegments = loadAnalysisSegments(absDir);
+  if (enrichmentSegments && hasCandidateArray(agentResult.selects)) {
+    agentResult.selects = enrichSelectsFromAnalysis(
+      agentResult.selects as unknown as ArtifactSelectsCandidates,
+      enrichmentSegments,
+    ) as unknown as SelectsCandidates;
+  }
   canonicalizeSelects(agentResult.selects, projectId);
   if (isP2AudioStoryGraphEnabled()) {
     materializeAudioStoryGraphRefs(absDir, agentResult.selects);
@@ -529,6 +538,46 @@ function loadCoverageSegments(projectDir: string): SelectionCoverageSegment[] | 
   } catch {
     return undefined;
   }
+}
+
+function loadAnalysisSegments(projectDir: string): EnrichmentSegmentItem[] | undefined {
+  const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+  if (!fs.existsSync(segmentsPath)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as { items?: unknown };
+    if (!Array.isArray(parsed.items)) return undefined;
+    return parsed.items.filter(isEnrichmentSegmentItem);
+  } catch {
+    return undefined;
+  }
+}
+
+function isEnrichmentSegmentItem(item: unknown): item is EnrichmentSegmentItem {
+  if (!item || typeof item !== "object") return false;
+  const segment = item as {
+    segment_id?: unknown;
+    asset_id?: unknown;
+    src_in_us?: unknown;
+    src_out_us?: unknown;
+    summary?: unknown;
+    transcript_excerpt?: unknown;
+    quality_flags?: unknown;
+    tags?: unknown;
+  };
+  return (
+    typeof segment.segment_id === "string" &&
+    typeof segment.asset_id === "string" &&
+    typeof segment.src_in_us === "number" &&
+    typeof segment.src_out_us === "number" &&
+    typeof segment.summary === "string" &&
+    typeof segment.transcript_excerpt === "string" &&
+    Array.isArray(segment.quality_flags) &&
+    Array.isArray(segment.tags)
+  );
+}
+
+function hasCandidateArray(selects: unknown): selects is { candidates: unknown[] } {
+  return !!selects && typeof selects === "object" && Array.isArray((selects as { candidates?: unknown }).candidates);
 }
 
 function hasAnalyzableSelects(selects: unknown): selects is SelectsCandidates {
