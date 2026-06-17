@@ -100,6 +100,12 @@ export function scoreCandidates(
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const nonReject = candidates.filter((c) => c.role !== "reject");
 
+  function candidateMatchesBeat(eligibleBeats: string[], beat: NormalizedBeat): boolean {
+    if (eligibleBeats.includes(beat.beat_id)) return true;
+    const beatText = [beat.label, beat.purpose].filter(Boolean).join(" ").toLowerCase();
+    return eligibleBeats.some((eb) => beatText.includes(eb.toLowerCase()));
+  }
+
   // Pre-compute global motif usage counts for reuse penalty
   const motifCounts = new Map<string, number>();
   for (const c of nonReject) {
@@ -118,7 +124,7 @@ export function scoreCandidates(
       if (
         c.eligible_beats &&
         c.eligible_beats.length > 0 &&
-        !c.eligible_beats.includes(beat.beat_id)
+        !candidateMatchesBeat(c.eligible_beats, beat)
       ) continue;
       assets.add(c.asset_id);
     }
@@ -134,11 +140,10 @@ export function scoreCandidates(
     const scored: ScoredCandidate[] = [];
 
     for (const candidate of nonReject) {
-      // Skip if candidate is not eligible for this beat
       if (
         candidate.eligible_beats &&
         candidate.eligible_beats.length > 0 &&
-        !candidate.eligible_beats.includes(beat.beat_id)
+        !candidateMatchesBeat(candidate.eligible_beats, beat)
       ) {
         continue;
       }
