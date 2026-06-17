@@ -95,6 +95,20 @@ function segmentsWithFilmstrips(): Array<Record<string, unknown>> {
   }));
 }
 
+function segmentsWithMarlinProvenance(segments: Array<Record<string, unknown>> = defaultSegments()): Array<Record<string, unknown>> {
+  return segments.map((segment) => ({
+    ...segment,
+    provenance: {
+      ...(segment.provenance as Record<string, unknown> | undefined),
+      summary: {
+        method: "marlin_reporter",
+        stage: "marlin",
+        prompt_template_id: "marlin-caption-v1",
+      },
+    },
+  }));
+}
+
 function writeFilmstrip(projectDir: string, relPath: string, content = "fake-png"): void {
   const targetPath = path.join(projectDir, "03_analysis", relPath);
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
@@ -360,6 +374,33 @@ describe("createLlmTriageAgent", () => {
     expect(images).toBeUndefined();
   });
 
+  it("defaults to text-only triage when segments have Marlin scene provenance", async () => {
+    const projectDir = createProject("marlin-text-default", segmentsWithMarlinProvenance(segmentsWithFilmstrips()));
+    writeFilmstrip(projectDir, "filmstrips/SEG_001.png");
+    writeFilmstrip(projectDir, "filmstrips/SEG_002.png");
+    let prompt = "";
+    let images: LlmImagePart[] | undefined;
+    let imagePreparerCalls = 0;
+    const agent = createLlmTriageAgent({
+      imagePreparer: async () => {
+        imagePreparerCalls += 1;
+        return { data: "unused", mimeType: "image/png" };
+      },
+      llm: async (nextPrompt, nextImages) => {
+        prompt = nextPrompt;
+        images = nextImages;
+        return responseFor("SEG_001");
+      },
+    });
+
+    await agent.run(context(projectDir));
+
+    expect(imagePreparerCalls).toBe(0);
+    expect(images).toBeUndefined();
+    expect(prompt).toContain("No filmstrip images are attached");
+    expect(prompt).toContain('"scene_report": "Child starts riding with training wheels."');
+  });
+
   it("batches multimodal triage and merges parsed candidates", async () => {
     const projectDir = createProject("filmstrip-batches", segmentsWithFilmstrips());
     writeFilmstrip(projectDir, "filmstrips/SEG_001.png");
@@ -542,6 +583,53 @@ describe("selectsFromLlmResponse", () => {
 });
 
 describe("compactSegmentEvidence", () => {
+  it("forwards Marlin scene report and Gemini appraisal fields when present", () => {
+    const segments = compactSegmentEvidence(segmentsWithMarlinProvenance([
+      {
+        segment_id: "SEG_APPRAISAL",
+        asset_id: "AST_APPRAISAL",
+        src_in_us: 0,
+        src_out_us: 5_000_000,
+        summary: "Soba shop frontage with a hand-written menu board.",
+        visual_appraisal: {
+          extracted_text: [
+            { text: "戸隠そば", confidence: 0.93 },
+            { text: "季節の天ぷら", confidence: 0.87 },
+            { text: "", confidence: 0.99 },
+          ],
+          place_hint: {
+            name: "Togakushi soba restaurant",
+            confidence: 0.76,
+          },
+          aesthetic_notes: ["warm window light", "layered signage depth", ""],
+        },
+      },
+    ]));
+
+    expect(segments[0]).toMatchObject({
+      scene_report: "Soba shop frontage with a hand-written menu board.",
+      extracted_text: ["戸隠そば", "季節の天ぷら"],
+      place_hint: "Togakushi soba restaurant",
+      aesthetic_notes: ["warm window light", "layered signage depth"],
+    });
+  });
+
+  it("keeps compact evidence backward compatible without visual_appraisal", () => {
+    const segments = compactSegmentEvidence([
+      {
+        segment_id: "SEG_LEGACY",
+        asset_id: "AST_LEGACY",
+        src_in_us: 0,
+        src_out_us: 5_000_000,
+        summary: "Legacy VLM-only segment.",
+      },
+    ]);
+
+    expect(segments[0]).not.toHaveProperty("extracted_text");
+    expect(segments[0]).not.toHaveProperty("place_hint");
+    expect(segments[0]).not.toHaveProperty("aesthetic_notes");
+  });
+
   it("forwards compact visual quality and interest point labels when present", () => {
     const segments = compactSegmentEvidence([
       {
@@ -689,7 +777,12 @@ describe("buildLlmTriagePrompt", () => {
     expect(prompt).toContain("selection_notes must include notes about intended emotional progression");
     expect(prompt).toContain("selection_notes must note the intended pacing approach");
     expect(prompt).toContain("Reject technically unusable footage");
-    expect(prompt).toContain("composition_score < 0.3 AND subject_prominence < 0.3");
+    expect(prompt).toContain("Use `place_hint` to identify location-specific content for the brief");
+    expect(prompt).toContain("Use `extracted_text` to identify signage, menus, or labels relevant to the brief");
+    expect(prompt).toContain("Use `aesthetic_notes` to prefer visually strong clips");
+    expect(prompt).toContain("focus_sharpness` < 0.3");
+    expect(prompt).toContain("subject_prominence` < 0.2");
+    expect(prompt).toContain("lower confidence significantly");
   });
 });
 
@@ -780,6 +873,14 @@ describe("triage-llm CLI args", () => {
       projectDir: "projects/demo",
       model: undefined,
       textOnlyTriage: true,
+    });
+  });
+
+  it("parses --multimodal as an explicit filmstrip opt-in", () => {
+    expect(parseArgs(["node", "triage-llm", "projects/demo", "--multimodal"])).toEqual({
+      projectDir: "projects/demo",
+      model: undefined,
+      textOnlyTriage: false,
     });
   });
 });

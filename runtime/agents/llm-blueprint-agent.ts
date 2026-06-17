@@ -21,6 +21,8 @@ import type {
 import { parseLlmResponse } from "./llm-json.js";
 import type { LlmCompleter } from "./llm-triage-agent.js";
 
+// Cockpit/repo-side editorial blueprinting should prefer Claude/Codex
+// subscription agents. Gemini flash-lite remains the headless CLI fallback.
 export const DEFAULT_BLUEPRINT_MODEL = "gemini-2.5-flash-lite";
 
 const VALID_ROLES = new Set<Role>(["hero", "support", "transition", "texture", "dialogue"]);

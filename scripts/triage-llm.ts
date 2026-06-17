@@ -2,7 +2,7 @@
 /**
  * Headless in-runtime LLM triage.
  *
- *   npx tsx scripts/triage-llm.ts <projectDir> [--model <model>] [--text-only-triage]
+ *   npx tsx scripts/triage-llm.ts <projectDir> [--model <model>] [--text-only-triage|--multimodal]
  */
 
 import * as path from "node:path";
@@ -10,19 +10,19 @@ import { pathToFileURL } from "node:url";
 import { createLlmTriageAgent } from "../runtime/agents/llm-triage-agent.js";
 import { runTriage } from "../runtime/commands/triage.js";
 
-const USAGE = "Usage: npx tsx scripts/triage-llm.ts <projectDir> [--model <model>] [--text-only-triage]";
+const USAGE = "Usage: npx tsx scripts/triage-llm.ts <projectDir> [--model <model>] [--text-only-triage|--multimodal]";
 
 interface Args {
   projectDir: string;
   model?: string;
-  textOnlyTriage: boolean;
+  textOnlyTriage?: boolean;
 }
 
 export function parseArgs(argv: string[]): Args {
   const args = argv.slice(2);
   let projectDir: string | undefined;
   let model: string | undefined;
-  let textOnlyTriage = false;
+  let textOnlyTriage: boolean | undefined;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -36,7 +36,13 @@ export function parseArgs(argv: string[]): Args {
       continue;
     }
     if (arg === "--text-only-triage") {
+      if (textOnlyTriage === false) throw new Error("Use only one of --text-only-triage or --multimodal");
       textOnlyTriage = true;
+      continue;
+    }
+    if (arg === "--multimodal") {
+      if (textOnlyTriage === true) throw new Error("Use only one of --text-only-triage or --multimodal");
+      textOnlyTriage = false;
       continue;
     }
     if (arg.startsWith("--")) throw new Error(`Unknown argument: ${arg}`);
@@ -60,7 +66,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   const projectDir = path.resolve(args.projectDir);
   const agent = createLlmTriageAgent({
     ...(args.model ? { model: args.model } : {}),
-    textOnlyTriage: args.textOnlyTriage,
+    ...(args.textOnlyTriage === undefined ? {} : { textOnlyTriage: args.textOnlyTriage }),
   });
   const result = await runTriage(projectDir, agent);
   if (!result.success) {

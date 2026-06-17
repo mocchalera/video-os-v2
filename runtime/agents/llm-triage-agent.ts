@@ -20,6 +20,8 @@ export type LlmImagePart = GeminiInlineImageInput;
 export type LlmCompleter = (prompt: string, images?: LlmImagePart[]) => Promise<string>;
 export { extractJsonObject } from "./llm-json.js";
 
+// Cockpit/repo-side editorial triage should prefer Claude/Codex subscription
+// agents. Gemini flash-lite remains the headless CLI automation fallback.
 export const DEFAULT_TRIAGE_MODEL = "gemini-2.5-flash-lite";
 export const UNRELIABLE_TRANSCRIPT_TEXT = "[unreliable — judge on visuals]";
 
@@ -29,6 +31,8 @@ const SEGMENTS_REL = "03_analysis/segments.json";
 const FILMSTRIP_MAX_WIDTH_PX = 512;
 const MULTIMODAL_BATCH_SEGMENTS = 15;
 const MULTIMODAL_BATCH_DELAY_MS = 5_000;
+const MARLIN_REPORTER_METHOD = "marlin_reporter";
+const MARLIN_SUMMARY_PROMPT_TEMPLATE_ID = "marlin-caption-v1";
 const execFileAsync = promisify(execFile);
 
 const VALID_ROLES = new Set<SelectCandidate["role"]>([
@@ -73,12 +77,16 @@ export interface CompactSegmentEvidence {
   src_in_us: number;
   src_out_us: number;
   summary: string;
+  scene_report?: string;
   tags: string[];
   peak: CompactPeakEvidence;
   transcript: string;
   filmstrip_path?: string;
   visual_quality?: CompactVisualQuality;
   interest_point_labels?: string[];
+  extracted_text?: string[];
+  place_hint?: string;
+  aesthetic_notes?: string[];
 }
 
 export interface TriageFilmstripImageRef {
@@ -310,6 +318,35 @@ function compactInterestPointLabels(value: unknown): string[] {
   });
 }
 
+function hasMarlinSummaryProvenance(segment: Record<string, unknown>): boolean {
+  const provenance = isRecord(segment.provenance) ? segment.provenance : {};
+  const summaryProvenance = isRecord(provenance.summary) ? provenance.summary : {};
+  return (
+    stringValue(summaryProvenance.method) === MARLIN_REPORTER_METHOD ||
+    stringValue(summaryProvenance.source_pass) === MARLIN_REPORTER_METHOD ||
+    (
+      stringValue(summaryProvenance.stage) === "marlin" &&
+      stringValue(summaryProvenance.prompt_template_id) === MARLIN_SUMMARY_PROMPT_TEMPLATE_ID
+    )
+  );
+}
+
+function compactExtractedText(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item)) return [];
+    const text = stringValue(item.text);
+    return text ? [text] : [];
+  });
+}
+
+function compactPlaceHint(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const confidence = numberValue(value.confidence);
+  if (confidence === undefined || confidence <= 0.5) return undefined;
+  return stringValue(value.name);
+}
+
 export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEvidence[] {
   return rawSegments.flatMap((item): CompactSegmentEvidence[] => {
     if (!isRecord(item)) return [];
@@ -321,7 +358,12 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
     if (srcInUs < 0 || srcOutUs <= srcInUs) return [];
     const visualQuality = compactVisualQuality(item.visual_quality);
     const interestPointLabels = compactInterestPointLabels(item.interest_points);
+    const visualAppraisal = isRecord(item.visual_appraisal) ? item.visual_appraisal : {};
+    const extractedText = compactExtractedText(visualAppraisal.extracted_text);
+    const placeHint = compactPlaceHint(visualAppraisal.place_hint);
+    const aestheticNotes = stringArray(visualAppraisal.aesthetic_notes);
     const summary = stringValue(item.summary) ?? "";
+    const sceneReport = hasMarlinSummaryProvenance(item) ? summary : undefined;
     const compactSummary = isTechnicallyPoorVisualQuality(visualQuality)
       ? `[TECHNICALLY_POOR] ${summary}`.trim()
       : summary;
@@ -332,15 +374,23 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
         src_in_us: srcInUs,
         src_out_us: srcOutUs,
         summary: compactSummary,
+        ...(sceneReport ? { scene_report: sceneReport } : {}),
         tags: stringArray(item.tags),
         peak: extractPeakEvidence(item),
         transcript: normalizeTranscript(item.transcript_excerpt ?? item.transcript),
         filmstrip_path: stringValue(item.filmstrip_path),
         ...(visualQuality ? { visual_quality: visualQuality } : {}),
         ...(interestPointLabels.length > 0 ? { interest_point_labels: interestPointLabels } : {}),
+        ...(extractedText.length > 0 ? { extracted_text: extractedText } : {}),
+        ...(placeHint ? { place_hint: placeHint } : {}),
+        ...(aestheticNotes.length > 0 ? { aesthetic_notes: aestheticNotes } : {}),
       },
     ];
   });
+}
+
+function hasMarlinSceneEvidence(segments: CompactSegmentEvidence[]): boolean {
+  return segments.some((segment) => Boolean(segment.scene_report));
 }
 
 export function loadCompactSegmentEvidence(projectDir: string): CompactSegmentEvidence[] {
@@ -393,7 +443,7 @@ function buildCoverageFeedbackPreamble(feedback: TriageCoverageFeedback | undefi
 function buildFilmstripPromptLines(refs: TriageFilmstripImageRef[] | undefined): string[] {
   if (!refs || refs.length === 0) {
     return [
-      "No filmstrip images are attached for this request. Fall back to the text summaries, tags, peaks, and transcript quality flags.",
+      "No filmstrip images are attached for this request. Use the text evidence: scene_report, summary, tags, extracted_text, place_hint, aesthetic_notes, peaks, and transcript quality flags.",
     ];
   }
   return [
@@ -448,9 +498,14 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- Respect the emotion curve and source chronology unless the brief clearly asks for editorial reordering.",
     "- Include a clear opening and a clear ending.",
     "- Maintain enough breadth across assets, visual modes, and story beats for the target runtime.",
+    "- Use `place_hint` to identify location-specific content for the brief.",
+    "- Use `extracted_text` to identify signage, menus, or labels relevant to the brief.",
+    "- Use `aesthetic_notes` to prefer visually strong clips.",
     "- Do not discard dense repetition just because shots are similar: montage clusters can be important. Sample them proportionally and avoid sparse coverage.",
     "- Reject technically unusable footage: assign role='reject' with rejection_reason for clips that are out of focus, have severe camera shake, are mostly black/overexposed, or show no identifiable subject.",
-    "- If visual_quality scores are available in the segment evidence, reject candidates with composition_score < 0.3 AND subject_prominence < 0.3.",
+    "- If `visual_quality.scores.focus_sharpness` < 0.3, reject as technically unusable.",
+    "- If `visual_quality.scores.subject_prominence` < 0.2, reject unless the clip serves a specific texture/transition role.",
+    "- If `aesthetic_notes` mention 'out of focus', 'severe motion blur', or 'overexposed', lower confidence significantly.",
     "- IMPORTANT: You must select candidates. An empty candidates array is never acceptable. These segments are the only available footage — choose the best from what exists, not against an ideal.",
     "",
     "## Output",
@@ -702,7 +757,6 @@ function mergeParsedTriageResponses(responses: Array<Record<string, unknown>>): 
 
 export function createLlmTriageAgent(opts: CreateLlmTriageAgentOptions = {}): TriageAgent {
   const model = opts.model ?? process.env.TRIAGE_MODEL ?? DEFAULT_TRIAGE_MODEL;
-  const textOnlyTriage = opts.textOnlyTriage ?? false;
   const multimodalBatchSize = Math.max(1, Math.trunc(opts.multimodalBatchSize ?? MULTIMODAL_BATCH_SEGMENTS));
   const imagePreparer = opts.imagePreparer ?? defaultFilmstripImagePreparer;
   // A breadth selection (20+ candidates with rationale) is a large JSON; the
@@ -717,6 +771,7 @@ export function createLlmTriageAgent(opts: CreateLlmTriageAgentOptions = {}): Tr
     async run(ctx: TriageAgentContext) {
       const brief = loadCreativeBrief(path.join(ctx.projectDir, BRIEF_REL));
       const segments = loadCompactSegmentEvidence(ctx.projectDir);
+      const textOnlyTriage = opts.textOnlyTriage ?? hasMarlinSceneEvidence(segments);
       const segmentBatches = textOnlyTriage || segments.length <= multimodalBatchSize
         ? [segments]
         : chunkSegments(segments, multimodalBatchSize);
