@@ -11,7 +11,7 @@ function brief(): CreativeBrief {
       id: "quick-alignment-fixture",
       title: "Trail confidence",
       strategy: "show a complete outdoor learning arc",
-      runtime_target_sec: 60,
+      runtime_target_sec: 20,
     },
     message: { primary: "practice creates confidence" },
     emotion_curve: ["uncertain start", "focused practice", "quiet confidence"],
@@ -111,6 +111,26 @@ describe("quickBriefAlignmentCheck", () => {
         feedback: "must_have 'zxqvplmn' has no matching candidate evidence",
       }),
     );
+  });
+
+  it("generates a minimum cut count gap from target runtime", () => {
+    const longBrief = {
+      ...brief(),
+      project: {
+        ...brief().project,
+        runtime_target_sec: 230,
+      },
+    } as CreativeBrief;
+
+    const result = quickBriefAlignmentCheck(longBrief, selects(), segments());
+
+    expect(result.gaps).toContainEqual(
+      expect.objectContaining({
+        axis: "minimum_cut_count",
+        feedback: "only 4 candidates for a 230s target -- need at least 29 clips (avg 5-8s/cut). Select more diverse clips.",
+      }),
+    );
+    expect(result.passed).toBe(false);
   });
 
   it("generates an emotion signal gap when candidates lack peak data", () => {

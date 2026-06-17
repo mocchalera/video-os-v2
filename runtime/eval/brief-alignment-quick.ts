@@ -55,6 +55,7 @@ export function quickBriefAlignmentCheck(
   };
 
   const gaps: BriefAlignmentGap[] = [
+    ...minimumCutCountGaps(brief, active),
     ...mustHaveGaps(brief, selects, segments, axisScores.must_have_coverage, resolvedThresholds.must_have_coverage),
     ...emotionGaps(active, axisScores.emotion_curve_alignment, resolvedThresholds.emotion_curve_alignment),
     ...narrativeGaps(active, axisScores.narrative_structure, resolvedThresholds.narrative_structure),
@@ -90,6 +91,7 @@ export async function quickBriefAlignmentCheckWithSemantic(
       : null;
 
   const gaps: BriefAlignmentGap[] = [
+    ...minimumCutCountGaps(brief, active),
     ...(mustHaveCoverage
       ? mustHaveGapsFromCoverage(mustHaveCoverage, axisScores.must_have_coverage, resolvedThresholds.must_have_coverage)
       : []),
@@ -108,6 +110,22 @@ export async function quickBriefAlignmentCheckWithSemantic(
 
 function activeCandidates(selects: SelectsCandidates): Candidate[] {
   return selects.candidates.filter((candidate) => candidate.role !== "reject");
+}
+
+function minimumCutCountGaps(brief: CreativeBrief, active: Candidate[]): BriefAlignmentGap[] {
+  const targetSec = Number(brief.project?.runtime_target_sec ?? 0);
+  const MIN_CUT_DURATION_SEC = 5;
+  const MAX_CUT_DURATION_SEC = 8;
+  const minCutCount = targetSec > 0 ? Math.ceil(targetSec / MAX_CUT_DURATION_SEC) : 0;
+  const idealCutCount = targetSec > 0 ? Math.ceil(targetSec / MIN_CUT_DURATION_SEC) : 0;
+  if (minCutCount === 0 || active.length >= minCutCount) return [];
+  return [
+    {
+      axis: "minimum_cut_count",
+      score: idealCutCount > 0 ? round3(active.length / idealCutCount) : 0,
+      feedback: `only ${active.length} candidates for a ${targetSec}s target -- need at least ${minCutCount} clips (avg 5-8s/cut). Select more diverse clips.`,
+    },
+  ];
 }
 
 function mustHaveGaps(

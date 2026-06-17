@@ -367,6 +367,9 @@ function buildCoverageFeedbackPreamble(feedback: TriageCoverageFeedback | undefi
       `brief-alignment の不足も必ず是正せよ: ${JSON.stringify(feedback.brief_alignment_gaps)}。各 feedback を candidates の evidence / why_it_matches / eligible_beats / editorial_signals で具体的に満たせ。`,
     );
   }
+  if (feedback.cut_count_feedback) {
+    lines.push(`clip count の不足も必ず是正せよ: ${feedback.cut_count_feedback}`);
+  }
   return [...lines, ""];
 }
 

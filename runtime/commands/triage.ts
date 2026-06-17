@@ -182,6 +182,7 @@ export interface TriageCoverageFeedback {
   round: number;
   gaps: string[];
   brief_alignment_gaps?: Array<{ axis: string; feedback: string }>;
+  cut_count_feedback?: string;
   previous_selection_count: number;
 }
 
@@ -240,12 +241,28 @@ const ALLOWED_STATES: ProjectState[] = [
 
 type CoverageLogger = (message: string) => void;
 
-export function coveragePasses(coverage: SelectionCoverageReport): boolean {
-  return !coverage.density.sparse && !coverage.cluster_coverage.some((cluster) => cluster.under_sampled);
+export function coveragePasses(coverage: SelectionCoverageReport, minCutCount = 0): boolean {
+  return (
+    !coverage.density.sparse &&
+    !coverage.cluster_coverage.some((cluster) => cluster.under_sampled) &&
+    coverage.density.selected_count >= minCutCount
+  );
 }
 
 function alignmentQuickPasses(alignment: BriefAlignmentQuickResult): boolean {
   return alignment.score >= 0.5;
+}
+
+function minimumCutCountForBrief(brief: CreativeBrief): number {
+  const targetSec = Number(brief.project?.runtime_target_sec ?? 0);
+  return targetSec > 0 ? Math.ceil(targetSec / 8) : 0;
+}
+
+function cutCountFeedback(brief: CreativeBrief, selectedCount: number): string | undefined {
+  const targetSec = Number(brief.project?.runtime_target_sec ?? 0);
+  const minCutCount = minimumCutCountForBrief(brief);
+  if (minCutCount === 0 || selectedCount >= minCutCount) return undefined;
+  return `only ${selectedCount} candidates selected but target runtime ${targetSec}s requires at least ${minCutCount} clips. Select more clips from diverse segments.`;
 }
 
 export async function runCoverageForcedSelection(
@@ -296,7 +313,12 @@ export async function runCoverageForcedSelection(
       );
       result = priorResult;
       finalCoverage = priorCoverage;
-      passed = Boolean(priorCoverage && finalAlignment && coveragePasses(priorCoverage) && alignmentQuickPasses(finalAlignment));
+      passed = Boolean(
+        priorCoverage &&
+          finalAlignment &&
+          coveragePasses(priorCoverage, minimumCutCountForBrief(brief)) &&
+          alignmentQuickPasses(finalAlignment),
+      );
       break;
     }
     rounds = round + 1;
@@ -318,7 +340,12 @@ export async function runCoverageForcedSelection(
       result.selects as unknown as ArtifactSelectsCandidates,
       segmentEvidence as EnrichmentSegmentItem[],
     );
-    passed = coveragePasses(finalCoverage) && alignmentQuickPasses(finalAlignment);
+    const minCutCount = minimumCutCountForBrief(brief);
+    const minimumCutFeedback = cutCountFeedback(brief, finalCoverage.density.selected_count);
+    const coverageGaps = minimumCutFeedback
+      ? [...finalCoverage.gaps, "insufficient clip count for target runtime", minimumCutFeedback]
+      : finalCoverage.gaps;
+    passed = coveragePasses(finalCoverage, minCutCount) && alignmentQuickPasses(finalAlignment);
     log?.(
       `[triage:coverage] round=${round} score=${formatCoverageScore(finalCoverage.score)} ` +
         `gaps=${finalCoverage.gaps.length} alignment_score=${formatCoverageScore(finalAlignment.score)} ` +
@@ -326,6 +353,9 @@ export async function runCoverageForcedSelection(
     );
     for (const gap of finalAlignment.gaps) {
       log?.(`[triage:brief-alignment] ${gap.axis}: ${gap.feedback}`);
+    }
+    if (minimumCutFeedback) {
+      log?.(`[triage:coverage] ${minimumCutFeedback}`);
     }
 
     if (passed) break;
@@ -340,11 +370,12 @@ export async function runCoverageForcedSelection(
     previousActiveSegmentIds = activeSegmentIds;
     feedback = {
       round: round + 1,
-      gaps: finalCoverage.gaps,
+      gaps: coverageGaps,
       brief_alignment_gaps: finalAlignment.gaps.map((gap) => ({
         axis: gap.axis,
         feedback: gap.feedback,
       })),
+      cut_count_feedback: minimumCutFeedback,
       previous_selection_count: finalCoverage.density.selected_count,
     };
   }

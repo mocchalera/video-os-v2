@@ -18,7 +18,7 @@ function brief(): CreativeBrief {
       id: "p",
       title: "coverage fixture",
       strategy: "test breadth selection",
-      runtime_target_sec: 60,
+      runtime_target_sec: 32,
     },
     message: { primary: "show the full rescue pattern" },
     emotion_curve: ["setup", "tension", "release"],
@@ -142,6 +142,35 @@ describe("runCoverageForcedSelection", () => {
     expect(result.coverage && coveragePasses(result.coverage)).toBe(false);
   });
 
+  it("keeps coverage failing until candidate count reaches the target-runtime minimum", async () => {
+    const calls: TriageAgentContext[] = [];
+    const agent: TriageAgent = {
+      async run(ctx) {
+        calls.push(copyContext(ctx));
+        return { selects: alignedSelects(), confirmed: true };
+      },
+    };
+    const longBrief = {
+      ...brief(),
+      project: {
+        ...brief().project,
+        runtime_target_sec: 80,
+      },
+    } as CreativeBrief;
+
+    const result = await runCoverageForcedSelection(agent, context(), longBrief, segments());
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1].coverageFeedback?.gaps).toContain("insufficient clip count for target runtime");
+    expect(calls[1].coverageFeedback?.cut_count_feedback).toBe(
+      "only 4 candidates selected but target runtime 80s requires at least 10 clips. Select more clips from diverse segments.",
+    );
+    expect(calls[1].coverageFeedback?.brief_alignment_gaps?.some((gap) => gap.axis === "minimum_cut_count")).toBe(true);
+    expect(result.skipped).toBe(false);
+    expect(result.passed).toBe(false);
+    expect(result.coverage && coveragePasses(result.coverage, 10)).toBe(false);
+  });
+
   it("skips the loop when coverage inputs are unavailable", async () => {
     const calls: TriageAgentContext[] = [];
     const agent: TriageAgent = {
@@ -200,6 +229,7 @@ function copyContext(ctx: TriageAgentContext): TriageAgentContext {
       ? {
           ...ctx.coverageFeedback,
           gaps: [...ctx.coverageFeedback.gaps],
+          cut_count_feedback: ctx.coverageFeedback.cut_count_feedback,
           brief_alignment_gaps: ctx.coverageFeedback.brief_alignment_gaps
             ? ctx.coverageFeedback.brief_alignment_gaps.map((gap) => ({ ...gap }))
             : undefined,
