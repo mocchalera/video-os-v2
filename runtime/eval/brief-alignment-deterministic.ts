@@ -7,6 +7,8 @@ import type {
 import { clamp01 } from "./matching.js";
 import {
   analyzeSelectionCoverage,
+  analyzeSelectionCoverageWithSemantic,
+  type SelectionCoverageReport,
   type SelectionCoverageSegment,
 } from "./selection-coverage.js";
 import type { AxisScore } from "./brief-alignment-types.js";
@@ -89,6 +91,10 @@ export function scoreMustHaveCoverage(
   segments: SelectionCoverageSegment[],
 ): AxisScore {
   const coverage = analyzeSelectionCoverage(selects, brief, segments);
+  return scoreMustHaveCoverageReport(coverage);
+}
+
+function scoreMustHaveCoverageReport(coverage: SelectionCoverageReport): AxisScore {
   const selectable = coverage.must_have_coverage.filter((item) => item.selectable);
   const matched = selectable.filter((item) => item.matched);
   const score = selectable.length === 0 ? 1 : matched.length / selectable.length;
@@ -96,6 +102,10 @@ export function scoreMustHaveCoverage(
     `${matched.length}/${selectable.length} selectable must_have items matched`,
     `selection coverage analyzer score ${(coverage.score * 100).toFixed(1)}%`,
   ];
+  const semanticMatched = matched.filter((item) => item.note.startsWith("semantic match"));
+  if (semanticMatched.length > 0) {
+    evidence.push(`${semanticMatched.length} must_have items matched by local semantic evidence`);
+  }
   const gaps = selectable
     .filter((item) => !item.matched)
     .map((item) => `missing explicit candidate evidence for must_have: ${item.item}`);
@@ -104,6 +114,21 @@ export function scoreMustHaveCoverage(
     evidence.push(`${productionDirectives.length} production directive must_have items deferred`);
   }
   return axis(score, selectable.length === 0 ? 0.7 : 0.9, evidence, gaps);
+}
+
+export async function scoreMustHaveCoverageWithSemantic(
+  brief: CreativeBrief,
+  selects: SelectsCandidates,
+  segments: SelectionCoverageSegment[],
+): Promise<AxisScore> {
+  try {
+    const coverage = await analyzeSelectionCoverageWithSemantic(selects, brief, segments);
+    return scoreMustHaveCoverageReport(coverage);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[brief-alignment] semantic must_have scoring failed; using text matcher (${message})`);
+    return scoreMustHaveCoverage(brief, selects, segments);
+  }
 }
 
 export function scoreMustAvoidViolations(

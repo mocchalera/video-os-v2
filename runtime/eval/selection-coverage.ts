@@ -1,4 +1,5 @@
 import type { Candidate, CreativeBrief, SelectsCandidates } from "../artifacts/types.js";
+import { semanticMustHaveMatch } from "./semantic-match.js";
 
 export const DENSITY_MIN = 0.55;
 export const CLUSTER_MIN_SIZE = 3;
@@ -34,6 +35,7 @@ export const PRODUCTION_DIRECTIVE_MARKERS = [
 
 const US_PER_SEC = 1_000_000;
 const MUST_HAVE_NOTE = "low-confidence (cross-language)";
+const SEMANTIC_MUST_HAVE_NOTE_PREFIX = "semantic match";
 const PRODUCTION_DIRECTIVE_NOTE = "production directive — not a selection target";
 
 function isProductionDirective(item: string): boolean {
@@ -221,6 +223,38 @@ function searchableCandidateText(
     .join(" ");
 }
 
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
+function semanticCandidateTexts(
+  candidates: Candidate[],
+  segmentById: Map<string, SelectionCoverageSegment>,
+): string[] {
+  const texts: string[] = [];
+  for (const candidate of candidates) {
+    const fields = [
+      candidate.why_it_matches,
+      ...(candidate.evidence ?? []),
+      candidate.transcript_excerpt ?? "",
+      ...(candidate.motif_tags ?? []),
+      ...(candidate.eligible_beats ?? []),
+      segmentById.get(candidate.segment_id)?.summary ?? "",
+    ].filter((value) => value.trim().length > 0);
+    texts.push(...fields);
+    if (fields.length > 1) texts.push(fields.join(" "));
+  }
+  return uniqueStrings(texts);
+}
+
 function itemMatchesSearchText(item: string, searchText: string): boolean {
   const target = compactText(searchText);
   const compactItem = compactText(item);
@@ -351,5 +385,53 @@ export function analyzeSelectionCoverage(
     must_have_coverage: mustHaveCoverage,
     gaps,
     score: clamp01(densityScore * DENSITY_SCORE_WEIGHT + clusterScore * CLUSTER_SCORE_WEIGHT),
+  };
+}
+
+export async function analyzeSelectionCoverageWithSemantic(
+  selects: SelectsCandidates,
+  brief: CreativeBrief,
+  segments: SelectionCoverageSegment[],
+): Promise<SelectionCoverageReport> {
+  const base = analyzeSelectionCoverage(selects, brief, segments);
+  const unmatchedItems = base.must_have_coverage
+    .filter((coverage) => coverage.selectable && !coverage.matched)
+    .map((coverage) => coverage.item);
+  if (unmatchedItems.length === 0) return base;
+
+  const active = selects.candidates.filter((candidate) => candidate.role !== "reject");
+  const segmentById = new Map(segments.map((segment) => [segment.segment_id, segment]));
+  const candidateTexts = semanticCandidateTexts(active, segmentById);
+  if (candidateTexts.length === 0) return base;
+
+  const semanticMatches = await semanticMustHaveMatch(unmatchedItems, candidateTexts);
+  const matchedByItem = new Map(
+    semanticMatches
+      .filter((result) => result.matched && result.bestMatch)
+      .map((result) => [result.item, result.bestMatch!]),
+  );
+  if (matchedByItem.size === 0) return base;
+
+  const mustHaveCoverage = base.must_have_coverage.map((coverage): MustHaveCoverage => {
+    if (!coverage.selectable || coverage.matched) return coverage;
+    const semanticMatch = matchedByItem.get(coverage.item);
+    if (!semanticMatch) return coverage;
+    return {
+      ...coverage,
+      matched: true,
+      note: `${SEMANTIC_MUST_HAVE_NOTE_PREFIX} ${semanticMatch.score.toFixed(3)}: ${semanticMatch.text}`,
+    };
+  });
+  const gaps = [
+    ...base.gaps.filter((gap) => !gap.startsWith("must_have uncertain: ")),
+    ...mustHaveCoverage
+      .filter((coverage) => coverage.selectable && !coverage.matched)
+      .map((coverage) => `must_have uncertain: ${coverage.item}`),
+  ];
+
+  return {
+    ...base,
+    must_have_coverage: mustHaveCoverage,
+    gaps,
   };
 }

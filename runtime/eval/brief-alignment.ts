@@ -17,7 +17,7 @@ import {
   scoreBlueprintEmotionCurve,
   scoreBlueprintIntentMessage,
   scoreMustAvoidViolations,
-  scoreMustHaveCoverage,
+  scoreMustHaveCoverageWithSemantic,
   scoreNarrativeStructureDeterministic,
   scorePacingDeterministic,
   scoreSelectsEmotionCurve,
@@ -177,7 +177,7 @@ async function evaluateSelectsStage(
   const avoid = scoreMustAvoidViolations(brief, selects);
   const base: Record<BriefAlignmentAxis, AxisScore> = {
     intent_message_alignment: scoreSelectsIntentMessage(brief, selects),
-    must_have_coverage: scoreMustHaveCoverage(brief, selects, segments),
+    must_have_coverage: await scoreMustHaveCoverageWithSemantic(brief, selects, segments),
     emotion_curve_alignment: scoreSelectsEmotionCurve(selects),
     narrative_structure: scoreSelectsNarrative(selects),
     pacing_coherence: scoreSelectsPacing(brief, selects),

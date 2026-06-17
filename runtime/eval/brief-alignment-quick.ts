@@ -2,11 +2,16 @@ import type { Candidate, CreativeBrief, SelectsCandidates } from "../artifacts/t
 import type { SegmentItem } from "../agents/triage-enrichment.js";
 import {
   scoreMustHaveCoverage,
+  scoreMustHaveCoverageWithSemantic,
   scoreSelectsEmotionCurve,
   scoreVisualVariety,
 } from "./brief-alignment-deterministic.js";
 import type { BriefAlignmentAxis } from "./brief-alignment-types.js";
-import { analyzeSelectionCoverage } from "./selection-coverage.js";
+import {
+  analyzeSelectionCoverage,
+  analyzeSelectionCoverageWithSemantic,
+  type SelectionCoverageReport,
+} from "./selection-coverage.js";
 
 export interface BriefAlignmentQuickResult {
   score: number;
@@ -64,6 +69,43 @@ export function quickBriefAlignmentCheck(
   };
 }
 
+export async function quickBriefAlignmentCheckWithSemantic(
+  brief: CreativeBrief,
+  selects: SelectsCandidates,
+  segments: SegmentItem[],
+  thresholds?: Partial<Record<BriefAlignmentAxis, number>>,
+): Promise<BriefAlignmentQuickResult> {
+  const active = activeCandidates(selects);
+  const resolvedThresholds = { ...DEFAULT_THRESHOLDS, ...thresholds };
+  const mustHaveAxis = await scoreMustHaveCoverageWithSemantic(brief, selects, segments);
+  const axisScores: Record<(typeof QUICK_AXES)[number], number> = {
+    must_have_coverage: mustHaveAxis.score,
+    emotion_curve_alignment: scoreSelectsEmotionCurve(selects).score,
+    narrative_structure: scoreNarrativeStructure(active),
+    visual_variety_and_focus: scoreVisualVariety(selects, segments).score,
+  };
+  const mustHaveCoverage =
+    axisScores.must_have_coverage < (resolvedThresholds.must_have_coverage ?? 0)
+      ? await analyzeSelectionCoverageWithSemantic(selects, brief, segments)
+      : null;
+
+  const gaps: BriefAlignmentGap[] = [
+    ...(mustHaveCoverage
+      ? mustHaveGapsFromCoverage(mustHaveCoverage, axisScores.must_have_coverage, resolvedThresholds.must_have_coverage)
+      : []),
+    ...emotionGaps(active, axisScores.emotion_curve_alignment, resolvedThresholds.emotion_curve_alignment),
+    ...narrativeGaps(active, axisScores.narrative_structure, resolvedThresholds.narrative_structure),
+    ...visualVarietyGaps(active, axisScores.visual_variety_and_focus, resolvedThresholds.visual_variety_and_focus),
+  ];
+
+  const score = round3(QUICK_AXES.reduce((total, axis) => total + axisScores[axis], 0) / QUICK_AXES.length);
+  return {
+    score,
+    gaps,
+    passed: gaps.length === 0,
+  };
+}
+
 function activeCandidates(selects: SelectsCandidates): Candidate[] {
   return selects.candidates.filter((candidate) => candidate.role !== "reject");
 }
@@ -77,6 +119,15 @@ function mustHaveGaps(
 ): BriefAlignmentGap[] {
   if (score >= threshold) return [];
   const coverage = analyzeSelectionCoverage(selects, brief, segments);
+  return mustHaveGapsFromCoverage(coverage, score, threshold);
+}
+
+function mustHaveGapsFromCoverage(
+  coverage: SelectionCoverageReport,
+  score: number,
+  threshold = 0,
+): BriefAlignmentGap[] {
+  if (score >= threshold) return [];
   return coverage.must_have_coverage
     .filter((item) => item.selectable && !item.matched)
     .map((item) => ({

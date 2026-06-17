@@ -13,6 +13,7 @@
     "verify": "tsx scripts/verify.ts",
     "build": "tsc",
     "preview": "tsx scripts/preview-segment.ts",
+    "setup:embedding-model": "tsx scripts/setup-embedding-model.ts",
     "export:premiere": "tsx scripts/export-premiere-xml.ts",
     "regen:premiere": "tsx scripts/regen-premiere-xml.ts",
     "marlin:evaluate": "tsx scripts/marlin-evaluate.ts"
@@ -30,6 +31,7 @@
     "yaml": "^2.7.0"
   },
   "devDependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
