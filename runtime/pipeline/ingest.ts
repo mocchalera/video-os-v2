@@ -41,6 +41,7 @@ import { segmentMap, segmentReduce } from "./stages/segment.js";
 import { derivativesMap, derivativesReduce } from "./stages/derivatives.js";
 import { resolveTranscribeFn, sttMap, sttReduce } from "./stages/stt.js";
 import { hydrateCachedVlmSegments, runParallelVlmAnalysis, vlmReduce, type VlmShard, type VlmAssetRunSummary, type VlmProgressReporter } from "./stages/vlm.js";
+import { DEFAULT_APPRAISER_CONCURRENCY, runAppraiserStage, type AppraiserFn } from "./stages/appraiser.js";
 import { degradedPeakMap, peakMap, peakReduce, type PeakShard } from "./stages/peak.js";
 import { buildGapReport, buildManifestEntries } from "./stages/gap-report.js";
 import { runMarlinAnalysis } from "./stages/marlin.js";
@@ -62,8 +63,11 @@ export interface PipelineOptions {
   marlinFn?: MarlinFn;
   marlinModel?: MarlinModelRecord;
   marlinQueries?: string[];
+  appraiserFn?: AppraiserFn;
+  appraiserModel?: string;
   skipStt?: boolean;
   skipVlm?: boolean;
+  skipAppraiser?: boolean;
   sttLanguageOverride?: string;
   sttProvider?: string;
   skipMarlin?: boolean;
@@ -166,6 +170,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   if (!effectiveSkipStt) totalStages += 1;
   if (shouldRunMarlinStage) totalStages += 1;
   if (!opts.skipVlm) totalStages += 1;
+  if (!opts.skipAppraiser) totalStages += 1;
   if (!opts.skipPeak) totalStages += 1;
   pt?.setTotal(totalStages);
 
@@ -186,8 +191,20 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     if (shouldRunMarlinStage) {
       const refreshedSegments = await runMarlinStage(opts, projectId, absProjectDir, sourceFiles, segmentsPath);
       if (refreshedSegments) {
-        return { ...cachedResult, segmentsJson: refreshedSegments };
+        cachedResult.segmentsJson = refreshedSegments;
       }
+    }
+    if (!opts.skipAppraiser) {
+      const allSourceFileMap = new Map<string, string>();
+      for (const shard of allIngestShards) allSourceFileMap.set(shard.asset.asset_id, shard.sourceFile);
+      cachedResult.segmentsJson = await runAppraiserPipelineStage(
+        opts,
+        cachedResult.segmentsJson,
+        allSourceFileMap,
+        outputDir,
+        segmentsPath,
+        policyHash,
+      );
     }
     return cachedResult;
   }
@@ -250,6 +267,19 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       policyHash, segmentsPath, assetsPath);
     if (result) { assetsJson = result.assets; segmentsJson = result.segments; vlmShards = result.vlmShards; vlmSummary = result.vlmSummary; }
     pt?.advance();
+  }
+
+  // ── Stage 10.5: Gemini Appraiser ──
+  if (!opts.skipAppraiser) {
+    segmentsJson = await runAppraiserPipelineStage(
+      opts,
+      segmentsJson,
+      sourceFileMap,
+      outputDir,
+      segmentsPath,
+      policyHash,
+    );
+    pt?.advance("segments.json");
   }
 
   // ── Stage 11–12: Peak Detection ──
@@ -383,7 +413,7 @@ async function runVlmOnlyPipeline(
   }
 
   console.log("[pipeline] --vlm-only: skipping Stage 1-8 and loading existing assets/segments");
-  pt?.setTotal((opts.skipVlm ? 0 : 1) + (opts.skipPeak ? 0 : 1) + 1);
+  pt?.setTotal((opts.skipVlm ? 0 : 1) + (opts.skipAppraiser ? 0 : 1) + (opts.skipPeak ? 0 : 1) + 1);
 
   let assetsJson = existingAssetsJson!;
   let segmentsJson = existingSegmentsJson!;
@@ -405,6 +435,18 @@ async function runVlmOnlyPipeline(
       atomicWriteJson(assetsPath, assetsJson);
       atomicWriteJson(segmentsPath, segmentsJson);
     }
+    pt?.advance("segments.json");
+  }
+
+  if (!opts.skipAppraiser) {
+    segmentsJson = await runAppraiserPipelineStage(
+      opts,
+      segmentsJson,
+      sourceFileMap,
+      outputDir,
+      segmentsPath,
+      policyHash,
+    );
     pt?.advance("segments.json");
   }
 
@@ -896,6 +938,39 @@ async function runVlmStage(
     return { assets: result.assets, segments: result.segments, vlmShards, vlmSummary };
   }
   return { assets: assetsJson, segments: segmentsJson, vlmShards, vlmSummary };
+}
+
+async function runAppraiserPipelineStage(
+  opts: PipelineOptions,
+  segmentsJson: SegmentsJson,
+  sourceFileMap: Map<string, string>,
+  outputDir: string,
+  segmentsPath: string,
+  policyHash: string,
+): Promise<SegmentsJson> {
+  console.log("[pipeline] Stage 10.5/12 Gemini appraiser starting");
+  const summary = await runAppraiserStage({
+    segmentsJson,
+    sourceFileMap,
+    outputDir,
+    segmentsOutputPath: segmentsPath,
+    policyHash,
+    skip: opts.skipAppraiser,
+    model: opts.appraiserModel,
+    concurrency: opts.vlmConcurrency ?? DEFAULT_APPRAISER_CONCURRENCY,
+    appraiserFn: opts.appraiserFn,
+  });
+
+  if (!summary.skippedNoApiKey) {
+    console.log(
+      `[pipeline] Appraiser: ${summary.appraisedSegments}/${summary.totalSegments} segments appraised, ` +
+      `${summary.cachedFrames} cached frames, ${summary.cachedAppraisals} cached appraisals`,
+    );
+  }
+  if (summary.failedSegments.length > 0) {
+    console.warn(`[pipeline] Appraiser degraded: ${summary.failedSegments.length} segments failed`);
+  }
+  return segmentsJson;
 }
 
 async function runMarlinStage(

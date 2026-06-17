@@ -17,11 +17,12 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { runPipeline } from "../runtime/pipeline/ingest.js";
 import { createGeminiVlmFn } from "../runtime/connectors/gemini-vlm.js";
+import { DEFAULT_APPRAISER_MODEL } from "../runtime/connectors/gemini-appraiser.js";
+import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import {
   createMarlinFnFromEnvironment,
   marlinModelFromEnvironment,
   marlinQueriesFromEnvironment,
-  runMarlinAnalysis,
   shouldRunMarlinAnalysis,
 } from "../runtime/pipeline/stages/marlin.js";
 import {
@@ -40,6 +41,7 @@ function parseArgs(argv: string[]): {
   skipDiarize: boolean;
   skipPeak: boolean;
   skipMarlin: boolean;
+  skipAppraiser: boolean;
   skipMediaLink: boolean;
   skipPreflight: boolean;
   vlmOnly: boolean;
@@ -59,6 +61,7 @@ function parseArgs(argv: string[]): {
   let skipDiarize = false;
   let skipPeak = false;
   let skipMarlin = false;
+  let skipAppraiser = false;
   let skipMediaLink = false;
   let skipPreflight = false;
   let vlmOnly = false;
@@ -85,6 +88,8 @@ function parseArgs(argv: string[]): {
       skipPeak = true;
     } else if (arg === "--skip-marlin") {
       skipMarlin = true;
+    } else if (arg === "--skip-appraiser") {
+      skipAppraiser = true;
     } else if (arg === "--skip-media-link") {
       skipMediaLink = true;
     } else if (arg === "--skip-preflight") {
@@ -129,6 +134,7 @@ Options:
   --skip-diarize     Skip pyannote speaker diarization (Groq STT only)
   --skip-peak        Skip VLM peak detection stage
   --skip-marlin      Skip Marlin-2B temporal semantic pass
+  --skip-appraiser   Skip Gemini single-frame appraiser pass
   --skip-media-link  Skip 02_media symlink generation
   --skip-preflight   Skip pre-flight environment checks
   --language, -l     ISO-639-1 language hint for STT (e.g. "ja", "en")
@@ -162,6 +168,7 @@ Options:
     skipDiarize,
     skipPeak,
     skipMarlin,
+    skipAppraiser,
     skipMediaLink,
     skipPreflight,
     vlmOnly,
@@ -198,6 +205,7 @@ async function main(): Promise<void> {
     skipDiarize,
     skipPeak,
     skipMarlin,
+    skipAppraiser,
     skipMediaLink,
     skipPreflight,
     vlmOnly,
@@ -236,6 +244,7 @@ async function main(): Promise<void> {
   if (skipDiarize) console.log("[analyze] Diarization: skipped");
   if (skipPeak) console.log("[analyze] Peak detection: skipped");
   if (skipMarlin) console.log("[analyze] Marlin: skipped");
+  if (skipAppraiser) console.log("[analyze] Appraiser: skipped");
   if (skipMediaLink) console.log("[analyze] Media links: skipped");
   if (language) console.log(`[analyze] Language: ${language}`);
   if (sttProvider) console.log(`[analyze] STT provider: ${sttProvider}`);
@@ -243,6 +252,13 @@ async function main(): Promise<void> {
   if (!skipVlm) console.log(`[analyze] VLM concurrency: ${concurrency}`);
   if (noCache) console.log("[analyze] Cache: disabled");
   if (clearCache) console.log("[analyze] Cache: clearing");
+  if (!skipAppraiser) {
+    if (process.env.GEMINI_API_KEY) {
+      console.log(`[analyze] Appraiser: using Gemini API (${DEFAULT_APPRAISER_MODEL})`);
+    } else {
+      console.warn("[analyze] WARNING: GEMINI_API_KEY not set, appraiser stage will be skipped");
+    }
+  }
 
   // Create live VLM function if not skipped and API key is available
   let vlmFn;
@@ -255,41 +271,40 @@ async function main(): Promise<void> {
     }
   }
 
-  const result = await runPipeline({
-    sourceFiles,
-    projectDir,
-    skipStt,
-    skipVlm,
-    skipDiarize,
-    skipPeak,
-    vlmOnly,
-    vlmFn,
-    sttLanguageOverride: language,
-    sttProvider,
-    sttStrategy,
-    contentHint,
-    skipMediaLink,
-    vlmConcurrency: concurrency,
-    vlmProgressReporter: createVlmProgressReporter(),
-    noCache,
-    clearCache,
-  });
-
+  let marlinFn: MarlinFn | undefined;
   if (!vlmOnly && !skipMarlin && shouldRunMarlinAnalysis(projectDir)) {
-    console.log("[analyze] Marlin: running temporal semantic pass");
-    const marlinFn = createMarlinFnFromEnvironment(projectDir);
-    try {
-      await runMarlinAnalysis({
-        sourceFiles,
-        projectDir,
-        projectId: path.basename(path.resolve(projectDir)),
-        marlinFn,
-        model: marlinModelFromEnvironment(projectDir),
-        queries: marlinQueriesFromEnvironment(projectDir),
-      });
-    } finally {
-      await marlinFn.close?.();
-    }
+    console.log("[analyze] Marlin: running before VLM as scene reporter");
+    marlinFn = createMarlinFnFromEnvironment(projectDir);
+  }
+
+  let result: Awaited<ReturnType<typeof runPipeline>>;
+  try {
+    result = await runPipeline({
+      sourceFiles,
+      projectDir,
+      skipStt,
+      skipVlm,
+      skipDiarize,
+      skipPeak,
+      skipMarlin,
+      skipAppraiser,
+      vlmOnly,
+      vlmFn,
+      marlinFn,
+      marlinModel: marlinFn ? marlinModelFromEnvironment(projectDir) : undefined,
+      marlinQueries: marlinFn ? marlinQueriesFromEnvironment(projectDir) : undefined,
+      sttLanguageOverride: language,
+      sttProvider,
+      sttStrategy,
+      contentHint,
+      skipMediaLink,
+      vlmConcurrency: concurrency,
+      vlmProgressReporter: createVlmProgressReporter(),
+      noCache,
+      clearCache,
+    });
+  } finally {
+    await marlinFn?.close?.();
   }
 
   if (result.vlmSummary) {

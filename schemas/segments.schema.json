@@ -74,6 +74,9 @@
             },
             "quality_flags": {
               "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
+            },
+            "visual_appraisal": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record"
             }
           },
           "additionalProperties": false
@@ -98,12 +101,47 @@
             },
             "visual_quality": {
               "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
+            },
+            "visual_appraisal": {
+              "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/provenance-record"
             }
           },
           "additionalProperties": false
         },
         "visual_quality": { "$ref": "#/$defs/visual-quality" },
+        "visual_appraisal": { "$ref": "#/$defs/visual-appraisal" },
         "peak_analysis": { "$ref": "#/$defs/peak-analysis" }
+      }
+    },
+    "visual-appraisal": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "frame_us": { "type": "integer", "minimum": 0 },
+        "frame_path": { "type": "string" },
+        "extracted_text": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "text": { "type": "string" },
+              "language": { "type": "string" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        },
+        "place_hint": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": ["string", "null"] },
+            "category": { "type": "string" },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "evidence": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "aesthetic_notes": { "type": "array", "items": { "type": "string" } }
       }
     },
     "visual-quality": {
