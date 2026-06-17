@@ -19,6 +19,7 @@ import type { DiarizeOptions, DiarizeTurn } from "../connectors/pyannote-diarize
 import type { TranscribeFn, SttPolicy, TranscriptAlignmentThresholds } from "../connectors/stt-interface.js";
 import type { PeakDetectionPolicy } from "../connectors/vlm-peak-detector.js";
 import { DEFAULT_PEAK_POLICY } from "../connectors/vlm-peak-detector.js";
+import type { MarlinFn, MarlinModelRecord } from "../connectors/marlin-types.js";
 import { resolvePolicy } from "../policy-resolver.js";
 import { generateDisplayNames, type DisplayNameInput } from "./display-name.js";
 import { createMediaLinks, loadSourceMap, type MediaSourceMapDoc } from "../media/source-map.js";
@@ -42,6 +43,7 @@ import { resolveTranscribeFn, sttMap, sttReduce } from "./stages/stt.js";
 import { hydrateCachedVlmSegments, runParallelVlmAnalysis, vlmReduce, type VlmShard, type VlmAssetRunSummary, type VlmProgressReporter } from "./stages/vlm.js";
 import { degradedPeakMap, peakMap, peakReduce, type PeakShard } from "./stages/peak.js";
 import { buildGapReport, buildManifestEntries } from "./stages/gap-report.js";
+import { runMarlinAnalysis } from "./stages/marlin.js";
 
 // ── Re-exports for backward compatibility ──────────────────────────
 export type { AssetsJson, SegmentsJson, GapEntry, GapReport } from "./pipeline-types.js";
@@ -57,10 +59,14 @@ export interface PipelineOptions {
   repoRoot?: string;
   transcribeFn?: TranscribeFn;
   vlmFn?: VlmFn;
+  marlinFn?: MarlinFn;
+  marlinModel?: MarlinModelRecord;
+  marlinQueries?: string[];
   skipStt?: boolean;
   skipVlm?: boolean;
   sttLanguageOverride?: string;
   sttProvider?: string;
+  skipMarlin?: boolean;
   skipDiarize?: boolean;
   diarizeFn?: (audioPath: string, options?: DiarizeOptions) => Promise<DiarizeTurn[]>;
   skipPeak?: boolean;
@@ -133,6 +139,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   const sourceFiles = opts.sourceFiles.map((f) => path.resolve(absProjectDir, f));
   const projectId = path.basename(absProjectDir);
   const pt = opts.progressTracker;
+  const shouldRunMarlinStage = Boolean(opts.marlinFn) && !opts.skipMarlin && !opts.vlmOnly;
 
   if (opts.vlmOnly) {
     return runVlmOnlyPipeline(
@@ -157,6 +164,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   // Progress tracking
   let totalStages = 6;
   if (!effectiveSkipStt) totalStages += 1;
+  if (shouldRunMarlinStage) totalStages += 1;
   if (!opts.skipVlm) totalStages += 1;
   if (!opts.skipPeak) totalStages += 1;
   pt?.setTotal(totalStages);
@@ -172,9 +180,16 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
   // ── All cached — short-circuit ──
   if (newIngestShards.length === 0 && cacheHitIds.size > 0) {
-    return finalizeCached(allIngestShards, cachedAssetItems, cachedSegmentItems, cacheHashMap,
+    const cachedResult = finalizeCached(allIngestShards, cachedAssetItems, cachedSegmentItems, cacheHashMap,
       projectId, assetsPath, segmentsPath, gapReportPath, manifestPath, outputDir,
       absProjectDir, sourceFiles, opts, pt);
+    if (shouldRunMarlinStage) {
+      const refreshedSegments = await runMarlinStage(opts, projectId, absProjectDir, sourceFiles, segmentsPath);
+      if (refreshedSegments) {
+        return { ...cachedResult, segmentsJson: refreshedSegments };
+      }
+    }
+    return cachedResult;
   }
 
   // ── Stage 2: Reduce ──
@@ -215,6 +230,15 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       sttSkippedAssetIds = result.skippedAssetIds;
     }
     pt?.advance();
+  }
+
+  // ── Stage 8.5: Marlin reporter ──
+  if (shouldRunMarlinStage) {
+    const refreshedSegments = await runMarlinStage(opts, projectId, absProjectDir, sourceFiles, segmentsPath);
+    if (refreshedSegments) {
+      segmentsJson = refreshedSegments;
+    }
+    pt?.advance("marlin_events.json");
   }
 
   // ── Stage 9–10: VLM ──
@@ -872,4 +896,25 @@ async function runVlmStage(
     return { assets: result.assets, segments: result.segments, vlmShards, vlmSummary };
   }
   return { assets: assetsJson, segments: segmentsJson, vlmShards, vlmSummary };
+}
+
+async function runMarlinStage(
+  opts: PipelineOptions,
+  projectId: string,
+  absProjectDir: string,
+  sourceFiles: string[],
+  segmentsPath: string,
+): Promise<SegmentsJson | undefined> {
+  if (!opts.marlinFn) return undefined;
+
+  console.log("[pipeline] Stage 8.5/12 Marlin reporter starting");
+  await runMarlinAnalysis({
+    projectDir: absProjectDir,
+    projectId,
+    sourceFiles,
+    marlinFn: opts.marlinFn,
+    model: opts.marlinModel,
+    queries: opts.marlinQueries,
+  });
+  return readJsonIfExists<SegmentsJson>(segmentsPath);
 }

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { resolvePolicy } from "../../policy-resolver.js";
 import type { MarlinAssetEvents, MarlinEventsArtifact, MarlinFn, MarlinModelRecord } from "../../connectors/marlin-types.js";
 import { createMarlinWorkerClient } from "../../connectors/marlin-local.js";
@@ -12,6 +13,9 @@ import { atomicWriteJson, readJsonIfExists } from "./_util.js";
 import { prepareMarlinProxy } from "./marlin-proxy.js";
 
 export const MARLIN_EVENTS_RELATIVE_PATH = "03_analysis/marlin_events.json";
+export const MARLIN_REPORTER_METHOD = "marlin_reporter";
+export const MARLIN_SUMMARY_MODEL_ID = "marlin-2b";
+export const MARLIN_SUMMARY_PROMPT_TEMPLATE_ID = "marlin-caption-v1";
 
 export interface MarlinPolicy {
   enabled?: boolean;
@@ -59,6 +63,10 @@ interface SegmentDocItem {
   asset_id: string;
   src_in_us: number;
   src_out_us: number;
+  summary?: string;
+  tags?: string[];
+  confidence?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
   interest_points?: Array<{
     frame_us: number;
     label: string;
@@ -184,26 +192,54 @@ export function applyMarlinEventsToSegments(projectDir: string, artifact: Marlin
   const nextItems = segments.items.map((segment) => {
     const assetEvents = eventsByAsset.get(segment.asset_id);
     if (!assetEvents) return segment;
-    const peak = bestMarlinPeakForSegment(segment, assetEvents);
-    if (!peak) return segment;
 
-    const existing = segment.peak_analysis;
-    const shouldReplacePeakAnalysis =
-      !existing ||
-      isMarlinPeakAnalysis(existing) ||
-      (existing.support_signals?.fused_peak_score ?? 0) < peak.confidence;
+    const scene = normalizeScene(assetEvents.scene);
+    const peaks = marlinPeaksForSegment(segment, assetEvents);
+    const peak = peaks[0] ?? null;
+    if (!scene && !peak) return segment;
 
     const nextSegment: SegmentDocItem = { ...segment };
-    nextSegment.interest_points = mergeInterestPoints(segment.interest_points, {
-      frame_us: peak.timestampUs,
-      label: `${peak.type}: ${peak.description}`,
-      confidence: peak.confidence,
-    });
 
-    if (shouldReplacePeakAnalysis) {
-      nextSegment.peak_analysis = buildMarlinPeakAnalysis(segment, peak);
+    if (scene) {
+      nextSegment.summary = scene;
+      nextSegment.tags = mergeTags(segment.tags, extractTagsFromScene(scene));
+      nextSegment.confidence = {
+        ...(isRecord(segment.confidence) ? segment.confidence : {}),
+        summary: {
+          score: marlinSummaryConfidence(peaks),
+          source: MARLIN_SUMMARY_MODEL_ID,
+          status: "ready",
+        },
+      };
+      nextSegment.provenance = {
+        ...(isRecord(segment.provenance) ? segment.provenance : {}),
+        summary: buildMarlinSummaryProvenance(artifact, assetEvents, segment, scene),
+      };
+      changed = true;
     }
-    changed = true;
+
+    if (peak) {
+      const existing = segment.peak_analysis;
+      const shouldReplacePeakAnalysis =
+        !existing ||
+        isMarlinPeakAnalysis(existing) ||
+        (existing.support_signals?.fused_peak_score ?? 0) < peak.confidence;
+
+      let interestPoints = nextSegment.interest_points ?? segment.interest_points;
+      for (const relevantPeak of peaks.slice(0, 3)) {
+        interestPoints = mergeInterestPoints(interestPoints, {
+          frame_us: relevantPeak.timestampUs,
+          label: `${relevantPeak.type}: ${relevantPeak.description}`,
+          confidence: relevantPeak.confidence,
+        });
+      }
+      nextSegment.interest_points = interestPoints;
+
+      if (shouldReplacePeakAnalysis) {
+        nextSegment.peak_analysis = buildMarlinPeakAnalysis(segment, peak);
+      }
+      changed = true;
+    }
     return nextSegment;
   });
 
@@ -293,10 +329,10 @@ export function loadMarlinAssetInputs(projectDir: string, sourceFiles: string[])
   return selected.length > 0 ? selected : inputs;
 }
 
-function bestMarlinPeakForSegment(
+function marlinPeaksForSegment(
   segment: SegmentDocItem,
   assetEvents: MarlinAssetEvents,
-): MarlinSegmentPeak | null {
+): MarlinSegmentPeak[] {
   const candidates: MarlinSegmentPeak[] = [];
 
   for (const event of assetEvents.events) {
@@ -337,7 +373,7 @@ function bestMarlinPeakForSegment(
     a.timestampUs - b.timestampUs ||
     a.peakRef.localeCompare(b.peakRef)
   );
-  return candidates[0] ?? null;
+  return candidates;
 }
 
 function buildMarlinPeakAnalysis(segment: SegmentDocItem, peak: MarlinSegmentPeak) {
@@ -396,6 +432,154 @@ function mergeInterestPoints(
   if (!exists) items.push(point);
   items.sort((a, b) => a.frame_us - b.frame_us || a.label.localeCompare(b.label));
   return items;
+}
+
+export function extractTagsFromScene(scene: string): string[] {
+  const normalized = scene.toLowerCase().replace(/['']/g, "");
+  const tags: string[] = [];
+
+  const phrasePatterns: Array<[RegExp, string]> = [
+    [/\bgrape\s+vineyards?\b/, "grape_vineyard"],
+    [/\bsoba\s+noodles?\b/, "soba_noodles"],
+    [/\btraditional\s+(?:wooden\s+)?buildings?\b/, "traditional_building"],
+    [/\bwooden\s+buildings?\b/, "wooden_building"],
+    [/\brice\s+fields?\b/, "rice_field"],
+    [/\bmountain\s+trails?\b/, "mountain_trail"],
+    [/\btea\s+ceremony\b/, "tea_ceremony"],
+    [/\bcraft\s+workshops?\b/, "craft_workshop"],
+  ];
+  for (const [pattern, tag] of phrasePatterns) {
+    if (pattern.test(normalized)) tags.push(tag);
+  }
+
+  const words = normalized
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .map((word) => word.replace(/^-+|-+$/g, ""))
+    .filter((word) => word.length >= 3 && !SCENE_TAG_STOPWORDS.has(word));
+
+  for (const chunk of sceneChunks(words)) {
+    if (chunk.length < 2) continue;
+    const compact = compactSceneChunk(chunk);
+    if (compact.length < 2) continue;
+    tags.push(compact.slice(0, 3).join("_"));
+  }
+
+  return uniqueTags(tags).slice(0, 8);
+}
+
+const SCENE_TAG_STOPWORDS = new Set([
+  "the", "and", "with", "while", "into", "onto", "from", "that", "this",
+  "there", "their", "over", "under", "near", "inside", "outside", "across",
+  "through", "during", "before", "after", "being", "been", "are", "was",
+  "were", "has", "have", "had", "show", "shows", "showing", "scene", "shot",
+  "video", "clip", "camera", "view", "visible", "background", "foreground",
+  "person", "people", "someone", "object", "objects", "area", "prepared",
+  "preparing", "standing", "sitting", "walking", "holding", "looking",
+]);
+
+const SCENE_CHUNK_BREAKERS = new Set([
+  "in", "on", "at", "by", "for", "to", "of", "as", "is", "a", "an",
+  "or", "but", "then", "where", "when",
+]);
+
+const WEAK_SCENE_MODIFIERS = new Set([
+  "clear", "wide", "close", "small", "large", "simple", "several", "many",
+  "various", "local", "outdoor", "indoor",
+]);
+
+function sceneChunks(words: string[]): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  for (const word of words) {
+    if (SCENE_CHUNK_BREAKERS.has(word)) {
+      if (current.length > 0) chunks.push(current);
+      current = [];
+      continue;
+    }
+    current.push(word);
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+function compactSceneChunk(chunk: string[]): string[] {
+  const compact = chunk.filter((word) => !WEAK_SCENE_MODIFIERS.has(word));
+  if (compact.length >= 2) return compact;
+  return chunk;
+}
+
+function mergeTags(current: string[] | undefined, additions: string[]): string[] {
+  return uniqueTags([...(current ?? []), ...additions]);
+}
+
+function uniqueTags(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const tag = normalizeTag(value);
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    result.push(tag);
+  }
+  return result;
+}
+
+function normalizeTag(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+}
+
+function normalizeScene(scene: string | undefined): string {
+  return scene?.trim().replace(/\s+/g, " ") ?? "";
+}
+
+function marlinSummaryConfidence(peaks: MarlinSegmentPeak[]): number {
+  const bestPeak = peaks[0];
+  if (!bestPeak) return 0.8;
+  return clamp01(Math.max(0.8, bestPeak.confidence));
+}
+
+function buildMarlinSummaryProvenance(
+  artifact: MarlinEventsArtifact,
+  assetEvents: MarlinAssetEvents,
+  segment: SegmentDocItem,
+  scene: string,
+): Record<string, string> {
+  const modelSnapshot = artifact.model.model_snapshot || "unknown";
+  const promptHash = stableHash({
+    prompt_template_id: MARLIN_SUMMARY_PROMPT_TEMPLATE_ID,
+    method: MARLIN_REPORTER_METHOD,
+  });
+  return {
+    stage: "marlin",
+    method: MARLIN_REPORTER_METHOD,
+    connector_version: artifact.model.connector_version ?? MARLIN_CONNECTOR_VERSION,
+    policy_hash: stableHash({
+      model_alias: artifact.model.model_alias,
+      model_snapshot: modelSnapshot,
+      prompt_template_id: MARLIN_SUMMARY_PROMPT_TEMPLATE_ID,
+    }),
+    request_hash: stableHash({
+      asset_id: assetEvents.asset_id,
+      segment_id: segment.segment_id,
+      scene,
+      event_ids: assetEvents.events.map((event) => event.event_id),
+    }),
+    model_alias: MARLIN_SUMMARY_MODEL_ID,
+    model_snapshot: modelSnapshot,
+    prompt_template_id: MARLIN_SUMMARY_PROMPT_TEMPLATE_ID,
+    prompt_hash: promptHash,
+    response_format: "marlin_events_v1",
+  };
+}
+
+function stableHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
 }
 
 function isMarlinPeakAnalysis(peakAnalysis: NonNullable<SegmentDocItem["peak_analysis"]>): boolean {

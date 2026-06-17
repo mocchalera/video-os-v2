@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import {
+  extractTagsFromScene,
   loadMarlinAssetInputs,
   runMarlinAnalysis,
 } from "../runtime/pipeline/stages/marlin.js";
@@ -145,7 +146,7 @@ describe("Marlin analysis stage", () => {
       async caption(videoPath) {
         calls.push(`caption:${path.basename(videoPath)}`);
         return {
-          scene: "A speaker reacts during an interview.",
+          scene: "Soba noodles being prepared beside a grape vineyard.",
           caption: "The subject pauses, smiles, and delivers the key point.",
           events: [
             {
@@ -193,6 +194,10 @@ describe("Marlin analysis stage", () => {
 
     const segments = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/segments.json"), "utf-8")) as {
       items: Array<{
+        summary: string;
+        tags: string[];
+        confidence?: { summary?: { source: string; status: string } };
+        provenance?: { summary?: Record<string, string> };
         peak_analysis?: {
           peak_moments: Array<{ source_pass: string; peak_ref: string }>;
           recommended_in_out: { source_pass: string };
@@ -203,11 +208,29 @@ describe("Marlin analysis stage", () => {
     const validateSegments = createSegmentsValidator();
 
     expect(validateSegments(segments), JSON.stringify(validateSegments.errors, null, 2)).toBe(true);
+    expect(segments.items[0].summary).toBe("Soba noodles being prepared beside a grape vineyard.");
+    expect(segments.items[0].tags).toEqual(expect.arrayContaining(["soba_noodles", "grape_vineyard"]));
+    expect(segments.items[0].confidence?.summary).toMatchObject({
+      source: "marlin-2b",
+      status: "ready",
+    });
+    expect(segments.items[0].provenance?.summary).toMatchObject({
+      stage: "marlin",
+      method: "marlin_reporter",
+      model_alias: "marlin-2b",
+      prompt_template_id: "marlin-caption-v1",
+    });
     expect(segments.items[0].peak_analysis?.peak_moments[0]).toMatchObject({
       source_pass: "marlin_caption",
       peak_ref: "MEV_AST_INTERVIEW_0001",
     });
     expect(segments.items[0].interest_points?.[0].label).toContain("emotional_peak");
+  });
+
+  it("extracts compact Marlin scene tags from common local concepts", () => {
+    expect(extractTagsFromScene("A grape vineyard with rows of vines.")).toContain("grape_vineyard");
+    expect(extractTagsFromScene("Soba noodles being prepared at a counter.")).toContain("soba_noodles");
+    expect(extractTagsFromScene("A traditional wooden building beside a lane.")).toContain("traditional_building");
   });
 
   it("materializes segment peak_analysis into candidate trim and scoring hints", () => {
