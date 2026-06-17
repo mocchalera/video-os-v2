@@ -849,11 +849,16 @@ function makeClip(
   usPerFrame: number,
 ): TimelineClip {
   const c = scored.candidate;
-  // Cap timeline_duration_frames at the source material's actual duration.
-  // Without this, a 10s clip assigned to a 40s beat would play in slow motion.
   const sourceDurationUs = c.src_out_us - c.src_in_us;
   const sourceDurationFrames = Math.ceil(sourceDurationUs / usPerFrame);
-  const clampedDurationFrames = Math.min(beatDurationFrames, sourceDurationFrames);
+  const trimPreferredFrames = c.trim_hint?.preferred_duration_us
+    ? Math.ceil(c.trim_hint.preferred_duration_us / usPerFrame)
+    : undefined;
+  const clampedDurationFrames = Math.min(
+    beatDurationFrames,
+    trimPreferredFrames ?? sourceDurationFrames,
+    sourceDurationFrames,
+  );
 
   return {
     clip_id: `CLP_${String(clipNum).padStart(4, "0")}`,
