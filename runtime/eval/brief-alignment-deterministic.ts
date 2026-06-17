@@ -63,7 +63,7 @@ function textMatchesTerm(text: string, term: string): boolean {
     .split(/[^\p{L}\p{N}]+/u)
     .map(searchable)
     .filter((token) => token.length >= 3);
-  return tokens.some((token) => normalizedText.includes(token));
+  return tokens.length >= 2 && tokens.every((token) => normalizedText.includes(token));
 }
 
 function candidateText(candidate: Candidate): string {
