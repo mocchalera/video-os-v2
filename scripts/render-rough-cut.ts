@@ -373,6 +373,7 @@ async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
         String(clip.durationSec),
         "-vf",
         `fps=${fps},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2`,
+        "-an",
         "-c:v",
         "libx264",
         "-preset",
