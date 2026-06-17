@@ -82,9 +82,20 @@ function scoreSelectsPacing(brief: CreativeBrief, selects: SelectsCandidates): A
     return fallbackAxis(0.65, [`${activeCount(selects)} active candidates selected`], ["brief runtime target is unavailable"]);
   }
   const ratio = selected / target;
-  const score = clamp01(1 - Math.max(0, Math.abs(ratio - 1) - 0.25) / 0.75);
+  let score: number;
+  if (ratio < 0.5) {
+    score = (ratio / 0.5) * 0.4;
+  } else if (ratio <= 1.5) {
+    score = 0.7 + ((ratio - 0.5) / 1.0) * 0.3;
+  } else if (ratio <= 4.0) {
+    score = 1.0;
+  } else if (ratio <= 8.0) {
+    score = 1.0 - ((ratio - 4.0) / 4.0) * 0.3;
+  } else {
+    score = 0.7 - Math.min(0.3, ((ratio - 8.0) / 8.0) * 0.3);
+  }
   return fallbackAxis(
-    score,
+    clamp01(score),
     [`selected source duration ${selected.toFixed(1)}s for ${target}s target`],
     score < 0.75 ? [`selected duration ratio ${ratio.toFixed(2)} may be weak for target runtime`] : [],
   );
