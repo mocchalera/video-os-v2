@@ -93,6 +93,36 @@ describe("enrichSelectsFromAnalysis", () => {
     expect(enriched.candidates[0].motif_tags).toEqual(["outdoor", "mountain", "trees"]);
   });
 
+  it("derives story_role from eligible_beats without overwriting explicit values", () => {
+    const enriched = enrichSelectsFromAnalysis(
+      selects([
+        candidate("SEG_HOOK", { eligible_beats: ["opening", "wonder"] }),
+        candidate("SEG_SETUP", { eligible_beats: ["setup"] }),
+        candidate("SEG_CLOSING", { eligible_beats: ["payoff", "release"] }),
+        candidate("SEG_EXPERIENCE", { eligible_beats: ["middle", "immersion"] }),
+        candidate("SEG_DEFAULT", { eligible_beats: ["quiet transition"] }),
+        candidate("SEG_EXPLICIT", { eligible_beats: ["opening"], story_role: "reaction" }),
+      ]),
+      [
+        segment("SEG_HOOK"),
+        segment("SEG_SETUP"),
+        segment("SEG_CLOSING"),
+        segment("SEG_EXPERIENCE"),
+        segment("SEG_DEFAULT"),
+        segment("SEG_EXPLICIT"),
+      ],
+    );
+
+    expect(enriched.candidates.map((item) => item.story_role)).toEqual([
+      "hook",
+      "setup",
+      "closing",
+      "experience",
+      "experience",
+      "reaction",
+    ]);
+  });
+
   it("does not overwrite LLM-populated scalar fields or motif tags", () => {
     const enriched = enrichSelectsFromAnalysis(
       selects([

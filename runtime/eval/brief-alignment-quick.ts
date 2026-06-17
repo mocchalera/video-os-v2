@@ -216,6 +216,7 @@ function hasStoryFunction(active: Candidate[], terms: string[]): boolean {
     const audioStoryRefs = (candidate as { audio_story_refs?: Array<{ role?: string }> }).audio_story_refs ?? [];
     const searchable = [
       candidate.why_it_matches,
+      candidate.story_role,
       candidate.transcript_excerpt,
       ...(candidate.evidence ?? []),
       ...(candidate.eligible_beats ?? []),

@@ -304,4 +304,97 @@ describe("brief alignment orchestration", () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("uses selects story_role for narrative scoring and semantic_rank ordering", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "brief-alignment-story-role-"));
+    try {
+      fs.mkdirSync(path.join(tmp, "01_intent"), { recursive: true });
+      fs.mkdirSync(path.join(tmp, "04_plan"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmp, "01_intent/creative_brief.yaml"),
+        JSON.stringify({
+          ...brief(),
+          version: "1",
+          created_at: "2026-06-17T00:00:00.000Z",
+          audience: { primary: "outdoor learners" },
+          autonomy: { may_decide: ["candidate order"], must_ask: [] },
+          resolved_assumptions: ["Use visible practice moments."],
+        }, null, 2),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(tmp, "04_plan/selects_candidates.yaml"),
+        JSON.stringify({
+          version: "1",
+          project_id: "alignment-fixture",
+          candidates: [
+            {
+              segment_id: "SEG_HOOK",
+              asset_id: "A",
+              src_in_us: 0,
+              src_out_us: 5_000_000,
+              role: "hero",
+              story_role: "hook",
+              semantic_rank: 1,
+              why_it_matches: "Opening uncertainty hooks the viewer.",
+              risks: [],
+              confidence: 0.9,
+            },
+            {
+              segment_id: "SEG_SETUP",
+              asset_id: "B",
+              src_in_us: 0,
+              src_out_us: 5_000_000,
+              role: "support",
+              story_role: "setup",
+              semantic_rank: 2,
+              why_it_matches: "Establishes the coaching context.",
+              risks: [],
+              confidence: 0.85,
+            },
+            {
+              segment_id: "SEG_EXPERIENCE",
+              asset_id: "C",
+              src_in_us: 0,
+              src_out_us: 5_000_000,
+              role: "dialogue",
+              story_role: "experience",
+              semantic_rank: 3,
+              why_it_matches: "Main practice experience carries the middle.",
+              risks: [],
+              confidence: 0.82,
+            },
+            {
+              segment_id: "SEG_CLOSING",
+              asset_id: "D",
+              src_in_us: 0,
+              src_out_us: 5_000_000,
+              role: "texture",
+              story_role: "closing",
+              semantic_rank: 4,
+              why_it_matches: "Closing smile provides release.",
+              risks: [],
+              confidence: 0.8,
+            },
+          ],
+        }, null, 2),
+        "utf-8",
+      );
+
+      const report = await evaluateBriefAlignment(tmp, {
+        stages: ["selects"],
+        useLlm: false,
+        evaluatedAt: "2026-06-17T00:00:00.000Z",
+      });
+
+      const narrative = report.stages.selects?.axes.narrative_structure;
+      expect(narrative?.confidence).toBe(0.8);
+      expect(narrative?.score).toBeGreaterThan(0.9);
+      expect(narrative?.evidence).toContain("story_role present on 4/4 candidates");
+      expect(narrative?.evidence).toContain("story_role semantic_rank order hook -> experience -> closing confirmed");
+      expect(narrative?.gaps).toEqual([]);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });

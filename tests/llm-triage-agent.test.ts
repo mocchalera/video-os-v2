@@ -397,6 +397,7 @@ describe("selectsFromLlmResponse", () => {
           src_in_us: 1000,
           src_out_us: 5000,
           role: "hero",
+          story_role: "payoff",
           why_it_matches: "The wobbling first ride anchors the setup-to-payoff arc.",
           confidence: 0.9,
           eligible_beats: ["setup", "payoff"],
@@ -433,6 +434,7 @@ describe("selectsFromLlmResponse", () => {
     }, "test-project", segments);
 
     const candidate = result.candidates[0] as unknown as Record<string, unknown>;
+    expect(candidate.story_role).toBe("payoff");
     expect(candidate.eligible_beats).toEqual(["setup", "payoff"]);
     expect(candidate.motif_tags).toEqual(["child_bike_attempt", "family_growth"]);
     expect(candidate.editorial_signals).toEqual({
@@ -470,6 +472,7 @@ describe("selectsFromLlmResponse", () => {
           src_in_us: 1000,
           src_out_us: 5000,
           role: "support",
+          story_role: "not_a_story_role",
           why_it_matches: "Still usable.",
           confidence: 0.8,
           eligible_beats: ["setup", 42, ""],
@@ -499,11 +502,42 @@ describe("selectsFromLlmResponse", () => {
     }, "test-project", segments);
 
     const candidate = result.candidates[0] as unknown as Record<string, unknown>;
+    expect(candidate.story_role).toBeUndefined();
     expect(candidate.eligible_beats).toEqual(["setup"]);
     expect(candidate.motif_tags).toEqual(["child_bike"]);
     expect(candidate.editorial_signals).toEqual({ visual_tags: ["bike"] });
     expect(candidate.peak_signals).toEqual({ speech_keyword: ["cheer"] });
     expect(candidate.trim_hint).toBeUndefined();
+  });
+
+  it("preserves valid story_role values and drops invalid ones", () => {
+    const result = selectsFromLlmResponse({
+      candidates: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_001",
+          src_in_us: 1000,
+          src_out_us: 5000,
+          role: "hero",
+          story_role: "hook",
+          why_it_matches: "Opening first-ride moment.",
+          confidence: 0.9,
+        },
+        {
+          segment_id: "SEG_002",
+          asset_id: "AST_002",
+          src_in_us: 6000,
+          src_out_us: 12000,
+          role: "support",
+          story_role: "middle-ish",
+          why_it_matches: "Reaction moment.",
+          confidence: 0.8,
+        },
+      ],
+    }, "test-project", segments);
+
+    expect(result.candidates[0].story_role).toBe("hook");
+    expect(result.candidates[1].story_role).toBeUndefined();
   });
 });
 
@@ -588,9 +622,11 @@ describe("buildLlmTriagePrompt", () => {
     });
 
     expect(prompt).toContain('"eligible_beats":["opening","landscape_scale"]');
+    expect(prompt).toContain('"story_role":"experience"');
     expect(prompt).toContain('"motif_tags":["mountain_landscape","aerial_scale"]');
     expect(prompt).toContain('"editorial_signals"');
     expect(prompt).toContain('"trim_hint":{"preferred_duration_us":3000000}');
+    expect(prompt).toContain("Assign a `story_role` to each candidate");
     expect(prompt).toContain("For each candidate, include eligible_beats");
     expect(prompt).toContain("Evidence must include at least one specific visual observation");
     expect(prompt).toContain("selection_notes must include notes about intended emotional progression");

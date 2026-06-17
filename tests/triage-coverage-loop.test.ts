@@ -64,6 +64,20 @@ function selects(segmentIds: string[]): SelectsCandidates {
   };
 }
 
+function alignedSelects(): SelectsCandidates {
+  const output = selects(["SEG_001", "SEG_002", "SEG_003", "SEG_005"]);
+  const storyRoles: Array<SelectCandidate["story_role"]> = ["hook", "setup", "experience", "closing"];
+  const beats = ["setup", "tension", "tension", "release"];
+  output.candidates = output.candidates.map((item, index) => ({
+    ...item,
+    story_role: storyRoles[index],
+    eligible_beats: [beats[index]],
+    evidence: [beats[index]],
+    editorial_signals: { peak_strength_score: 0.7 },
+  }));
+  return output;
+}
+
 function context(): TriageAgentContext {
   return {
     projectDir: "/tmp/video-os-coverage-loop",
@@ -81,7 +95,7 @@ describe("runCoverageForcedSelection", () => {
         calls.push(copyContext(ctx));
         return {
           selects: ctx.coverageFeedback
-            ? selects(["SEG_001", "SEG_002", "SEG_003", "SEG_005"])
+            ? alignedSelects()
             : selects(["SEG_001"]),
           confirmed: true,
         };

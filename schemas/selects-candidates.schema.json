@@ -180,6 +180,11 @@
             "minLength": 1
           }
         },
+        "story_role": {
+          "type": "string",
+          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing"],
+          "description": "Primary narrative function of this candidate in the edit"
+        },
         "transcript_excerpt": {
           "type": "string"
         },

@@ -110,6 +110,8 @@ export interface EditorialSummary {
   transcript_density?: "sparse" | "medium" | "dense" | "unknown";
 }
 
+export type SelectStoryRole = "hook" | "setup" | "experience" | "payoff" | "reaction" | "closing";
+
 export interface SelectCandidate {
   segment_id: string;
   asset_id: string;
@@ -125,6 +127,7 @@ export interface SelectCandidate {
   quality_flags?: string[];
   evidence?: string[];
   eligible_beats?: string[];
+  story_role?: SelectStoryRole;
   transcript_excerpt?: string;
   motif_tags?: string[];
   rejection_reason?: string;

@@ -8,6 +8,7 @@ export type TrackLayout = "single" | "multi";
 export type CaptionPolicySource = "transcript" | "authored" | "none";
 export type BriefCaptionPolicy = "auto" | "manual" | "off";
 export type BriefAudioPolicy = "ducking" | "bgm_only" | "original_only";
+export type SelectStoryRole = "hook" | "setup" | "experience" | "payoff" | "reaction" | "closing";
 
 export interface DurationPolicy {
   mode: DurationMode;
@@ -258,6 +259,7 @@ export interface Candidate {
   quality_flags?: string[];
   evidence?: string[];
   eligible_beats?: string[];
+  story_role?: SelectStoryRole;
   transcript_excerpt?: string;
   motif_tags?: string[];
   // M4.5 additive fields

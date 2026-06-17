@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type {
+  Candidate,
   CreativeBrief,
   EditBlueprint,
   SelectsCandidates,
@@ -101,31 +102,108 @@ function scoreSelectsPacing(brief: CreativeBrief, selects: SelectsCandidates): A
   );
 }
 
+type SelectNarrativeFunction = "hook" | "setup" | "experience" | "closing";
+
+function candidateHasNarrativeFunction(candidate: Candidate, target: SelectNarrativeFunction): boolean {
+  if (candidate.story_role) {
+    if (target === "closing") return candidate.story_role === "closing" || candidate.story_role === "payoff";
+    return candidate.story_role === target;
+  }
+  const beats = candidate.eligible_beats ?? [];
+  if (target === "hook") return beats.some((beat) => /hook|opening/i.test(beat));
+  if (target === "setup") return beats.some((beat) => /setup/i.test(beat));
+  if (target === "experience") return beats.some((beat) => /experience|development|immersion|middle/i.test(beat));
+  return beats.some((beat) => /closing|ending|payoff|release/i.test(beat));
+}
+
+function scoreStoryRoleOrder(active: Candidate[]): { score: number; evidence: string[]; gaps: string[] } {
+  const rankedRoles = {
+    hook: active
+      .filter((candidate) => candidate.story_role === "hook")
+      .map((candidate) => candidate.semantic_rank)
+      .filter((rank): rank is number => typeof rank === "number" && Number.isFinite(rank)),
+    experience: active
+      .filter((candidate) => candidate.story_role === "experience")
+      .map((candidate) => candidate.semantic_rank)
+      .filter((rank): rank is number => typeof rank === "number" && Number.isFinite(rank)),
+    closing: active
+      .filter((candidate) => candidate.story_role === "closing")
+      .map((candidate) => candidate.semantic_rank)
+      .filter((rank): rank is number => typeof rank === "number" && Number.isFinite(rank)),
+  };
+  const directRoleCounts = {
+    hook: active.filter((candidate) => candidate.story_role === "hook").length,
+    experience: active.filter((candidate) => candidate.story_role === "experience").length,
+    closing: active.filter((candidate) => candidate.story_role === "closing").length,
+  };
+  const hasDirectSequence = directRoleCounts.hook > 0 && directRoleCounts.experience > 0 && directRoleCounts.closing > 0;
+  if (!hasDirectSequence) {
+    return {
+      score: 0.5,
+      evidence: ["story_role sequence is partially available"],
+      gaps: [],
+    };
+  }
+  const hasRankedSequence = rankedRoles.hook.length > 0 && rankedRoles.experience.length > 0 && rankedRoles.closing.length > 0;
+  if (!hasRankedSequence) {
+    return {
+      score: 0.5,
+      evidence: ["story_role sequence exists but semantic_rank is incomplete"],
+      gaps: ["story_role ordering cannot be checked without semantic_rank on hook, experience, and closing candidates"],
+    };
+  }
+  const maxHook = Math.max(...rankedRoles.hook);
+  const minExperience = Math.min(...rankedRoles.experience);
+  const maxExperience = Math.max(...rankedRoles.experience);
+  const minClosing = Math.min(...rankedRoles.closing);
+  const ordered = maxHook < minExperience && maxExperience < minClosing;
+  return {
+    score: ordered ? 1 : 0,
+    evidence: [
+      ordered
+        ? "story_role semantic_rank order hook -> experience -> closing confirmed"
+        : "story_role semantic_rank order is not hook -> experience -> closing",
+    ],
+    gaps: ordered ? [] : ["story_role sequence is not ordered hook -> experience -> closing by semantic_rank"],
+  };
+}
+
 function scoreSelectsNarrative(selects: SelectsCandidates): AxisScore {
   const active = selects.candidates.filter((candidate) => candidate.role !== "reject");
+  if (active.length === 0) {
+    return fallbackAxis(0, [], ["selects have no active candidates"]);
+  }
   const roles = new Set(active.map((candidate) => candidate.role));
   const hasBeats = active.some((c) => c.eligible_beats && c.eligible_beats.length > 0);
-  const hasOpening = active.some(
-    (candidate) => candidate.role === "hero" || candidate.eligible_beats?.some((beat) => /hook|opening|setup/i.test(beat)),
-  );
-  const hasMiddle = active.some(
-    (candidate) => candidate.eligible_beats?.some((beat) => /experience|development|immersion|middle/i.test(beat)),
-  );
-  const hasClosing = active.some((candidate) => candidate.eligible_beats?.some((beat) => /closing|ending|payoff|release/i.test(beat)));
-  const functionCount = [hasOpening, hasMiddle, hasClosing].filter(Boolean).length;
-  const score = clamp01((roles.size / Math.min(4, Math.max(1, active.length))) * 0.3 + (functionCount / 3) * 0.7);
-  const confidence = hasBeats ? 0.75 : 0.45;
+  const storyRoleCount = active.filter((candidate) => candidate.story_role).length;
+  const hasStoryRoles = storyRoleCount > 0;
+  const hasHook = active.some((candidate) => candidateHasNarrativeFunction(candidate, "hook"))
+    || (!hasStoryRoles && active.some((candidate) => candidate.role === "hero"));
+  const hasSetup = active.some((candidate) => candidateHasNarrativeFunction(candidate, "setup"));
+  const hasExperience = active.some((candidate) => candidateHasNarrativeFunction(candidate, "experience"));
+  const hasClosing = active.some((candidate) => candidateHasNarrativeFunction(candidate, "closing"));
+  const roleDiversityScore = roles.size / Math.min(4, Math.max(1, active.length));
+  const order = hasStoryRoles ? scoreStoryRoleOrder(active) : { score: 0, evidence: [], gaps: [] };
+  const score = hasStoryRoles
+    ? clamp01(roleDiversityScore * 0.25 + ([hasHook, hasSetup, hasExperience, hasClosing].filter(Boolean).length / 4) * 0.55 + order.score * 0.2)
+    : clamp01(roleDiversityScore * 0.3 + ([hasHook || hasSetup, hasExperience, hasClosing].filter(Boolean).length / 3) * 0.7);
+  const confidence = hasStoryRoles ? 0.8 : hasBeats ? 0.75 : 0.45;
   const evidence = [
     `${roles.size} role types represented in selects`,
+    ...(hasStoryRoles ? [`story_role present on ${storyRoleCount}/${active.length} candidates`] : []),
     ...(hasBeats ? [`eligible_beats present on ${active.filter((c) => c.eligible_beats?.length).length}/${active.length} candidates`] : []),
-    ...(hasOpening ? ["hook/opening function detected"] : []),
-    ...(hasMiddle ? ["experience/development function detected"] : []),
+    ...(hasHook ? ["hook/opening function detected"] : []),
+    ...(hasSetup ? ["setup/context function detected"] : []),
+    ...(hasExperience ? ["experience/development function detected"] : []),
     ...(hasClosing ? ["closing/payoff function detected"] : []),
+    ...order.evidence,
   ];
   const gaps = [
-    ...(hasOpening ? [] : ["selects do not expose a clear hook/opening candidate"]),
-    ...(hasMiddle ? [] : ["selects do not expose experience/development candidates"]),
+    ...(hasHook ? [] : ["selects do not expose a clear hook/opening candidate"]),
+    ...(hasSetup ? [] : ["selects do not expose setup/context candidates"]),
+    ...(hasExperience ? [] : ["selects do not expose experience/development candidates"]),
     ...(hasClosing ? [] : ["selects do not expose a clear closing/payoff candidate"]),
+    ...order.gaps,
   ];
   return { score: round3(clamp01(score)), confidence, judge_source: "deterministic", evidence, gaps };
 }

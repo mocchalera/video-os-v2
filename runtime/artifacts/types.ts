@@ -26,6 +26,7 @@ export type {
   // Selects
   Role,
   ClipRole,
+  SelectStoryRole,
   TrimHint,
   EditorialSignals,
   EditorialSummary,

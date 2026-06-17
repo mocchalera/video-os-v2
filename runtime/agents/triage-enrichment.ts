@@ -87,6 +87,9 @@ function enrichCandidate(candidate: Candidate, segment: SegmentItem): Candidate 
     const motifTags = deriveMotifTags(segment.tags);
     if (motifTags.length > 0) next.motif_tags = motifTags;
   }
+  if (!hasValue(next.story_role) && hasValue(next.eligible_beats)) {
+    next.story_role = deriveStoryRole(next.eligible_beats);
+  }
 
   return next;
 }
@@ -135,6 +138,16 @@ function visualQualityTags(segment: SegmentItem): string[] {
 
 function deriveMotifTags(tags: string[] | undefined): string[] {
   return mergeTags([], (tags ?? []).map(normalizeTag).filter(isNonEmptyString)).slice(0, 8);
+}
+
+function deriveStoryRole(eligibleBeats: string[] | undefined): NonNullable<Candidate["story_role"]> {
+  const beats = (eligibleBeats ?? []).map(normalizeTag).filter(isNonEmptyString);
+  const joined = beats.join(" ");
+  if (/\b(hook|opening)\b/.test(joined)) return "hook";
+  if (/\bsetup\b/.test(joined)) return "setup";
+  if (/\b(closing|ending|payoff|release)\b/.test(joined)) return "closing";
+  if (/\b(experience|development|immersion|middle)\b/.test(joined)) return "experience";
+  return "experience";
 }
 
 function deriveSemanticClusterId(segment: SegmentItem): string {

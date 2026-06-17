@@ -40,6 +40,15 @@ const VALID_ROLES = new Set<SelectCandidate["role"]>([
   "reject",
 ]);
 
+const VALID_STORY_ROLES = new Set<NonNullable<SelectCandidate["story_role"]>>([
+  "hook",
+  "setup",
+  "experience",
+  "payoff",
+  "reaction",
+  "closing",
+]);
+
 const EDITORIAL_SUMMARY_VALUES = {
   dominant_visual_mode: new Set(["talking_head", "screen_demo", "event_broll", "mixed", "unknown"]),
   speaker_topology: new Set(["solo_primary", "interviewer_guest", "multi_speaker", "unknown"]),
@@ -425,8 +434,9 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "## Output",
     "Respond with JSON only. Markdown code fences are tolerated, but do not add prose outside JSON.",
     "Use only segment_id, asset_id, src_in_us, and src_out_us values that appear in the segment evidence.",
-    'Shape: {"selection_notes":["intended emotional progression across candidates","pacing approach: mixed"],"editorial_summary":{"dominant_visual_mode":"mixed","speaker_topology":"unknown","motion_profile":"medium","transcript_density":"sparse"},"candidates":[{"segment_id":"...","asset_id":"...","src_in_us":0,"src_out_us":1,"role":"hero","why_it_matches":"...","confidence":0.8,"semantic_rank":1,"evidence":["specific_visual_fact","brief_link_fact"],"eligible_beats":["opening","landscape_scale"],"motif_tags":["mountain_landscape","aerial_scale"],"editorial_signals":{"visual_tags":["aerial","golden_hour","wide_angle"],"peak_type":"visual_peak","peak_strength_score":0.7},"trim_hint":{"preferred_duration_us":3000000}}]}',
+    'Shape: {"selection_notes":["intended emotional progression across candidates","pacing approach: mixed"],"editorial_summary":{"dominant_visual_mode":"mixed","speaker_topology":"unknown","motion_profile":"medium","transcript_density":"sparse"},"candidates":[{"segment_id":"...","asset_id":"...","src_in_us":0,"src_out_us":1,"role":"hero","story_role":"experience","why_it_matches":"...","confidence":0.8,"semantic_rank":1,"evidence":["specific_visual_fact","brief_link_fact"],"eligible_beats":["opening","landscape_scale"],"motif_tags":["mountain_landscape","aerial_scale"],"editorial_signals":{"visual_tags":["aerial","golden_hour","wide_angle"],"peak_type":"visual_peak","peak_strength_score":0.7},"trim_hint":{"preferred_duration_us":3000000}}]}',
     'Valid roles: "hero", "support", "transition", "texture", "dialogue", "reject". If unsure, use "support".',
+    "- Assign a `story_role` to each candidate: hook (opening), setup (establishing context), experience (main content), payoff (emotional peak), reaction (response), or closing (ending). If unsure, use 'experience'.",
     "- For each candidate, include eligible_beats listing which brief emotion-curve terms or story phases this clip serves (e.g. wonder, discovery, hook, closing).",
     "- Include motif_tags with specific visual themes relevant to the brief, not generic tags.",
     "- If segment peak evidence exists (has_peak=true), populate editorial_signals.peak_type and peak_strength_score.",
@@ -445,6 +455,10 @@ function normalizeRole(value: unknown): SelectCandidate["role"] | null {
   if (value === undefined || value === null || value === "") return "support";
   if (typeof value !== "string") return null;
   return VALID_ROLES.has(value as SelectCandidate["role"]) ? (value as SelectCandidate["role"]) : null;
+}
+
+function normalizeStoryRole(value: unknown): SelectCandidate["story_role"] | undefined {
+  return sanitizeEnumString(value, VALID_STORY_ROLES);
 }
 
 function sameOptionalNumber(a: unknown, b: number): boolean {
@@ -578,6 +592,8 @@ export function selectsFromLlmResponse(
     if (evidence.length > 0) candidate.evidence = evidence;
     const eligibleBeats = stringArray(item.eligible_beats);
     if (eligibleBeats.length > 0) candidate.eligible_beats = eligibleBeats;
+    const storyRole = normalizeStoryRole(item.story_role);
+    if (storyRole) candidate.story_role = storyRole;
     const motifTags = stringArray(item.motif_tags);
     if (motifTags.length > 0) candidate.motif_tags = motifTags;
     const editorialSignals = sanitizeEditorialSignals(item.editorial_signals);
