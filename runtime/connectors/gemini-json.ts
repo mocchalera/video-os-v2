@@ -79,9 +79,22 @@ async function callGeminiGenerateContent(
     });
     if (response.ok) {
       const data = (await response.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+        promptFeedback?: { blockReason?: string; safetyRatings?: unknown[] };
       };
-      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const blockReason = data.promptFeedback?.blockReason;
+      if (!text && blockReason && images.length > 0) {
+        console.error(`[gemini] content blocked (${blockReason}) with ${images.length} images — retrying text-only`);
+        return callGeminiGenerateContent(prompt, model, options);
+      }
+      if (!text) {
+        const finishReason = data.candidates?.[0]?.finishReason;
+        if (finishReason || blockReason) {
+          console.error(`[gemini] empty response: finishReason=${finishReason} blockReason=${blockReason}`);
+        }
+      }
+      return text ?? "{}";
     }
 
     const body = await response.text();
