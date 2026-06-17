@@ -53,6 +53,11 @@ export interface CompactPeakEvidence {
   count: number;
 }
 
+export interface CompactVisualQuality {
+  scores?: Record<string, number>;
+  labels?: Record<string, string[]>;
+}
+
 export interface CompactSegmentEvidence {
   segment_id: string;
   asset_id: string;
@@ -63,6 +68,8 @@ export interface CompactSegmentEvidence {
   peak: CompactPeakEvidence;
   transcript: string;
   filmstrip_path?: string;
+  visual_quality?: CompactVisualQuality;
+  interest_point_labels?: string[];
 }
 
 export interface TriageFilmstripImageRef {
@@ -241,6 +248,46 @@ function extractPeakEvidence(segment: Record<string, unknown>): CompactPeakEvide
   };
 }
 
+function compactNumberObject(value: unknown): Record<string, number> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const n = numberValue(raw);
+    if (n !== undefined) out[key] = n;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function compactStringArrayObject(value: unknown): Record<string, string[]> | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, string[]> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const items = stringArray(raw);
+    if (items.length > 0) out[key] = items;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function compactVisualQuality(value: unknown): CompactVisualQuality | undefined {
+  if (!isRecord(value)) return undefined;
+  const scores = compactNumberObject(value.scores);
+  const labels = compactStringArrayObject(value.labels);
+  if (!scores && !labels) return undefined;
+  return {
+    ...(scores ? { scores } : {}),
+    ...(labels ? { labels } : {}),
+  };
+}
+
+function compactInterestPointLabels(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((point) => {
+    if (!isRecord(point)) return [];
+    const label = stringValue(point.label);
+    return label ? [label] : [];
+  });
+}
+
 export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEvidence[] {
   return rawSegments.flatMap((item): CompactSegmentEvidence[] => {
     if (!isRecord(item)) return [];
@@ -250,6 +297,8 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
     const srcOutUs = integerValue(item.src_out_us);
     if (!segmentId || !assetId || srcInUs === undefined || srcOutUs === undefined) return [];
     if (srcInUs < 0 || srcOutUs <= srcInUs) return [];
+    const visualQuality = compactVisualQuality(item.visual_quality);
+    const interestPointLabels = compactInterestPointLabels(item.interest_points);
     return [
       {
         segment_id: segmentId,
@@ -261,6 +310,8 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
         peak: extractPeakEvidence(item),
         transcript: normalizeTranscript(item.transcript_excerpt ?? item.transcript),
         filmstrip_path: stringValue(item.filmstrip_path),
+        ...(visualQuality ? { visual_quality: visualQuality } : {}),
+        ...(interestPointLabels.length > 0 ? { interest_point_labels: interestPointLabels } : {}),
       },
     ];
   });
@@ -369,8 +420,15 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "## Output",
     "Respond with JSON only. Markdown code fences are tolerated, but do not add prose outside JSON.",
     "Use only segment_id, asset_id, src_in_us, and src_out_us values that appear in the segment evidence.",
-    'Shape: {"selection_notes":["..."],"editorial_summary":{"dominant_visual_mode":"mixed","speaker_topology":"unknown","motion_profile":"medium","transcript_density":"sparse"},"candidates":[{"segment_id":"...","asset_id":"...","src_in_us":0,"src_out_us":1,"role":"hero","why_it_matches":"...","confidence":0.8,"semantic_rank":1,"evidence":["..."]}]}',
+    'Shape: {"selection_notes":["intended emotional progression across candidates","pacing approach: mixed"],"editorial_summary":{"dominant_visual_mode":"mixed","speaker_topology":"unknown","motion_profile":"medium","transcript_density":"sparse"},"candidates":[{"segment_id":"...","asset_id":"...","src_in_us":0,"src_out_us":1,"role":"hero","why_it_matches":"...","confidence":0.8,"semantic_rank":1,"evidence":["specific_visual_fact","brief_link_fact"],"eligible_beats":["opening","landscape_scale"],"motif_tags":["mountain_landscape","aerial_scale"],"editorial_signals":{"visual_tags":["aerial","golden_hour","wide_angle"],"peak_type":"visual_peak","peak_strength_score":0.7},"trim_hint":{"preferred_duration_us":3000000}}]}',
     'Valid roles: "hero", "support", "transition", "texture", "dialogue", "reject". If unsure, use "support".',
+    "- For each candidate, include eligible_beats listing which brief emotion-curve terms or story phases this clip serves (e.g. wonder, discovery, hook, closing).",
+    "- Include motif_tags with specific visual themes relevant to the brief, not generic tags.",
+    "- If segment peak evidence exists (has_peak=true), populate editorial_signals.peak_type and peak_strength_score.",
+    "- Include trim_hint.preferred_duration_us when you have a clear sense of how long this clip should be used.",
+    "- Evidence must include at least one specific visual observation and one brief-alignment justification. Avoid generic-only evidence like 'outdoor_scene' or 'person_standing' — add what makes this specific clip valuable.",
+    "- selection_notes must include notes about intended emotional progression across candidates.",
+    "- selection_notes must note the intended pacing approach (fast montage / slow holds / mixed).",
   ].join("\n");
 }
 
@@ -411,6 +469,72 @@ function sanitizeEditorialSummary(value: unknown): EditorialSummary | undefined 
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function sanitizeEnumString<T extends string>(value: unknown, allowed: ReadonlySet<T>): T | undefined {
+  const raw = stringValue(value);
+  return raw && allowed.has(raw as T) ? (raw as T) : undefined;
+}
+
+function sanitizeOptionalScore(value: unknown): number | undefined {
+  const n = numberValue(value);
+  return n !== undefined && n >= 0 && n <= 1 ? n : undefined;
+}
+
+function sanitizePositiveInteger(value: unknown): number | undefined {
+  const n = integerValue(value);
+  return n !== undefined && n >= 1 ? n : undefined;
+}
+
+const PEAK_TYPES = new Set(["action_peak", "emotional_peak", "visual_peak"] as const);
+
+function sanitizeEditorialSignals(value: unknown): SelectCandidate["editorial_signals"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: Record<string, unknown> = {};
+  const visualTags = stringArray(value.visual_tags);
+  if (visualTags.length > 0) out.visual_tags = visualTags;
+  const peakType = sanitizeEnumString(value.peak_type, PEAK_TYPES);
+  if (peakType) out.peak_type = peakType;
+  for (const key of [
+    "peak_strength_score",
+    "motion_energy_score",
+    "audio_energy_score",
+    "afterglow_score",
+    "reaction_intensity_score",
+    "surprise_signal",
+    "hope_signal",
+  ] as const) {
+    const score = sanitizeOptionalScore(value[key]);
+    if (score !== undefined) out[key] = score;
+  }
+  const semanticClusterId = stringValue(value.semantic_cluster_id);
+  if (semanticClusterId) out.semantic_cluster_id = semanticClusterId;
+  if (typeof value.face_detected === "boolean") out.face_detected = value.face_detected;
+  return Object.keys(out).length > 0 ? out as SelectCandidate["editorial_signals"] : undefined;
+}
+
+function sanitizePeakSignals(value: unknown): { motion?: number; audio_rms?: number; speech_keyword?: string[] } | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: { motion?: number; audio_rms?: number; speech_keyword?: string[] } = {};
+  const motion = sanitizeOptionalScore(value.motion);
+  if (motion !== undefined) out.motion = motion;
+  const audioRms = sanitizeOptionalScore(value.audio_rms);
+  if (audioRms !== undefined) out.audio_rms = audioRms;
+  const speechKeyword = stringArray(value.speech_keyword);
+  if (speechKeyword.length > 0) out.speech_keyword = speechKeyword;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeTrimHint(value: unknown): SelectCandidate["trim_hint"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: NonNullable<SelectCandidate["trim_hint"]> = {};
+  for (const key of ["preferred_duration_us", "min_duration_us", "max_duration_us"] as const) {
+    const duration = sanitizePositiveInteger(value[key]);
+    if (duration !== undefined) out[key] = duration;
+  }
+  const interestPointLabel = stringValue(value.interest_point_label);
+  if (interestPointLabel) out.interest_point_label = interestPointLabel;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function selectsFromLlmResponse(
   parsed: Record<string, unknown>,
   projectId: string,
@@ -447,6 +571,16 @@ export function selectsFromLlmResponse(
     if (semanticRank !== undefined) candidate.semantic_rank = semanticRank;
     const evidence = stringArray(item.evidence);
     if (evidence.length > 0) candidate.evidence = evidence;
+    const eligibleBeats = stringArray(item.eligible_beats);
+    if (eligibleBeats.length > 0) candidate.eligible_beats = eligibleBeats;
+    const motifTags = stringArray(item.motif_tags);
+    if (motifTags.length > 0) candidate.motif_tags = motifTags;
+    const editorialSignals = sanitizeEditorialSignals(item.editorial_signals);
+    if (editorialSignals) candidate.editorial_signals = editorialSignals;
+    const peakSignals = sanitizePeakSignals(item.peak_signals);
+    if (peakSignals) (candidate as SelectCandidate & { peak_signals?: typeof peakSignals }).peak_signals = peakSignals;
+    const trimHint = sanitizeTrimHint(item.trim_hint);
+    if (trimHint) candidate.trim_hint = trimHint;
     if (role === "reject") {
       candidate.rejection_reason =
         stringValue(item.rejection_reason) ?? stringValue(item.why_it_matches) ?? "LLM rejected this segment";

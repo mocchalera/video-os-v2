@@ -5,8 +5,11 @@ import * as path from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import {
   UNRELIABLE_TRANSCRIPT_TEXT,
+  buildLlmTriagePrompt,
+  compactSegmentEvidence,
   createLlmTriageAgent,
   loadCompactSegmentEvidence,
+  selectsFromLlmResponse,
   type LlmImagePart,
   type LlmCompleter,
 } from "../runtime/agents/llm-triage-agent.js";
@@ -371,6 +374,219 @@ describe("createLlmTriageAgent", () => {
     expect(calls[0].images).toHaveLength(1);
     expect(calls[1].images).toHaveLength(1);
     expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual(["SEG_001", "SEG_002"]);
+  });
+});
+
+describe("selectsFromLlmResponse", () => {
+  const segments = compactSegmentEvidence(defaultSegments());
+
+  it("preserves valid rich optional candidate fields", () => {
+    const result = selectsFromLlmResponse({
+      candidates: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_001",
+          src_in_us: 1000,
+          src_out_us: 5000,
+          role: "hero",
+          why_it_matches: "The wobbling first ride anchors the setup-to-payoff arc.",
+          confidence: 0.9,
+          eligible_beats: ["setup", "payoff"],
+          motif_tags: ["child_bike_attempt", "family_growth"],
+          editorial_signals: {
+            visual_tags: ["training_wheels", "outdoor_path"],
+            peak_type: "visual_peak",
+            peak_strength_score: 0.74,
+            motion_energy_score: 0.62,
+            audio_energy_score: 0.31,
+            semantic_cluster_id: "first_ride",
+            afterglow_score: 0.51,
+            reaction_intensity_score: 0.66,
+            surprise_signal: 0.2,
+            hope_signal: 0.8,
+            face_detected: true,
+            ignored_field: "drop me",
+          },
+          peak_signals: {
+            motion: 0.88,
+            audio_rms: 0.42,
+            speech_keyword: ["first ride"],
+            ignored_field: "drop me",
+          },
+          trim_hint: {
+            preferred_duration_us: 3_000_000,
+            min_duration_us: 2_000_000,
+            max_duration_us: 4_000_000,
+            interest_point_label: "first independent push",
+            source_center_us: 3_000_000,
+          },
+        },
+      ],
+    }, "test-project", segments);
+
+    const candidate = result.candidates[0] as unknown as Record<string, unknown>;
+    expect(candidate.eligible_beats).toEqual(["setup", "payoff"]);
+    expect(candidate.motif_tags).toEqual(["child_bike_attempt", "family_growth"]);
+    expect(candidate.editorial_signals).toEqual({
+      visual_tags: ["training_wheels", "outdoor_path"],
+      peak_type: "visual_peak",
+      peak_strength_score: 0.74,
+      motion_energy_score: 0.62,
+      audio_energy_score: 0.31,
+      afterglow_score: 0.51,
+      reaction_intensity_score: 0.66,
+      surprise_signal: 0.2,
+      hope_signal: 0.8,
+      semantic_cluster_id: "first_ride",
+      face_detected: true,
+    });
+    expect(candidate.peak_signals).toEqual({
+      motion: 0.88,
+      audio_rms: 0.42,
+      speech_keyword: ["first ride"],
+    });
+    expect(candidate.trim_hint).toEqual({
+      preferred_duration_us: 3_000_000,
+      min_duration_us: 2_000_000,
+      max_duration_us: 4_000_000,
+      interest_point_label: "first independent push",
+    });
+  });
+
+  it("drops invalid rich optional candidate fields without failing", () => {
+    const result = selectsFromLlmResponse({
+      candidates: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_001",
+          src_in_us: 1000,
+          src_out_us: 5000,
+          role: "support",
+          why_it_matches: "Still usable.",
+          confidence: 0.8,
+          eligible_beats: ["setup", 42, ""],
+          motif_tags: [false, "child_bike"],
+          editorial_signals: {
+            visual_tags: ["bike", 1],
+            peak_type: "not_a_peak",
+            peak_strength_score: 1.4,
+            motion_energy_score: -0.1,
+            audio_energy_score: "loud",
+            semantic_cluster_id: "",
+            face_detected: "yes",
+          },
+          peak_signals: {
+            motion: -1,
+            audio_rms: 2,
+            speech_keyword: ["cheer", ""],
+          },
+          trim_hint: {
+            preferred_duration_us: 0,
+            min_duration_us: -1,
+            max_duration_us: "long",
+            interest_point_label: "",
+          },
+        },
+      ],
+    }, "test-project", segments);
+
+    const candidate = result.candidates[0] as unknown as Record<string, unknown>;
+    expect(candidate.eligible_beats).toEqual(["setup"]);
+    expect(candidate.motif_tags).toEqual(["child_bike"]);
+    expect(candidate.editorial_signals).toEqual({ visual_tags: ["bike"] });
+    expect(candidate.peak_signals).toEqual({ speech_keyword: ["cheer"] });
+    expect(candidate.trim_hint).toBeUndefined();
+  });
+});
+
+describe("compactSegmentEvidence", () => {
+  it("forwards compact visual quality and interest point labels when present", () => {
+    const segments = compactSegmentEvidence([
+      {
+        segment_id: "SEG_VQ",
+        asset_id: "AST_VQ",
+        src_in_us: 0,
+        src_out_us: 5_000_000,
+        summary: "Wide golden-hour landscape.",
+        tags: ["landscape"],
+        visual_quality: {
+          scores: {
+            light_quality: 0.9,
+            composition_score: 0.8,
+            invalid_score: "high",
+          },
+          labels: {
+            lighting_style: ["golden_hour"],
+            composition_tags: ["wide_angle"],
+            empty: [],
+          },
+        },
+        interest_points: [
+          { frame_us: 2_000_000, label: "sun breaks over ridge", confidence: 0.8 },
+          { frame_us: 3_000_000, label: "", confidence: 0.5 },
+          { frame_us: 4_000_000, label: "camera tilts to valley", confidence: 0.7 },
+        ],
+      },
+    ]);
+
+    expect(segments[0]).toMatchObject({
+      visual_quality: {
+        scores: {
+          light_quality: 0.9,
+          composition_score: 0.8,
+        },
+        labels: {
+          lighting_style: ["golden_hour"],
+          composition_tags: ["wide_angle"],
+        },
+      },
+      interest_point_labels: ["sun breaks over ridge", "camera tilts to valley"],
+    });
+  });
+});
+
+describe("buildLlmTriagePrompt", () => {
+  it("includes rich optional selects output instructions", () => {
+    const projectDir = createProject("prompt-shape");
+    const segments = loadCompactSegmentEvidence(projectDir);
+    const prompt = buildLlmTriagePrompt({
+      brief: {
+        version: "1",
+        project_id: "test-project",
+        created_at: "2026-06-15T00:00:00Z",
+        project: {
+          id: "test-project",
+          title: "LLM triage fixture",
+          strategy: "message-first",
+          runtime_target_sec: 30,
+        },
+        message: {
+          primary: "Show the growth moment without over-explaining it.",
+          secondary: ["visual confidence", "warm ending"],
+        },
+        audience: {
+          primary: "family",
+        },
+        emotion_curve: ["setup", "attempt", "payoff"],
+        must_have: ["first ride", "family reaction"],
+        must_avoid: ["generic filler"],
+        autonomy: {
+          may_decide: ["candidate order"],
+          must_ask: ["change the message"],
+        },
+        resolved_assumptions: ["The edit should judge b-roll visually."],
+      },
+      segments,
+    });
+
+    expect(prompt).toContain('"eligible_beats":["opening","landscape_scale"]');
+    expect(prompt).toContain('"motif_tags":["mountain_landscape","aerial_scale"]');
+    expect(prompt).toContain('"editorial_signals"');
+    expect(prompt).toContain('"trim_hint":{"preferred_duration_us":3000000}');
+    expect(prompt).toContain("For each candidate, include eligible_beats");
+    expect(prompt).toContain("Evidence must include at least one specific visual observation");
+    expect(prompt).toContain("selection_notes must include notes about intended emotional progression");
+    expect(prompt).toContain("selection_notes must note the intended pacing approach");
   });
 });
 
