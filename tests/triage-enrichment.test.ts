@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agglomerativeClusters,
   enrichSelectsFromAnalysis,
+  parseFilmingTimestamp,
   refineClusters,
   type SegmentItem,
 } from "../runtime/agents/triage-enrichment.js";
@@ -349,6 +350,139 @@ describe("enrichSelectsFromAnalysis", () => {
 });
 
 describe("refineClusters", () => {
+  it("parses Blackmagic filename timestamps", () => {
+    const timestamp = parseFilmingTimestamp("Blackmagic Pocket Cinema Camera_1_2015-07-25_0535_C0006.mov");
+
+    expect(timestamp).toMatchObject({
+      dateKey: "20150725",
+      monthDayKey: "0725",
+      timeKey: "0535",
+      source: "filename",
+    });
+  });
+
+  it("uses 10-minute filming sessions as the primary cluster signal", async () => {
+    const refined = await refineClusters(
+      selects([
+        candidate("SEG_VINEYARD_1", {
+          asset_id: "AST_C0006",
+          motif_tags: ["wrong_motif_a"],
+          editorial_signals: { semantic_cluster_id: "llm_cluster_a" },
+        }),
+        candidate("SEG_VINEYARD_2", {
+          asset_id: "AST_C0009",
+          motif_tags: ["wrong_motif_b"],
+          editorial_signals: { semantic_cluster_id: "llm_cluster_b" },
+        }),
+        candidate("SEG_STREET", {
+          asset_id: "AST_C0018",
+          motif_tags: ["wrong_motif_c"],
+        }),
+      ]),
+      [
+        segment("SEG_VINEYARD_1", {
+          asset_id: "AST_C0006",
+          summary: "wide shot of a grape vineyard at sunrise",
+          tags: ["outdoor", "vineyard"],
+        }),
+        segment("SEG_VINEYARD_2", {
+          asset_id: "AST_C0009",
+          summary: "close view of grape vines in the same vineyard",
+          tags: ["outdoor", "vineyard"],
+        }),
+        segment("SEG_STREET", {
+          asset_id: "AST_C0018",
+          summary: "people crossing a city street",
+          tags: ["street", "people"],
+        }),
+      ],
+      {
+        assets: [
+          {
+            asset_id: "AST_C0006",
+            display_name: "Blackmagic Pocket Cinema Camera_1_2015-07-25_0535_C0006.mov",
+          },
+          {
+            asset_id: "AST_C0009",
+            display_name: "Blackmagic Pocket Cinema Camera_1_2015-07-25_0536_C0009.mov",
+          },
+          {
+            asset_id: "AST_C0018",
+            display_name: "Blackmagic Pocket Cinema Camera_1_2015-07-25_0600_C0018.mov",
+          },
+        ],
+      },
+    );
+
+    const clusterIds = refined.candidates.map((item) => item.editorial_signals?.semantic_cluster_id);
+    expect(clusterIds[0]).toBe("vineyard_0725_0535");
+    expect(clusterIds[1]).toBe("vineyard_0725_0535");
+    expect(clusterIds[2]).toBe("street_0725_0600");
+  });
+
+  it("uses file modification time for GoPro and DJI fallback session clustering", async () => {
+    const refined = await refineClusters(
+      selects([
+        candidate("SEG_GOPRO", { asset_id: "AST_GOPR" }),
+        candidate("SEG_DJI", { asset_id: "AST_DJI" }),
+      ]),
+      [
+        segment("SEG_GOPRO", {
+          asset_id: "AST_GOPR",
+          summary: "riders moving along a forest trail",
+          tags: ["trail", "forest"],
+        }),
+        segment("SEG_DJI", {
+          asset_id: "AST_DJI",
+          summary: "drone view above the same forest trail",
+          tags: ["drone", "trail"],
+        }),
+      ],
+      {
+        assets: [
+          {
+            asset_id: "AST_GOPR",
+            filename: "GOPR1234.MP4",
+            mtime_ms: Date.UTC(2026, 0, 2, 3, 4),
+          },
+          {
+            asset_id: "AST_DJI",
+            filename: "DJI_0001.MP4",
+            mtime_ms: Date.UTC(2026, 0, 2, 3, 8),
+          },
+        ],
+      },
+    );
+
+    const clusterIds = refined.candidates.map((item) => item.editorial_signals?.semantic_cluster_id);
+    expect(clusterIds[0]).toBe("forest_0102_0304");
+    expect(clusterIds[1]).toBe("forest_0102_0304");
+  });
+
+  it("falls back to motif tags when no filming timestamp is available", async () => {
+    const refined = await refineClusters(
+      selects([
+        candidate("SEG_001", { asset_id: "AST_001", motif_tags: ["campfire"] }),
+        candidate("SEG_002", { asset_id: "AST_002", motif_tags: ["river"] }),
+      ]),
+      [
+        segment("SEG_001", { asset_id: "AST_001", summary: "night fire", tags: ["outdoor"] }),
+        segment("SEG_002", { asset_id: "AST_002", summary: "river walking", tags: ["outdoor"] }),
+      ],
+      {
+        assets: [
+          { asset_id: "AST_001", filename: "clip_a.mov" },
+          { asset_id: "AST_002", filename: "clip_b.mov" },
+        ],
+      },
+    );
+
+    expect(refined.candidates.map((item) => item.editorial_signals?.semantic_cluster_id)).toEqual([
+      "campfire",
+      "river",
+    ]);
+  });
+
   it("assigns the same semantic_cluster_id to candidates with similar VLM summaries", async () => {
     mockSemanticEmbeddings({
       "person fishing by river": [1, 0, 0],

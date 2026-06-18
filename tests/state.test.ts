@@ -992,6 +992,56 @@ describe("gate computation via reconcile", () => {
     expect(result.reconciled_state).toBe("media_analyzed");
   });
 
+  it("allows active analysis_override when manually edited analysis fails validation", () => {
+    const tmpDir = createTempProject("analysis-override-invalid-analysis");
+    fs.rmSync(path.join(tmpDir, "04_plan"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "05_timeline"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "06_review"), { recursive: true });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+    segments.manual_edit_marker = true;
+    fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+
+    writeProjectState(tmpDir, {
+      version: 1,
+      project_id: "test",
+      current_state: "intent_locked",
+      analysis_override: {
+        status: "active",
+        approved_by: "operator",
+        approved_at: "2026-03-21T00:00:00Z",
+        artifact_version: "analysis-v1",
+      },
+      history: [],
+    });
+
+    const result = reconcile(tmpDir);
+    expect(result.gates.analysis_gate).toBe("partial_override");
+    expect(result.reconciled_state).toBe("media_analyzed");
+  });
+
+  it("blocks manually edited invalid analysis without analysis_override", () => {
+    const tmpDir = createTempProject("analysis-invalid-no-override");
+    fs.rmSync(path.join(tmpDir, "04_plan"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "05_timeline"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "06_review"), { recursive: true });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+    segments.manual_edit_marker = true;
+    fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+
+    writeProjectState(tmpDir, {
+      version: 1,
+      project_id: "test",
+      current_state: "intent_locked",
+      history: [],
+    });
+
+    const result = reconcile(tmpDir);
+    expect(result.gates.analysis_gate).toBe("blocked");
+    expect(result.reconciled_state).toBe("intent_locked");
+  });
+
   it("computes review_gate from review_report", () => {
     const tmpDir = createTempProject("review-gate");
     writeProjectState(tmpDir, {

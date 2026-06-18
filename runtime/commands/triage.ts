@@ -56,6 +56,7 @@ import {
 import {
   enrichSelectsFromAnalysis,
   refineClusters,
+  type ClusterAssetMetadata,
   type SegmentItem as EnrichmentSegmentItem,
 } from "../agents/triage-enrichment.js";
 import {
@@ -493,6 +494,7 @@ export async function runTriage(
   // 5.5 Materialize deterministic analysis signals, then canonicalize.
   const enrichmentSegments = loadAnalysisSegments(absDir);
   if (enrichmentSegments && hasCandidateArray(agentResult.selects)) {
+    const enrichmentAssets = loadAnalysisAssets(absDir);
     const enrichedSelects = enrichSelectsFromAnalysis(
       agentResult.selects as unknown as ArtifactSelectsCandidates,
       enrichmentSegments,
@@ -500,6 +502,7 @@ export async function runTriage(
     agentResult.selects = await refineClusters(
       enrichedSelects,
       enrichmentSegments,
+      { assets: enrichmentAssets, projectDir: absDir },
     ) as unknown as SelectsCandidates;
   }
   canonicalizeSelects(agentResult.selects, projectId);
@@ -609,6 +612,35 @@ function loadAnalysisSegments(projectDir: string): EnrichmentSegmentItem[] | und
     const parsed = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as { items?: unknown };
     if (!Array.isArray(parsed.items)) return undefined;
     return parsed.items.filter(isEnrichmentSegmentItem);
+  } catch {
+    return undefined;
+  }
+}
+
+function loadAnalysisAssets(projectDir: string): ClusterAssetMetadata[] | undefined {
+  const assetsPath = path.join(projectDir, "03_analysis/assets.json");
+  if (!fs.existsSync(assetsPath)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as { items?: unknown };
+    if (!Array.isArray(parsed.items)) return undefined;
+    return parsed.items.flatMap((item): ClusterAssetMetadata[] => {
+      if (!item || typeof item !== "object") return [];
+      const asset = item as {
+        asset_id?: unknown;
+        filename?: unknown;
+        display_name?: unknown;
+        source_locator?: unknown;
+      };
+      if (typeof asset.asset_id !== "string" || asset.asset_id.length === 0) return [];
+      return [
+        {
+          asset_id: asset.asset_id,
+          ...(typeof asset.filename === "string" ? { filename: asset.filename } : {}),
+          ...(typeof asset.display_name === "string" ? { display_name: asset.display_name } : {}),
+          ...(typeof asset.source_locator === "string" ? { source_locator: asset.source_locator } : {}),
+        },
+      ];
+    });
   } catch {
     return undefined;
   }

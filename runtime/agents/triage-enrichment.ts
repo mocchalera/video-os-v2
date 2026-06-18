@@ -1,3 +1,5 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { SegmentItem as BaseSegmentItem } from "../connectors/ffmpeg-segmenter.js";
 import type { Candidate, SelectsCandidates } from "../artifacts/types.js";
 
@@ -7,8 +9,39 @@ type ClusterEntry = {
   candidateIndex: number;
   summary: string;
 };
+type TimestampClusterEntry = {
+  candidateIndex: number;
+  segment: SegmentItem;
+  candidate: Candidate;
+  timestamp: FilmingTimestamp;
+};
 
 const DEFAULT_CLUSTER_SIMILARITY_THRESHOLD = 0.92;
+const TIMESTAMP_SESSION_GAP_MS = 10 * 60 * 1000;
+
+export interface ClusterAssetMetadata {
+  asset_id: string;
+  filename?: string;
+  display_name?: string;
+  source_locator?: string;
+  mtime?: string | number | Date;
+  mtime_ms?: number;
+  modified_at?: string;
+  source_mtime?: string | number | Date;
+}
+
+export interface RefineClusterOptions {
+  assets?: ClusterAssetMetadata[];
+  projectDir?: string;
+}
+
+export interface FilmingTimestamp {
+  dateKey: string;
+  monthDayKey: string;
+  timeKey: string;
+  epochMs: number;
+  source: "filename" | "mtime";
+}
 
 export type SegmentItem = BaseSegmentItem & {
   visual_quality?: {
@@ -55,9 +88,28 @@ export function enrichSelectsFromAnalysis(
 export async function refineClusters(
   selects: SelectsCandidates,
   segments: SegmentItem[],
+  options: RefineClusterOptions = {},
 ): Promise<SelectsCandidates> {
   const segmentsById = new Map(segments.map((segment) => [segment.segment_id, segment]));
+  const timestampClusters = buildTimestampClusterAssignments(selects, segmentsById, options);
+  if (timestampClusters.size > 0) {
+    const clusterableCandidates = selects.candidates.filter(
+      (candidate) => candidate.role !== "reject" && segmentsById.has(candidate.segment_id),
+    ).length;
+    if (timestampClusters.size === clusterableCandidates) {
+      return applyRefinedClusters(selects, segmentsById, timestampClusters);
+    }
+    const fallbackSelects = await refineClustersWithoutTimestamps(selects, segmentsById);
+    return applyRefinedClusters(fallbackSelects, segmentsById, timestampClusters);
+  }
 
+  return refineClustersWithoutTimestamps(selects, segmentsById);
+}
+
+async function refineClustersWithoutTimestamps(
+  selects: SelectsCandidates,
+  segmentsById: Map<string, SegmentItem>,
+): Promise<SelectsCandidates> {
   const hasMotifs = selects.candidates.some((c) => c.role !== "reject" && c.motif_tags && c.motif_tags.length > 0);
   if (hasMotifs) {
     return refineClustersByMotifTags(selects, segmentsById);
@@ -105,6 +157,216 @@ export async function refineClusters(
     console.warn(`[triage:semantic-clusters] embedding refinement skipped (${message})`);
     return applyFallbackClusters(selects, segmentsById);
   }
+}
+
+export function parseFilmingTimestamp(value: string): FilmingTimestamp | undefined {
+  const match = value.match(/(\d{4})-(\d{2})-(\d{2})[_\s-](\d{2})(\d{2})(?=\D|$)/);
+  if (!match) return undefined;
+  const [, yearText, monthText, dayText, hourText, minuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (!isValidDateTime(year, month, day, hour, minute)) return undefined;
+  return {
+    dateKey: `${yearText}${monthText}${dayText}`,
+    monthDayKey: `${monthText}${dayText}`,
+    timeKey: `${hourText}${minuteText}`,
+    epochMs: Date.UTC(year, month - 1, day, hour, minute),
+    source: "filename",
+  };
+}
+
+function buildTimestampClusterAssignments(
+  selects: SelectsCandidates,
+  segmentsById: Map<string, SegmentItem>,
+  options: RefineClusterOptions,
+): Map<number, string> {
+  const assetsById = new Map((options.assets ?? []).map((asset) => [asset.asset_id, asset]));
+  const entries: TimestampClusterEntry[] = [];
+  for (let candidateIndex = 0; candidateIndex < selects.candidates.length; candidateIndex += 1) {
+    const candidate = selects.candidates[candidateIndex];
+    if (candidate.role === "reject") continue;
+    const segment = segmentsById.get(candidate.segment_id);
+    if (!segment) continue;
+    const asset = assetsById.get(candidate.asset_id) ?? assetsById.get(segment.asset_id);
+    const timestamp = timestampForAsset(asset, segment, options.projectDir);
+    if (!timestamp) continue;
+    entries.push({ candidateIndex, segment, candidate, timestamp });
+  }
+  if (entries.length === 0) return new Map();
+
+  const sortedEntries = [...entries].sort((a, b) => {
+    if (a.timestamp.epochMs !== b.timestamp.epochMs) return a.timestamp.epochMs - b.timestamp.epochMs;
+    return a.candidateIndex - b.candidateIndex;
+  });
+
+  const sessions: TimestampClusterEntry[][] = [];
+  for (const entry of sortedEntries) {
+    const current = sessions[sessions.length - 1];
+    const previous = current?.[current.length - 1];
+    if (
+      previous &&
+      previous.timestamp.dateKey === entry.timestamp.dateKey &&
+      entry.timestamp.epochMs - previous.timestamp.epochMs <= TIMESTAMP_SESSION_GAP_MS
+    ) {
+      current.push(entry);
+    } else {
+      sessions.push([entry]);
+    }
+  }
+
+  const usedClusterIds = new Map<string, number>();
+  const clusterByCandidateIndex = new Map<number, string>();
+  for (const session of sessions) {
+    const firstTimestamp = session[0].timestamp;
+    const semanticName = timestampSessionSemanticName(session);
+    const baseClusterId = semanticName
+      ? `${semanticName}_${firstTimestamp.monthDayKey}_${firstTimestamp.timeKey}`
+      : `scene_${firstTimestamp.dateKey}_${firstTimestamp.timeKey}`;
+    const useCount = usedClusterIds.get(baseClusterId) ?? 0;
+    usedClusterIds.set(baseClusterId, useCount + 1);
+    const clusterId = useCount === 0 ? baseClusterId : `${baseClusterId}_${useCount + 1}`;
+    for (const entry of session) {
+      clusterByCandidateIndex.set(entry.candidateIndex, clusterId);
+    }
+  }
+  return clusterByCandidateIndex;
+}
+
+function timestampForAsset(
+  asset: ClusterAssetMetadata | undefined,
+  segment: SegmentItem,
+  projectDir: string | undefined,
+): FilmingTimestamp | undefined {
+  const sourceNames = assetSourceNames(asset, segment);
+  for (const name of sourceNames) {
+    const timestamp = parseFilmingTimestamp(name);
+    if (timestamp) return timestamp;
+  }
+  if (!asset || !sourceNames.some(isActionCameraFilename)) return undefined;
+  const mtimeDate = explicitMtimeDate(asset) ?? statMtimeDate(asset, projectDir);
+  return mtimeDate ? timestampFromDate(mtimeDate) : undefined;
+}
+
+function assetSourceNames(asset: ClusterAssetMetadata | undefined, segment: SegmentItem): string[] {
+  return [
+    asset?.display_name,
+    asset?.filename,
+    asset?.source_locator ? basenameLike(asset.source_locator) : undefined,
+    segment.asset_id,
+  ].filter(isNonEmptyString);
+}
+
+function basenameLike(value: string): string {
+  try {
+    if (value.startsWith("file://")) {
+      return path.basename(decodeURIComponent(new URL(value).pathname));
+    }
+  } catch {
+    // Fall back to raw basename parsing below.
+  }
+  return path.basename(value);
+}
+
+function isActionCameraFilename(value: string): boolean {
+  const basename = basenameLike(value).replace(/\.[^.]+$/, "").toUpperCase();
+  return /^(?:GOPR|GP\d{2}|DJI_)\d+/.test(basename);
+}
+
+function explicitMtimeDate(asset: ClusterAssetMetadata): Date | undefined {
+  return coerceMtimeDate(asset.mtime_ms) ??
+    coerceMtimeDate(asset.mtime) ??
+    coerceMtimeDate(asset.modified_at) ??
+    coerceMtimeDate(asset.source_mtime);
+}
+
+function statMtimeDate(asset: ClusterAssetMetadata, projectDir: string | undefined): Date | undefined {
+  for (const candidatePath of candidateAssetPaths(asset, projectDir)) {
+    try {
+      return fs.statSync(candidatePath).mtime;
+    } catch {
+      // Keep trying likely project-relative source locations.
+    }
+  }
+  return undefined;
+}
+
+function candidateAssetPaths(asset: ClusterAssetMetadata, projectDir: string | undefined): string[] {
+  const rawPaths = [asset.source_locator, asset.filename].filter(isNonEmptyString);
+  const candidates = new Set<string>();
+  for (const rawPath of rawPaths) {
+    const normalized = rawPath.startsWith("file://") ? new URL(rawPath).pathname : rawPath;
+    if (path.isAbsolute(normalized)) {
+      candidates.add(normalized);
+    } else if (projectDir) {
+      candidates.add(path.join(projectDir, normalized));
+      candidates.add(path.join(projectDir, "00_sources", normalized));
+      candidates.add(path.join(projectDir, "02_media", normalized));
+    }
+  }
+  return [...candidates];
+}
+
+function coerceMtimeDate(value: string | number | Date | undefined): Date | undefined {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date : undefined;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date : undefined;
+  }
+  return undefined;
+}
+
+function timestampFromDate(date: Date): FilmingTimestamp {
+  const year = String(date.getUTCFullYear()).padStart(4, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hour = String(date.getUTCHours()).padStart(2, "0");
+  const minute = String(date.getUTCMinutes()).padStart(2, "0");
+  return {
+    dateKey: `${year}${month}${day}`,
+    monthDayKey: `${month}${day}`,
+    timeKey: `${hour}${minute}`,
+    epochMs: Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)),
+    source: "mtime",
+  };
+}
+
+function timestampSessionSemanticName(entries: TimestampClusterEntry[]): string | undefined {
+  const combinedText = entries
+    .map((entry) => [
+      ...(entry.candidate.evidence ?? []),
+      entry.segment.summary,
+      ...(entry.segment.tags ?? []),
+    ].filter(isNonEmptyString).join(" "))
+    .filter(isNonEmptyString);
+  const tokens = new Set(combinedText.flatMap(tokenizeClusterTerms));
+  for (const term of TIMESTAMP_SCENE_TERMS) {
+    if (tokens.has(term)) return term;
+  }
+  const summaryName = clusterIdFromSummaries(combinedText);
+  return summaryName || undefined;
+}
+
+function isValidDateTime(year: number, month: number, day: number, hour: number, minute: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return false;
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return false;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    date.getUTCHours() === hour &&
+    date.getUTCMinutes() === minute
+  );
 }
 
 function refineClustersByMotifTags(
@@ -463,6 +725,32 @@ const CONTEXT_CLUSTER_TERMS = new Set([
   "trail",
   "workshop",
 ]);
+
+const TIMESTAMP_SCENE_TERMS = [
+  "vineyard",
+  "orchard",
+  "garden",
+  "forest",
+  "mountain",
+  "river",
+  "lake",
+  "campfire",
+  "camp",
+  "tent",
+  "kitchen",
+  "workshop",
+  "restaurant",
+  "street",
+  "beach",
+  "snow",
+  "field",
+  "trail",
+  "park",
+  "aerial",
+  "drone",
+  "interview",
+  "people",
+];
 
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length || a.length === 0) return 0;

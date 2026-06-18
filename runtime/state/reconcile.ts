@@ -694,13 +694,11 @@ function computeGates(
 ): GateStatus {
   let analysisGate: GateStatus["analysis_gate"] = "blocked";
   const analysis = computeAnalysisStatus(projectDir, doc.project_id || "");
+  const analysisOverrideActive = isAnalysisOverrideActiveForSnapshot(doc, snapshot) &&
+    analysisArtifactsExist(projectDir);
   if (analysis.qcStatus === "ready") {
     analysisGate = "ready";
-  } else if (
-    analysis.qcStatus === "partial" &&
-    doc.analysis_override?.status === "active" &&
-    doc.analysis_override.artifact_version === snapshot.hashes.analysis_artifact_version
-  ) {
+  } else if (analysisOverrideActive) {
     analysisGate = "partial_override";
   }
   if (isP1ManifestCoverageEnabled()) {
@@ -709,7 +707,7 @@ function computeGates(
       analysisGate = "ready";
     } else if (
       coverage?.status === "partial_override" &&
-      doc.analysis_override?.status === "active"
+      analysisOverrideActive
     ) {
       analysisGate = "partial_override";
     }
@@ -814,6 +812,21 @@ function computeGates(
     review_gate: reviewGate,
     packaging_gate: packagingGate,
   };
+}
+
+function isAnalysisOverrideActiveForSnapshot(doc: ProjectStateDoc, snapshot: ArtifactSnapshot): boolean {
+  return (
+    doc.analysis_override?.status === "active" &&
+    !!snapshot.hashes.analysis_artifact_version &&
+    doc.analysis_override.artifact_version === snapshot.hashes.analysis_artifact_version
+  );
+}
+
+function analysisArtifactsExist(projectDir: string): boolean {
+  return (
+    fs.existsSync(path.join(projectDir, "03_analysis/assets.json")) &&
+    fs.existsSync(path.join(projectDir, "03_analysis/segments.json"))
+  );
 }
 
 function computeAnalysisStatus(
