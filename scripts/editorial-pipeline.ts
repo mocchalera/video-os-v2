@@ -7,6 +7,7 @@
  *   npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render]
  */
 
+import { config as dotenvConfig } from "dotenv";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -28,18 +29,24 @@ import type { MarlinEventsArtifact } from "../runtime/connectors/marlin-types.js
 import { detectProjectBgm } from "../runtime/compiler/index.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
 import {
+  defaultMarlinQAVideoPath,
+  runMarlinQA,
+  summarizeMarlinQAReport,
+} from "../runtime/eval/marlin-qa.js";
+import {
   extractCraftKeyFrames,
   extractRepresentativeFrames,
 } from "../runtime/pipeline/stages/craft-frames.js";
 
 const execFileAsync = promisify(execFile);
 
-const USAGE = "Usage: npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render]";
+const USAGE = "Usage: npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render] [--qa]";
 
 export interface EditorialPipelineArgs {
   projectDir: string;
   skipFine: boolean;
   skipRender: boolean;
+  qa?: boolean;
 }
 
 interface SegmentsDoc {
@@ -51,6 +58,7 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
   let projectDir: string | undefined;
   let skipFine = false;
   let skipRender = false;
+  let qa = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -69,6 +77,10 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
       skipRender = true;
       continue;
     }
+    if (arg === "--qa") {
+      qa = true;
+      continue;
+    }
     if (arg.startsWith("--")) {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -84,6 +96,7 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
     projectDir: path.resolve(projectDir),
     skipFine,
     skipRender,
+    qa,
   };
 }
 
@@ -146,6 +159,11 @@ async function runRender(projectDir: string): Promise<void> {
     "--project",
     projectDir,
   ], path.resolve("."));
+}
+
+function loadLocalEnvForMarlinQA(): void {
+  dotenvConfig({ path: ".env.local" });
+  dotenvConfig();
 }
 
 export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise<void> {
@@ -233,6 +251,30 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
 
   console.log("[editorial] render");
   await runRender(projectDir);
+
+  if (args.qa) {
+    loadLocalEnvForMarlinQA();
+    console.log("[editorial] marlin qa");
+    try {
+      let reportPath = "";
+      const report = await runMarlinQA(
+        projectDir,
+        defaultMarlinQAVideoPath(projectDir),
+        brief,
+        {
+          onReportPath: (writtenPath) => {
+            reportPath = writtenPath;
+          },
+        },
+      );
+      console.log(`[editorial] marlin qa report: ${path.relative(process.cwd(), reportPath)}`);
+      for (const line of summarizeMarlinQAReport(report)) {
+        console.log(`[editorial] ${line}`);
+      }
+    } catch (error) {
+      console.warn(`[editorial] marlin qa failed; render remains complete: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 }
 
 export async function main(argv: string[] = process.argv): Promise<number> {
