@@ -14,6 +14,7 @@ import type {
 } from "../artifacts/types.js";
 import { validateArtifact } from "../artifacts/loaders.js";
 import { ensureCandidateIds, getCandidateRef } from "../compiler/candidate-ref.js";
+import { contextKnowledgePromptPayload } from "../context-knowledge.js";
 import type { CraftDirective } from "../compiler/types.js";
 import type { KeyFrame } from "../pipeline/stages/craft-frames.js";
 import {
@@ -301,6 +302,7 @@ function targetDurationSec(brief: CreativeBrief, bgmDurationSec: number | null):
 
 function compactBrief(brief: CreativeBrief, bgmDurationSec: number | null): Record<string, unknown> {
   const record = brief as Record<string, unknown>;
+  const contextKnowledge = contextKnowledgePromptPayload(brief);
   return {
     project_id: projectIdFromBrief(brief),
     title: brief.project?.title,
@@ -315,6 +317,7 @@ function compactBrief(brief: CreativeBrief, bgmDurationSec: number | null): Reco
     caption_policy: brief.caption_policy,
     audio_policy: brief.audio_policy,
     editorial: brief.editorial,
+    ...(contextKnowledge ? { context_knowledge: contextKnowledge } : {}),
   };
 }
 
@@ -490,6 +493,7 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
     "- Assign each selected clip to one or more exact beat ids.",
     "- Choose rhythm per beat and explain why each clip was selected.",
     "- Cite Marlin event ids or representative frame paths as evidence.",
+    "- Use context_knowledge to correct likely subject, food/product, person, terminology, or place misidentifications in Marlin text.",
     "- Do not invent clips, visual facts, source ranges, or new schema fields.",
     "",
     "## CRITICAL: Beat duration rules",
@@ -718,6 +722,7 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
     "Pass 2 is fine-cut refinement: inspect only selected clips in detail and decide exactly how they should cut.",
     "Do not add candidates outside the Pass 1 selects. If a clip is weak, flag it in revision_notes or move it to fallback, but keep references inside the selected pool.",
     "Use Marlin event ids for in/out rationale whenever possible.",
+    "Use context_knowledge to resolve ambiguous visual subjects or local terminology before changing selections or craft.",
     "",
     "## Creative brief",
     JSON.stringify(compactBrief(input.brief, input.bgmDurationSec), null, 2),
@@ -1290,6 +1295,8 @@ function sanitizeCraft(value: unknown): CraftDirective | undefined {
   if (beatSync !== undefined) out.beat_sync = beatSync;
   const holdDurationBias = numberValue(raw.hold_duration_bias);
   if (holdDurationBias !== undefined && holdDurationBias > 0) out.hold_duration_bias = holdDurationBias;
+  const flashCut = typeof raw.flash_cut === "boolean" ? raw.flash_cut : undefined;
+  if (flashCut !== undefined) out.flash_cut = flashCut;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 

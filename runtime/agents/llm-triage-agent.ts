@@ -13,6 +13,7 @@ import { loadCreativeBrief } from "../artifacts/loaders.js";
 import type { CreativeBrief, EditorialSummary } from "../artifacts/types.js";
 import { callGeminiMultimodal, type GeminiInlineImageInput } from "../connectors/gemini-json.js";
 import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
+import { contextKnowledgePromptPayload } from "../context-knowledge.js";
 import { parseLlmResponse } from "./llm-json.js";
 import type {
   SelectCandidate,
@@ -531,6 +532,7 @@ function buildBatchPromptLines(batch: TriageBatchInfo | undefined): string[] {
 }
 
 export function buildLlmTriagePrompt(input: TriagePromptInput): string {
+  const contextKnowledge = contextKnowledgePromptPayload(input.brief);
   const briefPayload = {
     project_id: input.brief.project_id,
     title: input.brief.project.title,
@@ -542,6 +544,7 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     },
     must_have: briefMustHave(input.brief),
     emotion_curve: input.brief.emotion_curve,
+    ...(contextKnowledge ? { context_knowledge: contextKnowledge } : {}),
   };
 
   return [
@@ -566,6 +569,7 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- Use `place_hint` to identify location-specific content for the brief.",
     "- Use `extracted_text` to identify signage, menus, or labels relevant to the brief.",
     "- Use `aesthetic_notes` to prefer visually strong clips.",
+    "- Use `context_knowledge` to correct likely subject, food/product, person, terminology, or place misidentifications in scene text.",
     "- Do not discard dense repetition just because shots are similar: montage clusters can be important. Sample them proportionally and avoid sparse coverage.",
     "- Reject technically unusable footage: assign role='reject' with rejection_reason for clips that are out of focus, have severe camera shake, are mostly black/overexposed, or show no identifiable subject.",
     "- If `visual_quality.scores.focus_sharpness` < 0.3, reject as technically unusable.",

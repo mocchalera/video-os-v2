@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
+import { parse as parseYaml } from "yaml";
 import { resolvePolicy } from "../../policy-resolver.js";
 import type { MarlinAssetEvents, MarlinEventsArtifact, MarlinFn, MarlinModelRecord } from "../../connectors/marlin-types.js";
 import { createMarlinWorkerClient } from "../../connectors/marlin-local.js";
@@ -9,6 +10,11 @@ import {
   MARLIN_CONNECTOR_VERSION,
   normalizeMarlinAssetEvents,
 } from "../../connectors/marlin-normalize.js";
+import {
+  applyContextKnowledgeToSummary,
+  contextKnowledgeFromBrief,
+  type ContextKnowledge,
+} from "../../context-knowledge.js";
 import { atomicWriteJson, readJsonIfExists } from "./_util.js";
 import { prepareMarlinProxy } from "./marlin-proxy.js";
 
@@ -186,6 +192,7 @@ export function applyMarlinEventsToSegments(projectDir: string, artifact: Marlin
   if (!segments?.items || segments.items.length === 0) {
     return false;
   }
+  const contextKnowledge = loadBriefContextKnowledge(absProjectDir);
 
   const eventsByAsset = new Map(artifact.items.map((item) => [item.asset_id, item]));
   let changed = false;
@@ -193,7 +200,7 @@ export function applyMarlinEventsToSegments(projectDir: string, artifact: Marlin
     const assetEvents = eventsByAsset.get(segment.asset_id);
     if (!assetEvents) return segment;
 
-    const scene = normalizeScene(assetEvents.scene);
+    const scene = applyContextKnowledgeToSummary(normalizeScene(assetEvents.scene), contextKnowledge);
     const peaks = marlinPeaksForSegment(segment, assetEvents);
     const peak = peaks[0] ?? null;
     if (!scene && !peak) return segment;
@@ -541,6 +548,17 @@ function normalizeTag(value: string): string {
 
 function normalizeScene(scene: string | undefined): string {
   return scene?.trim().replace(/\s+/g, " ") ?? "";
+}
+
+function loadBriefContextKnowledge(projectDir: string): ContextKnowledge | undefined {
+  const briefPath = path.join(projectDir, "01_intent", "creative_brief.yaml");
+  if (!fs.existsSync(briefPath)) return undefined;
+  try {
+    const parsed = parseYaml(fs.readFileSync(briefPath, "utf-8"));
+    return contextKnowledgeFromBrief(parsed);
+  } catch {
+    return undefined;
+  }
 }
 
 function marlinSummaryConfidence(peaks: MarlinSegmentPeak[]): number {

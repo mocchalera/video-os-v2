@@ -233,6 +233,66 @@
       "type": "string",
       "description": "Free-text hint describing what the footage contains, used to improve VLM recognition accuracy (e.g. 'child learning to ride a bicycle')"
     },
+    "context_knowledge": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "object",
+          "properties": {
+            "primary_location": { "type": "string" },
+            "specific_places": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "subjects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "role": { "type": "string" },
+              "appearance": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "key_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "significance": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "cultural_context": { "type": "string" },
+        "terminology": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "term": { "type": "string" },
+              "meaning": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "editorial": {
       "type": "object",
       "properties": {
