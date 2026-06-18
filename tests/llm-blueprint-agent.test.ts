@@ -247,6 +247,8 @@ describe("createLlmBlueprintAgent", () => {
     expect(prompt).toContain("Show the first ride without over-explaining it.");
     expect(prompt).toContain("cand_hook");
     expect(prompt).toContain("Use warm, restrained pacing");
+    expect(prompt).toContain("For each beat, choose an in_point technique");
+    expect(prompt).toContain('"transition_out": "dissolve"');
 
     const validate = createValidator("edit-blueprint.schema.json");
     expect(validate(result.blueprint), JSON.stringify(validate.errors, null, 2)).toBe(true);

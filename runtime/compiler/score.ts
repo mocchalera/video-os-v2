@@ -15,6 +15,7 @@ import type {
 import { getSkillScoreAdjustment } from "../editorial/skill-registry.js";
 import type { BgmSection } from "./transition-types.js";
 import type { BeatEvent } from "../media/bgm-analyzer.js";
+import { getCandidateRef } from "./candidate-ref.js";
 
 // ── BGM-aware scoring context ───────────────────────────────────────
 
@@ -106,6 +107,16 @@ export function scoreCandidates(
     return eligibleBeats.some((eb) => beatText.includes(eb.toLowerCase()));
   }
 
+  function candidateMatchesPlan(candidate: Candidate, beat: NormalizedBeat): boolean {
+    const plan = beat.candidate_plan;
+    if (!plan) return false;
+    const refs = new Set([
+      plan.primary_candidate_ref,
+      ...(plan.fallback_candidate_refs ?? []),
+    ].filter((ref): ref is string => typeof ref === "string" && ref.length > 0));
+    return refs.has(getCandidateRef(candidate)) || refs.has(candidate.segment_id);
+  }
+
   // Pre-compute global motif usage counts for reuse penalty
   const motifCounts = new Map<string, number>();
   for (const c of nonReject) {
@@ -121,7 +132,9 @@ export function scoreCandidates(
   for (const beat of normalized.beats) {
     const assets = new Set<string>();
     for (const c of nonReject) {
+      const isPlanned = candidateMatchesPlan(c, beat);
       if (
+        !isPlanned &&
         c.eligible_beats &&
         c.eligible_beats.length > 0 &&
         !candidateMatchesBeat(c.eligible_beats, beat)
@@ -140,7 +153,9 @@ export function scoreCandidates(
     const scored: ScoredCandidate[] = [];
 
     for (const candidate of nonReject) {
+      const isPlanned = candidateMatchesPlan(candidate, beat);
       if (
+        !isPlanned &&
         candidate.eligible_beats &&
         candidate.eligible_beats.length > 0 &&
         !candidateMatchesBeat(candidate.eligible_beats, beat)

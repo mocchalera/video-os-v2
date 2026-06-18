@@ -63,6 +63,13 @@ export function assemble(
     typeof options?.maxDurationFrames === "number" && options.maxDurationFrames > 0
       ? Math.floor(options.maxDurationFrames)
       : undefined;
+  const beatBudgetFrames = buildBeatBudgetFrames(normalized.beats, maxDurationFrames);
+  const reservedCandidateOwner = buildBeatCandidateReservations(
+    normalized.beats,
+    rankedTable,
+    layout,
+    maxDurationFrames,
+  );
   let durationCapDroppedClips = 0;
 
   // Track used segments to apply adjacency penalty and prevent overuse
@@ -80,6 +87,7 @@ export function assemble(
       break;
     }
 
+    const beatBudget = beatBudgetFrames.get(beat.beat_id) ?? beat.target_duration_frames;
     const beatCandidates = rankedTable.get(beat.beat_id) ?? [];
 
     // Add beat boundary marker
@@ -89,12 +97,20 @@ export function assemble(
       label: `${beat.beat_id}: ${beat.label}`,
     });
 
+    if (beatBudget <= 0) {
+      continue;
+    }
+
     // Collect candidates by role for this beat, applying adjacency penalty
     const byRole = groupByRole(beatCandidates);
 
     if (layout === "single") {
-      const visualCandidates = getV1FirstCandidates(byRole);
-      const beatEndFrame = currentFrame + beat.target_duration_frames;
+      const visualCandidates = candidatesForCurrentBeat(
+        getV1FirstCandidates(byRole),
+        beat.beat_id,
+        reservedCandidateOwner,
+      );
+      const beatEndFrame = currentFrame + beatBudget;
       let v1Frame = currentFrame;
 
       while (v1Frame < beatEndFrame) {
@@ -129,8 +145,13 @@ export function assemble(
       }
     } else {
       // V1: hero clips (always pick best 1)
-      const heroClip = pickBest(
+      const heroCandidates = candidatesForCurrentBeat(
         byRole.get("hero") ?? [],
+        beat.beat_id,
+        reservedCandidateOwner,
+      );
+      const heroClip = pickBest(
+        heroCandidates,
         usedClips,
         prevV1Asset,
         params.adjacency_penalty,
@@ -140,9 +161,9 @@ export function assemble(
           heroClip,
           beat.beat_id,
           currentFrame,
-          beat.target_duration_frames,
+          beatBudget,
           ++clipCounter,
-          getRunnersUp(byRole.get("hero") ?? [], heroClip, usedClips),
+          getRunnersUp(heroCandidates, heroClip, usedClips),
           usPerFrame,
         );
         if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
@@ -165,6 +186,11 @@ export function assemble(
         if (diff !== 0) return diff;
         return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
       });
+      const availableSupportCandidates = candidatesForCurrentBeat(
+        supportCandidates,
+        beat.beat_id,
+        reservedCandidateOwner,
+      );
 
       if (isGuide) {
         // Guide mode: place available support/texture clips as V2 inserts,
@@ -176,13 +202,13 @@ export function assemble(
         // ended and the run is capped at the beat boundary; surplus
         // candidates are left unused (and stay available to later beats).
         const allSupport = pickAvailable(
-          supportCandidates,
+          availableSupportCandidates,
           usedClips,
           prevV2Asset,
           params.adjacency_penalty,
           clusterContinuity,
         );
-        const beatEndFrame = currentFrame + beat.target_duration_frames;
+        const beatEndFrame = currentFrame + beatBudget;
         let v2Frame = currentFrame;
         for (const sc of allSupport) {
           if (v2Frame >= beatEndFrame) break; // keep V2 inserts inside the beat
@@ -208,7 +234,7 @@ export function assemble(
       } else {
         // Strict mode: pick best 1
         const supportClip = pickBest(
-          supportCandidates,
+          availableSupportCandidates,
           usedClips,
           prevV2Asset,
           params.adjacency_penalty,
@@ -218,9 +244,9 @@ export function assemble(
             supportClip,
             beat.beat_id,
             currentFrame,
-            beat.target_duration_frames,
+            beatBudget,
             ++clipCounter,
-            getRunnersUp(supportCandidates, supportClip, usedClips),
+            getRunnersUp(availableSupportCandidates, supportClip, usedClips),
             usPerFrame,
           );
           if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
@@ -237,8 +263,13 @@ export function assemble(
     // A1: dialogue clips
     if (isGuide) {
       // Guide mode: place ALL available dialogue clips
-      const allDialogue = pickAvailable(
+      const dialogueCandidates = candidatesForCurrentBeat(
         byRole.get("dialogue") ?? [],
+        beat.beat_id,
+        reservedCandidateOwner,
+      );
+      const allDialogue = pickAvailable(
+        dialogueCandidates,
         usedClips,
         null,
         0,
@@ -249,7 +280,7 @@ export function assemble(
           sc,
           beat.beat_id,
           currentFrame,
-          beat.target_duration_frames,
+          beatBudget,
           ++clipCounter,
           { segment_ids: [], candidate_refs: [] },
           usPerFrame,
@@ -263,8 +294,13 @@ export function assemble(
         }
       }
     } else {
-      const dialogueClip = pickBest(
+      const dialogueCandidates = candidatesForCurrentBeat(
         byRole.get("dialogue") ?? [],
+        beat.beat_id,
+        reservedCandidateOwner,
+      );
+      const dialogueClip = pickBest(
+        dialogueCandidates,
         usedClips,
         null,
         0,
@@ -274,9 +310,9 @@ export function assemble(
           dialogueClip,
           beat.beat_id,
           currentFrame,
-          beat.target_duration_frames,
+          beatBudget,
           ++clipCounter,
-          getRunnersUp(byRole.get("dialogue") ?? [], dialogueClip, usedClips),
+          getRunnersUp(dialogueCandidates, dialogueClip, usedClips),
           usPerFrame,
         );
         if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
@@ -290,8 +326,13 @@ export function assemble(
 
     if (layout === "multi") {
       // Transition clips go to V2 as well
-      const transitionClip = pickBest(
+      const transitionCandidates = candidatesForCurrentBeat(
         byRole.get("transition") ?? [],
+        beat.beat_id,
+        reservedCandidateOwner,
+      );
+      const transitionClip = pickBest(
+        transitionCandidates,
         usedClips,
         prevV2Asset,
         params.adjacency_penalty,
@@ -301,9 +342,9 @@ export function assemble(
           transitionClip,
           beat.beat_id,
           currentFrame,
-          beat.target_duration_frames,
+          beatBudget,
           ++clipCounter,
-          getRunnersUp(byRole.get("transition") ?? [], transitionClip, usedClips),
+          getRunnersUp(transitionCandidates, transitionClip, usedClips),
           usPerFrame,
         );
         if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
@@ -331,9 +372,9 @@ export function assemble(
         (max, c) => Math.max(max, c.timeline_duration_frames),
         0,
       );
-      currentFrame += Math.max(maxClipDuration, beat.target_duration_frames);
+      currentFrame += Math.max(maxClipDuration, beatBudget);
     } else {
-      currentFrame += beat.target_duration_frames;
+      currentFrame += beatBudget;
     }
     if (maxDurationFrames != null && currentFrame >= maxDurationFrames) {
       currentFrame = maxDurationFrames;
@@ -586,6 +627,118 @@ function dropClipsBeyondCap(clips: TimelineClip[], maxDurationFrames: number): n
     clips.splice(0, clips.length, ...keep);
   }
   return dropped;
+}
+
+function buildBeatBudgetFrames(
+  beats: NormalizedData["beats"],
+  maxDurationFrames: number | undefined,
+): Map<string, number> {
+  const budgets = new Map<string, number>();
+  const totalBeatFrames = beats.reduce(
+    (sum, beat) => sum + Math.max(0, beat.target_duration_frames),
+    0,
+  );
+
+  if (maxDurationFrames == null || totalBeatFrames <= maxDurationFrames || totalBeatFrames <= 0) {
+    for (const beat of beats) {
+      budgets.set(beat.beat_id, beat.target_duration_frames);
+    }
+    return budgets;
+  }
+
+  const scale = maxDurationFrames / totalBeatFrames;
+  const positiveBeatCount = beats.filter((beat) => beat.target_duration_frames > 0).length;
+  const canGiveEveryPositiveBeat = maxDurationFrames >= positiveBeatCount;
+  const scaled = beats.map((beat, index) => {
+    const raw = Math.max(0, beat.target_duration_frames) * scale;
+    let frames = Math.floor(raw);
+    if (canGiveEveryPositiveBeat && beat.target_duration_frames > 0 && frames === 0) {
+      frames = 1;
+    }
+    return {
+      beat,
+      index,
+      frames,
+      remainder: raw - Math.floor(raw),
+    };
+  });
+
+  let allocated = scaled.reduce((sum, item) => sum + item.frames, 0);
+  if (allocated > maxDurationFrames) {
+    const reducible = [...scaled].sort((a, b) =>
+      b.frames - a.frames || a.remainder - b.remainder || a.index - b.index
+    );
+    for (const item of reducible) {
+      const floor = canGiveEveryPositiveBeat && item.beat.target_duration_frames > 0 ? 1 : 0;
+      while (allocated > maxDurationFrames && item.frames > floor) {
+        item.frames -= 1;
+        allocated -= 1;
+      }
+      if (allocated <= maxDurationFrames) break;
+    }
+  }
+
+  let remaining = maxDurationFrames - allocated;
+  if (remaining > 0) {
+    const byRemainder = [...scaled].sort((a, b) =>
+      b.remainder - a.remainder || a.index - b.index
+    );
+    let cursor = 0;
+    while (remaining > 0 && byRemainder.length > 0) {
+      byRemainder[cursor % byRemainder.length].frames += 1;
+      remaining -= 1;
+      cursor += 1;
+    }
+  }
+
+  for (const item of scaled) {
+    budgets.set(item.beat.beat_id, item.frames);
+  }
+  return budgets;
+}
+
+function buildBeatCandidateReservations(
+  beats: NormalizedData["beats"],
+  rankedTable: RankedCandidateTable,
+  layout: TrackLayout,
+  maxDurationFrames: number | undefined,
+): Map<string, string> {
+  const reservedOwner = new Map<string, string>();
+  if (maxDurationFrames == null) return reservedOwner;
+
+  for (const beat of [...beats].reverse()) {
+    const scored = rankedTable.get(beat.beat_id) ?? [];
+    const candidates = layout === "single"
+      ? getV1FirstCandidates(groupByRole(scored))
+      : scored;
+    const reserved = candidates.find((candidate) =>
+      !reservedOwner.has(clipUsageKey(candidate.candidate))
+    );
+    if (reserved) {
+      reservedOwner.set(clipUsageKey(reserved.candidate), beat.beat_id);
+    }
+  }
+
+  return reservedOwner;
+}
+
+function candidatesForCurrentBeat(
+  candidates: ScoredCandidate[],
+  beatId: string,
+  reservedOwner: Map<string, string>,
+): ScoredCandidate[] {
+  if (reservedOwner.size === 0) return candidates;
+  return candidates
+    .filter((candidate) => {
+      const owner = reservedOwner.get(clipUsageKey(candidate.candidate));
+      return owner == null || owner === beatId;
+    })
+    .sort((a, b) => {
+      const aReserved = reservedOwner.get(clipUsageKey(a.candidate)) === beatId;
+      const bReserved = reservedOwner.get(clipUsageKey(b.candidate)) === beatId;
+      if (aReserved !== bReserved) return aReserved ? -1 : 1;
+      return 0;
+    });
 }
 
 // ── Cluster continuity reorder ───────────────────────────────────────

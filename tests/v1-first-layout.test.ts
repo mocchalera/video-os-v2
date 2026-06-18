@@ -105,7 +105,7 @@ describe("V1-first track layout", () => {
     }
   });
 
-  it("drops clips that would exceed maxDurationFrames without placing partial clips", () => {
+  it("scales a single over-cap beat before placing clips", () => {
     const normalized = makeNormalized(40);
     const table: RankedCandidateTable = new Map([
       [
@@ -130,11 +130,81 @@ describe("V1-first track layout", () => {
     );
 
     const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
-    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_hero", "seg_support"]);
-    expect(v1.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 10]);
-    expect(v1.clips.every((clip) => clip.timeline_duration_frames === 10)).toBe(true);
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_hero", "seg_support", "seg_texture"]);
+    expect(v1.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 10, 20]);
+    expect(v1.clips.map((clip) => clip.timeline_duration_frames)).toEqual([10, 10, 5]);
     expect(Math.max(...v1.clips.map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames))).toBeLessThanOrEqual(25);
-    expect(logs).toEqual(["Duration cap dropped 1 clip(s) beyond 25 frames"]);
+    expect(logs).toEqual([]);
+  });
+
+  it("proportionally distributes maxDurationFrames across beats before placement", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 100 },
+      { beat_id: "b02", target_duration_frames: 100 },
+      { beat_id: "b03", target_duration_frames: 100 },
+    ]);
+    const table: RankedCandidateTable = new Map([
+      ["b01", [score("seg_b01", "AST_A", "support", 0.9, "b01")]],
+      ["b02", [score("seg_b02", "AST_B", "support", 0.9, "b02")]],
+      ["b03", [score("seg_b03", "AST_C", "support", 0.9, "b03")]],
+    ]);
+    const logs: string[] = [];
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only", maxDurationFrames: 180, log: (message) => logs.push(message) },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.beat_id)).toEqual(["b01", "b02", "b03"]);
+    expect(v1.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 60, 120]);
+    expect(Math.max(...v1.clips.map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames))).toBeLessThanOrEqual(180);
+    expect(logs).toEqual([]);
+  });
+
+  it("reserves capped candidates so early beats cannot consume later beats entirely", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 100 },
+      { beat_id: "b02", target_duration_frames: 100 },
+      { beat_id: "b03", target_duration_frames: 100 },
+    ]);
+    const table: RankedCandidateTable = new Map([
+      [
+        "b01",
+        [
+          score("seg_b03", "AST_C", "support", 1.0, "b01"),
+          score("seg_b02", "AST_B", "support", 0.9, "b01"),
+          score("seg_b01", "AST_A", "support", 0.8, "b01"),
+        ],
+      ],
+      [
+        "b02",
+        [
+          score("seg_b03", "AST_C", "support", 1.0, "b02"),
+          score("seg_b02", "AST_B", "support", 0.9, "b02"),
+        ],
+      ],
+      ["b03", [score("seg_b03", "AST_C", "support", 1.0, "b03")]],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only", maxDurationFrames: 90 },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.beat_id)).toEqual(["b01", "b02", "b03"]);
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_b01", "seg_b02", "seg_b03"]);
   });
 
   it("multi mode preserves hero on V1 and support/texture on V2", () => {

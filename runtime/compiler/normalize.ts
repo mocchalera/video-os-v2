@@ -28,6 +28,14 @@ export function normalize(
     story_role: b.story_role,
     craft: b.craft ? { ...b.craft } : undefined,
     skill_hints: b.skill_hints ? [...b.skill_hints] : undefined,
+    candidate_plan: b.candidate_plan
+      ? {
+          primary_candidate_ref: b.candidate_plan.primary_candidate_ref,
+          fallback_candidate_refs: b.candidate_plan.fallback_candidate_refs
+            ? [...b.candidate_plan.fallback_candidate_refs]
+            : undefined,
+        }
+      : undefined,
   }));
 
   const roleQuotas = computeRoleQuotas(beats);

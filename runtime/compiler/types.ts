@@ -408,6 +408,7 @@ export interface NormalizedBeat {
   story_role?: "hook" | "setup" | "experience" | "closing";
   craft?: CraftDirective;
   skill_hints?: string[];
+  candidate_plan?: CandidatePlan;
 }
 
 export interface RoleQuotas {

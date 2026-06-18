@@ -19,6 +19,7 @@ import type {
   AdjacencyAnalysis,
   TimelineTransition,
   TransitionType,
+  TransitionEffects,
   BgmAnalysis,
   AdjacencyFeatures,
   PeakType,
@@ -377,6 +378,17 @@ function metadataOnlyCraftTransition(transition: CraftTransition | undefined): b
   return transition === "j_cut" || transition === "l_cut" || transition === "match_cut";
 }
 
+function defaultCraftTransitionType(transition: CraftTransition | undefined): TransitionType | undefined {
+  switch (transition) {
+    case "dissolve":
+      return "crossfade";
+    case "dip_to_black":
+      return "fade_to_black";
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Find the closest beat/downbeat in the BGM grid to a given frame position.
  * Returns distance in frames, or undefined if no BGM analysis available.
@@ -516,6 +528,9 @@ export function adjacencyDecide(
     const rightBeat = beatMap.get(rightClip.beat_id);
     const craftTransition = resolvePairCraftTransition(leftBeat, rightBeat);
     const preferredCraftSkillId = craftTransitionToSkillId(craftTransition?.transition);
+    const preferredCraftCard = preferredCraftSkillId
+      ? cards.find((card) => card.id === preferredCraftSkillId)
+      : undefined;
 
     const leftSegEvidence = opts.segmentEvidenceIndex?.get(leftClip.segment_id);
     const rightSegEvidence = opts.segmentEvidenceIndex?.get(rightClip.segment_id);
@@ -618,6 +633,7 @@ export function adjacencyDecide(
     let minScoreThreshold = 0.3;
     let selectedSkillScore = 0;
     let selectedSkillId: string | null = null;
+    let activeTransitionEffects: TransitionEffects | undefined;
 
     // Fallback resolution: walk fallback_order[] when below threshold or viability failed
     const resolveFallback = (
@@ -672,6 +688,7 @@ export function adjacencyDecide(
       selectedSkillId = selectedCard.card.id;
       selectedSkillScore = selectedCard.score;
       minScoreThreshold = selectedCard.threshold;
+      activeTransitionEffects = selectedCard.card.pipeline_effects;
     } else if (selectedCard && belowThreshold) {
       // Below threshold — try fallback chain
       const fb = resolveFallback(selectedCard.card, selectedCard.card.id);
@@ -704,6 +721,26 @@ export function adjacencyDecide(
       belowThreshold = true;
     }
 
+    const forcedCraftTransitionType = defaultCraftTransitionType(craftTransition?.transition);
+    if (craftTransition && forcedCraftTransitionType) {
+      const craftEffects = preferredCraftCard?.pipeline_effects;
+      transitionType = craftEffects?.transition_type ?? forcedCraftTransitionType;
+      appliedSkillId = preferredCraftCard?.id ?? `craft.${craftTransition.transition}`;
+      confidence = Math.max(confidence, 0.8);
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = preferredCraftCard ? resolveSkillThreshold(preferredCraftCard) : 0;
+      degradedFromSkillId = null;
+      belowThreshold = false;
+      fallbackParams = {};
+      activeTransitionEffects = craftEffects ?? {
+        transition_type: forcedCraftTransitionType,
+        crossfade_sec: forcedCraftTransitionType === "crossfade" || forcedCraftTransitionType === "fade_to_black"
+          ? 0.5
+          : undefined,
+      };
+    }
+
     const craftForcesCut = craftTransition?.transition === "hard_cut" ||
       metadataOnlyCraftTransition(craftTransition?.transition);
     if (craftForcesCut && craftTransition) {
@@ -718,12 +755,13 @@ export function adjacencyDecide(
       degradedFromSkillId = null;
       belowThreshold = false;
       fallbackParams = {};
+      activeTransitionEffects = undefined;
     }
 
     // BGM beat snap — respect snap_anchor for windowed transitions
     let snapResult: ReturnType<typeof findBeatSnapTarget> | undefined;
-    if (selectedCard && !belowThreshold && !craftForcesCut) {
-      const effects = selectedCard.card.pipeline_effects;
+    if (activeTransitionEffects && !belowThreshold && !craftForcesCut) {
+      const effects = activeTransitionEffects;
       const preferDownbeat = effects.beat_snap === "downbeat";
       const snapAnchor = effects.snap_anchor ?? "cut_frame";
 
@@ -784,8 +822,8 @@ export function adjacencyDecide(
     const params: Record<string, unknown> = {};
     let hasParams = false;
 
-    if (selectedCard && !belowThreshold && selectedCard.card.pipeline_effects.crossfade_sec) {
-      params.crossfade_sec = selectedCard.card.pipeline_effects.crossfade_sec;
+    if (!belowThreshold && activeTransitionEffects?.crossfade_sec) {
+      params.crossfade_sec = activeTransitionEffects.crossfade_sec;
       hasParams = true;
     }
 

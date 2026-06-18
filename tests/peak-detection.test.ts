@@ -29,6 +29,43 @@ function candidate(overrides: Partial<Candidate>): Candidate {
 }
 
 describe("peak detection scoring", () => {
+  it("keeps candidate_plan refs eligible even when eligible_beats text does not match the beat", () => {
+    const normalized: NormalizedData = {
+      project_id: "p",
+      project_title: "P",
+      total_duration_frames: 120,
+      role_quotas: { hero: 1, support: 0, transition: 0, texture: 0, dialogue: 0 },
+      beats: [{
+        beat_id: "b01",
+        label: "closing impression",
+        target_duration_frames: 120,
+        required_roles: ["hero"],
+        preferred_roles: [],
+        purpose: "resolve",
+        candidate_plan: {
+          primary_candidate_ref: "cand_planned",
+          fallback_candidate_refs: [],
+        },
+      }],
+    };
+
+    const ranked = scoreCandidates(
+      normalized,
+      [
+        candidate({
+          candidate_id: "cand_planned",
+          segment_id: "planned",
+          eligible_beats: ["unrelated discovery"],
+        }),
+      ],
+      params,
+      30,
+      1,
+    ).get("b01")!;
+
+    expect(ranked.map((entry) => entry.candidate.segment_id)).toEqual(["planned"]);
+  });
+
   it("boosts explicit peak_signals enough to outrank a better semantic rank", () => {
     const normalized: NormalizedData = {
       project_id: "p",

@@ -167,6 +167,54 @@ describe("editorial craft directives", () => {
     expect(transitions[0].applied_skill_id).toBe("crossfade_bridge");
   });
 
+  it("forces dissolve craft even when ordinary skill predicates would fall back to cut", () => {
+    const v1: Track = {
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", {
+          timeline_in_frame: 0,
+          timeline_duration_frames: 72,
+          beat_id: "B01",
+          asset_id: "AST_SHARED",
+        }),
+        makeClip("02", {
+          timeline_in_frame: 72,
+          timeline_duration_frames: 72,
+          beat_id: "B02",
+          asset_id: "AST_SHARED",
+        }),
+      ],
+    };
+
+    const { transitions } = adjacencyDecide(v1, {
+      activeEditingSkills: [],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({
+          segment_id: "SEG_01",
+          asset_id: "AST_SHARED",
+          editorial_signals: { semantic_cluster_id: "same_topic", visual_tags: ["wide"] },
+        }),
+        makeCandidate({
+          segment_id: "SEG_02",
+          asset_id: "AST_SHARED",
+          editorial_signals: { semantic_cluster_id: "same_topic", visual_tags: ["wide"] },
+        }),
+      ],
+      beats: [
+        makeBeat("B01", { craft: { transition_out: "dissolve" } }),
+        makeBeat("B02"),
+      ],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(transitions[0].transition_type).toBe("crossfade");
+    expect(transitions[0].applied_skill_id).toBe("crossfade_bridge");
+    expect(transitions[0].transition_params).toMatchObject({ crossfade_sec: 0.5 });
+  });
+
   it("emits deferred craft transitions as metadata-only cuts", () => {
     const v1: Track = {
       track_id: "V1",
