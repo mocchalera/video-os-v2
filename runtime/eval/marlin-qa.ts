@@ -7,12 +7,14 @@ import type { CreativeBrief } from "../artifacts/types.js";
 import type { MarlinFn, MarlinRawCaption, MarlinRawEvent } from "../connectors/marlin-types.js";
 import { extractDurationUs, runFfprobe } from "../connectors/ffprobe.js";
 import { createMarlinFnFromEnvironment } from "../pipeline/stages/marlin.js";
+import { prepareMarlinProxy } from "../pipeline/stages/marlin-proxy.js";
 import type { MarlinQAIssue, MarlinQAReport } from "./marlin-qa-types.js";
 
 const DEFAULT_VIDEO_RELATIVE_PATH = "09_output/rough-cut.mp4";
-const DEFAULT_CHUNK_DURATION_SEC = 15;
+const DEFAULT_CHUNK_DURATION_SEC = 30;
 const DEFAULT_CHUNK_OVERLAP_SEC = 3;
 const DEFAULT_SHORT_VIDEO_THRESHOLD_SEC = 20;
+const DEFAULT_QA_PROXY_MAX_WIDTH = 384;
 const execFileAsync = promisify(execFile);
 
 export interface MarlinQAEvent {
@@ -33,7 +35,9 @@ export interface RunMarlinQAOptions {
   chunkDurationSec?: number;
   chunkOverlapSec?: number;
   shortVideoThresholdSec?: number;
+  proxyMaxWidth?: number;
   createChunkClip?: CreateMarlinQAChunkClip;
+  prepareEvaluationClip?: PrepareMarlinQAEvaluationClip;
 }
 
 export interface BuildMarlinQAReportInput {
@@ -64,6 +68,13 @@ export interface CreateMarlinQAChunkClipInput {
 
 export type CreateMarlinQAChunkClip = (input: CreateMarlinQAChunkClipInput) => Promise<void>;
 
+export interface PrepareMarlinQAEvaluationClipInput {
+  projectDir: string;
+  videoPath: string;
+}
+
+export type PrepareMarlinQAEvaluationClip = (input: PrepareMarlinQAEvaluationClipInput) => Promise<string>;
+
 export function defaultMarlinQAVideoPath(projectDir: string): string {
   return path.join(projectDir, DEFAULT_VIDEO_RELATIVE_PATH);
 }
@@ -81,17 +92,21 @@ export async function runMarlinQA(
   }
 
   const durationSec = options.durationSec ?? await readVideoDurationSec(absVideoPath);
+  const restoreProxyEnv = applyMarlinQAProxyMaxWidth(options.proxyMaxWidth);
   const ownsMarlinFn = options.marlinFn === undefined;
-  const marlinFn = options.marlinFn ?? createMarlinFnFromEnvironment(absProjectDir, options.repoRoot, {
-    requestTimeoutMs: 300_000,
-  });
+  let marlinFn: MarlinFn | undefined;
 
   try {
+    marlinFn = options.marlinFn ?? createMarlinFnFromEnvironment(absProjectDir, options.repoRoot, {
+      requestTimeoutMs: 300_000,
+    });
     const caption = await captionMarlinQAWithChunks(absVideoPath, durationSec, marlinFn, {
+      projectDir: absProjectDir,
       chunkDurationSec: options.chunkDurationSec,
       chunkOverlapSec: options.chunkOverlapSec,
       shortVideoThresholdSec: options.shortVideoThresholdSec,
       createChunkClip: options.createChunkClip,
+      prepareEvaluationClip: options.prepareEvaluationClip,
     });
     const report = buildMarlinQAReport({
       projectDir: absProjectDir,
@@ -112,8 +127,9 @@ export async function runMarlinQA(
     return report;
   } finally {
     if (ownsMarlinFn) {
-      await marlinFn.close?.();
+      await marlinFn?.close?.();
     }
+    restoreProxyEnv();
   }
 }
 
@@ -123,17 +139,19 @@ export async function captionMarlinQAWithChunks(
   marlinFn: MarlinFn,
   options: Pick<
     RunMarlinQAOptions,
-    "chunkDurationSec" | "chunkOverlapSec" | "shortVideoThresholdSec" | "createChunkClip"
-  > = {},
+    "chunkDurationSec" | "chunkOverlapSec" | "shortVideoThresholdSec" | "createChunkClip" | "prepareEvaluationClip"
+  > & { projectDir?: string } = {},
 ): Promise<MarlinRawCaption> {
   const durationSec = round3(Math.max(0, videoDurationSec));
+  const projectDir = options.projectDir ?? path.dirname(videoPath);
+  const prepareEvaluationClip = options.prepareEvaluationClip ?? prepareMarlinQAEvaluationClip;
   const shortVideoThresholdSec = positiveOrDefault(
     options.shortVideoThresholdSec,
     DEFAULT_SHORT_VIDEO_THRESHOLD_SEC,
   );
 
   if (durationSec <= 0 || durationSec < shortVideoThresholdSec) {
-    return marlinFn.caption(videoPath);
+    return captionMarlinQAClip(projectDir, videoPath, marlinFn, prepareEvaluationClip);
   }
 
   const chunks = splitMarlinQAVideoChunks(durationSec, {
@@ -141,7 +159,7 @@ export async function captionMarlinQAWithChunks(
     overlapSec: options.chunkOverlapSec,
   });
   if (chunks.length <= 1) {
-    return marlinFn.caption(videoPath);
+    return captionMarlinQAClip(projectDir, videoPath, marlinFn, prepareEvaluationClip);
   }
 
   const createChunkClip = options.createChunkClip ?? createFfmpegMarlinQAChunkClip;
@@ -154,7 +172,7 @@ export async function captionMarlinQAWithChunks(
       await createChunkClip({ videoPath, outputPath, chunk });
       captions.push({
         chunk,
-        caption: await marlinFn.caption(outputPath),
+        caption: await captionMarlinQAClip(projectDir, outputPath, marlinFn, prepareEvaluationClip),
       });
     }
 
@@ -551,6 +569,37 @@ async function createFfmpegMarlinQAChunkClip(input: CreateMarlinQAChunkClipInput
     "copy",
     input.outputPath,
   ]);
+}
+
+async function captionMarlinQAClip(
+  projectDir: string,
+  videoPath: string,
+  marlinFn: MarlinFn,
+  prepareEvaluationClip: PrepareMarlinQAEvaluationClip,
+): Promise<MarlinRawCaption> {
+  const evaluationPath = await prepareEvaluationClip({ projectDir, videoPath });
+  return marlinFn.caption(evaluationPath);
+}
+
+async function prepareMarlinQAEvaluationClip(input: PrepareMarlinQAEvaluationClipInput): Promise<string> {
+  const proxy = await prepareMarlinProxy(input.projectDir, input.videoPath);
+  return proxy.evaluationPath;
+}
+
+function applyMarlinQAProxyMaxWidth(proxyMaxWidth: number | undefined): () => void {
+  const previous = process.env.VOS_MARLIN_PROXY_MAX_WIDTH;
+  const requested = isFiniteNumber(proxyMaxWidth) && proxyMaxWidth > 0
+    ? Math.floor(proxyMaxWidth)
+    : undefined;
+  process.env.VOS_MARLIN_PROXY_MAX_WIDTH = String(requested ?? previous ?? DEFAULT_QA_PROXY_MAX_WIDTH);
+
+  return () => {
+    if (previous === undefined) {
+      delete process.env.VOS_MARLIN_PROXY_MAX_WIDTH;
+    } else {
+      process.env.VOS_MARLIN_PROXY_MAX_WIDTH = previous;
+    }
+  };
 }
 
 function normalizeRawEvent(raw: MarlinRawEvent, videoDurationSec: number): MarlinQAEvent | null {

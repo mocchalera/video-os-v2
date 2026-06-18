@@ -65,17 +65,17 @@ function expectValidReportShape(report: MarlinQAReport): void {
 }
 
 describe("Marlin output QA", () => {
-  it("splits rendered videos into 15s chunks with 3s overlap", () => {
-    const chunks = splitMarlinQAVideoChunks(201, { chunkDurationSec: 15, overlapSec: 3 });
+  it("splits rendered videos into 30s chunks with 3s overlap by default", () => {
+    const chunks = splitMarlinQAVideoChunks(201);
 
-    expect(chunks).toHaveLength(17);
+    expect(chunks).toHaveLength(8);
     expect(chunks.slice(0, 4)).toEqual([
-      { index: 0, start_sec: 0, end_sec: 15, duration_sec: 15 },
-      { index: 1, start_sec: 12, end_sec: 27, duration_sec: 15 },
-      { index: 2, start_sec: 24, end_sec: 39, duration_sec: 15 },
-      { index: 3, start_sec: 36, end_sec: 51, duration_sec: 15 },
+      { index: 0, start_sec: 0, end_sec: 30, duration_sec: 30 },
+      { index: 1, start_sec: 27, end_sec: 57, duration_sec: 30 },
+      { index: 2, start_sec: 54, end_sec: 84, duration_sec: 30 },
+      { index: 3, start_sec: 81, end_sec: 111, duration_sec: 30 },
     ]);
-    expect(chunks[chunks.length - 1]).toEqual({ index: 16, start_sec: 192, end_sec: 201, duration_sec: 9 });
+    expect(chunks[chunks.length - 1]).toEqual({ index: 7, start_sec: 189, end_sec: 201, duration_sec: 12 });
     expect(chunks[0].end_sec - chunks[1].start_sec).toBe(3);
   });
 
@@ -160,6 +160,67 @@ describe("Marlin output QA", () => {
     expectValidReportShape(report);
   });
 
+  it("uses QA proxy width defaults and restores caller environment", async () => {
+    const previousProxyWidth = process.env.VOS_MARLIN_PROXY_MAX_WIDTH;
+    delete process.env.VOS_MARLIN_PROXY_MAX_WIDTH;
+
+    try {
+      const projectDir = tempProject();
+      const videoPath = path.join(projectDir, "09_output", "rough-cut.mp4");
+      const preparedPaths: string[] = [];
+      const captionedPaths: string[] = [];
+      const seenProxyWidths: Array<string | undefined> = [];
+      const marlinFn: MarlinFn = {
+        async caption(captionVideoPath) {
+          captionedPaths.push(captionVideoPath);
+          seenProxyWidths.push(process.env.VOS_MARLIN_PROXY_MAX_WIDTH);
+          return {
+            scene: "Prepared QA proxy",
+            events: [{ start: 0, end: 1, description: "Prepared QA proxy caption." }],
+          };
+        },
+        async find() {
+          throw new Error("QA should use caption only");
+        },
+      };
+
+      await runMarlinQA(projectDir, "09_output/rough-cut.mp4", brief(), {
+        marlinFn,
+        durationSec: 2,
+        writeReport: false,
+        prepareEvaluationClip: async ({ videoPath: inputVideoPath }) => {
+          preparedPaths.push(inputVideoPath);
+          return `${inputVideoPath}.proxy`;
+        },
+      });
+
+      expect(seenProxyWidths).toEqual(["384"]);
+      expect(process.env.VOS_MARLIN_PROXY_MAX_WIDTH).toBeUndefined();
+      expect(preparedPaths).toEqual([videoPath]);
+      expect(captionedPaths).toEqual([`${videoPath}.proxy`]);
+
+      process.env.VOS_MARLIN_PROXY_MAX_WIDTH = "512";
+      seenProxyWidths.length = 0;
+
+      await runMarlinQA(projectDir, "09_output/rough-cut.mp4", brief(), {
+        marlinFn,
+        durationSec: 2,
+        proxyMaxWidth: 320,
+        writeReport: false,
+        prepareEvaluationClip: async ({ videoPath: inputVideoPath }) => `${inputVideoPath}.proxy`,
+      });
+
+      expect(seenProxyWidths).toEqual(["320"]);
+      expect(process.env.VOS_MARLIN_PROXY_MAX_WIDTH).toBe("512");
+    } finally {
+      if (previousProxyWidth === undefined) {
+        delete process.env.VOS_MARLIN_PROXY_MAX_WIDTH;
+      } else {
+        process.env.VOS_MARLIN_PROXY_MAX_WIDTH = previousProxyWidth;
+      }
+    }
+  });
+
   it("uses chunked Marlin captions for long videos and finds more events than the single-call fallback", async () => {
     const projectDir = tempProject();
     const chunkClipPaths: string[] = [];
@@ -171,9 +232,9 @@ describe("Marlin output QA", () => {
       brief(),
       {
         marlinFn: mockMarlin([
-          { start: 0, end: 36, description: "Single long Marlin summary for the whole rough cut." },
+          { start: 0, end: 66, description: "Single long Marlin summary for the whole rough cut." },
         ]),
-        durationSec: 36,
+        durationSec: 66,
         shortVideoThresholdSec: 999,
         writeReport: false,
       },
@@ -186,7 +247,7 @@ describe("Marlin output QA", () => {
         if (basename === "rough-cut.mp4") {
           return {
             scene: "Single full-video caption",
-            events: [{ start: 0, end: 36, description: "Single long Marlin summary for the whole rough cut." }],
+            events: [{ start: 0, end: 66, description: "Single long Marlin summary for the whole rough cut." }],
           };
         }
         if (basename === "chunk_000.mp4") {
@@ -194,7 +255,7 @@ describe("Marlin output QA", () => {
             scene: "Uncertain opening and early practice",
             events: [
               { start: 0, end: 6, description: "Uncertain opening on a quiet path." },
-              { start: 9, end: 15, description: "Practice begins at the workshop table.", confidence: 0.4 },
+              { start: 24, end: 30, description: "Practice begins at the workshop table.", confidence: 0.4 },
             ],
           };
         }
@@ -225,7 +286,7 @@ describe("Marlin output QA", () => {
       brief(),
       {
         marlinFn,
-        durationSec: 36,
+        durationSec: 66,
         writeReport: false,
         createChunkClip: async ({ outputPath }) => {
           chunkClipPaths.push(outputPath);
@@ -238,9 +299,9 @@ describe("Marlin output QA", () => {
     expect(chunkedReport.scene_descriptions.length).toBeGreaterThan(singleReport.scene_descriptions.length);
     expect(chunkedReport.scene_descriptions).toEqual([
       { start_sec: 0, end_sec: 6, description: "Uncertain opening on a quiet path." },
-      { start_sec: 12, end_sec: 15, description: "Practice begins at the workshop table with clearer hands." },
-      { start_sec: 15, end_sec: 22, description: "Man in workshop shapes material with tools." },
-      { start_sec: 24, end_sec: 29, description: "Confidence resolves as the maker smiles." },
+      { start_sec: 27, end_sec: 30, description: "Practice begins at the workshop table with clearer hands." },
+      { start_sec: 30, end_sec: 37, description: "Man in workshop shapes material with tools." },
+      { start_sec: 54, end_sec: 59, description: "Confidence resolves as the maker smiles." },
     ]);
     expect(chunkClipPaths).toHaveLength(3);
     for (const chunkPath of chunkClipPaths) {
