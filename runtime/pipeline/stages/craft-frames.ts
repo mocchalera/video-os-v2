@@ -146,6 +146,15 @@ function outputPathFor(projectDir: string, segmentId: string, label: string): st
   );
 }
 
+function representativeOutputPathFor(projectDir: string, assetId: string): string {
+  return path.join(
+    projectDir,
+    "03_analysis",
+    "representative_frames",
+    `${safePathPart(assetId)}.jpg`,
+  );
+}
+
 function resolveSourcePath(projectDir: string, entry: MediaSourceMapEntry): string {
   const sourcePath = entry.local_source_path || entry.source_locator || entry.link_path;
   return path.isAbsolute(sourcePath) ? sourcePath : path.resolve(projectDir, sourcePath);
@@ -226,6 +235,73 @@ export async function extractCraftKeyFrames(
     }
 
     result.set(candidate.segment_id, extractedFrames);
+  }
+
+  return result;
+}
+
+function representativeTimestampUs(
+  assetId: string,
+  segments: Array<{
+    asset_id: string;
+    src_in_us: number;
+    src_out_us: number;
+    rep_frame_us?: number;
+  }>,
+  marlinEvents: MarlinEventsArtifact | null,
+): number | undefined {
+  const assetEvents = marlinEventsByAsset(marlinEvents).get(assetId) ?? [];
+  const bestEvent = [...assetEvents]
+    .filter((event) =>
+      Number.isFinite(event.start_us)
+      && Number.isFinite(event.end_us)
+      && event.end_us > event.start_us
+    )
+    .sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1))[0];
+  if (bestEvent) return eventMidpoint(bestEvent);
+
+  const segment = segments
+    .filter((item) => item.asset_id === assetId)
+    .sort((a, b) => a.src_in_us - b.src_in_us)[0];
+  if (!segment) return undefined;
+  if (Number.isFinite(segment.rep_frame_us)) return Math.trunc(segment.rep_frame_us!);
+  if (Number.isFinite(segment.src_in_us) && Number.isFinite(segment.src_out_us) && segment.src_out_us > segment.src_in_us) {
+    return Math.trunc((segment.src_in_us + segment.src_out_us) / 2);
+  }
+  return undefined;
+}
+
+export async function extractRepresentativeFrames(
+  projectDir: string,
+  segments: Array<{
+    asset_id: string;
+    src_in_us: number;
+    src_out_us: number;
+    rep_frame_us?: number;
+  }>,
+  marlinEvents: MarlinEventsArtifact | null,
+  sourceMap: Map<string, MediaSourceMapEntry>,
+): Promise<Map<string, string>> {
+  const absProjectDir = path.resolve(projectDir);
+  const result = new Map<string, string>();
+  const assetIds = [...new Set(segments.map((segment) => segment.asset_id).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+  for (const assetId of assetIds) {
+    const sourceEntry = sourceMap.get(assetId);
+    const timestampUs = representativeTimestampUs(assetId, segments, marlinEvents);
+    if (!sourceEntry || timestampUs === undefined) continue;
+
+    const sourcePath = resolveSourcePath(absProjectDir, sourceEntry);
+    const sourceExists = Boolean(statIfExists(sourcePath)?.isFile());
+    const outputPath = representativeOutputPathFor(absProjectDir, assetId);
+    const relativePath = toPosixRelative(absProjectDir, outputPath);
+
+    if (!isCacheFresh(outputPath, sourcePath)) {
+      if (!sourceExists) continue;
+      await extractFrame(sourcePath, timestampUs, outputPath);
+    }
+
+    result.set(assetId, relativePath);
   }
 
   return result;
