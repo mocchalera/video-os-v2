@@ -14,10 +14,19 @@ import type { GateStatus, ProjectState } from "../../state/reconcile.js";
 import type {
   Beat,
   ConfirmedPreferences,
+  CreativeBrief,
   EditBlueprint,
   QualityTargets,
+  SelectsCandidates,
 } from "../../artifacts/types.js";
+import type { MarlinEventsArtifact } from "../../connectors/marlin-types.js";
 import { inferAutonomyMode } from "../../autonomy.js";
+import {
+  applyCraftRevisions,
+  renderCraftReviewMarkdown,
+  reviewBlueprintCraft,
+} from "../../agents/editorial-craft-agent.js";
+import type { CraftDecision } from "../../agents/editorial-craft-types.js";
 import { buildDefaultPhases, runNarrativeLoop } from "./narrative.js";
 import {
   recordAutonomousConfirmedPreferences,
@@ -170,12 +179,21 @@ export interface BlueprintCommandResult {
   promoted?: string[];
   planningBlocked?: boolean;
   loopSummary?: LoopSummary;
+  craftDecision?: CraftDecision;
 }
 
 export interface BlueprintCommandOptions {
   iterativeEngine?: boolean;
   maxIterations?: number;
   requireConfirmationInCollaborative?: boolean;
+  skipCraftReview?: boolean;
+  craftReviewModel?: string;
+  craftReviewer?: (
+    brief: CreativeBrief,
+    selects: SelectsCandidates,
+    blueprint: EditBlueprint,
+    marlinEvents: MarlinEventsArtifact | null,
+  ) => Promise<CraftDecision>;
 }
 
 const ALLOWED_STATES: ProjectState[] = [
@@ -194,7 +212,7 @@ export async function runBlueprint(
   options?: BlueprintCommandOptions,
   phases?: NarrativePhases,
 ): Promise<BlueprintCommandResult> {
-  const pt = new ProgressTracker(projectDir, "blueprint", 4);
+  const pt = new ProgressTracker(projectDir, "blueprint", 5);
   const ctx = initCommand(projectDir, "/blueprint", ALLOWED_STATES);
   if (isCommandError(ctx)) {
     pt.fail("init", ctx.message);
@@ -408,6 +426,73 @@ export async function runBlueprint(
     };
   }
 
+  let craftDecision: CraftDecision | undefined;
+  let appliedCraftRevisionCount = 0;
+  if (!options?.skipCraftReview) {
+    const marlinEvents = readProjectMarlinEvents(absDir);
+    try {
+      craftDecision = options?.craftReviewer
+        ? await options.craftReviewer(
+          briefContent as CreativeBrief,
+          selectsContent as SelectsCandidates,
+          agentResult.blueprint,
+          marlinEvents,
+        )
+        : await reviewBlueprintCraft(
+          briefContent as CreativeBrief,
+          selectsContent as SelectsCandidates,
+          agentResult.blueprint,
+          marlinEvents,
+          { model: options?.craftReviewModel },
+        );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pt.fail("craft", `Editorial craft review failed: ${message}`);
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: `Editorial craft review failed: ${message}`,
+        },
+        previousState,
+        loopSummary,
+      };
+    }
+
+    if (craftDecision.verdict === "block") {
+      writeCraftReviewTrace(absDir, craftDecision, 0);
+      const message = `Editorial craft review blocked promotion: ${craftDecision.summary}`;
+      const updatedDoc = transitionState(
+        absDir,
+        doc,
+        "blocked",
+        "/blueprint",
+        "editorial-craft-reviewer",
+        message,
+      );
+      pt.fail("craft", message);
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message,
+          details: craftDecision.issues,
+        },
+        previousState,
+        newState: updatedDoc.current_state,
+        planningBlocked: true,
+        loopSummary,
+        craftDecision,
+      };
+    }
+
+    if (craftDecision.verdict === "revise") {
+      agentResult.blueprint = applyCraftRevisions(agentResult.blueprint, craftDecision);
+      appliedCraftRevisionCount = craftDecision.revisions.length;
+      console.log(`[craft-review] applied ${appliedCraftRevisionCount} blueprint revision(s)`);
+    }
+  }
+
   const drafts: DraftFile[] = [
     {
       relativePath: "04_plan/edit_blueprint.yaml",
@@ -455,6 +540,9 @@ export async function runBlueprint(
     };
   }
   pt.advance("04_plan/edit_blueprint.yaml");
+  if (craftDecision) {
+    writeCraftReviewTrace(absDir, craftDecision, appliedCraftRevisionCount);
+  }
 
   const hasPlanningBlocker = agentResult.uncertaintyRegister.uncertainties.some(
     (uncertainty) => uncertainty.status === "blocker",
@@ -489,7 +577,32 @@ export async function runBlueprint(
     promoted: promoteResult.promoted,
     planningBlocked: hasPlanningBlocker || hasCompileBlocker,
     loopSummary,
+    craftDecision,
   };
+}
+
+function readProjectMarlinEvents(projectDir: string): MarlinEventsArtifact | null {
+  const marlinPath = path.join(projectDir, "03_analysis", "marlin_events.json");
+  if (!fs.existsSync(marlinPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(marlinPath, "utf-8")) as MarlinEventsArtifact;
+  } catch {
+    return null;
+  }
+}
+
+function writeCraftReviewTrace(
+  projectDir: string,
+  decision: CraftDecision,
+  appliedRevisionCount: number,
+): void {
+  const planDir = path.join(projectDir, "04_plan");
+  fs.mkdirSync(planDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(planDir, "editorial_craft_review.md"),
+    renderCraftReviewMarkdown(decision, appliedRevisionCount),
+    "utf-8",
+  );
 }
 
 function persistScriptEvaluation(
