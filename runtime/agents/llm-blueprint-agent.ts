@@ -57,6 +57,12 @@ const VALID_CRAFT_IN_POINT = new Set<NonNullable<CraftDirective["in_point"]>>([
   "post_action_hold",
   "clean_in_clean_out",
 ]);
+const VALID_CRAFT_OUT_POINT = new Set<NonNullable<CraftDirective["out_point"]>>([
+  "cut_on_action",
+  "peak_hold",
+  "post_action_hold",
+  "clean_in_clean_out",
+]);
 const VALID_CRAFT_TRANSITION = new Set<NonNullable<CraftDirective["transition_in"]>>([
   "hard_cut",
   "dissolve",
@@ -277,6 +283,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
         },
         craft: {
           in_point: "cut_on_action",
+          out_point: "peak_hold",
           rhythm: "accelerando",
           transition_out: "dissolve",
         },
@@ -347,6 +354,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
     "未知の候補や存在しない candidate_ref を作らないでください。迷う場合は fallback_candidate_refs に別の既存 candidate_ref を置いてください。",
     "brief の emotion_curve と pacing intent に基づいて、必要な beat だけに craft directives を割り当ててください。craft は任意です。",
     "For each beat, choose an in_point technique: use 'cut_on_action' for energetic beats, 'peak_hold' for emotional moments, 'clean_in_clean_out' for opening/closing, 'pre_roll_enter' for anticipation.",
+    "For exit craft, choose an out_point technique: use 'cut_on_action' to leave during motion, 'peak_hold' for emotional weight, 'post_action_hold' for breath after action, 'clean_in_clean_out' for static exits.",
     "Use accelerando for building energy, ritardando for emotional resolution.",
     "Use dissolve between different locations, hard_cut within the same scene.",
     "",
@@ -546,6 +554,8 @@ function sanitizeCraftDirective(value: unknown): CraftDirective | undefined {
   const out: CraftDirective = {};
   const inPoint = enumValue(raw.in_point, VALID_CRAFT_IN_POINT);
   if (inPoint) out.in_point = inPoint;
+  const outPoint = enumValue(raw.out_point, VALID_CRAFT_OUT_POINT);
+  if (outPoint) out.out_point = outPoint;
   const transitionIn = enumValue(raw.transition_in, VALID_CRAFT_TRANSITION);
   if (transitionIn) out.transition_in = transitionIn;
   const transitionOut = enumValue(raw.transition_out, VALID_CRAFT_TRANSITION);

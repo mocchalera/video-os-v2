@@ -128,6 +128,7 @@ function validBlueprintResponse(overrides: Record<string, unknown> = {}): string
         },
         craft: {
           in_point: "cut_on_action",
+          out_point: "peak_hold",
           transition_out: "hard_cut",
           rhythm: "accelerando",
           shot_progression: "wide_to_close",
@@ -236,6 +237,7 @@ describe("createLlmBlueprintAgent", () => {
     });
     expect(result.blueprint.beats[0].craft).toEqual({
       in_point: "cut_on_action",
+      out_point: "peak_hold",
       transition_out: "hard_cut",
       rhythm: "accelerando",
       shot_progression: "wide_to_close",
@@ -248,6 +250,8 @@ describe("createLlmBlueprintAgent", () => {
     expect(prompt).toContain("cand_hook");
     expect(prompt).toContain("Use warm, restrained pacing");
     expect(prompt).toContain("For each beat, choose an in_point technique");
+    expect(prompt).toContain("choose an out_point technique");
+    expect(prompt).toContain('"out_point": "peak_hold"');
     expect(prompt).toContain('"transition_out": "dissolve"');
 
     const validate = createValidator("edit-blueprint.schema.json");

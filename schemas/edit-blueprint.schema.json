@@ -245,6 +245,10 @@
           "type": "string",
           "enum": ["cut_on_action", "peak_hold", "pre_roll_enter", "post_action_hold", "clean_in_clean_out"]
         },
+        "out_point": {
+          "type": "string",
+          "enum": ["cut_on_action", "peak_hold", "post_action_hold", "clean_in_clean_out"]
+        },
         "transition_in": {
           "type": "string",
           "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut"]

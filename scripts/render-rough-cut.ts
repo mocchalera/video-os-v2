@@ -21,6 +21,7 @@ const USAGE =
 
 const VIDEO_EXTENSIONS = new Set([".mov", ".mp4"]);
 const BGM_EXTENSIONS = new Set([".mp3", ".wav"]);
+const XFADE_DURATION_EPSILON_SEC = 0.001;
 
 export interface RenderArgs {
   projectPath: string;
@@ -51,11 +52,37 @@ export interface BgmCandidate {
   durationSec: number;
 }
 
+export interface RenderTransition {
+  fromClipId?: string;
+  toClipId: string;
+  durationSec: number;
+}
+
+export interface RenderGroup {
+  clipPaths: string[];
+  durationSec: number;
+  transitionIn?: RenderTransition;
+}
+
+export interface XfadeSegment {
+  path: string;
+  durationSec: number;
+  transitionIn?: RenderTransition;
+}
+
+export interface XfadeFilterGraph {
+  filterComplex: string;
+  outputLabel: string;
+  durationSec: number;
+  xfadeCount: number;
+}
+
 export interface RenderSummary {
   outputPath: string;
   clipCount: number;
   durationSec: number;
   fileSizeBytes: number;
+  xfadeCount: number;
 }
 
 interface TimelineDoc {
@@ -69,6 +96,7 @@ interface TimelineDoc {
       clips?: unknown[];
     }>;
   };
+  transitions?: unknown[];
 }
 
 interface AssetDoc {
@@ -111,6 +139,21 @@ export function parseArgs(argv: string[]): RenderArgs {
 
 function readJson<T>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function atomicWriteJson(filePath: string, data: unknown): void {
@@ -238,6 +281,88 @@ export function extractVideoClips(timeline: TimelineDoc): TimelineClip[] {
     });
 }
 
+function transitionDurationSec(raw: Record<string, unknown>, fps: number): number {
+  const params = recordValue(raw.transition_params);
+  const crossfadeSec = numberValue(params?.crossfade_sec);
+  if (crossfadeSec !== undefined && crossfadeSec > 0) return crossfadeSec;
+
+  const transitionFrames = numberValue(raw.transition_frames) ?? numberValue(raw.duration_frames);
+  if (transitionFrames !== undefined && transitionFrames > 0) return transitionFrames / fps;
+
+  return 0.5;
+}
+
+export function extractCrossfadeTransitions(
+  timeline: TimelineDoc,
+  fps: number,
+): Map<string, RenderTransition> {
+  const transitionsByToClipId = new Map<string, RenderTransition>();
+
+  for (const item of timeline.transitions ?? []) {
+    const raw = recordValue(item);
+    if (!raw) continue;
+
+    const transitionType = stringValue(raw.transition_type);
+    if (transitionType !== "crossfade" && transitionType !== "match_cut_soft") continue;
+
+    const toClipId = stringValue(raw.to_clip_id);
+    if (!toClipId) continue;
+
+    transitionsByToClipId.set(toClipId, {
+      fromClipId: stringValue(raw.from_clip_id),
+      toClipId,
+      durationSec: transitionDurationSec(raw, fps),
+    });
+  }
+
+  return transitionsByToClipId;
+}
+
+function transitionForBoundary(
+  previousClip: RenderClip,
+  nextClip: RenderClip,
+  transitionsByToClipId: Map<string, RenderTransition>,
+): RenderTransition | undefined {
+  const transition = transitionsByToClipId.get(nextClip.clipId);
+  if (!transition) return undefined;
+  if (transition.fromClipId && transition.fromClipId !== previousClip.clipId) return undefined;
+  return transition;
+}
+
+export function buildRenderGroups(
+  clips: RenderClip[],
+  clipPaths: string[],
+  transitionsByToClipId: Map<string, RenderTransition>,
+): RenderGroup[] {
+  if (clips.length !== clipPaths.length) {
+    throw new Error(`clip path count mismatch: ${clips.length} clips, ${clipPaths.length} paths`);
+  }
+  if (clips.length === 0) return [];
+
+  const groups: RenderGroup[] = [{
+    clipPaths: [clipPaths[0]],
+    durationSec: clips[0].durationSec,
+  }];
+
+  for (let index = 1; index < clips.length; index += 1) {
+    const transition = transitionForBoundary(clips[index - 1], clips[index], transitionsByToClipId);
+    if (transition) {
+      groups.push({
+        clipPaths: [clipPaths[index]],
+        durationSec: clips[index].durationSec,
+        transitionIn: transition,
+      });
+      continue;
+    }
+
+    const current = groups[groups.length - 1];
+    current.clipPaths.push(clipPaths[index]);
+    current.durationSec += clips[index].durationSec;
+  }
+
+  return groups;
+}
+
 export function buildRenderClips(
   clips: TimelineClip[],
   sourceMap: Map<string, MediaSourceMapEntry>,
@@ -278,6 +403,57 @@ function concatEscape(filePath: string): string {
 export function writeConcatList(listPath: string, clipPaths: string[]): void {
   const body = clipPaths.map((clipPath) => `file '${concatEscape(path.resolve(clipPath))}'`).join("\n");
   fs.writeFileSync(listPath, `${body}\n`, "utf-8");
+}
+
+function ffmpegNumber(value: number): string {
+  return Number(value.toFixed(6)).toString();
+}
+
+function effectiveXfadeDuration(
+  requestedDurationSec: number,
+  currentDurationSec: number,
+  nextDurationSec: number,
+): number {
+  const maxDuration = Math.min(currentDurationSec, nextDurationSec);
+  const safeMaxDuration = Math.max(0.001, maxDuration - XFADE_DURATION_EPSILON_SEC);
+  return Math.max(0.001, Math.min(requestedDurationSec, safeMaxDuration));
+}
+
+export function buildXfadeFilterGraph(segments: XfadeSegment[]): XfadeFilterGraph | undefined {
+  if (segments.length < 2) return undefined;
+
+  const parts: string[] = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    parts.push(`[${index}:v]settb=AVTB,setpts=PTS-STARTPTS[v${index}]`);
+  }
+
+  let currentLabel = "v0";
+  let currentDurationSec = segments[0].durationSec;
+
+  for (let index = 1; index < segments.length; index += 1) {
+    const requestedDurationSec = segments[index].transitionIn?.durationSec ?? 0.5;
+    const durationSec = effectiveXfadeDuration(
+      requestedDurationSec,
+      currentDurationSec,
+      segments[index].durationSec,
+    );
+    const offsetSec = Math.max(0, currentDurationSec - durationSec);
+    const outputLabel = index === segments.length - 1 ? "vout" : `xf${index}`;
+
+    parts.push(
+      `[${currentLabel}][v${index}]xfade=transition=fade:duration=${ffmpegNumber(durationSec)}:offset=${ffmpegNumber(offsetSec)}[${outputLabel}]`,
+    );
+
+    currentLabel = outputLabel;
+    currentDurationSec += segments[index].durationSec - durationSec;
+  }
+
+  return {
+    filterComplex: parts.join(";"),
+    outputLabel: currentLabel,
+    durationSec: currentDurationSec,
+    xfadeCount: segments.length - 1,
+  };
 }
 
 export async function probeDurationSec(filePath: string): Promise<number> {
@@ -340,6 +516,161 @@ async function runFfmpeg(args: string[]): Promise<void> {
   await execFileAsync("ffmpeg", ["-y", ...args], { maxBuffer: 1024 * 1024 * 16 });
 }
 
+async function renderHardCutGroup(
+  group: RenderGroup,
+  index: number,
+  tempDir: string,
+): Promise<string> {
+  if (group.clipPaths.length === 1) return group.clipPaths[0];
+
+  const concatListPath = path.join(tempDir, `group-${String(index + 1).padStart(4, "0")}.txt`);
+  const groupPath = path.join(tempDir, `group-${String(index + 1).padStart(4, "0")}.mp4`);
+  writeConcatList(concatListPath, group.clipPaths);
+  await runFfmpeg(["-f", "concat", "-safe", "0", "-i", concatListPath, "-c", "copy", groupPath]);
+  return groupPath;
+}
+
+async function renderXfadeGraph(
+  segments: XfadeSegment[],
+  graph: XfadeFilterGraph,
+  outputPath: string,
+): Promise<void> {
+  const inputArgs = segments.flatMap((segment) => ["-i", segment.path]);
+  await runFfmpeg([
+    ...inputArgs,
+    "-filter_complex",
+    graph.filterComplex,
+    "-map",
+    `[${graph.outputLabel}]`,
+    "-an",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    "18",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "use_metadata_tags",
+    "-metadata",
+    `video_os_xfade_count=${graph.xfadeCount}`,
+    outputPath,
+  ]);
+}
+
+async function renderIterativeXfades(
+  segments: XfadeSegment[],
+  tempDir: string,
+): Promise<{ outputPath: string; durationSec: number; xfadeCount: number }> {
+  let currentPath = segments[0].path;
+  let currentDurationSec = segments[0].durationSec;
+  let xfadeCount = 0;
+
+  for (let index = 1; index < segments.length; index += 1) {
+    const next = segments[index];
+    const requestedDurationSec = next.transitionIn?.durationSec ?? 0.5;
+    const durationSec = effectiveXfadeDuration(
+      requestedDurationSec,
+      currentDurationSec,
+      next.durationSec,
+    );
+    const offsetSec = Math.max(0, currentDurationSec - durationSec);
+    const outputPath = path.join(tempDir, `xfade-${String(index).padStart(4, "0")}.mp4`);
+    const filter = [
+      "[0:v]settb=AVTB,setpts=PTS-STARTPTS[v0]",
+      "[1:v]settb=AVTB,setpts=PTS-STARTPTS[v1]",
+      `[v0][v1]xfade=transition=fade:duration=${ffmpegNumber(durationSec)}:offset=${ffmpegNumber(offsetSec)}[vout]`,
+    ].join(";");
+
+    await runFfmpeg([
+      "-i",
+      currentPath,
+      "-i",
+      next.path,
+      "-filter_complex",
+      filter,
+      "-map",
+      "[vout]",
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "18",
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "use_metadata_tags",
+      "-metadata",
+      `video_os_xfade_count=${xfadeCount + 1}`,
+      outputPath,
+    ]);
+
+    xfadeCount += 1;
+    currentPath = outputPath;
+    currentDurationSec = await probeDurationSec(currentPath);
+  }
+
+  return {
+    outputPath: currentPath,
+    durationSec: currentDurationSec,
+    xfadeCount,
+  };
+}
+
+async function assembleVideoFromGroups(
+  groups: RenderGroup[],
+  tempDir: string,
+): Promise<{ outputPath: string; durationSec: number; xfadeCount: number }> {
+  if (groups.length === 0) throw new Error("No render groups found");
+
+  const groupPaths: string[] = [];
+  for (let index = 0; index < groups.length; index += 1) {
+    groupPaths.push(await renderHardCutGroup(groups[index], index, tempDir));
+  }
+
+  if (groupPaths.length === 1) {
+    return {
+      outputPath: groupPaths[0],
+      durationSec: await probeDurationSec(groupPaths[0]),
+      xfadeCount: 0,
+    };
+  }
+
+  const groupDurations = await Promise.all(groupPaths.map((groupPath) => probeDurationSec(groupPath)));
+  const segments: XfadeSegment[] = groups.map((group, index) => ({
+    path: groupPaths[index],
+    durationSec: groupDurations[index],
+    transitionIn: group.transitionIn,
+  }));
+  const graph = buildXfadeFilterGraph(segments);
+  if (!graph) {
+    return {
+      outputPath: groupPaths[0],
+      durationSec: groupDurations[0],
+      xfadeCount: 0,
+    };
+  }
+
+  const graphOutputPath = path.join(tempDir, "rough-cut-video.mp4");
+  await renderXfadeGraph(segments, graph, graphOutputPath);
+  const graphDurationSec = await probeDurationSec(graphOutputPath);
+  if (graphDurationSec >= graph.durationSec - 1) {
+    return {
+      outputPath: graphOutputPath,
+      durationSec: graphDurationSec,
+      xfadeCount: graph.xfadeCount,
+    };
+  }
+
+  console.warn(
+    `Warning: xfade graph duration ${graphDurationSec.toFixed(3)}s was shorter than expected ${graph.durationSec.toFixed(3)}s; retrying iterative merge`,
+  );
+  return renderIterativeXfades(segments, tempDir);
+}
+
 async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
   const projectPath = path.resolve(args.projectPath);
   const timelinePath = path.join(projectPath, "05_timeline", "timeline.json");
@@ -351,7 +682,7 @@ async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
   const clips = buildRenderClips(extractVideoClips(timeline), sourceMap, fps);
   if (clips.length === 0) throw new Error("No renderable video clips found");
 
-  const totalDurationSec = clips.reduce((sum, clip) => sum + clip.durationSec, 0);
+  const timelineDurationSec = clips.reduce((sum, clip) => sum + clip.durationSec, 0);
   const outputPath = args.outputPath
     ? resolveUserPath(projectPath, args.outputPath)
     : path.join(projectPath, "09_output", "rough-cut.mp4");
@@ -372,7 +703,7 @@ async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
         "-t",
         String(clip.durationSec),
         "-vf",
-        `fps=${fps},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2`,
+        `fps=${fps},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1`,
         "-an",
         "-c:v",
         "libx264",
@@ -380,30 +711,34 @@ async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
         "fast",
         "-crf",
         "18",
+        "-pix_fmt",
+        "yuv420p",
         tmpClip,
       ]);
       tmpClipPaths.push(tmpClip);
     }
 
-    const concatListPath = path.join(tempDir, "concat.txt");
-    const tmpVideoPath = path.join(tempDir, "rough-cut-video.mp4");
-    writeConcatList(concatListPath, tmpClipPaths);
-    await runFfmpeg(["-f", "concat", "-safe", "0", "-i", concatListPath, "-c", "copy", tmpVideoPath]);
+    const crossfades = extractCrossfadeTransitions(timeline, fps);
+    const groups = buildRenderGroups(clips, tmpClipPaths, crossfades);
+    const videoAssembly = await assembleVideoFromGroups(groups, tempDir);
 
     let bgmPath: string | undefined;
     if (!args.noAudio) {
       if (args.bgmPath) {
         bgmPath = resolveUserPath(projectPath, args.bgmPath);
       } else {
-        bgmPath = selectBgmCandidate(await findBgmCandidates(projectPath), totalDurationSec)?.path;
+        bgmPath = selectBgmCandidate(await findBgmCandidates(projectPath), videoAssembly.durationSec)?.path;
       }
     }
 
     if (bgmPath) {
       if (!fs.existsSync(bgmPath)) throw new Error(`BGM file not found: ${bgmPath}`);
+      const metadataArgs = videoAssembly.xfadeCount > 0
+        ? ["-metadata", `video_os_xfade_count=${videoAssembly.xfadeCount}`]
+        : [];
       await runFfmpeg([
         "-i",
-        tmpVideoPath,
+        videoAssembly.outputPath,
         "-i",
         bgmPath,
         "-c:v",
@@ -413,27 +748,32 @@ async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
         "-b:a",
         "192k",
         "-shortest",
+        "-movflags",
+        "use_metadata_tags",
+        ...metadataArgs,
         outputPath,
       ]);
     } else {
-      fs.copyFileSync(tmpVideoPath, outputPath);
+      fs.copyFileSync(videoAssembly.outputPath, outputPath);
     }
+
+    return {
+      outputPath,
+      clipCount: clips.length,
+      durationSec: videoAssembly.xfadeCount > 0 ? videoAssembly.durationSec : timelineDurationSec,
+      fileSizeBytes: fs.statSync(outputPath).size,
+      xfadeCount: videoAssembly.xfadeCount,
+    };
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
-
-  return {
-    outputPath,
-    clipCount: clips.length,
-    durationSec: totalDurationSec,
-    fileSizeBytes: fs.statSync(outputPath).size,
-  };
 }
 
 async function main(): Promise<void> {
   const summary = await renderRoughCut(parseArgs(process.argv));
   console.log(`Rendered rough cut: ${summary.outputPath}`);
   console.log(`  Clips: ${summary.clipCount}`);
+  console.log(`  Crossfades: ${summary.xfadeCount}`);
   console.log(`  Duration: ${summary.durationSec.toFixed(1)}s`);
   console.log(`  File size: ${(summary.fileSizeBytes / 1024 / 1024).toFixed(2)} MB`);
 }

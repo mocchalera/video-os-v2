@@ -75,6 +75,7 @@ describe("editorial craft directives", () => {
     ) as { beats: Array<Record<string, unknown>> };
     blueprint.beats[0].craft = {
       in_point: "cut_on_action",
+      out_point: "peak_hold",
       transition_in: "hard_cut",
       transition_out: "dissolve",
       rhythm: "accelerando",
@@ -98,6 +99,19 @@ describe("editorial craft directives", () => {
 
     expect(clips.map((clip) => clip.timeline_duration_frames)).toEqual([60, 40, 20]);
     expect(clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 60, 100]);
+  });
+
+  it("clamps only rhythm-generated short durations and redistributes frames", () => {
+    const clips = [
+      makeClip("01", { timeline_in_frame: 0, timeline_duration_frames: 20 }),
+      makeClip("02", { timeline_in_frame: 20, timeline_duration_frames: 20 }),
+      makeClip("03", { timeline_in_frame: 40, timeline_duration_frames: 20 }),
+    ];
+
+    applyRhythmPattern(clips, "accelerando", 24);
+
+    expect(clips.map((clip) => clip.timeline_duration_frames)).toEqual([28, 20, 12]);
+    expect(clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 28, 48]);
   });
 
   it("passes beat craft.in_point into adaptive trim", () => {
@@ -127,6 +141,34 @@ describe("editorial craft directives", () => {
     expect(clip.src_in_us).toBe(1_500_000);
     expect(clip.src_out_us).toBe(3_500_000);
     expect(clip.metadata?.trim).toMatchObject({ craft_in_point: "pre_roll_enter" });
+  });
+
+  it("passes beat craft.out_point into adaptive trim", () => {
+    const candidate = makeCandidate({
+      trim_hint: {
+        source_center_us: 3_000_000,
+        preferred_duration_us: 2_000_000,
+      },
+    });
+    const clip = makeClip("001", {
+      segment_id: candidate.segment_id,
+      asset_id: candidate.asset_id,
+      src_in_us: candidate.src_in_us,
+      src_out_us: candidate.src_out_us,
+      beat_id: "B01",
+      timeline_duration_frames: 48,
+    });
+    const blueprint = { trim_policy: { mode: "adaptive" } } as EditBlueprint;
+    const beat = makeBeat("B01", {
+      craft: { out_point: "post_action_hold" },
+      target_duration_frames: 72,
+    });
+
+    const result = applyAdaptiveTrim([clip], [candidate], blueprint, [beat], 1_000_000 / 24);
+
+    expect(result.get(clip.clip_id)?.craft_out_point).toBe("post_action_hold");
+    expect(clip.src_out_us).toBe(4_500_000);
+    expect(clip.metadata?.trim).toMatchObject({ craft_out_point: "post_action_hold" });
   });
 
   it("biases dissolve craft toward crossfade_bridge", () => {

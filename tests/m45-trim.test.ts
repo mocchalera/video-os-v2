@@ -149,4 +149,37 @@ describe("Adaptive Trim", () => {
     expect(result.src_in_us).toBeGreaterThanOrEqual(2_000_000);
     expect(result.src_out_us).toBeLessThanOrEqual(6_000_000);
   });
+
+  it("applies out_point peak_hold to extend the exit past the center", () => {
+    const c = makeCandidate({
+      trim_hint: { source_center_us: 5_000_000, preferred_duration_us: 1_000_000 },
+    });
+    const result = resolveTrim(c, {
+      ...defaultCtx,
+      trimPolicy: { mode: "adaptive" },
+      craftOutPoint: "peak_hold",
+    });
+
+    expect(result.craft_out_point).toBe("peak_hold");
+    expect(result.src_in_us).toBe(4_500_000);
+    expect(result.src_out_us).toBe(5_750_000);
+  });
+
+  it("applies out_point cut_on_action by ending at the action center", () => {
+    const c = makeCandidate({
+      trim_hint: {
+        source_center_us: 5_000_000,
+        preferred_duration_us: 2_000_000,
+        peak_type: "action_peak",
+      },
+    });
+    const result = resolveTrim(c, {
+      ...defaultCtx,
+      trimPolicy: { mode: "adaptive" },
+      craftOutPoint: "cut_on_action",
+    });
+
+    expect(result.craft_out_point).toBe("cut_on_action");
+    expect(result.src_out_us).toBe(5_000_000);
+  });
 });

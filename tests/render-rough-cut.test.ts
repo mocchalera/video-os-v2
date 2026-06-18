@@ -2,13 +2,17 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+  buildRenderGroups,
   buildRenderClips,
+  buildXfadeFilterGraph,
+  extractCrossfadeTransitions,
   extractVideoClips,
   findBgmCandidates,
   generateSourceMapFromAssets,
   selectBgmCandidate,
   writeConcatList,
   type BgmCandidate,
+  type RenderClip,
 } from "../scripts/render-rough-cut.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
 
@@ -193,3 +197,93 @@ describe("writeConcatList", () => {
     expect(selectBgmCandidate(candidates, 10)).toBeUndefined();
   });
 });
+
+describe("crossfade render planning", () => {
+  it("extracts crossfade transitions by destination clip id", () => {
+    const timeline = {
+      sequence: { fps_num: 24, fps_den: 1 },
+      transitions: [
+        {
+          transition_id: "TR_001",
+          from_clip_id: "clip_a",
+          to_clip_id: "clip_b",
+          track_id: "V1",
+          transition_type: "crossfade",
+          transition_params: { crossfade_sec: 0.5 },
+        },
+        {
+          transition_id: "TR_002",
+          from_clip_id: "clip_b",
+          to_clip_id: "clip_c",
+          track_id: "V1",
+          transition_type: "cut",
+        },
+      ],
+    };
+
+    const transitions = extractCrossfadeTransitions(timeline, 24);
+
+    expect(transitions.get("clip_b")).toEqual({
+      fromClipId: "clip_a",
+      toClipId: "clip_b",
+      durationSec: 0.5,
+    });
+    expect(transitions.has("clip_c")).toBe(false);
+  });
+
+  it("groups hard cuts and separates adjacent clips that need xfade", () => {
+    const clips: RenderClip[] = [
+      renderClip("clip_a", 2),
+      renderClip("clip_b", 3),
+      renderClip("clip_c", 4),
+    ];
+    const transitions = new Map([
+      ["clip_c", { fromClipId: "clip_b", toClipId: "clip_c", durationSec: 0.5 }],
+    ]);
+
+    const groups = buildRenderGroups(clips, ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.mp4"], transitions);
+
+    expect(groups).toEqual([
+      { clipPaths: ["/tmp/a.mp4", "/tmp/b.mp4"], durationSec: 5 },
+      {
+        clipPaths: ["/tmp/c.mp4"],
+        durationSec: 4,
+        transitionIn: { fromClipId: "clip_b", toClipId: "clip_c", durationSec: 0.5 },
+      },
+    ]);
+  });
+
+  it("builds an iterative xfade filter graph with cumulative offsets", () => {
+    const graph = buildXfadeFilterGraph([
+      { path: "/tmp/a.mp4", durationSec: 2 },
+      {
+        path: "/tmp/b.mp4",
+        durationSec: 3,
+        transitionIn: { fromClipId: "a", toClipId: "b", durationSec: 0.5 },
+      },
+      {
+        path: "/tmp/c.mp4",
+        durationSec: 4,
+        transitionIn: { fromClipId: "b", toClipId: "c", durationSec: 0.5 },
+      },
+    ]);
+
+    expect(graph?.outputLabel).toBe("vout");
+    expect(graph?.xfadeCount).toBe(2);
+    expect(graph?.durationSec).toBe(8);
+    expect(graph?.filterComplex).toContain("[0:v]settb=AVTB,setpts=PTS-STARTPTS[v0]");
+    expect(graph?.filterComplex).toContain("[v0][v1]xfade=transition=fade:duration=0.5:offset=1.5[xf1]");
+    expect(graph?.filterComplex).toContain("[xf1][v2]xfade=transition=fade:duration=0.5:offset=4[vout]");
+  });
+});
+
+function renderClip(clipId: string, durationSec: number): RenderClip {
+  return {
+    clipId,
+    assetId: `AST_${clipId}`,
+    sourcePath: `/tmp/${clipId}.mov`,
+    startSec: 0,
+    durationSec,
+    timelineInFrame: 0,
+  };
+}

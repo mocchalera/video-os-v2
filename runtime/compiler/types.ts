@@ -61,6 +61,12 @@ export type CraftInPoint =
   | "post_action_hold"
   | "clean_in_clean_out";
 
+export type CraftOutPoint =
+  | "cut_on_action"
+  | "peak_hold"
+  | "post_action_hold"
+  | "clean_in_clean_out";
+
 export type CraftTransition =
   | "hard_cut"
   | "dissolve"
@@ -84,6 +90,7 @@ export type CraftShotProgression =
 
 export interface CraftDirective {
   in_point?: CraftInPoint;
+  out_point?: CraftOutPoint;
   transition_in?: CraftTransition;
   transition_out?: CraftTransition;
   rhythm?: CraftRhythm;

@@ -7,6 +7,7 @@
 import type {
   Candidate,
   CraftInPoint,
+  CraftOutPoint,
   TrimHint,
   TrimPolicy,
   EditBlueprint,
@@ -25,6 +26,7 @@ export interface ResolvedTrim {
   peak_confidence?: number;
   peak_ref?: string;
   craft_in_point?: CraftInPoint;
+  craft_out_point?: CraftOutPoint;
   craft_degraded?: boolean;
 }
 
@@ -41,6 +43,8 @@ export interface TrimContext {
   usPerFrame: number;
   /** Beat-level craft trim directive */
   craftInPoint?: CraftInPoint;
+  /** Beat-level craft exit directive */
+  craftOutPoint?: CraftOutPoint;
 }
 
 /**
@@ -62,9 +66,10 @@ export function resolveTrim(
   const authoredDuration = authoredOut - authoredIn;
   const hint = candidate.trim_hint;
   const craftInPoint = ctx.craftInPoint;
+  const craftOutPoint = ctx.craftOutPoint;
 
   // If no hint and no policy, use authored range as-is
-  if (!hint && !ctx.trimPolicy && !craftInPoint) {
+  if (!hint && !ctx.trimPolicy && !craftInPoint && !craftOutPoint) {
     return {
       src_in_us: authoredIn,
       src_out_us: authoredOut,
@@ -73,7 +78,7 @@ export function resolveTrim(
   }
 
   // If trim policy is "fixed", use authored range
-  if (ctx.trimPolicy?.mode === "fixed" && !craftInPoint) {
+  if (ctx.trimPolicy?.mode === "fixed" && !craftInPoint && !craftOutPoint) {
     return {
       src_in_us: authoredIn,
       src_out_us: authoredOut,
@@ -259,6 +264,29 @@ export function resolveTrim(
     resolvedOut = snapped.outUs;
   }
 
+  if (craftOutPoint) {
+    const adjusted = applyCraftOutPoint(
+      {
+        inUs: resolvedIn,
+        outUs: resolvedOut,
+      },
+      {
+        candidate,
+        hint,
+        recommendedRange,
+        center,
+        windowStart,
+        windowEnd,
+        authoredIn,
+        authoredOut,
+        craftOutPoint,
+      },
+    );
+    if (adjusted.degraded) craftDegraded = true;
+    resolvedIn = adjusted.inUs;
+    resolvedOut = adjusted.outUs;
+  }
+
   // Final safety: ensure in < out
   if (resolvedIn >= resolvedOut) {
     resolvedIn = authoredIn;
@@ -281,8 +309,62 @@ export function resolveTrim(
     peak_confidence: peakConfidence,
     peak_ref: peakRef,
     craft_in_point: craftInPoint,
+    craft_out_point: craftOutPoint,
     craft_degraded: craftDegraded || undefined,
   };
+}
+
+function applyCraftOutPoint(
+  range: { inUs: number; outUs: number },
+  ctx: {
+    candidate: Candidate;
+    hint: TrimHint | undefined;
+    recommendedRange: { inUs: number; outUs: number } | undefined;
+    center: number;
+    windowStart: number;
+    windowEnd: number;
+    authoredIn: number;
+    authoredOut: number;
+    craftOutPoint: CraftOutPoint;
+  },
+): { inUs: number; outUs: number; degraded: boolean } {
+  let nextIn = range.inUs;
+  let nextOut = range.outUs;
+  let degraded = false;
+
+  if (ctx.craftOutPoint === "cut_on_action") {
+    if (!hasActionEvidence(ctx.candidate)) {
+      return { inUs: nextIn, outUs: nextOut, degraded: true };
+    }
+    const actionPoint = ctx.hint?.source_center_us ??
+      (ctx.recommendedRange ? Math.round((ctx.recommendedRange.inUs + ctx.recommendedRange.outUs) / 2) : undefined);
+    if (actionPoint !== undefined && actionPoint > nextIn) {
+      nextOut = Math.min(ctx.windowEnd, Math.max(nextIn + 1, actionPoint));
+    } else {
+      degraded = true;
+    }
+  } else if (ctx.craftOutPoint === "peak_hold") {
+    const holdUntil = ctx.recommendedRange?.outUs ?? ctx.center + 750_000;
+    const extended = Math.min(ctx.windowEnd, Math.max(nextOut, holdUntil));
+    if (extended === nextOut && nextOut >= ctx.windowEnd) degraded = true;
+    nextOut = extended;
+  } else if (ctx.craftOutPoint === "post_action_hold") {
+    const actionEnd = ctx.recommendedRange?.outUs ?? ctx.center;
+    const extended = Math.min(ctx.windowEnd, Math.max(nextOut, actionEnd + 1_500_000));
+    if (extended === nextOut && nextOut >= ctx.windowEnd) degraded = true;
+    nextOut = extended;
+  } else if (ctx.craftOutPoint === "clean_in_clean_out") {
+    const snapped = snapCleanOut(nextIn, nextOut, ctx.hint, ctx.authoredIn, ctx.authoredOut);
+    nextIn = snapped.inUs;
+    nextOut = snapped.outUs;
+    degraded = snapped.degraded;
+  }
+
+  if (nextIn >= nextOut) {
+    return { inUs: range.inUs, outUs: range.outUs, degraded: true };
+  }
+
+  return { inUs: nextIn, outUs: nextOut, degraded };
 }
 
 function clampRangeToWindow(
@@ -351,6 +433,21 @@ function snapCleanInOut(
   return { inUs: nextIn, outUs: nextOut, degraded: !snapped };
 }
 
+function snapCleanOut(
+  inUs: number,
+  outUs: number,
+  hint: TrimHint | undefined,
+  authoredIn: number,
+  authoredOut: number,
+): { inUs: number; outUs: number; degraded: boolean } {
+  const snapToleranceUs = 500_000;
+  const cleanOut = hint?.window_end_us ?? authoredOut;
+  if (Math.abs(outUs - cleanOut) > snapToleranceUs || inUs >= cleanOut) {
+    return { inUs, outUs, degraded: true };
+  }
+  return { inUs, outUs: cleanOut, degraded: false };
+}
+
 /**
  * Apply adaptive trim to all clips in the assembled timeline.
  * Mutates clips in place. Returns trim metadata for each clip.
@@ -382,9 +479,10 @@ export function applyAdaptiveTrim(
 
     const beat = beatMap.get(clip.beat_id);
     const craftInPoint = beat?.craft?.in_point;
+    const craftOutPoint = beat?.craft?.out_point;
 
     // Skip if no trim hint, no trim policy, and no beat craft trim directive.
-    if (!candidate.trim_hint && !blueprint.trim_policy && !craftInPoint) continue;
+    if (!candidate.trim_hint && !blueprint.trim_policy && !craftInPoint && !craftOutPoint) continue;
 
     const beatTargetDurationUs = beat
       ? beat.target_duration_frames * usPerFrame
@@ -395,6 +493,7 @@ export function applyAdaptiveTrim(
       trimPolicy: blueprint.trim_policy,
       usPerFrame,
       craftInPoint,
+      craftOutPoint,
     });
 
     // Apply resolved trim to clip
@@ -414,6 +513,7 @@ export function applyAdaptiveTrim(
       interest_point_label: resolved.interest_point_label,
     };
     if (resolved.craft_in_point) trimMeta.craft_in_point = resolved.craft_in_point;
+    if (resolved.craft_out_point) trimMeta.craft_out_point = resolved.craft_out_point;
     if (resolved.craft_degraded) trimMeta.craft_degraded = true;
     if (resolved.peak_type) trimMeta.peak_type = resolved.peak_type;
     if (resolved.peak_confidence !== undefined) trimMeta.peak_confidence = resolved.peak_confidence;

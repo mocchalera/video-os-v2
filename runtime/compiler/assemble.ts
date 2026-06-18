@@ -25,6 +25,8 @@ import type {
 } from "./types.js";
 import { getCandidateRef } from "./candidate-ref.js";
 
+export const MIN_RHYTHM_CLIP_DURATION_SEC = 0.5;
+
 export interface AssembleOptions {
   timelineOrder?: "chronological" | "editorial";
   beatOrder?: string[];
@@ -549,12 +551,18 @@ export function applyRhythmPattern(
   const ordered = orderedTimelineClips(clips);
   if (ordered.length === 0 || rhythm === "steady") return;
 
+  const minRhythmFrames = Math.max(1, Math.round(fps * MIN_RHYTHM_CLIP_DURATION_SEC));
+
   if (rhythm === "accelerando") {
-    applyDurationMultipliers(ordered, interpolatedMultipliers(ordered.length, 1.5, 0.5));
+    applyDurationMultipliers(ordered, interpolatedMultipliers(ordered.length, 1.5, 0.5), minRhythmFrames);
   } else if (rhythm === "ritardando") {
-    applyDurationMultipliers(ordered, interpolatedMultipliers(ordered.length, 0.5, 1.5));
+    applyDurationMultipliers(ordered, interpolatedMultipliers(ordered.length, 0.5, 1.5), minRhythmFrames);
   } else if (rhythm === "syncopated") {
-    applyDurationMultipliers(ordered, ordered.map((_, index) => (index % 2 === 0 ? 1.3 : 0.7)));
+    applyDurationMultipliers(
+      ordered,
+      ordered.map((_, index) => (index % 2 === 0 ? 1.3 : 0.7)),
+      minRhythmFrames,
+    );
   } else if (rhythm === "breath") {
     applyBreathRhythm(ordered, fps);
   }
@@ -574,15 +582,39 @@ function interpolatedMultipliers(count: number, first: number, last: number): nu
   });
 }
 
-function applyDurationMultipliers(clips: TimelineClip[], multipliers: number[]): void {
+function applyDurationMultipliers(
+  clips: TimelineClip[],
+  multipliers: number[],
+  minDurationFrames = 1,
+): void {
   if (clips.length === 0) return;
+  const targetDurations = clips.map((clip, index) => {
+    const multiplier = multipliers[index] ?? 1;
+    return Math.max(1, Math.round(clip.timeline_duration_frames * multiplier));
+  });
+  const targetTotal = targetDurations.reduce((sum, duration) => sum + duration, 0);
+  const durations = targetDurations.map((duration) => Math.max(minDurationFrames, duration));
+  let extraFrames = durations.reduce((sum, duration) => sum + duration, 0) - targetTotal;
+
+  if (extraFrames > 0) {
+    const reducible = durations
+      .map((duration, index) => ({ index, slack: duration - minDurationFrames }))
+      .filter((item) => item.slack > 0)
+      .sort((a, b) => b.slack - a.slack || a.index - b.index);
+
+    for (const item of reducible) {
+      if (extraFrames <= 0) break;
+      const reduction = Math.min(item.slack, extraFrames);
+      durations[item.index] -= reduction;
+      extraFrames -= reduction;
+    }
+  }
+
   let frame = clips[0].timeline_in_frame;
   for (let i = 0; i < clips.length; i += 1) {
-    const multiplier = multipliers[i] ?? 1;
-    const duration = Math.max(1, Math.round(clips[i].timeline_duration_frames * multiplier));
     clips[i].timeline_in_frame = frame;
-    clips[i].timeline_duration_frames = duration;
-    frame += duration;
+    clips[i].timeline_duration_frames = durations[i];
+    frame += durations[i];
   }
 }
 
