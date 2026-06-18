@@ -14,6 +14,13 @@ import {
   type BgmCandidate,
   type RenderClip,
 } from "../scripts/render-rough-cut.js";
+import { applyAdaptiveTrim } from "../runtime/compiler/trim.js";
+import type {
+  Candidate,
+  EditBlueprint,
+  NormalizedBeat,
+  TimelineClip as CompilerTimelineClip,
+} from "../runtime/compiler/types.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
 
 const tempDirs: string[] = [];
@@ -106,14 +113,14 @@ describe("timeline clip extraction", () => {
         video: [
           {
             clips: [
-              { clip_id: "late", asset_id: "AST_003", src_in_us: 3_000_000, timeline_in_frame: 48, timeline_duration_frames: 24 },
-              { clip_id: "first-v1", asset_id: "AST_001", src_in_us: 0, timeline_in_frame: 0, timeline_duration_frames: 24 },
+              { clip_id: "late", asset_id: "AST_003", src_in_us: 3_000_000, src_out_us: 4_000_000, timeline_in_frame: 48, timeline_duration_frames: 24 },
+              { clip_id: "first-v1", asset_id: "AST_001", src_in_us: 0, src_out_us: 1_000_000, timeline_in_frame: 0, timeline_duration_frames: 24 },
             ],
           },
           {
             clips: [
-              { clip_id: "first-v2", asset_id: "AST_002", src_in_us: 1_000_000, timeline_in_frame: 0, timeline_duration_frames: 48 },
-              { clip_id: "invalid", asset_id: "AST_004", src_in_us: 0, timeline_in_frame: 1, timeline_duration_frames: 0 },
+              { clip_id: "first-v2", asset_id: "AST_002", src_in_us: 1_000_000, src_out_us: 3_000_000, timeline_in_frame: 0, timeline_duration_frames: 48 },
+              { clip_id: "invalid", asset_id: "AST_004", src_in_us: 0, src_out_us: 1_000_000, timeline_in_frame: 1, timeline_duration_frames: 0 },
             ],
           },
         ],
@@ -142,8 +149,8 @@ describe("timeline clip extraction", () => {
     const warnings: string[] = [];
     const renderClips = buildRenderClips(
       [
-        { clip_id: "c1", asset_id: "AST_001", src_in_us: 1_500_000, timeline_in_frame: 12, timeline_duration_frames: 48 },
-        { clip_id: "missing", asset_id: "AST_404", src_in_us: 0, timeline_duration_frames: 24 },
+        { clip_id: "c1", asset_id: "AST_001", src_in_us: 1_500_000, src_out_us: 4_000_000, timeline_in_frame: 12, timeline_duration_frames: 48 },
+        { clip_id: "missing", asset_id: "AST_404", src_in_us: 0, src_out_us: 1_000_000, timeline_duration_frames: 24 },
       ],
       new Map([
         [
@@ -171,6 +178,111 @@ describe("timeline clip extraction", () => {
       },
     ]);
     expect(warnings[0]).toContain("missing source_map entry");
+  });
+
+  it("clamps render duration to the source in/out range", () => {
+    const projectDir = createTempProject("render_clips_clamp");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const renderClips = buildRenderClips(
+      [
+        {
+          clip_id: "c1",
+          asset_id: "AST_001",
+          src_in_us: 2_000_000,
+          src_out_us: 7_000_000,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 240,
+        },
+      ],
+      new Map([
+        [
+          "AST_001",
+          {
+            asset_id: "AST_001",
+            source_locator: sourcePath,
+            local_source_path: sourcePath,
+            link_path: "source.mov",
+          },
+        ],
+      ]),
+      24,
+    );
+
+    expect(renderClips[0].durationSec).toBe(5);
+  });
+
+  it("keeps render duration aligned when adaptive trim shortens a source range", () => {
+    const projectDir = createTempProject("adaptive_trim_render");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const candidate: Candidate = {
+      segment_id: "SEG_001",
+      asset_id: "AST_001",
+      src_in_us: 0,
+      src_out_us: 10_000_000,
+      role: "hero",
+      why_it_matches: "test",
+      risks: [],
+      confidence: 0.9,
+      trim_hint: {
+        source_center_us: 5_000_000,
+        preferred_duration_us: 5_000_000,
+      },
+    };
+    const clip: CompilerTimelineClip = {
+      clip_id: "c1",
+      segment_id: candidate.segment_id,
+      asset_id: candidate.asset_id,
+      src_in_us: candidate.src_in_us,
+      src_out_us: candidate.src_out_us,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 240,
+      role: "hero",
+      motivation: "test",
+      beat_id: "B01",
+      fallback_segment_ids: [],
+      confidence: 0.9,
+      quality_flags: [],
+    };
+    const blueprint = { trim_policy: { mode: "adaptive" } } as EditBlueprint;
+    const beat: NormalizedBeat = {
+      beat_id: "B01",
+      label: "Beat 1",
+      target_duration_frames: 240,
+      required_roles: ["hero"],
+      preferred_roles: [],
+      purpose: "test",
+    };
+
+    applyAdaptiveTrim([clip], [candidate], blueprint, [beat], 1_000_000 / 24);
+
+    expect(clip.src_in_us).toBe(2_500_000);
+    expect(clip.src_out_us).toBe(7_500_000);
+    expect(clip.timeline_duration_frames).toBe(120);
+
+    const renderClips = buildRenderClips(
+      [clip],
+      new Map([
+        [
+          "AST_001",
+          {
+            asset_id: "AST_001",
+            source_locator: sourcePath,
+            local_source_path: sourcePath,
+            link_path: "source.mov",
+          },
+        ],
+      ]),
+      24,
+    );
+
+    expect(renderClips[0]).toMatchObject({
+      startSec: 2.5,
+      durationSec: 5,
+    });
   });
 });
 

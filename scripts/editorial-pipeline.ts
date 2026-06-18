@@ -1,5 +1,7 @@
 #!/usr/bin/env tsx
 /**
+ * Canonical two-pass editorial pipeline.
+ *
  * Hybrid two-pass editorial pipeline.
  *
  *   npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render]

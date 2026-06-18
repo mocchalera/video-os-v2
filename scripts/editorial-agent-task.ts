@@ -1,5 +1,7 @@
 #!/usr/bin/env tsx
 /**
+ * Cockpit agent wrapper for editorial-pipeline.
+ *
  * Cockpit-compatible wrapper for the two-pass unified editorial agent.
  *
  * Direct/headless:

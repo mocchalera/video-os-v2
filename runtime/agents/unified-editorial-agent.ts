@@ -38,7 +38,7 @@ import { parseLlmResponse } from "./llm-json.js";
 // fallback, and this module keeps that fallback text-only by default.
 export const DEFAULT_UNIFIED_EDITORIAL_MODEL = "gemini-2.5-flash-lite";
 
-const FPS = 30;
+const FPS = 24;
 const MIN_FINE_DURATION_US = 500_000;
 const DEFAULT_CLIP_DURATION_US = 3_000_000;
 

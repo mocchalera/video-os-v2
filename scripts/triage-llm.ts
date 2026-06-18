@@ -1,5 +1,7 @@
 #!/usr/bin/env tsx
 /**
+ * Legacy standalone triage — use editorial-pipeline for new projects.
+ *
  * Headless in-runtime LLM triage.
  *
  *   npx tsx scripts/triage-llm.ts <projectDir> [--model <model>] [--text-only-triage|--multimodal]

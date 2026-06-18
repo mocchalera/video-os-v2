@@ -1,5 +1,7 @@
 #!/usr/bin/env tsx
 /**
+ * Legacy standalone blueprint — use editorial-pipeline for new projects.
+ *
  * Headless in-runtime LLM blueprint planning.
  *
  *   npx tsx scripts/blueprint-llm.ts <projectDir> [--model <model>] [--skip-craft-review] [--skip-craft-frames]

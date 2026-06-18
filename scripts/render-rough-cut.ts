@@ -34,6 +34,7 @@ export interface TimelineClip {
   clip_id?: string;
   asset_id: string;
   src_in_us: number;
+  src_out_us: number;
   timeline_in_frame?: number;
   timeline_duration_frames: number;
 }
@@ -256,6 +257,7 @@ export function extractVideoClips(timeline: TimelineDoc): TimelineClip[] {
       return (
         typeof clip.asset_id === "string" &&
         typeof clip.src_in_us === "number" &&
+        typeof clip.src_out_us === "number" &&
         typeof clip.timeline_duration_frames === "number" &&
         clip.timeline_duration_frames > 0
       );
@@ -275,6 +277,7 @@ export function extractVideoClips(timeline: TimelineDoc): TimelineClip[] {
         clip_id: clip.clip_id,
         asset_id: clip.asset_id,
         src_in_us: clip.src_in_us,
+        src_out_us: clip.src_out_us,
         timeline_in_frame: clip.timeline_in_frame,
         timeline_duration_frames: clip.timeline_duration_frames,
       };
@@ -388,7 +391,10 @@ export function buildRenderClips(
       assetId: clip.asset_id,
       sourcePath,
       startSec: clip.src_in_us / 1_000_000,
-      durationSec: clip.timeline_duration_frames / fps,
+      durationSec: Math.min(
+        clip.timeline_duration_frames / fps,
+        (clip.src_out_us - clip.src_in_us) / 1_000_000,
+      ),
       timelineInFrame: clip.timeline_in_frame ?? 0,
     });
   }

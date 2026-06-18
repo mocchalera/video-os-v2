@@ -554,6 +554,11 @@ export function applyAdaptiveTrim(
     if (resolved.mode !== "fixed_authored") {
       clip.src_in_us = resolved.src_in_us;
       clip.src_out_us = resolved.src_out_us;
+      const newDurationUs = clip.src_out_us - clip.src_in_us;
+      const newDurationFrames = Math.ceil(newDurationUs / usPerFrame);
+      if (newDurationFrames < clip.timeline_duration_frames) {
+        clip.timeline_duration_frames = newDurationFrames;
+      }
     }
 
     // Store trim metadata
