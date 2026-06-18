@@ -7,6 +7,7 @@ import * as path from "node:path";
 import type {
   Candidate,
   CaptionPolicySource,
+  CraftTransition,
   NormalizedBeat,
   TimelineClip,
   Track,
@@ -325,6 +326,57 @@ export interface AdjacencyDecideOptions {
   transitionSkillsDir?: string;
 }
 
+const CRAFT_TRANSITION_SCORE_BONUS = 0.2;
+
+export function craftTransitionToSkillId(transition: CraftTransition | undefined): string | undefined {
+  switch (transition) {
+    case "dissolve":
+      return "crossfade_bridge";
+    case "dip_to_black":
+      return "silence_beat";
+    default:
+      return undefined;
+  }
+}
+
+export function hasCraftTransitions(beats: NormalizedBeat[]): boolean {
+  return beats.some((beat) => !!beat.craft?.transition_in || !!beat.craft?.transition_out);
+}
+
+function activeSkillsWithCraftTransitionBias(
+  activeEditingSkills: string[],
+  beats: NormalizedBeat[],
+): string[] {
+  const ids = new Set(activeEditingSkills);
+  for (const beat of beats) {
+    const transitionIds = [
+      craftTransitionToSkillId(beat.craft?.transition_in),
+      craftTransitionToSkillId(beat.craft?.transition_out),
+    ];
+    for (const id of transitionIds) {
+      if (id) ids.add(id);
+    }
+  }
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+function resolvePairCraftTransition(
+  leftBeat: NormalizedBeat | undefined,
+  rightBeat: NormalizedBeat | undefined,
+): { transition: CraftTransition; source: "transition_out" | "transition_in" } | undefined {
+  if (leftBeat?.craft?.transition_out) {
+    return { transition: leftBeat.craft.transition_out, source: "transition_out" };
+  }
+  if (rightBeat?.craft?.transition_in) {
+    return { transition: rightBeat.craft.transition_in, source: "transition_in" };
+  }
+  return undefined;
+}
+
+function metadataOnlyCraftTransition(transition: CraftTransition | undefined): boolean {
+  return transition === "j_cut" || transition === "l_cut" || transition === "match_cut";
+}
+
 /**
  * Find the closest beat/downbeat in the BGM grid to a given frame position.
  * Returns distance in frames, or undefined if no BGM analysis available.
@@ -425,7 +477,7 @@ export function adjacencyDecide(
   opts: AdjacencyDecideOptions,
 ): { transitions: TimelineTransition[]; analysis: AdjacencyAnalysis } {
   const cards = getActiveTransitionCards(
-    opts.activeEditingSkills,
+    activeSkillsWithCraftTransitionBias(opts.activeEditingSkills, opts.beats),
     "p0",
     opts.transitionSkillsDir,
   );
@@ -462,6 +514,8 @@ export function adjacencyDecide(
 
     const leftBeat = beatMap.get(leftClip.beat_id);
     const rightBeat = beatMap.get(rightClip.beat_id);
+    const craftTransition = resolvePairCraftTransition(leftBeat, rightBeat);
+    const preferredCraftSkillId = craftTransitionToSkillId(craftTransition?.transition);
 
     const leftSegEvidence = opts.segmentEvidenceIndex?.get(leftClip.segment_id);
     const rightSegEvidence = opts.segmentEvidenceIndex?.get(rightClip.segment_id);
@@ -524,6 +578,9 @@ export function adjacencyDecide(
       // is also build_to_peak, add a continuity bonus to favor sustained build
       if (card.id === "build_to_peak" && prevSelectedSkillId === "build_to_peak") {
         score = Math.min(1, score + 0.08);
+      }
+      if (preferredCraftSkillId && card.id === preferredCraftSkillId) {
+        score = Math.min(1, score + CRAFT_TRANSITION_SCORE_BONUS);
       }
 
       scoredCards.push({ card, score, threshold, passesWhen, passesAvoidWhen, passesViability });
@@ -647,9 +704,25 @@ export function adjacencyDecide(
       belowThreshold = true;
     }
 
+    const craftForcesCut = craftTransition?.transition === "hard_cut" ||
+      metadataOnlyCraftTransition(craftTransition?.transition);
+    if (craftForcesCut && craftTransition) {
+      transitionType = "cut";
+      appliedSkillId = craftTransition.transition === "hard_cut"
+        ? "craft.hard_cut"
+        : `craft.${craftTransition.transition}.metadata_only`;
+      confidence = Math.max(confidence, 0.5);
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = 0;
+      degradedFromSkillId = null;
+      belowThreshold = false;
+      fallbackParams = {};
+    }
+
     // BGM beat snap — respect snap_anchor for windowed transitions
     let snapResult: ReturnType<typeof findBeatSnapTarget> | undefined;
-    if (selectedCard && !belowThreshold) {
+    if (selectedCard && !belowThreshold && !craftForcesCut) {
       const effects = selectedCard.card.pipeline_effects;
       const preferDownbeat = effects.beat_snap === "downbeat";
       const snapAnchor = effects.snap_anchor ?? "cut_frame";

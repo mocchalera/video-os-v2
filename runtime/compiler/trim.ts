@@ -6,6 +6,7 @@
 
 import type {
   Candidate,
+  CraftInPoint,
   TrimHint,
   TrimPolicy,
   EditBlueprint,
@@ -23,6 +24,8 @@ export interface ResolvedTrim {
   peak_type?: string;
   peak_confidence?: number;
   peak_ref?: string;
+  craft_in_point?: CraftInPoint;
+  craft_degraded?: boolean;
 }
 
 export interface TrimContext {
@@ -36,6 +39,8 @@ export interface TrimContext {
   skillTrimBias?: number;
   /** Microseconds per frame */
   usPerFrame: number;
+  /** Beat-level craft trim directive */
+  craftInPoint?: CraftInPoint;
 }
 
 /**
@@ -56,9 +61,10 @@ export function resolveTrim(
   const authoredOut = candidate.src_out_us;
   const authoredDuration = authoredOut - authoredIn;
   const hint = candidate.trim_hint;
+  const craftInPoint = ctx.craftInPoint;
 
   // If no hint and no policy, use authored range as-is
-  if (!hint && !ctx.trimPolicy) {
+  if (!hint && !ctx.trimPolicy && !craftInPoint) {
     return {
       src_in_us: authoredIn,
       src_out_us: authoredOut,
@@ -67,7 +73,7 @@ export function resolveTrim(
   }
 
   // If trim policy is "fixed", use authored range
-  if (ctx.trimPolicy?.mode === "fixed") {
+  if (ctx.trimPolicy?.mode === "fixed" && !craftInPoint) {
     return {
       src_in_us: authoredIn,
       src_out_us: authoredOut,
@@ -82,13 +88,33 @@ export function resolveTrim(
   let peakType: string | undefined;
   let peakConfidence: number | undefined;
   let peakRef: string | undefined;
+  let craftDegraded = false;
+  let craftPreferredDurationUs: number | undefined;
 
   // Check for recommended_in_out first (strong peak with high confidence)
   const hasRecommendedInOut = hint?.recommended_in_us !== undefined &&
     hint?.recommended_out_us !== undefined &&
     hint.recommended_in_us < hint.recommended_out_us;
+  const recommendedRange = hasRecommendedInOut
+    ? clampRangeToWindow(
+      {
+        inUs: hint!.recommended_in_us!,
+        outUs: hint!.recommended_out_us!,
+      },
+      hint?.window_start_us ?? authoredIn,
+      hint?.window_end_us ?? authoredOut,
+    )
+    : undefined;
 
-  if (hint?.source_center_us !== undefined && hint?.peak_type) {
+  if (craftInPoint === "peak_hold" && recommendedRange) {
+    center = Math.round((recommendedRange.inUs + recommendedRange.outUs) / 2);
+    craftPreferredDurationUs = recommendedRange.outUs - recommendedRange.inUs;
+    mode = "adaptive_peak_center";
+    interestLabel = hint?.interest_point_label;
+    peakType = hint?.peak_type ?? candidate.editorial_signals?.peak_type;
+    peakConfidence = hint?.interest_point_confidence ?? candidate.editorial_signals?.peak_strength_score;
+    peakRef = hint?.peak_ref ?? candidate.editorial_signals?.peak_ref;
+  } else if (hint?.source_center_us !== undefined && hint?.peak_type) {
     // Peak-centered trim
     center = hint.source_center_us;
     mode = "adaptive_peak_center";
@@ -104,6 +130,22 @@ export function resolveTrim(
     // Fallback: midpoint of authored range
     center = Math.round((authoredIn + authoredOut) / 2);
     mode = "fixed_midpoint";
+    if (craftInPoint) craftDegraded = true;
+  }
+
+  if (
+    craftInPoint === "cut_on_action" &&
+    recommendedRange &&
+    hasActionEvidence(candidate)
+  ) {
+    center = Math.round((recommendedRange.inUs + recommendedRange.outUs) / 2);
+    craftPreferredDurationUs = recommendedRange.outUs - recommendedRange.inUs;
+    mode = "adaptive_peak_center";
+    peakType = peakType ?? "action_peak";
+    peakConfidence = peakConfidence ?? hint?.interest_point_confidence ?? candidate.editorial_signals?.peak_strength_score;
+    peakRef = peakRef ?? hint?.peak_ref ?? candidate.editorial_signals?.peak_ref;
+  } else if (craftInPoint === "cut_on_action" && !hasActionEvidence(candidate)) {
+    craftDegraded = true;
   }
 
   // Step 2: Determine desired duration
@@ -117,6 +159,10 @@ export function resolveTrim(
   // Apply hint preferred duration if available (overrides policy)
   if (hint?.preferred_duration_us) {
     desiredDurationUs = hint.preferred_duration_us;
+  }
+
+  if (craftPreferredDurationUs !== undefined) {
+    desiredDurationUs = craftPreferredDurationUs;
   }
 
   // Apply skill duration bias
@@ -162,6 +208,9 @@ export function resolveTrim(
     const bias = Math.max(-0.3, Math.min(0.3, ctx.skillTrimBias));
     preRollRatio = Math.max(0.2, Math.min(0.8, preRollRatio - bias));
   }
+  if (craftInPoint === "post_action_hold") {
+    preRollRatio = Math.max(0.2, Math.min(0.8, preRollRatio - 0.2));
+  }
 
   // Step 4: Compute in/out from center
   const preRoll = Math.round(desiredDurationUs * preRollRatio);
@@ -185,6 +234,31 @@ export function resolveTrim(
     resolvedIn = Math.max(resolvedIn - shift, windowStart);
   }
 
+  if (craftInPoint === "peak_hold" && recommendedRange) {
+    resolvedIn = recommendedRange.inUs;
+    resolvedOut = recommendedRange.outUs;
+  } else if (
+    craftInPoint === "cut_on_action" &&
+    recommendedRange &&
+    hasActionEvidence(candidate)
+  ) {
+    resolvedIn = recommendedRange.inUs;
+    resolvedOut = recommendedRange.outUs;
+  } else if (craftInPoint === "pre_roll_enter") {
+    const shifted = shiftRangeWithinWindow(resolvedIn, resolvedOut, -500_000, windowStart, windowEnd);
+    resolvedIn = shifted.inUs;
+    resolvedOut = shifted.outUs;
+  } else if (craftInPoint === "post_action_hold") {
+    const extendedOut = Math.min(windowEnd, resolvedOut + 1_000_000);
+    if (extendedOut === resolvedOut) craftDegraded = true;
+    resolvedOut = extendedOut;
+  } else if (craftInPoint === "clean_in_clean_out") {
+    const snapped = snapCleanInOut(resolvedIn, resolvedOut, hint, authoredIn, authoredOut);
+    if (snapped.degraded) craftDegraded = true;
+    resolvedIn = snapped.inUs;
+    resolvedOut = snapped.outUs;
+  }
+
   // Final safety: ensure in < out
   if (resolvedIn >= resolvedOut) {
     resolvedIn = authoredIn;
@@ -206,7 +280,75 @@ export function resolveTrim(
     peak_type: peakType,
     peak_confidence: peakConfidence,
     peak_ref: peakRef,
+    craft_in_point: craftInPoint,
+    craft_degraded: craftDegraded || undefined,
   };
+}
+
+function clampRangeToWindow(
+  range: { inUs: number; outUs: number },
+  windowStart: number,
+  windowEnd: number,
+): { inUs: number; outUs: number } | undefined {
+  const inUs = Math.max(windowStart, range.inUs);
+  const outUs = Math.min(windowEnd, range.outUs);
+  return inUs < outUs ? { inUs, outUs } : undefined;
+}
+
+function shiftRangeWithinWindow(
+  inUs: number,
+  outUs: number,
+  shiftUs: number,
+  windowStart: number,
+  windowEnd: number,
+): { inUs: number; outUs: number } {
+  const duration = outUs - inUs;
+  if (duration <= 0) return { inUs, outUs };
+  let nextIn = inUs + shiftUs;
+  let nextOut = outUs + shiftUs;
+  if (nextIn < windowStart) {
+    nextIn = windowStart;
+    nextOut = Math.min(windowEnd, nextIn + duration);
+  }
+  if (nextOut > windowEnd) {
+    nextOut = windowEnd;
+    nextIn = Math.max(windowStart, nextOut - duration);
+  }
+  return { inUs: nextIn, outUs: nextOut };
+}
+
+function hasActionEvidence(candidate: Candidate): boolean {
+  return candidate.trim_hint?.peak_type === "action_peak" ||
+    candidate.editorial_signals?.peak_type === "action_peak" ||
+    (candidate.peak_signals?.motion ?? 0) >= 0.55;
+}
+
+function snapCleanInOut(
+  inUs: number,
+  outUs: number,
+  hint: TrimHint | undefined,
+  authoredIn: number,
+  authoredOut: number,
+): { inUs: number; outUs: number; degraded: boolean } {
+  const snapToleranceUs = 500_000;
+  let nextIn = inUs;
+  let nextOut = outUs;
+  let snapped = false;
+
+  const cleanIn = hint?.window_start_us ?? authoredIn;
+  const cleanOut = hint?.window_end_us ?? authoredOut;
+  if (Math.abs(nextIn - cleanIn) <= snapToleranceUs) {
+    nextIn = cleanIn;
+    snapped = true;
+  }
+  if (Math.abs(nextOut - cleanOut) <= snapToleranceUs) {
+    nextOut = cleanOut;
+    snapped = true;
+  }
+  if (nextIn >= nextOut) {
+    return { inUs, outUs, degraded: true };
+  }
+  return { inUs: nextIn, outUs: nextOut, degraded: !snapped };
 }
 
 /**
@@ -238,10 +380,12 @@ export function applyAdaptiveTrim(
     const candidate = candidateMap.get(key);
     if (!candidate) continue;
 
-    // Skip if no trim hint and no trim policy
-    if (!candidate.trim_hint && !blueprint.trim_policy) continue;
-
     const beat = beatMap.get(clip.beat_id);
+    const craftInPoint = beat?.craft?.in_point;
+
+    // Skip if no trim hint, no trim policy, and no beat craft trim directive.
+    if (!candidate.trim_hint && !blueprint.trim_policy && !craftInPoint) continue;
+
     const beatTargetDurationUs = beat
       ? beat.target_duration_frames * usPerFrame
       : clip.timeline_duration_frames * usPerFrame;
@@ -250,6 +394,7 @@ export function applyAdaptiveTrim(
       beatTargetDurationUs,
       trimPolicy: blueprint.trim_policy,
       usPerFrame,
+      craftInPoint,
     });
 
     // Apply resolved trim to clip
@@ -268,6 +413,8 @@ export function applyAdaptiveTrim(
       resolved_src_out_us: resolved.src_out_us,
       interest_point_label: resolved.interest_point_label,
     };
+    if (resolved.craft_in_point) trimMeta.craft_in_point = resolved.craft_in_point;
+    if (resolved.craft_degraded) trimMeta.craft_degraded = true;
     if (resolved.peak_type) trimMeta.peak_type = resolved.peak_type;
     if (resolved.peak_confidence !== undefined) trimMeta.peak_confidence = resolved.peak_confidence;
     if (resolved.peak_ref) trimMeta.peak_ref = resolved.peak_ref;

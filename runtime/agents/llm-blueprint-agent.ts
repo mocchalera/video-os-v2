@@ -5,6 +5,7 @@ import type {
   CandidatePlan,
   CaptionPolicySource,
   ConfirmedPreferences,
+  CraftDirective,
   DurationMode,
   DurationPolicy,
   EditBlueprint,
@@ -49,6 +50,34 @@ const VALID_CAPTION_SOURCES = new Set<CaptionPolicySource>(["transcript", "autho
 const VALID_CAPTION_DELIVERY = new Set(["burn_in", "sidecar", "both"] as const);
 const VALID_TIMELINE_ORDER = new Set(["chronological", "editorial"] as const);
 const VALID_TRACK_LAYOUT = new Set<TrackLayout>(["single", "multi"]);
+const VALID_CRAFT_IN_POINT = new Set<NonNullable<CraftDirective["in_point"]>>([
+  "cut_on_action",
+  "peak_hold",
+  "pre_roll_enter",
+  "post_action_hold",
+  "clean_in_clean_out",
+]);
+const VALID_CRAFT_TRANSITION = new Set<NonNullable<CraftDirective["transition_in"]>>([
+  "hard_cut",
+  "dissolve",
+  "dip_to_black",
+  "j_cut",
+  "l_cut",
+  "match_cut",
+]);
+const VALID_CRAFT_RHYTHM = new Set<NonNullable<CraftDirective["rhythm"]>>([
+  "accelerando",
+  "ritardando",
+  "steady",
+  "syncopated",
+  "breath",
+]);
+const VALID_CRAFT_SHOT_PROGRESSION = new Set<NonNullable<CraftDirective["shot_progression"]>>([
+  "wide_to_close",
+  "close_to_wide",
+  "scale_match",
+  "free",
+]);
 
 export interface BlueprintPromptInput {
   projectId: string;
@@ -246,6 +275,14 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
           primary_candidate_ref: "use_a_candidate_ref_from_the_list",
           fallback_candidate_refs: ["use_other_candidate_refs_from_the_list"],
         },
+        craft: {
+          in_point: "cut_on_action",
+          transition_out: "hard_cut",
+          rhythm: "accelerando",
+          shot_progression: "wide_to_close",
+          beat_sync: true,
+          hold_duration_bias: 0.9,
+        },
       },
     ],
     pacing: {
@@ -311,6 +348,9 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
     "brief と承認済み selects 候補だけを根拠に、編集設計として EditBlueprint JSON を作ってください。",
     "各 beat は story_arc と対応させ、candidate_plan.primary_candidate_ref は必ず下の selects の candidate_ref から選んでください。",
     "未知の候補や存在しない candidate_ref を作らないでください。迷う場合は fallback_candidate_refs に別の既存 candidate_ref を置いてください。",
+    "brief の emotion_curve と pacing intent に基づいて、必要な beat だけに craft directives を割り当ててください。craft は任意です。",
+    "Use accelerando for building energy, ritardando for emotional resolution.",
+    "Use dissolve between different locations, hard_cut within the same scene.",
     "",
     "## Creative brief",
     JSON.stringify(compactBriefForPrompt(input.briefContent, input.projectId), null, 2),
@@ -501,6 +541,30 @@ function sanitizeCandidateConstraints(value: unknown): Beat["candidate_constrain
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function sanitizeCraftDirective(value: unknown): CraftDirective | undefined {
+  const raw = recordValue(value);
+  if (!raw) return undefined;
+
+  const out: CraftDirective = {};
+  const inPoint = enumValue(raw.in_point, VALID_CRAFT_IN_POINT);
+  if (inPoint) out.in_point = inPoint;
+  const transitionIn = enumValue(raw.transition_in, VALID_CRAFT_TRANSITION);
+  if (transitionIn) out.transition_in = transitionIn;
+  const transitionOut = enumValue(raw.transition_out, VALID_CRAFT_TRANSITION);
+  if (transitionOut) out.transition_out = transitionOut;
+  const rhythm = enumValue(raw.rhythm, VALID_CRAFT_RHYTHM);
+  if (rhythm) out.rhythm = rhythm;
+  const shotProgression = enumValue(raw.shot_progression, VALID_CRAFT_SHOT_PROGRESSION);
+  if (shotProgression) out.shot_progression = shotProgression;
+  const beatSync = booleanValue(raw.beat_sync);
+  if (beatSync !== undefined) out.beat_sync = beatSync;
+  const holdDurationBias = numberValue(raw.hold_duration_bias);
+  if (holdDurationBias !== undefined && holdDurationBias > 0) {
+    out.hold_duration_bias = holdDurationBias;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function sanitizeBeat(
   value: unknown,
   index: number,
@@ -538,6 +602,8 @@ function sanitizeBeat(
   if (notes) beat.notes = notes;
   const storyRole = enumValue(raw.story_role, VALID_STORY_ROLES);
   if (storyRole) beat.story_role = storyRole;
+  const craft = sanitizeCraftDirective(raw.craft);
+  if (craft) beat.craft = craft;
   const skillHints = stringArray(raw.skill_hints);
   if (skillHints.length > 0) beat.skill_hints = skillHints;
   if (inferredPlan) beat.candidate_plan = inferredPlan;

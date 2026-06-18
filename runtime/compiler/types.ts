@@ -54,6 +54,44 @@ export interface CandidatePlan {
   fallback_candidate_refs?: string[];
 }
 
+export type CraftInPoint =
+  | "cut_on_action"
+  | "peak_hold"
+  | "pre_roll_enter"
+  | "post_action_hold"
+  | "clean_in_clean_out";
+
+export type CraftTransition =
+  | "hard_cut"
+  | "dissolve"
+  | "dip_to_black"
+  | "j_cut"
+  | "l_cut"
+  | "match_cut";
+
+export type CraftRhythm =
+  | "accelerando"
+  | "ritardando"
+  | "steady"
+  | "syncopated"
+  | "breath";
+
+export type CraftShotProgression =
+  | "wide_to_close"
+  | "close_to_wide"
+  | "scale_match"
+  | "free";
+
+export interface CraftDirective {
+  in_point?: CraftInPoint;
+  transition_in?: CraftTransition;
+  transition_out?: CraftTransition;
+  rhythm?: CraftRhythm;
+  shot_progression?: CraftShotProgression;
+  beat_sync?: boolean;
+  hold_duration_bias?: number;
+}
+
 export interface Beat {
   id: string;
   label: string;
@@ -64,6 +102,7 @@ export interface Beat {
   notes?: string;
   // M4.5 additive fields
   story_role?: "hook" | "setup" | "experience" | "closing";
+  craft?: CraftDirective;
   skill_hints?: string[];
   candidate_plan?: CandidatePlan;
   candidate_constraints?: {
@@ -367,6 +406,7 @@ export interface NormalizedBeat {
   purpose: string;
   // Peak-aware extensions (vlm-peak-detection-design.md §11.1)
   story_role?: "hook" | "setup" | "experience" | "closing";
+  craft?: CraftDirective;
   skill_hints?: string[];
 }
 

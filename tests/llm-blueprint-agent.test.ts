@@ -126,6 +126,15 @@ function validBlueprintResponse(overrides: Record<string, unknown> = {}): string
           primary_candidate_ref: "cand_hook",
           fallback_candidate_refs: ["cand_close", "cand_missing"],
         },
+        craft: {
+          in_point: "cut_on_action",
+          transition_out: "hard_cut",
+          rhythm: "accelerando",
+          shot_progression: "wide_to_close",
+          beat_sync: true,
+          hold_duration_bias: 0.9,
+          unknown_craft_field: "must be dropped",
+        },
         extra_beat_field: "must be dropped",
       },
       {
@@ -224,6 +233,14 @@ describe("createLlmBlueprintAgent", () => {
     expect(result.blueprint.beats[0].candidate_plan).toEqual({
       primary_candidate_ref: "cand_hook",
       fallback_candidate_refs: ["cand_close"],
+    });
+    expect(result.blueprint.beats[0].craft).toEqual({
+      in_point: "cut_on_action",
+      transition_out: "hard_cut",
+      rhythm: "accelerando",
+      shot_progression: "wide_to_close",
+      beat_sync: true,
+      hold_duration_bias: 0.9,
     });
     expect((result.blueprint as Record<string, unknown>).extra_top_level).toBeUndefined();
     expect((result.blueprint.beats[0] as unknown as Record<string, unknown>).extra_beat_field).toBeUndefined();

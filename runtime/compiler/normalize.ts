@@ -26,6 +26,7 @@ export function normalize(
     preferred_roles: b.preferred_roles ? [...b.preferred_roles] : [],
     purpose: b.purpose ?? "",
     story_role: b.story_role,
+    craft: b.craft ? { ...b.craft } : undefined,
     skill_hints: b.skill_hints ? [...b.skill_hints] : undefined,
   }));
 

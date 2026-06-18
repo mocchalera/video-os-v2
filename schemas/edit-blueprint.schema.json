@@ -212,6 +212,9 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "craft": {
+          "$ref": "#/$defs/craftDirective"
+        },
         "candidate_plan": {
           "type": "object",
           "properties": {
@@ -233,6 +236,39 @@
         }
       },
       "additionalProperties": false
+    },
+    "craftDirective": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "in_point": {
+          "type": "string",
+          "enum": ["cut_on_action", "peak_hold", "pre_roll_enter", "post_action_hold", "clean_in_clean_out"]
+        },
+        "transition_in": {
+          "type": "string",
+          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut"]
+        },
+        "transition_out": {
+          "type": "string",
+          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut"]
+        },
+        "rhythm": {
+          "type": "string",
+          "enum": ["accelerando", "ritardando", "steady", "syncopated", "breath"]
+        },
+        "shot_progression": {
+          "type": "string",
+          "enum": ["wide_to_close", "close_to_wide", "scale_match", "free"]
+        },
+        "beat_sync": {
+          "type": "boolean"
+        },
+        "hold_duration_bias": {
+          "type": "number",
+          "description": "Multiplier for clip duration: >1 = hold longer, <1 = cut shorter"
+        }
+      }
     },
     "beatRole": {
       "type": "string",

@@ -11,6 +11,8 @@
 import type {
   AssembledTimeline,
   BriefAudioPolicy,
+  CraftDirective,
+  CraftRhythm,
   DurationPolicy,
   Marker,
   NormalizedData,
@@ -314,6 +316,9 @@ export function assemble(
       }
     }
 
+    applyBeatCraftTiming(v1Clips, beat.craft, beat.beat_id, fpsNum / fpsDen);
+    applyBeatCraftTiming(v2Clips, beat.craft, beat.beat_id, fpsNum / fpsDen);
+
     // Frame advancement
     if (isGuide) {
       // Guide mode: use at least beat.target_duration_frames as floor.
@@ -465,6 +470,96 @@ export function assemble(
   ];
 
   return { tracks: { video, audio }, markers };
+}
+
+function applyBeatCraftTiming(
+  trackClips: TimelineClip[],
+  craft: CraftDirective | undefined,
+  beatId: string,
+  fps: number,
+): void {
+  if (!craft) return;
+  const beatClips = orderedTimelineClips(trackClips.filter((clip) => clip.beat_id === beatId));
+  if (beatClips.length === 0) return;
+
+  const holdBias = typeof craft.hold_duration_bias === "number" &&
+    Number.isFinite(craft.hold_duration_bias) &&
+    craft.hold_duration_bias > 0
+    ? craft.hold_duration_bias
+    : undefined;
+
+  if (holdBias !== undefined && holdBias !== 1) {
+    applyDurationMultipliers(
+      beatClips,
+      beatClips.map(() => holdBias),
+    );
+  }
+
+  if (craft.rhythm) {
+    applyRhythmPattern(beatClips, craft.rhythm, fps);
+  }
+}
+
+export function applyRhythmPattern(
+  clips: TimelineClip[],
+  rhythm: CraftRhythm | string,
+  fps: number,
+): void {
+  const ordered = orderedTimelineClips(clips);
+  if (ordered.length === 0 || rhythm === "steady") return;
+
+  if (rhythm === "accelerando") {
+    applyDurationMultipliers(ordered, interpolatedMultipliers(ordered.length, 1.5, 0.5));
+  } else if (rhythm === "ritardando") {
+    applyDurationMultipliers(ordered, interpolatedMultipliers(ordered.length, 0.5, 1.5));
+  } else if (rhythm === "syncopated") {
+    applyDurationMultipliers(ordered, ordered.map((_, index) => (index % 2 === 0 ? 1.3 : 0.7)));
+  } else if (rhythm === "breath") {
+    applyBreathRhythm(ordered, fps);
+  }
+}
+
+function orderedTimelineClips(clips: TimelineClip[]): TimelineClip[] {
+  return [...clips].sort((a, b) =>
+    a.timeline_in_frame - b.timeline_in_frame || a.clip_id.localeCompare(b.clip_id)
+  );
+}
+
+function interpolatedMultipliers(count: number, first: number, last: number): number[] {
+  if (count <= 1) return [1];
+  return Array.from({ length: count }, (_, index) => {
+    const t = index / (count - 1);
+    return first + (last - first) * t;
+  });
+}
+
+function applyDurationMultipliers(clips: TimelineClip[], multipliers: number[]): void {
+  if (clips.length === 0) return;
+  let frame = clips[0].timeline_in_frame;
+  for (let i = 0; i < clips.length; i += 1) {
+    const multiplier = multipliers[i] ?? 1;
+    const duration = Math.max(1, Math.round(clips[i].timeline_duration_frames * multiplier));
+    clips[i].timeline_in_frame = frame;
+    clips[i].timeline_duration_frames = duration;
+    frame += duration;
+  }
+}
+
+function applyBreathRhythm(clips: TimelineClip[], fps: number): void {
+  if (clips.length === 0) return;
+  const breathFrames = Math.max(1, Math.round(fps));
+  let frame = clips[0].timeline_in_frame;
+
+  for (let i = 0; i < clips.length; i += 1) {
+    const shouldHoldLast = clips.length <= 3 && i === clips.length - 1;
+    const duration = clips[i].timeline_duration_frames + (shouldHoldLast ? breathFrames : 0);
+    clips[i].timeline_in_frame = frame;
+    clips[i].timeline_duration_frames = Math.max(1, duration);
+    frame += clips[i].timeline_duration_frames;
+    if (clips.length > 3 && (i + 1) % 4 === 0 && i < clips.length - 1) {
+      frame += breathFrames;
+    }
+  }
 }
 
 function placeClipWithinCap(
