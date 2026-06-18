@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   planClipTrims,
   type ClipTrimPlan,
@@ -287,6 +287,70 @@ describe("planClipTrims", () => {
     expect(plan.rationale).toContain("matches warmth in brief");
   });
 
+  it("prefers action-oriented Marlin descriptions over generic weak descriptions", () => {
+    const plans = planClipTrims(
+      [candidate()],
+      [segment()],
+      marlinArtifact([
+        {
+          event_id: "MEV_AST_001_0001",
+          start_us: 2_000_000,
+          end_us: 5_000_000,
+          description: "subjects hold a static pose",
+          confidence: 0.99,
+          source_pass: "marlin_caption",
+        },
+        {
+          event_id: "MEV_AST_001_0002",
+          start_us: 5_000_000,
+          end_us: 7_000_000,
+          description: "woman picks up a basket",
+          confidence: 0.62,
+          source_pass: "marlin_caption",
+        },
+      ]),
+      brief(),
+      new Map(),
+    );
+
+    const plan = eventPlan(plans);
+    expect(plan.event_id).toBe("MEV_AST_001_0002");
+    expect(plan.technique).toBe("cut_on_action");
+  });
+
+  it("uses midpoint fallback when all Marlin events are weak after quality weighting", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const plans = planClipTrims(
+        [candidate({ src_out_us: 20_000_000 })],
+        [segment({ src_out_us: 20_000_000, duration_us: 20_000_000 })],
+        marlinArtifact([
+          {
+            event_id: "MEV_AST_001_0001",
+            start_us: 0,
+            end_us: 20_000_000,
+            description: "subjects hold a static pose",
+            confidence: 0.99,
+            source_pass: "marlin_caption",
+          },
+        ]),
+        brief(),
+        new Map(),
+      );
+
+      const plan = eventPlan(plans);
+      expect(plan.event_id).toBeUndefined();
+      expect(plan.best_in_us).toBe(7_500_000);
+      expect(plan.best_out_us).toBe(12_500_000);
+      expect(plan.score).toBe(0);
+      expect(plan.rationale).toContain("midpoint fallback after weak Marlin events");
+      expect(warn).toHaveBeenCalledWith("[clip-trim] weak events for SEG_001, using midpoint fallback");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("de-prioritizes source-start camera setup events in favor of later Marlin events", () => {
     const plans = planClipTrims(
       [candidate()],
@@ -306,6 +370,36 @@ describe("planClipTrims", () => {
           end_us: 5_000_000,
           description: "speaker smiles warmly after the setup",
           confidence: 0.78,
+          source_pass: "marlin_caption",
+        },
+      ]),
+      brief({ emotion_curve: ["warmth"] }),
+      new Map(),
+    );
+
+    const plan = eventPlan(plans);
+    expect(plan.event_id).toBe("MEV_AST_001_0002");
+  });
+
+  it("prefers a later alternative when the top event is centered in the first second", () => {
+    const plans = planClipTrims(
+      [candidate()],
+      [segment()],
+      marlinArtifact([
+        {
+          event_id: "MEV_AST_001_0001",
+          start_us: 600_000,
+          end_us: 1_200_000,
+          description: "speaker smiles warmly",
+          confidence: 0.99,
+          source_pass: "marlin_caption",
+        },
+        {
+          event_id: "MEV_AST_001_0002",
+          start_us: 3_000_000,
+          end_us: 4_000_000,
+          description: "person enters with a warm smile",
+          confidence: 0.5,
           source_pass: "marlin_caption",
         },
       ]),

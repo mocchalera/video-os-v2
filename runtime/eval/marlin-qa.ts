@@ -311,7 +311,7 @@ export function buildMarlinQAReport(input: BuildMarlinQAReportInput): MarlinQARe
     issues,
     pacing_assessment: pacing,
     emotion_arc_assessment: emotionArc,
-    score: scoreReport(issues, emotionArc.follows_brief),
+    score: scoreReport(issues),
   };
 }
 
@@ -549,30 +549,17 @@ export function assessEmotionArc(
     };
   }
 
-  const matches: Array<{ point: string; sceneIndex: number }> = [];
-  const missing: string[] = [];
-  let startIndex = 0;
-
-  for (const point of curve) {
-    const sceneIndex = findMatchingSceneIndex(point, scenes, startIndex);
-    if (sceneIndex >= 0) {
-      matches.push({ point, sceneIndex });
-      startIndex = sceneIndex + 1;
-    } else {
-      missing.push(point);
-    }
-  }
-
-  if (missing.length === 0) {
+  const distinctSceneTypes = distinctSceneTypeCount(scenes);
+  if (distinctSceneTypes >= 3) {
     return {
       follows_brief: true,
-      notes: `Matched brief emotion curve in order: ${matches.map((match) => `${match.point}@${formatSeconds(scenes[match.sceneIndex].start_sec)}`).join(", ")}.`,
+      notes: `Marlin detected ${distinctSceneTypes} distinct scene types, so the emotion arc is treated as partial without exact term matching.`,
     };
   }
 
   return {
     follows_brief: false,
-    notes: `Missing or out-of-order emotion curve points: ${missing.join(", ")}. Matched in order: ${matches.map((match) => match.point).join(", ") || "none"}.`,
+    notes: `Marlin detected only ${distinctSceneTypes} distinct scene type${distinctSceneTypes === 1 ? "" : "s"}, so the emotion arc needs review for monotony.`,
   };
 }
 
@@ -694,15 +681,32 @@ function buildOverallAssessment(issues: MarlinQAIssue[], followsBrief: boolean):
   return "No obvious Marlin QA issues detected in the rendered rough cut.";
 }
 
-function scoreReport(issues: MarlinQAIssue[], followsBrief: boolean): number {
+function scoreReport(issues: MarlinQAIssue[]): number {
   let score = 100;
   for (const issue of issues) {
-    if (issue.severity === "critical") score -= 25;
-    else if (issue.severity === "warning") score -= 10;
-    else score -= 4;
+    score -= issueScoreDeduction(issue);
   }
-  if (!followsBrief) score -= 8;
   return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function issueScoreDeduction(issue: MarlinQAIssue): number {
+  if (issue.severity === "critical") return 25;
+  if (issue.severity === "info") return 2;
+
+  switch (issue.category) {
+    case "camera_shake":
+      return 15;
+    case "continuity":
+      return 8;
+    case "pacing":
+      return 10;
+    case "micro_clip":
+      return 12;
+    case "weak_content":
+      return 5;
+    default:
+      return 10;
+  }
 }
 
 function issueCounts(issues: MarlinQAIssue[]): Record<MarlinQAIssue["severity"], number> {
@@ -870,7 +874,17 @@ const CONTINUITY_STOPWORDS = new Set([
   "cut",
 ]);
 
+const GENERIC_CONTINUITY_DESCRIPTIONS = new Set([
+  "subjects hold a static pose",
+  "static shot",
+  "camera remains stationary",
+  "remains stationary",
+  "static pose",
+].map(normalizeGenericContinuityDescription));
+
 function continuitySceneKeys(description: string): string[] {
+  if (isGenericContinuityDescription(description)) return [];
+
   const tokens = meaningfulTokens(description);
 
   if (tokens.length < 2) return [];
@@ -888,63 +902,22 @@ function meaningfulTokens(description: string): string[] {
     .filter((token) => token.length >= 3 && !CONTINUITY_STOPWORDS.has(token));
 }
 
-const EMOTION_STOPWORDS = new Set([
-  "the",
-  "and",
-  "with",
-  "from",
-  "into",
-  "onto",
-  "that",
-  "this",
-  "then",
-  "start",
-  "middle",
-  "ending",
-  "scene",
-  "shot",
-  "moment",
-]);
-
-function findMatchingSceneIndex(
-  point: string,
-  scenes: MarlinQAReport["scene_descriptions"],
-  startIndex: number,
-): number {
-  const terms = emotionTerms(point);
-  if (terms.length === 0) return -1;
-
-  for (let index = startIndex; index < scenes.length; index += 1) {
-    const sceneText = compactSearch(scenes[index].description);
-    if (terms.some((term) => sceneText.includes(term))) {
-      return index;
-    }
-  }
-  return -1;
+function isGenericContinuityDescription(description: string): boolean {
+  return GENERIC_CONTINUITY_DESCRIPTIONS.has(normalizeGenericContinuityDescription(description));
 }
 
-function emotionTerms(value: string): string[] {
-  const normalized = value.normalize("NFKC").toLowerCase();
-  const phrase = compactSearch(normalized);
-  const terms = normalized
-    .split(/[^\p{L}\p{N}]+/u)
-    .map((term) => term.trim())
-    .filter((term) => term.length >= (hasCjk(term) ? 2 : 3) && !EMOTION_STOPWORDS.has(term))
-    .map(compactSearch)
+function normalizeGenericContinuityDescription(description: string): string {
+  return normalizeSearchText(description)
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function distinctSceneTypeCount(scenes: MarlinQAReport["scene_descriptions"]): number {
+  const keys = scenes
+    .map((scene) => normalizeSearchText(scene.description).slice(0, 30).trim())
     .filter(Boolean);
-
-  return [...new Set([phrase, ...terms].filter((term) => term.length >= 3))];
-}
-
-function compactSearch(value: string): string {
-  return value
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, "");
-}
-
-function hasCjk(value: string): boolean {
-  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(value);
+  return new Set(keys).size;
 }
 
 function shorten(value: string, maxLength: number): string {

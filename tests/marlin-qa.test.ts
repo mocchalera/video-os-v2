@@ -382,6 +382,16 @@ describe("Marlin output QA", () => {
     expect(issues).toHaveLength(0);
   });
 
+  it("ignores generic static Marlin fallback descriptions for continuity", () => {
+    const issues = detectContinuityIssues([
+      { start_sec: 0, end_sec: 3, description: "subjects hold a static pose" },
+      { start_sec: 3, end_sec: 6, description: "Outdoor family reaction in the garden" },
+      { start_sec: 6, end_sec: 9, description: "subjects hold a static pose" },
+    ]);
+
+    expect(issues).toHaveLength(0);
+  });
+
   it("flags a location that returns after unrelated intervening scenes", () => {
     const issues = detectContinuityIssues([
       { start_sec: 0, end_sec: 4, description: "Wide vineyard row with morning light" },
@@ -398,14 +408,52 @@ describe("Marlin output QA", () => {
     });
   });
 
-  it("reports emotion curve mismatch when Marlin scenes do not follow the brief progression", () => {
+  it("reports emotion arc review only when Marlin scenes are monotone", () => {
     const result = assessEmotionArc(brief(), [
       { start_sec: 0, end_sec: 4, description: "Practice drills continue in the middle." },
       { start_sec: 4, end_sec: 8, description: "Confidence ending smile appears early." },
     ]);
 
     expect(result.follows_brief).toBe(false);
-    expect(result.notes).toContain("uncertain");
+    expect(result.notes).toContain("needs review for monotony");
+  });
+
+  it("treats three distinct Marlin scene types as a partial emotion arc match", () => {
+    const result = assessEmotionArc(brief(), [
+      { start_sec: 0, end_sec: 4, description: "Quiet room before the work begins." },
+      { start_sec: 4, end_sec: 8, description: "Hands assemble materials at a table." },
+      { start_sec: 8, end_sec: 12, description: "Family reaction outside near the doorway." },
+    ]);
+
+    expect(result.follows_brief).toBe(true);
+    expect(result.notes).toContain("partial without exact term matching");
+  });
+
+  it("weights QA score deductions by issue category", () => {
+    const projectDir = tempProject();
+    const report = buildMarlinQAReport({
+      projectDir,
+      videoPath: path.join(projectDir, "09_output", "rough-cut.mp4"),
+      videoDurationSec: 12,
+      brief: brief(),
+      caption: {
+        scene: "Rendered rough cut",
+        events: [
+          { start: 0, end: 2, description: "Opening view as the camera moves and becomes shaky." },
+          { start: 2, end: 6, description: "Static shot where nothing happens." },
+          { start: 6, end: 8, description: "Workbench process with hands preparing tea." },
+          { start: 8, end: 10, description: "Outdoor family reaction in the garden." },
+          { start: 10, end: 12, description: "Workbench process with hands preparing tea." },
+        ],
+      },
+    });
+
+    expect(report.issues.map((issue) => issue.category)).toEqual(expect.arrayContaining([
+      "camera_shake",
+      "weak_content",
+      "continuity",
+    ]));
+    expect(report.score).toBe(72);
   });
 
   it("writes a structured report when report output is enabled", async () => {

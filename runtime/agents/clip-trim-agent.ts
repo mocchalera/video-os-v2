@@ -47,6 +47,7 @@ interface ScoredEvent {
   outUs: number;
   score: number;
   relevance: RelevanceResult;
+  descriptionQualityScore: number;
 }
 
 const MIN_EVENT_DURATION_US = 500_000;
@@ -54,12 +55,39 @@ const PREFERRED_MIN_DURATION_US = 2_000_000;
 const PREFERRED_MAX_DURATION_US = 5_000_000;
 const DEFAULT_PREFERRED_DURATION_US = 5_000_000;
 const DEFAULT_EVENT_CONFIDENCE = 0.7;
-const SOURCE_START_EVENT_TOLERANCE_US = 250_000;
+const SOURCE_START_EVENT_TOLERANCE_US = 500_000;
 const SOURCE_START_SAFETY_TOLERANCE_US = 50_000;
 const SOURCE_START_SAFETY_OFFSET_US = 1_000_000;
 const MIN_SOURCE_DURATION_FOR_START_SAFETY_US = 3_000_000;
-const SOURCE_START_EVENT_PENALTY = 0.18;
+const MIN_SOURCE_DURATION_FOR_START_PENALTY_US = 5_000_000;
+const SOURCE_START_EVENT_SCORE_MULTIPLIER = 0.3;
+const FULL_SOURCE_SPAN_EVENT_SCORE_MULTIPLIER = 0.2;
+const SOURCE_SPAN_EVENT_TOLERANCE_US = 500_000;
+const WEAK_EVENT_SCORE_THRESHOLD = 0.3;
+const EARLY_SELECTED_EVENT_CENTER_US = 1_000_000;
+const LATER_ALTERNATIVE_EVENT_CENTER_US = 2_000_000;
+const LATER_ALTERNATIVE_MIN_SCORE_RATIO = 0.8;
 const CAMERA_SETUP_EVENT_PENALTY = 0.22;
+
+const WEAK_DESCRIPTION_PATTERNS = [
+  /\bstatic pose\b/,
+  /\bsubjects?\s+holds?\b/,
+  /\bnothing happens\b/,
+  /\bremains stationary\b/,
+  /\bcamera remains\b/,
+];
+
+const ACTION_DESCRIPTION_PATTERNS = [
+  /\bwalk(?:s|ed|ing)?\b/,
+  /\bpicks?\s+up\b/,
+  /\bsmil(?:e|es|ed|ing)\b/,
+  /\bpour(?:s|ed|ing)?\b/,
+  /\bcut(?:s|ting)?\b/,
+  /\benter(?:s|ed|ing)?\b/,
+  /\blift(?:s|ed|ing)?\b/,
+  /\bplace(?:s|d|ing)?\b/,
+  /\bpluck(?:s|ed|ing)?\b/,
+];
 
 const STOP_WORDS = new Set([
   "the", "and", "with", "while", "into", "onto", "from", "that", "this",
@@ -112,8 +140,12 @@ export function planClipTrims(
     if (!range) continue;
 
     const events = eventsByAsset.get(candidate.asset_id) ?? [];
-    const scoredEvents = events
-      .map((event) => scoreEvent(event, range, terms))
+    const usableEvents = events.filter((event) => eventUsableDurationUs(event, range) >= MIN_EVENT_DURATION_US);
+    const hasLaterUsableEvent = usableEvents.some((event) =>
+      event.start_us > range.startUs + SOURCE_START_EVENT_TOLERANCE_US
+    );
+    const scoredEvents = usableEvents
+      .map((event) => scoreEvent(event, range, terms, { hasLaterUsableEvent }))
       .filter((event): event is ScoredEvent => event !== undefined)
       .sort((a, b) =>
         b.score - a.score ||
@@ -121,7 +153,27 @@ export function planClipTrims(
         a.event.event_id.localeCompare(b.event.event_id)
       );
 
-    const best = scoredEvents[0];
+    if (scoredEvents.length > 0 && scoredEvents.every((event) => event.score < WEAK_EVENT_SCORE_THRESHOLD)) {
+      console.warn(`[clip-trim] weak events for ${candidate.segment_id}, using midpoint fallback`);
+      const trimRange = centeredRange(
+        Math.round((range.startUs + range.endUs) / 2),
+        DEFAULT_PREFERRED_DURATION_US,
+        range,
+      );
+      const fallbackTechnique = resolveFallbackTechnique(candidate, beatCraft) ?? "peak_hold";
+      plans.push({
+        segment_id: candidate.segment_id,
+        best_in_us: trimRange.startUs,
+        best_out_us: trimRange.endUs,
+        rationale: "midpoint fallback after weak Marlin events; default 5s from source midpoint",
+        technique: fallbackTechnique,
+        source: "marlin_event",
+        score: 0,
+      });
+      continue;
+    }
+
+    const best = chooseBestScoredEvent(scoredEvents, range);
     if (best) {
       const centerUs = resolveEventCenterUs(best, range);
       const preferredDuration = resolvePreferredDurationUs(candidate, planningContext);
@@ -171,6 +223,12 @@ function candidateSegmentRange(candidate: SelectCandidate, segment: SegmentItem 
   const startUs = Math.max(candidateStart, segmentStart);
   const endUs = Math.min(candidateEnd, segmentEnd);
   return startUs < endUs ? { startUs, endUs } : undefined;
+}
+
+function eventUsableDurationUs(event: MarlinEvent, range: TimeRange): number {
+  const inUs = Math.max(range.startUs, event.start_us);
+  const outUs = Math.min(range.endUs, event.end_us);
+  return outUs - inUs;
 }
 
 interface PreferredDurationResolution {
@@ -232,11 +290,29 @@ function candidateBeatIds(
 }
 
 function resolveEventCenterUs(scored: ScoredEvent, range: TimeRange): number {
-  const eventCenterUs = Math.round((scored.event.start_us + scored.event.end_us) / 2);
+  const centerUs = eventCenterUs(scored.event);
   const safetyAdjustedCenterUs = shouldApplySourceStartSafety(scored.event, range)
-    ? eventCenterUs + SOURCE_START_SAFETY_OFFSET_US
-    : eventCenterUs;
+    ? centerUs + SOURCE_START_SAFETY_OFFSET_US
+    : centerUs;
   return clampNumber(safetyAdjustedCenterUs, range.startUs, range.endUs);
+}
+
+function chooseBestScoredEvent(scoredEvents: ScoredEvent[], range: TimeRange): ScoredEvent | undefined {
+  const best = scoredEvents[0];
+  if (!best) return undefined;
+
+  const bestCenterUs = eventCenterUs(best.event);
+  if (bestCenterUs > range.startUs + EARLY_SELECTED_EVENT_CENTER_US) return best;
+
+  const alternative = scoredEvents.find((event) =>
+    eventCenterUs(event.event) > range.startUs + LATER_ALTERNATIVE_EVENT_CENTER_US &&
+    event.score >= best.score * LATER_ALTERNATIVE_MIN_SCORE_RATIO
+  );
+  return alternative ?? best;
+}
+
+function eventCenterUs(event: MarlinEvent): number {
+  return Math.round((event.start_us + event.end_us) / 2);
 }
 
 function centeredRange(centerUs: number, preferredDurationUs: number, bounds: TimeRange): TimeRange {
@@ -264,6 +340,7 @@ function scoreEvent(
   event: MarlinEvent,
   range: TimeRange,
   terms: TermIndex,
+  context: { hasLaterUsableEvent: boolean },
 ): ScoredEvent | undefined {
   const inUs = Math.max(range.startUs, event.start_us);
   const outUs = Math.min(range.endUs, event.end_us);
@@ -274,15 +351,20 @@ function scoreEvent(
   const relevance = scoreDescriptionRelevance(event.description, terms);
   const confidenceScore = clamp01(event.confidence ?? DEFAULT_EVENT_CONFIDENCE);
   const positionScore = positionPreferenceScore(Math.round((inUs + outUs) / 2), range);
-  const sourceStartPenalty = sourceStartEventPenalty(event, range);
+  const descriptionQualityScore = scoreDescriptionQuality(event.description);
+  const sourceStartMultiplier = sourceStartEventScoreMultiplier(event, range, context.hasLaterUsableEvent);
+  const sourceSpanMultiplier = fullSourceSpanEventScoreMultiplier(event, range);
   const cameraSetupPenalty = describesCameraSetupMotion(event.description) ? CAMERA_SETUP_EVENT_PENALTY : 0;
-  const score =
+  const baseScore =
     durationScore * 0.30 +
     relevance.score * 0.35 +
     confidenceScore * 0.25 +
     positionScore * 0.10 -
-    sourceStartPenalty -
     cameraSetupPenalty;
+  const score = Math.max(0, baseScore) *
+    descriptionQualityScore *
+    sourceStartMultiplier *
+    sourceSpanMultiplier;
 
   return {
     event,
@@ -290,15 +372,25 @@ function scoreEvent(
     outUs,
     score,
     relevance,
+    descriptionQualityScore,
   };
 }
 
-function sourceStartEventPenalty(event: MarlinEvent, range: TimeRange): number {
+function sourceStartEventScoreMultiplier(
+  event: MarlinEvent,
+  range: TimeRange,
+  hasLaterUsableEvent: boolean,
+): number {
   const durationUs = range.endUs - range.startUs;
-  if (durationUs <= MIN_SOURCE_DURATION_FOR_START_SAFETY_US) return 0;
+  if (durationUs <= MIN_SOURCE_DURATION_FOR_START_PENALTY_US || !hasLaterUsableEvent) return 1;
   const startsNearRangeStart = event.start_us <= range.startUs + SOURCE_START_EVENT_TOLERANCE_US;
-  if (!startsNearRangeStart) return 0;
-  return SOURCE_START_EVENT_PENALTY;
+  return startsNearRangeStart ? SOURCE_START_EVENT_SCORE_MULTIPLIER : 1;
+}
+
+function fullSourceSpanEventScoreMultiplier(event: MarlinEvent, range: TimeRange): number {
+  const startsNearRangeStart = event.start_us <= range.startUs + SOURCE_SPAN_EVENT_TOLERANCE_US;
+  const endsNearRangeEnd = event.end_us >= range.endUs - SOURCE_SPAN_EVENT_TOLERANCE_US;
+  return startsNearRangeStart && endsNearRangeEnd ? FULL_SOURCE_SPAN_EVENT_SCORE_MULTIPLIER : 1;
 }
 
 function shouldApplySourceStartSafety(event: MarlinEvent, range: TimeRange): boolean {
@@ -370,6 +462,13 @@ function scoreDescriptionRelevance(description: string, terms: TermIndex): Relev
     score: clamp01(score),
     matchedBriefTerms: [...matched],
   };
+}
+
+function scoreDescriptionQuality(description: string): number {
+  const value = description.toLowerCase();
+  if (WEAK_DESCRIPTION_PATTERNS.some((pattern) => pattern.test(value))) return 0.2;
+  if (ACTION_DESCRIPTION_PATTERNS.some((pattern) => pattern.test(value))) return 1;
+  return 0.6;
 }
 
 function addMatches(
@@ -475,7 +574,7 @@ function stemToken(raw: string): string {
 
 function inferTechnique(description: string): string {
   const value = description.toLowerCase();
-  if (/(action|move|moving|run|jump|enter|exit|fall|hit|ride|riding|pedal|dance|gesture|hand|reveal|start|pour|prepare|turn|open|close)/.test(value)) {
+  if (/(action|move|moving|walk|run|jump|enter|exit|fall|hit|ride|riding|pedal|dance|gesture|hand|reveal|start|pick|pluck|lift|place|pour|prepare|turn|open|close)/.test(value)) {
     return "cut_on_action";
   }
   if (/(smile|laugh|cry|hug|reaction|surprise|relief|hope|pause|look|nod)/.test(value)) {
