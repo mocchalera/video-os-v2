@@ -7,7 +7,9 @@ import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import {
   assessEmotionArc,
   detectContinuityIssues,
+  mergeMarlinQAChunkCaptions,
   runMarlinQA,
+  splitMarlinQAVideoChunks,
 } from "../runtime/eval/marlin-qa.js";
 import type { MarlinQAReport } from "../runtime/eval/marlin-qa-types.js";
 
@@ -63,6 +65,61 @@ function expectValidReportShape(report: MarlinQAReport): void {
 }
 
 describe("Marlin output QA", () => {
+  it("splits rendered videos into 15s chunks with 3s overlap", () => {
+    const chunks = splitMarlinQAVideoChunks(201, { chunkDurationSec: 15, overlapSec: 3 });
+
+    expect(chunks).toHaveLength(17);
+    expect(chunks.slice(0, 4)).toEqual([
+      { index: 0, start_sec: 0, end_sec: 15, duration_sec: 15 },
+      { index: 1, start_sec: 12, end_sec: 27, duration_sec: 15 },
+      { index: 2, start_sec: 24, end_sec: 39, duration_sec: 15 },
+      { index: 3, start_sec: 36, end_sec: 51, duration_sec: 15 },
+    ]);
+    expect(chunks[chunks.length - 1]).toEqual({ index: 16, start_sec: 192, end_sec: 201, duration_sec: 9 });
+    expect(chunks[0].end_sec - chunks[1].start_sec).toBe(3);
+  });
+
+  it("offsets chunk-local Marlin events and deduplicates overlap events by confidence", () => {
+    const caption = mergeMarlinQAChunkCaptions([
+      {
+        chunk: { index: 0, start_sec: 0, end_sec: 15, duration_sec: 15 },
+        caption: {
+          scene: "Opening vineyard section",
+          events: [
+            { start: 10, end: 15, description: "Woman enters vineyard", confidence: 0.4 },
+          ],
+        },
+      },
+      {
+        chunk: { index: 1, start_sec: 12, end_sec: 27, duration_sec: 15 },
+        caption: {
+          scene: "Workshop section",
+          events: [
+            { start: 0, end: 3, description: "Woman enters the vineyard and turns to camera", confidence: 0.9 },
+            { start: 3, end: 9, description: "Man works at the workshop bench", confidence: 0.7 },
+          ],
+        },
+      },
+    ], 27);
+
+    expect(caption.scene).toContain("[0s-15s] Opening vineyard section");
+    expect(caption.scene).toContain("[12s-27s] Workshop section");
+    expect(caption.events).toEqual([
+      {
+        start_sec: 12,
+        end_sec: 15,
+        description: "Woman enters the vineyard and turns to camera",
+        confidence: 0.9,
+      },
+      {
+        start_sec: 15,
+        end_sec: 21,
+        description: "Man works at the workshop bench",
+        confidence: 0.7,
+      },
+    ]);
+  });
+
   it("detects camera shake, exposure, weak content, and fast pacing from mock Marlin events", async () => {
     const projectDir = tempProject();
     const calls: string[] = [];
@@ -103,6 +160,94 @@ describe("Marlin output QA", () => {
     expectValidReportShape(report);
   });
 
+  it("uses chunked Marlin captions for long videos and finds more events than the single-call fallback", async () => {
+    const projectDir = tempProject();
+    const chunkClipPaths: string[] = [];
+    const chunkedCalls: string[] = [];
+
+    const singleReport = await runMarlinQA(
+      projectDir,
+      "09_output/rough-cut.mp4",
+      brief(),
+      {
+        marlinFn: mockMarlin([
+          { start: 0, end: 36, description: "Single long Marlin summary for the whole rough cut." },
+        ]),
+        durationSec: 36,
+        shortVideoThresholdSec: 999,
+        writeReport: false,
+      },
+    );
+
+    const marlinFn: MarlinFn = {
+      async caption(videoPath) {
+        const basename = path.basename(videoPath);
+        chunkedCalls.push(basename);
+        if (basename === "rough-cut.mp4") {
+          return {
+            scene: "Single full-video caption",
+            events: [{ start: 0, end: 36, description: "Single long Marlin summary for the whole rough cut." }],
+          };
+        }
+        if (basename === "chunk_000.mp4") {
+          return {
+            scene: "Uncertain opening and early practice",
+            events: [
+              { start: 0, end: 6, description: "Uncertain opening on a quiet path." },
+              { start: 9, end: 15, description: "Practice begins at the workshop table.", confidence: 0.4 },
+            ],
+          };
+        }
+        if (basename === "chunk_001.mp4") {
+          return {
+            scene: "Workshop practice continues",
+            events: [
+              { start: 0, end: 3, description: "Practice begins at the workshop table with clearer hands.", confidence: 0.8 },
+              { start: 3, end: 10, description: "Man in workshop shapes material with tools." },
+            ],
+          };
+        }
+        return {
+          scene: "Confidence ending",
+          events: [
+            { start: 0, end: 5, description: "Confidence resolves as the maker smiles." },
+          ],
+        };
+      },
+      async find() {
+        throw new Error("QA should use caption only");
+      },
+    };
+
+    const chunkedReport = await runMarlinQA(
+      projectDir,
+      "09_output/rough-cut.mp4",
+      brief(),
+      {
+        marlinFn,
+        durationSec: 36,
+        writeReport: false,
+        createChunkClip: async ({ outputPath }) => {
+          chunkClipPaths.push(outputPath);
+          fs.writeFileSync(outputPath, "chunk");
+        },
+      },
+    );
+
+    expect(chunkedCalls).toEqual(["chunk_000.mp4", "chunk_001.mp4", "chunk_002.mp4"]);
+    expect(chunkedReport.scene_descriptions.length).toBeGreaterThan(singleReport.scene_descriptions.length);
+    expect(chunkedReport.scene_descriptions).toEqual([
+      { start_sec: 0, end_sec: 6, description: "Uncertain opening on a quiet path." },
+      { start_sec: 12, end_sec: 15, description: "Practice begins at the workshop table with clearer hands." },
+      { start_sec: 15, end_sec: 22, description: "Man in workshop shapes material with tools." },
+      { start_sec: 24, end_sec: 29, description: "Confidence resolves as the maker smiles." },
+    ]);
+    expect(chunkClipPaths).toHaveLength(3);
+    for (const chunkPath of chunkClipPaths) {
+      expect(fs.existsSync(chunkPath)).toBe(false);
+    }
+  });
+
   it("detects non-adjacent repeated scene descriptions as continuity issues", () => {
     const issues = detectContinuityIssues([
       { start_sec: 0, end_sec: 3, description: "Workbench process with hands preparing tea" },
@@ -126,6 +271,22 @@ describe("Marlin output QA", () => {
     ]);
 
     expect(issues).toHaveLength(0);
+  });
+
+  it("flags a location that returns after unrelated intervening scenes", () => {
+    const issues = detectContinuityIssues([
+      { start_sec: 0, end_sec: 4, description: "Wide vineyard row with morning light" },
+      { start_sec: 4, end_sec: 8, description: "Woman in kimono walks past a doorway" },
+      { start_sec: 8, end_sec: 12, description: "Man in workshop planes a cedar board" },
+      { start_sec: 12, end_sec: 16, description: "Close view of vineyard workers tying vines" },
+    ]);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      category: "continuity",
+      severity: "warning",
+      timestamp_sec: 12,
+    });
   });
 
   it("reports emotion curve mismatch when Marlin scenes do not follow the brief progression", () => {

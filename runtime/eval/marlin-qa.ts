@@ -1,5 +1,8 @@
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import type { CreativeBrief } from "../artifacts/types.js";
 import type { MarlinFn, MarlinRawCaption, MarlinRawEvent } from "../connectors/marlin-types.js";
 import { extractDurationUs, runFfprobe } from "../connectors/ffprobe.js";
@@ -7,6 +10,10 @@ import { createMarlinFnFromEnvironment } from "../pipeline/stages/marlin.js";
 import type { MarlinQAIssue, MarlinQAReport } from "./marlin-qa-types.js";
 
 const DEFAULT_VIDEO_RELATIVE_PATH = "09_output/rough-cut.mp4";
+const DEFAULT_CHUNK_DURATION_SEC = 15;
+const DEFAULT_CHUNK_OVERLAP_SEC = 3;
+const DEFAULT_SHORT_VIDEO_THRESHOLD_SEC = 20;
+const execFileAsync = promisify(execFile);
 
 export interface MarlinQAEvent {
   start_sec: number;
@@ -23,6 +30,10 @@ export interface RunMarlinQAOptions {
   writeReport?: boolean;
   now?: () => Date;
   onReportPath?: (reportPath: string) => void;
+  chunkDurationSec?: number;
+  chunkOverlapSec?: number;
+  shortVideoThresholdSec?: number;
+  createChunkClip?: CreateMarlinQAChunkClip;
 }
 
 export interface BuildMarlinQAReportInput {
@@ -32,6 +43,26 @@ export interface BuildMarlinQAReportInput {
   brief: CreativeBrief;
   caption: MarlinRawCaption;
 }
+
+export interface MarlinQAChunk {
+  index: number;
+  start_sec: number;
+  end_sec: number;
+  duration_sec: number;
+}
+
+export interface MarlinQAChunkCaption {
+  chunk: MarlinQAChunk;
+  caption: MarlinRawCaption;
+}
+
+export interface CreateMarlinQAChunkClipInput {
+  videoPath: string;
+  outputPath: string;
+  chunk: MarlinQAChunk;
+}
+
+export type CreateMarlinQAChunkClip = (input: CreateMarlinQAChunkClipInput) => Promise<void>;
 
 export function defaultMarlinQAVideoPath(projectDir: string): string {
   return path.join(projectDir, DEFAULT_VIDEO_RELATIVE_PATH);
@@ -54,7 +85,12 @@ export async function runMarlinQA(
   const marlinFn = options.marlinFn ?? createMarlinFnFromEnvironment(absProjectDir, options.repoRoot);
 
   try {
-    const caption = await marlinFn.caption(absVideoPath);
+    const caption = await captionMarlinQAWithChunks(absVideoPath, durationSec, marlinFn, {
+      chunkDurationSec: options.chunkDurationSec,
+      chunkOverlapSec: options.chunkOverlapSec,
+      shortVideoThresholdSec: options.shortVideoThresholdSec,
+      createChunkClip: options.createChunkClip,
+    });
     const report = buildMarlinQAReport({
       projectDir: absProjectDir,
       videoPath: absVideoPath,
@@ -77,6 +113,154 @@ export async function runMarlinQA(
       await marlinFn.close?.();
     }
   }
+}
+
+export async function captionMarlinQAWithChunks(
+  videoPath: string,
+  videoDurationSec: number,
+  marlinFn: MarlinFn,
+  options: Pick<
+    RunMarlinQAOptions,
+    "chunkDurationSec" | "chunkOverlapSec" | "shortVideoThresholdSec" | "createChunkClip"
+  > = {},
+): Promise<MarlinRawCaption> {
+  const durationSec = round3(Math.max(0, videoDurationSec));
+  const shortVideoThresholdSec = positiveOrDefault(
+    options.shortVideoThresholdSec,
+    DEFAULT_SHORT_VIDEO_THRESHOLD_SEC,
+  );
+
+  if (durationSec <= 0 || durationSec < shortVideoThresholdSec) {
+    return marlinFn.caption(videoPath);
+  }
+
+  const chunks = splitMarlinQAVideoChunks(durationSec, {
+    chunkDurationSec: options.chunkDurationSec,
+    overlapSec: options.chunkOverlapSec,
+  });
+  if (chunks.length <= 1) {
+    return marlinFn.caption(videoPath);
+  }
+
+  const createChunkClip = options.createChunkClip ?? createFfmpegMarlinQAChunkClip;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "video-os-marlin-qa-chunks-"));
+  const captions: MarlinQAChunkCaption[] = [];
+
+  try {
+    for (const chunk of chunks) {
+      const outputPath = path.join(tempDir, `chunk_${String(chunk.index).padStart(3, "0")}.mp4`);
+      await createChunkClip({ videoPath, outputPath, chunk });
+      captions.push({
+        chunk,
+        caption: await marlinFn.caption(outputPath),
+      });
+    }
+
+    return mergeMarlinQAChunkCaptions(captions, durationSec);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+export function splitMarlinQAVideoChunks(
+  videoDurationSec: number,
+  options: { chunkDurationSec?: number; overlapSec?: number } = {},
+): MarlinQAChunk[] {
+  const durationSec = round3(Math.max(0, videoDurationSec));
+  if (durationSec <= 0) return [];
+
+  const chunkDurationSec = positiveOrDefault(options.chunkDurationSec, DEFAULT_CHUNK_DURATION_SEC);
+  const overlapSec = clamp(
+    positiveOrDefault(options.overlapSec, DEFAULT_CHUNK_OVERLAP_SEC),
+    0,
+    Math.max(0, chunkDurationSec - 0.001),
+  );
+  const stepSec = Math.max(0.001, chunkDurationSec - overlapSec);
+  const chunks: MarlinQAChunk[] = [];
+
+  let index = 0;
+  let startSec = 0;
+  while (startSec < durationSec) {
+    const endSec = round3(Math.min(durationSec, startSec + chunkDurationSec));
+    const start = round3(startSec);
+    chunks.push({
+      index,
+      start_sec: start,
+      end_sec: endSec,
+      duration_sec: round3(endSec - start),
+    });
+
+    if (endSec >= durationSec) break;
+    index += 1;
+    startSec += stepSec;
+  }
+
+  return chunks;
+}
+
+export function mergeMarlinQAChunkCaptions(
+  chunkCaptions: MarlinQAChunkCaption[],
+  videoDurationSec: number,
+): MarlinRawCaption {
+  const durationSec = round3(Math.max(0, videoDurationSec));
+  const events: MarlinQAEvent[] = [];
+  const sceneParts: string[] = [];
+  const captionParts: string[] = [];
+
+  for (const { chunk, caption } of chunkCaptions) {
+    const localEvents = parseMarlinQAEvents(caption, chunk.duration_sec);
+    for (const event of localEvents) {
+      const startSec = round3(clamp(chunk.start_sec + event.start_sec, 0, durationSec));
+      const endSec = round3(clamp(chunk.start_sec + event.end_sec, startSec, durationSec));
+      if (endSec <= startSec) continue;
+      events.push({
+        start_sec: startSec,
+        end_sec: endSec,
+        description: event.description,
+        ...(isFiniteNumber(event.confidence) ? { confidence: event.confidence } : {}),
+      });
+    }
+
+    const scene = caption.scene?.trim();
+    if (scene) {
+      sceneParts.push(`[${formatSeconds(chunk.start_sec)}-${formatSeconds(chunk.end_sec)}] ${scene}`);
+    }
+    const captionText = caption.caption?.trim();
+    if (captionText) {
+      captionParts.push(`[${formatSeconds(chunk.start_sec)}-${formatSeconds(chunk.end_sec)}] ${captionText}`);
+    }
+  }
+
+  return {
+    ...(sceneParts.length > 0 ? { scene: sceneParts.join("\n") } : {}),
+    ...(captionParts.length > 0 ? { caption: captionParts.join("\n") } : {}),
+    events: mergeMarlinQAEvents(events).map((event) => ({
+      start_sec: event.start_sec,
+      end_sec: event.end_sec,
+      description: event.description,
+      ...(isFiniteNumber(event.confidence) ? { confidence: event.confidence } : {}),
+    })),
+  };
+}
+
+export function mergeMarlinQAEvents(events: MarlinQAEvent[]): MarlinQAEvent[] {
+  const merged: MarlinQAEvent[] = [];
+  const sorted = [...events].sort((left, right) =>
+    left.start_sec - right.start_sec ||
+    left.end_sec - right.end_sec ||
+    left.description.localeCompare(right.description)
+  );
+
+  for (const event of sorted) {
+    const duplicateIndex = merged.findIndex((existing) => areDuplicateMarlinQAEvents(existing, event));
+    if (duplicateIndex >= 0) {
+      merged[duplicateIndex] = preferMarlinQAEvent(merged[duplicateIndex], event);
+    } else {
+      merged.push(event);
+    }
+  }
+
+  return merged.sort((left, right) => left.start_sec - right.start_sec || left.end_sec - right.end_sec);
 }
 
 export function buildMarlinQAReport(input: BuildMarlinQAReportInput): MarlinQAReport {
@@ -240,23 +424,27 @@ export function detectContinuityIssues(events: MarlinQAEvent[]): MarlinQAIssue[]
   const reported = new Set<string>();
 
   events.forEach((event, index) => {
-    const key = continuitySceneKey(event.description);
-    if (!key) return;
+    const keys = continuitySceneKeys(event.description);
+    if (keys.length === 0) return;
 
-    const previous = lastByScene.get(key);
-    if (previous && index - previous.index > 1 && !reported.has(key)) {
-      reported.add(key);
+    const repeated = keys
+      .map((key) => ({ key, previous: lastByScene.get(key) }))
+      .find(({ key, previous }) => previous && index - previous.index > 1 && !reported.has(key));
+    if (repeated?.previous) {
+      reported.add(repeated.key);
       issues.push({
         timestamp_sec: event.start_sec,
         duration_sec: issueDuration(event),
         category: "continuity",
         severity: "warning",
-        description: `Scene appears to repeat non-adjacently after ${formatSeconds(previous.event.start_sec)}: ${shorten(event.description, 120)}`,
+        description: `Scene appears to repeat non-adjacently after ${formatSeconds(repeated.previous.event.start_sec)}: ${shorten(event.description, 120)}`,
         suggestion: "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance.",
       });
     }
 
-    lastByScene.set(key, { index, event });
+    for (const key of keys) {
+      lastByScene.set(key, { index, event });
+    }
   });
 
   return issues;
@@ -344,6 +532,25 @@ async function readVideoDurationSec(videoPath: string): Promise<number> {
   return round3(Math.max(0, extractDurationUs(probe) / 1_000_000));
 }
 
+async function createFfmpegMarlinQAChunkClip(input: CreateMarlinQAChunkClipInput): Promise<void> {
+  fs.mkdirSync(path.dirname(input.outputPath), { recursive: true });
+  await execFileAsync("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-ss",
+    formatFfmpegSeconds(input.chunk.start_sec),
+    "-i",
+    input.videoPath,
+    "-t",
+    formatFfmpegSeconds(input.chunk.duration_sec),
+    "-c",
+    "copy",
+    input.outputPath,
+  ]);
+}
+
 function normalizeRawEvent(raw: MarlinRawEvent, videoDurationSec: number): MarlinQAEvent | null {
   const description = raw.description?.trim().replace(/\s+/g, " ");
   if (!description) return null;
@@ -410,6 +617,55 @@ function severityRank(severity: MarlinQAIssue["severity"]): number {
   return 1;
 }
 
+function areDuplicateMarlinQAEvents(left: MarlinQAEvent, right: MarlinQAEvent): boolean {
+  const overlapSec = Math.min(left.end_sec, right.end_sec) - Math.max(left.start_sec, right.start_sec);
+  if (overlapSec <= 0) return false;
+
+  const shorterDurationSec = Math.min(issueDuration(left), issueDuration(right));
+  if (overlapSec < Math.min(1, shorterDurationSec * 0.5)) return false;
+
+  return descriptionsAreSimilar(left.description, right.description);
+}
+
+function descriptionsAreSimilar(left: string, right: string): boolean {
+  const leftText = normalizeSearchText(left).replace(/[^\p{L}\p{N}\s]+/gu, " ");
+  const rightText = normalizeSearchText(right).replace(/[^\p{L}\p{N}\s]+/gu, " ");
+  if (!leftText || !rightText) return false;
+  if (leftText === rightText) return true;
+  if (leftText.length >= 10 && rightText.includes(leftText)) return true;
+  if (rightText.length >= 10 && leftText.includes(rightText)) return true;
+
+  const leftTokens = meaningfulTokens(leftText);
+  const rightTokens = meaningfulTokens(rightText);
+  if (leftTokens.length === 0 || rightTokens.length === 0) return false;
+
+  const leftSet = new Set(leftTokens);
+  const rightSet = new Set(rightTokens);
+  const shared = [...leftSet].filter((token) => rightSet.has(token)).length;
+  const union = new Set([...leftSet, ...rightSet]).size;
+  return shared >= 2 && shared / union >= 0.5;
+}
+
+function preferMarlinQAEvent(left: MarlinQAEvent, right: MarlinQAEvent): MarlinQAEvent {
+  const leftConfidence = left.confidence ?? -1;
+  const rightConfidence = right.confidence ?? -1;
+  if (leftConfidence !== rightConfidence) {
+    return rightConfidence > leftConfidence ? right : left;
+  }
+
+  if (left.description.length !== right.description.length) {
+    return right.description.length > left.description.length ? right : left;
+  }
+
+  const leftDuration = issueDuration(left);
+  const rightDuration = issueDuration(right);
+  if (leftDuration !== rightDuration) {
+    return rightDuration > leftDuration ? right : left;
+  }
+
+  return left.start_sec <= right.start_sec ? left : right;
+}
+
 function projectIdFromBrief(brief: CreativeBrief, projectDir: string): string {
   return brief.project_id || brief.project?.id || path.basename(path.resolve(projectDir));
 }
@@ -449,16 +705,32 @@ const CONTINUITY_STOPWORDS = new Set([
   "people",
   "someone",
   "static",
+  "wide",
+  "close",
+  "closeup",
+  "medium",
+  "slow",
+  "quick",
+  "cuts",
+  "cut",
 ]);
 
-function continuitySceneKey(description: string): string {
-  const tokens = normalizeSearchText(description)
+function continuitySceneKeys(description: string): string[] {
+  const tokens = meaningfulTokens(description);
+
+  if (tokens.length < 2) return [];
+  const keys = [tokens.slice(0, 8).join(" ")];
+  for (const token of tokens) {
+    if (token.length >= 6) keys.push(token);
+  }
+  return [...new Set(keys)];
+}
+
+function meaningfulTokens(description: string): string[] {
+  return normalizeSearchText(description)
     .replace(/[^a-z0-9\s]+/g, " ")
     .split(/\s+/)
     .filter((token) => token.length >= 3 && !CONTINUITY_STOPWORDS.has(token));
-
-  if (tokens.length < 2) return "";
-  return tokens.slice(0, 8).join(" ");
 }
 
 const EMOTION_STOPWORDS = new Set([
@@ -532,6 +804,10 @@ function formatSeconds(value: number): string {
   return `${round1(value)}s`;
 }
 
+function formatFfmpegSeconds(value: number): string {
+  return round3(Math.max(0, value)).toFixed(3);
+}
+
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
@@ -547,6 +823,10 @@ function clamp(value: number, min: number, max: number): number {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function positiveOrDefault(value: number | undefined, fallback: number): number {
+  return isFiniteNumber(value) && value > 0 ? value : fallback;
 }
 
 function findRepoRoot(from: string): string {
