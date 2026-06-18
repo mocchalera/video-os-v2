@@ -1,9 +1,11 @@
 import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fineCutRefinement,
+  formatFineFrameReferences,
+  formatRoughFrameReferences,
   roughCutPlanning,
 } from "../runtime/agents/unified-editorial-agent.js";
 import { getCandidateRef } from "../runtime/compiler/candidate-ref.js";
@@ -306,6 +308,104 @@ describe("unified editorial agent", () => {
       selects: { project_id: "unified-test" },
       blueprint: { project_id: "unified-test" },
     });
+  });
+
+  it("interactive rough pass returns prompt and absolute frame refs without calling Gemini", async () => {
+    const geminiCalls: string[] = [];
+    vi.resetModules();
+    vi.doMock("../runtime/connectors/gemini-json.js", () => ({
+      callGeminiJson: async (prompt: string) => {
+        geminiCalls.push(prompt);
+        return "{}";
+      },
+    }));
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key-that-should-not-be-used";
+      const mod = await import("../runtime/agents/unified-editorial-agent.js");
+      const projectDir = path.resolve("tmp", "unified-editorial-agent");
+      const task = await mod.roughCutPlanning(
+        brief(),
+        marlinEvents(),
+        representativeFrames(),
+        segments(),
+        24,
+        { mode: "interactive", projectDir },
+      );
+
+      expect(geminiCalls).toHaveLength(0);
+      expect(task.mode).toBe("interactive");
+      expect(task.pass).toBe("rough");
+      expect(task.prompt).toContain("## Representative frames for rough pass");
+      expect(task.prompt).toContain(path.resolve(projectDir, "03_analysis/representative_frames/AST_001.jpg"));
+      expect(task.frame_refs.length).toBe(3);
+      expect(task.frame_refs.every((ref) => path.isAbsolute(ref.path))).toBe(true);
+    } finally {
+      vi.doUnmock("../runtime/connectors/gemini-json.js");
+      vi.resetModules();
+    }
+  });
+
+  it("headless mode calls Gemini when an API key is configured", async () => {
+    const geminiCalls: string[] = [];
+    vi.resetModules();
+    vi.doMock("../runtime/connectors/gemini-json.js", () => ({
+      callGeminiJson: async (prompt: string) => {
+        geminiCalls.push(prompt);
+        return "{}";
+      },
+    }));
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key";
+      const mod = await import("../runtime/agents/unified-editorial-agent.js");
+      const result = await mod.roughCutPlanning(
+        brief(),
+        marlinEvents(),
+        representativeFrames(),
+        segments(),
+        24,
+        { mode: "headless" },
+      );
+
+      expect(geminiCalls).toHaveLength(1);
+      expect(geminiCalls[0]).toContain("Pass 1 is rough-cut planning");
+      expect(result.selects.project_id).toBe("unified-test");
+      expect(result.blueprint.project_id).toBe("unified-test");
+    } finally {
+      vi.doUnmock("../runtime/connectors/gemini-json.js");
+      vi.resetModules();
+    }
+  });
+
+  it("formats rough and fine frame references for repo-side agents", async () => {
+    const projectDir = path.resolve("tmp", "unified-editorial-agent");
+    const roughMarkdown = formatRoughFrameReferences({
+      marlinEvents: marlinEvents(),
+      representativeFrames: representativeFrames(),
+      projectDir,
+    });
+
+    expect(roughMarkdown).toContain(`Asset AST_001: ${path.resolve(projectDir, "03_analysis/representative_frames/AST_001.jpg")}`);
+    expect(roughMarkdown).toContain('Marlin: "Hands prepare the product on a table."');
+
+    const rough = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+    );
+    const fineMarkdown = formatFineFrameReferences({
+      selects: rough.selects,
+      marlinEvents: marlinEvents(),
+      keyFrames: keyFrames(),
+      projectDir,
+    });
+
+    expect(fineMarkdown).toContain("## Key frames for clip");
+    expect(fineMarkdown).toContain(`IN:   ${path.resolve(projectDir, "03_analysis/craft_frames/SEG_001_in.jpg")} (0.7s)`);
+    expect(fineMarkdown).toContain("-> Suggest in/out adjustment if any frame shows camera issues.");
   });
 
   it("parses --skip-fine for rough-pass-only CLI runs", () => {

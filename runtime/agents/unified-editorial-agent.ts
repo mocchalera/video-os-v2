@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { callGeminiJson } from "../connectors/gemini-json.js";
 import type { MarlinAssetEvents, MarlinEvent, MarlinEventsArtifact } from "../connectors/marlin-types.js";
 import type { SegmentItem } from "../connectors/ffmpeg-segmenter.js";
@@ -127,6 +128,65 @@ interface FineClipEvidence {
   }>;
 }
 
+export type EditorialAgentMode = "headless" | "interactive";
+
+export interface EditorialAgentOptions {
+  mode: EditorialAgentMode;
+  /**
+   * Used only for interactive prompt packets. Extractors store frame paths
+   * relative to the project; repo-side agents need absolute paths for Read.
+   */
+  projectDir?: string;
+}
+
+export interface RoughCutPlanningInput {
+  brief: CreativeBrief;
+  marlinEvents: MarlinEventsArtifact;
+  representativeFrames: Map<string, string>;
+  segments: SegmentItem[];
+  bgmDurationSec: number | null;
+}
+
+export interface FineCutRefinementInput {
+  brief: CreativeBrief;
+  selects: SelectsCandidates;
+  blueprint: EditBlueprint;
+  marlinEvents: MarlinEventsArtifact;
+  keyFrames: Map<string, KeyFrame[]>;
+  bgmDurationSec: number | null;
+}
+
+export interface EditorialFrameReference {
+  pass: "rough" | "fine";
+  kind: "representative" | "key_frame";
+  path: string;
+  asset_id?: string;
+  segment_id?: string;
+  candidate_ref?: string;
+  beat_id?: string;
+  label?: string;
+  timestamp_us?: number;
+  marlin?: string;
+}
+
+export interface EditorialInteractivePrompt {
+  mode: "interactive";
+  pass: "rough" | "fine";
+  prompt: string;
+  frame_refs: EditorialFrameReference[];
+  frame_reference_markdown: string;
+}
+
+export interface RoughCutPlanningResult {
+  selects: SelectsCandidates;
+  blueprint: EditBlueprint;
+}
+
+interface FrameReferenceBundle {
+  markdown: string;
+  refs: EditorialFrameReference[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -183,6 +243,44 @@ function nonNegativeInteger(value: unknown): number | undefined {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function resolveFramePath(framePath: string | undefined, projectDir?: string): string | undefined {
+  if (!framePath) return undefined;
+  return path.isAbsolute(framePath) ? framePath : path.resolve(projectDir ?? ".", framePath);
+}
+
+function absoluteRepresentativeFrames(
+  representativeFrames: Map<string, string>,
+  projectDir?: string,
+): Map<string, string> {
+  return new Map(
+    [...representativeFrames.entries()]
+      .map(([assetId, framePath]) => {
+        const resolved = resolveFramePath(framePath, projectDir);
+        return resolved ? [assetId, resolved] as const : undefined;
+      })
+      .filter((entry): entry is readonly [string, string] => Boolean(entry)),
+  );
+}
+
+function absoluteKeyFrames(
+  keyFrames: Map<string, KeyFrame[]>,
+  projectDir?: string,
+): Map<string, KeyFrame[]> {
+  return new Map(
+    [...keyFrames.entries()].map(([segmentId, frames]) => [
+      segmentId,
+      frames.map((frame) => ({
+        ...frame,
+        path: resolveFramePath(frame.path, projectDir) ?? frame.path,
+      })),
+    ]),
+  );
+}
+
+function secondsFromUs(timestampUs: number): string {
+  return `${(timestampUs / 1_000_000).toFixed(1)}s`;
 }
 
 function projectIdFromBrief(brief: CreativeBrief): string {
@@ -317,13 +415,49 @@ function buildRoughAssetEvidence(
   });
 }
 
-function buildRoughPrompt(input: {
-  brief: CreativeBrief;
+function roughFrameReferenceBundle(input: {
   marlinEvents: MarlinEventsArtifact;
   representativeFrames: Map<string, string>;
-  segments: SegmentItem[];
-  bgmDurationSec: number | null;
+  projectDir?: string;
+}): FrameReferenceBundle {
+  const marlin = marlinByAsset(input.marlinEvents);
+  const refs: EditorialFrameReference[] = [];
+  const lines = ["## Representative frames for rough pass"];
+  const entries = [...input.representativeFrames.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+  if (entries.length === 0) {
+    lines.push("_No representative frames were available._");
+    return { markdown: lines.join("\n"), refs };
+  }
+
+  for (const [assetId, framePath] of entries) {
+    const absolutePath = resolveFramePath(framePath, input.projectDir);
+    if (!absolutePath) continue;
+    const scene = marlin.get(assetId)?.scene;
+    refs.push({
+      pass: "rough",
+      kind: "representative",
+      asset_id: assetId,
+      path: absolutePath,
+      ...(scene ? { marlin: scene } : {}),
+    });
+    lines.push(`Asset ${assetId}: ${absolutePath}`);
+    lines.push(`  Marlin: "${scene ?? "No Marlin scene report available."}"`);
+    lines.push("");
+  }
+
+  return { markdown: lines.join("\n").trimEnd(), refs };
+}
+
+export function formatRoughFrameReferences(input: {
+  marlinEvents: MarlinEventsArtifact;
+  representativeFrames: Map<string, string>;
+  projectDir?: string;
 }): string {
+  return roughFrameReferenceBundle(input).markdown;
+}
+
+function buildRoughPrompt(input: RoughCutPlanningInput): string {
   const assetEvidence = buildRoughAssetEvidence(
     input.marlinEvents,
     input.representativeFrames,
@@ -493,14 +627,86 @@ function buildFineClipEvidence(
     });
 }
 
-function buildFinePrompt(input: {
-  brief: CreativeBrief;
+function frameEventDescription(
+  candidate: Candidate,
+  frame: KeyFrame,
+  eventsByAsset: Map<string, MarlinEvent[]>,
+): string | undefined {
+  return (eventsByAsset.get(candidate.asset_id) ?? [])
+    .filter((event) =>
+      frame.timestamp_us >= event.start_us
+      && frame.timestamp_us <= event.end_us
+      && overlapsSegment(candidate, event)
+    )
+    .sort((a, b) => (b.confidence ?? 0.6) - (a.confidence ?? 0.6))[0]?.description;
+}
+
+function fineFrameReferenceBundle(input: {
   selects: SelectsCandidates;
-  blueprint: EditBlueprint;
   marlinEvents: MarlinEventsArtifact;
   keyFrames: Map<string, KeyFrame[]>;
-  bgmDurationSec: number | null;
+  projectDir?: string;
+}): FrameReferenceBundle {
+  const refs: EditorialFrameReference[] = [];
+  const lines = ["## Key frames for fine pass"];
+  const eventsByAsset = marlinEventsForAsset(input.marlinEvents);
+  const activeCandidates = input.selects.candidates.filter((candidate) => candidate.role !== "reject");
+
+  if (activeCandidates.length === 0) {
+    lines.push("_No selected clips were available for fine-cut key frames._");
+    return { markdown: lines.join("\n"), refs };
+  }
+
+  for (const candidate of activeCandidates) {
+    const candidateRef = getCandidateRef(candidate);
+    const beatId = candidate.eligible_beats?.[0] ?? beatIdForStoryRole(candidate.story_role ?? "experience");
+    const frames = input.keyFrames.get(candidate.segment_id) ?? [];
+    lines.push(`## Key frames for clip ${candidateRef} (${beatId})`);
+
+    if (frames.length === 0) {
+      lines.push("_No key frames were extracted for this clip._");
+      lines.push("");
+      continue;
+    }
+
+    for (const frame of frames) {
+      const absolutePath = resolveFramePath(frame.path, input.projectDir);
+      if (!absolutePath) continue;
+      const label = frame.label.toUpperCase();
+      const description = frameEventDescription(candidate, frame, eventsByAsset);
+      refs.push({
+        pass: "fine",
+        kind: "key_frame",
+        segment_id: candidate.segment_id,
+        asset_id: candidate.asset_id,
+        candidate_ref: candidateRef,
+        beat_id: beatId,
+        label: frame.label,
+        timestamp_us: frame.timestamp_us,
+        path: absolutePath,
+        ...(description ? { marlin: description } : {}),
+      });
+      const paddedLabel = `${label}:`.padEnd(6, " ");
+      lines.push(`${paddedLabel}${absolutePath} (${secondsFromUs(frame.timestamp_us)})${description ? ` - "${description}"` : ""}`);
+    }
+
+    lines.push("-> Suggest in/out adjustment if any frame shows camera issues.");
+    lines.push("");
+  }
+
+  return { markdown: lines.join("\n").trimEnd(), refs };
+}
+
+export function formatFineFrameReferences(input: {
+  selects: SelectsCandidates;
+  marlinEvents: MarlinEventsArtifact;
+  keyFrames: Map<string, KeyFrame[]>;
+  projectDir?: string;
 }): string {
+  return fineFrameReferenceBundle(input).markdown;
+}
+
+function buildFinePrompt(input: FineCutRefinementInput): string {
   const clipEvidence = buildFineClipEvidence(input.selects, input.marlinEvents, input.keyFrames);
   return [
     "You are the unified Claude/Codex editorial agent for Video OS.",
@@ -542,6 +748,65 @@ function buildFinePrompt(input: {
       revision_notes: ["what changed and why"],
     }, null, 2),
   ].join("\n");
+}
+
+function buildRoughInteractivePrompt(
+  input: RoughCutPlanningInput,
+  options: EditorialAgentOptions,
+): EditorialInteractivePrompt {
+  const representativeFrames = absoluteRepresentativeFrames(input.representativeFrames, options.projectDir);
+  const interactiveInput = { ...input, representativeFrames };
+  const bundle = roughFrameReferenceBundle({
+    marlinEvents: input.marlinEvents,
+    representativeFrames,
+    projectDir: options.projectDir,
+  });
+  const prompt = [
+    buildRoughPrompt(interactiveInput),
+    "",
+    bundle.markdown,
+    "",
+    "## Repo-side agent instructions",
+    "- Use the Read tool on the absolute frame paths above before deciding.",
+    "- Return the JSON object requested in the prompt. Do not write timeline.json.",
+  ].join("\n");
+  return {
+    mode: "interactive",
+    pass: "rough",
+    prompt,
+    frame_refs: bundle.refs,
+    frame_reference_markdown: bundle.markdown,
+  };
+}
+
+function buildFineInteractivePrompt(
+  input: FineCutRefinementInput,
+  options: EditorialAgentOptions,
+): EditorialInteractivePrompt {
+  const keyFrames = absoluteKeyFrames(input.keyFrames, options.projectDir);
+  const interactiveInput = { ...input, keyFrames };
+  const bundle = fineFrameReferenceBundle({
+    selects: input.selects,
+    marlinEvents: input.marlinEvents,
+    keyFrames,
+    projectDir: options.projectDir,
+  });
+  const prompt = [
+    buildFinePrompt(interactiveInput),
+    "",
+    bundle.markdown,
+    "",
+    "## Repo-side agent instructions",
+    "- Use the Read tool on the absolute key-frame paths above before setting in/out points.",
+    "- Return the JSON object requested in the prompt. Do not write timeline.json.",
+  ].join("\n");
+  return {
+    mode: "interactive",
+    pass: "fine",
+    prompt,
+    frame_refs: bundle.refs,
+    frame_reference_markdown: bundle.markdown,
+  };
 }
 
 function headlessLlmCompleter(passLabel: string): LlmCompleter | undefined {
@@ -892,21 +1157,56 @@ function normalizeRoughResult(
   return { selects, blueprint };
 }
 
+function parseAgentJsonResponse(response: string | Record<string, unknown>): Record<string, unknown> {
+  if (typeof response === "string") return parseLlmResponse(response);
+  if (isRecord(response)) return response;
+  throw new Error("Interactive editorial response must be a JSON string or object");
+}
+
+export function parseRoughCutPlanningResponse(
+  response: string | Record<string, unknown>,
+  input: RoughCutPlanningInput,
+): RoughCutPlanningResult {
+  return normalizeRoughResult(parseAgentJsonResponse(response), input);
+}
+
+export function roughCutPlanning(
+  brief: CreativeBrief,
+  marlinEvents: MarlinEventsArtifact,
+  representativeFrames: Map<string, string>,
+  segments: SegmentItem[],
+  bgmDurationSec: number | null,
+  options: EditorialAgentOptions & { mode: "interactive" },
+): Promise<EditorialInteractivePrompt>;
+export function roughCutPlanning(
+  brief: CreativeBrief,
+  marlinEvents: MarlinEventsArtifact,
+  representativeFrames: Map<string, string>,
+  segments: SegmentItem[],
+  bgmDurationSec: number | null,
+  options?: EditorialAgentOptions,
+): Promise<RoughCutPlanningResult>;
 export async function roughCutPlanning(
   brief: CreativeBrief,
   marlinEvents: MarlinEventsArtifact,
   representativeFrames: Map<string, string>,
   segments: SegmentItem[],
   bgmDurationSec: number | null,
-): Promise<{ selects: SelectsCandidates; blueprint: EditBlueprint }> {
-  const prompt = buildRoughPrompt({ brief, marlinEvents, representativeFrames, segments, bgmDurationSec });
+  options?: EditorialAgentOptions,
+): Promise<RoughCutPlanningResult | EditorialInteractivePrompt> {
+  const input: RoughCutPlanningInput = { brief, marlinEvents, representativeFrames, segments, bgmDurationSec };
+  if (options?.mode === "interactive") {
+    return buildRoughInteractivePrompt(input, options);
+  }
+
+  const prompt = buildRoughPrompt(input);
   let parsed: Record<string, unknown> | undefined;
   try {
     parsed = await completeJsonWithRetry(headlessLlmCompleter("unified-editorial-rough"), prompt);
   } catch {
     parsed = undefined;
   }
-  return normalizeRoughResult(parsed, { brief, marlinEvents, representativeFrames, segments, bgmDurationSec });
+  return normalizeRoughResult(parsed, input);
 }
 
 function allowedCanonicalRefs(index: CandidateIndex): Set<string> {
@@ -1163,6 +1463,31 @@ function normalizeFineBlueprint(
   return next;
 }
 
+export function parseFineCutRefinementResponse(
+  response: string | Record<string, unknown>,
+  input: FineCutRefinementInput,
+): EditBlueprint {
+  return normalizeFineBlueprint(parseAgentJsonResponse(response), input);
+}
+
+export function fineCutRefinement(
+  brief: CreativeBrief,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  marlinEvents: MarlinEventsArtifact,
+  keyFrames: Map<string, KeyFrame[]>,
+  bgmDurationSec: number | null,
+  options: EditorialAgentOptions & { mode: "interactive" },
+): Promise<EditorialInteractivePrompt>;
+export function fineCutRefinement(
+  brief: CreativeBrief,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  marlinEvents: MarlinEventsArtifact,
+  keyFrames: Map<string, KeyFrame[]>,
+  bgmDurationSec: number | null,
+  options?: EditorialAgentOptions,
+): Promise<EditBlueprint>;
 export async function fineCutRefinement(
   brief: CreativeBrief,
   selects: SelectsCandidates,
@@ -1170,8 +1495,14 @@ export async function fineCutRefinement(
   marlinEvents: MarlinEventsArtifact,
   keyFrames: Map<string, KeyFrame[]>,
   bgmDurationSec: number | null,
-): Promise<EditBlueprint> {
-  const prompt = buildFinePrompt({ brief, selects, blueprint, marlinEvents, keyFrames, bgmDurationSec });
+  options?: EditorialAgentOptions,
+): Promise<EditBlueprint | EditorialInteractivePrompt> {
+  const input: FineCutRefinementInput = { brief, selects, blueprint, marlinEvents, keyFrames, bgmDurationSec };
+  if (options?.mode === "interactive") {
+    return buildFineInteractivePrompt(input, options);
+  }
+
+  const prompt = buildFinePrompt(input);
   let parsed: Record<string, unknown> | undefined;
   try {
     parsed = await completeJsonWithRetry(headlessLlmCompleter("unified-editorial-fine"), prompt);
