@@ -66,6 +66,65 @@ describe("peak detection scoring", () => {
     expect(ranked.map((entry) => entry.candidate.segment_id)).toEqual(["planned"]);
   });
 
+  it("prioritizes candidate_plan primary refs and exact eligible beat matches over generic candidates", () => {
+    const normalized: NormalizedData = {
+      project_id: "p",
+      project_title: "P",
+      total_duration_frames: 120,
+      role_quotas: { hero: 0, support: 1, transition: 0, texture: 1, dialogue: 0 },
+      beats: [{
+        beat_id: "b05_serenity",
+        label: "serenity",
+        target_duration_frames: 120,
+        required_roles: ["support"],
+        preferred_roles: ["texture"],
+        purpose: "close with quiet serenity",
+        story_role: "closing",
+        candidate_plan: {
+          primary_candidate_ref: "cand_primary",
+          fallback_candidate_refs: ["cand_fallback"],
+        },
+      }],
+    };
+
+    const ranked = scoreCandidates(
+      normalized,
+      [
+        candidate({
+          candidate_id: "cand_generic",
+          segment_id: "generic",
+          role: "texture",
+          semantic_rank: 1,
+          eligible_beats: undefined,
+        }),
+        candidate({
+          candidate_id: "cand_fallback",
+          segment_id: "fallback",
+          role: "support",
+          semantic_rank: 2,
+          eligible_beats: ["b03_immersion"],
+        }),
+        candidate({
+          candidate_id: "cand_primary",
+          segment_id: "primary",
+          role: "support",
+          semantic_rank: 50,
+          eligible_beats: ["b05_serenity"],
+        }),
+      ],
+      params,
+      30,
+      1,
+    ).get("b05_serenity")!;
+
+    expect(ranked[0].candidate.segment_id).toBe("primary");
+    expect(ranked[0].breakdown.plan_priority_bonus).toBeGreaterThan(
+      ranked[1].breakdown.plan_priority_bonus ?? 0,
+    );
+    expect(ranked[0].breakdown.beat_match_bonus).toBeGreaterThan(0);
+    expect(ranked.find((entry) => entry.candidate.segment_id === "generic")?.breakdown.generic_beat_penalty).toBeGreaterThan(0);
+  });
+
   it("boosts explicit peak_signals enough to outrank a better semantic rank", () => {
     const normalized: NormalizedData = {
       project_id: "p",

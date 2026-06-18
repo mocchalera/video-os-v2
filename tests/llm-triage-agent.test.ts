@@ -13,6 +13,10 @@ import {
   type LlmImagePart,
   type LlmCompleter,
 } from "../runtime/agents/llm-triage-agent.js";
+import {
+  MARLIN_CAMERA_MOTION_CONFIDENCE_PENALTY,
+  MARLIN_CAMERA_MOTION_START_FLAG,
+} from "../runtime/analysis/camera-motion.js";
 import { callGeminiMultimodal } from "../runtime/connectors/gemini-json.js";
 import type { TriageAgentContext } from "../runtime/commands/triage.js";
 import { parseArgs } from "../scripts/triage-llm.js";
@@ -580,6 +584,29 @@ describe("selectsFromLlmResponse", () => {
     expect(result.candidates[0].story_role).toBe("hook");
     expect(result.candidates[1].story_role).toBeUndefined();
   });
+
+  it("applies segment confidence penalties from camera-motion quality gates", () => {
+    const segments = compactSegmentEvidence(defaultSegments());
+    segments[0].quality_flags = [MARLIN_CAMERA_MOTION_START_FLAG];
+    segments[0].confidence_penalty = MARLIN_CAMERA_MOTION_CONFIDENCE_PENALTY;
+
+    const result = selectsFromLlmResponse({
+      candidates: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_001",
+          src_in_us: 1000,
+          src_out_us: 5000,
+          role: "hero",
+          why_it_matches: "Opening first-ride moment.",
+          confidence: 0.9,
+        },
+      ],
+    }, "test-project", segments);
+
+    expect(result.candidates[0].confidence).toBeCloseTo(0.72);
+    expect(result.candidates[0].risks).toContain(MARLIN_CAMERA_MOTION_START_FLAG);
+  });
 });
 
 describe("compactSegmentEvidence", () => {
@@ -628,6 +655,55 @@ describe("compactSegmentEvidence", () => {
     expect(segments[0]).not.toHaveProperty("extracted_text");
     expect(segments[0]).not.toHaveProperty("place_hint");
     expect(segments[0]).not.toHaveProperty("aesthetic_notes");
+  });
+
+  it("adds a camera-motion confidence penalty from Marlin first-event evidence", () => {
+    const projectDir = createProject("marlin-camera-motion", [
+      {
+        segment_id: "SEG_CAMERA",
+        asset_id: "AST_CAMERA",
+        src_in_us: 0,
+        src_out_us: 5_000_000,
+        summary: "Handheld opening shot before the view settles.",
+      },
+    ]);
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/marlin_events.json"),
+      JSON.stringify({
+        project_id: "test-project",
+        artifact_version: "marlin-events-v1",
+        model: {
+          provider: "marlin",
+          model_alias: "test",
+          model_snapshot: "test",
+        },
+        items: [
+          {
+            asset_id: "AST_CAMERA",
+            source_path: "media/camera.mp4",
+            scene: "camera opening",
+            events: [
+              {
+                event_id: "MEV_CAMERA_001",
+                start_us: 0,
+                end_us: 1_500_000,
+                description: "camera stabilizes after recording starts",
+                confidence: 0.9,
+                source_pass: "marlin_caption",
+              },
+            ],
+            find_results: [],
+          },
+        ],
+      }, null, 2),
+      "utf-8",
+    );
+
+    const segments = loadCompactSegmentEvidence(projectDir);
+
+    expect(segments[0].quality_flags).toContain(MARLIN_CAMERA_MOTION_START_FLAG);
+    expect(segments[0].confidence_penalty).toBe(MARLIN_CAMERA_MOTION_CONFIDENCE_PENALTY);
+    expect(segments[0].aesthetic_notes?.[0]).toContain("camera setup/motion");
   });
 
   it("forwards compact visual quality and interest point labels when present", () => {

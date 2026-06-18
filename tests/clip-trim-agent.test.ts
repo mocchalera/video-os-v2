@@ -287,6 +287,60 @@ describe("planClipTrims", () => {
     expect(plan.rationale).toContain("matches warmth in brief");
   });
 
+  it("de-prioritizes source-start camera setup events in favor of later Marlin events", () => {
+    const plans = planClipTrims(
+      [candidate()],
+      [segment()],
+      marlinArtifact([
+        {
+          event_id: "MEV_AST_001_0001",
+          start_us: 0,
+          end_us: 2_000_000,
+          description: "warm scene as the camera stabilizes",
+          confidence: 0.99,
+          source_pass: "marlin_caption",
+        },
+        {
+          event_id: "MEV_AST_001_0002",
+          start_us: 3_000_000,
+          end_us: 5_000_000,
+          description: "speaker smiles warmly after the setup",
+          confidence: 0.78,
+          source_pass: "marlin_caption",
+        },
+      ]),
+      brief({ emotion_curve: ["warmth"] }),
+      new Map(),
+    );
+
+    const plan = eventPlan(plans);
+    expect(plan.event_id).toBe("MEV_AST_001_0002");
+  });
+
+  it("adds a conditional safety offset when only a source-start event is usable", () => {
+    const plans = planClipTrims(
+      [candidate({ trim_hint: { preferred_duration_us: 5_000_000 } })],
+      [segment()],
+      marlinArtifact([
+        {
+          event_id: "MEV_AST_001_0001",
+          start_us: 0,
+          end_us: 1_500_000,
+          description: "person enters the warm room",
+          confidence: 0.9,
+          source_pass: "marlin_caption",
+        },
+      ]),
+      brief({ emotion_curve: ["warmth"] }),
+      new Map(),
+    );
+
+    const plan = eventPlan(plans);
+    expect(plan.best_in_us).toBe(1_000_000);
+    expect(plan.best_out_us).toBe(6_000_000);
+    expect(plan.rationale).toContain("source-start safety offset applied");
+  });
+
   it("reports beat-level craft as fallback when no Marlin events exist", () => {
     const craft = new Map<string, CraftDirective>([
       ["b01", { in_point: "peak_hold" }],

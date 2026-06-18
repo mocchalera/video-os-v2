@@ -3,10 +3,16 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import {
+  MARLIN_CAMERA_MOTION_CONFIDENCE_PENALTY,
+  MARLIN_CAMERA_MOTION_START_FLAG,
+  describesCameraSetupMotion,
+} from "../analysis/camera-motion.js";
 import { classifyTranscriptQuality } from "../analysis/transcript-quality.js";
 import { loadCreativeBrief } from "../artifacts/loaders.js";
 import type { CreativeBrief, EditorialSummary } from "../artifacts/types.js";
 import { callGeminiMultimodal, type GeminiInlineImageInput } from "../connectors/gemini-json.js";
+import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
 import { parseLlmResponse } from "./llm-json.js";
 import type {
   SelectCandidate,
@@ -28,6 +34,8 @@ export const UNRELIABLE_TRANSCRIPT_TEXT = "[unreliable — judge on visuals]";
 const BRIEF_REL = "01_intent/creative_brief.yaml";
 const ANALYSIS_REL = "03_analysis";
 const SEGMENTS_REL = "03_analysis/segments.json";
+const MARLIN_EVENTS_REL = "03_analysis/marlin_events.json";
+const SOURCE_START_TOLERANCE_US = 250_000;
 const FILMSTRIP_MAX_WIDTH_PX = 512;
 const MULTIMODAL_BATCH_SEGMENTS = 15;
 const MULTIMODAL_BATCH_DELAY_MS = 5_000;
@@ -83,6 +91,8 @@ export interface CompactSegmentEvidence {
   transcript: string;
   filmstrip_path?: string;
   visual_quality?: CompactVisualQuality;
+  quality_flags?: string[];
+  confidence_penalty?: number;
   interest_point_labels?: string[];
   extracted_text?: string[];
   place_hint?: string;
@@ -149,6 +159,10 @@ function stringArray(value: unknown): string[] {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : ""))
     .filter((item) => item.length > 0);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }
 
 function clamp01(value: unknown, fallback: number): number {
@@ -379,6 +393,7 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
         peak: extractPeakEvidence(item),
         transcript: normalizeTranscript(item.transcript_excerpt ?? item.transcript),
         filmstrip_path: stringValue(item.filmstrip_path),
+        quality_flags: stringArray(item.quality_flags),
         ...(visualQuality ? { visual_quality: visualQuality } : {}),
         ...(interestPointLabels.length > 0 ? { interest_point_labels: interestPointLabels } : {}),
         ...(extractedText.length > 0 ? { extracted_text: extractedText } : {}),
@@ -386,6 +401,55 @@ export function compactSegmentEvidence(rawSegments: unknown[]): CompactSegmentEv
         ...(aestheticNotes.length > 0 ? { aesthetic_notes: aestheticNotes } : {}),
       },
     ];
+  });
+}
+
+interface MarlinCameraMotionStartHint {
+  description: string;
+  confidencePenalty: number;
+}
+
+function loadMarlinCameraMotionStartHints(projectDir: string): Map<string, MarlinCameraMotionStartHint> {
+  const marlinPath = path.join(projectDir, MARLIN_EVENTS_REL);
+  if (!fs.existsSync(marlinPath)) return new Map();
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(marlinPath, "utf-8")) as MarlinEventsArtifact;
+    const hints = new Map<string, MarlinCameraMotionStartHint>();
+    for (const item of parsed.items ?? []) {
+      const firstEvent = [...(item.events ?? [])].sort((a, b) =>
+        a.start_us - b.start_us || a.end_us - b.end_us || a.event_id.localeCompare(b.event_id)
+      )[0];
+      if (!firstEvent || firstEvent.start_us > SOURCE_START_TOLERANCE_US) continue;
+      if (!describesCameraSetupMotion(firstEvent.description)) continue;
+      hints.set(item.asset_id, {
+        description: firstEvent.description,
+        confidencePenalty: MARLIN_CAMERA_MOTION_CONFIDENCE_PENALTY,
+      });
+    }
+    return hints;
+  } catch {
+    return new Map();
+  }
+}
+
+function applyMarlinCameraMotionQualityHints(
+  segments: CompactSegmentEvidence[],
+  hints: Map<string, MarlinCameraMotionStartHint>,
+): CompactSegmentEvidence[] {
+  if (hints.size === 0) return segments;
+  return segments.map((segment) => {
+    const hint = hints.get(segment.asset_id);
+    if (!hint || segment.src_in_us > SOURCE_START_TOLERANCE_US) return segment;
+    return {
+      ...segment,
+      quality_flags: uniqueStrings([...(segment.quality_flags ?? []), MARLIN_CAMERA_MOTION_START_FLAG]),
+      confidence_penalty: Math.max(segment.confidence_penalty ?? 0, hint.confidencePenalty),
+      aesthetic_notes: uniqueStrings([
+        ...(segment.aesthetic_notes ?? []),
+        `Marlin first event suggests camera setup/motion: ${hint.description}`,
+      ]),
+    };
   });
 }
 
@@ -411,7 +475,8 @@ export function loadCompactSegmentEvidence(projectDir: string): CompactSegmentEv
   if (segments.length === 0) {
     throw new Error(`segments.json has no valid segment evidence: ${segmentsPath}`);
   }
-  return segments.map((segment) => {
+  const qualityHints = loadMarlinCameraMotionStartHints(projectDir);
+  return applyMarlinCameraMotionQualityHints(segments, qualityHints).map((segment) => {
     if (!segment.filmstrip_path) return segment;
     return {
       ...segment,
@@ -506,6 +571,7 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- If `visual_quality.scores.focus_sharpness` < 0.3, reject as technically unusable.",
     "- If `visual_quality.scores.subject_prominence` < 0.2, reject unless the clip serves a specific texture/transition role.",
     "- If `aesthetic_notes` mention 'out of focus', 'severe motion blur', or 'overexposed', lower confidence significantly.",
+    `- If quality_flags include '${MARLIN_CAMERA_MOTION_START_FLAG}' or confidence_penalty is present, lower confidence because source-start camera setup/motion often contains unusable shake.`,
     "- IMPORTANT: You must select candidates. An empty candidates array is never acceptable. These segments are the only available footage — choose the best from what exists, not against an ideal.",
     "",
     "## Output",
@@ -660,8 +726,8 @@ export function selectsFromLlmResponse(
       src_out_us: segment.src_out_us,
       role,
       why_it_matches: stringValue(item.why_it_matches) ?? segment.summary,
-      risks: stringArray(item.risks),
-      confidence: clamp01(item.confidence, 0.5),
+      risks: uniqueStrings([...stringArray(item.risks), ...(segment.quality_flags ?? [])]),
+      confidence: clamp01(clamp01(item.confidence, 0.5) - (segment.confidence_penalty ?? 0), 0.5),
     };
     const semanticRank = sanitizeSemanticRank(item.semantic_rank);
     if (semanticRank !== undefined) candidate.semantic_rank = semanticRank;

@@ -207,6 +207,32 @@ describe("V1-first track layout", () => {
     expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_b01", "seg_b02", "seg_b03"]);
   });
 
+  it("keeps a final beat clip when breath rhythm would otherwise exceed the duration cap", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 100 },
+      { beat_id: "b02_closing", target_duration_frames: 100 },
+    ]);
+    normalized.beats[1].craft = { rhythm: "breath" };
+    const table: RankedCandidateTable = new Map([
+      ["b01", [score("seg_b01", "AST_A", "support", 0.9, "b01")]],
+      ["b02_closing", [score("seg_b02", "AST_B", "support", 0.9, "b02_closing")]],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only", maxDurationFrames: 20 },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.beat_id)).toEqual(["b01", "b02_closing"]);
+    expect(Math.max(...v1.clips.map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames))).toBe(20);
+  });
+
   it("multi mode preserves hero on V1 and support/texture on V2", () => {
     const normalized = makeNormalized(30);
     const table: RankedCandidateTable = new Map([

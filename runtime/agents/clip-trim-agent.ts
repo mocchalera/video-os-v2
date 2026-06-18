@@ -1,6 +1,7 @@
 import type { SegmentItem } from "../connectors/ffmpeg-segmenter.js";
 import type { MarlinEvent, MarlinEventsArtifact } from "../connectors/marlin-types.js";
 import type { Candidate, CraftDirective, CreativeBrief } from "../compiler/types.js";
+import { describesCameraSetupMotion } from "../analysis/camera-motion.js";
 
 export type SelectCandidate = Candidate;
 export type ClipTrimPlanSource = "marlin_event" | "beat_craft_fallback";
@@ -53,6 +54,12 @@ const PREFERRED_MIN_DURATION_US = 2_000_000;
 const PREFERRED_MAX_DURATION_US = 5_000_000;
 const DEFAULT_PREFERRED_DURATION_US = 5_000_000;
 const DEFAULT_EVENT_CONFIDENCE = 0.7;
+const SOURCE_START_EVENT_TOLERANCE_US = 250_000;
+const SOURCE_START_SAFETY_TOLERANCE_US = 50_000;
+const SOURCE_START_SAFETY_OFFSET_US = 1_000_000;
+const MIN_SOURCE_DURATION_FOR_START_SAFETY_US = 3_000_000;
+const SOURCE_START_EVENT_PENALTY = 0.18;
+const CAMERA_SETUP_EVENT_PENALTY = 0.22;
 
 const STOP_WORDS = new Set([
   "the", "and", "with", "while", "into", "onto", "from", "that", "this",
@@ -118,12 +125,16 @@ export function planClipTrims(
     if (best) {
       const centerUs = resolveEventCenterUs(best, range);
       const preferredDuration = resolvePreferredDurationUs(candidate, planningContext);
-      const trimRange = centeredRange(centerUs, preferredDuration.durationUs, range);
+      const trimRange = applySourceStartSafetyOffset(
+        centeredRange(centerUs, preferredDuration.durationUs, range),
+        best.event,
+        range,
+      );
       plans.push({
         segment_id: candidate.segment_id,
         best_in_us: trimRange.startUs,
         best_out_us: trimRange.endUs,
-        rationale: buildEventRationale(best, trimRange),
+        rationale: buildEventRationale(best, trimRange, range),
         technique: inferTechnique(best.event.description),
         source: "marlin_event",
         event_id: best.event.event_id,
@@ -222,7 +233,10 @@ function candidateBeatIds(
 
 function resolveEventCenterUs(scored: ScoredEvent, range: TimeRange): number {
   const eventCenterUs = Math.round((scored.event.start_us + scored.event.end_us) / 2);
-  return clampNumber(eventCenterUs, range.startUs, range.endUs);
+  const safetyAdjustedCenterUs = shouldApplySourceStartSafety(scored.event, range)
+    ? eventCenterUs + SOURCE_START_SAFETY_OFFSET_US
+    : eventCenterUs;
+  return clampNumber(safetyAdjustedCenterUs, range.startUs, range.endUs);
 }
 
 function centeredRange(centerUs: number, preferredDurationUs: number, bounds: TimeRange): TimeRange {
@@ -260,11 +274,15 @@ function scoreEvent(
   const relevance = scoreDescriptionRelevance(event.description, terms);
   const confidenceScore = clamp01(event.confidence ?? DEFAULT_EVENT_CONFIDENCE);
   const positionScore = positionPreferenceScore(Math.round((inUs + outUs) / 2), range);
+  const sourceStartPenalty = sourceStartEventPenalty(event, range);
+  const cameraSetupPenalty = describesCameraSetupMotion(event.description) ? CAMERA_SETUP_EVENT_PENALTY : 0;
   const score =
     durationScore * 0.30 +
     relevance.score * 0.35 +
     confidenceScore * 0.25 +
-    positionScore * 0.10;
+    positionScore * 0.10 -
+    sourceStartPenalty -
+    cameraSetupPenalty;
 
   return {
     event,
@@ -272,6 +290,38 @@ function scoreEvent(
     outUs,
     score,
     relevance,
+  };
+}
+
+function sourceStartEventPenalty(event: MarlinEvent, range: TimeRange): number {
+  const durationUs = range.endUs - range.startUs;
+  if (durationUs <= MIN_SOURCE_DURATION_FOR_START_SAFETY_US) return 0;
+  const startsNearRangeStart = event.start_us <= range.startUs + SOURCE_START_EVENT_TOLERANCE_US;
+  if (!startsNearRangeStart) return 0;
+  return SOURCE_START_EVENT_PENALTY;
+}
+
+function shouldApplySourceStartSafety(event: MarlinEvent, range: TimeRange): boolean {
+  const durationUs = range.endUs - range.startUs;
+  if (durationUs <= MIN_SOURCE_DURATION_FOR_START_SAFETY_US) return false;
+  return event.start_us <= range.startUs + SOURCE_START_SAFETY_TOLERANCE_US;
+}
+
+function applySourceStartSafetyOffset(
+  trimRange: TimeRange,
+  event: MarlinEvent,
+  bounds: TimeRange,
+): TimeRange {
+  if (!shouldApplySourceStartSafety(event, bounds)) return trimRange;
+
+  const durationUs = trimRange.endUs - trimRange.startUs;
+  const latestStartUs = bounds.endUs - durationUs;
+  const targetStartUs = Math.min(bounds.startUs + SOURCE_START_SAFETY_OFFSET_US, latestStartUs);
+  if (targetStartUs <= trimRange.startUs) return trimRange;
+
+  return {
+    startUs: Math.round(targetStartUs),
+    endUs: Math.round(targetStartUs + durationUs),
   };
 }
 
@@ -450,12 +500,18 @@ function resolveFallbackTechnique(
   return undefined;
 }
 
-function buildEventRationale(scored: ScoredEvent, trimRange: TimeRange): string {
+function buildEventRationale(scored: ScoredEvent, trimRange: TimeRange, sourceRange: TimeRange): string {
   const match = scored.relevance.matchedBriefTerms.length > 0
     ? `; matches ${scored.relevance.matchedBriefTerms[0]} in brief`
     : "; best scored Marlin event for this clip";
+  const safety = shouldApplySourceStartSafety(scored.event, sourceRange)
+    ? "; source-start safety offset applied"
+    : "";
+  const cameraMotion = describesCameraSetupMotion(scored.event.description)
+    ? "; camera setup/motion event de-prioritized"
+    : "";
   const trimDurationUs = trimRange.endUs - trimRange.startUs;
-  return `centered on Marlin event '${scored.event.description}' (${formatRange(scored.event.start_us, scored.event.end_us)}), trimmed to ${formatSeconds(trimDurationUs)}s${match}`;
+  return `centered on Marlin event '${scored.event.description}' (${formatRange(scored.event.start_us, scored.event.end_us)}), trimmed to ${formatSeconds(trimDurationUs)}s${match}${safety}${cameraMotion}`;
 }
 
 function formatRange(inUs: number, outUs: number): string {

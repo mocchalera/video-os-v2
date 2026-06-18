@@ -359,8 +359,11 @@ export function assemble(
       }
     }
 
-    applyBeatCraftTiming(v1Clips, beat.craft, beat.beat_id, fpsNum / fpsDen);
-    applyBeatCraftTiming(v2Clips, beat.craft, beat.beat_id, fpsNum / fpsDen);
+    const craftMaxEndFrame = maxDurationFrames != null
+      ? Math.min(currentFrame + beatBudget, maxDurationFrames)
+      : undefined;
+    applyBeatCraftTiming(v1Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
+    applyBeatCraftTiming(v2Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
 
     // Frame advancement
     if (isGuide) {
@@ -520,6 +523,7 @@ function applyBeatCraftTiming(
   craft: CraftDirective | undefined,
   beatId: string,
   fps: number,
+  maxEndFrame?: number,
 ): void {
   if (!craft) return;
   const beatClips = orderedTimelineClips(trackClips.filter((clip) => clip.beat_id === beatId));
@@ -541,6 +545,8 @@ function applyBeatCraftTiming(
   if (craft.rhythm) {
     applyRhythmPattern(beatClips, craft.rhythm, fps);
   }
+
+  capBeatClipsToMaxEnd(beatClips, maxEndFrame);
 }
 
 export function applyRhythmPattern(
@@ -632,6 +638,37 @@ function applyBreathRhythm(clips: TimelineClip[], fps: number): void {
     if (clips.length > 3 && (i + 1) % 4 === 0 && i < clips.length - 1) {
       frame += breathFrames;
     }
+  }
+}
+
+function capBeatClipsToMaxEnd(clips: TimelineClip[], maxEndFrame: number | undefined): void {
+  if (maxEndFrame == null || clips.length === 0) return;
+  const ordered = orderedTimelineClips(clips);
+  const firstFrame = ordered[0].timeline_in_frame;
+  const availableFrames = maxEndFrame - firstFrame;
+  if (availableFrames < ordered.length) return;
+
+  const currentEndFrame = Math.max(
+    ...ordered.map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames),
+  );
+  if (currentEndFrame <= maxEndFrame) return;
+
+  const durations = ordered.map((clip) => Math.max(1, clip.timeline_duration_frames));
+  let overflow = durations.reduce((sum, duration) => sum + duration, 0) - availableFrames;
+  if (overflow > 0) {
+    for (let index = durations.length - 1; index >= 0 && overflow > 0; index -= 1) {
+      const reducible = durations[index] - 1;
+      const reduction = Math.min(reducible, overflow);
+      durations[index] -= reduction;
+      overflow -= reduction;
+    }
+  }
+
+  let frame = firstFrame;
+  for (let index = 0; index < ordered.length; index += 1) {
+    ordered[index].timeline_in_frame = frame;
+    ordered[index].timeline_duration_frames = durations[index];
+    frame += durations[index];
   }
 }
 

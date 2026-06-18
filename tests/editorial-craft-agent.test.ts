@@ -414,6 +414,16 @@ describe("editorial craft agent", () => {
       projectDir: "/tmp/project",
       model: undefined,
       skipCraftReview: true,
+      skipCraftFrames: false,
+    });
+  });
+
+  it("parses --skip-craft-frames for the headless CLI", () => {
+    expect(parseArgs(["node", "blueprint-llm.ts", "/tmp/project", "--skip-craft-frames"])).toEqual({
+      projectDir: "/tmp/project",
+      model: undefined,
+      skipCraftReview: false,
+      skipCraftFrames: true,
     });
   });
 });
