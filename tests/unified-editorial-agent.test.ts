@@ -346,6 +346,39 @@ describe("unified editorial agent", () => {
     }
   });
 
+  it("interactive fine pass advertises optional Marlin inspection tools", async () => {
+    const rough = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+    );
+    const projectDir = path.resolve("tmp", "unified-editorial-agent");
+
+    const task = await fineCutRefinement(
+      brief(),
+      rough.selects,
+      rough.blueprint,
+      marlinEvents(),
+      keyFrames(),
+      24,
+      { mode: "interactive", projectDir },
+    );
+
+    expect(task.pass).toBe("fine");
+    expect(task.prompt).toContain("## Available tools");
+    expect(task.prompt).toContain("analyze_clip_range(asset_id, start_sec, end_sec)");
+    expect(task.prompt).toContain("find_moment(asset_id, query)");
+    expect(task.prompt).toContain("extract_frame(asset_id, timestamp_sec)");
+    expect(task.tools?.map((tool) => tool.name)).toEqual([
+      "analyze_clip_range",
+      "find_moment",
+      "extract_frame",
+      "compare_frames",
+    ]);
+  });
+
   it("headless mode calls Gemini when an API key is configured", async () => {
     const geminiCalls: string[] = [];
     vi.resetModules();

@@ -17,6 +17,10 @@ import { ensureCandidateIds, getCandidateRef } from "../compiler/candidate-ref.j
 import type { CraftDirective } from "../compiler/types.js";
 import type { KeyFrame } from "../pipeline/stages/craft-frames.js";
 import {
+  EDITORIAL_TOOL_DEFINITIONS,
+  type EditorialToolDefinition,
+} from "../tools/editorial-tools.js";
+import {
   blueprintFromLlmResponse,
   buildCandidateIndex,
   type CandidateIndex,
@@ -175,6 +179,7 @@ export interface EditorialInteractivePrompt {
   prompt: string;
   frame_refs: EditorialFrameReference[];
   frame_reference_markdown: string;
+  tools?: EditorialToolDefinition[];
 }
 
 export interface RoughCutPlanningResult {
@@ -750,6 +755,19 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
   ].join("\n");
 }
 
+function fineToolPromptSection(): string {
+  const lines = [
+    "## Available tools",
+    "You can call these optional tools to inspect selected clips more closely during the fine pass:",
+  ];
+  for (const tool of EDITORIAL_TOOL_DEFINITIONS) {
+    const signature = Object.keys(tool.parameters).join(", ");
+    lines.push(`- ${tool.name}(${signature}): ${tool.description}`);
+  }
+  lines.push("If tool calls are unavailable, continue using the provided key frames and Marlin temporal events.");
+  return lines.join("\n");
+}
+
 function buildRoughInteractivePrompt(
   input: RoughCutPlanningInput,
   options: EditorialAgentOptions,
@@ -794,10 +812,13 @@ function buildFineInteractivePrompt(
   const prompt = [
     buildFinePrompt(interactiveInput),
     "",
+    fineToolPromptSection(),
+    "",
     bundle.markdown,
     "",
     "## Repo-side agent instructions",
     "- Use the Read tool on the absolute key-frame paths above before setting in/out points.",
+    "- Use the available tools when a key frame is ambiguous, blurred, shaky, or misses the action boundary.",
     "- Return the JSON object requested in the prompt. Do not write timeline.json.",
   ].join("\n");
   return {
@@ -806,6 +827,7 @@ function buildFineInteractivePrompt(
     prompt,
     frame_refs: bundle.refs,
     frame_reference_markdown: bundle.markdown,
+    tools: EDITORIAL_TOOL_DEFINITIONS,
   };
 }
 
