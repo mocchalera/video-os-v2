@@ -329,6 +329,11 @@ function buildRoughPrompt(input: {
     input.representativeFrames,
     input.segments,
   );
+  const briefProject = (input.brief as Record<string, unknown>).project as Record<string, unknown> | undefined;
+  const targetSec = Number(briefProject?.runtime_target_sec ?? input.bgmDurationSec ?? 120);
+  const fps = 24;
+  const totalFrames = Math.round(targetSec * fps);
+  const beatCount = 5;
   return [
     "You are the unified Claude/Codex editorial agent for Video OS.",
     "Pass 1 is rough-cut planning: see all available material, select the best clips, and decide what goes where.",
@@ -347,6 +352,13 @@ function buildRoughPrompt(input: {
     "- Choose rhythm per beat and explain why each clip was selected.",
     "- Cite Marlin event ids or representative frame paths as evidence.",
     "- Do not invent clips, visual facts, source ranges, or new schema fields.",
+    "",
+    "## CRITICAL: Beat duration rules",
+    `- Target runtime is ${targetSec}s (${totalFrames} frames at ${fps}fps).`,
+    `- The SUM of all beat target_duration_frames MUST equal approximately ${totalFrames}.`,
+    `- With ${beatCount} beats, each beat averages ${Math.round(totalFrames / beatCount)} frames (${Math.round(targetSec / beatCount)}s).`,
+    "- Do NOT use small values like 90 or 120 for target_duration_frames — those are only 3-5 seconds.",
+    `- Opening beat: ~${Math.round(totalFrames * 0.1)} frames. Middle beats: ~${Math.round(totalFrames * 0.25)} each. Closing: ~${Math.round(totalFrames * 0.15)} frames.`,
     "",
     "## JSON output",
     "Return JSON only with this top-level shape:",
@@ -386,7 +398,7 @@ function buildRoughPrompt(input: {
             id: "b01_hook",
             label: "hook",
             purpose: "establish the promise quickly",
-            target_duration_frames: 90,
+            target_duration_frames: Math.round(totalFrames * 0.1),
             required_roles: ["hero"],
             preferred_roles: ["support", "texture"],
             story_role: "hook",
