@@ -2,7 +2,7 @@
 /**
  * Headless in-runtime LLM blueprint planning.
  *
- *   npx tsx scripts/blueprint-llm.ts <projectDir> [--model <model>] [--skip-craft-review]
+ *   npx tsx scripts/blueprint-llm.ts <projectDir> [--model <model>] [--skip-craft-review] [--skip-craft-frames]
  */
 
 import * as path from "node:path";
@@ -10,12 +10,13 @@ import { pathToFileURL } from "node:url";
 import { createLlmBlueprintAgent } from "../runtime/agents/llm-blueprint-agent.js";
 import { runBlueprint } from "../runtime/commands/blueprint.js";
 
-const USAGE = "Usage: npx tsx scripts/blueprint-llm.ts <projectDir> [--model <model>] [--skip-craft-review]";
+const USAGE = "Usage: npx tsx scripts/blueprint-llm.ts <projectDir> [--model <model>] [--skip-craft-review] [--skip-craft-frames]";
 
 interface Args {
   projectDir: string;
   model?: string;
   skipCraftReview: boolean;
+  skipCraftFrames: boolean;
 }
 
 export function parseArgs(argv: string[]): Args {
@@ -23,6 +24,7 @@ export function parseArgs(argv: string[]): Args {
   let projectDir: string | undefined;
   let model: string | undefined;
   let skipCraftReview = false;
+  let skipCraftFrames = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -39,13 +41,17 @@ export function parseArgs(argv: string[]): Args {
       skipCraftReview = true;
       continue;
     }
+    if (arg === "--skip-craft-frames") {
+      skipCraftFrames = true;
+      continue;
+    }
     if (arg.startsWith("--")) throw new Error(`Unknown argument: ${arg}`);
     if (projectDir) throw new Error(`Unexpected extra argument: ${arg}`);
     projectDir = arg;
   }
 
   if (!projectDir) throw new Error(USAGE);
-  return { projectDir, model, skipCraftReview };
+  return { projectDir, model, skipCraftReview, skipCraftFrames };
 }
 
 export async function main(argv: string[] = process.argv): Promise<number> {
@@ -62,6 +68,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   const result = await runBlueprint(projectDir, agent, {
     iterativeEngine: false,
     skipCraftReview: args.skipCraftReview,
+    skipCraftFrames: args.skipCraftFrames,
   });
   if (!result.success) {
     console.error(`blueprint-llm failed: ${result.error?.message ?? "unknown error"}`);

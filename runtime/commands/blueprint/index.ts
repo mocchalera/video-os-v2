@@ -20,6 +20,11 @@ import type {
   SelectsCandidates,
 } from "../../artifacts/types.js";
 import type { MarlinEventsArtifact } from "../../connectors/marlin-types.js";
+import { loadSourceMap } from "../../media/source-map.js";
+import {
+  extractCraftKeyFrames,
+  type KeyFrame,
+} from "../../pipeline/stages/craft-frames.js";
 import { inferAutonomyMode } from "../../autonomy.js";
 import {
   applyCraftRevisions,
@@ -187,12 +192,14 @@ export interface BlueprintCommandOptions {
   maxIterations?: number;
   requireConfirmationInCollaborative?: boolean;
   skipCraftReview?: boolean;
+  skipCraftFrames?: boolean;
   craftReviewModel?: string;
   craftReviewer?: (
     brief: CreativeBrief,
     selects: SelectsCandidates,
     blueprint: EditBlueprint,
     marlinEvents: MarlinEventsArtifact | null,
+    keyFrames?: Map<string, KeyFrame[]>,
   ) => Promise<CraftDecision>;
 }
 
@@ -430,19 +437,30 @@ export async function runBlueprint(
   let appliedCraftRevisionCount = 0;
   if (!options?.skipCraftReview) {
     const marlinEvents = readProjectMarlinEvents(absDir);
+    let keyFrames: Map<string, KeyFrame[]> | undefined;
     try {
+      if (!options?.skipCraftFrames) {
+        keyFrames = await extractCraftKeyFrames(
+          absDir,
+          (selectsContent as SelectsCandidates).candidates ?? [],
+          marlinEvents,
+          loadSourceMap(absDir).entryMap,
+        );
+      }
       craftDecision = options?.craftReviewer
         ? await options.craftReviewer(
           briefContent as CreativeBrief,
           selectsContent as SelectsCandidates,
           agentResult.blueprint,
           marlinEvents,
+          keyFrames,
         )
         : await reviewBlueprintCraft(
           briefContent as CreativeBrief,
           selectsContent as SelectsCandidates,
           agentResult.blueprint,
           marlinEvents,
+          keyFrames ?? new Map(),
           { model: options?.craftReviewModel },
         );
     } catch (error) {

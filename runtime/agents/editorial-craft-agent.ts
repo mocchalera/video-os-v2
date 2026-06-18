@@ -10,6 +10,7 @@ import type { CraftDirective } from "../compiler/types.js";
 import { buildCandidateIndex, type CompactBlueprintCandidate } from "./llm-blueprint-agent.js";
 import { parseLlmResponse } from "./llm-json.js";
 import type { LlmCompleter } from "./llm-triage-agent.js";
+import type { KeyFrame } from "../pipeline/stages/craft-frames.js";
 import type {
   CraftDecision,
   CraftIssue,
@@ -24,6 +25,7 @@ export const DEFAULT_CRAFT_REVIEW_MODEL = "gemini-2.5-flash-lite";
 export interface CraftReviewOptions {
   model?: string;
   llm?: LlmCompleter;
+  includeKeyFrames?: boolean;
 }
 
 const VALID_VERDICTS = new Set<CraftVerdict>(["accept", "revise", "block"]);
@@ -209,6 +211,43 @@ function compactMarlinEvidence(
   });
 }
 
+function frameReferencesForPrompt(input: {
+  blueprint: EditBlueprint;
+  candidates: CompactBlueprintCandidate[];
+  canonicalByAlias: Map<string, string>;
+  keyFrames?: Map<string, KeyFrame[]>;
+}): string {
+  if (!input.keyFrames || input.keyFrames.size === 0) return "(no key frames provided)";
+  const candidateByRef = new Map(input.candidates.map((candidate) => [candidate.candidate_ref, candidate]));
+  const lines: string[] = [];
+
+  for (const beat of input.blueprint.beats) {
+    lines.push(`Beat ${beat.id} candidates:`);
+    const refs = uniqueStrings(
+      candidateRefsForBeat(beat)
+        .map((ref) => input.canonicalByAlias.get(ref) ?? ref),
+    );
+    if (refs.length === 0) {
+      lines.push("  (no planned candidates)");
+      continue;
+    }
+    for (const ref of refs) {
+      const candidate = candidateByRef.get(ref);
+      if (!candidate) {
+        lines.push(`  ${ref}: (candidate not found in approved selects)`);
+        continue;
+      }
+      const frames = input.keyFrames.get(candidate.segment_id) ?? [];
+      const frameRefs = frames.length > 0
+        ? frames.map((frame) => `[${frame.label}: ${frame.path}]`).join(" ")
+        : "(no key frames)";
+      lines.push(`  ${ref} (${candidate.role}; ${candidate.segment_id}): ${frameRefs}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 export function detectCraftProblems(blueprint: EditBlueprint): CraftIssue[] {
   const issues: CraftIssue[] = [];
   const beats = blueprint.beats ?? [];
@@ -294,6 +333,8 @@ export function buildCraftReviewPrompt(input: {
   selects: SelectsCandidates;
   blueprint: EditBlueprint;
   marlinEvents: MarlinEventsArtifact | null;
+  keyFrames?: Map<string, KeyFrame[]>;
+  includeKeyFrames?: boolean;
 }): string {
   const candidateIndex = buildCandidateIndex(input.selects);
   const heuristicIssues = detectCraftProblems(input.blueprint);
@@ -390,6 +431,19 @@ export function buildCraftReviewPrompt(input: {
     "## Marlin scene summaries and temporal events",
     JSON.stringify(compactMarlinEvidence(candidateIndex.candidates, input.marlinEvents), null, 2),
     "",
+    ...(input.includeKeyFrames
+      ? [
+          "## Candidate key frames",
+          "Local repo-side agents can inspect these project-relative frame paths for composition, focus, motion, and trim-point quality.",
+          frameReferencesForPrompt({
+            blueprint: input.blueprint,
+            candidates: candidateIndex.candidates,
+            canonicalByAlias: candidateIndex.canonicalByAlias,
+            keyFrames: input.keyFrames,
+          }),
+          "",
+        ]
+      : []),
     "## Deterministic craft warnings to consider",
     JSON.stringify(heuristicIssues, null, 2),
   ].join("\n");
@@ -582,8 +636,26 @@ export async function reviewBlueprintCraft(
   selects: SelectsCandidates,
   blueprint: EditBlueprint,
   marlinEvents: MarlinEventsArtifact | null,
-  options: CraftReviewOptions = {},
+  keyFrames: Map<string, KeyFrame[]>,
+  options?: CraftReviewOptions,
+): Promise<CraftDecision>;
+export async function reviewBlueprintCraft(
+  brief: CreativeBrief,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  marlinEvents: MarlinEventsArtifact | null,
+  options?: CraftReviewOptions,
+): Promise<CraftDecision>;
+export async function reviewBlueprintCraft(
+  brief: CreativeBrief,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  marlinEvents: MarlinEventsArtifact | null,
+  keyFramesOrOptions: Map<string, KeyFrame[]> | CraftReviewOptions = {},
+  maybeOptions: CraftReviewOptions = {},
 ): Promise<CraftDecision> {
+  const keyFrames = keyFramesOrOptions instanceof Map ? keyFramesOrOptions : undefined;
+  const options = keyFramesOrOptions instanceof Map ? maybeOptions : keyFramesOrOptions;
   if (!options.llm && !process.env.GEMINI_API_KEY) {
     return {
       verdict: "accept",
@@ -600,7 +672,15 @@ export async function reviewBlueprintCraft(
       maxOutputTokens: 16384,
       temperature: 0.2,
     }));
-  const prompt = buildCraftReviewPrompt({ brief, selects, blueprint, marlinEvents });
+  const includeKeyFrames = options.includeKeyFrames ?? Boolean(options.llm);
+  const prompt = buildCraftReviewPrompt({
+    brief,
+    selects,
+    blueprint,
+    marlinEvents,
+    keyFrames,
+    includeKeyFrames,
+  });
   const parsed = await completeWithSingleJsonRetry(llm, prompt);
   return craftDecisionFromLlmResponse(parsed, blueprint, selects);
 }
