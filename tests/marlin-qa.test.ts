@@ -6,6 +6,7 @@ import type { CreativeBrief } from "../runtime/artifacts/types.js";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import {
   assessEmotionArc,
+  buildMarlinQAReport,
   detectContinuityIssues,
   mergeMarlinQAChunkCaptions,
   runMarlinQA,
@@ -158,6 +159,53 @@ describe("Marlin output QA", () => {
     expect(report.pacing_assessment.too_slow).toBe(false);
     expect(report.emotion_arc_assessment.follows_brief).toBe(true);
     expectValidReportShape(report);
+  });
+
+  it("flags micro-clips deterministically from timeline data", () => {
+    const projectDir = tempProject();
+    fs.mkdirSync(path.join(projectDir, "05_timeline"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "05_timeline", "timeline.json"), JSON.stringify({
+      version: "1",
+      project_id: "marlin-qa-fixture",
+      sequence: { fps_num: 24, fps_den: 1 },
+      tracks: {
+        video: [
+          {
+            track_id: "V1",
+            clips: [
+              {
+                clip_id: "CLP_MICRO",
+                asset_id: "AST_MICRO",
+                timeline_in_frame: 48,
+                timeline_duration_frames: 2,
+              },
+            ],
+          },
+        ],
+        audio: [],
+      },
+    }), "utf-8");
+
+    const report = buildMarlinQAReport({
+      projectDir,
+      videoPath: path.join(projectDir, "09_output", "rough-cut.mp4"),
+      videoDurationSec: 3,
+      brief: brief(),
+      caption: {
+        scene: "Rendered rough cut",
+        events: [{ start: 0, end: 3, description: "Opening scene plays normally." }],
+      },
+    });
+
+    expect(report.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: "micro_clip",
+        severity: "critical",
+        timestamp_sec: 2,
+        duration_sec: 0.083,
+        description: expect.stringContaining("CLP_MICRO"),
+      }),
+    ]));
   });
 
   it("uses QA proxy width defaults and restores caller environment", async () => {

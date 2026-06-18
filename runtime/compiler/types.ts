@@ -97,6 +97,7 @@ export interface CraftDirective {
   shot_progression?: CraftShotProgression;
   beat_sync?: boolean;
   hold_duration_bias?: number;
+  flash_cut?: boolean;
 }
 
 export interface Beat {
@@ -450,6 +451,9 @@ export interface ScoredCandidate {
     peak_salience_bonus?: number;
     peak_priority_bonus?: number;
     bgm_bonus?: number;
+    plan_priority_bonus?: number;
+    beat_match_bonus?: number;
+    generic_beat_penalty?: number;
   };
 }
 

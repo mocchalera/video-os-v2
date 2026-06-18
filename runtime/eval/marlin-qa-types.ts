@@ -1,7 +1,7 @@
 export interface MarlinQAIssue {
   timestamp_sec: number;
   duration_sec: number;
-  category: "camera_shake" | "dark_exposure" | "pacing" | "continuity" | "weak_content" | "other";
+  category: "camera_shake" | "dark_exposure" | "pacing" | "continuity" | "weak_content" | "micro_clip" | "other";
   severity: "critical" | "warning" | "info";
   description: string;
   suggestion: string;

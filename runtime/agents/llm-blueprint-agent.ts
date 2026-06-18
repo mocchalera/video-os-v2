@@ -570,6 +570,8 @@ function sanitizeCraftDirective(value: unknown): CraftDirective | undefined {
   if (holdDurationBias !== undefined && holdDurationBias > 0) {
     out.hold_duration_bias = holdDurationBias;
   }
+  const flashCut = booleanValue(raw.flash_cut);
+  if (flashCut !== undefined) out.flash_cut = flashCut;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 

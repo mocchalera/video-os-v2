@@ -54,6 +54,8 @@ export { applyPatch } from "./patch.js";
 export type { ReviewPatch, PatchResult, PatchError, PatchOperation } from "./patch.js";
 export type { ResolutionReport } from "./resolve.js";
 
+export const MIN_RENDERABLE_FRAMES = 12;
+
 export interface CompileResult {
   timeline: TimelineIR;
   outputPath: string;
@@ -87,6 +89,13 @@ interface ResolvedAudioPolicy {
   mode: BriefAudioPolicy;
   source: "explicit_brief" | "profile_default" | "global_default";
   a1_loudnorm: boolean;
+}
+
+export interface MicroClipGuardResult {
+  dropped: number;
+  droppedClipIds: string[];
+  droppedAudioClipIds: string[];
+  minRenderableFrames: number;
 }
 
 /**
@@ -375,6 +384,197 @@ function enforceDurationCapAfterTimingAdjustments(
   }
 }
 
+export function dropUnintentionalMicroClips(
+  assembled: AssembledTimeline,
+  options: {
+    minRenderableFrames?: number;
+    beats?: NormalizedBeat[];
+    log?: (message: string) => void;
+  } = {},
+): MicroClipGuardResult {
+  const minRenderableFrames = Math.max(
+    1,
+    Math.floor(options.minRenderableFrames ?? MIN_RENDERABLE_FRAMES),
+  );
+  const result: MicroClipGuardResult = {
+    dropped: 0,
+    droppedClipIds: [],
+    droppedAudioClipIds: [],
+    minRenderableFrames,
+  };
+  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
+  if (!v1Track) return result;
+
+  const beatCraftById = new Map(
+    (options.beats ?? []).map((beat) => [beat.beat_id, beat.craft]),
+  );
+  const droppedV1Clips: TimelineClip[] = [];
+  for (const clip of v1Track.clips) {
+    if (clip.timeline_duration_frames >= minRenderableFrames) continue;
+    if (hasIntentionalShortClipMarker(clip, beatCraftById.get(clip.beat_id))) {
+      annotateIntentionalShortClip(clip);
+      continue;
+    }
+    droppedV1Clips.push(clip);
+  }
+
+  if (droppedV1Clips.length === 0) return result;
+
+  const droppedClipIds = new Set(droppedV1Clips.map((clip) => clip.clip_id));
+  const droppedMirrorKeys = new Set(droppedV1Clips.map(audioMirrorKey));
+  const removalSpans = normalizeRemovalSpans(
+    droppedV1Clips.map((clip) => ({
+      startFrame: clip.timeline_in_frame,
+      durationFrames: clip.timeline_duration_frames,
+    })),
+  );
+
+  v1Track.clips.splice(
+    0,
+    v1Track.clips.length,
+    ...v1Track.clips.filter((clip) => !droppedClipIds.has(clip.clip_id)),
+  );
+
+  for (const track of assembled.tracks.audio) {
+    const kept = track.clips.filter((clip) => {
+      const shouldDrop = isGeneratedAudioMirror(clip) && droppedMirrorKeys.has(audioMirrorKey(clip));
+      if (shouldDrop) result.droppedAudioClipIds.push(clip.clip_id);
+      return !shouldDrop;
+    });
+    if (kept.length !== track.clips.length) {
+      track.clips.splice(0, track.clips.length, ...kept);
+    }
+  }
+
+  retimeTimelineAfterRemovingSpans(assembled, removalSpans);
+
+  result.dropped = droppedV1Clips.length;
+  result.droppedClipIds = droppedV1Clips.map((clip) => clip.clip_id);
+  const emit = options.log ?? console.warn;
+  emit(`[compile] dropped ${result.dropped} micro-clip(s) below minimum renderable duration`);
+  return result;
+}
+
+function hasIntentionalShortClipMarker(
+  clip: TimelineClip,
+  beatCraft: CraftDirective | undefined,
+): boolean {
+  if (beatCraft?.flash_cut === true) return true;
+  const metadata = recordValue(clip.metadata);
+  if (!metadata) return false;
+  return hasShortClipMarker(metadata) ||
+    hasShortClipMarker(recordValue(metadata.craft)) ||
+    hasShortClipMarker(recordValue(metadata.editorial)) ||
+    hasShortClipMarker(recordValue(metadata.trim));
+}
+
+function hasShortClipMarker(value: Record<string, unknown> | undefined): boolean {
+  return value?.flash_cut === true ||
+    value?.intentional_flash_cut === true ||
+    value?.intentional_short_clip === true ||
+    value?.intentional_micro_clip === true;
+}
+
+function annotateIntentionalShortClip(clip: TimelineClip): void {
+  const metadata = recordValue(clip.metadata) ?? {};
+  const craft = recordValue(metadata.craft) ?? {};
+  craft.flash_cut = true;
+  metadata.craft = craft;
+  clip.metadata = metadata;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function isGeneratedAudioMirror(clip: TimelineClip): boolean {
+  return clip.motivation === "original clip audio" || clip.role === "nat_sound";
+}
+
+function audioMirrorKey(clip: TimelineClip): string {
+  return [
+    clip.segment_id,
+    clip.asset_id,
+    clip.src_in_us,
+    clip.src_out_us,
+    clip.timeline_in_frame,
+    clip.timeline_duration_frames,
+  ].join(":");
+}
+
+function normalizeRemovalSpans(
+  spans: Array<{ startFrame: number; durationFrames: number }>,
+): Array<{ startFrame: number; durationFrames: number }> {
+  const sorted = spans
+    .filter((span) => span.durationFrames > 0)
+    .sort((a, b) => a.startFrame - b.startFrame || a.durationFrames - b.durationFrames);
+  const merged: Array<{ startFrame: number; durationFrames: number }> = [];
+
+  for (const span of sorted) {
+    const last = merged[merged.length - 1];
+    const spanEnd = span.startFrame + span.durationFrames;
+    if (!last) {
+      merged.push({ ...span });
+      continue;
+    }
+    const lastEnd = last.startFrame + last.durationFrames;
+    if (span.startFrame <= lastEnd) {
+      last.durationFrames = Math.max(lastEnd, spanEnd) - last.startFrame;
+    } else {
+      merged.push({ ...span });
+    }
+  }
+
+  return merged;
+}
+
+function retimeTimelineAfterRemovingSpans(
+  assembled: AssembledTimeline,
+  spans: Array<{ startFrame: number; durationFrames: number }>,
+): void {
+  if (spans.length === 0) return;
+  const tracks = [...assembled.tracks.video, ...assembled.tracks.audio];
+  for (const track of tracks) {
+    const kept: TimelineClip[] = [];
+    for (const clip of track.clips) {
+      const start = clip.timeline_in_frame;
+      const end = clip.timeline_in_frame + clip.timeline_duration_frames;
+      const nextStart = retimeFrameAfterRemovingSpans(start, spans);
+      const nextEnd = retimeFrameAfterRemovingSpans(end, spans);
+      const nextDuration = nextEnd - nextStart;
+      if (nextDuration <= 0) continue;
+      clip.timeline_in_frame = nextStart;
+      clip.timeline_duration_frames = nextDuration;
+      kept.push(clip);
+    }
+    if (kept.length !== track.clips.length) {
+      track.clips.splice(0, track.clips.length, ...kept);
+    }
+  }
+
+  for (const marker of assembled.markers) {
+    marker.frame = retimeFrameAfterRemovingSpans(marker.frame, spans);
+  }
+}
+
+function retimeFrameAfterRemovingSpans(
+  frame: number,
+  spans: Array<{ startFrame: number; durationFrames: number }>,
+): number {
+  let removedFrames = 0;
+  for (const span of spans) {
+    const spanEnd = span.startFrame + span.durationFrames;
+    if (frame >= spanEnd) {
+      removedFrames += span.durationFrames;
+    } else if (frame > span.startFrame) {
+      removedFrames += frame - span.startFrame;
+    }
+  }
+  return frame - removedFrames;
+}
+
 export function compile(opts: CompileOptions): CompileResult {
   const projectPath = path.resolve(opts.projectPath);
   const repoRoot = opts.repoRoot
@@ -529,6 +729,10 @@ export function compile(opts: CompileOptions): CompileResult {
   }
 
   enforceDurationCapAfterTimingAdjustments(assembled, maxDurationFrames, opts.log);
+  dropUnintentionalMicroClips(assembled, {
+    beats: normalized.beats,
+    log: opts.log,
+  });
 
   // ── Phase 4: Resolve constraints ──────────────────────────────────
 
@@ -572,7 +776,7 @@ export function compile(opts: CompileOptions): CompileResult {
           const left = clipMap.get(tr.from_clip_id);
           const right = clipMap.get(tr.to_clip_id);
           if (left && right) {
-            const committed = applyBeatSnap(left, right, snapDelta, fpsNum);
+            const committed = applyBeatSnap(left, right, snapDelta, fpsNum, MIN_RENDERABLE_FRAMES);
             if (!committed) {
               // Snap failed guard — revert to original cut frame
               if (tr.transition_params) {
@@ -583,6 +787,19 @@ export function compile(opts: CompileOptions): CompileResult {
             }
           }
         }
+      }
+
+      const finalMicroClipGuard = dropUnintentionalMicroClips(assembled, {
+        beats: normalized.beats,
+        log: opts.log,
+      });
+      if (finalMicroClipGuard.droppedClipIds.length > 0) {
+        const droppedClipIds = new Set(finalMicroClipGuard.droppedClipIds);
+        adjacencyTransitions = adjacencyTransitions.filter(
+          (transition) =>
+            !droppedClipIds.has(transition.from_clip_id) &&
+            !droppedClipIds.has(transition.to_clip_id),
+        );
       }
 
       // Set project_id on analysis

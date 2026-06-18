@@ -15,6 +15,8 @@ const DEFAULT_CHUNK_DURATION_SEC = 30;
 const DEFAULT_CHUNK_OVERLAP_SEC = 3;
 const DEFAULT_SHORT_VIDEO_THRESHOLD_SEC = 20;
 const DEFAULT_QA_PROXY_MAX_WIDTH = 384;
+const MIN_RENDERABLE_TIMELINE_FRAMES = 12;
+const MICRO_CLIP_EVENT_THRESHOLD_SEC = 0.5;
 const execFileAsync = promisify(execFile);
 
 export interface MarlinQAEvent {
@@ -293,7 +295,10 @@ export function buildMarlinQAReport(input: BuildMarlinQAReportInput): MarlinQARe
     description: event.description,
   }));
   const pacing = assessPacing(events, durationSec);
-  const issues = detectMarlinQAIssues(events, durationSec, pacing);
+  const issues = sortMarlinQAIssues([
+    ...detectMarlinQAIssues(events, durationSec, pacing),
+    ...detectTimelineMicroClipIssues(input.projectDir),
+  ]);
   const emotionArc = assessEmotionArc(input.brief, sceneDescriptions);
 
   return {
@@ -412,6 +417,17 @@ export function detectMarlinQAIssues(
         suggestion: "Swap in a more specific action, reaction, or context shot, or shorten this section substantially.",
       });
     }
+
+    if (duration > 0 && duration < MICRO_CLIP_EVENT_THRESHOLD_SEC && looksLikeBriefFlashEvent(searchable)) {
+      issues.push({
+        timestamp_sec: event.start_sec,
+        duration_sec: duration,
+        category: "micro_clip",
+        severity: "warning",
+        description: `Possible unintended micro-clip visible in Marlin event: ${event.description}`,
+        suggestion: "Check the timeline around this timestamp and remove the flash unless it is explicitly marked as an intentional flash_cut.",
+      });
+    }
   }
 
   issues.push(...detectContinuityIssues(events));
@@ -431,11 +447,52 @@ export function detectMarlinQAIssues(
     });
   }
 
-  return issues.sort((left, right) =>
-    left.timestamp_sec - right.timestamp_sec ||
-    severityRank(right.severity) - severityRank(left.severity) ||
-    left.category.localeCompare(right.category)
-  );
+  return sortMarlinQAIssues(issues);
+}
+
+export function detectTimelineMicroClipIssues(projectDir: string): MarlinQAIssue[] {
+  const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+  if (!fs.existsSync(timelinePath)) return [];
+
+  let timeline: unknown;
+  try {
+    timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+  } catch {
+    return [];
+  }
+
+  const doc = recordValue(timeline);
+  const tracks = recordValue(doc?.tracks);
+  const videoTracks = Array.isArray(tracks?.video) ? tracks.video : [];
+  const fps = timelineFps(doc);
+  const issues: MarlinQAIssue[] = [];
+
+  for (const rawTrack of videoTracks) {
+    const track = recordValue(rawTrack);
+    const trackId = typeof track?.track_id === "string" ? track.track_id : "video";
+    const clips = Array.isArray(track?.clips) ? track.clips : [];
+    for (const rawClip of clips) {
+      const clip = recordValue(rawClip);
+      if (!clip) continue;
+      const durationFrames = finiteNumber(clip.timeline_duration_frames);
+      if (durationFrames === undefined || durationFrames >= MIN_RENDERABLE_TIMELINE_FRAMES) continue;
+      if (isIntentionalTimelineMicroClip(clip)) continue;
+
+      const startFrame = finiteNumber(clip.timeline_in_frame) ?? 0;
+      const clipId = typeof clip.clip_id === "string" ? clip.clip_id : "unknown";
+      const assetId = typeof clip.asset_id === "string" ? clip.asset_id : "unknown asset";
+      issues.push({
+        timestamp_sec: round3(startFrame / fps),
+        duration_sec: round3(Math.max(0, durationFrames) / fps),
+        category: "micro_clip",
+        severity: "critical",
+        description: `Timeline clip ${clipId} (${assetId}) on ${trackId} is ${durationFrames} frame(s), below the ${MIN_RENDERABLE_TIMELINE_FRAMES}-frame minimum renderable duration.`,
+        suggestion: "Remove this clip and retime the sequence, or add an explicit flash_cut marker if the sub-0.5s cut is intentional.",
+      });
+    }
+  }
+
+  return sortMarlinQAIssues(issues);
 }
 
 export function detectContinuityIssues(events: MarlinQAEvent[]): MarlinQAIssue[] {
@@ -731,6 +788,53 @@ function normalizeSearchText(value: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function sortMarlinQAIssues(issues: MarlinQAIssue[]): MarlinQAIssue[] {
+  return issues.sort((left, right) =>
+    left.timestamp_sec - right.timestamp_sec ||
+    severityRank(right.severity) - severityRank(left.severity) ||
+    left.category.localeCompare(right.category)
+  );
+}
+
+function looksLikeBriefFlashEvent(searchable: string): boolean {
+  return /\b(flash|flashes|brief|briefly|sudden|suddenly|momentary|blink|single[- ]frame|one[- ]frame|split[- ]second|quick image|brief image|sudden image|image appears briefly)\b/.test(searchable);
+}
+
+function timelineFps(doc: Record<string, unknown> | undefined): number {
+  const sequence = recordValue(doc?.sequence);
+  const fpsNum = finiteNumber(sequence?.fps_num);
+  const fpsDen = finiteNumber(sequence?.fps_den);
+  const fps = (fpsNum && fpsNum > 0 ? fpsNum : 24) / (fpsDen && fpsDen > 0 ? fpsDen : 1);
+  return fps > 0 ? fps : 24;
+}
+
+function isIntentionalTimelineMicroClip(clip: Record<string, unknown>): boolean {
+  if (hasTimelineShortClipMarker(clip)) return true;
+  const metadata = recordValue(clip.metadata);
+  if (!metadata) return false;
+  return hasTimelineShortClipMarker(metadata) ||
+    hasTimelineShortClipMarker(recordValue(metadata.craft)) ||
+    hasTimelineShortClipMarker(recordValue(metadata.editorial)) ||
+    hasTimelineShortClipMarker(recordValue(metadata.trim));
+}
+
+function hasTimelineShortClipMarker(value: Record<string, unknown> | undefined): boolean {
+  return value?.flash_cut === true ||
+    value?.intentional_flash_cut === true ||
+    value?.intentional_short_clip === true ||
+    value?.intentional_micro_clip === true;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) ? value : undefined;
 }
 
 const CONTINUITY_STOPWORDS = new Set([

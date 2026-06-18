@@ -271,6 +271,10 @@
         "hold_duration_bias": {
           "type": "number",
           "description": "Multiplier for clip duration: >1 = hold longer, <1 = cut shorter"
+        },
+        "flash_cut": {
+          "type": "boolean",
+          "description": "Marks an intentionally sub-0.5s flash cut that should survive micro-clip guards"
         }
       }
     },

@@ -2,10 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { compile } from "../runtime/compiler/index.js";
+import { compile, dropUnintentionalMicroClips, MIN_RENDERABLE_FRAMES } from "../runtime/compiler/index.js";
 import { resolve } from "../runtime/compiler/resolve.js";
 import { validateProject } from "../scripts/validate-schemas.js";
-import type { AssembledTimeline, Candidate, ClipOutput, TimelineClip } from "../runtime/compiler/types.js";
+import type { AssembledTimeline, Candidate, ClipOutput, NormalizedBeat, TimelineClip } from "../runtime/compiler/types.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -275,6 +275,114 @@ describe("Timeline Compiler", () => {
     // previewManifestPath should point to a real file
     expect(result.previewManifestPath).toContain("preview-manifest.json");
     expect(fs.existsSync(result.previewManifestPath)).toBe(true);
+  });
+});
+
+// ── Micro-clip guard tests ──────────────────────────────────────────
+
+describe("Compiler micro-clip guard", () => {
+  function makeClip(overrides: Partial<TimelineClip> & { clip_id: string; segment_id: string }): TimelineClip {
+    return {
+      asset_id: "AST_001",
+      src_in_us: 0,
+      src_out_us: 1_000_000,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 24,
+      role: "hero",
+      motivation: "test",
+      beat_id: "b01",
+      fallback_segment_ids: [],
+      confidence: 0.9,
+      quality_flags: [],
+      ...overrides,
+    };
+  }
+
+  function makeTimeline(videoClips: TimelineClip[], audioTracks: TimelineClip[][] = [[]]): AssembledTimeline {
+    return {
+      tracks: {
+        video: [{ track_id: "V1", kind: "video", clips: videoClips }],
+        audio: audioTracks.map((clips, index) => ({
+          track_id: `A${index + 1}`,
+          kind: "audio" as const,
+          clips,
+        })),
+      },
+      markers: [{ frame: 26, kind: "beat", label: "after micro" }],
+    };
+  }
+
+  function makeBeat(overrides: Partial<NormalizedBeat> = {}): NormalizedBeat {
+    return {
+      beat_id: "b01",
+      label: "Beat",
+      target_duration_frames: 24,
+      required_roles: ["hero"],
+      preferred_roles: [],
+      purpose: "test",
+      ...overrides,
+    };
+  }
+
+  it("drops unintentional V1 micro-clips, removes generated audio mirrors, and closes the gap", () => {
+    const first = makeClip({ clip_id: "C1", segment_id: "S1", timeline_in_frame: 0, timeline_duration_frames: 24 });
+    const micro = makeClip({ clip_id: "C_MICRO", segment_id: "S_MICRO", timeline_in_frame: 24, timeline_duration_frames: 2 });
+    const last = makeClip({ clip_id: "C2", segment_id: "S2", timeline_in_frame: 26, timeline_duration_frames: 24 });
+    const audioMirror = makeClip({
+      ...micro,
+      clip_id: "A_MICRO",
+      role: "nat_sound",
+      motivation: "original clip audio",
+    });
+    const bgm = makeClip({
+      clip_id: "BGM",
+      segment_id: "BGM_SEG",
+      asset_id: "BGM",
+      role: "bgm",
+      motivation: "background music bed",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 50,
+      src_in_us: 0,
+      src_out_us: 50_000_000,
+    });
+    const timeline = makeTimeline([first, micro, last], [[audioMirror], [bgm]]);
+    const logs: string[] = [];
+
+    const result = dropUnintentionalMicroClips(timeline, { log: (message) => logs.push(message) });
+
+    expect(result).toMatchObject({
+      dropped: 1,
+      droppedClipIds: ["C_MICRO"],
+      droppedAudioClipIds: ["A_MICRO"],
+      minRenderableFrames: MIN_RENDERABLE_FRAMES,
+    });
+    expect(timeline.tracks.video[0].clips.map((clip) => clip.clip_id)).toEqual(["C1", "C2"]);
+    expect(timeline.tracks.video[0].clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 24]);
+    expect(timeline.tracks.audio[0].clips).toEqual([]);
+    expect(timeline.tracks.audio[1].clips[0].timeline_duration_frames).toBe(48);
+    expect(timeline.markers[0].frame).toBe(24);
+    expect(logs).toEqual(["[compile] dropped 1 micro-clip(s) below minimum renderable duration"]);
+  });
+
+  it("preserves intentional short clips marked with beat craft.flash_cut", () => {
+    const flash = makeClip({
+      clip_id: "C_FLASH",
+      segment_id: "S_FLASH",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 2,
+      beat_id: "b_flash",
+    });
+    const timeline = makeTimeline([flash]);
+
+    const result = dropUnintentionalMicroClips(timeline, {
+      beats: [makeBeat({ beat_id: "b_flash", craft: { flash_cut: true } })],
+      log: () => undefined,
+    });
+
+    expect(result.dropped).toBe(0);
+    expect(timeline.tracks.video[0].clips).toHaveLength(1);
+    expect(timeline.tracks.video[0].clips[0].timeline_duration_frames).toBe(2);
+    expect(timeline.tracks.video[0].clips[0].metadata?.craft).toEqual({ flash_cut: true });
   });
 });
 
