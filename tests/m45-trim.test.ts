@@ -56,6 +56,28 @@ describe("Adaptive Trim", () => {
     expect(result.src_out_us).toBe(6_000_000);
   });
 
+  it("uses clip-level trim plan ranges directly", () => {
+    const c = makeCandidate();
+    const result = resolveTrim(c, {
+      ...defaultCtx,
+      trimPolicy: { mode: "adaptive" },
+      clipTrimPlan: {
+        segment_id: "SEG_001",
+        best_in_us: 2_000_000,
+        best_out_us: 4_500_000,
+        rationale: "using event: speaker smiles (2-4.5s) - matches warmth in brief",
+        technique: "peak_hold",
+        source: "marlin_event",
+        event_id: "MEV_AST_001_0001",
+      },
+    });
+
+    expect(result.mode).toBe("clip_trim_plan");
+    expect(result.src_in_us).toBe(2_000_000);
+    expect(result.src_out_us).toBe(4_500_000);
+    expect(result.clip_trim_rationale).toContain("speaker smiles");
+  });
+
   it("falls back to midpoint when no center hint", () => {
     const c = makeCandidate({
       trim_hint: { preferred_duration_us: 2_000_000 },

@@ -17,23 +17,35 @@ import { applyPatch } from "./patch.js";
 import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags, getUtteranceSnapConfig } from "../editorial/skill-registry.js";
 import { loadProfiles } from "../editorial/policy-resolver.js";
-import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap } from "./adjacency.js";
+import { adjacencyDecide, writeAdjacencyAnalysis, applyBeatSnap, hasCraftTransitions } from "./adjacency.js";
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
 import { loadSourceMap } from "../media/source-map.js";
 import { extractDurationUs, runFfprobe } from "../connectors/ffprobe.js";
 import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
 import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
+import {
+  isMarlinEventClipTrimPlan,
+  planClipTrims,
+  type ClipTrimPlan,
+} from "../agents/clip-trim-agent.js";
 import type { BgmScoringContext } from "./score.js";
+import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
+import type { SegmentItem } from "../connectors/ffmpeg-segmenter.js";
 import type {
+  Candidate,
   CompileOptions,
   CompilerDefaults,
   CreativeBrief,
   AssembledTimeline,
   BriefAudioPolicy,
+  CraftDirective,
   DurationPolicy,
   EditBlueprint,
+  NormalizedBeat,
   SelectsCandidates,
+  TimelineClip,
   TimelineIR,
+  TrimHint,
 } from "./types.js";
 
 export type { TimelineIR, CompileOptions };
@@ -128,6 +140,112 @@ function findRepoRoot(from: string): string {
 function readYaml<T>(filePath: string): T {
   const raw = fs.readFileSync(filePath, "utf-8");
   return parseYaml(raw) as T;
+}
+
+function readJsonIfExists<T>(filePath: string): T | undefined {
+  if (!fs.existsSync(filePath)) return undefined;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function loadProjectSegments(projectPath: string): SegmentItem[] {
+  const doc = readJsonIfExists<{ items?: SegmentItem[] }>(path.join(projectPath, "03_analysis", "segments.json"));
+  if (!Array.isArray(doc?.items)) return [];
+  return doc.items.filter((item): item is SegmentItem =>
+    typeof item?.segment_id === "string" &&
+    typeof item.asset_id === "string" &&
+    typeof item.src_in_us === "number" &&
+    typeof item.src_out_us === "number" &&
+    item.src_out_us > item.src_in_us
+  );
+}
+
+function loadProjectMarlinEvents(projectPath: string): MarlinEventsArtifact | undefined {
+  const doc = readJsonIfExists<MarlinEventsArtifact>(path.join(projectPath, "03_analysis", "marlin_events.json"));
+  return Array.isArray(doc?.items) ? doc : undefined;
+}
+
+function buildBeatCraftMap(beats: NormalizedBeat[]): Map<string, CraftDirective> {
+  const map = new Map<string, CraftDirective>();
+  for (const beat of beats) {
+    if (beat.craft) map.set(beat.beat_id, beat.craft);
+  }
+  return map;
+}
+
+function candidatesForAssembledClips(candidates: Candidate[], clips: TimelineClip[]): Candidate[] {
+  const placedKeys = new Set(clips.map((clip) => sourceRangeKey(clip)));
+  const selected: Candidate[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = sourceRangeKey(candidate);
+    if (!placedKeys.has(key) || seen.has(key)) continue;
+    selected.push(candidate);
+    seen.add(key);
+  }
+  return selected;
+}
+
+function sourceRangeKey(item: { segment_id: string; src_in_us: number; src_out_us: number }): string {
+  return `${item.segment_id}:${item.src_in_us}:${item.src_out_us}`;
+}
+
+function applyClipTrimPlansToCandidates(candidates: Candidate[], plans: ClipTrimPlan[]): void {
+  const plansBySegment = new Map(plans.filter(isMarlinEventClipTrimPlan).map((plan) => [plan.segment_id, plan]));
+  for (const candidate of candidates) {
+    const plan = plansBySegment.get(candidate.segment_id);
+    if (!plan) continue;
+
+    const inUs = clampInteger(plan.best_in_us, candidate.src_in_us, candidate.src_out_us);
+    const outUs = clampInteger(plan.best_out_us, candidate.src_in_us, candidate.src_out_us);
+    if (outUs <= inUs) continue;
+
+    const peakType = peakTypeForClipTrimTechnique(plan.technique);
+    const nextHint: TrimHint = {
+      ...(candidate.trim_hint ?? {}),
+      source_center_us: Math.round((inUs + outUs) / 2),
+      preferred_duration_us: outUs - inUs,
+      window_start_us: inUs,
+      window_end_us: outUs,
+      recommended_in_us: inUs,
+      recommended_out_us: outUs,
+      interest_point_label: plan.rationale,
+      interest_point_confidence: typeof plan.score === "number" ? clamp01(plan.score) : candidate.trim_hint?.interest_point_confidence,
+      center_source: "precision_proxy_clip",
+      rationale: plan.rationale,
+    };
+    if (plan.event_id) nextHint.peak_ref = plan.event_id;
+    if (peakType) nextHint.peak_type = peakType;
+    candidate.trim_hint = nextHint;
+
+    if (plan.event_id || peakType || typeof plan.score === "number") {
+      candidate.editorial_signals ??= {};
+      if (plan.event_id) candidate.editorial_signals.peak_ref = plan.event_id;
+      if (peakType) candidate.editorial_signals.peak_type = peakType;
+      if (typeof plan.score === "number") candidate.editorial_signals.peak_strength_score = clamp01(plan.score);
+      candidate.editorial_signals.peak_source_pass = "marlin_caption";
+    }
+  }
+}
+
+function peakTypeForClipTrimTechnique(technique: string): "action_peak" | "emotional_peak" | "visual_peak" | undefined {
+  if (technique === "cut_on_action") return "action_peak";
+  if (technique === "peak_hold" || technique === "post_action_hold") return "emotional_peak";
+  if (technique === "clean_in_clean_out" || technique === "pre_roll_enter") return "visual_peak";
+  return undefined;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.round(Math.max(min, Math.min(value, max)));
 }
 
 function readSourceVideoDimensions(
@@ -338,7 +456,18 @@ export function compile(opts: CompileOptions): CompileResult {
     ...assembled.tracks.video.flatMap((t) => t.clips),
     ...assembled.tracks.audio.flatMap((t) => t.clips),
   ];
-  applyAdaptiveTrim(allAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame);
+  const marlinEvents = loadProjectMarlinEvents(projectPath);
+  const clipTrimPlans = marlinEvents
+    ? planClipTrims(
+        candidatesForAssembledClips(selects.candidates, allAssembledClips),
+        loadProjectSegments(projectPath),
+        marlinEvents,
+        brief,
+        buildBeatCraftMap(normalized.beats),
+      ).filter(isMarlinEventClipTrimPlan)
+    : [];
+  applyClipTrimPlansToCandidates(selects.candidates, clipTrimPlans);
+  applyAdaptiveTrim(allAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame, clipTrimPlans);
 
   // ── Phase 3.5b: Duration Adjustment (strict mode) ───────────────
   applyDurationAdjust(assembled, normalized.beats, selects.candidates, durationPolicy, fpsNum, fpsDen);
@@ -374,7 +503,7 @@ export function compile(opts: CompileOptions): CompileResult {
 
   let adjacencyTransitions: import("./transition-types.js").TimelineTransition[] = [];
 
-  if (activeSkills.length > 0 && assembled.tracks.video.length > 0) {
+  if ((activeSkills.length > 0 || hasCraftTransitions(normalized.beats)) && assembled.tracks.video.length > 0) {
     const v1Track = assembled.tracks.video[0];
     if (v1Track.clips.length > 1) {
       const adjResult = adjacencyDecide(v1Track, {

@@ -14,11 +14,12 @@ import type {
   NormalizedBeat,
   TimelineClip,
 } from "./types.js";
+import type { ClipTrimPlan } from "../agents/clip-trim-agent.js";
 
 export interface ResolvedTrim {
   src_in_us: number;
   src_out_us: number;
-  mode: "adaptive_center" | "adaptive_interest" | "adaptive_peak_center" | "fixed_midpoint" | "fixed_authored";
+  mode: "adaptive_center" | "adaptive_interest" | "adaptive_peak_center" | "clip_trim_plan" | "fixed_midpoint" | "fixed_authored";
   source_center_us?: number;
   preferred_duration_us?: number;
   interest_point_label?: string;
@@ -28,6 +29,9 @@ export interface ResolvedTrim {
   craft_in_point?: CraftInPoint;
   craft_out_point?: CraftOutPoint;
   craft_degraded?: boolean;
+  clip_trim_rationale?: string;
+  clip_trim_technique?: string;
+  clip_trim_source?: string;
 }
 
 export interface TrimContext {
@@ -45,6 +49,8 @@ export interface TrimContext {
   craftInPoint?: CraftInPoint;
   /** Beat-level craft exit directive */
   craftOutPoint?: CraftOutPoint;
+  /** Clip-level deterministic plan from Marlin temporal events */
+  clipTrimPlan?: ClipTrimPlan;
 }
 
 /**
@@ -67,6 +73,37 @@ export function resolveTrim(
   const hint = candidate.trim_hint;
   const craftInPoint = ctx.craftInPoint;
   const craftOutPoint = ctx.craftOutPoint;
+  const clipTrimPlan = ctx.clipTrimPlan;
+
+  if (clipTrimPlan) {
+    const plannedRange = clampRangeToWindow(
+      {
+        inUs: clipTrimPlan.best_in_us,
+        outUs: clipTrimPlan.best_out_us,
+      },
+      authoredIn,
+      authoredOut,
+    );
+    if (plannedRange) {
+      const durationUs = plannedRange.outUs - plannedRange.inUs;
+      return {
+        src_in_us: Math.round(plannedRange.inUs),
+        src_out_us: Math.round(plannedRange.outUs),
+        mode: "clip_trim_plan",
+        source_center_us: Math.round((plannedRange.inUs + plannedRange.outUs) / 2),
+        preferred_duration_us: durationUs,
+        interest_point_label: clipTrimPlan.rationale,
+        peak_type: peakTypeForTechnique(clipTrimPlan.technique),
+        peak_confidence: typeof clipTrimPlan.score === "number" ? clipTrimPlan.score : undefined,
+        peak_ref: clipTrimPlan.event_id,
+        craft_in_point: craftInPoint,
+        craft_out_point: craftOutPoint,
+        clip_trim_rationale: clipTrimPlan.rationale,
+        clip_trim_technique: clipTrimPlan.technique,
+        clip_trim_source: clipTrimPlan.source,
+      };
+    }
+  }
 
   // If no hint and no policy, use authored range as-is
   if (!hint && !ctx.trimPolicy && !craftInPoint && !craftOutPoint) {
@@ -405,6 +442,13 @@ function hasActionEvidence(candidate: Candidate): boolean {
     (candidate.peak_signals?.motion ?? 0) >= 0.55;
 }
 
+function peakTypeForTechnique(technique: string): "action_peak" | "emotional_peak" | "visual_peak" | undefined {
+  if (technique === "cut_on_action") return "action_peak";
+  if (technique === "peak_hold" || technique === "post_action_hold") return "emotional_peak";
+  if (technique === "clean_in_clean_out" || technique === "pre_roll_enter") return "visual_peak";
+  return undefined;
+}
+
 function snapCleanInOut(
   inUs: number,
   outUs: number,
@@ -458,6 +502,7 @@ export function applyAdaptiveTrim(
   blueprint: EditBlueprint,
   beats: NormalizedBeat[],
   usPerFrame: number,
+  clipTrimPlans: ClipTrimPlan[] = [],
 ): Map<string, ResolvedTrim> {
   const trimResults = new Map<string, ResolvedTrim>();
   const candidateMap = new Map<string, Candidate>();
@@ -472,6 +517,13 @@ export function applyAdaptiveTrim(
     beatMap.set(b.beat_id, b);
   }
 
+  const clipTrimPlanMap = new Map<string, ClipTrimPlan>();
+  for (const plan of clipTrimPlans) {
+    if (plan.source === "marlin_event") {
+      clipTrimPlanMap.set(plan.segment_id, plan);
+    }
+  }
+
   for (const clip of clips) {
     const key = `${clip.segment_id}:${clip.src_in_us}:${clip.src_out_us}`;
     const candidate = candidateMap.get(key);
@@ -480,9 +532,10 @@ export function applyAdaptiveTrim(
     const beat = beatMap.get(clip.beat_id);
     const craftInPoint = beat?.craft?.in_point;
     const craftOutPoint = beat?.craft?.out_point;
+    const clipTrimPlan = clipTrimPlanMap.get(clip.segment_id);
 
     // Skip if no trim hint, no trim policy, and no beat craft trim directive.
-    if (!candidate.trim_hint && !blueprint.trim_policy && !craftInPoint && !craftOutPoint) continue;
+    if (!clipTrimPlan && !candidate.trim_hint && !blueprint.trim_policy && !craftInPoint && !craftOutPoint) continue;
 
     const beatTargetDurationUs = beat
       ? beat.target_duration_frames * usPerFrame
@@ -494,6 +547,7 @@ export function applyAdaptiveTrim(
       usPerFrame,
       craftInPoint,
       craftOutPoint,
+      clipTrimPlan,
     });
 
     // Apply resolved trim to clip
@@ -518,6 +572,9 @@ export function applyAdaptiveTrim(
     if (resolved.peak_type) trimMeta.peak_type = resolved.peak_type;
     if (resolved.peak_confidence !== undefined) trimMeta.peak_confidence = resolved.peak_confidence;
     if (resolved.peak_ref) trimMeta.peak_ref = resolved.peak_ref;
+    if (resolved.clip_trim_rationale) trimMeta.clip_trim_rationale = resolved.clip_trim_rationale;
+    if (resolved.clip_trim_technique) trimMeta.clip_trim_technique = resolved.clip_trim_technique;
+    if (resolved.clip_trim_source) trimMeta.clip_trim_source = resolved.clip_trim_source;
     (clip.metadata as Record<string, unknown>).trim = trimMeta;
 
     // Peak editorial metadata (design doc §7.3)
