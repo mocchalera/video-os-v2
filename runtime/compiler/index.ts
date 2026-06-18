@@ -27,6 +27,7 @@ import {
   isMarlinEventClipTrimPlan,
   planClipTrims,
   type ClipTrimPlan,
+  type ClipTrimPlanningContext,
 } from "../agents/clip-trim-agent.js";
 import type { BgmScoringContext } from "./score.js";
 import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
@@ -174,6 +175,40 @@ function buildBeatCraftMap(beats: NormalizedBeat[]): Map<string, CraftDirective>
     if (beat.craft) map.set(beat.beat_id, beat.craft);
   }
   return map;
+}
+
+function buildClipTrimPlanningContext(
+  beats: NormalizedBeat[],
+  visualClips: TimelineClip[],
+  usPerFrame: number,
+): ClipTrimPlanningContext {
+  const beatTargetDurationFramesById = new Map(
+    beats.map((beat) => [beat.beat_id, beat.target_duration_frames]),
+  );
+  const sourceKeysByBeat = new Map<string, Set<string>>();
+  const selectedBeatBySegmentId = new Map<string, string>();
+
+  for (const clip of visualClips) {
+    if (!beatTargetDurationFramesById.has(clip.beat_id)) continue;
+    const sourceKeys = sourceKeysByBeat.get(clip.beat_id) ?? new Set<string>();
+    sourceKeys.add(sourceRangeKey(clip));
+    sourceKeysByBeat.set(clip.beat_id, sourceKeys);
+    if (!selectedBeatBySegmentId.has(clip.segment_id)) {
+      selectedBeatBySegmentId.set(clip.segment_id, clip.beat_id);
+    }
+  }
+
+  const clipsInBeatById = new Map<string, number>();
+  for (const beat of beats) {
+    clipsInBeatById.set(beat.beat_id, Math.max(1, sourceKeysByBeat.get(beat.beat_id)?.size ?? 1));
+  }
+
+  return {
+    usPerFrame,
+    beatTargetDurationFramesById,
+    clipsInBeatById,
+    selectedBeatBySegmentId,
+  };
 }
 
 function candidatesForAssembledClips(candidates: Candidate[], clips: TimelineClip[]): Candidate[] {
@@ -456,6 +491,7 @@ export function compile(opts: CompileOptions): CompileResult {
     ...assembled.tracks.video.flatMap((t) => t.clips),
     ...assembled.tracks.audio.flatMap((t) => t.clips),
   ];
+  const visualAssembledClips = assembled.tracks.video.flatMap((t) => t.clips);
   const marlinEvents = loadProjectMarlinEvents(projectPath);
   const clipTrimPlans = marlinEvents
     ? planClipTrims(
@@ -464,6 +500,7 @@ export function compile(opts: CompileOptions): CompileResult {
         marlinEvents,
         brief,
         buildBeatCraftMap(normalized.beats),
+        buildClipTrimPlanningContext(normalized.beats, visualAssembledClips, usPerFrame),
       ).filter(isMarlinEventClipTrimPlan)
     : [];
   applyClipTrimPlansToCandidates(selects.candidates, clipTrimPlans);

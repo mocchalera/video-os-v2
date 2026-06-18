@@ -16,6 +16,13 @@ export interface ClipTrimPlan {
   score?: number;
 }
 
+export interface ClipTrimPlanningContext {
+  usPerFrame: number;
+  beatTargetDurationFramesById: Map<string, number>;
+  clipsInBeatById: Map<string, number>;
+  selectedBeatBySegmentId?: Map<string, string>;
+}
+
 interface TimeRange {
   startUs: number;
   endUs: number;
@@ -44,6 +51,7 @@ interface ScoredEvent {
 const MIN_EVENT_DURATION_US = 500_000;
 const PREFERRED_MIN_DURATION_US = 2_000_000;
 const PREFERRED_MAX_DURATION_US = 5_000_000;
+const DEFAULT_PREFERRED_DURATION_US = 5_000_000;
 const DEFAULT_EVENT_CONFIDENCE = 0.7;
 
 const STOP_WORDS = new Set([
@@ -82,6 +90,7 @@ export function planClipTrims(
   marlinEvents: MarlinEventsArtifact,
   brief: CreativeBrief,
   beatCraft: Map<string, CraftDirective>,
+  planningContext?: ClipTrimPlanningContext,
 ): ClipTrimPlan[] {
   const segmentsById = new Map(segments.map((segment) => [segment.segment_id, segment]));
   const eventsByAsset = new Map(marlinEvents.items.map((item) => [item.asset_id, item.events]));
@@ -107,11 +116,14 @@ export function planClipTrims(
 
     const best = scoredEvents[0];
     if (best) {
+      const centerUs = resolveEventCenterUs(best, range);
+      const preferredDuration = resolvePreferredDurationUs(candidate, planningContext);
+      const trimRange = centeredRange(centerUs, preferredDuration.durationUs, range);
       plans.push({
         segment_id: candidate.segment_id,
-        best_in_us: best.inUs,
-        best_out_us: best.outUs,
-        rationale: buildEventRationale(best),
+        best_in_us: trimRange.startUs,
+        best_out_us: trimRange.endUs,
+        rationale: buildEventRationale(best, trimRange),
         technique: inferTechnique(best.event.description),
         source: "marlin_event",
         event_id: best.event.event_id,
@@ -148,6 +160,90 @@ function candidateSegmentRange(candidate: SelectCandidate, segment: SegmentItem 
   const startUs = Math.max(candidateStart, segmentStart);
   const endUs = Math.min(candidateEnd, segmentEnd);
   return startUs < endUs ? { startUs, endUs } : undefined;
+}
+
+interface PreferredDurationResolution {
+  durationUs: number;
+  source: "trim_hint" | "beat_allocation" | "default";
+}
+
+function resolvePreferredDurationUs(
+  candidate: SelectCandidate,
+  planningContext: ClipTrimPlanningContext | undefined,
+): PreferredDurationResolution {
+  const hintDurationUs = positiveFiniteNumber(candidate.trim_hint?.preferred_duration_us);
+  if (hintDurationUs !== undefined) {
+    return { durationUs: hintDurationUs, source: "trim_hint" };
+  }
+
+  const beatDurationUs = resolveBeatPreferredDurationUs(candidate, planningContext);
+  if (beatDurationUs !== undefined) {
+    return { durationUs: beatDurationUs, source: "beat_allocation" };
+  }
+
+  return { durationUs: DEFAULT_PREFERRED_DURATION_US, source: "default" };
+}
+
+function resolveBeatPreferredDurationUs(
+  candidate: SelectCandidate,
+  planningContext: ClipTrimPlanningContext | undefined,
+): number | undefined {
+  if (!planningContext) return undefined;
+  const usPerFrame = positiveFiniteNumber(planningContext.usPerFrame);
+  if (usPerFrame === undefined) return undefined;
+
+  for (const beatId of candidateBeatIds(candidate, planningContext)) {
+    const targetFrames = positiveFiniteNumber(planningContext.beatTargetDurationFramesById.get(beatId));
+    if (targetFrames === undefined) continue;
+
+    const clipsInBeat = Math.max(
+      1,
+      Math.floor(positiveFiniteNumber(planningContext.clipsInBeatById.get(beatId)) ?? 1),
+    );
+    const durationUs = targetFrames * usPerFrame / clipsInBeat;
+    if (Number.isFinite(durationUs) && durationUs > 0) return durationUs;
+  }
+
+  return undefined;
+}
+
+function candidateBeatIds(
+  candidate: SelectCandidate,
+  planningContext: ClipTrimPlanningContext,
+): string[] {
+  const selectedBeatId = planningContext.selectedBeatBySegmentId?.get(candidate.segment_id);
+  const eligible = candidate.eligible_beats ?? [];
+  if (!selectedBeatId) return eligible;
+  return [
+    selectedBeatId,
+    ...eligible.filter((beatId) => beatId !== selectedBeatId),
+  ];
+}
+
+function resolveEventCenterUs(scored: ScoredEvent, range: TimeRange): number {
+  const eventCenterUs = Math.round((scored.event.start_us + scored.event.end_us) / 2);
+  return clampNumber(eventCenterUs, range.startUs, range.endUs);
+}
+
+function centeredRange(centerUs: number, preferredDurationUs: number, bounds: TimeRange): TimeRange {
+  const availableDurationUs = bounds.endUs - bounds.startUs;
+  const durationUs = Math.min(Math.round(preferredDurationUs), availableDurationUs);
+  let startUs = centerUs - durationUs / 2;
+  let endUs = centerUs + durationUs / 2;
+
+  if (startUs < bounds.startUs) {
+    endUs += bounds.startUs - startUs;
+    startUs = bounds.startUs;
+  }
+  if (endUs > bounds.endUs) {
+    startUs -= endUs - bounds.endUs;
+    endUs = bounds.endUs;
+  }
+
+  return {
+    startUs: Math.round(clampNumber(startUs, bounds.startUs, bounds.endUs)),
+    endUs: Math.round(clampNumber(endUs, bounds.startUs, bounds.endUs)),
+  };
 }
 
 function scoreEvent(
@@ -354,11 +450,12 @@ function resolveFallbackTechnique(
   return undefined;
 }
 
-function buildEventRationale(scored: ScoredEvent): string {
+function buildEventRationale(scored: ScoredEvent, trimRange: TimeRange): string {
   const match = scored.relevance.matchedBriefTerms.length > 0
-    ? ` - matches ${scored.relevance.matchedBriefTerms[0]} in brief`
-    : " - best scored Marlin event for this clip";
-  return `using event: ${scored.event.description} (${formatRange(scored.inUs, scored.outUs)})${match}`;
+    ? `; matches ${scored.relevance.matchedBriefTerms[0]} in brief`
+    : "; best scored Marlin event for this clip";
+  const trimDurationUs = trimRange.endUs - trimRange.startUs;
+  return `centered on Marlin event '${scored.event.description}' (${formatRange(scored.event.start_us, scored.event.end_us)}), trimmed to ${formatSeconds(trimDurationUs)}s${match}`;
 }
 
 function formatRange(inUs: number, outUs: number): string {
@@ -373,6 +470,16 @@ function formatSeconds(us: number): string {
 function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function positiveFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 function roundScore(score: number): number {
