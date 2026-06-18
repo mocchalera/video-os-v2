@@ -82,7 +82,9 @@ export async function runMarlinQA(
 
   const durationSec = options.durationSec ?? await readVideoDurationSec(absVideoPath);
   const ownsMarlinFn = options.marlinFn === undefined;
-  const marlinFn = options.marlinFn ?? createMarlinFnFromEnvironment(absProjectDir, options.repoRoot);
+  const marlinFn = options.marlinFn ?? createMarlinFnFromEnvironment(absProjectDir, options.repoRoot, {
+    requestTimeoutMs: 300_000,
+  });
 
   try {
     const caption = await captionMarlinQAWithChunks(absVideoPath, durationSec, marlinFn, {

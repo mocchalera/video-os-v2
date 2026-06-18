@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import {
+  createMarlinFnFromEnvironment,
   extractTagsFromScene,
   loadMarlinAssetInputs,
   runMarlinAnalysis,
@@ -102,6 +103,22 @@ describe("Marlin analysis stage", () => {
         sourcePath: path.join(projectDir, "media/clip-b.mp4"),
       },
     ]);
+  });
+
+  it("passes request timeout overrides to the local worker client", () => {
+    const projectDir = makeTempProject();
+    const marlinFn = createMarlinFnFromEnvironment(projectDir, REPO_ROOT, {
+      requestTimeoutMs: 120_000,
+    });
+
+    const workerOptions = (marlinFn as unknown as {
+      options?: { cwd?: string; requestTimeoutMs?: number };
+    }).options;
+
+    expect(workerOptions).toMatchObject({
+      cwd: REPO_ROOT,
+      requestTimeoutMs: 120_000,
+    });
   });
 
   it("writes schema-valid marlin_events.json from caption and find passes", async () => {

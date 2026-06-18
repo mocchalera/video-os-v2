@@ -257,7 +257,11 @@ export function shouldRunMarlinAnalysis(projectDir: string, repoRoot?: string): 
   return policy.enabled === true;
 }
 
-export function createMarlinFnFromEnvironment(projectDir: string, repoRoot?: string): MarlinFn {
+export function createMarlinFnFromEnvironment(
+  projectDir: string,
+  repoRoot?: string,
+  overrides: { requestTimeoutMs?: number } = {},
+): MarlinFn {
   const policy = resolveMarlinPolicy(projectDir, repoRoot);
   const workerPath = process.env.VOS_MARLIN_WORKER ?? policy.worker_path;
   const mockFromEnv = process.env.VOS_MARLIN_MOCK !== undefined
@@ -271,6 +275,7 @@ export function createMarlinFnFromEnvironment(projectDir: string, repoRoot?: str
     model: process.env.VOS_MARLIN_MODEL ?? policy.model_alias,
     device: process.env.VOS_MARLIN_DEVICE,
     mock: mockFromEnv ?? policy.mock,
+    requestTimeoutMs: overrides.requestTimeoutMs,
   });
 }
 
