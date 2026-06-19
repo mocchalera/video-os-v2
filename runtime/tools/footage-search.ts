@@ -49,6 +49,7 @@ export interface FootageSearchContext {
 export interface SearchFootageInput {
   query: string;
   mode?: FootageSearchMode;
+  explicitBoolean?: boolean;
   text_match?: string;
   semantic?: string;
   filters?: FootageSearchFilters;
@@ -167,6 +168,7 @@ interface DbSearchRow {
   src_in_us: number;
   src_out_us: number;
   duration_us: number;
+  segment_type: string | null;
   summary: string;
   transcript_excerpt: string;
   transcript_text: string;
@@ -176,6 +178,9 @@ interface DbSearchRow {
   asset_quality_flags_json: string;
   filmstrip_path: string | null;
   source_order: number;
+  shooting_date?: string | null;
+  shooting_time?: string | null;
+  camera_type?: string | null;
   light_quality: number | null;
   subject_prominence: number | null;
   emotional_expression: number | null;
@@ -219,6 +224,7 @@ const BASE_SELECT = `
     s.src_in_us,
     s.src_out_us,
     s.duration_us,
+    s.segment_type,
     s.summary,
     s.transcript_excerpt,
     COALESCE(st.text, '') AS transcript_text,
@@ -228,6 +234,9 @@ const BASE_SELECT = `
     a.quality_flags_json AS asset_quality_flags_json,
     s.filmstrip_path,
     a.source_order,
+    a.shooting_date,
+    a.shooting_time,
+    a.camera_type,
     v.light_quality,
     v.subject_prominence,
     v.emotional_expression,
@@ -273,10 +282,10 @@ export function buildFtsMatchQuery(input: {
 
   if (text) {
     if (input.explicitBoolean) clauses.push(booleanFtsExpression(text));
-    else clauses.push(expandedPhraseClauses(text).join(" OR "));
+    else clauses.push(naturalFtsExpression(text));
   }
   for (const term of contextTerms) {
-    const clause = expandedPhraseClauses(term).join(" OR ");
+    const clause = groupedPhraseClauses(term);
     if (clause) clauses.push(clause);
   }
 
@@ -387,7 +396,7 @@ async function searchFootageWithDb(
   const allowedIds = new Set(rows.map((row) => row.segment_id));
 
   const fts = text
-    ? buildFtsMatchQuery({ text, explicitBoolean: /\b(?:AND|OR|NOT)\b/.test(text), contextTerms: contextExpansions })
+    ? buildFtsMatchQuery({ text, explicitBoolean: input.explicitBoolean === true, contextTerms: contextExpansions })
     : { match: "", warnings: [] };
   warnings.push(...fts.warnings);
 
@@ -864,15 +873,21 @@ function fallbackSearch(
 }
 
 function fallbackFilter(row: DbSearchRow, filters: FootageSearchFilters): boolean {
+  if (filters.shooting_date && row.shooting_date !== filters.shooting_date) return false;
+  if (filters.shooting_time_start && (!row.shooting_time || row.shooting_time < filters.shooting_time_start)) return false;
+  if (filters.shooting_time_end && (!row.shooting_time || row.shooting_time > filters.shooting_time_end)) return false;
+  if (filters.camera_type && row.camera_type !== filters.camera_type) return false;
+  if (filters.place_hint_name && row.place_hint_name !== filters.place_hint_name) return false;
+  if (filters.place_hint_category && row.place_hint_category !== filters.place_hint_category) return false;
   if (filters.asset_ids && filters.asset_ids.length > 0 && !filters.asset_ids.includes(row.asset_id)) return false;
   if (filters.segment_type && fallbackSegmentType(row) !== filters.segment_type) return false;
   if (filters.min_duration_us != null && row.duration_us < filters.min_duration_us) return false;
   if (filters.max_duration_us != null && row.duration_us > filters.max_duration_us) return false;
   if (filters.exclude_segment_ids?.includes(row.segment_id)) return false;
-  if (filters.has_text === true && !fallbackText(row)) return false;
-  if (filters.has_text === false && fallbackText(row)) return false;
-  if (filters.has_dialogue === true && !row.transcript_excerpt && row.has_dialogue !== 1) return false;
-  if (filters.has_dialogue === false && (row.transcript_excerpt || row.has_dialogue === 1)) return false;
+  if (filters.has_text === true && !fallbackHasText(row)) return false;
+  if (filters.has_text === false && fallbackHasText(row)) return false;
+  if (filters.has_dialogue === true && !fallbackHasDialogue(row)) return false;
+  if (filters.has_dialogue === false && fallbackHasDialogue(row)) return false;
   for (const field of QUALITY_FIELDS) {
     const min = filters.quality_min?.[field];
     if (typeof min === "number" && ((row[field] ?? -Infinity) < min)) return false;
@@ -889,34 +904,42 @@ function fallbackRow(
   index: number,
 ): DbSearchRow {
   const quality = recordValue(recordValue(segment.visual_quality).scores);
+  const appraisal = recordValue(segment.visual_appraisal);
+  const placeHint = recordValue(appraisal.place_hint);
+  const transcriptText = stringValue(segment.transcript_excerpt);
+  const extractedText = extractedTextFlat(appraisal.extracted_text);
   return {
     segment_id: stringValue(segment.segment_id) || `SEG_${index + 1}`,
     asset_id: stringValue(segment.asset_id),
     src_in_us: srcInUs,
     src_out_us: srcOutUs,
     duration_us: srcOutUs - srcInUs,
+    segment_type: nullableString(segment.segment_type),
     summary: stringValue(segment.summary),
-    transcript_excerpt: stringValue(segment.transcript_excerpt),
-    transcript_text: stringValue(segment.transcript_excerpt),
+    transcript_excerpt: transcriptText,
+    transcript_text: transcriptText,
     tags_json: JSON.stringify([...arrayStrings(segment.tags), ...arrayStrings(segment.visual_tags)]),
     quality_flags_json: JSON.stringify(arrayStrings(segment.quality_flags)),
     asset_tags_json: JSON.stringify(arrayStrings(asset.tags)),
     asset_quality_flags_json: JSON.stringify(arrayStrings(asset.quality_flags)),
     filmstrip_path: nullableString(segment.filmstrip_path),
     source_order: sourceOrder,
+    shooting_date: nullableString(asset.shooting_date),
+    shooting_time: nullableString(asset.shooting_time),
+    camera_type: nullableString(asset.camera_type),
     light_quality: scoreOrNull(quality.light_quality),
     subject_prominence: scoreOrNull(quality.subject_prominence),
     emotional_expression: scoreOrNull(quality.emotional_expression),
     composition_score: scoreOrNull(quality.composition_score),
     motion_quality: scoreOrNull(quality.motion_quality),
-    frame_path: nullableString(recordValue(segment.visual_appraisal).frame_path),
-    extracted_text_json: JSON.stringify(recordValue(segment.visual_appraisal).extracted_text ?? []),
-    extracted_text_flat: "",
-    place_hint_name: null,
-    place_hint_category: null,
-    place_hint_confidence: null,
-    aesthetic_notes_flat: "",
-    has_dialogue: stringValue(segment.transcript_excerpt) ? 1 : 0,
+    frame_path: nullableString(appraisal.frame_path),
+    extracted_text_json: JSON.stringify(appraisal.extracted_text ?? []),
+    extracted_text_flat: extractedText,
+    place_hint_name: nullableString(placeHint.name),
+    place_hint_category: nullableString(placeHint.category),
+    place_hint_confidence: scoreOrNull(placeHint.confidence),
+    aesthetic_notes_flat: arrayStrings(appraisal.aesthetic_notes).join(" "),
+    has_dialogue: transcriptText ? 1 : 0,
     fused_peak_score: null,
     peak_timestamp_us: null,
     peak_type: null,
@@ -930,7 +953,15 @@ function fallbackText(row: DbSearchRow): string {
 }
 
 function fallbackSegmentType(row: DbSearchRow): string | null {
-  return row.transcript_excerpt ? "dialogue" : null;
+  return row.segment_type;
+}
+
+function fallbackHasText(row: DbSearchRow): boolean {
+  return Boolean(row.extracted_text_flat.trim() || row.transcript_text.trim() || row.transcript_excerpt.trim());
+}
+
+function fallbackHasDialogue(row: DbSearchRow): boolean {
+  return row.has_dialogue === 1 || row.segment_type === "dialogue";
 }
 
 async function segmentTextForSimilarity(projectDir: string, segmentId: string): Promise<string> {
@@ -990,8 +1021,19 @@ function contextTermsForQuery(query: string, context?: FootageSearchContext): st
 function booleanFtsExpression(text: string): string {
   return text.split(/\s+/).map((token) => {
     if (token === "AND" || token === "OR" || token === "NOT") return token;
-    return expandedPhraseClauses(token).join(" OR ");
+    return groupedPhraseClauses(token);
   }).filter(Boolean).join(" ");
+}
+
+function naturalFtsExpression(text: string): string {
+  const tokens = text.split(/\s+/).map(groupedPhraseClauses).filter(Boolean);
+  return tokens.join(" AND ");
+}
+
+function groupedPhraseClauses(text: string): string {
+  const clauses = expandedPhraseClauses(text);
+  if (clauses.length === 0) return "";
+  return clauses.length === 1 ? clauses[0] : `(${clauses.join(" OR ")})`;
 }
 
 function expandedPhraseClauses(text: string): string[] {
@@ -1093,6 +1135,16 @@ function nullableString(value: unknown): string | null {
 function arrayStrings(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+function extractedTextFlat(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  return value.flatMap((item) => {
+    if (typeof item === "string") return item.trim() ? [item.trim()] : [];
+    const record = recordValue(item);
+    const text = stringValue(record.text).trim();
+    return text ? [text] : [];
+  }).join(" ");
 }
 
 function jsonStrings(value: string): string[] {

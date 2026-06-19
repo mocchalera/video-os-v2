@@ -11,6 +11,17 @@ interface MockCalls {
   extract: Array<[string, number, string]>;
 }
 
+interface MockFootageCalls {
+  status: string[];
+  build: Array<Record<string, unknown>>;
+  search: Array<[string, Record<string, unknown>]>;
+  similar: Array<[string, Record<string, unknown>]>;
+  unused: Array<[string, Record<string, unknown>]>;
+  best: Array<[string, Record<string, unknown>]>;
+  statusValue?: "ready" | "missing" | "stale" | "malformed";
+  buildError?: Error;
+}
+
 let projectDir: string | null = null;
 
 function createProject(): { projectDir: string; sourcePath: string; sourceMap: Map<string, MediaSourceMapEntry> } {
@@ -29,7 +40,44 @@ function createProject(): { projectDir: string; sourcePath: string; sourceMap: M
   return { projectDir, sourcePath, sourceMap };
 }
 
-async function importWithMockedMarlinTools(calls: MockCalls) {
+function mockResponse(tool: string, input: Record<string, unknown>) {
+  return {
+    query: { query: tool, ...input },
+    db_status: "ready",
+    mode_used: "hybrid",
+    results: [{
+      segment_id: `SEG_${tool}`,
+      asset_id: "AST_001",
+      src_in_us: 0,
+      src_out_us: 1_000_000,
+      duration_us: 1_000_000,
+      score: 1,
+      scores: { final: 1 },
+      match_reason: `${tool} mock`,
+      summary: `${tool} summary`,
+      key_frame_path: "frames/mock.jpg",
+      tags: [],
+      quality_flags: [],
+      evidence_refs: [{ field: "summary", value: `${tool} evidence` }],
+    }],
+    warnings: [],
+  };
+}
+
+function createFootageCalls(overrides: Partial<MockFootageCalls> = {}): MockFootageCalls {
+  return {
+    status: [],
+    build: [],
+    search: [],
+    similar: [],
+    unused: [],
+    best: [],
+    statusValue: "ready",
+    ...overrides,
+  };
+}
+
+async function importWithMockedMarlinTools(calls: MockCalls, footageCalls = createFootageCalls()) {
   vi.resetModules();
   vi.doMock("../runtime/tools/marlin-tools.js", () => ({
     ensureMarlinWorker: async (dir: string) => {
@@ -49,11 +97,50 @@ async function importWithMockedMarlinTools(calls: MockCalls) {
       return outputPath;
     },
   }));
+  vi.doMock("../runtime/artifacts/footage-db.js", () => ({
+    readFootageDbStatus: (dir: string) => {
+      footageCalls.status.push(dir);
+      return {
+        exists: footageCalls.statusValue !== "missing",
+        status: footageCalls.statusValue ?? "ready",
+        stale_reasons: [],
+        errors: [],
+      };
+    },
+  }));
+  vi.doMock("../runtime/artifacts/footage-db-builder.js", () => ({
+    buildFootageDb: async (options: Record<string, unknown>) => {
+      footageCalls.build.push(options);
+      if (footageCalls.buildError) throw footageCalls.buildError;
+      return { embedding_status: "skipped", counts: { embeddings: 0 }, warnings: [] };
+    },
+  }));
+  vi.doMock("../runtime/tools/footage-search.js", () => ({
+    searchFootage: async (dir: string, input: Record<string, unknown>) => {
+      footageCalls.search.push([dir, input]);
+      return mockResponse("search", input);
+    },
+    similarFootage: async (dir: string, input: Record<string, unknown>) => {
+      footageCalls.similar.push([dir, input]);
+      return mockResponse("similar", input);
+    },
+    unusedFootage: async (dir: string, input: Record<string, unknown>) => {
+      footageCalls.unused.push([dir, input]);
+      return mockResponse("unused", input);
+    },
+    bestForBeat: async (dir: string, input: Record<string, unknown>) => {
+      footageCalls.best.push([dir, input]);
+      return mockResponse("best", input);
+    },
+  }));
   return import("../runtime/tools/editorial-tools.js");
 }
 
 afterEach(() => {
   vi.doUnmock("../runtime/tools/marlin-tools.js");
+  vi.doUnmock("../runtime/artifacts/footage-db.js");
+  vi.doUnmock("../runtime/artifacts/footage-db-builder.js");
+  vi.doUnmock("../runtime/tools/footage-search.js");
   vi.resetModules();
   if (projectDir) {
     fs.rmSync(projectDir, { recursive: true, force: true });
@@ -74,6 +161,10 @@ describe("editorial tool registry", () => {
       "find_moment",
       "extract_frame",
       "compare_frames",
+      "search_footage",
+      "similar_to",
+      "unused_footage",
+      "best_for_beat",
     ]);
     expect(toolkit.every((tool) => typeof tool.execute === "function")).toBe(true);
   });
@@ -130,5 +221,82 @@ describe("editorial tool registry", () => {
       start_sec: 0,
       end_sec: 1,
     })).rejects.toThrow("Unknown asset_id");
+  });
+
+  it("executes footage search tools with expected parameters", async () => {
+    const calls: MockCalls = { ensure: [], analyze: [], find: [], extract: [] };
+    const footage = createFootageCalls();
+    const fixture = createProject();
+    const { createEditorialToolkit } = await importWithMockedMarlinTools(calls, footage);
+    const toolkit = createEditorialToolkit(fixture.projectDir, fixture.sourceMap);
+
+    await toolkit.find((tool) => tool.name === "search_footage")?.execute({
+      query: "warm food",
+      mode: "text",
+      filters: { place_hint_category: "market" },
+      limit: 4,
+    });
+    await toolkit.find((tool) => tool.name === "similar_to")?.execute({
+      segment_id: "SEG_food",
+      limit: 3,
+    });
+    await toolkit.find((tool) => tool.name === "unused_footage")?.execute({
+      exclude_segment_ids: ["SEG_food"],
+      min_quality: 0.7,
+      limit: 2,
+    });
+    await toolkit.find((tool) => tool.name === "best_for_beat")?.execute({
+      beat_purpose: "show warm preparation",
+      emotion: "calm",
+      exclude_segment_ids: ["SEG_food"],
+      limit: 1,
+    });
+
+    expect(footage.search).toEqual([[
+      fixture.projectDir,
+      {
+        query: "warm food",
+        mode: "text",
+        filters: { place_hint_category: "market" },
+        limit: 4,
+      },
+    ]]);
+    expect(footage.similar).toEqual([[fixture.projectDir, { segment_id: "SEG_food", limit: 3 }]]);
+    expect(footage.unused).toEqual([[
+      fixture.projectDir,
+      { selected_segment_ids: ["SEG_food"], min_quality: 0.7, limit: 2 },
+    ]]);
+    expect(footage.best).toEqual([[
+      fixture.projectDir,
+      {
+        beat_purpose: "show warm preparation",
+        required_visuals: ["calm"],
+        avoid_segment_ids: ["SEG_food"],
+        limit: 1,
+      },
+    ]]);
+    expect(footage.build).toHaveLength(0);
+  });
+
+  it("attempts a DB build for missing footage DB and still returns fallback search results", async () => {
+    const calls: MockCalls = { ensure: [], analyze: [], find: [], extract: [] };
+    const footage = createFootageCalls({
+      statusValue: "missing",
+      buildError: new Error("missing source artifacts"),
+    });
+    const fixture = createProject();
+    const { createEditorialToolkit } = await importWithMockedMarlinTools(calls, footage);
+    const toolkit = createEditorialToolkit(fixture.projectDir, fixture.sourceMap);
+
+    const result = await toolkit.find((tool) => tool.name === "search_footage")?.execute({
+      query: "warm food",
+      limit: 4,
+    }) as { warnings: string[]; results: Array<{ key_frame_path?: string }> };
+
+    expect(footage.build).toHaveLength(1);
+    expect(footage.build[0]).toMatchObject({ projectDir: fixture.projectDir, embeddingPolicy: "auto" });
+    expect(footage.search).toHaveLength(1);
+    expect(result.warnings[0]).toContain("build failed");
+    expect(result.results[0].key_frame_path).toBe("frames/mock.jpg");
   });
 });

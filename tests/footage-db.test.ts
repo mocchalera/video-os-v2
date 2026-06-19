@@ -81,9 +81,46 @@ describe("footage database", () => {
     expect(japanese.db_status).toBe("ready");
     expect(japanese.results[0]?.segment_id).toBe("SEG_food");
 
-    const english = await searchFootage(projectDir, { query: "栗 OR chestnut", mode: "text", limit: 3 });
+    const english = await searchFootage(projectDir, { query: "栗 OR chestnut", mode: "text", explicitBoolean: true, limit: 3 });
     expect(english.rewritten_query?.fts_match).toContain("OR");
     expect(english.results[0]?.segment_id).toBe("SEG_food");
+  });
+
+  it("defaults embedding policy to auto", async () => {
+    const projectDir = makeProject();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+
+    const result = await buildFootageDb({ projectDir });
+
+    expect(result.embedding_status).toBe("ready");
+    expect(result.counts.embeddings).toBeGreaterThan(0);
+  });
+
+  it("uses explicit boolean mode only when requested and groups CJK alternatives", async () => {
+    const projectDir = makeProject();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { buildFtsMatchQuery, searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+
+    const naturalNot = buildFtsMatchQuery({ text: "this is NOT that" });
+    expect(naturalNot.match).toBe("\"this\" AND \"is\" AND \"NOT\" AND \"that\"");
+
+    const cjkBoolean = buildFtsMatchQuery({ text: "栗山 AND chestnut", explicitBoolean: true });
+    expect(cjkBoolean.match).toMatch(/^\(.+\) AND "chestnut"$/);
+    expect(cjkBoolean.match).toContain(" OR ");
+
+    const natural = await searchFootage(projectDir, { query: "栗 OR chestnut", mode: "text", limit: 3 });
+    expect(natural.rewritten_query?.fts_match).toContain("\"OR\"");
+    expect(natural.results).toHaveLength(0);
+
+    const explicit = await searchFootage(projectDir, {
+      query: "栗 OR chestnut",
+      mode: "text",
+      explicitBoolean: true,
+      limit: 3,
+    });
+    expect(explicit.rewritten_query?.fts_match).toContain(" OR ");
+    expect(explicit.results[0]?.segment_id).toBe("SEG_food");
   });
 
   it("applies structured filters for date, quality, duration, place, and exclusion", async () => {
@@ -153,6 +190,60 @@ describe("footage database", () => {
     const response = await searchFootage(projectDir, { query: "chestnut", mode: "text" });
     expect(response.db_status).toBe("fallback");
     expect(response.results[0]?.segment_id).toBe("SEG_food");
+  });
+
+  it("fallback search enforces date, time, camera, place, text, and dialogue filters", async () => {
+    const projectDir = makeProject();
+    const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+    const segmentsJson = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+      items: Array<Record<string, unknown>>;
+    };
+    segmentsJson.items[1].segment_type = "dialogue";
+    fs.writeFileSync(segmentsPath, `${JSON.stringify(segmentsJson, null, 2)}\n`, "utf-8");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+
+    const date = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { shooting_date: "2026-06-01" },
+    });
+    expect(date.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+
+    const timeAndCamera = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { shooting_time_start: "10:30:00", shooting_time_end: "11:30:00", camera_type: "iphone" },
+    });
+    expect(timeAndCamera.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
+
+    const place = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { place_hint_name: "Chestnut market", place_hint_category: "market" },
+    });
+    expect(place.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+    expect(place.results[0].place_hint).toMatchObject({ name: "Chestnut market", category: "market" });
+
+    const hasText = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { has_text: true },
+    });
+    expect(hasText.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+
+    const noText = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { has_text: false },
+    });
+    expect(noText.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
+
+    const dialogueByType = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { asset_ids: ["AST_river"], has_dialogue: true },
+    });
+    expect(dialogueByType.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
   });
 
   it("detects mtime staleness after segments.json changes", async () => {

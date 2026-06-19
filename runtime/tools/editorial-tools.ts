@@ -1,6 +1,17 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { buildFootageDb } from "../artifacts/footage-db-builder.js";
+import { readFootageDbStatus } from "../artifacts/footage-db.js";
 import type { MediaSourceMapEntry } from "../media/source-map.js";
+import {
+  bestForBeat,
+  searchFootage,
+  similarFootage,
+  unusedFootage,
+  type FootageSearchFilters,
+  type FootageSearchMode,
+  type FootageSearchResponse,
+} from "./footage-search.js";
 import {
   ensureMarlinWorker,
   marlinAnalyzeRange,
@@ -52,6 +63,44 @@ export const EDITORIAL_TOOL_DEFINITIONS: EditorialToolDefinition[] = [
       timestamp_b_sec: { type: "number", description: "Second source timestamp to inspect, in seconds." },
     },
   },
+  {
+    name: "search_footage",
+    description: "Search the full analyzed footage pool by natural language, semantic evidence, and structured filters. Read-only.",
+    parameters: {
+      query: { type: "string", description: "Natural-language search intent, such as warm indoor scenes or food preparation closeups." },
+      filters: { type: "object", description: "Optional FootageSearchFilters object for date, place, type, quality, dialogue, text, or exclusion filters." },
+      filters_json: { type: "string", description: "Optional JSON string matching FootageSearchFilters when object parameters are unavailable." },
+      mode: { type: "string", description: "Optional: hybrid, text, semantic, or structured. Defaults to hybrid." },
+      limit: { type: "number", description: "Optional result limit. Defaults to 12, max 50." },
+    },
+  },
+  {
+    name: "similar_to",
+    description: "Find full-pool clips similar to a known segment while excluding that segment. Read-only.",
+    parameters: {
+      segment_id: { type: "string", description: "Segment id to use as the similarity anchor." },
+      limit: { type: "number", description: "Optional result limit." },
+    },
+  },
+  {
+    name: "unused_footage",
+    description: "Find strong clips that are not already selected. Read-only.",
+    parameters: {
+      exclude_segment_ids: { type: "array", description: "Segment ids already used or rejected." },
+      min_quality: { type: "number", description: "Optional minimum composition quality threshold from 0 to 1." },
+      limit: { type: "number", description: "Optional result limit." },
+    },
+  },
+  {
+    name: "best_for_beat",
+    description: "Search for the strongest clip for a beat purpose and emotional target. Read-only.",
+    parameters: {
+      beat_purpose: { type: "string", description: "Editorial need for the beat, such as establish place or show payoff reaction." },
+      emotion: { type: "string", description: "Optional emotional keyword or visual mood to combine with the beat purpose." },
+      exclude_segment_ids: { type: "array", description: "Segment ids to avoid when proposing a replacement." },
+      limit: { type: "number", description: "Optional result limit." },
+    },
+  },
 ];
 
 function stringParam(params: Record<string, unknown>, key: string): string {
@@ -69,6 +118,78 @@ function numberParam(params: Record<string, unknown>, key: string): number {
     throw new Error(`${key} must be a finite number`);
   }
   return number;
+}
+
+function optionalStringParam(params: Record<string, unknown>, key: string): string | undefined {
+  const value = params[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function optionalNumberParam(params: Record<string, unknown>, key: string): number | undefined {
+  if (!(key in params) || params[key] == null) return undefined;
+  return numberParam(params, key);
+}
+
+function stringArrayParam(params: Record<string, unknown>, key: string): string[] {
+  const value = params[key];
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(`${key} must be an array of strings`);
+  }
+  return value.map((item) => item.trim()).filter(Boolean);
+}
+
+function parseMode(value: unknown): FootageSearchMode | undefined {
+  if (value == null || value === "") return undefined;
+  if (value === "hybrid" || value === "text" || value === "semantic" || value === "structured") return value;
+  throw new Error("mode must be hybrid, text, semantic, or structured");
+}
+
+function parseFilters(params: Record<string, unknown>): FootageSearchFilters | undefined {
+  const objectValue = params.filters;
+  if (objectValue && typeof objectValue === "object" && !Array.isArray(objectValue)) {
+    return objectValue as FootageSearchFilters;
+  }
+  const jsonValue = optionalStringParam(params, "filters_json");
+  if (!jsonValue) return undefined;
+  const parsed = JSON.parse(jsonValue) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("filters_json must be a JSON object");
+  }
+  return parsed as FootageSearchFilters;
+}
+
+function withAdditionalWarnings(response: FootageSearchResponse, warnings: string[]): FootageSearchResponse {
+  if (warnings.length === 0) return response;
+  return {
+    ...response,
+    warnings: Array.from(new Set([...warnings, ...response.warnings])),
+  };
+}
+
+async function ensureSearchDatabase(projectDir: string): Promise<string[]> {
+  const status = readFootageDbStatus(projectDir);
+  if (status.status === "ready") return [];
+
+  try {
+    await buildFootageDb({ projectDir, embeddingPolicy: "auto" });
+    return [`footage DB was ${status.status}; rebuilt before search`];
+  } catch (error) {
+    return [
+      `footage DB was ${status.status}; build failed, using available search fallback: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ];
+  }
+}
+
+async function runFootageToolSearch(
+  projectDir: string,
+  search: () => Promise<FootageSearchResponse>,
+): Promise<FootageSearchResponse> {
+  const buildWarnings = await ensureSearchDatabase(projectDir);
+  const response = await search();
+  return withAdditionalWarnings(response, buildWarnings);
 }
 
 function resolveCandidatePath(projectDir: string, candidate: string | undefined): string | undefined {
@@ -194,6 +315,51 @@ export function createEditorialToolkit(
             { label: "b", timestamp_sec: timestampBSec, path: frameB },
           ],
         };
+      },
+    },
+    {
+      ...definition("search_footage"),
+      execute: async (params) => {
+        const query = stringParam(params, "query");
+        return runFootageToolSearch(resolvedProjectDir, () => searchFootage(resolvedProjectDir, {
+          query,
+          mode: parseMode(params.mode),
+          filters: parseFilters(params),
+          limit: optionalNumberParam(params, "limit"),
+        }));
+      },
+    },
+    {
+      ...definition("similar_to"),
+      execute: async (params) => {
+        const segmentId = stringParam(params, "segment_id");
+        return runFootageToolSearch(resolvedProjectDir, () => similarFootage(resolvedProjectDir, {
+          segment_id: segmentId,
+          limit: optionalNumberParam(params, "limit"),
+        }));
+      },
+    },
+    {
+      ...definition("unused_footage"),
+      execute: async (params) => {
+        return runFootageToolSearch(resolvedProjectDir, () => unusedFootage(resolvedProjectDir, {
+          selected_segment_ids: stringArrayParam(params, "exclude_segment_ids"),
+          min_quality: optionalNumberParam(params, "min_quality"),
+          limit: optionalNumberParam(params, "limit"),
+        }));
+      },
+    },
+    {
+      ...definition("best_for_beat"),
+      execute: async (params) => {
+        const beatPurpose = stringParam(params, "beat_purpose");
+        const emotion = optionalStringParam(params, "emotion");
+        return runFootageToolSearch(resolvedProjectDir, () => bestForBeat(resolvedProjectDir, {
+          beat_purpose: beatPurpose,
+          required_visuals: emotion ? [emotion] : undefined,
+          avoid_segment_ids: stringArrayParam(params, "exclude_segment_ids"),
+          limit: optionalNumberParam(params, "limit"),
+        }));
       },
     },
   ];

@@ -719,8 +719,8 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
   const clipEvidence = buildFineClipEvidence(input.selects, input.marlinEvents, input.keyFrames);
   return [
     "You are the unified Claude/Codex editorial agent for Video OS.",
-    "Pass 2 is fine-cut refinement: inspect only selected clips in detail and decide exactly how they should cut.",
-    "Do not add candidates outside the Pass 1 selects. If a clip is weak, flag it in revision_notes or move it to fallback, but keep references inside the selected pool.",
+    "Pass 2 is fine-cut refinement: default to selected clips, inspect them in detail, and decide exactly how they should cut.",
+    "Default to existing selected and fallback candidates. Search the full footage pool only when a beat gap, QA issue, or inspected weakness justifies it, and cite the search result evidence before recommending a replacement.",
     "Use Marlin event ids for in/out rationale whenever possible.",
     "Use context_knowledge to resolve ambiguous visual subjects or local terminology before changing selections or craft.",
     "",
@@ -737,7 +737,7 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
     "- For each selected clip, choose the best in/out point by referencing a specific Marlin event.",
     "- Choose beat-level transition_in / transition_out, rhythm, and in_point / out_point craft.",
     "- Adjust pacing and duration policy for the BGM duration when needed.",
-    "- Flag clips that should be swapped by using existing fallback candidates only.",
+    "- If a selected clip is weak, repetitive, too short, technically poor, or mismatched to its beat, use search_footage or best_for_beat to find a replacement candidate and cite the query, result segment_id, evidence_refs, and key_frame_path in revision_notes.",
     "- Keep the output schema-compatible: per-clip in/out belongs in clip_craft; beat craft belongs in blueprint.beats[].craft.",
     "",
     "## JSON output",
@@ -763,7 +763,7 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
 function fineToolPromptSection(): string {
   const lines = [
     "## Available tools",
-    "You can call these optional tools to inspect selected clips more closely during the fine pass:",
+    "You can call these optional tools to inspect selected clips or search for justified full-pool alternatives during the fine pass:",
   ];
   for (const tool of EDITORIAL_TOOL_DEFINITIONS) {
     const signature = Object.keys(tool.parameters).join(", ");
@@ -823,7 +823,8 @@ function buildFineInteractivePrompt(
     "",
     "## Repo-side agent instructions",
     "- Use the Read tool on the absolute key-frame paths above before setting in/out points.",
-    "- Use the available tools when a key frame is ambiguous, blurred, shaky, or misses the action boundary.",
+    "- Use the available inspection tools when a key frame is ambiguous, blurred, shaky, or misses the action boundary.",
+    "- Use search_footage or best_for_beat when inspection shows a weak clip and cite returned evidence before recommending a replacement.",
     "- Return the JSON object requested in the prompt. Do not write timeline.json.",
   ].join("\n");
   return {

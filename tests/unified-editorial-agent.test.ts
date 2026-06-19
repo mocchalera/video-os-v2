@@ -50,6 +50,21 @@ function brief(): CreativeBrief {
     order_policy: "editorial",
     caption_policy: "auto",
     audio_policy: "bgm_only",
+    context_knowledge: {
+      key_items: [
+        {
+          name: "栗きんとん",
+          description: "Chestnut confection",
+          significance: "Small round objects handled with tongs are chestnuts, not insects.",
+        },
+      ],
+      terminology: [
+        {
+          term: "栗",
+          meaning: "Chestnuts - the small round objects being handled are NOT insects",
+        },
+      ],
+    },
   };
 }
 
@@ -346,7 +361,7 @@ describe("unified editorial agent", () => {
     }
   });
 
-  it("interactive fine pass advertises optional Marlin inspection tools", async () => {
+  it("interactive fine pass advertises optional inspection and footage search tools", async () => {
     const rough = await roughCutPlanning(
       brief(),
       marlinEvents(),
@@ -371,11 +386,18 @@ describe("unified editorial agent", () => {
     expect(task.prompt).toContain("analyze_clip_range(asset_id, start_sec, end_sec)");
     expect(task.prompt).toContain("find_moment(asset_id, query)");
     expect(task.prompt).toContain("extract_frame(asset_id, timestamp_sec)");
+    expect(task.prompt).toContain("search_footage(query, filters, filters_json, mode, limit)");
+    expect(task.prompt).toContain("best_for_beat(beat_purpose, emotion, exclude_segment_ids, limit)");
+    expect(task.prompt).toContain("cite the query, result segment_id, evidence_refs, and key_frame_path");
     expect(task.tools?.map((tool) => tool.name)).toEqual([
       "analyze_clip_range",
       "find_moment",
       "extract_frame",
       "compare_frames",
+      "search_footage",
+      "similar_to",
+      "unused_footage",
+      "best_for_beat",
     ]);
   });
 
@@ -403,6 +425,8 @@ describe("unified editorial agent", () => {
 
       expect(geminiCalls).toHaveLength(1);
       expect(geminiCalls[0]).toContain("Pass 1 is rough-cut planning");
+      expect(geminiCalls[0]).toContain('"context_knowledge"');
+      expect(geminiCalls[0]).toContain("Chestnuts - the small round objects being handled are NOT insects");
       expect(result.selects.project_id).toBe("unified-test");
       expect(result.blueprint.project_id).toBe("unified-test");
     } finally {

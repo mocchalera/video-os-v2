@@ -337,7 +337,7 @@ export async function buildFootageDb(options: BuildFootageDbOptions): Promise<Bu
   const projectDir = path.resolve(options.projectDir);
   const outputPath = path.resolve(options.outputPath ?? footageDbPath(projectDir));
   const reportPath = path.join(path.dirname(outputPath), "footage-db-build-report.json");
-  const embeddingPolicy = options.embeddingPolicy ?? "skip";
+  const embeddingPolicy = options.embeddingPolicy ?? "auto";
   const now = options.now ?? new Date();
   const indexedAt = now.toISOString();
   const inputs = loadInputs(projectDir);

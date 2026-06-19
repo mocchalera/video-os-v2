@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   const result = await buildFootageDb({
     projectDir: path.resolve(args.project),
     outputPath: args.output ? path.resolve(args.output) : undefined,
-    embeddingPolicy: args.embeddingPolicy ?? "skip",
+    embeddingPolicy: args.embeddingPolicy ?? "auto",
     rebuildMode: args.rebuildMode ?? "full",
     allowRemoteEmbeddingModels: args.allowRemoteEmbeddingModels ?? false,
   });
@@ -71,7 +71,7 @@ function usage(exitCode: number): never {
 
 Options:
   --output <path>                  default: <project>/03_analysis/search/footage.db
-  --embedding-policy auto|skip|require
+  --embedding-policy auto|skip|require  default: auto
   --rebuild-mode full|incremental
   --allow-remote-embedding-models  default false
 `);
