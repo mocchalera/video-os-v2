@@ -34,6 +34,10 @@ export interface FootageSearchFilters {
   place_hint_category?: string;
   has_text?: boolean;
   has_dialogue?: boolean;
+  camera_motion?: string;
+  shot_scale?: string;
+  stability?: string;
+  usability?: string;
   include_tags_any?: string[];
   exclude_quality_flags?: string[];
   exclude_segment_ids?: string[];
@@ -117,6 +121,14 @@ export interface FootageSearchResult {
     confidence?: number;
     description?: string;
   };
+  metadata?: {
+    camera_motion?: string;
+    shot_scale?: string;
+    stability?: string;
+    dominant_subject_position?: string;
+    usability?: string;
+    has_dialogue?: boolean;
+  };
   evidence_refs: FootageEvidenceRef[];
 }
 
@@ -199,11 +211,23 @@ interface DbSearchRow {
   peak_type: "action_peak" | "emotional_peak" | "visual_peak" | null;
   peak_confidence: number | null;
   peak_description: string | null;
+  camera_motion: string | null;
+  shot_scale: string | null;
+  stability: string | null;
+  dominant_subject_position: string | null;
+  usability: string | null;
 }
 
 interface BuiltWhere {
   sql: string;
   params: Record<string, unknown>;
+}
+
+interface MetadataAvailability {
+  visualProfile: boolean;
+  audioProfile: boolean;
+  logging: boolean;
+  metadataFts: boolean;
 }
 
 const DEFAULT_FOOTAGE_SEARCH_LIMIT = 12;
@@ -217,58 +241,66 @@ const QUALITY_FIELDS: FootageQualityField[] = [
 ];
 const EMBEDDING_MODEL_ID = `${SEMANTIC_EMBEDDING_MODEL}:${SEMANTIC_EMBEDDING_DTYPE}`;
 
-const BASE_SELECT = `
-  SELECT
-    s.segment_id,
-    s.asset_id,
-    s.src_in_us,
-    s.src_out_us,
-    s.duration_us,
-    s.segment_type,
-    s.summary,
-    s.transcript_excerpt,
-    COALESCE(st.text, '') AS transcript_text,
-    s.tags_json,
-    s.quality_flags_json,
-    a.tags_json AS asset_tags_json,
-    a.quality_flags_json AS asset_quality_flags_json,
-    s.filmstrip_path,
-    a.source_order,
-    a.shooting_date,
-    a.shooting_time,
-    a.camera_type,
-    v.light_quality,
-    v.subject_prominence,
-    v.emotional_expression,
-    v.composition_score,
-    v.motion_quality,
-    app.frame_path,
-    COALESCE(app.extracted_text_json, '[]') AS extracted_text_json,
-    COALESCE(app.extracted_text_flat, '') AS extracted_text_flat,
-    app.place_hint_name,
-    app.place_hint_category,
-    app.place_hint_confidence,
-    COALESCE(app.aesthetic_notes_flat, '') AS aesthetic_notes_flat,
-    COALESCE(st.has_dialogue, 0) AS has_dialogue,
-    pa.fused_peak_score,
-    pm.timestamp_us AS peak_timestamp_us,
-    pm.type AS peak_type,
-    pm.confidence AS peak_confidence,
-    pm.description AS peak_description
-  FROM segments s
-  JOIN assets a ON a.asset_id = s.asset_id
-  LEFT JOIN visual_quality v ON v.segment_id = s.segment_id
-  LEFT JOIN visual_appraisal app ON app.segment_id = s.segment_id
-  LEFT JOIN segment_transcripts st ON st.segment_id = s.segment_id
-  LEFT JOIN peak_analysis pa ON pa.segment_id = s.segment_id
-  LEFT JOIN peak_moments pm ON pm.peak_ref = (
-    SELECT pm2.peak_ref
-    FROM peak_moments pm2
-    WHERE pm2.segment_id = s.segment_id
-    ORDER BY pm2.confidence DESC, pm2.timestamp_us ASC, pm2.peak_ref ASC
-    LIMIT 1
-  )
-`;
+function baseSelect(metadata: MetadataAvailability): string {
+  return `
+    SELECT
+      s.segment_id,
+      s.asset_id,
+      s.src_in_us,
+      s.src_out_us,
+      s.duration_us,
+      s.segment_type,
+      s.summary,
+      s.transcript_excerpt,
+      COALESCE(st.text, '') AS transcript_text,
+      s.tags_json,
+      s.quality_flags_json,
+      a.tags_json AS asset_tags_json,
+      a.quality_flags_json AS asset_quality_flags_json,
+      s.filmstrip_path,
+      a.source_order,
+      a.shooting_date,
+      a.shooting_time,
+      a.camera_type,
+      v.light_quality,
+      v.subject_prominence,
+      v.emotional_expression,
+      v.composition_score,
+      v.motion_quality,
+      app.frame_path,
+      COALESCE(app.extracted_text_json, '[]') AS extracted_text_json,
+      COALESCE(app.extracted_text_flat, '') AS extracted_text_flat,
+      app.place_hint_name,
+      app.place_hint_category,
+      app.place_hint_confidence,
+      COALESCE(app.aesthetic_notes_flat, '') AS aesthetic_notes_flat,
+      ${metadata.audioProfile ? "COALESCE(sap.has_dialogue, st.has_dialogue, 0)" : "COALESCE(st.has_dialogue, 0)"} AS has_dialogue,
+      pa.fused_peak_score,
+      pm.timestamp_us AS peak_timestamp_us,
+      pm.type AS peak_type,
+      pm.confidence AS peak_confidence,
+      pm.description AS peak_description,
+      ${metadata.visualProfile ? "svp.camera_motion" : "NULL"} AS camera_motion,
+      ${metadata.visualProfile ? "svp.shot_scale" : "NULL"} AS shot_scale,
+      ${metadata.visualProfile ? "svp.stability" : "NULL"} AS stability,
+      ${metadata.visualProfile ? "svp.dominant_subject_position" : "NULL"} AS dominant_subject_position,
+      ${metadata.logging ? "sl.usability" : "NULL"} AS usability
+    FROM segments s
+    JOIN assets a ON a.asset_id = s.asset_id
+    LEFT JOIN visual_quality v ON v.segment_id = s.segment_id
+    LEFT JOIN visual_appraisal app ON app.segment_id = s.segment_id
+    LEFT JOIN segment_transcripts st ON st.segment_id = s.segment_id
+    ${metadataJoinSql(metadata)}
+    LEFT JOIN peak_analysis pa ON pa.segment_id = s.segment_id
+    LEFT JOIN peak_moments pm ON pm.peak_ref = (
+      SELECT pm2.peak_ref
+      FROM peak_moments pm2
+      WHERE pm2.segment_id = s.segment_id
+      ORDER BY pm2.confidence DESC, pm2.timestamp_us ASC, pm2.peak_ref ASC
+      LIMIT 1
+    )
+  `;
+}
 
 export function buildFtsMatchQuery(input: {
   text: string;
@@ -317,7 +349,6 @@ export async function searchFootage(
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     db.pragma("foreign_keys = ON");
-    appendMissingIndexedDataWarnings(db, input.filters ?? {}, warnings);
     const response = await searchFootageWithDb(db, dbPath, input, mode, limit, warnings, status.status);
     return response;
   } catch (error) {
@@ -387,11 +418,13 @@ async function searchFootageWithDb(
   dbStatus: "ready" | "stale",
 ): Promise<FootageSearchResponse> {
   const filters = input.filters ?? {};
+  const metadata = metadataAvailability(db);
+  appendMissingIndexedDataWarnings(db, filters, metadata, warnings);
   const contextExpansions = contextTermsForQuery(input.query, input.context);
   const text = normalizeSearchText(input.text_match ?? input.query);
   const semanticText = normalizeSearchText(input.semantic ?? input.query);
-  const structuredWhere = buildStructuredWhere(filters);
-  const eligibleRows = loadRows(db, structuredWhere);
+  const structuredWhere = buildStructuredWhere(filters, metadata);
+  const eligibleRows = loadRows(db, metadata, structuredWhere);
   let rows = applyPostFilters(eligibleRows, filters);
   const allowedIds = new Set(rows.map((row) => row.segment_id));
 
@@ -402,7 +435,7 @@ async function searchFootageWithDb(
 
   const lexicalRaw = (mode === "structured" || !fts.match)
     ? new Map<string, number>()
-    : ftsScores(db, structuredWhere, fts.match, allowedIds, warnings);
+    : ftsScores(db, metadata, structuredWhere, fts.match, allowedIds, warnings);
   const lexicalScores = normalizeRankScores(lexicalRaw);
 
   let semanticScores = new Map<string, number>();
@@ -472,7 +505,7 @@ async function searchFootageWithDb(
   };
 }
 
-function buildStructuredWhere(filters: FootageSearchFilters): BuiltWhere {
+function buildStructuredWhere(filters: FootageSearchFilters, metadata: MetadataAvailability): BuiltWhere {
   const clauses: string[] = ["1 = 1"];
   const params: Record<string, unknown> = {};
   if (filters.shooting_date) {
@@ -527,9 +560,41 @@ function buildStructuredWhere(filters: FootageSearchFilters): BuiltWhere {
     clauses.push("(COALESCE(app.extracted_text_flat, '') = '' AND COALESCE(st.text, '') = '')");
   }
   if (filters.has_dialogue === true) {
-    clauses.push("(COALESCE(st.has_dialogue, 0) = 1 OR s.segment_type = 'dialogue')");
+    clauses.push(`(${metadata.audioProfile ? "COALESCE(sap.has_dialogue, st.has_dialogue, 0)" : "COALESCE(st.has_dialogue, 0)"} = 1 OR s.segment_type = 'dialogue')`);
   } else if (filters.has_dialogue === false) {
-    clauses.push("(COALESCE(st.has_dialogue, 0) = 0 AND COALESCE(s.segment_type, '') <> 'dialogue')");
+    clauses.push(`(${metadata.audioProfile ? "COALESCE(sap.has_dialogue, st.has_dialogue, 0)" : "COALESCE(st.has_dialogue, 0)"} = 0 AND COALESCE(s.segment_type, '') <> 'dialogue')`);
+  }
+  if (filters.camera_motion) {
+    if (metadata.visualProfile) {
+      clauses.push("svp.camera_motion = @camera_motion");
+      params.camera_motion = filters.camera_motion;
+    } else {
+      clauses.push("0 = 1");
+    }
+  }
+  if (filters.shot_scale) {
+    if (metadata.visualProfile) {
+      clauses.push("svp.shot_scale = @shot_scale");
+      params.shot_scale = filters.shot_scale;
+    } else {
+      clauses.push("0 = 1");
+    }
+  }
+  if (filters.stability) {
+    if (metadata.visualProfile) {
+      clauses.push("svp.stability = @stability");
+      params.stability = filters.stability;
+    } else {
+      clauses.push("0 = 1");
+    }
+  }
+  if (filters.usability) {
+    if (metadata.logging) {
+      clauses.push("sl.usability = @usability");
+      params.usability = filters.usability;
+    } else {
+      clauses.push("0 = 1");
+    }
   }
   if (filters.exclude_segment_ids && filters.exclude_segment_ids.length > 0) {
     clauses.push(`s.segment_id NOT IN (${filters.exclude_segment_ids.map((id, index) => {
@@ -541,12 +606,13 @@ function buildStructuredWhere(filters: FootageSearchFilters): BuiltWhere {
   return { sql: clauses.join(" AND "), params };
 }
 
-function loadRows(db: Database.Database, where: BuiltWhere): DbSearchRow[] {
-  return db.prepare(`${BASE_SELECT} WHERE ${where.sql}`).all(where.params) as DbSearchRow[];
+function loadRows(db: Database.Database, metadata: MetadataAvailability, where: BuiltWhere): DbSearchRow[] {
+  return db.prepare(`${baseSelect(metadata)} WHERE ${where.sql}`).all(where.params) as DbSearchRow[];
 }
 
 function ftsScores(
   db: Database.Database,
+  metadata: MetadataAvailability,
   where: BuiltWhere,
   match: string,
   allowedIds: Set<string>,
@@ -561,6 +627,7 @@ function ftsScores(
       LEFT JOIN visual_quality v ON v.segment_id = s.segment_id
       LEFT JOIN visual_appraisal app ON app.segment_id = s.segment_id
       LEFT JOIN segment_transcripts st ON st.segment_id = s.segment_id
+      ${metadataJoinSql(metadata)}
       WHERE segments_fts MATCH @fts_match AND ${where.sql}
       ORDER BY rank ASC, s.segment_id ASC
     `).all({ ...where.params, fts_match: match }) as Array<{ segment_id: string; rank: number }>;
@@ -677,6 +744,10 @@ function rowToResult(
     if (value != null) reasonParts.push(`${field}=${value.toFixed(2)}`);
   }
   if (tags.length > 0) reasonParts.push(`tags: ${tags.slice(0, 4).join(",")}`);
+  const metadata = resultMetadata(row);
+  if (metadata.camera_motion) reasonParts.push(`camera_motion=${metadata.camera_motion}`);
+  if (metadata.shot_scale) reasonParts.push(`shot_scale=${metadata.shot_scale}`);
+  if (metadata.usability) reasonParts.push(`usability=${metadata.usability}`);
   if (scoring.contextExpansions.length > 0) reasonParts.push(`context expansions: ${scoring.contextExpansions.join(",")}`);
 
   return {
@@ -713,6 +784,7 @@ function rowToResult(
       confidence: row.peak_confidence ?? undefined,
       description: row.peak_description ?? undefined,
     } : undefined,
+    metadata,
     evidence_refs: evidence,
   };
 }
@@ -833,6 +905,7 @@ function fallbackSearch(
   const assetById = new Map(assets.map((asset, index) => [stringValue(asset.asset_id), { asset, index }]));
   const text = normalizeSearchText(input.text_match ?? input.query).toLowerCase();
   const filters = input.filters ?? {};
+  const unsupportedMetadataFilters = requestedMetadataFilters(filters);
   let rows = segments.flatMap((segment, index): DbSearchRow[] => {
     const assetId = stringValue(segment.asset_id);
     const asset = assetById.get(assetId);
@@ -841,7 +914,12 @@ function fallbackSearch(
     if (!asset || srcInUs == null || srcOutUs == null || srcOutUs <= srcInUs) return [];
     return [fallbackRow(segment, asset.asset, asset.index, srcInUs, srcOutUs, index)];
   });
-  rows = rows.filter((row) => fallbackFilter(row, filters));
+  if (unsupportedMetadataFilters.length > 0) {
+    warnings.push(`metadata filters require footage.db metadata tables; JSON fallback cannot evaluate: ${unsupportedMetadataFilters.join(", ")}`);
+    rows = [];
+  } else {
+    rows = rows.filter((row) => fallbackFilter(row, filters));
+  }
   if (mode !== "structured" && text) {
     rows = rows.filter((row) => fallbackText(row).toLowerCase().includes(text));
   }
@@ -945,6 +1023,11 @@ function fallbackRow(
     peak_type: null,
     peak_confidence: null,
     peak_description: null,
+    camera_motion: null,
+    shot_scale: null,
+    stability: null,
+    dominant_subject_position: null,
+    usability: null,
   };
 }
 
@@ -962,6 +1045,17 @@ function fallbackHasText(row: DbSearchRow): boolean {
 
 function fallbackHasDialogue(row: DbSearchRow): boolean {
   return row.has_dialogue === 1 || row.segment_type === "dialogue";
+}
+
+function resultMetadata(row: DbSearchRow): NonNullable<FootageSearchResult["metadata"]> {
+  const metadata: NonNullable<FootageSearchResult["metadata"]> = {};
+  if (row.camera_motion) metadata.camera_motion = row.camera_motion;
+  if (row.shot_scale) metadata.shot_scale = row.shot_scale;
+  if (row.stability) metadata.stability = row.stability;
+  if (row.dominant_subject_position) metadata.dominant_subject_position = row.dominant_subject_position;
+  if (row.usability) metadata.usability = row.usability;
+  metadata.has_dialogue = fallbackHasDialogue(row);
+  return metadata;
 }
 
 async function segmentTextForSimilarity(projectDir: string, segmentId: string): Promise<string> {
@@ -985,9 +1079,40 @@ async function segmentTextForSimilarity(projectDir: string, segmentId: string): 
   return [stringValue(segment?.summary), stringValue(segment?.transcript_excerpt)].filter(Boolean).join(" ");
 }
 
+function metadataAvailability(db: Database.Database): MetadataAvailability {
+  return {
+    visualProfile: tableExists(db, "segment_visual_profile"),
+    audioProfile: tableExists(db, "segment_audio_profile"),
+    logging: tableExists(db, "segment_logging"),
+    metadataFts: tableExists(db, "metadata_fts"),
+  };
+}
+
+function metadataJoinSql(metadata: MetadataAvailability): string {
+  return [
+    metadata.visualProfile ? "LEFT JOIN segment_visual_profile svp ON svp.segment_id = s.segment_id" : "",
+    metadata.audioProfile ? "LEFT JOIN segment_audio_profile sap ON sap.segment_id = s.segment_id" : "",
+    metadata.logging ? "LEFT JOIN segment_logging sl ON sl.segment_id = s.segment_id" : "",
+  ].filter(Boolean).join("\n");
+}
+
+function tableExists(db: Database.Database, tableName: string): boolean {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ? LIMIT 1").get(tableName));
+}
+
+function requestedMetadataFilters(filters: FootageSearchFilters): string[] {
+  const names: string[] = [];
+  if (filters.camera_motion) names.push("camera_motion");
+  if (filters.shot_scale) names.push("shot_scale");
+  if (filters.stability) names.push("stability");
+  if (filters.usability) names.push("usability");
+  return names;
+}
+
 function appendMissingIndexedDataWarnings(
   db: Database.Database,
   filters: FootageSearchFilters,
+  metadata: MetadataAvailability,
   warnings: string[],
 ): void {
   if (filters.shooting_date && !db.prepare("SELECT 1 FROM assets WHERE shooting_date IS NOT NULL LIMIT 1").get()) {
@@ -1001,6 +1126,16 @@ function appendMissingIndexedDataWarnings(
   }
   if ((filters.place_hint_name || filters.place_hint_category) && !db.prepare("SELECT 1 FROM visual_appraisal WHERE place_hint_name IS NOT NULL OR place_hint_category IS NOT NULL LIMIT 1").get()) {
     warnings.push("place_hint filter requested, but no place_hint values are indexed");
+  }
+  if ((filters.camera_motion || filters.shot_scale || filters.stability) && !metadata.visualProfile) {
+    warnings.push("visual metadata filter requested, but segment_visual_profile is missing in this footage DB");
+  } else if ((filters.camera_motion || filters.shot_scale || filters.stability) && !db.prepare("SELECT 1 FROM segment_visual_profile LIMIT 1").get()) {
+    warnings.push("visual metadata filter requested, but no segment_visual_profile rows are indexed");
+  }
+  if (filters.usability && !metadata.logging) {
+    warnings.push("usability filter requested, but segment_logging is missing in this footage DB");
+  } else if (filters.usability && !db.prepare("SELECT 1 FROM segment_logging LIMIT 1").get()) {
+    warnings.push("usability filter requested, but no segment_logging rows are indexed");
   }
 }
 

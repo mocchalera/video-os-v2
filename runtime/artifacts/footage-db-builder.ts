@@ -4,6 +4,11 @@ import * as path from "node:path";
 import { computeNormalizedJsonHash } from "./p1-manifest-coverage.js";
 import { footageDbPath } from "./footage-db.js";
 import {
+  extractCameraMotion,
+  extractSceneShotTake,
+  extractShotScale,
+} from "./footage-metadata-extractor.js";
+import {
   SEMANTIC_EMBEDDING_DTYPE,
   SEMANTIC_EMBEDDING_MODEL,
   embedTexts,
@@ -32,6 +37,11 @@ export interface BuildFootageDbResult {
     fts_rows: number;
     marlin_events: number;
     transcript_segments: number;
+    asset_technical: number;
+    segment_visual_profiles: number;
+    segment_audio_profiles: number;
+    segment_logging: number;
+    metadata_fts_rows: number;
     embeddings: number;
   };
   embedding_status: "ready" | "skipped" | "unavailable" | "error";
@@ -166,6 +176,25 @@ CREATE INDEX idx_assets_shooting_date ON assets(shooting_date);
 CREATE INDEX idx_assets_shooting_time ON assets(shooting_time);
 CREATE INDEX idx_assets_camera_type ON assets(camera_type);
 
+CREATE TABLE asset_technical (
+  asset_id TEXT PRIMARY KEY REFERENCES assets(asset_id) ON DELETE CASCADE,
+  codec TEXT,
+  resolution_width INTEGER CHECK (resolution_width IS NULL OR resolution_width > 0),
+  resolution_height INTEGER CHECK (resolution_height IS NULL OR resolution_height > 0),
+  fps_num INTEGER CHECK (fps_num IS NULL OR fps_num > 0),
+  fps_den INTEGER CHECK (fps_den IS NULL OR fps_den > 0),
+  bit_depth INTEGER CHECK (bit_depth IS NULL OR bit_depth > 0),
+  color_space TEXT,
+  audio_channels INTEGER CHECK (audio_channels IS NULL OR audio_channels >= 0),
+  audio_sample_rate INTEGER CHECK (audio_sample_rate IS NULL OR audio_sample_rate >= 0),
+  timecode TEXT,
+  recording_format TEXT
+);
+
+CREATE INDEX idx_asset_technical_codec ON asset_technical(codec, recording_format);
+CREATE INDEX idx_asset_technical_resolution ON asset_technical(resolution_width, resolution_height);
+CREATE INDEX idx_asset_technical_fps ON asset_technical(fps_num, fps_den);
+
 CREATE TABLE segments (
   segment_id TEXT PRIMARY KEY,
   asset_id TEXT NOT NULL REFERENCES assets(asset_id) ON DELETE CASCADE,
@@ -189,6 +218,55 @@ CREATE TABLE segments (
 CREATE INDEX idx_segments_asset_time ON segments(asset_id, src_in_us, src_out_us);
 CREATE INDEX idx_segments_duration ON segments(duration_us);
 CREATE INDEX idx_segments_type ON segments(segment_type);
+
+CREATE TABLE segment_visual_profile (
+  segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
+  camera_motion TEXT NOT NULL DEFAULT 'static' CHECK (
+    camera_motion IN ('static', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'dolly_in', 'dolly_out', 'tracking', 'crane', 'handheld', 'drone')
+  ),
+  motion_direction TEXT,
+  motion_speed TEXT CHECK (motion_speed IS NULL OR motion_speed IN ('slow', 'medium', 'fast')),
+  stability TEXT NOT NULL DEFAULT 'stable' CHECK (
+    stability IN ('stable', 'slight_movement', 'shaky')
+  ),
+  shot_scale TEXT NOT NULL DEFAULT 'medium' CHECK (
+    shot_scale IN ('extreme_wide', 'wide', 'full', 'medium', 'medium_closeup', 'closeup', 'extreme_closeup', 'detail')
+  ),
+  dominant_subject_position TEXT CHECK (
+    dominant_subject_position IS NULL OR dominant_subject_position IN ('left', 'center', 'right')
+  )
+);
+
+CREATE INDEX idx_segment_visual_profile_motion ON segment_visual_profile(camera_motion, stability);
+CREATE INDEX idx_segment_visual_profile_scale ON segment_visual_profile(shot_scale);
+
+CREATE TABLE segment_audio_profile (
+  segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
+  has_dialogue INTEGER NOT NULL DEFAULT 0 CHECK (has_dialogue IN (0, 1)),
+  has_music INTEGER NOT NULL DEFAULT 0 CHECK (has_music IN (0, 1)),
+  has_ambient INTEGER NOT NULL DEFAULT 0 CHECK (has_ambient IN (0, 1)),
+  has_silence INTEGER NOT NULL DEFAULT 0 CHECK (has_silence IN (0, 1)),
+  peak_db REAL,
+  rms_db REAL,
+  loudness_lufs REAL
+);
+
+CREATE INDEX idx_segment_audio_profile_dialogue ON segment_audio_profile(has_dialogue);
+
+CREATE TABLE segment_logging (
+  segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
+  scene_number INTEGER,
+  shot_number INTEGER,
+  take_number INTEGER,
+  usability TEXT NOT NULL DEFAULT 'fully_usable' CHECK (
+    usability IN ('fully_usable', 'partially_usable', 'unusable')
+  ),
+  roll_type TEXT CHECK (roll_type IS NULL OR roll_type IN ('a_roll', 'b_roll', 'cutaway')),
+  user_notes TEXT
+);
+
+CREATE INDEX idx_segment_logging_scene_take ON segment_logging(scene_number, shot_number, take_number);
+CREATE INDEX idx_segment_logging_usability ON segment_logging(usability);
 
 CREATE TABLE visual_quality (
   segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
@@ -331,6 +409,15 @@ CREATE VIRTUAL TABLE segments_fts USING fts5(
   aesthetic_notes,
   tokenize = "unicode61 remove_diacritics 2 tokenchars '_-'"
 );
+
+CREATE VIRTUAL TABLE metadata_fts USING fts5(
+  segment_id UNINDEXED,
+  camera_motion,
+  shot_scale,
+  dominant_subject_position,
+  user_notes,
+  tokenize = "unicode61 remove_diacritics 2 tokenchars '_-'"
+);
 `;
 
 export async function buildFootageDb(options: BuildFootageDbOptions): Promise<BuildFootageDbResult> {
@@ -364,6 +451,7 @@ export async function buildFootageDb(options: BuildFootageDbOptions): Promise<Bu
     insertMeta(db, {
       schema_version: SCHEMA_VERSION,
       artifact_version: ARTIFACT_VERSION,
+      metadata_schema_version: "1",
       project_id: inputs.projectId,
       created_at: indexedAt,
       builder: "scripts/build-footage-db.ts",
@@ -480,6 +568,15 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
       @source_order, @shooting_date, @shooting_time, @camera_type
     )
   `);
+  const insertAssetTechnical = db.prepare(`
+    INSERT INTO asset_technical (
+      asset_id, codec, resolution_width, resolution_height, fps_num, fps_den, bit_depth,
+      color_space, audio_channels, audio_sample_rate, timecode, recording_format
+    ) VALUES (
+      @asset_id, @codec, @resolution_width, @resolution_height, @fps_num, @fps_den, @bit_depth,
+      @color_space, @audio_channels, @audio_sample_rate, @timecode, @recording_format
+    )
+  `);
   const insertMarlinAsset = db.prepare(`
     INSERT INTO marlin_assets (asset_id, source_path, scene, caption)
     VALUES (@asset_id, @source_path, @scene, @caption)
@@ -493,6 +590,7 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
   `);
 
   let assetCount = 0;
+  let assetTechnicalCount = 0;
   let marlinEventCount = 0;
   const assetTx = db.transaction(() => {
     assetItems.forEach((asset, index) => {
@@ -521,7 +619,9 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
         shooting_time: nullableString(asset.shooting_time),
         camera_type: nullableString(asset.camera_type),
       });
+      insertAssetTechnical.run(assetTechnicalRow(assetId, asset));
       assetCount += 1;
+      assetTechnicalCount += 1;
     });
 
     for (const marlin of marlinByAsset.values()) {
@@ -610,6 +710,27 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
     INSERT INTO segment_transcripts (segment_id, text, language, confidence_min, has_dialogue, item_refs_json)
     VALUES (@segment_id, @text, @language, @confidence_min, @has_dialogue, @item_refs_json)
   `);
+  const insertVisualProfile = db.prepare(`
+    INSERT INTO segment_visual_profile (
+      segment_id, camera_motion, motion_direction, motion_speed, stability, shot_scale, dominant_subject_position
+    ) VALUES (
+      @segment_id, @camera_motion, @motion_direction, @motion_speed, @stability, @shot_scale, @dominant_subject_position
+    )
+  `);
+  const insertAudioProfile = db.prepare(`
+    INSERT INTO segment_audio_profile (
+      segment_id, has_dialogue, has_music, has_ambient, has_silence, peak_db, rms_db, loudness_lufs
+    ) VALUES (
+      @segment_id, @has_dialogue, @has_music, @has_ambient, @has_silence, @peak_db, @rms_db, @loudness_lufs
+    )
+  `);
+  const insertLogging = db.prepare(`
+    INSERT INTO segment_logging (
+      segment_id, scene_number, shot_number, take_number, usability, roll_type, user_notes
+    ) VALUES (
+      @segment_id, @scene_number, @shot_number, @take_number, @usability, @roll_type, @user_notes
+    )
+  `);
   const insertFts = db.prepare(`
     INSERT INTO segments_fts (
       segment_id, asset_id, summary, transcript, marlin_scene, marlin_events, tags,
@@ -617,6 +738,13 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
     ) VALUES (
       @segment_id, @asset_id, @summary, @transcript, @marlin_scene, @marlin_events, @tags,
       @quality_labels, @extracted_text, @place, @aesthetic_notes
+    )
+  `);
+  const insertMetadataFts = db.prepare(`
+    INSERT INTO metadata_fts (
+      segment_id, camera_motion, shot_scale, dominant_subject_position, user_notes
+    ) VALUES (
+      @segment_id, @camera_motion, @shot_scale, @dominant_subject_position, @user_notes
     )
   `);
   const insertEmbeddingText = db.prepare(`
@@ -636,6 +764,10 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
   let segmentCount = 0;
   let ftsRows = 0;
   let transcriptSegments = 0;
+  let segmentVisualProfiles = 0;
+  let segmentAudioProfiles = 0;
+  let segmentLogging = 0;
+  let metadataFtsRows = 0;
   const segmentTx = db.transaction(() => {
     segmentItems.forEach((segment, index) => {
       const segmentId = stringValue(segment.segment_id) || `SEG_${index + 1}`;
@@ -678,6 +810,8 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
       insertVisualAppraisal.run(visualAppraisalRow(segmentId, appraisal));
       insertPeakAnalysis.run(peakAnalysisRow(segmentId, recordValue(segment.peak_analysis)));
       insertPeakMoments(insertPeakMoment, segmentId, recordValue(segment.peak_analysis), warnings);
+      const visualProfile = segmentVisualProfileRow(segmentId, record);
+      const logging = segmentLoggingRow(segmentId, segment, asset, quality);
       insertTranscript.run({
         segment_id: segmentId,
         text: transcript.text,
@@ -687,10 +821,18 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
         item_refs_json: JSON.stringify(transcript.itemRefs),
       });
       if (transcript.text.trim()) transcriptSegments += 1;
-      insertFts.run(ftsRow(record));
+      insertVisualProfile.run(visualProfile);
+      segmentVisualProfiles += 1;
+      insertAudioProfile.run(segmentAudioProfileRow(segmentId, transcript, normalizedSegmentType));
+      segmentAudioProfiles += 1;
+      insertLogging.run(logging);
+      segmentLogging += 1;
+      insertFts.run(ftsRow(record, visualProfile, logging));
       ftsRows += 1;
+      insertMetadataFts.run(metadataFtsRow(visualProfile, logging));
+      metadataFtsRows += 1;
 
-      const fieldTexts = embeddingTextBundles(record);
+      const fieldTexts = embeddingTextBundles(record, visualProfile, logging);
       for (const field of Object.keys(fieldTexts) as EmbeddingField[]) {
         const text = normalizeSearchText(fieldTexts[field]);
         const contentHash = hashValue(text);
@@ -717,11 +859,16 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
     counts: {
       assets: assetCount,
       segments: segmentCount,
-      fts_rows: ftsRows,
-      marlin_events: marlinEventCount,
-      transcript_segments: transcriptSegments,
-      embeddings: 0,
-    },
+        fts_rows: ftsRows,
+        marlin_events: marlinEventCount,
+        transcript_segments: transcriptSegments,
+        asset_technical: assetTechnicalCount,
+        segment_visual_profiles: segmentVisualProfiles,
+        segment_audio_profiles: segmentAudioProfiles,
+        segment_logging: segmentLogging,
+        metadata_fts_rows: metadataFtsRows,
+        embeddings: 0,
+      },
     embeddingTexts,
     warnings,
   };
@@ -894,7 +1041,8 @@ function segmentBuildRecord(
   };
 }
 
-function ftsRow(record: SegmentBuildRecord): Record<string, string> {
+function ftsRow(record: SegmentBuildRecord, visualProfile: JsonRecord, logging: JsonRecord): Record<string, string> {
+  const metadataTerms = metadataTermsForSearch(visualProfile, logging);
   return {
     segment_id: record.segmentId,
     asset_id: record.assetId,
@@ -903,7 +1051,7 @@ function ftsRow(record: SegmentBuildRecord): Record<string, string> {
     marlin_scene: searchFieldText([record.marlinSceneText]),
     marlin_events: searchFieldText(record.marlinEvents),
     tags: searchFieldText(record.tags),
-    quality_labels: searchFieldText([...record.qualityLabels, ...record.qualityFlags]),
+    quality_labels: searchFieldText([...record.qualityLabels, ...record.qualityFlags, ...metadataTerms]),
     extracted_text: searchFieldText([record.extractedTextFlat]),
     place: searchFieldText([record.placeText]),
     aesthetic_notes: searchFieldText([record.aestheticNotesFlat]),
@@ -916,7 +1064,8 @@ function searchFieldText(parts: string[]): string {
   return normalizeSearchText([...normalizedParts, ...expansions].join(" "));
 }
 
-function embeddingTextBundles(record: SegmentBuildRecord): Record<EmbeddingField, string> {
+function embeddingTextBundles(record: SegmentBuildRecord, visualProfile: JsonRecord, logging: JsonRecord): Record<EmbeddingField, string> {
+  const metadataTerms = metadataTermsForSearch(visualProfile, logging).join(" ");
   const summary = [
     record.summary,
     ...record.tags,
@@ -935,8 +1084,112 @@ function embeddingTextBundles(record: SegmentBuildRecord): Record<EmbeddingField
     scene,
     record.extractedTextFlat,
     record.aestheticNotesFlat,
+    metadataTerms,
   ].join(" ");
   return { summary, transcript, scene, combined };
+}
+
+function assetTechnicalRow(assetId: string, asset: JsonRecord): JsonRecord {
+  const video = recordValue(asset.video_stream ?? asset.video ?? asset.video_track);
+  const audio = recordValue(asset.audio_stream ?? asset.audio ?? asset.audio_track);
+  const format = recordValue(asset.format);
+  const tags = recordValue(asset.tags);
+  const videoTags = recordValue(video.tags);
+  const fps = fpsParts(video.r_frame_rate ?? video.avg_frame_rate ?? asset.r_frame_rate);
+  return {
+    asset_id: assetId,
+    codec: nullableString(
+      video.codec_name ??
+      video.codec ??
+      asset.codec_name ??
+      asset.codec,
+    ),
+    resolution_width: positiveInteger(video.width ?? asset.width),
+    resolution_height: positiveInteger(video.height ?? asset.height),
+    fps_num: positiveInteger(video.fps_num ?? fps?.fps_num),
+    fps_den: positiveInteger(video.fps_den ?? fps?.fps_den),
+    bit_depth: positiveInteger(video.bit_depth ?? video.bits_per_raw_sample ?? asset.bit_depth) ?? bitDepthFromPixelFormat(stringValue(video.pix_fmt ?? asset.pix_fmt)),
+    color_space: nullableString(video.color_space ?? video.color_primaries ?? asset.color_space ?? asset.color_primaries),
+    audio_channels: nonNegativeIntegerLike(audio.channels ?? asset.audio_channels),
+    audio_sample_rate: nonNegativeIntegerLike(audio.sample_rate ?? audio.sample_rate_hz ?? asset.audio_sample_rate),
+    timecode: nullableString(asset.timecode ?? video.timecode ?? videoTags.timecode ?? tags.timecode),
+    recording_format: nullableString(asset.recording_format ?? format.format_name ?? format.format_long_name ?? extensionFormat(stringValue(asset.filename))),
+  };
+}
+
+function segmentVisualProfileRow(segmentId: string, record: SegmentBuildRecord): JsonRecord {
+  const description = [
+    record.marlinSceneText,
+    ...record.marlinEvents,
+    record.summary,
+    ...record.qualityFlags,
+    ...record.qualityLabels,
+  ].join(" ");
+  const motion = extractCameraMotion(description);
+  return {
+    segment_id: segmentId,
+    camera_motion: motion.camera_motion,
+    motion_direction: motion.motion_direction,
+    motion_speed: motion.motion_speed,
+    stability: motion.stability,
+    shot_scale: extractShotScale(description),
+    dominant_subject_position: dominantSubjectPosition(description),
+  };
+}
+
+function segmentAudioProfileRow(segmentId: string, transcript: TranscriptSlice, segmentType: string | null): JsonRecord {
+  const hasDialogue = transcript.hasDialogue || segmentType === "dialogue";
+  const hasMusic = segmentType === "music_driven";
+  return {
+    segment_id: segmentId,
+    has_dialogue: hasDialogue ? 1 : 0,
+    has_music: hasMusic ? 1 : 0,
+    has_ambient: !hasDialogue && !hasMusic ? 1 : 0,
+    has_silence: 0,
+    peak_db: null,
+    rms_db: null,
+    loudness_lufs: null,
+  };
+}
+
+function segmentLoggingRow(segmentId: string, segment: JsonRecord, asset: JsonRecord, quality: JsonRecord): JsonRecord {
+  const parsed = extractSceneShotTake(
+    stringValue(asset.filename) || stringValue(asset.source_locator),
+    stringValue(asset.shooting_timestamp ?? asset.shooting_date ?? asset.created_at),
+  );
+  return {
+    segment_id: segmentId,
+    scene_number: parsed.scene_number,
+    shot_number: parsed.shot_number,
+    take_number: parsed.take_number,
+    usability: allVisualQualityScoresBelow(quality, 0.3) ? "unusable" : "fully_usable",
+    roll_type: null,
+    user_notes: nullableString(segment.user_notes ?? asset.user_notes),
+  };
+}
+
+function metadataFtsRow(visualProfile: JsonRecord, logging: JsonRecord): JsonRecord {
+  return {
+    segment_id: stringValue(visualProfile.segment_id),
+    camera_motion: searchFieldText([stringValue(visualProfile.camera_motion), stringValue(visualProfile.motion_direction), stringValue(visualProfile.stability)]),
+    shot_scale: searchFieldText([stringValue(visualProfile.shot_scale)]),
+    dominant_subject_position: searchFieldText([stringValue(visualProfile.dominant_subject_position)]),
+    user_notes: searchFieldText([stringValue(logging.user_notes)]),
+  };
+}
+
+function metadataTermsForSearch(visualProfile: JsonRecord, logging: JsonRecord): string[] {
+  return uniqueStrings([
+    stringValue(visualProfile.camera_motion),
+    stringValue(visualProfile.motion_direction),
+    stringValue(visualProfile.motion_speed),
+    stringValue(visualProfile.stability),
+    stringValue(visualProfile.shot_scale),
+    stringValue(visualProfile.dominant_subject_position),
+    stringValue(logging.usability),
+    stringValue(logging.roll_type),
+    stringValue(logging.user_notes),
+  ]);
 }
 
 function visualQualityRow(segmentId: string, quality: JsonRecord): JsonRecord {
@@ -1027,6 +1280,26 @@ function qualityLabels(segment: JsonRecord): string[] {
     ...arrayStrings(labels.expression_tags),
     ...arrayStrings(labels.motion_tags),
   ]);
+}
+
+function dominantSubjectPosition(description: string): string | null {
+  const text = description.toLowerCase();
+  if (/\b(left\s+side|on\s+the\s+left|left\s+of\s+frame|frame\s+left)\b/.test(text)) return "left";
+  if (/\b(right\s+side|on\s+the\s+right|right\s+of\s+frame|frame\s+right)\b/.test(text)) return "right";
+  if (/\b(center(?:ed)?|centre(?:d)?|middle|center\s+of\s+frame)\b/.test(text)) return "center";
+  return null;
+}
+
+function allVisualQualityScoresBelow(quality: JsonRecord, threshold: number): boolean {
+  const scores = recordValue(quality.scores);
+  const values = [
+    scores.light_quality ?? quality.light_quality,
+    scores.subject_prominence ?? quality.subject_prominence,
+    scores.emotional_expression ?? quality.emotional_expression,
+    scores.composition_score ?? quality.composition_score,
+    scores.motion_quality ?? quality.motion_quality,
+  ].map(scoreNumber).filter((value): value is number => value != null);
+  return values.length > 0 && values.every((value) => value < threshold);
 }
 
 function transcriptForSegment(
@@ -1232,9 +1505,33 @@ function nonNegativeInteger(value: unknown): number | null {
   return Math.trunc(value);
 }
 
+function positiveInteger(value: unknown): number | null {
+  const parsed = integerLike(value);
+  return parsed != null && parsed > 0 ? parsed : null;
+}
+
+function nonNegativeIntegerLike(value: unknown): number | null {
+  const parsed = integerLike(value);
+  return parsed != null && parsed >= 0 ? parsed : null;
+}
+
+function integerLike(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
 function integerOrNull(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.trunc(value);
+}
+
+function scoreNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value;
 }
 
 function scoreOrNull(value: unknown): number | null {
@@ -1253,4 +1550,39 @@ function overlaps(startA: number, endA: number, startB: number, endB: number): b
 
 function hashValue(value: unknown): string {
   return computeNormalizedJsonHash(value, ["created_at"]);
+}
+
+function fpsParts(value: unknown): { fps_num: number; fps_den: number } | null {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(?<num>\d+(?:\.\d+)?)(?:\/(?<den>\d+(?:\.\d+)?))?$/);
+  if (!match?.groups) return null;
+  const rawNum = Number.parseFloat(match.groups.num);
+  const rawDen = match.groups.den ? Number.parseFloat(match.groups.den) : 1;
+  if (!Number.isFinite(rawNum) || !Number.isFinite(rawDen) || rawNum <= 0 || rawDen <= 0) return null;
+  const scale = 1_000_000;
+  let num = Math.round(rawNum * scale);
+  let den = Math.round(rawDen * scale);
+  const divisor = gcd(Math.abs(num), Math.abs(den));
+  num = Math.trunc(num / divisor);
+  den = Math.trunc(den / divisor);
+  return { fps_num: num, fps_den: den };
+}
+
+function gcd(a: number, b: number): number {
+  while (b !== 0) {
+    const t = b;
+    b = a % b;
+    a = t;
+  }
+  return a || 1;
+}
+
+function bitDepthFromPixelFormat(value: string): number | null {
+  const match = value.match(/(?:p|yuv|rgb|gbrp|gray)(?<depth>8|10|12|14|16)(?:le|be)?/i);
+  return positiveInteger(match?.groups?.depth);
+}
+
+function extensionFormat(filename: string): string | null {
+  const ext = path.extname(filename).replace(/^\./, "").toLowerCase();
+  return ext || null;
 }

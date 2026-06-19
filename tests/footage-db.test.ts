@@ -63,7 +63,40 @@ describe("footage database", () => {
       expect(db.prepare("SELECT COUNT(*) FROM assets").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segments").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segments_fts").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM asset_technical").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM segment_visual_profile").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM segment_audio_profile").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM segment_logging").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM metadata_fts").pluck().get()).toBe(2);
       expect(db.prepare("SELECT value FROM footage_db_meta WHERE key = 'artifact_version'").pluck().get()).toBe("footage-db-v1");
+      expect(db.prepare("SELECT value FROM footage_db_meta WHERE key = 'metadata_schema_version'").pluck().get()).toBe("1");
+      expect(db.prepare("SELECT codec, resolution_width, resolution_height, fps_num, fps_den, audio_channels, audio_sample_rate FROM asset_technical WHERE asset_id = 'AST_food'").get()).toMatchObject({
+        codec: "prores",
+        resolution_width: 3840,
+        resolution_height: 2160,
+        fps_num: 60000,
+        fps_den: 1001,
+        audio_channels: 4,
+        audio_sample_rate: 48000,
+      });
+      expect(db.prepare("SELECT camera_motion, motion_direction, stability, shot_scale FROM segment_visual_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
+        camera_motion: "pan_right",
+        motion_direction: "right",
+        stability: "stable",
+        shot_scale: "detail",
+      });
+      expect(db.prepare("SELECT has_dialogue, peak_db, rms_db, loudness_lufs FROM segment_audio_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
+        has_dialogue: 1,
+        peak_db: null,
+        rms_db: null,
+        loudness_lufs: null,
+      });
+      expect(db.prepare("SELECT scene_number, shot_number, take_number, usability FROM segment_logging WHERE segment_id = 'SEG_river'").get()).toMatchObject({
+        scene_number: 20260619,
+        shot_number: 143015,
+        take_number: 7,
+        usability: "unusable",
+      });
     } finally {
       db.close();
     }
@@ -165,6 +198,49 @@ describe("footage database", () => {
     expect(excluded.results).toHaveLength(0);
   });
 
+  it("applies metadata filters for camera motion, shot scale, stability, dialogue, and usability", async () => {
+    const projectDir = makeProject();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+
+    const pan = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { camera_motion: "pan_right" },
+    });
+    expect(pan.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+    expect(pan.results[0].metadata).toMatchObject({ camera_motion: "pan_right", shot_scale: "detail" });
+
+    const wide = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { shot_scale: "wide" },
+    });
+    expect(wide.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
+
+    const shaky = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { stability: "shaky" },
+    });
+    expect(shaky.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
+
+    const dialogue = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { has_dialogue: true },
+    });
+    expect(dialogue.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+
+    const unusable = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { usability: "unusable" },
+    });
+    expect(unusable.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
+  });
+
   it("stores local embeddings and ranks semantic matches by vector score", async () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
@@ -190,6 +266,39 @@ describe("footage database", () => {
     const response = await searchFootage(projectDir, { query: "chestnut", mode: "text" });
     expect(response.db_status).toBe("fallback");
     expect(response.results[0]?.segment_id).toBe("SEG_food");
+  });
+
+  it("keeps searching older footage DBs that do not have metadata tables", async () => {
+    const projectDir = makeProject();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+
+    const db = new Database(footageDbPath(projectDir));
+    try {
+      db.exec(`
+        DROP TABLE metadata_fts;
+        DROP TABLE segment_logging;
+        DROP TABLE segment_audio_profile;
+        DROP TABLE segment_visual_profile;
+        DROP TABLE asset_technical;
+      `);
+    } finally {
+      db.close();
+    }
+
+    const response = await searchFootage(projectDir, { query: "chestnut", mode: "text" });
+    expect(response.db_status).toBe("ready");
+    expect(response.results[0]?.segment_id).toBe("SEG_food");
+
+    const metadataFiltered = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { camera_motion: "pan_right" },
+    });
+    expect(metadataFiltered.results).toHaveLength(0);
+    expect(metadataFiltered.warnings).toContain("visual metadata filter requested, but segment_visual_profile is missing in this footage DB");
   });
 
   it("fallback search enforces date, time, camera, place, text, and dialogue filters", async () => {
@@ -276,7 +385,7 @@ function makeProject(): string {
     items: [
       {
         asset_id: "AST_food",
-        filename: "food.mov",
+        filename: "NINJAV_S001_S001_T001.MOV",
         display_name: "Food prep",
         role_guess: "b-roll",
         duration_us: 8_000_000,
@@ -286,13 +395,15 @@ function makeProject(): string {
         quality_flags: [],
         source_locator: "02_media/food.mov",
         source_fingerprint: "sha256:food",
+        video_stream: { width: 3840, height: 2160, fps_num: 60000, fps_den: 1001, codec: "prores" },
+        audio_stream: { sample_rate: 48000, channels: 4, codec: "pcm_s24le" },
         shooting_date: "2026-06-01",
         shooting_time: "10:00:00",
         camera_type: "bmpcc",
       },
       {
         asset_id: "AST_river",
-        filename: "river.mov",
+        filename: "A001_20260619_143015_C0007.mov",
         display_name: "River",
         role_guess: "b-roll",
         duration_us: 12_000_000,
@@ -301,6 +412,8 @@ function makeProject(): string {
         quality_flags: ["shaky"],
         source_locator: "02_media/river.mov",
         source_fingerprint: "sha256:river",
+        video_stream: { width: 1920, height: 1080, fps_num: 30, fps_den: 1, codec: "h264" },
+        audio_stream: { sample_rate: 48000, channels: 2, codec: "aac" },
         shooting_date: "2026-06-02",
         shooting_time: "11:00:00",
         camera_type: "iphone",
@@ -379,11 +492,11 @@ function makeProject(): string {
         quality_flags: ["shaky"],
         visual_quality: {
           scores: {
-            light_quality: 0.4,
-            subject_prominence: 0.3,
+            light_quality: 0.2,
+            subject_prominence: 0.2,
             emotional_expression: 0.2,
-            composition_score: 0.5,
-            motion_quality: 0.4,
+            composition_score: 0.2,
+            motion_quality: 0.2,
           },
           labels: {
             lighting_style: ["flat_light"],
@@ -410,7 +523,7 @@ function makeProject(): string {
           event_id: "MEV_food_1",
           start_us: 500_000,
           end_us: 2_500_000,
-          description: "hands roast chestnuts",
+          description: "The camera pans to the right in a detail of a person's hand roasting chestnuts",
           confidence: 0.9,
           source_pass: "marlin_caption",
         }],
@@ -425,7 +538,7 @@ function makeProject(): string {
           event_id: "MEV_river_1",
           start_us: 0,
           end_us: 6_000_000,
-          description: "water flows through the river",
+          description: "Static wide shot of water flowing through the river with a shaky handheld feel",
           confidence: 0.8,
           source_pass: "marlin_caption",
         }],
