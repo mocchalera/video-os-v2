@@ -162,6 +162,7 @@ describe("editorial tool registry", () => {
       "extract_frame",
       "compare_frames",
       "search_footage",
+      "visual_search",
       "similar_to",
       "unused_footage",
       "best_for_beat",
@@ -238,6 +239,7 @@ describe("editorial tool registry", () => {
     });
     await toolkit.find((tool) => tool.name === "similar_to")?.execute({
       segment_id: "SEG_food",
+      use_visual: false,
       limit: 3,
     });
     await toolkit.find((tool) => tool.name === "unused_footage")?.execute({

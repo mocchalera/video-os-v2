@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { assemble } from "../runtime/compiler/assemble.js";
+import { compactTrimmedClipsWithinBeats } from "../runtime/compiler/trim.js";
 import type {
   DurationPolicy,
   NormalizedData,
   RankedCandidateTable,
   ScoredCandidate,
   ScoringParams,
+  TimelineClip,
 } from "../runtime/compiler/types.js";
 
 const params: ScoringParams = {
@@ -28,6 +30,26 @@ const guidePolicy: DurationPolicy = {
 };
 
 describe("V1-first track layout", () => {
+  it("compacts post-trim V1 gaps within each beat without crossing beat boundaries", () => {
+    const beats = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 100 },
+      { beat_id: "b02", target_duration_frames: 50 },
+    ]).beats;
+    const clips = [
+      clip("C1", "b01", 0, 30),
+      clip("C2", "b01", 50, 20),
+      clip("C3", "b01", 90, 5),
+      clip("C4", "b02", 100, 10),
+    ];
+
+    compactTrimmedClipsWithinBeats(clips, beats, [
+      { frame: 0, kind: "beat", label: "b01: Hook" },
+      { frame: 100, kind: "beat", label: "b02: Close" },
+    ]);
+
+    expect(clips.map((item) => item.timeline_in_frame)).toEqual([0, 30, 50, 100]);
+  });
+
   it("single mode places hero/support/texture sequentially on V1 and leaves V2 empty", () => {
     const normalized = makeNormalized(40);
     const table: RankedCandidateTable = new Map([
@@ -205,6 +227,61 @@ describe("V1-first track layout", () => {
     const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
     expect(v1.clips.map((clip) => clip.beat_id)).toEqual(["b01", "b02", "b03"]);
     expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_b01", "seg_b02", "seg_b03"]);
+  });
+
+  it("does not reserve shared candidates when maxDurationFrames exceeds total beat frames", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 10 },
+      { beat_id: "b02", target_duration_frames: 10 },
+    ]);
+    const table: RankedCandidateTable = new Map([
+      ["b01", [score("seg_shared", "AST_A", "support", 1.0, "b01")]],
+      [
+        "b02",
+        [
+          score("seg_shared", "AST_A", "support", 1.0, "b02"),
+          score("seg_b02", "AST_B", "support", 0.8, "b02"),
+        ],
+      ],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only", maxDurationFrames: 100 },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.beat_id)).toEqual(["b01", "b02"]);
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_shared", "seg_b02"]);
+  });
+
+  it("single guide fill places unused candidates on V1 within remaining beat budget", () => {
+    const normalized = makeNormalized(25);
+    const table: RankedCandidateTable = new Map([
+      ["b01", [score("seg_primary", "AST_A", "support", 0.9, "b01")]],
+      ["unused_pool", [score("seg_unused", "AST_B", "texture", 0.8, "unused_pool")]],
+    ]);
+
+    const assembled = assemble(
+      normalized,
+      table,
+      params,
+      1,
+      1,
+      guidePolicy,
+      { audioPolicy: "bgm_only" },
+    );
+
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_primary", "seg_unused"]);
+    expect(v1.clips.map((clip) => clip.timeline_in_frame)).toEqual([0, 10]);
+    expect(v1.clips.map((clip) => clip.timeline_duration_frames)).toEqual([10, 10]);
+    expect(Math.max(...v1.clips.map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames))).toBeLessThanOrEqual(25);
   });
 
   it("keeps a final beat clip when breath rhythm would otherwise exceed the duration cap", () => {
@@ -468,5 +545,28 @@ function score(
       motif_reuse_penalty: 0,
       adjacency_penalty: 0,
     },
+  };
+}
+
+function clip(
+  clipId: string,
+  beatId: string,
+  timelineInFrame: number,
+  durationFrames: number,
+): TimelineClip {
+  return {
+    clip_id: clipId,
+    segment_id: clipId,
+    asset_id: `AST_${clipId}`,
+    src_in_us: 0,
+    src_out_us: durationFrames * 1_000_000,
+    timeline_in_frame: timelineInFrame,
+    timeline_duration_frames: durationFrames,
+    role: "support",
+    motivation: "test",
+    beat_id: beatId,
+    fallback_segment_ids: [],
+    confidence: 1,
+    quality_flags: [],
   };
 }

@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { footageDbPath, readFootageDbStatus } from "../artifacts/footage-db.js";
 import { cjkSearchExpansions, normalizeSearchText } from "../artifacts/footage-db-builder.js";
+import type { Qwen3VlEmbeddingClient } from "../connectors/qwen3vl-embedding-local.js";
 import {
   SEMANTIC_EMBEDDING_DTYPE,
   SEMANTIC_EMBEDDING_MODEL,
@@ -10,8 +11,13 @@ import {
   embedTexts,
 } from "../eval/semantic-match.js";
 
-export type FootageSearchMode = "hybrid" | "text" | "semantic" | "structured";
+export type FootageSearchMode = "hybrid" | "text" | "semantic" | "structured" | "visual" | "multimodal";
 export type FootageSortBy = "relevance" | "quality" | "chronological" | "duration";
+export type VisualFrameType =
+  | "visual_representative"
+  | "visual_keyframe_in"
+  | "visual_keyframe_peak"
+  | "visual_keyframe_out";
 
 export type FootageQualityField =
   | "light_quality"
@@ -79,24 +85,54 @@ export interface FootageSearchContext {
   subjects?: Array<{ name: string; role?: string; appearance?: string; aliases?: string[] }>;
 }
 
+export interface FootageVisualAnchor {
+  segment_id: string;
+  frame_type?: VisualFrameType;
+}
+
 export interface SearchFootageInput {
   query: string;
   mode?: FootageSearchMode;
   explicitBoolean?: boolean;
   text_match?: string;
   semantic?: string;
+  image_query_path?: string;
+  visual_anchor?: FootageVisualAnchor;
+  visual_goal?: "similarity" | "palette" | "shot_scale" | "match_cut";
   filters?: FootageSearchFilters;
   sort_by?: FootageSortBy;
   limit?: number;
   context?: FootageSearchContext;
+  rerank?: {
+    enabled?: boolean;
+    top_n?: number;
+  };
+}
+
+export interface SearchEmbeddingMatch {
+  embedding_type: string;
+  model_id: number;
+  score: number;
+  source_ref?: string;
+  segment_embedding_id?: number;
+  source_timestamp_us?: number;
 }
 
 export interface FootageScoreBreakdown {
   semantic?: number;
+  e5_text?: number;
   lexical?: number;
+  qwen_text?: number;
+  qwen_visual?: number;
+  qwen_mixed?: number;
+  structured?: number;
   quality?: number;
   peak?: number;
+  duration?: number;
   final: number;
+  weights?: Record<string, number>;
+  embedding_matches?: SearchEmbeddingMatch[];
+  unavailable_channels?: string[];
 }
 
 export interface FootageEvidenceRef {
@@ -275,6 +311,31 @@ interface DbSearchRow {
   usability: string | null;
 }
 
+interface EmbeddingVectorRow {
+  segment_id: string;
+  vector: Float32Array;
+}
+
+type QwenSearchEmbeddingType =
+  | "visual_representative"
+  | "visual_keyframe_in"
+  | "visual_keyframe_peak"
+  | "visual_keyframe_out"
+  | "text_combined_qwen";
+
+interface SegmentEmbeddingDbRow {
+  id: number;
+  segment_id: string;
+  embedding_type: string;
+  dimension: number;
+  vector: Buffer;
+  model_id: number;
+  output_dimension: number;
+  normalized: number;
+  source_ref: string;
+  source_timestamp_us: number | null;
+}
+
 interface BuiltWhere {
   sql: string;
   params: Record<string, unknown>;
@@ -289,6 +350,45 @@ interface MetadataAvailability {
   metadataFts: boolean;
 }
 
+interface SegmentEmbeddingVectorRow {
+  id: number;
+  segment_id: string;
+  embedding_type: string;
+  model_id: number;
+  source_ref: string;
+  source_timestamp_us: number | null;
+  vector: Float32Array;
+}
+
+type SegmentEmbeddingVectorMap = Map<string, Map<string, SegmentEmbeddingVectorRow[]>>;
+
+interface VisualInputValidation {
+  imageQueryPath?: string;
+  visualAnchor?: FootageVisualAnchor;
+  hasVisualIntent: boolean;
+  hasValidVisualQuery: boolean;
+  shouldReturnEmpty: boolean;
+}
+
+interface QwenScoreResult {
+  present: boolean;
+  available: boolean;
+  scores: Map<string, {
+    qwenVisual?: number;
+    qwenText?: number;
+    matches: SearchEmbeddingMatch[];
+  }>;
+  unavailableChannels: string[];
+}
+
+interface ScoreFusionResult {
+  final: number;
+  weights: Record<string, number>;
+  unavailableChannels: string[];
+}
+
+type QwenFusionMode = "text" | "image" | "mixed";
+
 const DEFAULT_FOOTAGE_SEARCH_LIMIT = 12;
 const MAX_FOOTAGE_SEARCH_LIMIT = 50;
 const QUALITY_FIELDS: FootageQualityField[] = [
@@ -299,6 +399,33 @@ const QUALITY_FIELDS: FootageQualityField[] = [
   "motion_quality",
 ];
 const EMBEDDING_MODEL_ID = `${SEMANTIC_EMBEDDING_MODEL}:${SEMANTIC_EMBEDDING_DTYPE}`;
+const E5_MODEL_REVISION = "legacy-unpinned";
+const E5_OUTPUT_DIMENSION = 384;
+const E5_INSTRUCTION = "e5-query-passage-prefix-v1";
+const E5_PREPROCESS_VERSION = "footage-db-text-bundle-v1";
+const E5_RUNNER_NAME = "transformers.js";
+const QWEN3VL_MODEL_NAME = "Qwen/Qwen3-VL-Embedding-2B";
+const QWEN3VL_OUTPUT_DIMENSION = 2048;
+const QWEN3VL_INSTRUCTION = "Retrieve relevant video footage for editing.";
+const QWEN3VL_PREPROCESS_VERSION = "qwen3vl-frame-v1";
+const VALID_IMAGE_QUERY_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const IMAGE_QUERY_APPROVED_DIRS_ENV = "VOS_FOOTAGE_SEARCH_APPROVED_FRAME_DIRS";
+const QWEN_VISUAL_EMBEDDING_TYPES: QwenSearchEmbeddingType[] = [
+  "visual_representative",
+  "visual_keyframe_in",
+  "visual_keyframe_peak",
+  "visual_keyframe_out",
+];
+const QWEN_TEXT_QUERY_EMBEDDING_TYPES: QwenSearchEmbeddingType[] = [
+  "visual_representative",
+  "text_combined_qwen",
+];
+const QWEN_IMAGE_QUERY_EMBEDDING_TYPES: QwenSearchEmbeddingType[] = [
+  "visual_representative",
+];
+const segmentEmbeddingTableCache = new WeakMap<Database.Database, boolean>();
+let qwenClientPromise: Promise<Qwen3VlEmbeddingClient | null> | null = null;
+let qwenClientUnavailable = false;
 
 function baseSelect(metadata: MetadataAvailability): string {
   return `
@@ -414,6 +541,10 @@ export async function searchFootage(
   const warnings = [...(status.stale_reasons ?? [])];
   const mode = input.mode ?? "hybrid";
   const limit = clampLimit(input.limit);
+  const visualInput = validateVisualInput(absProjectDir, input, mode, warnings);
+  if (visualInput.shouldReturnEmpty) {
+    return emptySearchResponse(absProjectDir, input, mode, status.status, warnings);
+  }
 
   if (status.status === "missing" || status.status === "malformed") {
     return fallbackSearch(absProjectDir, input, mode, limit, [
@@ -428,7 +559,7 @@ export async function searchFootage(
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     db.pragma("foreign_keys = ON");
-    const response = await searchFootageWithDb(db, dbPath, input, mode, limit, warnings, status.status);
+    const response = await searchFootageWithDb(db, dbPath, input, mode, limit, warnings, status.status, visualInput);
     return response;
   } catch (error) {
     return fallbackSearch(absProjectDir, input, mode, limit, [
@@ -438,6 +569,143 @@ export async function searchFootage(
   } finally {
     db.close();
   }
+}
+
+export async function disposeFootageSearch(): Promise<void> {
+  const client = await qwenClientPromise;
+  qwenClientPromise = null;
+  qwenClientUnavailable = false;
+  await client?.shutdown();
+}
+
+function validateVisualInput(projectDir: string, input: SearchFootageInput, mode: FootageSearchMode, warnings: string[]): VisualInputValidation {
+  const hasVisualIntent = mode === "visual" || mode === "multimodal" || Boolean(input.image_query_path || input.visual_anchor);
+  const validation: VisualInputValidation = {
+    hasVisualIntent,
+    hasValidVisualQuery: false,
+    shouldReturnEmpty: false,
+  };
+
+  if (input.image_query_path) {
+    const pathValidation = validateImageQueryPath(projectDir, input.image_query_path);
+    if (pathValidation.validPath) {
+      validation.imageQueryPath = pathValidation.validPath;
+      validation.hasValidVisualQuery = true;
+    } else {
+      warnings.push(pathValidation.warning);
+    }
+  }
+
+  if (input.visual_anchor?.segment_id) {
+    validation.visualAnchor = {
+      segment_id: input.visual_anchor.segment_id,
+      frame_type: input.visual_anchor.frame_type,
+    };
+    validation.hasValidVisualQuery = true;
+  } else if (input.visual_anchor && !input.visual_anchor.segment_id) {
+    warnings.push("visual_anchor.segment_id is required when visual_anchor is provided");
+  }
+
+  const text = normalizeSearchText(input.text_match ?? input.query);
+  if (mode === "visual" && !validation.hasValidVisualQuery) {
+    warnings.push("visual mode requires image_query_path or visual_anchor");
+    validation.shouldReturnEmpty = true;
+  }
+
+  return validation;
+}
+
+function validateImageQueryPath(projectDir: string, imagePath: string): { validPath: string; warning: string } | { validPath?: undefined; warning: string } {
+  if (!path.isAbsolute(imagePath)) {
+    return { warning: "image_query_path must be an absolute path" };
+  }
+  if (!VALID_IMAGE_QUERY_EXTENSIONS.has(path.extname(imagePath).toLowerCase())) {
+    return { warning: "image_query_path must be a .jpg, .jpeg, .png, or .webp file" };
+  }
+  if (!fs.existsSync(imagePath)) {
+    return { warning: `image_query_path does not exist: ${imagePath}` };
+  }
+
+  let projectRoot: string;
+  let realPath: string;
+  let approvedRoots: string[];
+  try {
+    projectRoot = fs.realpathSync(projectDir);
+    realPath = fs.realpathSync(imagePath);
+    approvedRoots = imageQueryApprovedRoots(projectDir, projectRoot);
+  } catch (error) {
+    return { warning: `image_query_path could not be resolved: ${imagePath}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(realPath);
+  } catch (error) {
+    return { warning: `image_query_path is not readable: ${imagePath}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!stat.isFile()) {
+    return { warning: `image_query_path is not a regular file: ${imagePath}` };
+  }
+
+  if (!approvedRoots.some((root) => isPathWithin(realPath, root))) {
+    return { warning: `image_query_path must resolve under the project root or approved frame cache directories: ${imagePath}` };
+  }
+
+  return { validPath: realPath, warning: "" };
+}
+
+function imageQueryApprovedRoots(projectDir: string, projectRoot: string): string[] {
+  const roots = [projectRoot];
+  for (const relPath of ["03_analysis", "02_media"]) {
+    addRealDirectoryRoot(roots, path.join(projectDir, relPath));
+  }
+  for (const configuredRoot of configuredImageQueryRoots(projectDir)) {
+    addRealDirectoryRoot(roots, configuredRoot);
+  }
+  return Array.from(new Set(roots));
+}
+
+function configuredImageQueryRoots(projectDir: string): string[] {
+  const value = process.env[IMAGE_QUERY_APPROVED_DIRS_ENV];
+  if (!value) return [];
+  return value
+    .split(path.delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => path.isAbsolute(item) ? item : path.resolve(projectDir, item));
+}
+
+function addRealDirectoryRoot(roots: string[], dirPath: string): void {
+  try {
+    const realDir = fs.realpathSync(dirPath);
+    if (fs.statSync(realDir).isDirectory()) {
+      roots.push(realDir);
+    }
+  } catch {
+    // Optional roots are approved only when they exist and resolve cleanly.
+  }
+}
+
+function isPathWithin(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function emptySearchResponse(
+  projectDir: string,
+  input: SearchFootageInput,
+  mode: FootageSearchMode,
+  dbStatus: FootageSearchResponse["db_status"],
+  warnings: string[],
+): FootageSearchResponse {
+  return {
+    query: input,
+    db_path: footageDbPath(projectDir),
+    db_status: dbStatus,
+    mode_used: mode,
+    results: [],
+    warnings: Array.from(new Set(warnings)),
+  };
 }
 
 export async function similarFootage(
@@ -495,6 +763,7 @@ async function searchFootageWithDb(
   limit: number,
   warnings: string[],
   dbStatus: "ready" | "stale",
+  visualInput: VisualInputValidation,
 ): Promise<FootageSearchResponse> {
   const filters = input.filters ?? {};
   const metadata = metadataAvailability(db);
@@ -517,16 +786,42 @@ async function searchFootageWithDb(
     : ftsScores(db, metadata, structuredWhere, fts.match, allowedIds, warnings);
   const lexicalScores = normalizeRankScores(lexicalRaw);
 
+  const qwenEmbeddingTypes = qwenEmbeddingTypesForQuery(mode, text, visualInput);
+  const qwenEmbeddings = qwenEmbeddingTypes.length > 0
+    ? loadQwenEmbeddingRows(db, rows.map((row) => row.segment_id), qwenEmbeddingTypes, warnings)
+    : new Map<string, Map<string, SegmentEmbeddingVectorRow[]>>();
+  const qwenRowsPresent = segmentEmbeddingVectorCount(qwenEmbeddings) > 0;
+
   let semanticScores = new Map<string, number>();
   let semanticAvailable = false;
-  if ((mode === "hybrid" || mode === "semantic") && semanticText) {
+  const needsSemantic =
+    (mode === "hybrid" || mode === "semantic" || mode === "multimodal" || mode === "visual" || (mode === "text" && qwenRowsPresent))
+    && Boolean(semanticText);
+  if (needsSemantic) {
     const semantic = await semanticScoresForRows(db, rows, semanticText, warnings);
     semanticScores = semantic.scores;
     semanticAvailable = semantic.available;
   }
 
+  const qwen = qwenRowsPresent
+    ? await qwenScoresForRows({
+      db,
+      rows,
+      text,
+      mode,
+      visualInput,
+      embeddings: qwenEmbeddings,
+      warnings,
+    })
+    : {
+      present: false,
+      available: false,
+      scores: new Map<string, { qwenVisual?: number; qwenText?: number; matches: SearchEmbeddingMatch[] }>(),
+      unavailableChannels: [],
+    };
+
   if (mode === "text") {
-    rows = rows.filter((row) => lexicalScores.has(row.segment_id));
+    rows = rows.filter((row) => lexicalScores.has(row.segment_id) || qwen.scores.has(row.segment_id));
   } else if (mode === "semantic") {
     if (semanticAvailable) {
       rows = rows.filter((row) => semanticScores.has(row.segment_id));
@@ -537,7 +832,22 @@ async function searchFootageWithDb(
       warnings.push("semantic embeddings unavailable and no text query was usable");
       rows = [];
     }
-  } else if (mode === "hybrid" && fts.match && !semanticAvailable) {
+  } else if (mode === "visual") {
+    if (qwen.available) {
+      rows = rows.filter((row) => qwen.scores.has(row.segment_id));
+    } else if (text && (semanticAvailable || lexicalScores.size > 0)) {
+      warnings.push("visual search unavailable; falling back to text/semantic channels");
+      rows = rows.filter((row) => semanticScores.has(row.segment_id) || lexicalScores.has(row.segment_id));
+    } else {
+      warnings.push("visual search unavailable; no text fallback was usable");
+      rows = [];
+    }
+  } else if (mode === "multimodal") {
+    if (!qwen.available && !text) {
+      warnings.push("multimodal visual search unavailable; no text fallback was usable");
+      rows = [];
+    }
+  } else if (mode === "hybrid" && fts.match && !semanticAvailable && !qwen.available) {
     rows = rows.filter((row) => lexicalScores.has(row.segment_id));
   }
 
@@ -548,19 +858,30 @@ async function searchFootageWithDb(
     const peak = peakScore(row);
     const lexical = lexicalScores.get(row.segment_id);
     const semantic = semanticScores.get(row.segment_id);
-    const final = finalScore({
+    const qwenScore = qwen.scores.get(row.segment_id);
+    const fusion = finalScore({
       semantic,
       lexical,
+      qwenVisual: qwenScore?.qwenVisual,
+      qwenText: qwenScore?.qwenText,
       quality,
       peak,
       duration: durationScores.get(row.segment_id) ?? 0,
+      qwenPresent: qwen.present && (mode === "hybrid" || mode === "text" || mode === "visual" || mode === "multimodal"),
+      qwenMode: qwenFusionMode(mode, text, visualInput),
     });
     return rowToResult(row, {
       semantic,
       lexical,
+      qwenText: qwenScore?.qwenText,
+      qwenVisual: qwenScore?.qwenVisual,
       quality,
       peak,
-      final,
+      duration: durationScores.get(row.segment_id) ?? 0,
+      final: fusion.final,
+      weights: fusion.weights,
+      unavailableChannels: Array.from(new Set([...fusion.unavailableChannels, ...qwen.unavailableChannels])),
+      embeddingMatches: qwenScore?.matches ?? [],
       marlinEvents: eventLookup.get(row.segment_id) ?? [],
       contextExpansions,
       query: input,
@@ -755,7 +1076,7 @@ async function semanticScoresForRows(
   warnings: string[],
 ): Promise<{ available: boolean; scores: Map<string, number> }> {
   if (rows.length === 0) return { available: false, scores: new Map() };
-  const vectorRows = loadEmbeddingRows(db, rows.map((row) => row.segment_id));
+  const vectorRows = loadEmbeddingRows(db, rows.map((row) => row.segment_id), warnings);
   if (vectorRows.length === 0) {
     warnings.push("semantic embeddings unavailable; FTS/structured search only");
     return { available: false, scores: new Map() };
@@ -769,7 +1090,7 @@ async function semanticScoresForRows(
     }
     const raw = new Map<string, number>();
     for (const row of vectorRows) {
-      raw.set(row.segment_id, cosineSimilarity(queryVector, decodeVector(row.vector)));
+      raw.set(row.segment_id, cosineSimilarity(queryVector, row.vector));
     }
     return { available: true, scores: normalizeCosineScores(raw) };
   } catch (error) {
@@ -781,15 +1102,402 @@ async function semanticScoresForRows(
 function loadEmbeddingRows(
   db: Database.Database,
   segmentIds: string[],
-): Array<{ segment_id: string; vector: Buffer }> {
+  warnings: string[],
+): EmbeddingVectorRow[] {
   if (segmentIds.length === 0) return [];
+  if (hasSegmentEmbeddingsTables(db)) {
+    return loadSegmentEmbeddingRows(db, segmentIds, warnings);
+  }
   const params: Record<string, unknown> = { model_id: EMBEDDING_MODEL_ID };
   const clause = inClause("segment_id", "semantic_segment_id", segmentIds, params);
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT segment_id, vector
     FROM embeddings
     WHERE model_id = @model_id AND field = 'combined' AND ${clause}
   `).all(params) as Array<{ segment_id: string; vector: Buffer }>;
+  return rows.map((row) => ({ segment_id: row.segment_id, vector: decodeVector(row.vector) }));
+}
+
+function loadSegmentEmbeddingRows(
+  db: Database.Database,
+  segmentIds: string[],
+  warnings: string[],
+): EmbeddingVectorRow[] {
+  const model = db.prepare(`
+    SELECT id
+    FROM embedding_models
+    WHERE name = @name
+      AND model_revision = @model_revision
+      AND output_dimension = @output_dimension
+      AND input_modality = @input_modality
+      AND instruction = @instruction
+      AND preprocess_version = @preprocess_version
+      AND runner_name = @runner_name
+      AND precision = @precision
+      AND normalized = @normalized
+      AND distance_metric = @distance_metric
+    ORDER BY id ASC
+    LIMIT 1
+  `).get({
+    name: SEMANTIC_EMBEDDING_MODEL,
+    model_revision: E5_MODEL_REVISION,
+    output_dimension: E5_OUTPUT_DIMENSION,
+    input_modality: "text",
+    instruction: E5_INSTRUCTION,
+    preprocess_version: E5_PREPROCESS_VERSION,
+    runner_name: E5_RUNNER_NAME,
+    precision: SEMANTIC_EMBEDDING_DTYPE,
+    normalized: 1,
+    distance_metric: "cosine",
+  }) as { id: number } | undefined;
+  if (!model) {
+    warnings.push("semantic embeddings unavailable: E5 model registry row missing");
+    return [];
+  }
+
+  const params: Record<string, unknown> = { model_id: model.id };
+  const clause = inClause("se.segment_id", "semantic_segment_id", segmentIds, params);
+  const rows = db.prepare(`
+    SELECT
+      se.id,
+      se.segment_id,
+      se.embedding_type,
+      se.dimension,
+      se.vector,
+      se.model_id,
+      se.source_ref,
+      se.source_timestamp_us,
+      em.output_dimension,
+      em.normalized
+    FROM segment_embeddings se
+    JOIN embedding_models em ON em.id = se.model_id
+    WHERE se.model_id = @model_id
+      AND se.embedding_type = 'combined'
+      AND ${clause}
+    ORDER BY se.segment_id ASC, se.id ASC
+  `).all(params) as SegmentEmbeddingDbRow[];
+
+  return rows.flatMap((row) => {
+    const vector = validatedSegmentEmbeddingVector(row, warnings);
+    return vector ? [{ segment_id: row.segment_id, vector }] : [];
+  });
+}
+
+function validatedSegmentEmbeddingVector(row: SegmentEmbeddingDbRow, warnings: string[]): Float32Array | null {
+  const label = `segment_embeddings row ${row.id} (${row.segment_id}/${row.embedding_type})`;
+  if (row.dimension !== row.output_dimension) {
+    warnings.push(`${label} skipped: dimension ${row.dimension} does not match embedding_models.output_dimension ${row.output_dimension}`);
+    return null;
+  }
+  if (row.vector.byteLength !== row.dimension * 4) {
+    warnings.push(`${label} skipped: vector byte length ${row.vector.byteLength} does not equal dimension * 4 (${row.dimension * 4})`);
+    return null;
+  }
+
+  const vector = decodeVector(row.vector);
+  let magnitudeSquared = 0;
+  for (let index = 0; index < vector.length; index += 1) {
+    const value = vector[index];
+    if (!Number.isFinite(value)) {
+      warnings.push(`${label} skipped: vector contains non-finite value at index ${index}`);
+      return null;
+    }
+    magnitudeSquared += value * value;
+  }
+
+  if (row.normalized === 1) {
+    const norm = Math.sqrt(magnitudeSquared);
+    if (norm < 0.9 || norm > 1.1) {
+      warnings.push(`${label} skipped: normalized vector L2 norm ${norm.toFixed(6)} is outside 0.9-1.1`);
+      return null;
+    }
+  }
+
+  return vector;
+}
+
+function hasSegmentEmbeddingsTables(db: Database.Database): boolean {
+  const cached = segmentEmbeddingTableCache.get(db);
+  if (cached != null) return cached;
+  const exists = tableExists(db, "segment_embeddings") && tableExists(db, "embedding_models");
+  segmentEmbeddingTableCache.set(db, exists);
+  return exists;
+}
+
+function qwenEmbeddingTypesForQuery(
+  mode: FootageSearchMode,
+  text: string,
+  visualInput: VisualInputValidation,
+): QwenSearchEmbeddingType[] {
+  const types = new Set<QwenSearchEmbeddingType>();
+  if ((mode === "hybrid" || mode === "text" || mode === "multimodal") && text) {
+    for (const type of QWEN_TEXT_QUERY_EMBEDDING_TYPES) types.add(type);
+  }
+  if ((mode === "visual" || mode === "multimodal") && visualInput.hasValidVisualQuery) {
+    for (const type of QWEN_IMAGE_QUERY_EMBEDDING_TYPES) types.add(type);
+  }
+  return Array.from(types);
+}
+
+function loadQwenEmbeddingRows(
+  db: Database.Database,
+  segmentIds: string[],
+  embeddingTypes: QwenSearchEmbeddingType[],
+  warnings: string[],
+): SegmentEmbeddingVectorMap {
+  const result: SegmentEmbeddingVectorMap = new Map();
+  if (segmentIds.length === 0 || embeddingTypes.length === 0 || !hasSegmentEmbeddingsTables(db)) return result;
+
+  const params: Record<string, unknown> = {
+    qwen_model_name: QWEN3VL_MODEL_NAME,
+    qwen_output_dimension: QWEN3VL_OUTPUT_DIMENSION,
+  };
+  const segmentClause = inClause("se.segment_id", "qwen_segment_id", segmentIds, params);
+  const typeClause = inClause("se.embedding_type", "qwen_embedding_type", embeddingTypes, params);
+  const rows = db.prepare(`
+    SELECT
+      se.id,
+      se.segment_id,
+      se.embedding_type,
+      se.dimension,
+      se.vector,
+      se.model_id,
+      se.source_ref,
+      se.source_timestamp_us,
+      em.output_dimension,
+      em.normalized
+    FROM segment_embeddings se
+    JOIN embedding_models em ON em.id = se.model_id
+    WHERE em.name = @qwen_model_name
+      AND em.output_dimension = @qwen_output_dimension
+      AND em.input_modality IN ('multimodal', 'mixed', 'image', 'text')
+      AND em.distance_metric = 'cosine'
+      AND ${segmentClause}
+      AND ${typeClause}
+    ORDER BY se.segment_id ASC, se.embedding_type ASC, se.id ASC
+  `).all(params) as SegmentEmbeddingDbRow[];
+
+  for (const row of rows) {
+    const vector = validatedSegmentEmbeddingVector(row, warnings);
+    if (!vector) continue;
+    const byType = result.get(row.segment_id) ?? new Map<string, SegmentEmbeddingVectorRow[]>();
+    const values = byType.get(row.embedding_type) ?? [];
+    values.push({
+      id: row.id,
+      segment_id: row.segment_id,
+      embedding_type: row.embedding_type,
+      model_id: row.model_id,
+      source_ref: row.source_ref,
+      source_timestamp_us: row.source_timestamp_us,
+      vector,
+    });
+    byType.set(row.embedding_type, values);
+    result.set(row.segment_id, byType);
+  }
+
+  return result;
+}
+
+function segmentEmbeddingVectorCount(embeddings: SegmentEmbeddingVectorMap): number {
+  let count = 0;
+  for (const byType of embeddings.values()) {
+    for (const rows of byType.values()) count += rows.length;
+  }
+  return count;
+}
+
+async function qwenScoresForRows(args: {
+  db: Database.Database;
+  rows: DbSearchRow[];
+  text: string;
+  mode: FootageSearchMode;
+  visualInput: VisualInputValidation;
+  embeddings: SegmentEmbeddingVectorMap;
+  warnings: string[];
+}): Promise<QwenScoreResult> {
+  const scores = new Map<string, { qwenVisual?: number; qwenText?: number; matches: SearchEmbeddingMatch[] }>();
+  const unavailableChannels = new Set<string>();
+  let queryChannelAvailable = false;
+
+  const scoreQueryVector = (
+    queryVector: Float32Array,
+    embeddingTypes: QwenSearchEmbeddingType[],
+  ) => {
+    for (const row of args.rows) {
+      const byType = args.embeddings.get(row.segment_id);
+      if (!byType) continue;
+      for (const embeddingType of embeddingTypes) {
+        const candidates = byType.get(embeddingType) ?? [];
+        for (const candidate of candidates) {
+          if (candidate.vector.length !== queryVector.length) {
+            args.warnings.push(`qwen3vl embedding skipped for ${candidate.segment_id}/${candidate.embedding_type}: query dimension ${queryVector.length} does not match stored dimension ${candidate.vector.length}`);
+            continue;
+          }
+          const score = roundScore(clamp01((cosineSimilarity(queryVector, candidate.vector) + 1) / 2));
+          const previous = scores.get(row.segment_id) ?? { matches: [] };
+          if (embeddingType === "text_combined_qwen") {
+            previous.qwenText = Math.max(previous.qwenText ?? 0, score);
+          }
+          if (QWEN_VISUAL_EMBEDDING_TYPES.includes(embeddingType)) {
+            previous.qwenVisual = Math.max(previous.qwenVisual ?? 0, score);
+          }
+          previous.matches.push({
+            segment_embedding_id: candidate.id,
+            embedding_type: embeddingType,
+            model_id: candidate.model_id,
+            score,
+            source_ref: candidate.source_ref || undefined,
+            source_timestamp_us: candidate.source_timestamp_us ?? undefined,
+          });
+          scores.set(row.segment_id, previous);
+        }
+      }
+    }
+  };
+
+  if ((args.mode === "hybrid" || args.mode === "text" || args.mode === "multimodal") && args.text) {
+    const queryVector = await qwenTextQueryVector(args.text, args.warnings);
+    if (queryVector) {
+      queryChannelAvailable = true;
+      scoreQueryVector(queryVector, QWEN_TEXT_QUERY_EMBEDDING_TYPES);
+    } else {
+      unavailableChannels.add("qwen_visual");
+      unavailableChannels.add("qwen_text");
+    }
+  }
+
+  if ((args.mode === "visual" || args.mode === "multimodal") && args.visualInput.hasValidVisualQuery) {
+    const queryVector = args.visualInput.imageQueryPath
+      ? await qwenImageQueryVector(args.visualInput.imageQueryPath, args.warnings)
+      : qwenAnchorQueryVector(args.db, args.visualInput.visualAnchor, args.warnings);
+    if (queryVector) {
+      queryChannelAvailable = true;
+      scoreQueryVector(queryVector, QWEN_IMAGE_QUERY_EMBEDDING_TYPES);
+    } else {
+      unavailableChannels.add("qwen_visual");
+    }
+  }
+
+  for (const score of scores.values()) {
+    score.matches.sort((a, b) => b.score - a.score || a.embedding_type.localeCompare(b.embedding_type));
+  }
+  if (Array.from(scores.values()).some((score) => score.qwenVisual != null)) {
+    unavailableChannels.delete("qwen_visual");
+  }
+  if (Array.from(scores.values()).some((score) => score.qwenText != null)) {
+    unavailableChannels.delete("qwen_text");
+  }
+
+  return {
+    present: queryChannelAvailable,
+    available: scores.size > 0,
+    scores,
+    unavailableChannels: Array.from(unavailableChannels),
+  };
+}
+
+async function qwenTextQueryVector(text: string, warnings: string[]): Promise<Float32Array | null> {
+  const client = await getQwenClient(warnings);
+  if (!client) return null;
+  try {
+    const response = await client.embedText([text], qwenQueryOptions());
+    return validQwenQueryVector(response.vectors[0]?.vector, warnings, "text");
+  } catch (error) {
+    await markQwenClientUnavailable(error, warnings);
+    return null;
+  }
+}
+
+async function qwenImageQueryVector(imagePath: string, warnings: string[]): Promise<Float32Array | null> {
+  const client = await getQwenClient(warnings);
+  if (!client) return null;
+  try {
+    const response = await client.embedImage([imagePath], qwenQueryOptions());
+    return validQwenQueryVector(response.vectors[0]?.vector, warnings, "image");
+  } catch (error) {
+    await markQwenClientUnavailable(error, warnings);
+    return null;
+  }
+}
+
+function qwenAnchorQueryVector(
+  db: Database.Database,
+  anchor: FootageVisualAnchor | undefined,
+  warnings: string[],
+): Float32Array | null {
+  if (!anchor?.segment_id) return null;
+  const frameType = anchor.frame_type ?? "visual_representative";
+  const rows = loadQwenEmbeddingRows(db, [anchor.segment_id], [frameType], warnings);
+  const vector = rows.get(anchor.segment_id)?.get(frameType)?.[0]?.vector;
+  if (!vector) {
+    warnings.push(`visual_anchor embedding unavailable for ${anchor.segment_id}/${frameType}`);
+    return null;
+  }
+  return vector;
+}
+
+async function getQwenClient(warnings: string[]): Promise<Qwen3VlEmbeddingClient | null> {
+  if (qwenClientUnavailable) return null;
+  if (!qwenClientPromise) {
+    qwenClientPromise = import("../connectors/qwen3vl-embedding-local.js")
+      .then((connector) => connector.createQwen3VlEmbeddingLocalClient({ requestTimeoutMs: qwenRequestTimeoutMs() }))
+      .catch((error) => {
+        qwenClientUnavailable = true;
+        warnings.push(`qwen3vl search embedding unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      });
+  }
+  return qwenClientPromise;
+}
+
+async function markQwenClientUnavailable(error: unknown, warnings: string[]): Promise<void> {
+  qwenClientUnavailable = true;
+  warnings.push(`qwen3vl search embedding unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  const promise = qwenClientPromise;
+  const client = promise ? await promise.catch(() => null) : null;
+  qwenClientPromise = null;
+  await Promise.resolve(client?.shutdown()).catch(() => undefined);
+}
+
+function qwenQueryOptions(): {
+  instruction: string;
+  outputDimension: number;
+  normalize: boolean;
+  preprocessVersion: string;
+  timeoutMs?: number;
+} {
+  return {
+    instruction: QWEN3VL_INSTRUCTION,
+    outputDimension: QWEN3VL_OUTPUT_DIMENSION,
+    normalize: true,
+    preprocessVersion: QWEN3VL_PREPROCESS_VERSION,
+    timeoutMs: qwenRequestTimeoutMs(),
+  };
+}
+
+function qwenRequestTimeoutMs(): number | undefined {
+  const value = process.env.VOS_QWEN3VL_REQUEST_TIMEOUT_MS;
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function validQwenQueryVector(vector: Float32Array | undefined, warnings: string[], kind: "text" | "image"): Float32Array | null {
+  if (!vector || vector.length === 0) {
+    warnings.push(`qwen3vl ${kind} query embedding unavailable`);
+    return null;
+  }
+  if (vector.length !== QWEN3VL_OUTPUT_DIMENSION) {
+    warnings.push(`qwen3vl ${kind} query embedding dimension ${vector.length} does not match expected ${QWEN3VL_OUTPUT_DIMENSION}`);
+    return null;
+  }
+  for (let index = 0; index < vector.length; index += 1) {
+    if (!Number.isFinite(vector[index])) {
+      warnings.push(`qwen3vl ${kind} query embedding contains non-finite value at index ${index}`);
+      return null;
+    }
+  }
+  return vector;
 }
 
 function applyPostFilters(rows: DbSearchRow[], filters: FootageSearchFilters): DbSearchRow[] {
@@ -843,9 +1551,16 @@ function rowToResult(
   scoring: {
     semantic?: number;
     lexical?: number;
+    qwenText?: number;
+    qwenVisual?: number;
+    structured?: number;
     quality: number;
     peak: number;
+    duration: number;
     final: number;
+    weights: Record<string, number>;
+    unavailableChannels: string[];
+    embeddingMatches: SearchEmbeddingMatch[];
     marlinEvents: string[];
     contextExpansions: string[];
     query: SearchFootageInput;
@@ -858,6 +1573,8 @@ function rowToResult(
   const reasonParts: string[] = [];
   if (scoring.semantic != null) reasonParts.push(`semantic match "${scoring.query.semantic ?? scoring.query.query}" against combined text`);
   if (scoring.lexical != null) reasonParts.push(`FTS lexical match score=${scoring.lexical.toFixed(3)}`);
+  if (scoring.qwenVisual != null) reasonParts.push(`Qwen visual match score=${scoring.qwenVisual.toFixed(3)}`);
+  if (scoring.qwenText != null) reasonParts.push(`Qwen text match score=${scoring.qwenText.toFixed(3)}`);
   for (const [field, value] of Object.entries(quality)) {
     if (value != null) reasonParts.push(`${field}=${value.toFixed(2)}`);
   }
@@ -867,6 +1584,7 @@ function rowToResult(
   if (metadata.shot_scale) reasonParts.push(`shot_scale=${metadata.shot_scale}`);
   if (metadata.usability) reasonParts.push(`usability=${metadata.usability}`);
   if (scoring.contextExpansions.length > 0) reasonParts.push(`context expansions: ${scoring.contextExpansions.join(",")}`);
+  const matchedFrame = scoring.embeddingMatches.find((match) => match.embedding_type.startsWith("visual_") && match.source_ref)?.source_ref;
 
   return {
     segment_id: row.segment_id,
@@ -877,14 +1595,22 @@ function rowToResult(
     score: scoring.final,
     scores: {
       semantic: scoring.semantic,
+      e5_text: scoring.semantic,
       lexical: scoring.lexical,
+      qwen_text: scoring.qwenText,
+      qwen_visual: scoring.qwenVisual,
+      structured: scoring.structured,
       quality: scoring.quality,
       peak: scoring.peak,
+      duration: scoring.duration,
       final: scoring.final,
+      weights: scoring.weights,
+      embedding_matches: scoring.embeddingMatches.length > 0 ? scoring.embeddingMatches : undefined,
+      unavailable_channels: scoring.unavailableChannels.length > 0 ? scoring.unavailableChannels : undefined,
     },
     match_reason: reasonParts.join("; ") || "structured filters matched deterministic footage fields",
     summary: row.summary,
-    key_frame_path: row.frame_path ?? row.filmstrip_path ?? undefined,
+    key_frame_path: matchedFrame ?? row.frame_path ?? row.filmstrip_path ?? undefined,
     tags,
     quality_flags: qualityFlags,
     transcript_excerpt: row.transcript_text || row.transcript_excerpt || undefined,
@@ -944,20 +1670,162 @@ function evidenceRefs(
 function finalScore(scores: {
   semantic?: number;
   lexical?: number;
+  qwenVisual?: number;
+  qwenText?: number;
   quality: number;
   peak: number;
   duration: number;
-}): number {
-  if (scores.semantic != null && scores.lexical != null) {
-    return roundScore(0.55 * scores.semantic + 0.30 * scores.lexical + 0.10 * scores.quality + 0.05 * scores.peak);
+  qwenPresent: boolean;
+  qwenMode: QwenFusionMode;
+}): ScoreFusionResult {
+  if (!scores.qwenPresent) {
+    return legacyScore(scores);
   }
-  if (scores.semantic == null && scores.lexical != null) {
-    return roundScore(0.75 * scores.lexical + 0.20 * scores.quality + 0.05 * scores.peak);
+
+  if (scores.qwenMode === "image") {
+    return qwenWeightedScore(
+      {
+        qwen_visual: 0.80,
+        quality: 0.12,
+        peak: 0.05,
+        duration: 0.03,
+      },
+      {
+        qwen_visual: scores.qwenVisual,
+        quality: scores.quality,
+        peak: scores.peak,
+        duration: scores.duration,
+      },
+      ["qwen_visual"],
+      scores,
+    );
+  }
+
+  if (scores.qwenMode === "mixed") {
+    return qwenWeightedScore(
+      {
+        qwen_visual: 0.55,
+        e5_text: 0.15,
+        lexical: 0.15,
+        quality: 0.10,
+        peak: 0.05,
+      },
+      {
+        qwen_visual: scores.qwenVisual,
+        e5_text: scores.semantic,
+        lexical: scores.lexical,
+        quality: scores.quality,
+        peak: scores.peak,
+      },
+      ["qwen_visual", "e5_text", "lexical"],
+      scores,
+    );
+  }
+
+  return qwenWeightedScore(
+    {
+      qwen_visual: 0.35,
+      qwen_text: 0.10,
+      e5_text: 0.25,
+      lexical: 0.15,
+      quality: 0.10,
+      peak: 0.05,
+    },
+    {
+      qwen_visual: scores.qwenVisual,
+      qwen_text: scores.qwenText,
+      e5_text: scores.semantic,
+      lexical: scores.lexical,
+      quality: scores.quality,
+      peak: scores.peak,
+    },
+    ["qwen_visual", "qwen_text", "e5_text", "lexical"],
+    scores,
+  );
+}
+
+function qwenFusionMode(mode: FootageSearchMode, text: string, visualInput: VisualInputValidation): QwenFusionMode {
+  if ((mode === "visual" || mode === "multimodal") && visualInput.hasValidVisualQuery) {
+    return text ? "mixed" : "image";
+  }
+  return "text";
+}
+
+function legacyScore(scores: {
+  semantic?: number;
+  lexical?: number;
+  quality: number;
+  peak: number;
+  duration: number;
+}): ScoreFusionResult {
+  if (scores.semantic != null && scores.lexical != null) {
+    const weights = { semantic: 0.55, lexical: 0.30, quality: 0.10, peak: 0.05 };
+    return {
+      final: roundScore(0.55 * scores.semantic + 0.30 * scores.lexical + 0.10 * scores.quality + 0.05 * scores.peak),
+      weights,
+      unavailableChannels: [],
+    };
   }
   if (scores.semantic != null && scores.lexical == null) {
-    return roundScore(0.80 * scores.semantic + 0.15 * scores.quality + 0.05 * scores.peak);
+    const weights = { semantic: 0.80, quality: 0.15, peak: 0.05 };
+    return {
+      final: roundScore(0.80 * scores.semantic + 0.15 * scores.quality + 0.05 * scores.peak),
+      weights,
+      unavailableChannels: ["lexical"],
+    };
   }
-  return roundScore(0.70 * scores.quality + 0.20 * scores.peak + 0.10 * scores.duration);
+  if (scores.semantic == null && scores.lexical != null) {
+    const weights = { lexical: 0.75, quality: 0.20, peak: 0.05 };
+    return {
+      final: roundScore(0.75 * scores.lexical + 0.20 * scores.quality + 0.05 * scores.peak),
+      weights,
+      unavailableChannels: ["semantic"],
+    };
+  }
+  const weights = { quality: 0.70, peak: 0.20, duration: 0.10 };
+  return {
+    final: roundScore(0.70 * scores.quality + 0.20 * scores.peak + 0.10 * scores.duration),
+    weights,
+    unavailableChannels: ["semantic", "lexical"],
+  };
+}
+
+function qwenWeightedScore(
+  baseWeights: Record<string, number>,
+  channelScores: Record<string, number | undefined>,
+  retrievalChannels: string[],
+  scores: {
+    semantic?: number;
+    lexical?: number;
+    quality: number;
+    peak: number;
+    duration: number;
+  },
+): ScoreFusionResult {
+  const retrievalSet = new Set(retrievalChannels);
+  const unavailableChannels = Object.keys(baseWeights).filter((channel) => channelScores[channel] == null);
+  const availableRetrieval = retrievalChannels.filter((channel) => channelScores[channel] != null && baseWeights[channel] != null);
+  const missingRetrievalWeight = retrievalChannels
+    .filter((channel) => channelScores[channel] == null)
+    .reduce((sum, channel) => sum + (baseWeights[channel] ?? 0), 0);
+  const availableRetrievalWeight = availableRetrieval.reduce((sum, channel) => sum + (baseWeights[channel] ?? 0), 0);
+  if (availableRetrievalWeight <= 0) return legacyScore(scores);
+
+  const weights: Record<string, number> = {};
+  let final = 0;
+  for (const [channel, baseWeight] of Object.entries(baseWeights)) {
+    if (channelScores[channel] == null) continue;
+    const weight = retrievalSet.has(channel)
+      ? baseWeight + (missingRetrievalWeight * baseWeight / availableRetrievalWeight)
+      : baseWeight;
+    weights[channel] = roundScore(weight);
+    final += weight * (channelScores[channel] ?? 0);
+  }
+  return {
+    final: roundScore(final),
+    weights,
+    unavailableChannels,
+  };
 }
 
 function qualityScore(row: DbSearchRow): number {
@@ -1041,18 +1909,33 @@ function fallbackSearch(
   if (mode !== "structured" && text) {
     rows = rows.filter((row) => fallbackText(row).toLowerCase().includes(text));
   }
+  if ((mode === "visual" || mode === "multimodal") && !text) {
+    warnings.push("visual search unavailable in JSON fallback; build footage.db with Qwen embeddings or provide a text query");
+    rows = [];
+  }
   rows = applyPostFilters(rows, filters);
   const durationScores = normalizeDurationScores(rows);
   const results = rows.map((row) => {
     const quality = qualityScore(row);
     const peak = peakScore(row);
     const lexical = text ? 1 : undefined;
-    const final = finalScore({ lexical, quality, peak, duration: durationScores.get(row.segment_id) ?? 0 });
+    const fusion = finalScore({
+      lexical,
+      quality,
+      peak,
+      duration: durationScores.get(row.segment_id) ?? 0,
+      qwenPresent: false,
+      qwenMode: "text",
+    });
     return rowToResult(row, {
       lexical,
       quality,
       peak,
-      final,
+      duration: durationScores.get(row.segment_id) ?? 0,
+      final: fusion.final,
+      weights: fusion.weights,
+      unavailableChannels: fusion.unavailableChannels,
+      embeddingMatches: [],
       marlinEvents: [],
       contextExpansions: [],
       query: input,

@@ -1,26 +1,36 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
 const execFileMock = vi.hoisted(() => vi.fn());
+const qwenCreateMock = vi.hoisted(() => vi.fn());
+const qwenEmbedBatchMock = vi.hoisted(() => vi.fn());
+const qwenShutdownMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", () => ({
   execFile: execFileMock,
 }));
 
+vi.mock("../runtime/connectors/qwen3vl-embedding-local.js", () => ({
+  createQwen3VlEmbeddingLocalClient: qwenCreateMock,
+}));
+
 vi.mock("../runtime/eval/semantic-match.js", () => {
-  function normalize(values: number[]): Float32Array {
-    const magnitude = Math.sqrt(values.reduce((sum, value) => sum + value * value, 0));
-    return new Float32Array(magnitude > 0 ? values.map((value) => value / magnitude) : values);
+  const TEST_EMBEDDING_DIMENSION = 384;
+
+  function unitVector(axis: number): Float32Array {
+    const vector = new Float32Array(TEST_EMBEDDING_DIMENSION);
+    vector[axis] = 1;
+    return vector;
   }
 
   function vectorFor(text: string): Float32Array {
     const lower = text.toLowerCase();
-    if (/栗|chestnut|sweet|food|roast/.test(lower)) return normalize([1, 0, 0]);
-    if (/river|water|mountain/.test(lower)) return normalize([0, 1, 0]);
-    return normalize([0, 0, 1]);
+    if (/栗|chestnut|sweet|food|roast/.test(lower)) return unitVector(0);
+    if (/river|water|mountain/.test(lower)) return unitVector(1);
+    return unitVector(2);
   }
 
   return {
@@ -37,9 +47,44 @@ vi.mock("../runtime/eval/semantic-match.js", () => {
 });
 
 const tempDirs: string[] = [];
+const QWEN_DIMENSION = 2048;
+
+beforeEach(() => {
+  qwenEmbedBatchMock.mockImplementation(async (items: Array<{ ref?: string }>, options: { outputDimension?: number } = {}) => ({
+    vectors: items.map((item, index) => ({
+      ref: item.ref ?? String(index),
+      vector: unitVector(options.outputDimension ?? QWEN_DIMENSION, index),
+      dimension: options.outputDimension ?? QWEN_DIMENSION,
+      normalized: true,
+    })),
+    model: {
+      name: "Qwen/Qwen3-VL-Embedding-2B",
+      modelRevision: "mock",
+      outputDimension: options.outputDimension ?? QWEN_DIMENSION,
+      instruction: "Retrieve relevant video footage for editing.",
+      preprocessVersion: "qwen3vl-frame-v1",
+      runnerName: "typescript-qwen3vl-mock",
+      runnerVersion: "qwen3vl-worker-v1",
+      precision: "mock",
+      device: "mock",
+      distanceMetric: "cosine",
+    },
+    elapsedMs: 0,
+  }));
+  qwenCreateMock.mockImplementation(() => ({
+    embedText: vi.fn(),
+    embedImage: vi.fn(),
+    embedMixed: vi.fn(),
+    embedBatch: qwenEmbedBatchMock,
+    shutdown: qwenShutdownMock,
+  }));
+});
 
 afterEach(() => {
   execFileMock.mockReset();
+  qwenCreateMock.mockReset();
+  qwenEmbedBatchMock.mockReset();
+  qwenShutdownMock.mockReset();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -51,7 +96,7 @@ describe("footage database", () => {
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { footageDbPath, readFootageDbStatus } = await import("../runtime/artifacts/footage-db.js");
 
-    const result = await buildFootageDb({ projectDir, embeddingPolicy: "skip", now: new Date("2026-06-19T00:00:00.000Z") });
+    const result = await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false, now: new Date("2026-06-19T00:00:00.000Z") });
     expect(result.counts).toMatchObject({
       assets: 2,
       segments: 2,
@@ -61,12 +106,35 @@ describe("footage database", () => {
       embeddings: 0,
     });
     expect(result.embedding_status).toBe("skipped");
+    expect(result.embedding_counts).toEqual({
+      e5_text: 0,
+      qwen_text: 0,
+      qwen_visual: 0,
+      qwen_mixed: 0,
+      qwen_reranker: 0,
+    });
+    expect(result.embedding_statuses).toEqual({
+      e5_text: "skipped",
+      qwen_text: "skipped",
+      qwen_visual: "skipped",
+      qwen_mixed: "unsupported",
+      qwen_reranker: "deferred",
+    });
     expect(fs.existsSync(footageDbPath(projectDir))).toBe(true);
-    expect(fs.existsSync(path.join(projectDir, "03_analysis/search/footage-db-build-report.json"))).toBe(true);
+    const reportPath = path.join(projectDir, "03_analysis/search/footage-db-build-report.json");
+    expect(fs.existsSync(reportPath)).toBe(true);
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf-8")) as {
+      embedding_counts?: unknown;
+      embedding_statuses?: unknown;
+    };
+    expect(report.embedding_counts).toEqual(result.embedding_counts);
+    expect(report.embedding_statuses).toEqual(result.embedding_statuses);
 
     const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
     try {
       expect(db.prepare("PRAGMA integrity_check").pluck().get()).toBe("ok");
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'embedding_models'").pluck().get()).toBe("embedding_models");
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'segment_embeddings'").pluck().get()).toBe("segment_embeddings");
       expect(db.prepare("SELECT COUNT(*) FROM assets").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segments").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segments_fts").pluck().get()).toBe(2);
@@ -123,7 +191,7 @@ describe("footage database", () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const japanese = await searchFootage(projectDir, { query: "栗", mode: "text", limit: 3 });
     expect(japanese.db_status).toBe("ready");
@@ -138,17 +206,141 @@ describe("footage database", () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
 
-    const result = await buildFootageDb({ projectDir });
+    const result = await buildFootageDb({ projectDir, qwen3vlEnabled: false });
 
     expect(result.embedding_status).toBe("ready");
     expect(result.counts.embeddings).toBeGreaterThan(0);
+    expect(result.embedding_counts?.e5_text).toBe(result.counts.embeddings);
+    expect(result.embedding_statuses?.e5_text).toBe("ready");
+  });
+
+  it("marks aggregate embedding_status ready when only Qwen visual retrieval is ready", async () => {
+    const projectDir = makeProject();
+    writeSourceMedia(projectDir);
+    mockFrameExtraction();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+
+    const result = await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      skipAudioAnalysis: true,
+      now: new Date("2026-06-19T00:00:00.000Z"),
+    });
+
+    expect(result.embedding_status).toBe("ready");
+    expect(result.embedding_statuses).toMatchObject({
+      e5_text: "skipped",
+      qwen_visual: "ready",
+      qwen_text: "skipped",
+    });
+    expect(result.embedding_counts).toMatchObject({
+      e5_text: 0,
+      qwen_visual: 2,
+      qwen_text: 0,
+    });
+  });
+
+  it("refreshes representative frame cache when output, timestamp, or source identity changes", async () => {
+    const projectDir = makeProject();
+    writeSourceMedia(projectDir);
+    mockFrameExtraction();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+
+    await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      skipAudioAnalysis: true,
+      now: new Date("2026-06-19T00:00:00.000Z"),
+    });
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+
+    execFileMock.mockClear();
+    qwenCreateMock.mockClear();
+    await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      skipAudioAnalysis: true,
+      now: new Date("2026-06-19T00:01:00.000Z"),
+    });
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(qwenCreateMock).not.toHaveBeenCalled();
+
+    const riverFrame = path.join(projectDir, "03_analysis/frames/SEG_river/representative.jpg");
+    fs.writeFileSync(riverFrame, "stale output");
+    execFileMock.mockClear();
+    await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      skipAudioAnalysis: true,
+      now: new Date("2026-06-19T00:02:00.000Z"),
+    });
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect((execFileMock.mock.calls[0][1] as string[])).toContain(path.join(projectDir, "02_media/river.mov"));
+
+    updateSegment(projectDir, "SEG_river", { rep_frame_us: 4_000_000 });
+    execFileMock.mockClear();
+    await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      skipAudioAnalysis: true,
+      now: new Date("2026-06-19T00:03:00.000Z"),
+    });
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect((execFileMock.mock.calls[0][1] as string[])).toEqual(expect.arrayContaining(["-ss", "4"]));
+
+    updateAsset(projectDir, "AST_river", {
+      source_locator: "02_media/river-new.mov",
+      source_fingerprint: "sha256:river-new",
+    });
+    fs.writeFileSync(path.join(projectDir, "02_media/river-new.mov"), "new river media");
+    execFileMock.mockClear();
+    await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      skipAudioAnalysis: true,
+      now: new Date("2026-06-19T00:04:00.000Z"),
+    });
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect((execFileMock.mock.calls[0][1] as string[])).toContain(path.join(projectDir, "02_media/river-new.mov"));
+  });
+
+  it("does not embed filmstrip images as representative frames", async () => {
+    const projectDir = makeProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis/filmstrips"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "03_analysis/filmstrips/SEG_food.png"), "filmstrip montage");
+    mockFrameExtraction();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+
+    const result = await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      skipAudioAnalysis: true,
+    });
+
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(result.embedding_counts?.qwen_visual).toBe(0);
+    expect(result.warnings.some((warning) => warning.includes("qwen3vl frame skipped"))).toBe(true);
   });
 
   it("uses explicit boolean mode only when requested and groups CJK alternatives", async () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { buildFtsMatchQuery, searchFootage } = await import("../runtime/tools/footage-search.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const naturalNot = buildFtsMatchQuery({ text: "this is NOT that" });
     expect(naturalNot.match).toBe("\"this\" AND \"is\" AND \"NOT\" AND \"that\"");
@@ -175,7 +367,7 @@ describe("footage database", () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const date = await searchFootage(projectDir, {
       query: "",
@@ -217,7 +409,7 @@ describe("footage database", () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const pan = await searchFootage(projectDir, {
       query: "",
@@ -282,7 +474,7 @@ describe("footage database", () => {
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
     const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
     try {
@@ -316,7 +508,7 @@ describe("footage database", () => {
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const db = new Database(footageDbPath(projectDir));
     try {
@@ -349,7 +541,7 @@ describe("footage database", () => {
 
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
     try {
@@ -383,7 +575,7 @@ describe("footage database", () => {
     fs.writeFileSync(segmentsPath, `${JSON.stringify(segmentsJson, null, 2)}\n`, "utf-8");
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
     try {
@@ -403,10 +595,63 @@ describe("footage database", () => {
   it("stores local embeddings and ranks semantic matches by vector score", async () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
-    const build = await buildFootageDb({ projectDir, embeddingPolicy: "require" });
+    const build = await buildFootageDb({ projectDir, embeddingPolicy: "require", qwen3vlEnabled: false });
     expect(build.embedding_status).toBe("ready");
     expect(build.counts.embeddings).toBeGreaterThan(0);
+    expect(build.embedding_counts?.e5_text).toBe(build.counts.embeddings);
+    expect(build.embedding_statuses?.e5_text).toBe("ready");
+
+    const db = new Database(footageDbPath(projectDir));
+    try {
+      const legacyCount = db.prepare("SELECT COUNT(*) FROM embeddings").pluck().get() as number;
+      const segmentEmbeddingCount = db.prepare("SELECT COUNT(*) FROM segment_embeddings").pluck().get() as number;
+      expect(legacyCount).toBeGreaterThan(0);
+      expect(segmentEmbeddingCount).toBe(legacyCount);
+      expect(db.prepare(`
+        SELECT
+          name,
+          model_revision,
+          output_dimension,
+          input_modality,
+          instruction,
+          preprocess_version,
+          runner_name,
+          runner_version,
+          precision,
+          normalized,
+          distance_metric,
+          license
+        FROM embedding_models
+      `).get()).toMatchObject({
+        name: "Xenova/multilingual-e5-small",
+        model_revision: "legacy-unpinned",
+        output_dimension: 384,
+        input_modality: "text",
+        instruction: "e5-query-passage-prefix-v1",
+        preprocess_version: "footage-db-text-bundle-v1",
+        runner_name: "transformers.js",
+        runner_version: "unknown",
+        precision: "q8",
+        normalized: 1,
+        distance_metric: "cosine",
+        license: "model-card-verified-before-release",
+      });
+      expect(db.prepare(`
+        SELECT se.embedding_type, se.source_ref, se.source_timestamp_us, se.dimension, se.created_at
+        FROM segment_embeddings se
+        WHERE se.segment_id = 'SEG_food' AND se.embedding_type = 'combined'
+      `).get()).toMatchObject({
+        embedding_type: "combined",
+        source_ref: "embedding_texts:combined",
+        source_timestamp_us: null,
+        dimension: 384,
+      });
+      db.prepare("DELETE FROM embeddings").run();
+    } finally {
+      db.close();
+    }
 
     const response = await searchFootage(projectDir, {
       query: "sweet food",
@@ -416,6 +661,91 @@ describe("footage database", () => {
     });
     expect(response.results.map((result) => result.segment_id)).toEqual(["SEG_food", "SEG_river"]);
     expect(response.results[0].scores.semantic).toBeGreaterThan(response.results[1].scores.semantic ?? 0);
+  });
+
+  it("skips corrupt segment_embeddings vectors with warnings", async () => {
+    const projectDir = makeProject();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "require", qwen3vlEnabled: false });
+
+    const dbPath = footageDbPath(projectDir);
+    let db = new Database(dbPath);
+    try {
+      db.prepare(`
+        UPDATE segment_embeddings
+        SET vector = @vector
+        WHERE segment_id = 'SEG_food' AND embedding_type = 'combined'
+      `).run({ vector: Buffer.alloc(4) });
+    } finally {
+      db.close();
+    }
+    let response = await searchFootage(projectDir, { query: "sweet food", semantic: "sweet food", mode: "semantic" });
+    expect(response.warnings.some((warning) => warning.includes("vector byte length"))).toBe(true);
+
+    db = new Database(dbPath);
+    try {
+      db.prepare(`
+        UPDATE segment_embeddings
+        SET dimension = 384, vector = @vector
+        WHERE segment_id = 'SEG_food' AND embedding_type = 'combined'
+      `).run({ vector: unitVectorBlob(384, 0) });
+      db.prepare(`
+        UPDATE segment_embeddings
+        SET vector = @vector
+        WHERE segment_id = 'SEG_river' AND embedding_type = 'combined'
+      `).run({ vector: nanVectorBlob(384) });
+    } finally {
+      db.close();
+    }
+    response = await searchFootage(projectDir, { query: "sweet food", semantic: "sweet food", mode: "semantic" });
+    expect(response.warnings.some((warning) => warning.includes("non-finite value"))).toBe(true);
+
+    db = new Database(dbPath);
+    try {
+      db.prepare(`
+        UPDATE segment_embeddings
+        SET vector = @vector
+        WHERE segment_id = 'SEG_river' AND embedding_type = 'combined'
+      `).run({ vector: unitVectorBlob(384, 1) });
+      db.prepare(`
+        UPDATE segment_embeddings
+        SET dimension = 383, vector = @vector
+        WHERE segment_id = 'SEG_food' AND embedding_type = 'combined'
+      `).run({ vector: unitVectorBlob(383, 0) });
+    } finally {
+      db.close();
+    }
+    response = await searchFootage(projectDir, { query: "sweet food", semantic: "sweet food", mode: "semantic" });
+    expect(response.warnings.some((warning) => warning.includes("does not match embedding_models.output_dimension"))).toBe(true);
+  });
+
+  it("falls back to legacy embeddings when segment_embeddings is absent", async () => {
+    const projectDir = makeProject();
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "require", qwen3vlEnabled: false });
+
+    const db = new Database(footageDbPath(projectDir));
+    try {
+      db.exec(`
+        DROP TABLE segment_embeddings;
+        DROP TABLE embedding_models;
+      `);
+    } finally {
+      db.close();
+    }
+
+    const response = await searchFootage(projectDir, {
+      query: "sweet food",
+      semantic: "sweet food",
+      mode: "semantic",
+      limit: 2,
+    });
+    expect(response.results.map((result) => result.segment_id)).toEqual(["SEG_food", "SEG_river"]);
+    expect(response.warnings.some((warning) => warning.includes("semantic embeddings unavailable"))).toBe(false);
   });
 
   it("falls back to segments.json when the DB file is missing", async () => {
@@ -432,7 +762,7 @@ describe("footage database", () => {
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     const db = new Database(footageDbPath(projectDir));
     try {
@@ -519,7 +849,7 @@ describe("footage database", () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { isFootageDbStale, readFootageDbStatus } = await import("../runtime/artifacts/footage-db.js");
-    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
 
     expect(isFootageDbStale(projectDir)).toBe(false);
     const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
@@ -725,8 +1055,59 @@ function makeProject(): string {
   return projectDir;
 }
 
+function writeSourceMedia(projectDir: string): void {
+  fs.mkdirSync(path.join(projectDir, "02_media"), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, "02_media/food.mov"), "food media");
+  fs.writeFileSync(path.join(projectDir, "02_media/river.mov"), "river media");
+}
+
+function mockFrameExtraction(): void {
+  execFileMock.mockImplementation((_cmd: string, args: string[], _options: unknown, cb: (error: Error | null, stdout: string, stderr: string) => void) => {
+    const outputPath = args[args.length - 1];
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, `frame:${args.join("|")}`);
+    cb(null, "", "");
+    return {} as never;
+  });
+}
+
+function updateSegment(projectDir: string, segmentId: string, patch: Record<string, unknown>): void {
+  const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+  const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as { items: Array<Record<string, unknown>> };
+  const segment = segments.items.find((item) => item.segment_id === segmentId);
+  if (!segment) throw new Error(`missing segment fixture ${segmentId}`);
+  Object.assign(segment, patch);
+  fs.writeFileSync(segmentsPath, `${JSON.stringify(segments, null, 2)}\n`, "utf-8");
+}
+
+function updateAsset(projectDir: string, assetId: string, patch: Record<string, unknown>): void {
+  const assetsPath = path.join(projectDir, "03_analysis/assets.json");
+  const assets = JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as { items: Array<Record<string, unknown>> };
+  const asset = assets.items.find((item) => item.asset_id === assetId);
+  if (!asset) throw new Error(`missing asset fixture ${assetId}`);
+  Object.assign(asset, patch);
+  fs.writeFileSync(assetsPath, `${JSON.stringify(assets, null, 2)}\n`, "utf-8");
+}
+
 function writeJson(projectDir: string, relPath: string, value: unknown): void {
   const filePath = path.join(projectDir, relPath);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+}
+
+function unitVectorBlob(dimension: number, axis: number): Buffer {
+  const vector = unitVector(dimension, axis);
+  return Buffer.from(vector.buffer);
+}
+
+function unitVector(dimension: number, axis: number): Float32Array {
+  const vector = new Float32Array(dimension);
+  vector[axis % dimension] = 1;
+  return vector;
+}
+
+function nanVectorBlob(dimension: number): Buffer {
+  const vector = new Float32Array(dimension);
+  vector[0] = Number.NaN;
+  return Buffer.from(vector.buffer);
 }

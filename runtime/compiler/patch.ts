@@ -140,6 +140,11 @@ export function applyPatch(
         duration_fit: true,
         total_frames: 0,
         target_frames: 0,
+        content_frames: 0,
+        content_fill_ratio: 1,
+        gap_frames: 0,
+        gap_count: 0,
+        beat_fill: [],
       },
     };
   }

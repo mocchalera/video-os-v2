@@ -66,12 +66,14 @@ export function assemble(
       ? Math.floor(options.maxDurationFrames)
       : undefined;
   const beatBudgetFrames = buildBeatBudgetFrames(normalized.beats, maxDurationFrames);
-  const reservedCandidateOwner = buildBeatCandidateReservations(
-    normalized.beats,
-    rankedTable,
-    layout,
-    maxDurationFrames,
-  );
+  const reservedCandidateOwner = shouldReserveBeatCandidates(normalized.beats, maxDurationFrames)
+    ? buildBeatCandidateReservations(
+        normalized.beats,
+        rankedTable,
+        layout,
+        maxDurationFrames,
+      )
+    : new Map<string, string>();
   let durationCapDroppedClips = 0;
 
   // Track used segments to apply adjacency penalty and prevent overuse
@@ -390,7 +392,22 @@ export function assemble(
   // ── Guide mode: global fill pass ────────────────────────────────────
   // Place any remaining unused candidates that appear in the ranked table.
   // This ensures material coverage (important for keepsake profiles).
-  if (isGuide && layout === "multi") {
+  if (isGuide && layout === "single") {
+    const fillResult = fillSingleLayoutGuideBeats(
+      v1Clips,
+      normalized.beats,
+      markers,
+      rankedTable,
+      beatBudgetFrames,
+      usedClips,
+      clusterByClipId,
+      clipCounter + 1,
+      usPerFrame,
+      maxDurationFrames,
+    );
+    durationCapDroppedClips += fillResult.droppedClips;
+    clipCounter = fillResult.clipCounter;
+  } else if (isGuide && layout === "multi") {
     const unusedMap = new Map<string, ScoredCandidate>();
     for (const [, scored] of rankedTable) {
       for (const sc of scored) {
@@ -516,6 +533,111 @@ export function assemble(
   ];
 
   return { tracks: { video, audio }, markers };
+}
+
+function fillSingleLayoutGuideBeats(
+  v1Clips: TimelineClip[],
+  beats: NormalizedData["beats"],
+  markers: Marker[],
+  rankedTable: RankedCandidateTable,
+  beatBudgetFrames: Map<string, number>,
+  usedClips: Set<string>,
+  clusterByClipId: Map<string, string>,
+  startClipCounter: number,
+  usPerFrame: number,
+  maxDurationFrames?: number,
+): { droppedClips: number; clipCounter: number } {
+  const unused = buildUnusedCandidatePool(rankedTable, usedClips);
+  if (unused.length === 0) return { droppedClips: 0, clipCounter: startClipCounter - 1 };
+
+  const beatStarts = buildBeatStartFrameMap(beats, markers);
+  let clipCounter = startClipCounter - 1;
+  let droppedClips = 0;
+
+  for (const beat of beats) {
+    const beatBudget = beatBudgetFrames.get(beat.beat_id) ?? beat.target_duration_frames;
+    if (beatBudget <= 0) continue;
+
+    const beatStart = beatStarts.get(beat.beat_id) ?? 0;
+    const beatEnd = beatStart + beatBudget;
+    let cursor = beatStart;
+    for (const clip of orderedTimelineClips(v1Clips.filter((item) => item.beat_id === beat.beat_id))) {
+      cursor = Math.max(cursor, clip.timeline_in_frame + clip.timeline_duration_frames);
+    }
+
+    while (cursor < beatEnd && unused.length > 0) {
+      const nextIndex = findBestFillCandidateIndex(unused, beat.beat_id);
+      const [sc] = unused.splice(nextIndex, 1);
+      const availableFrames = beatEnd - cursor;
+      const clip = makeClip(
+        sc,
+        beat.beat_id,
+        cursor,
+        availableFrames,
+        ++clipCounter,
+        { segment_ids: [], candidate_refs: [] },
+        usPerFrame,
+      );
+      usedClips.add(clipUsageKey(sc.candidate));
+      if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
+        registerClipCluster(clusterByClipId, clip, sc);
+        cursor += clip.timeline_duration_frames;
+      } else {
+        droppedClips += 1;
+      }
+    }
+  }
+
+  return { droppedClips, clipCounter };
+}
+
+function buildUnusedCandidatePool(
+  rankedTable: RankedCandidateTable,
+  usedClips: Set<string>,
+): ScoredCandidate[] {
+  const unusedByKey = new Map<string, ScoredCandidate>();
+  for (const [, scored] of rankedTable) {
+    for (const sc of scored) {
+      const key = clipUsageKey(sc.candidate);
+      if (!V1_FIRST_ROLE_PRIORITY.has(sc.candidate.role)) continue;
+      if (usedClips.has(key)) continue;
+      const current = unusedByKey.get(key);
+      if (
+        !current ||
+        sc.score > current.score ||
+        (sc.score === current.score && sc.candidate.segment_id.localeCompare(current.candidate.segment_id) < 0)
+      ) {
+        unusedByKey.set(key, sc);
+      }
+    }
+  }
+
+  return [...unusedByKey.values()].sort((a, b) => {
+    const diff = b.score - a.score;
+    if (diff !== 0) return diff;
+    return a.candidate.segment_id.localeCompare(b.candidate.segment_id);
+  });
+}
+
+function findBestFillCandidateIndex(unused: ScoredCandidate[], beatId: string): number {
+  const beatLocalIndex = unused.findIndex((sc) => sc.beat_id === beatId);
+  return beatLocalIndex >= 0 ? beatLocalIndex : 0;
+}
+
+function buildBeatStartFrameMap(beats: NormalizedData["beats"], markers: Marker[]): Map<string, number> {
+  const starts = new Map<string, number>();
+  for (const marker of markers) {
+    if (marker.kind !== "beat") continue;
+    const beatId = marker.label.split(":")[0]?.trim();
+    if (beatId) starts.set(beatId, marker.frame);
+  }
+
+  let cursor = 0;
+  for (const beat of beats) {
+    if (!starts.has(beat.beat_id)) starts.set(beat.beat_id, cursor);
+    cursor += Math.max(0, beat.target_duration_frames);
+  }
+  return starts;
 }
 
 function applyBeatCraftTiming(
@@ -764,6 +886,18 @@ function buildBeatBudgetFrames(
     budgets.set(item.beat.beat_id, item.frames);
   }
   return budgets;
+}
+
+function shouldReserveBeatCandidates(
+  beats: NormalizedData["beats"],
+  maxDurationFrames: number | undefined,
+): boolean {
+  if (maxDurationFrames == null) return false;
+  const totalBeatFrames = beats.reduce(
+    (sum, beat) => sum + Math.max(0, beat.target_duration_frames),
+    0,
+  );
+  return maxDurationFrames < totalBeatFrames;
 }
 
 function buildBeatCandidateReservations(

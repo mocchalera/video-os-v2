@@ -76,6 +76,7 @@ const ALLOWED_REVISION_FIELDS = new Set([
   "craft.shot_progression",
   "craft.beat_sync",
   "craft.hold_duration_bias",
+  "craft.flash_cut",
   "candidate_plan.primary_candidate_ref",
   "candidate_plan.fallback_candidate_refs",
 ]);
@@ -478,6 +479,7 @@ function readBeatField(beat: Beat, field: string): unknown {
     case "craft.shot_progression": return beat.craft?.shot_progression;
     case "craft.beat_sync": return beat.craft?.beat_sync;
     case "craft.hold_duration_bias": return beat.craft?.hold_duration_bias;
+    case "craft.flash_cut": return beat.craft?.flash_cut;
     default: return undefined;
   }
 }
@@ -507,6 +509,7 @@ function normalizeRevisionValue(
     const n = numberValue(value);
     return n !== undefined && n > 0 ? n : undefined;
   }
+  if (field === "craft.flash_cut") return booleanValue(value);
   if (field === "candidate_plan.primary_candidate_ref") {
     return canonicalSelectRef(value, selects);
   }

@@ -833,6 +833,21 @@ describe("buildLlmTriagePrompt", () => {
         emotion_curve: ["setup", "attempt", "payoff"],
         must_have: ["first ride", "family reaction"],
         must_avoid: ["generic filler"],
+        context_knowledge: {
+          key_items: [
+            {
+              name: "栗きんとん",
+              description: "Chestnut confection",
+              significance: "Small round objects handled with tongs are chestnuts, not insects.",
+            },
+          ],
+          terminology: [
+            {
+              term: "栗",
+              meaning: "Chestnuts - the small round objects being handled are NOT insects",
+            },
+          ],
+        },
         autonomy: {
           may_decide: ["candidate order"],
           must_ask: ["change the message"],
@@ -856,6 +871,9 @@ describe("buildLlmTriagePrompt", () => {
     expect(prompt).toContain("Use `place_hint` to identify location-specific content for the brief");
     expect(prompt).toContain("Use `extracted_text` to identify signage, menus, or labels relevant to the brief");
     expect(prompt).toContain("Use `aesthetic_notes` to prefer visually strong clips");
+    expect(prompt).toContain('"context_knowledge"');
+    expect(prompt).toContain("Chestnuts - the small round objects being handled are NOT insects");
+    expect(prompt).toContain("Use `context_knowledge` to correct likely subject");
     expect(prompt).toContain("focus_sharpness` < 0.3");
     expect(prompt).toContain("subject_prominence` < 0.2");
     expect(prompt).toContain("lower confidence significantly");

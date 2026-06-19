@@ -9,10 +9,12 @@ import { parse as parseYaml } from "yaml";
 import { normalize } from "./normalize.js";
 import { scoreCandidates } from "./score.js";
 import { assemble } from "./assemble.js";
-import { applyAdaptiveTrim, applyUtteranceSnap, type UtteranceSpan } from "./trim.js";
+import { applyAdaptiveTrim, applyUtteranceSnap, compactTrimmedClipsWithinBeats, type UtteranceSpan } from "./trim.js";
 import { applyDurationAdjust } from "./duration-adjust.js";
 import { resolve } from "./resolve.js";
 import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
+import { reorderAssembledSceneContinuity } from "./scene-order.js";
+import { loadVisualCache, type CompileVisualCache } from "./visual-cache.js";
 import { applyPatch } from "./patch.js";
 import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags, getUtteranceSnapConfig } from "../editorial/skill-registry.js";
@@ -75,6 +77,11 @@ export interface CompileResult {
     duration_status?: string;
     duration_delta_frames?: number;
     duration_delta_pct?: number;
+    content_frames?: number;
+    content_fill_ratio?: number;
+    gap_frames?: number;
+    gap_count?: number;
+    beat_fill?: Array<{ beat_id: string; target: number; actual: number; fill_ratio: number }>;
   };
   duration_policy?: DurationPolicy;
 }
@@ -666,6 +673,7 @@ export function compile(opts: CompileOptions): CompileResult {
   );
   const sourceDimensions = readSourceVideoDimensions(projectPath, sourceAssetIds);
   const outputDims = resolveOutputDimensions(brief.editorial, sourceDimensions);
+  const montageOrdering = isMontageOrderingBrief(brief);
 
   // ── Phase 3: Assemble ─────────────────────────────────────────────
 
@@ -675,13 +683,21 @@ export function compile(opts: CompileOptions): CompileResult {
     trackLayout,
     audioPolicy: audioPolicy.mode,
     a1Loudnorm: audioPolicy.a1_loudnorm,
-    clusterContinuity: !isMontageOrderingBrief(brief),
+    clusterContinuity: !montageOrdering,
     bgmAssetId: blueprint.music_policy.bgm_asset_id,
     bgmSegmentId: blueprint.music_policy.bgm_segment_id,
     bgmDurationSec: blueprint.music_policy.bgm_duration_sec,
     maxDurationFrames,
     log: opts.log,
   });
+  const visualCache: CompileVisualCache | null = loadVisualCache(
+    projectPath,
+    assembled.tracks.video.flatMap((track) => track.clips.map((clip) => clip.segment_id)),
+    opts.log,
+  );
+  if (!montageOrdering && visualCache) {
+    reorderAssembledSceneContinuity(assembled, normalized.beats, visualCache);
+  }
 
   // ── Phase 3.5: Adaptive Trim ────────────────────────────────────
   // Apply center-based trim when trim_hint is available.
@@ -705,6 +721,10 @@ export function compile(opts: CompileOptions): CompileResult {
     : [];
   applyClipTrimPlansToCandidates(selects.candidates, clipTrimPlans);
   applyAdaptiveTrim(allAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame, clipTrimPlans);
+  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
+  if (v1Track) {
+    compactTrimmedClipsWithinBeats(v1Track.clips, normalized.beats, assembled.markers);
+  }
 
   // ── Phase 3.5b: Duration Adjustment (strict mode) ───────────────
   applyDurationAdjust(assembled, normalized.beats, selects.candidates, durationPolicy, fpsNum, fpsDen);
@@ -744,7 +764,10 @@ export function compile(opts: CompileOptions): CompileResult {
 
   let adjacencyTransitions: import("./transition-types.js").TimelineTransition[] = [];
 
-  if ((activeSkills.length > 0 || hasCraftTransitions(normalized.beats)) && assembled.tracks.video.length > 0) {
+  if (
+    (activeSkills.length > 0 || hasCraftTransitions(normalized.beats) || (visualCache?.embeddings.size ?? 0) > 0) &&
+    assembled.tracks.video.length > 0
+  ) {
     const v1Track = assembled.tracks.video[0];
     if (v1Track.clips.length > 1) {
       const adjResult = adjacencyDecide(v1Track, {
@@ -755,6 +778,7 @@ export function compile(opts: CompileOptions): CompileResult {
         captionPolicySource: blueprint.caption_policy?.source,
         candidates: selects.candidates,
         beats: normalized.beats,
+        visualEmbeddings: visualCache?.embeddings,
         transitionSkillsDir: opts.repoRoot
           ? path.join(opts.repoRoot, "runtime/editorial/transition-skills")
           : undefined,

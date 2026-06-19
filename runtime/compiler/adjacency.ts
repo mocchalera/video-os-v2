@@ -39,6 +39,7 @@ import {
   resolveShotScaleContinuity,
   resolveCadenceFit,
 } from "./transition-skill-loader.js";
+import { cosineSimilarity } from "./visual-cache.js";
 
 // ── PairEvidence construction ───────────────────────────────────────
 
@@ -324,10 +325,32 @@ export interface AdjacencyDecideOptions {
   candidates: Candidate[];
   beats: NormalizedBeat[];
   segmentEvidenceIndex?: Map<string, SegmentEvidence>;
+  visualEmbeddings?: Map<string, Float32Array>;
   transitionSkillsDir?: string;
 }
 
 const CRAFT_TRANSITION_SCORE_BONUS = 0.2;
+const VISUAL_DISSOLVE_THRESHOLD = 0.85;
+const VISUAL_HARD_CUT_THRESHOLD = 0.95;
+
+export function visualCoherenceScore(
+  clipA: TimelineClip,
+  clipB: TimelineClip,
+  embeddings: Map<string, Float32Array>,
+): number {
+  const vecA = embeddings.get(clipA.segment_id);
+  const vecB = embeddings.get(clipB.segment_id);
+  if (!vecA || !vecB) return 0.5;
+  return cosineSimilarity(vecA, vecB);
+}
+
+export function visualTransitionHint(
+  score: number,
+): "dissolve" | "hard_cut" | undefined {
+  if (score < VISUAL_DISSOLVE_THRESHOLD) return "dissolve";
+  if (score > VISUAL_HARD_CUT_THRESHOLD) return "hard_cut";
+  return undefined;
+}
 
 export function craftTransitionToSkillId(transition: CraftTransition | undefined): string | undefined {
   switch (transition) {
@@ -555,6 +578,16 @@ export function adjacencyDecide(
         totalBeats: opts.beats.length,
       },
     );
+    const visualScore = opts.visualEmbeddings
+      ? visualCoherenceScore(leftClip, rightClip, opts.visualEmbeddings)
+      : undefined;
+    const visualHint = visualScore == null ? undefined : visualTransitionHint(visualScore);
+    if (visualScore != null) {
+      evidence.visual_coherence_score = roundScore(visualScore);
+    }
+    if (visualHint) {
+      evidence.visual_transition_hint = visualHint;
+    }
 
     // Resolve axis scores
     const axisScores = resolveAxisScores(evidence);
@@ -758,6 +791,28 @@ export function adjacencyDecide(
       activeTransitionEffects = undefined;
     }
 
+    if (!craftTransition && visualHint === "dissolve" && transitionType === "cut") {
+      transitionType = "crossfade";
+      appliedSkillId = "visual.dissolve";
+      confidence = Math.max(confidence, 1 - (visualScore ?? VISUAL_DISSOLVE_THRESHOLD));
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = 0;
+      degradedFromSkillId = null;
+      belowThreshold = false;
+      fallbackParams = {};
+      activeTransitionEffects = {
+        transition_type: "crossfade",
+        crossfade_sec: 0.5,
+      };
+    } else if (!craftTransition && visualHint === "hard_cut" && transitionType === "cut" && !appliedSkillId) {
+      appliedSkillId = "visual.hard_cut";
+      confidence = Math.max(confidence, visualScore ?? VISUAL_HARD_CUT_THRESHOLD);
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = 0;
+    }
+
     // BGM beat snap — respect snap_anchor for windowed transitions
     let snapResult: ReturnType<typeof findBeatSnapTarget> | undefined;
     if (activeTransitionEffects && !belowThreshold && !craftForcesCut) {
@@ -879,6 +934,8 @@ export function adjacencyDecide(
         semantic_cluster_change: evidence.semantic_cluster_change,
         outgoing_afterglow_score: evidence.outgoing_afterglow_score,
         outgoing_silence_ratio: evidence.outgoing_silence_ratio,
+        visual_coherence_score: evidence.visual_coherence_score,
+        visual_transition_hint: evidence.visual_transition_hint,
       },
       degraded_from_skill_id: degradedFromSkillId,
     };
@@ -897,6 +954,10 @@ export function adjacencyDecide(
   return { transitions, analysis };
 }
 
+function roundScore(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
 /**
  * Apply beat snap to clip geometry (pair-preserving reallocation).
  * Modifies clips in-place. Returns true if snap was committed.
@@ -906,17 +967,19 @@ export function applyBeatSnap(
   rightClip: TimelineClip,
   snapDeltaFrames: number,
   fpsNum: number,
+  minDurationFrames = 1,
 ): boolean {
   if (snapDeltaFrames === 0) return true;
 
   const usPerFrame = 1_000_000 / fpsNum;
   const absDelta = Math.abs(snapDeltaFrames);
+  const minFrames = Math.max(1, Math.floor(minDurationFrames));
 
-  // Guard: both clips must remain at least 1 frame
+  // Guard: both clips must remain renderable after pair-preserving reallocation.
   if (snapDeltaFrames > 0) {
-    if (rightClip.timeline_duration_frames - absDelta < 1) return false;
+    if (rightClip.timeline_duration_frames - absDelta < minFrames) return false;
   } else {
-    if (leftClip.timeline_duration_frames - absDelta < 1) return false;
+    if (leftClip.timeline_duration_frames - absDelta < minFrames) return false;
   }
 
   if (snapDeltaFrames > 0) {

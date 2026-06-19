@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import { execFile } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { computeNormalizedJsonHash } from "./p1-manifest-coverage.js";
@@ -14,9 +16,21 @@ import {
   SEMANTIC_EMBEDDING_MODEL,
   embedTexts,
 } from "../eval/semantic-match.js";
+import type {
+  Qwen3VlBatchItem,
+  Qwen3VlEmbeddingClient,
+  Qwen3VlVectorResult,
+} from "../connectors/qwen3vl-embedding-local.js";
 
 export type FootageDbEmbeddingPolicy = "auto" | "skip" | "require";
 export type FootageDbRebuildMode = "full" | "incremental";
+export type Qwen3VlBuildEmbeddingType = "visual_representative" | "text_combined_qwen";
+
+export interface Qwen3VlBuildProgress {
+  phase: "frames" | "visual" | "text";
+  completed: number;
+  total: number;
+}
 
 export interface BuildFootageDbOptions {
   projectDir: string;
@@ -25,7 +39,29 @@ export interface BuildFootageDbOptions {
   rebuildMode?: FootageDbRebuildMode;
   allowRemoteEmbeddingModels?: boolean;
   skipAudioAnalysis?: boolean;
+  qwen3vlEnabled?: boolean;
+  qwen3vlEmbedTypes?: Qwen3VlBuildEmbeddingType[];
+  qwen3vlRequestTimeoutMs?: number;
+  onQwen3VlProgress?: (progress: Qwen3VlBuildProgress) => void;
   now?: Date;
+}
+
+export interface EmbeddingCounts {
+  e5_text: number;
+  qwen_text: number;
+  qwen_visual: number;
+  qwen_mixed: number;
+  qwen_reranker: number;
+}
+
+export type EmbeddingStatus = "ready" | "skipped" | "unavailable" | "error";
+
+export interface EmbeddingStatuses {
+  e5_text: EmbeddingStatus;
+  qwen_text: EmbeddingStatus;
+  qwen_visual: EmbeddingStatus;
+  qwen_mixed: EmbeddingStatus | "unsupported";
+  qwen_reranker: EmbeddingStatus | "deferred";
 }
 
 export interface BuildFootageDbResult {
@@ -46,7 +82,9 @@ export interface BuildFootageDbResult {
     metadata_fts_rows: number;
     embeddings: number;
   };
-  embedding_status: "ready" | "skipped" | "unavailable" | "error";
+  embedding_status: EmbeddingStatus;
+  embedding_counts?: EmbeddingCounts;
+  embedding_statuses?: EmbeddingStatuses;
   warnings: string[];
   source_hashes: Record<string, string>;
 }
@@ -122,7 +160,64 @@ interface SegmentBuildRecord {
 interface PopulationResult {
   counts: BuildFootageDbResult["counts"];
   embeddingTexts: Array<{ segment_id: string; field: EmbeddingField; text: string; content_hash: string }>;
+  segments: SegmentBuildRecord[];
   warnings: string[];
+}
+
+interface EmbeddingModelInput {
+  name: string;
+  model_revision: string;
+  output_dimension: number;
+  input_modality: string;
+  instruction: string;
+  preprocess_version: string;
+  runner_name: string;
+  runner_version: string;
+  precision: string;
+  normalized: boolean;
+  distance_metric: string;
+  license: string;
+  created_at: string;
+}
+
+interface EmbeddingPopulationResult {
+  status: EmbeddingStatus;
+  count: number;
+  counts: EmbeddingCounts;
+  statuses: EmbeddingStatuses;
+}
+
+interface Qwen3VlPopulationOptions {
+  projectDir: string;
+  outputPath: string;
+  segments: SegmentBuildRecord[];
+  embeddingTexts: Array<{ segment_id: string; field: EmbeddingField; text: string; content_hash: string }>;
+  enabled: boolean;
+  embedTypes: Qwen3VlBuildEmbeddingType[];
+  requestTimeoutMs: number;
+  createdAt: string;
+  warnings: string[];
+  onProgress?: (progress: Qwen3VlBuildProgress) => void;
+}
+
+interface Qwen3VlPopulationResult {
+  count: number;
+  counts: Pick<EmbeddingCounts, "qwen_text" | "qwen_visual" | "qwen_mixed" | "qwen_reranker">;
+  statuses: Pick<EmbeddingStatuses, "qwen_text" | "qwen_visual" | "qwen_mixed" | "qwen_reranker">;
+}
+
+interface RepresentativeFrameRecord {
+  segmentId: string;
+  framePath: string;
+  outputRelPath: string;
+  contentHash: string;
+  timestampUs: number;
+}
+
+interface QwenTextEmbeddingInput {
+  segmentId: string;
+  text: string;
+  contentHash: string;
 }
 
 interface UserAnnotations {
@@ -144,6 +239,28 @@ const ARTIFACT_VERSION = "footage-db-v1" as const;
 const SCHEMA_VERSION = "1" as const;
 const REPORT_ARTIFACT_VERSION = "footage-db-build-report-v1";
 const EMBEDDING_MODEL_ID = `${SEMANTIC_EMBEDDING_MODEL}:${SEMANTIC_EMBEDDING_DTYPE}`;
+const E5_MODEL_REVISION = "legacy-unpinned";
+const E5_OUTPUT_DIMENSION = 384;
+const E5_INSTRUCTION = "e5-query-passage-prefix-v1";
+const E5_PREPROCESS_VERSION = "footage-db-text-bundle-v1";
+const E5_RUNNER_NAME = "transformers.js";
+const E5_RUNNER_VERSION = "unknown";
+const E5_LICENSE = "model-card-verified-before-release";
+const QWEN3VL_MODEL_NAME = "Qwen/Qwen3-VL-Embedding-2B";
+const QWEN3VL_MODEL_REVISION = "local-cache";
+const QWEN3VL_OUTPUT_DIMENSION = 2048;
+const QWEN3VL_INSTRUCTION = "Retrieve relevant video footage for editing.";
+const QWEN3VL_PREPROCESS_VERSION = "qwen3vl-frame-v1";
+const QWEN3VL_RUNNER_NAME = "python-qwen3vl-worker";
+const QWEN3VL_RUNNER_VERSION = "qwen3vl-worker-v1";
+const QWEN3VL_PRECISION = "fp16";
+const QWEN3VL_LICENSE = "Apache-2.0";
+const QWEN3VL_DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const QWEN3VL_DEFAULT_EMBED_TYPES: Qwen3VlBuildEmbeddingType[] = ["visual_representative", "text_combined_qwen"];
+const QWEN3VL_TEXT_MAX_CHARS = 4_096;
+const QWEN3VL_TEXT_CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+const FRAME_CACHE_REL_ROOT = "03_analysis/frames";
+const REPRESENTATIVE_FRAME_FILENAME = "representative.jpg";
 const VALID_SEGMENT_TYPES = new Set(["dialogue", "music_driven", "action", "static", "general"]);
 
 const FOOTAGE_DB_DDL = `
@@ -592,6 +709,50 @@ CREATE VIRTUAL TABLE segment_metadata_fts USING fts5(
   logging,
   tokenize = "unicode61 remove_diacritics 2 tokenchars '_-'"
 );
+
+CREATE TABLE embedding_models (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  model_revision TEXT NOT NULL,
+  output_dimension INTEGER NOT NULL CHECK (output_dimension >= 0),
+  input_modality TEXT NOT NULL CHECK (
+    input_modality IN ('text', 'image', 'screenshot', 'video', 'mixed', 'multimodal', 'reranker')
+  ),
+  instruction TEXT NOT NULL DEFAULT '',
+  preprocess_version TEXT NOT NULL,
+  runner_name TEXT NOT NULL,
+  runner_version TEXT NOT NULL,
+  precision TEXT NOT NULL,
+  normalized INTEGER NOT NULL CHECK (normalized IN (0, 1)),
+  distance_metric TEXT NOT NULL CHECK (distance_metric IN ('cosine', 'dot', 'l2', 'rerank_score')),
+  license TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (name, model_revision, output_dimension, input_modality, instruction, preprocess_version, runner_name, runner_version, precision, normalized, distance_metric)
+) STRICT;
+
+CREATE TABLE segment_embeddings (
+  id INTEGER PRIMARY KEY,
+  segment_id TEXT NOT NULL REFERENCES segments(segment_id) ON DELETE CASCADE,
+  embedding_type TEXT NOT NULL CHECK (
+    embedding_type IN (
+      'summary', 'transcript', 'scene', 'combined',
+      'visual_representative', 'visual_keyframe_in', 'visual_keyframe_peak',
+      'visual_keyframe_out', 'text_combined_qwen', 'mixed_representative'
+    )
+  ),
+  model_id INTEGER NOT NULL REFERENCES embedding_models(id) ON DELETE RESTRICT,
+  source_ref TEXT NOT NULL DEFAULT '',
+  source_timestamp_us INTEGER CHECK (source_timestamp_us IS NULL OR source_timestamp_us >= 0),
+  content_hash TEXT NOT NULL,
+  dimension INTEGER NOT NULL CHECK (dimension > 0),
+  vector BLOB NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (segment_id, embedding_type, model_id, source_ref, content_hash)
+) STRICT;
+
+CREATE INDEX idx_segment_embeddings_segment ON segment_embeddings(segment_id);
+CREATE INDEX idx_segment_embeddings_model ON segment_embeddings(model_id);
+CREATE INDEX idx_segment_embeddings_type_model ON segment_embeddings(embedding_type, model_id);
 `;
 
 export async function buildFootageDb(options: BuildFootageDbOptions): Promise<BuildFootageDbResult> {
@@ -624,7 +785,20 @@ export async function buildFootageDb(options: BuildFootageDbOptions): Promise<Bu
       projectDir,
     });
     warnings.push(...population.warnings);
-    const embedding = await populateEmbeddings(db, population.embeddingTexts, embeddingPolicy, indexedAt, warnings);
+    const e5Embedding = await populateEmbeddings(db, population.embeddingTexts, embeddingPolicy, indexedAt, warnings);
+    const qwenEmbedding = await populateQwen3VlEmbeddings(db, {
+      projectDir,
+      outputPath,
+      segments: population.segments,
+      embeddingTexts: population.embeddingTexts,
+      enabled: options.qwen3vlEnabled === true || (embeddingPolicy !== "skip" && options.qwen3vlEnabled !== false),
+      embedTypes: normalizeQwen3VlEmbedTypes(options.qwen3vlEmbedTypes),
+      requestTimeoutMs: options.qwen3vlRequestTimeoutMs ?? QWEN3VL_DEFAULT_REQUEST_TIMEOUT_MS,
+      createdAt: indexedAt,
+      warnings,
+      onProgress: options.onQwen3VlProgress,
+    });
+    const embedding = mergeEmbeddingResults(e5Embedding, qwenEmbedding);
     insertMeta(db, {
       schema_version: SCHEMA_VERSION,
       artifact_version: ARTIFACT_VERSION,
@@ -655,6 +829,8 @@ export async function buildFootageDb(options: BuildFootageDbOptions): Promise<Bu
         embeddings: embedding.count,
       },
       embedding_status: embedding.status,
+      embedding_counts: embedding.counts,
+      embedding_statuses: embedding.statuses,
       warnings,
       source_hashes: sourceHashes,
     };
@@ -744,6 +920,7 @@ async function populateStructuredTables(
   const marlinByAsset = buildMarlinMap(inputs.marlinJson);
   const transcripts = buildTranscriptMap(inputs.transcripts);
   const embeddingTexts: PopulationResult["embeddingTexts"] = [];
+  const segmentRecords: SegmentBuildRecord[] = [];
 
   const insertAsset = db.prepare(`
     INSERT INTO assets (
@@ -1076,6 +1253,7 @@ async function populateStructuredTables(
       embedding_combined_hash: hashValue(fieldTexts.combined),
       indexed_at: indexedAt,
     });
+    segmentRecords.push(record);
     segmentCount += 1;
   }
 
@@ -1094,6 +1272,7 @@ async function populateStructuredTables(
         embeddings: 0,
       },
     embeddingTexts,
+    segments: segmentRecords,
     warnings,
   };
 }
@@ -1104,11 +1283,11 @@ async function populateEmbeddings(
   policy: FootageDbEmbeddingPolicy,
   createdAt: string,
   warnings: string[],
-): Promise<{ status: BuildFootageDbResult["embedding_status"]; count: number }> {
-  if (policy === "skip") return { status: "skipped", count: 0 };
+): Promise<EmbeddingPopulationResult> {
+  if (policy === "skip") return embeddingPopulationResult("skipped", 0);
 
   const rows = embeddingTexts.filter((row) => row.text.trim().length > 0);
-  if (rows.length === 0) return { status: "ready", count: 0 };
+  if (rows.length === 0) return embeddingPopulationResult("ready", 0);
 
   try {
     const vectors = await embedTexts(rows.map((row) => row.text), "passage");
@@ -1116,9 +1295,10 @@ async function populateEmbeddings(
       const message = "embedding model unavailable or returned no vectors";
       if (policy === "require") throw new Error(message);
       warnings.push(message);
-      return { status: "unavailable", count: 0 };
+      return embeddingPopulationResult("unavailable", 0);
     }
 
+    const e5ModelId = upsertEmbeddingModel(db, e5EmbeddingModel(createdAt));
     const insertEmbedding = db.prepare(`
       INSERT INTO embeddings (
         segment_id, field, model_id, dimension, vector, content_hash, created_at
@@ -1126,18 +1306,43 @@ async function populateEmbeddings(
         @segment_id, @field, @model_id, @dimension, @vector, @content_hash, @created_at
       )
     `);
+    const insertSegmentEmbedding = db.prepare(`
+      INSERT INTO segment_embeddings (
+        segment_id, embedding_type, model_id, source_ref, source_timestamp_us,
+        content_hash, dimension, vector, created_at
+      ) VALUES (
+        @segment_id, @embedding_type, @model_id, @source_ref, @source_timestamp_us,
+        @content_hash, @dimension, @vector, @created_at
+      )
+    `);
     let count = 0;
     const tx = db.transaction(() => {
       rows.forEach((row, index) => {
         const vector = vectors[index];
         if (vector.length === 0) return;
+        if (vector.length !== E5_OUTPUT_DIMENSION) {
+          warnings.push(`embedding for ${row.segment_id}/${row.field} skipped: expected ${E5_OUTPUT_DIMENSION} dimensions, got ${vector.length}`);
+          return;
+        }
+        const vectorBlob = Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
         insertEmbedding.run({
           segment_id: row.segment_id,
           field: row.field,
           model_id: EMBEDDING_MODEL_ID,
-          dimension: vector.length,
-          vector: Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength),
+          dimension: E5_OUTPUT_DIMENSION,
+          vector: vectorBlob,
           content_hash: row.content_hash,
+          created_at: createdAt,
+        });
+        insertSegmentEmbedding.run({
+          segment_id: row.segment_id,
+          embedding_type: row.field,
+          model_id: e5ModelId,
+          source_ref: `embedding_texts:${row.field}`,
+          source_timestamp_us: null,
+          content_hash: row.content_hash,
+          dimension: E5_OUTPUT_DIMENSION,
+          vector: vectorBlob,
           created_at: createdAt,
         });
         count += 1;
@@ -1147,13 +1352,749 @@ async function populateEmbeddings(
     if (count === 0 && policy === "require") {
       throw new Error("embedding model returned only empty vectors");
     }
-    return { status: count > 0 ? "ready" : "unavailable", count };
+    return embeddingPopulationResult(count > 0 ? "ready" : "unavailable", count);
   } catch (error) {
     const message = `embedding population failed: ${error instanceof Error ? error.message : String(error)}`;
     if (policy === "require") throw new Error(message);
     warnings.push(message);
-    return { status: "unavailable", count: 0 };
+    return embeddingPopulationResult("unavailable", 0);
   }
+}
+
+async function populateQwen3VlEmbeddings(
+  db: Database.Database,
+  options: Qwen3VlPopulationOptions,
+): Promise<Qwen3VlPopulationResult> {
+  const result = qwen3VlPopulationResult();
+  const wantsVisual = options.embedTypes.includes("visual_representative");
+  const wantsText = options.embedTypes.includes("text_combined_qwen");
+  if (!options.enabled || (!wantsVisual && !wantsText)) {
+    return result;
+  }
+
+  const modelId = upsertEmbeddingModel(db, qwen3VlEmbeddingModel(options.createdAt));
+  let previousDb: Database.Database | null = null;
+  let client: Qwen3VlEmbeddingClient | null = null;
+
+  try {
+    previousDb = openReusableFootageDb(options.outputPath);
+
+    if (wantsVisual) {
+      const frames = await buildRepresentativeFrameCache(options.projectDir, options.segments, options.createdAt, options.warnings, options.onProgress);
+      copyReusableQwenRows(db, previousDb, modelId, "visual_representative", frames.map((frame) => ({
+        segmentId: frame.segmentId,
+        sourceRef: frame.outputRelPath,
+        sourceTimestampUs: frame.timestampUs,
+        contentHash: frame.contentHash,
+      })), options.createdAt);
+      const pendingFrames = frames.filter((frame) => !segmentEmbeddingExists(db, frame.segmentId, "visual_representative", modelId, frame.contentHash));
+      if (pendingFrames.length > 0) {
+        options.onProgress?.({ phase: "visual", completed: 0, total: pendingFrames.length });
+        client ??= await createQwen3VlBuilderClient(options.requestTimeoutMs);
+        await embedAndInsertQwenRows(db, client, {
+          modelId,
+          embeddingType: "visual_representative",
+          createdAt: options.createdAt,
+          requestTimeoutMs: options.requestTimeoutMs,
+          warnings: options.warnings,
+          items: pendingFrames.map((frame) => ({
+            ref: `${frame.segmentId}:visual_representative`,
+            kind: "image",
+            imagePath: frame.framePath,
+          })),
+          rowByRef: new Map(pendingFrames.map((frame) => [
+            `${frame.segmentId}:visual_representative`,
+            {
+              segmentId: frame.segmentId,
+              sourceRef: frame.outputRelPath,
+              sourceTimestampUs: frame.timestampUs,
+              contentHash: frame.contentHash,
+            },
+          ])),
+        });
+        options.onProgress?.({ phase: "visual", completed: pendingFrames.length, total: pendingFrames.length });
+      }
+      result.counts.qwen_visual = countSegmentEmbeddings(db, modelId, "visual_representative");
+      result.statuses.qwen_visual = result.counts.qwen_visual > 0 ? "ready" : "skipped";
+    }
+
+    if (wantsText) {
+      const textRows = qwenTextEmbeddingInputs(options.embeddingTexts);
+      copyReusableQwenRows(db, previousDb, modelId, "text_combined_qwen", textRows.map((row) => ({
+        segmentId: row.segmentId,
+        sourceRef: "embedding_texts:combined",
+        sourceTimestampUs: null,
+        contentHash: row.contentHash,
+      })), options.createdAt);
+      const pendingTextRows = textRows.filter((row) => !segmentEmbeddingExists(db, row.segmentId, "text_combined_qwen", modelId, row.contentHash));
+      if (pendingTextRows.length > 0) {
+        options.onProgress?.({ phase: "text", completed: 0, total: pendingTextRows.length });
+        client ??= await createQwen3VlBuilderClient(options.requestTimeoutMs);
+        await embedAndInsertQwenRows(db, client, {
+          modelId,
+          embeddingType: "text_combined_qwen",
+          createdAt: options.createdAt,
+          requestTimeoutMs: options.requestTimeoutMs,
+          warnings: options.warnings,
+          items: pendingTextRows.map((row) => ({
+            ref: `${row.segmentId}:text_combined_qwen`,
+            kind: "text",
+            text: row.text,
+          })),
+          rowByRef: new Map(pendingTextRows.map((row) => [
+            `${row.segmentId}:text_combined_qwen`,
+            {
+              segmentId: row.segmentId,
+              sourceRef: "embedding_texts:combined",
+              sourceTimestampUs: null,
+              contentHash: row.contentHash,
+            },
+          ])),
+        });
+        options.onProgress?.({ phase: "text", completed: pendingTextRows.length, total: pendingTextRows.length });
+      }
+      result.counts.qwen_text = countSegmentEmbeddings(db, modelId, "text_combined_qwen");
+      result.statuses.qwen_text = result.counts.qwen_text > 0 ? "ready" : "skipped";
+    }
+
+    result.count = result.counts.qwen_visual + result.counts.qwen_text;
+    return result;
+  } catch (error) {
+    const status = qwenFailureStatus(error);
+    options.warnings.push(`qwen3vl embedding ${status === "unavailable" ? "unavailable" : "failed"}: ${error instanceof Error ? error.message : String(error)}`);
+    if (wantsVisual) {
+      result.counts.qwen_visual = countSegmentEmbeddings(db, modelId, "visual_representative");
+      result.statuses.qwen_visual = result.counts.qwen_visual > 0 ? "ready" : status;
+    }
+    if (wantsText) {
+      result.counts.qwen_text = countSegmentEmbeddings(db, modelId, "text_combined_qwen");
+      result.statuses.qwen_text = result.counts.qwen_text > 0 ? "ready" : status;
+    }
+    result.count = result.counts.qwen_visual + result.counts.qwen_text;
+    return result;
+  } finally {
+    previousDb?.close();
+    if (client) {
+      try {
+        await client.shutdown();
+      } catch {
+        // Shutdown should not turn a fail-open optional channel into a build failure.
+      }
+    }
+  }
+}
+
+function mergeEmbeddingResults(e5: EmbeddingPopulationResult, qwen: Qwen3VlPopulationResult): EmbeddingPopulationResult {
+  const counts: EmbeddingCounts = {
+    ...e5.counts,
+    qwen_text: qwen.counts.qwen_text,
+    qwen_visual: qwen.counts.qwen_visual,
+    qwen_mixed: qwen.counts.qwen_mixed,
+    qwen_reranker: qwen.counts.qwen_reranker,
+  };
+  const statuses: EmbeddingStatuses = {
+    ...e5.statuses,
+    qwen_text: qwen.statuses.qwen_text,
+    qwen_visual: qwen.statuses.qwen_visual,
+    qwen_mixed: qwen.statuses.qwen_mixed,
+    qwen_reranker: qwen.statuses.qwen_reranker,
+  };
+  return {
+    status: aggregateEmbeddingStatus(e5, qwen),
+    count: e5.count + qwen.count,
+    counts,
+    statuses,
+  };
+}
+
+function aggregateEmbeddingStatus(e5: EmbeddingPopulationResult, qwen: Qwen3VlPopulationResult): EmbeddingStatus {
+  const retrievalStatuses = [
+    e5.status,
+    qwen.statuses.qwen_text,
+    qwen.statuses.qwen_visual,
+    qwen.statuses.qwen_mixed,
+  ];
+  if (retrievalStatuses.includes("ready")) return "ready";
+  if (retrievalStatuses.includes("error")) return "error";
+  if (retrievalStatuses.includes("unavailable")) return "unavailable";
+  return "skipped";
+}
+
+function embeddingPopulationResult(status: EmbeddingStatus, e5TextCount: number): EmbeddingPopulationResult {
+  const counts: EmbeddingCounts = {
+    e5_text: e5TextCount,
+    qwen_text: 0,
+    qwen_visual: 0,
+    qwen_mixed: 0,
+    qwen_reranker: 0,
+  };
+  const statuses: EmbeddingStatuses = {
+    e5_text: status,
+    qwen_text: "skipped",
+    qwen_visual: "skipped",
+    qwen_mixed: "unsupported",
+    qwen_reranker: "deferred",
+  };
+  return { status, count: e5TextCount, counts, statuses };
+}
+
+function qwen3VlPopulationResult(): Qwen3VlPopulationResult {
+  return {
+    count: 0,
+    counts: {
+      qwen_text: 0,
+      qwen_visual: 0,
+      qwen_mixed: 0,
+      qwen_reranker: 0,
+    },
+    statuses: {
+      qwen_text: "skipped",
+      qwen_visual: "skipped",
+      qwen_mixed: "unsupported",
+      qwen_reranker: "deferred",
+    },
+  };
+}
+
+function qwen3VlEmbeddingModel(createdAt: string): EmbeddingModelInput {
+  return {
+    name: QWEN3VL_MODEL_NAME,
+    model_revision: QWEN3VL_MODEL_REVISION,
+    output_dimension: QWEN3VL_OUTPUT_DIMENSION,
+    input_modality: "multimodal",
+    instruction: QWEN3VL_INSTRUCTION,
+    preprocess_version: QWEN3VL_PREPROCESS_VERSION,
+    runner_name: QWEN3VL_RUNNER_NAME,
+    runner_version: QWEN3VL_RUNNER_VERSION,
+    precision: QWEN3VL_PRECISION,
+    normalized: true,
+    distance_metric: "cosine",
+    license: QWEN3VL_LICENSE,
+    created_at: createdAt,
+  };
+}
+
+async function createQwen3VlBuilderClient(requestTimeoutMs: number): Promise<Qwen3VlEmbeddingClient> {
+  const connector = await import("../connectors/qwen3vl-embedding-local.js");
+  return connector.createQwen3VlEmbeddingLocalClient({ requestTimeoutMs });
+}
+
+function normalizeQwen3VlEmbedTypes(values: Qwen3VlBuildEmbeddingType[] | undefined): Qwen3VlBuildEmbeddingType[] {
+  if (!values) return [...QWEN3VL_DEFAULT_EMBED_TYPES];
+  const allowed = new Set<Qwen3VlBuildEmbeddingType>(QWEN3VL_DEFAULT_EMBED_TYPES);
+  return Array.from(new Set(values.filter((value): value is Qwen3VlBuildEmbeddingType => allowed.has(value))));
+}
+
+async function buildRepresentativeFrameCache(
+  projectDir: string,
+  segments: SegmentBuildRecord[],
+  createdAt: string,
+  warnings: string[],
+  onProgress?: (progress: Qwen3VlBuildProgress) => void,
+): Promise<RepresentativeFrameRecord[]> {
+  const frames: RepresentativeFrameRecord[] = [];
+  let completed = 0;
+  onProgress?.({ phase: "frames", completed, total: segments.length });
+  for (const record of segments) {
+    const frame = await buildRepresentativeFrame(projectDir, record, createdAt, warnings);
+    if (frame) frames.push(frame);
+    completed += 1;
+    onProgress?.({ phase: "frames", completed, total: segments.length });
+  }
+  return frames;
+}
+
+async function buildRepresentativeFrame(
+  projectDir: string,
+  record: SegmentBuildRecord,
+  createdAt: string,
+  warnings: string[],
+): Promise<RepresentativeFrameRecord | null> {
+  const outputDir = path.join(projectDir, FRAME_CACHE_REL_ROOT, record.segmentId);
+  const outputPath = path.join(outputDir, REPRESENTATIVE_FRAME_FILENAME);
+  const manifestPath = path.join(outputDir, "manifest.json");
+  const outputRelPath = toProjectRelativePath(projectDir, outputPath);
+  const timestampUs = representativeTimestampUs(record);
+
+  const source = representativeFrameSource(projectDir, record, timestampUs);
+  if (!source) {
+    warnings.push(`qwen3vl frame skipped for ${record.segmentId}: source media not accessible`);
+    return null;
+  }
+  const sourceHash = stringValue(record.asset.source_fingerprint) || null;
+  const sourceRelPath = toProjectRelativePath(projectDir, source.path);
+
+  const existingHash = existingFrameCacheHash(outputPath, manifestPath, {
+    source,
+    sourceRelPath,
+    sourceHash,
+    timestampUs,
+    outputRelPath,
+  });
+  if (existingHash) {
+    return {
+      segmentId: record.segmentId,
+      framePath: outputPath,
+      outputRelPath,
+      contentHash: existingHash,
+      timestampUs,
+    };
+  }
+
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.rmSync(outputPath, { force: true });
+  const args = source.kind === "video"
+    ? [
+        "-ss",
+        formatTimestampSeconds(timestampUs),
+        "-i",
+        source.path,
+        "-vframes",
+        "1",
+        "-q:v",
+        "2",
+        "-vf",
+        "scale=384:-2",
+        outputPath,
+      ]
+    : [
+        "-i",
+        source.path,
+        "-vframes",
+        "1",
+        "-q:v",
+        "2",
+        "-vf",
+        "scale=384:-2",
+        outputPath,
+      ];
+
+  try {
+    await execFilePromise("ffmpeg", args);
+  } catch (error) {
+    warnings.push(`qwen3vl frame extraction failed for ${record.segmentId}: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+
+  if (!fs.existsSync(outputPath) || !fs.statSync(outputPath).isFile()) {
+    warnings.push(`qwen3vl frame extraction failed for ${record.segmentId}: ffmpeg did not create ${outputRelPath}`);
+    return null;
+  }
+
+  const contentHash = sha256File(outputPath);
+  fs.writeFileSync(manifestPath, `${JSON.stringify({
+    segment_id: record.segmentId,
+    frame_type: "visual_representative",
+    source_video_path: source.kind === "video" ? sourceRelPath : null,
+    source_frame_path: source.kind === "image" ? sourceRelPath : null,
+    source_timestamp_us: timestampUs,
+    output_path: outputRelPath,
+    source_hash: sourceHash,
+    frame_content_hash: contentHash,
+    preprocess_version: QWEN3VL_PREPROCESS_VERSION,
+    created_at: createdAt,
+  }, null, 2)}\n`, "utf-8");
+
+  return {
+    segmentId: record.segmentId,
+    framePath: outputPath,
+    outputRelPath,
+    contentHash,
+    timestampUs,
+  };
+}
+
+function representativeFrameSource(
+  projectDir: string,
+  record: SegmentBuildRecord,
+  timestampUs: number,
+): { kind: "image" | "video"; path: string } | null {
+  const appraisal = recordValue(record.segment.visual_appraisal);
+  const appraisalFrame = resolveAnalysisFilePath(projectDir, appraisal.frame_path);
+  if (appraisalFrame) return { kind: "image", path: appraisalFrame };
+  const sourceMedia = resolveSourceMediaPath(projectDir, record.asset);
+  if (!sourceMedia || timestampUs < 0) return null;
+  return { kind: "video", path: sourceMedia };
+}
+
+function representativeTimestampUs(record: SegmentBuildRecord): number {
+  const appraisal = recordValue(record.segment.visual_appraisal);
+  return nonNegativeInteger(appraisal.frame_us)
+    ?? nonNegativeInteger(record.segment.rep_frame_us)
+    ?? Math.trunc((record.srcInUs + record.srcOutUs) / 2);
+}
+
+function resolveAnalysisFilePath(projectDir: string, value: unknown): string | null {
+  const filePath = nullableString(value);
+  if (!filePath) return null;
+  const candidates = path.isAbsolute(filePath)
+    ? [filePath]
+    : [
+        path.resolve(projectDir, "03_analysis", filePath),
+        path.resolve(projectDir, filePath),
+      ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+function existingFrameCacheHash(
+  outputPath: string,
+  manifestPath: string,
+  expected: {
+    source: { kind: "image" | "video"; path: string };
+    sourceRelPath: string;
+    sourceHash: string | null;
+    timestampUs: number;
+    outputRelPath: string;
+  },
+): string | null {
+  if (!fs.existsSync(outputPath) || !fs.statSync(outputPath).isFile()) return null;
+  if (!fs.existsSync(manifestPath) || !fs.statSync(manifestPath).isFile()) return null;
+  try {
+    const currentHash = sha256File(outputPath);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as JsonRecord;
+    const sourcePathMatches = expected.source.kind === "video"
+      ? manifest.source_video_path === expected.sourceRelPath && manifest.source_frame_path == null
+      : manifest.source_frame_path === expected.sourceRelPath && manifest.source_video_path == null;
+    if (
+      manifest.frame_content_hash === currentHash
+      && manifest.preprocess_version === QWEN3VL_PREPROCESS_VERSION
+      && manifest.source_timestamp_us === expected.timestampUs
+      && manifest.output_path === expected.outputRelPath
+      && manifest.source_hash === expected.sourceHash
+      && sourcePathMatches
+    ) {
+      return currentHash;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function execFilePromise(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { windowsHide: true }, (error, _stdout, stderr) => {
+      if (error) {
+        const suffix = typeof stderr === "string" && stderr.trim() ? `: ${stderr.trim()}` : "";
+        reject(new Error(`${error.message}${suffix}`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function openReusableFootageDb(outputPath: string): Database.Database | null {
+  if (!fs.existsSync(outputPath) || !fs.statSync(outputPath).isFile()) return null;
+  try {
+    const db = new Database(outputPath, { readonly: true, fileMustExist: true });
+    const tableCount = db.prepare(`
+      SELECT COUNT(*)
+      FROM sqlite_master
+      WHERE type = 'table' AND name IN ('embedding_models', 'segment_embeddings')
+    `).pluck().get() as number;
+    if (tableCount !== 2) {
+      db.close();
+      return null;
+    }
+    return db;
+  } catch {
+    return null;
+  }
+}
+
+function copyReusableQwenRows(
+  db: Database.Database,
+  previousDb: Database.Database | null,
+  modelId: number,
+  embeddingType: "visual_representative" | "text_combined_qwen",
+  rows: Array<{ segmentId: string; sourceRef: string; sourceTimestampUs: number | null; contentHash: string }>,
+  createdAt: string,
+): void {
+  if (!previousDb || rows.length === 0) return;
+  const previousModelId = previousQwenModelId(previousDb);
+  if (previousModelId == null) return;
+
+  const selectPrevious = previousDb.prepare(`
+    SELECT dimension, vector
+    FROM segment_embeddings
+    WHERE segment_id = @segment_id
+      AND embedding_type = @embedding_type
+      AND model_id = @model_id
+      AND content_hash = @content_hash
+    LIMIT 1
+  `);
+  const insertCurrent = db.prepare(`
+    INSERT OR IGNORE INTO segment_embeddings (
+      segment_id, embedding_type, model_id, source_ref, source_timestamp_us,
+      content_hash, dimension, vector, created_at
+    ) VALUES (
+      @segment_id, @embedding_type, @model_id, @source_ref, @source_timestamp_us,
+      @content_hash, @dimension, @vector, @created_at
+    )
+  `);
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      if (segmentEmbeddingExists(db, row.segmentId, embeddingType, modelId, row.contentHash)) continue;
+      const previous = selectPrevious.get({
+        segment_id: row.segmentId,
+        embedding_type: embeddingType,
+        model_id: previousModelId,
+        content_hash: row.contentHash,
+      }) as { dimension: number; vector: Buffer } | undefined;
+      if (!previous || previous.dimension !== QWEN3VL_OUTPUT_DIMENSION) continue;
+      insertCurrent.run({
+        segment_id: row.segmentId,
+        embedding_type: embeddingType,
+        model_id: modelId,
+        source_ref: row.sourceRef,
+        source_timestamp_us: row.sourceTimestampUs,
+        content_hash: row.contentHash,
+        dimension: previous.dimension,
+        vector: Buffer.from(previous.vector),
+        created_at: createdAt,
+      });
+    }
+  });
+  tx();
+}
+
+function previousQwenModelId(db: Database.Database): number | null {
+  const model = qwen3VlEmbeddingModel("");
+  const row = db.prepare(`
+    SELECT id
+    FROM embedding_models
+    WHERE name = @name
+      AND model_revision = @model_revision
+      AND output_dimension = @output_dimension
+      AND input_modality = @input_modality
+      AND instruction = @instruction
+      AND preprocess_version = @preprocess_version
+      AND runner_name = @runner_name
+      AND runner_version = @runner_version
+      AND precision = @precision
+      AND normalized = @normalized
+      AND distance_metric = @distance_metric
+    LIMIT 1
+  `).get({
+    ...model,
+    normalized: model.normalized ? 1 : 0,
+  }) as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
+function segmentEmbeddingExists(
+  db: Database.Database,
+  segmentId: string,
+  embeddingType: "visual_representative" | "text_combined_qwen",
+  modelId: number,
+  contentHash: string,
+): boolean {
+  return Boolean(db.prepare(`
+    SELECT 1
+    FROM segment_embeddings
+    WHERE segment_id = @segment_id
+      AND embedding_type = @embedding_type
+      AND model_id = @model_id
+      AND content_hash = @content_hash
+    LIMIT 1
+  `).pluck().get({
+    segment_id: segmentId,
+    embedding_type: embeddingType,
+    model_id: modelId,
+    content_hash: contentHash,
+  }));
+}
+
+async function embedAndInsertQwenRows(
+  db: Database.Database,
+  client: Qwen3VlEmbeddingClient,
+  options: {
+    modelId: number;
+    embeddingType: "visual_representative" | "text_combined_qwen";
+    createdAt: string;
+    requestTimeoutMs: number;
+    warnings: string[];
+    items: Qwen3VlBatchItem[];
+    rowByRef: Map<string, { segmentId: string; sourceRef: string; sourceTimestampUs: number | null; contentHash: string }>;
+  },
+): Promise<void> {
+  if (options.items.length === 0) return;
+  const response = await client.embedBatch(options.items, {
+    instruction: QWEN3VL_INSTRUCTION,
+    outputDimension: QWEN3VL_OUTPUT_DIMENSION,
+    normalize: true,
+    preprocessVersion: QWEN3VL_PREPROCESS_VERSION,
+    timeoutMs: options.requestTimeoutMs * Math.max(1, options.items.length),
+  });
+
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO segment_embeddings (
+      segment_id, embedding_type, model_id, source_ref, source_timestamp_us,
+      content_hash, dimension, vector, created_at
+    ) VALUES (
+      @segment_id, @embedding_type, @model_id, @source_ref, @source_timestamp_us,
+      @content_hash, @dimension, @vector, @created_at
+    )
+  `);
+  const tx = db.transaction(() => {
+    for (const vector of response.vectors) {
+      const row = options.rowByRef.get(vector.ref);
+      if (!row) {
+        options.warnings.push(`qwen3vl embedding skipped for ${vector.ref}: no matching input row`);
+        continue;
+      }
+      if (!validQwenVector(vector)) {
+        options.warnings.push(`qwen3vl embedding skipped for ${vector.ref}: expected ${QWEN3VL_OUTPUT_DIMENSION} dimensions, got ${vector.dimension}`);
+        continue;
+      }
+      insert.run({
+        segment_id: row.segmentId,
+        embedding_type: options.embeddingType,
+        model_id: options.modelId,
+        source_ref: row.sourceRef,
+        source_timestamp_us: row.sourceTimestampUs,
+        content_hash: row.contentHash,
+        dimension: QWEN3VL_OUTPUT_DIMENSION,
+        vector: float32ArrayToLittleEndianBlob(vector.vector),
+        created_at: options.createdAt,
+      });
+    }
+  });
+  tx();
+}
+
+function validQwenVector(result: Qwen3VlVectorResult): boolean {
+  return result.dimension === QWEN3VL_OUTPUT_DIMENSION && result.vector.length === QWEN3VL_OUTPUT_DIMENSION;
+}
+
+function countSegmentEmbeddings(
+  db: Database.Database,
+  modelId: number,
+  embeddingType: "visual_representative" | "text_combined_qwen",
+): number {
+  return db.prepare(`
+    SELECT COUNT(*)
+    FROM segment_embeddings
+    WHERE model_id = @model_id AND embedding_type = @embedding_type
+  `).pluck().get({
+    model_id: modelId,
+    embedding_type: embeddingType,
+  }) as number;
+}
+
+function qwenTextEmbeddingInputs(
+  embeddingTexts: Array<{ segment_id: string; field: EmbeddingField; text: string; content_hash: string }>,
+): QwenTextEmbeddingInput[] {
+  return embeddingTexts
+    .filter((row) => row.field === "combined")
+    .map((row) => ({
+      segmentId: row.segment_id,
+      text: prepareQwenTextInput(row.text),
+    }))
+    .filter((row) => row.text.length > 0)
+    .map((row) => ({
+      ...row,
+      contentHash: hashValue({
+        embedding_type: "text_combined_qwen",
+        preprocess_version: QWEN3VL_PREPROCESS_VERSION,
+        text: row.text,
+      }),
+    }));
+}
+
+function qwenFailureStatus(error: unknown): EmbeddingStatus {
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
+  return code === "invalid_input" ? "error" : "unavailable";
+}
+
+function prepareQwenTextInput(text: string): string {
+  const sanitized = text
+    .replace(QWEN3VL_TEXT_CONTROL_CHARS, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return sanitized.length > QWEN3VL_TEXT_MAX_CHARS
+    ? sanitized.slice(0, QWEN3VL_TEXT_MAX_CHARS).trimEnd()
+    : sanitized;
+}
+
+function sha256File(filePath: string): string {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
+function float32ArrayToLittleEndianBlob(vector: Float32Array): Buffer {
+  const buffer = Buffer.alloc(vector.length * 4);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  for (let index = 0; index < vector.length; index += 1) {
+    view.setFloat32(index * 4, vector[index], true);
+  }
+  return buffer;
+}
+
+function formatTimestampSeconds(timestampUs: number): string {
+  const seconds = (timestampUs / 1_000_000).toFixed(6);
+  return seconds.replace(/\.?0+$/u, "") || "0";
+}
+
+function toProjectRelativePath(projectDir: string, filePath: string): string {
+  return path.relative(projectDir, filePath).split(path.sep).join("/");
+}
+
+function e5EmbeddingModel(createdAt: string): EmbeddingModelInput {
+  return {
+    name: SEMANTIC_EMBEDDING_MODEL,
+    model_revision: E5_MODEL_REVISION,
+    output_dimension: E5_OUTPUT_DIMENSION,
+    input_modality: "text",
+    instruction: E5_INSTRUCTION,
+    preprocess_version: E5_PREPROCESS_VERSION,
+    runner_name: E5_RUNNER_NAME,
+    runner_version: E5_RUNNER_VERSION,
+    precision: SEMANTIC_EMBEDDING_DTYPE,
+    normalized: true,
+    distance_metric: "cosine",
+    license: E5_LICENSE,
+    created_at: createdAt,
+  };
+}
+
+function upsertEmbeddingModel(db: Database.Database, model: EmbeddingModelInput): number {
+  const params = {
+    ...model,
+    normalized: model.normalized ? 1 : 0,
+  };
+  db.prepare(`
+    INSERT OR IGNORE INTO embedding_models (
+      name, model_revision, output_dimension, input_modality, instruction, preprocess_version,
+      runner_name, runner_version, precision, normalized, distance_metric, license, created_at
+    ) VALUES (
+      @name, @model_revision, @output_dimension, @input_modality, @instruction, @preprocess_version,
+      @runner_name, @runner_version, @precision, @normalized, @distance_metric, @license, @created_at
+    )
+  `).run(params);
+
+  const row = db.prepare(`
+    SELECT id
+    FROM embedding_models
+    WHERE name = @name
+      AND model_revision = @model_revision
+      AND output_dimension = @output_dimension
+      AND input_modality = @input_modality
+      AND instruction = @instruction
+      AND preprocess_version = @preprocess_version
+      AND runner_name = @runner_name
+      AND runner_version = @runner_version
+      AND precision = @precision
+      AND normalized = @normalized
+      AND distance_metric = @distance_metric
+    LIMIT 1
+  `).get(params) as { id: number } | undefined;
+
+  if (!row) throw new Error(`embedding model registry upsert failed for ${model.name}`);
+  return row.id;
 }
 
 function insertMeta(db: Database.Database, meta: Record<string, string>): void {
@@ -1219,6 +2160,8 @@ function writeBuildReport(
     schema_version: SCHEMA_VERSION,
     embedding_status: result.embedding_status,
     embedding_model_id: result.embedding_status === "ready" ? EMBEDDING_MODEL_ID : null,
+    embedding_counts: result.embedding_counts,
+    embedding_statuses: result.embedding_statuses,
     source_hashes: result.source_hashes,
     counts: result.counts,
     warnings: result.warnings,

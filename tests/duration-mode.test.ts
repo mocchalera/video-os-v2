@@ -525,9 +525,9 @@ describe("Compiler: Guide Mode", () => {
     expect(result.resolution.total_frames).toBeGreaterThan(0);
   });
 
-  it("guide mode: duration_status is pass or advisory, never fail", () => {
+  it("guide mode: duration_status is pass or short, never over", () => {
     const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
-    expect(["pass", "advisory"]).toContain(result.resolution.duration_status);
+    expect(["pass", "short"]).toContain(result.resolution.duration_status);
   });
 
   it("guide mode: duration_policy in provenance", () => {
@@ -688,8 +688,8 @@ describe("Compiler: Guide Without Target", () => {
       const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
       expect(result.timeline).toBeDefined();
       expect(result.resolution.total_frames).toBeGreaterThan(0);
-      // Never fail for guide
-      expect(result.resolution.duration_status).not.toBe("fail");
+      // Guide without a max target should not report an overrun.
+      expect(result.resolution.duration_status).not.toBe("over");
     } finally {
       removeDirSync(tmpDir);
     }
@@ -744,13 +744,16 @@ describe("Resolve: Duration Status", () => {
     };
   }
 
-  function makeTimeline(videoClips: TimelineClip[][]): AssembledTimeline {
+  function makeTimeline(
+    videoClips: TimelineClip[][],
+    markers: AssembledTimeline["markers"] = [],
+  ): AssembledTimeline {
     return {
       tracks: {
         video: videoClips.map((clips, i) => ({ track_id: `V${i + 1}`, kind: "video" as const, clips })),
         audio: [{ track_id: "A1", kind: "audio" as const, clips: [] }],
       },
-      markers: [],
+      markers,
     };
   }
 
@@ -796,7 +799,7 @@ describe("Resolve: Duration Status", () => {
     expect(report.duration_status).toBe("pass");
   });
 
-  it("strict: actual 1 frame below min → fail", () => {
+  it("strict: actual 1 frame below min → short", () => {
     const clip = makeClip({
       clip_id: "C1",
       segment_id: "S1",
@@ -814,10 +817,10 @@ describe("Resolve: Duration Status", () => {
       protect_vlm_peaks: false,
     };
     const report = resolve(makeTimeline([[clip]]), 720, [], policy, 24, 1);
-    expect(report.duration_status).toBe("fail");
+    expect(report.duration_status).toBe("short");
   });
 
-  it("strict: actual 1 frame above max → fail", () => {
+  it("strict: actual 1 frame above max → over", () => {
     const clip = makeClip({
       clip_id: "C1",
       segment_id: "S1",
@@ -835,10 +838,10 @@ describe("Resolve: Duration Status", () => {
       protect_vlm_peaks: false,
     };
     const report = resolve(makeTimeline([[clip]]), 720, [], policy, 24, 1);
-    expect(report.duration_status).toBe("fail");
+    expect(report.duration_status).toBe("over");
   });
 
-  it("guide: actual outside advisory window → advisory", () => {
+  it("guide: content below fill threshold → short", () => {
     const clip = makeClip({
       clip_id: "C1",
       segment_id: "S1",
@@ -856,7 +859,7 @@ describe("Resolve: Duration Status", () => {
       protect_vlm_peaks: true,
     };
     const report = resolve(makeTimeline([[clip]]), 720, [], policy, 24, 1);
-    expect(report.duration_status).toBe("advisory");
+    expect(report.duration_status).toBe("short");
   });
 
   it("guide: actual within window → pass", () => {
@@ -880,7 +883,7 @@ describe("Resolve: Duration Status", () => {
     expect(report.duration_status).toBe("pass");
   });
 
-  it("guide: advisory window boundary → pass", () => {
+  it("guide: advisory window boundary below fill threshold → short", () => {
     // 30% of 720 = 216 → min = 504 frames
     const policy: DurationPolicy = {
       mode: "guide",
@@ -900,10 +903,10 @@ describe("Resolve: Duration Status", () => {
       timeline_duration_frames: minFrames,
     });
     const report = resolve(makeTimeline([[clip]]), 720, [], policy, 24, 1);
-    expect(report.duration_status).toBe("pass");
+    expect(report.duration_status).toBe("short");
   });
 
-  it("guide: 1 frame below advisory min → advisory", () => {
+  it("guide: 1 frame below advisory min → short", () => {
     const policy: DurationPolicy = {
       mode: "guide",
       source: "explicit_brief",
@@ -922,7 +925,60 @@ describe("Resolve: Duration Status", () => {
       timeline_duration_frames: minFrames - 1,
     });
     const report = resolve(makeTimeline([[clip]]), 720, [], policy, 24, 1);
-    expect(report.duration_status).toBe("advisory");
+    expect(report.duration_status).toBe("short");
+  });
+
+  it("content diagnostics count clip duration instead of timeline span", () => {
+    const policy: DurationPolicy = {
+      mode: "guide",
+      source: "explicit_brief",
+      target_source: "explicit_brief",
+      target_duration_sec: 300,
+      min_duration_sec: 0,
+      max_duration_sec: null,
+      hard_gate: false,
+      protect_vlm_peaks: true,
+    };
+    const clip1 = makeClip({
+      clip_id: "C1",
+      segment_id: "S1",
+      beat_id: "b01",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 100,
+    });
+    const clip2 = makeClip({
+      clip_id: "C2",
+      segment_id: "S2",
+      beat_id: "b02",
+      timeline_in_frame: 200,
+      timeline_duration_frames: 50,
+    });
+
+    const report = resolve(
+      makeTimeline(
+        [[clip1, clip2]],
+        [
+          { frame: 0, kind: "beat", label: "b01: Open" },
+          { frame: 150, kind: "beat", label: "b02: Close" },
+        ],
+      ),
+      300,
+      [],
+      policy,
+      1,
+      1,
+    );
+
+    expect(report.total_frames).toBe(250);
+    expect(report.content_frames).toBe(150);
+    expect(report.content_fill_ratio).toBeCloseTo(0.5);
+    expect(report.duration_status).toBe("short");
+    expect(report.gap_frames).toBe(150);
+    expect(report.gap_count).toBe(2);
+    expect(report.beat_fill).toEqual([
+      { beat_id: "b01", target: 150, actual: 100, fill_ratio: 100 / 150 },
+      { beat_id: "b02", target: 150, actual: 50, fill_ratio: 50 / 150 },
+    ]);
   });
 
   it("no policy: backward compat, no duration_status", () => {
@@ -970,7 +1026,7 @@ describe("Resolve: Duration Status", () => {
     const reportMax = resolve(makeTimeline([[clipMax]]), bounds.target_frames, [], policy, 30000, 1001);
     expect(reportMax.duration_status).toBe("pass");
 
-    // 1 frame over → fail
+    // 1 frame over → over
     const clipOver = makeClip({
       clip_id: "C3",
       segment_id: "S3",
@@ -978,7 +1034,7 @@ describe("Resolve: Duration Status", () => {
       timeline_duration_frames: bounds.max_target_frames! + 1,
     });
     const reportOver = resolve(makeTimeline([[clipOver]]), bounds.target_frames, [], policy, 30000, 1001);
-    expect(reportOver.duration_status).toBe("fail");
+    expect(reportOver.duration_status).toBe("over");
   });
 });
 

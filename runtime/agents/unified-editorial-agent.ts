@@ -33,6 +33,11 @@ import {
   type LlmCompleter,
 } from "./llm-triage-agent.js";
 import { parseLlmResponse } from "./llm-json.js";
+import {
+  formatEvidenceForPrompt,
+  type VisualRetrievalEvidence,
+  type VisualRetrievalResult,
+} from "./visual-retrieval-evidence.js";
 
 // Cockpit/repo-side editorial planning should prefer Claude/Codex
 // subscription agents. Gemini flash-lite is only the headless automation
@@ -142,6 +147,7 @@ export interface EditorialAgentOptions {
    * relative to the project; repo-side agents need absolute paths for Read.
    */
   projectDir?: string;
+  visualEvidence?: VisualRetrievalEvidence[];
 }
 
 export interface RoughCutPlanningInput {
@@ -150,6 +156,7 @@ export interface RoughCutPlanningInput {
   representativeFrames: Map<string, string>;
   segments: SegmentItem[];
   bgmDurationSec: number | null;
+  visualEvidence?: VisualRetrievalEvidence[];
 }
 
 export interface FineCutRefinementInput {
@@ -476,6 +483,7 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
   const fps = 24;
   const totalFrames = Math.round(targetSec * fps);
   const beatCount = 5;
+  const visualEvidenceSection = formatEvidenceForPrompt(input.visualEvidence ?? []);
   return [
     "You are the unified Claude/Codex editorial agent for Video OS.",
     "Pass 1 is rough-cut planning: see all available material, select the best clips, and decide what goes where.",
@@ -485,6 +493,7 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
     "## Creative brief",
     JSON.stringify(compactBrief(input.brief, input.bgmDurationSec), null, 2),
     "",
+    ...(visualEvidenceSection ? [visualEvidenceSection, ""] : []),
     "## All Marlin asset reports plus representative frames",
     JSON.stringify(assetEvidence, null, 2),
     "",
@@ -760,15 +769,18 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
   ].join("\n");
 }
 
-function fineToolPromptSection(): string {
+function fineToolPromptSection(passLabel: "rough" | "fine" = "fine"): string {
   const lines = [
     "## Available tools",
-    "You can call these optional tools to inspect selected clips or search for justified full-pool alternatives during the fine pass:",
+    passLabel === "rough"
+      ? "You can call these optional tools to inspect representative frames or search for mood, lighting, texture, and visual tone matches during the rough pass:"
+      : "You can call these optional tools to inspect selected clips or search for justified full-pool alternatives during the fine pass:",
   ];
   for (const tool of EDITORIAL_TOOL_DEFINITIONS) {
     const signature = Object.keys(tool.parameters).join(", ");
     lines.push(`- ${tool.name}(${signature}): ${tool.description}`);
   }
+  lines.push("For frame-based retrieval, use visual_search for direct frame similarity, search_footage with mode=visual and image_query_path for custom visual queries, or similar_to with use_visual=true for segment-anchor similarity.");
   lines.push("If tool calls are unavailable, continue using the provided key frames and Marlin temporal events.");
   return lines.join("\n");
 }
@@ -787,10 +799,13 @@ function buildRoughInteractivePrompt(
   const prompt = [
     buildRoughPrompt(interactiveInput),
     "",
+    fineToolPromptSection("rough"),
+    "",
     bundle.markdown,
     "",
     "## Repo-side agent instructions",
     "- Use the Read tool on the absolute frame paths above before deciding.",
+    "- Use search_footage, visual_search, or best_for_beat when mood, lighting, texture, or visual tone needs evidence beyond the provided representative frames.",
     "- Return the JSON object requested in the prompt. Do not write timeline.json.",
   ].join("\n");
   return {
@@ -799,6 +814,7 @@ function buildRoughInteractivePrompt(
     prompt,
     frame_refs: bundle.refs,
     frame_reference_markdown: bundle.markdown,
+    tools: EDITORIAL_TOOL_DEFINITIONS,
   };
 }
 
@@ -1137,6 +1153,61 @@ function selectSourceObject(parsed: Record<string, unknown>): Record<string, unk
   return recordValue(parsed.selects) ?? parsed;
 }
 
+interface SelectedVisualRetrievalEvidence {
+  queryId: string;
+  result: VisualRetrievalResult;
+}
+
+function visualScoreText(value: number | undefined): string {
+  return value === undefined ? "n/a" : value.toFixed(3);
+}
+
+function bestVisualRetrievalBySegment(
+  evidence: VisualRetrievalEvidence[] | undefined,
+): Map<string, SelectedVisualRetrievalEvidence> {
+  const best = new Map<string, SelectedVisualRetrievalEvidence>();
+  for (const entry of evidence ?? []) {
+    for (const result of entry.results) {
+      const previous = best.get(result.segment_id);
+      if (!previous || result.score_breakdown.final > previous.result.score_breakdown.final) {
+        best.set(result.segment_id, { queryId: entry.query_id, result });
+      }
+    }
+  }
+  return best;
+}
+
+function formatSelectedVisualRetrievalEvidence(match: SelectedVisualRetrievalEvidence): string {
+  const parts = [
+    "Qwen visual retrieval:",
+    `query=${match.queryId}`,
+    `qwen_visual=${visualScoreText(match.result.score_breakdown.qwen_visual)}`,
+    `final=${visualScoreText(match.result.score_breakdown.final)}`,
+  ];
+  if (match.result.matched_frame_path) {
+    parts.push(`matched_frame=${match.result.matched_frame_path}`);
+  }
+  return parts.join(" ");
+}
+
+function enrichSelectedCandidatesWithVisualEvidence(
+  selects: SelectsCandidates,
+  evidence: VisualRetrievalEvidence[] | undefined,
+): void {
+  const bySegment = bestVisualRetrievalBySegment(evidence);
+  if (bySegment.size === 0) return;
+
+  for (const candidate of selects.candidates) {
+    const match = bySegment.get(candidate.segment_id);
+    if (!match) continue;
+    const evidenceLine = formatSelectedVisualRetrievalEvidence(match);
+    const existing = candidate.evidence ?? [];
+    if (!existing.includes(evidenceLine)) {
+      candidate.evidence = [...existing, evidenceLine];
+    }
+  }
+}
+
 function normalizeRoughResult(
   parsed: Record<string, unknown> | undefined,
   input: {
@@ -1145,6 +1216,7 @@ function normalizeRoughResult(
     representativeFrames: Map<string, string>;
     segments: SegmentItem[];
     bgmDurationSec: number | null;
+    visualEvidence?: VisualRetrievalEvidence[];
   },
 ): { selects: SelectsCandidates; blueprint: EditBlueprint } {
   const projectId = projectIdFromBrief(input.brief);
@@ -1161,6 +1233,7 @@ function normalizeRoughResult(
     selects = fallbackSelects(input.brief, input.marlinEvents, input.representativeFrames, input.segments);
   }
   ensureCandidateIds(projectId, selects.candidates);
+  enrichSelectedCandidatesWithVisualEvidence(selects, input.visualEvidence);
   validateArtifact<SelectsCandidates>(selects, "selects-candidates.schema.json");
 
   let blueprint: EditBlueprint;
@@ -1222,7 +1295,14 @@ export async function roughCutPlanning(
   bgmDurationSec: number | null,
   options?: EditorialAgentOptions,
 ): Promise<RoughCutPlanningResult | EditorialInteractivePrompt> {
-  const input: RoughCutPlanningInput = { brief, marlinEvents, representativeFrames, segments, bgmDurationSec };
+  const input: RoughCutPlanningInput = {
+    brief,
+    marlinEvents,
+    representativeFrames,
+    segments,
+    bgmDurationSec,
+    ...(options?.visualEvidence ? { visualEvidence: options.visualEvidence } : {}),
+  };
   if (options?.mode === "interactive") {
     return buildRoughInteractivePrompt(input, options);
   }

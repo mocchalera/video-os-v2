@@ -11,6 +11,7 @@ import type {
   TrimHint,
   TrimPolicy,
   EditBlueprint,
+  Marker,
   NormalizedBeat,
   TimelineClip,
 } from "./types.js";
@@ -601,6 +602,51 @@ export function applyAdaptiveTrim(
   }
 
   return trimResults;
+}
+
+/**
+ * Adaptive trim can shorten clips after assembly has already placed later
+ * clips. Close only intra-beat gaps by moving each beat's clips left from the
+ * beat marker; do not pull material across beat boundaries.
+ */
+export function compactTrimmedClipsWithinBeats(
+  clips: TimelineClip[],
+  beats: NormalizedBeat[],
+  markers: Marker[] = [],
+): void {
+  const beatStarts = buildBeatStartFrames(beats, markers);
+
+  for (const beat of beats) {
+    const beatClips = clips
+      .filter((clip) => clip.beat_id === beat.beat_id)
+      .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame || a.clip_id.localeCompare(b.clip_id));
+    if (beatClips.length === 0) continue;
+
+    const fallbackStart = Math.min(...beatClips.map((clip) => clip.timeline_in_frame));
+    let cursor = beatStarts.get(beat.beat_id) ?? fallbackStart;
+    for (const clip of beatClips) {
+      if (clip.timeline_in_frame > cursor) {
+        clip.timeline_in_frame = cursor;
+      }
+      cursor = Math.max(cursor, clip.timeline_in_frame + clip.timeline_duration_frames);
+    }
+  }
+}
+
+function buildBeatStartFrames(beats: NormalizedBeat[], markers: Marker[]): Map<string, number> {
+  const starts = new Map<string, number>();
+  for (const marker of markers) {
+    if (marker.kind !== "beat") continue;
+    const beatId = marker.label.split(":")[0]?.trim();
+    if (beatId) starts.set(beatId, marker.frame);
+  }
+
+  let cursor = 0;
+  for (const beat of beats) {
+    if (!starts.has(beat.beat_id)) starts.set(beat.beat_id, cursor);
+    cursor += Math.max(0, beat.target_duration_frames);
+  }
+  return starts;
 }
 
 // ── Utterance-boundary snapping (talking_head_pacing increment 1) ──────────

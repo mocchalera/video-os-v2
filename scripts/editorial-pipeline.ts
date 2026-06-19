@@ -18,6 +18,12 @@ import {
   fineCutRefinement,
   roughCutPlanning,
 } from "../runtime/agents/unified-editorial-agent.js";
+import {
+  buildSelectedLinkage,
+  buildVisualRetrievalTrace,
+  extractVisualQueries,
+  runVisualRetrieval,
+} from "../runtime/agents/visual-retrieval-evidence.js";
 import { loadCreativeBrief, validateArtifact } from "../runtime/artifacts/loaders.js";
 import type {
   CreativeBrief,
@@ -132,6 +138,18 @@ function writeYamlArtifact(
   fs.renameSync(tmp, filePath);
 }
 
+function writeJsonArtifact(projectDir: string, relativePath: string, data: unknown): void {
+  const filePath = path.join(projectDir, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tmp = `${filePath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  fs.renameSync(tmp, filePath);
+}
+
+function projectIdFromBrief(brief: CreativeBrief, projectDir: string): string {
+  return brief.project_id || brief.project?.id || path.basename(projectDir);
+}
+
 async function runCommand(cmd: string, args: string[], cwd: string): Promise<void> {
   const { stdout, stderr } = await execFileAsync(cmd, args, {
     cwd,
@@ -184,6 +202,11 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
     sourceMap,
   );
 
+  console.log("[editorial] visual retrieval");
+  const visualEvidence = await runVisualRetrieval(projectDir, extractVisualQueries(brief), {
+    limitPerQuery: 8,
+  });
+
   console.log("[editorial] rough pass");
   const rough = await roughCutPlanning(
     brief,
@@ -191,6 +214,17 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
     representativeFrames,
     segments,
     bgmDurationSec,
+    { mode: "headless", visualEvidence },
+  );
+  writeJsonArtifact(
+    projectDir,
+    "04_plan/visual_search_trace.json",
+    buildVisualRetrievalTrace(
+      projectIdFromBrief(brief, projectDir),
+      visualEvidence,
+      new Date().toISOString(),
+      buildSelectedLinkage(rough.selects, visualEvidence),
+    ),
   );
   writeYamlArtifact(
     projectDir,

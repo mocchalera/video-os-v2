@@ -13,6 +13,7 @@ import type { CreativeBrief } from "../runtime/artifacts/types.js";
 import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { MarlinEventsArtifact } from "../runtime/connectors/marlin-types.js";
 import type { KeyFrame } from "../runtime/pipeline/stages/craft-frames.js";
+import type { VisualRetrievalEvidence } from "../runtime/agents/visual-retrieval-evidence.js";
 import { parseArgs } from "../scripts/editorial-pipeline.js";
 
 const require = createRequire(import.meta.url);
@@ -214,6 +215,57 @@ function keyFrames(): Map<string, KeyFrame[]> {
   ]);
 }
 
+function visualSearchInput(query: string, limit = 8) {
+  return {
+    query,
+    semantic: query,
+    mode: "hybrid" as const,
+    limit,
+  };
+}
+
+function visualEvidence(): VisualRetrievalEvidence[] {
+  return [
+    {
+      query_id: "must_have_01",
+      source: "brief.must_have",
+      query: "warm natural light",
+      search_input: visualSearchInput("warm natural light"),
+      mode: "hybrid",
+      results: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_001",
+          src_in_us: 0,
+          src_out_us: 4_000_000,
+          summary: "Warm light on hands preparing the product.",
+          score: 0.867,
+          score_breakdown: {
+            qwen_visual: 0.852,
+            qwen_text: 0.831,
+            e5_text: 0.82,
+            lexical: 0.5,
+            final: 0.867,
+          },
+          matched_frame_path: "03_analysis/frames/SEG_001/representative.jpg",
+          matched_embedding_type: "visual_representative",
+          tags: ["warm", "hands"],
+        },
+      ],
+      warnings: [],
+    },
+  ];
+}
+
+function extractVisualEvidenceJson(prompt: string): Record<string, unknown> {
+  const sectionStart = prompt.indexOf("## Visual Retrieval Evidence (Qwen3-VL)");
+  expect(sectionStart).toBeGreaterThanOrEqual(0);
+  const section = prompt.slice(sectionStart);
+  const match = section.match(/```json\n([\s\S]*?)\n```/);
+  expect(match?.[1]).toBeTruthy();
+  return JSON.parse(match?.[1] ?? "{}") as Record<string, unknown>;
+}
+
 beforeEach(() => {
   previousGeminiKey = process.env.GEMINI_API_KEY;
   delete process.env.GEMINI_API_KEY;
@@ -386,7 +438,9 @@ describe("unified editorial agent", () => {
     expect(task.prompt).toContain("analyze_clip_range(asset_id, start_sec, end_sec)");
     expect(task.prompt).toContain("find_moment(asset_id, query)");
     expect(task.prompt).toContain("extract_frame(asset_id, timestamp_sec)");
-    expect(task.prompt).toContain("search_footage(query, filters, filters_json, mode, limit)");
+    expect(task.prompt).toContain("search_footage(query, mode, filters_json, limit, image_query_path, visual_anchor_segment_id, visual_anchor_frame_type, visual_goal)");
+    expect(task.prompt).toContain("visual_search(query_frame_path, text_hint, exclude_segment_ids, limit)");
+    expect(task.prompt).toContain("mode=visual and image_query_path");
     expect(task.prompt).toContain("best_for_beat(beat_purpose, emotion, exclude_segment_ids, limit)");
     expect(task.prompt).toContain("cite the query, result segment_id, evidence_refs, and key_frame_path");
     expect(task.tools?.map((tool) => tool.name)).toEqual([
@@ -395,6 +449,7 @@ describe("unified editorial agent", () => {
       "extract_frame",
       "compare_frames",
       "search_footage",
+      "visual_search",
       "similar_to",
       "unused_footage",
       "best_for_beat",
@@ -433,6 +488,186 @@ describe("unified editorial agent", () => {
       vi.doUnmock("../runtime/connectors/gemini-json.js");
       vi.resetModules();
     }
+  });
+
+  it("rough prompt includes JSON-formatted visual retrieval evidence when provided", async () => {
+    const geminiCalls: string[] = [];
+    vi.resetModules();
+    vi.doMock("../runtime/connectors/gemini-json.js", () => ({
+      callGeminiJson: async (prompt: string) => {
+        geminiCalls.push(prompt);
+        return "{}";
+      },
+    }));
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key";
+      const mod = await import("../runtime/agents/unified-editorial-agent.js");
+      await mod.roughCutPlanning(
+        brief(),
+        marlinEvents(),
+        representativeFrames(),
+        segments(),
+        24,
+        { mode: "headless", visualEvidence: visualEvidence() },
+      );
+
+      expect(geminiCalls).toHaveLength(1);
+      expect(geminiCalls[0]).toContain("## Visual Retrieval Evidence (Qwen3-VL)");
+      const payload = extractVisualEvidenceJson(geminiCalls[0]);
+      const entries = payload.visual_retrieval_evidence as Array<Record<string, unknown>>;
+      const result = (entries[0].results as Array<Record<string, unknown>>)[0];
+      expect(entries[0].query_id).toBe("must_have_01");
+      expect(result).toMatchObject({
+        segment_id: "SEG_001",
+        asset_id: "AST_001",
+        src_in_us: 0,
+        src_out_us: 4_000_000,
+        scores: {
+          qwen_visual: 0.852,
+          qwen_text: 0.831,
+          e5_text: 0.82,
+          final: 0.867,
+        },
+        matched_frame_path: "03_analysis/frames/SEG_001/representative.jpg",
+      });
+      expect(geminiCalls[0].indexOf("## Visual Retrieval Evidence (Qwen3-VL)"))
+        .toBeLessThan(geminiCalls[0].indexOf("## All Marlin asset reports plus representative frames"));
+    } finally {
+      vi.doUnmock("../runtime/connectors/gemini-json.js");
+      vi.resetModules();
+    }
+  });
+
+  it("rough prompt without visual evidence is unchanged for empty evidence", async () => {
+    const geminiCalls: string[] = [];
+    vi.resetModules();
+    vi.doMock("../runtime/connectors/gemini-json.js", () => ({
+      callGeminiJson: async (prompt: string) => {
+        geminiCalls.push(prompt);
+        return "{}";
+      },
+    }));
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key";
+      const mod = await import("../runtime/agents/unified-editorial-agent.js");
+      await mod.roughCutPlanning(
+        brief(),
+        marlinEvents(),
+        representativeFrames(),
+        segments(),
+        24,
+        { mode: "headless" },
+      );
+      await mod.roughCutPlanning(
+        brief(),
+        marlinEvents(),
+        representativeFrames(),
+        segments(),
+        24,
+        { mode: "headless", visualEvidence: [] },
+      );
+
+      expect(geminiCalls).toHaveLength(2);
+      expect(geminiCalls[0]).not.toContain("## Visual Retrieval Evidence (Qwen3-VL)");
+      expect(geminiCalls[1]).toBe(geminiCalls[0]);
+    } finally {
+      vi.doUnmock("../runtime/connectors/gemini-json.js");
+      vi.resetModules();
+    }
+  });
+
+  it("enriches selected candidate evidence when a segment matches visual retrieval", async () => {
+    const rough = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+      { mode: "headless", visualEvidence: visualEvidence() },
+    );
+
+    expect(rough.selects.candidates.find((candidate) => candidate.segment_id === "SEG_001")?.evidence).toContain(
+      "Qwen visual retrieval: query=must_have_01 qwen_visual=0.852 final=0.867 matched_frame=03_analysis/frames/SEG_001/representative.jpg",
+    );
+  });
+
+  it("skips visual retrieval enrichment when no selected candidate matches", async () => {
+    const baseline = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+    );
+    const rough = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+      {
+        mode: "headless",
+        visualEvidence: [
+          {
+            ...visualEvidence()[0],
+            results: [
+              {
+                ...visualEvidence()[0].results[0],
+                segment_id: "SEG_NOT_SELECTED",
+                asset_id: "AST_NOT_SELECTED",
+              },
+            ],
+          },
+        ],
+      },
+    );
+
+    expect(rough.selects.candidates.map((candidate) => candidate.evidence)).toEqual(
+      baseline.selects.candidates.map((candidate) => candidate.evidence),
+    );
+  });
+
+  it("adds only one visual retrieval enrichment when the same segment appears in multiple queries", async () => {
+    const duplicateEvidence: VisualRetrievalEvidence[] = [
+      ...visualEvidence(),
+      {
+        ...visualEvidence()[0],
+        query_id: "policy_hint_01",
+        source: "brief.editorial.policy_hint",
+        query: "soft texture",
+        search_input: visualSearchInput("soft texture"),
+        results: [
+          {
+            ...visualEvidence()[0].results[0],
+            score: 0.91,
+            score_breakdown: {
+              qwen_visual: 0.88,
+              qwen_text: 0.84,
+              e5_text: 0.86,
+              lexical: 0.4,
+              final: 0.91,
+            },
+          },
+        ],
+      },
+    ];
+
+    const rough = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+      { mode: "headless", visualEvidence: duplicateEvidence },
+    );
+
+    const evidence = rough.selects.candidates.find((candidate) => candidate.segment_id === "SEG_001")?.evidence ?? [];
+    const retrievalLines = evidence.filter((line) => line.startsWith("Qwen visual retrieval:"));
+    expect(retrievalLines).toEqual([
+      "Qwen visual retrieval: query=policy_hint_01 qwen_visual=0.880 final=0.910 matched_frame=03_analysis/frames/SEG_001/representative.jpg",
+    ]);
   });
 
   it("formats rough and fine frame references for repo-side agents", async () => {
