@@ -34,12 +34,41 @@ export interface FootageSearchFilters {
   place_hint_category?: string;
   has_text?: boolean;
   has_dialogue?: boolean;
+  has_music?: boolean;
+  has_ambient?: boolean;
+  video_codec?: string;
+  recording_format?: string;
+  frame_rate_mode?: "cfr" | "vfr" | "audio_only" | "unknown";
+  min_width?: number;
+  min_height?: number;
+  color_primaries?: string;
+  color_transfer?: string;
+  reel_name?: string;
+  card_id?: string;
+  camera_id?: string;
   camera_motion?: string;
+  camera_motion_type?: string | string[];
+  camera_motion_direction?: string | string[];
   shot_scale?: string;
   stability?: string;
+  camera_stability?: string | string[];
+  audio_role?: string | string[];
+  peak_dbfs_max?: number;
+  integrated_lufs_min?: number;
+  integrated_lufs_max?: number;
+  silence_ratio_min?: number;
+  silence_ratio_max?: number;
+  scene_number?: string;
+  shot_number?: string;
+  take_number?: string;
+  circle_take?: boolean;
+  best_take?: boolean;
   usability?: string;
+  min_metadata_confidence?: number;
   include_tags_any?: string[];
+  custom_tags_any?: string[];
   exclude_quality_flags?: string[];
+  noise_flags_exclude?: string[];
   exclude_segment_ids?: string[];
 }
 
@@ -123,8 +152,16 @@ export interface FootageSearchResult {
   };
   metadata?: {
     camera_motion?: string;
+    camera_motion_type?: string;
+    camera_motion_direction?: string;
     shot_scale?: string;
     stability?: string;
+    camera_stability?: string;
+    audio_role?: string;
+    scene_number?: string;
+    shot_number?: string;
+    take_number?: string;
+    circle_take?: boolean;
     dominant_subject_position?: string;
     usability?: string;
     has_dialogue?: boolean;
@@ -212,8 +249,28 @@ interface DbSearchRow {
   peak_confidence: number | null;
   peak_description: string | null;
   camera_motion: string | null;
+  camera_motion_type: string | null;
+  camera_motion_direction: string | null;
   shot_scale: string | null;
   stability: string | null;
+  camera_stability: string | null;
+  audio_role: string | null;
+  has_music: number | null;
+  has_ambient: number | null;
+  peak_dbfs: number | null;
+  integrated_lufs: number | null;
+  silence_ratio: number | null;
+  noise_flags_json: string;
+  scene_number: string | null;
+  shot_number: string | null;
+  take_number: string | null;
+  circle_take: number | null;
+  best_take: number | null;
+  custom_tags_json: string;
+  logging_confidence: number | null;
+  audio_confidence: number | null;
+  visual_motion_confidence: number | null;
+  visual_scale_confidence: number | null;
   dominant_subject_position: string | null;
   usability: string | null;
 }
@@ -224,9 +281,11 @@ interface BuiltWhere {
 }
 
 interface MetadataAvailability {
+  assetTechnical: boolean;
   visualProfile: boolean;
   audioProfile: boolean;
   logging: boolean;
+  usability: boolean;
   metadataFts: boolean;
 }
 
@@ -275,16 +334,36 @@ function baseSelect(metadata: MetadataAvailability): string {
       app.place_hint_confidence,
       COALESCE(app.aesthetic_notes_flat, '') AS aesthetic_notes_flat,
       ${metadata.audioProfile ? "COALESCE(sap.has_dialogue, st.has_dialogue, 0)" : "COALESCE(st.has_dialogue, 0)"} AS has_dialogue,
+      ${metadata.audioProfile ? "sap.has_music" : "NULL"} AS has_music,
+      ${metadata.audioProfile ? "sap.has_ambient" : "NULL"} AS has_ambient,
       pa.fused_peak_score,
       pm.timestamp_us AS peak_timestamp_us,
       pm.type AS peak_type,
       pm.confidence AS peak_confidence,
       pm.description AS peak_description,
-      ${metadata.visualProfile ? "svp.camera_motion" : "NULL"} AS camera_motion,
+      ${metadata.visualProfile ? "svp.camera_motion_type" : "NULL"} AS camera_motion,
+      ${metadata.visualProfile ? "svp.camera_motion_type" : "NULL"} AS camera_motion_type,
+      ${metadata.visualProfile ? "svp.camera_motion_direction" : "NULL"} AS camera_motion_direction,
       ${metadata.visualProfile ? "svp.shot_scale" : "NULL"} AS shot_scale,
-      ${metadata.visualProfile ? "svp.stability" : "NULL"} AS stability,
-      ${metadata.visualProfile ? "svp.dominant_subject_position" : "NULL"} AS dominant_subject_position,
-      ${metadata.logging ? "sl.usability" : "NULL"} AS usability
+      ${metadata.visualProfile ? "svp.camera_stability" : "NULL"} AS stability,
+      ${metadata.visualProfile ? "svp.camera_stability" : "NULL"} AS camera_stability,
+      ${metadata.visualProfile ? "svp.subject_screen_side" : "NULL"} AS dominant_subject_position,
+      ${metadata.visualProfile ? "svp.motion_confidence" : "NULL"} AS visual_motion_confidence,
+      ${metadata.visualProfile ? "svp.scale_confidence" : "NULL"} AS visual_scale_confidence,
+      ${metadata.audioProfile ? "sap.audio_role" : "NULL"} AS audio_role,
+      ${metadata.audioProfile ? "sap.peak_dbfs" : "NULL"} AS peak_dbfs,
+      ${metadata.audioProfile ? "sap.integrated_lufs" : "NULL"} AS integrated_lufs,
+      ${metadata.audioProfile ? "sap.silence_ratio" : "NULL"} AS silence_ratio,
+      ${metadata.audioProfile ? "sap.noise_flags_json" : "'[]'"} AS noise_flags_json,
+      ${metadata.audioProfile ? "sap.confidence" : "NULL"} AS audio_confidence,
+      ${metadata.logging ? "slp.scene_number" : "NULL"} AS scene_number,
+      ${metadata.logging ? "slp.shot_number" : "NULL"} AS shot_number,
+      ${metadata.logging ? "slp.take_number" : "NULL"} AS take_number,
+      ${metadata.logging ? "slp.circle_take" : "NULL"} AS circle_take,
+      ${metadata.logging ? "slp.best_take" : "NULL"} AS best_take,
+      ${metadata.logging ? "slp.custom_tags_json" : "'[]'"} AS custom_tags_json,
+      ${metadata.logging ? "slp.confidence" : "NULL"} AS logging_confidence,
+      ${metadata.usability ? "sup.usability" : "NULL"} AS usability
     FROM segments s
     JOIN assets a ON a.asset_id = s.asset_id
     LEFT JOIN visual_quality v ON v.segment_id = s.segment_id
@@ -564,34 +643,43 @@ function buildStructuredWhere(filters: FootageSearchFilters, metadata: MetadataA
   } else if (filters.has_dialogue === false) {
     clauses.push(`(${metadata.audioProfile ? "COALESCE(sap.has_dialogue, st.has_dialogue, 0)" : "COALESCE(st.has_dialogue, 0)"} = 0 AND COALESCE(s.segment_type, '') <> 'dialogue')`);
   }
-  if (filters.camera_motion) {
-    if (metadata.visualProfile) {
-      clauses.push("svp.camera_motion = @camera_motion");
-      params.camera_motion = filters.camera_motion;
-    } else {
-      clauses.push("0 = 1");
-    }
-  }
-  if (filters.shot_scale) {
-    if (metadata.visualProfile) {
-      clauses.push("svp.shot_scale = @shot_scale");
-      params.shot_scale = filters.shot_scale;
-    } else {
-      clauses.push("0 = 1");
-    }
-  }
-  if (filters.stability) {
-    if (metadata.visualProfile) {
-      clauses.push("svp.stability = @stability");
-      params.stability = filters.stability;
-    } else {
-      clauses.push("0 = 1");
-    }
-  }
-  if (filters.usability) {
-    if (metadata.logging) {
-      clauses.push("sl.usability = @usability");
-      params.usability = filters.usability;
+  if (filters.has_music != null) addBooleanFilter(clauses, params, metadata.audioProfile, "sap.has_music", "has_music", filters.has_music);
+  if (filters.has_ambient != null) addBooleanFilter(clauses, params, metadata.audioProfile, "sap.has_ambient", "has_ambient", filters.has_ambient);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.video_codec", "video_codec", filters.video_codec);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.recording_format", "recording_format", filters.recording_format);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.frame_rate_mode", "frame_rate_mode", filters.frame_rate_mode);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.color_primaries", "color_primaries", filters.color_primaries);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.color_transfer", "color_transfer", filters.color_transfer);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.reel_name", "reel_name", filters.reel_name);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.card_id", "technical_card_id", filters.card_id);
+  addStringFilter(clauses, params, metadata.assetTechnical, "atm.camera_id", "technical_camera_id", filters.camera_id);
+  if (typeof filters.min_width === "number") addRangeFilter(clauses, params, metadata.assetTechnical, "atm.width", "min_width", ">=", filters.min_width);
+  if (typeof filters.min_height === "number") addRangeFilter(clauses, params, metadata.assetTechnical, "atm.height", "min_height", ">=", filters.min_height);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.camera_motion_type", "camera_motion_type", filters.camera_motion_type ?? filters.camera_motion);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.camera_motion_direction", "camera_motion_direction", filters.camera_motion_direction);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.shot_scale", "shot_scale", filters.shot_scale);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.camera_stability", "camera_stability", filters.camera_stability ?? filters.stability);
+  addStringArrayFilter(clauses, params, metadata.audioProfile, "sap.audio_role", "audio_role", filters.audio_role);
+  if (typeof filters.peak_dbfs_max === "number") addRangeFilter(clauses, params, metadata.audioProfile, "sap.peak_dbfs", "peak_dbfs_max", "<=", filters.peak_dbfs_max);
+  if (typeof filters.integrated_lufs_min === "number") addRangeFilter(clauses, params, metadata.audioProfile, "sap.integrated_lufs", "integrated_lufs_min", ">=", filters.integrated_lufs_min);
+  if (typeof filters.integrated_lufs_max === "number") addRangeFilter(clauses, params, metadata.audioProfile, "sap.integrated_lufs", "integrated_lufs_max", "<=", filters.integrated_lufs_max);
+  if (typeof filters.silence_ratio_min === "number") addRangeFilter(clauses, params, metadata.audioProfile, "sap.silence_ratio", "silence_ratio_min", ">=", filters.silence_ratio_min);
+  if (typeof filters.silence_ratio_max === "number") addRangeFilter(clauses, params, metadata.audioProfile, "sap.silence_ratio", "silence_ratio_max", "<=", filters.silence_ratio_max);
+  addStringFilter(clauses, params, metadata.logging, "slp.scene_number", "scene_number", filters.scene_number);
+  addStringFilter(clauses, params, metadata.logging, "slp.shot_number", "shot_number", filters.shot_number);
+  addStringFilter(clauses, params, metadata.logging, "slp.take_number", "take_number", filters.take_number);
+  if (filters.circle_take != null) addBooleanFilter(clauses, params, metadata.logging, "slp.circle_take", "circle_take", filters.circle_take);
+  if (filters.best_take != null) addBooleanFilter(clauses, params, metadata.logging, "slp.best_take", "best_take", filters.best_take);
+  addStringFilter(clauses, params, metadata.usability, "sup.usability", "usability", filters.usability);
+  if (typeof filters.min_metadata_confidence === "number") {
+    if (metadata.visualProfile || metadata.audioProfile || metadata.logging) {
+      const confidenceClauses = [
+        metadata.visualProfile ? "COALESCE(svp.motion_confidence, svp.scale_confidence, 0)" : "0",
+        metadata.audioProfile ? "COALESCE(sap.confidence, 0)" : "0",
+        metadata.logging ? "COALESCE(slp.confidence, 0)" : "0",
+      ];
+      clauses.push(`MAX(${confidenceClauses.join(", ")}) >= @min_metadata_confidence`);
+      params.min_metadata_confidence = filters.min_metadata_confidence;
     } else {
       clauses.push("0 = 1");
     }
@@ -631,9 +719,29 @@ function ftsScores(
       WHERE segments_fts MATCH @fts_match AND ${where.sql}
       ORDER BY rank ASC, s.segment_id ASC
     `).all({ ...where.params, fts_match: match }) as Array<{ segment_id: string; rank: number }>;
-    return new Map(rows
+    const rankMap = new Map(rows
       .filter((row) => allowedIds.has(row.segment_id))
       .map((row) => [row.segment_id, row.rank]));
+    if (metadata.metadataFts) {
+      const metadataRows = db.prepare(`
+        SELECT s.segment_id, bm25(segment_metadata_fts) AS rank
+        FROM segment_metadata_fts
+        JOIN segments s ON s.segment_id = segment_metadata_fts.segment_id
+        JOIN assets a ON a.asset_id = s.asset_id
+        LEFT JOIN visual_quality v ON v.segment_id = s.segment_id
+        LEFT JOIN visual_appraisal app ON app.segment_id = s.segment_id
+        LEFT JOIN segment_transcripts st ON st.segment_id = s.segment_id
+        ${metadataJoinSql(metadata)}
+        WHERE segment_metadata_fts MATCH @fts_match AND ${where.sql}
+        ORDER BY rank ASC, s.segment_id ASC
+      `).all({ ...where.params, fts_match: match }) as Array<{ segment_id: string; rank: number }>;
+      for (const row of metadataRows) {
+        if (!allowedIds.has(row.segment_id)) continue;
+        const previous = rankMap.get(row.segment_id);
+        rankMap.set(row.segment_id, previous == null ? row.rank : Math.min(previous, row.rank));
+      }
+    }
+    return rankMap;
   } catch (error) {
     warnings.push(`FTS search skipped: ${error instanceof Error ? error.message : String(error)}`);
     return new Map();
@@ -686,16 +794,26 @@ function loadEmbeddingRows(
 
 function applyPostFilters(rows: DbSearchRow[], filters: FootageSearchFilters): DbSearchRow[] {
   const includeTags = (filters.include_tags_any ?? []).map((tag) => tag.toLowerCase());
+  const customTags = (filters.custom_tags_any ?? []).map((tag) => tag.toLowerCase());
   const excludeFlags = (filters.exclude_quality_flags ?? []).map((flag) => flag.toLowerCase());
+  const noiseFlagsExclude = (filters.noise_flags_exclude ?? []).map((flag) => flag.toLowerCase());
   return rows.filter((row) => {
     if (includeTags.length > 0) {
       const tags = [...jsonStrings(row.tags_json), ...jsonStrings(row.asset_tags_json)].map((tag) => tag.toLowerCase());
       if (!includeTags.some((tag) => tags.includes(tag))) return false;
     }
+    if (customTags.length > 0) {
+      const rowCustomTags = jsonStrings(row.custom_tags_json).map((tag) => tag.toLowerCase());
+      if (!customTags.some((tag) => rowCustomTags.includes(tag))) return false;
+    }
     if (excludeFlags.length > 0) {
       const flags = [...jsonStrings(row.quality_flags_json), ...jsonStrings(row.asset_quality_flags_json)]
         .map((flag) => flag.toLowerCase());
       if (excludeFlags.some((flag) => flags.includes(flag))) return false;
+    }
+    if (noiseFlagsExclude.length > 0) {
+      const flags = jsonStrings(row.noise_flags_json).map((flag) => flag.toLowerCase());
+      if (noiseFlagsExclude.some((flag) => flags.includes(flag))) return false;
     }
     return true;
   });
@@ -1024,8 +1142,28 @@ function fallbackRow(
     peak_confidence: null,
     peak_description: null,
     camera_motion: null,
+    camera_motion_type: null,
+    camera_motion_direction: null,
     shot_scale: null,
     stability: null,
+    camera_stability: null,
+    audio_role: null,
+    has_music: null,
+    has_ambient: null,
+    peak_dbfs: null,
+    integrated_lufs: null,
+    silence_ratio: null,
+    noise_flags_json: "[]",
+    scene_number: null,
+    shot_number: null,
+    take_number: null,
+    circle_take: null,
+    best_take: null,
+    custom_tags_json: "[]",
+    logging_confidence: null,
+    audio_confidence: null,
+    visual_motion_confidence: null,
+    visual_scale_confidence: null,
     dominant_subject_position: null,
     usability: null,
   };
@@ -1050,8 +1188,16 @@ function fallbackHasDialogue(row: DbSearchRow): boolean {
 function resultMetadata(row: DbSearchRow): NonNullable<FootageSearchResult["metadata"]> {
   const metadata: NonNullable<FootageSearchResult["metadata"]> = {};
   if (row.camera_motion) metadata.camera_motion = row.camera_motion;
+  if (row.camera_motion_type) metadata.camera_motion_type = row.camera_motion_type;
+  if (row.camera_motion_direction) metadata.camera_motion_direction = row.camera_motion_direction;
   if (row.shot_scale) metadata.shot_scale = row.shot_scale;
   if (row.stability) metadata.stability = row.stability;
+  if (row.camera_stability) metadata.camera_stability = row.camera_stability;
+  if (row.audio_role) metadata.audio_role = row.audio_role;
+  if (row.scene_number) metadata.scene_number = row.scene_number;
+  if (row.shot_number) metadata.shot_number = row.shot_number;
+  if (row.take_number) metadata.take_number = row.take_number;
+  if (row.circle_take != null) metadata.circle_take = row.circle_take === 1;
   if (row.dominant_subject_position) metadata.dominant_subject_position = row.dominant_subject_position;
   if (row.usability) metadata.usability = row.usability;
   metadata.has_dialogue = fallbackHasDialogue(row);
@@ -1081,18 +1227,22 @@ async function segmentTextForSimilarity(projectDir: string, segmentId: string): 
 
 function metadataAvailability(db: Database.Database): MetadataAvailability {
   return {
+    assetTechnical: tableExists(db, "asset_technical_metadata"),
     visualProfile: tableExists(db, "segment_visual_profile"),
     audioProfile: tableExists(db, "segment_audio_profile"),
-    logging: tableExists(db, "segment_logging"),
-    metadataFts: tableExists(db, "metadata_fts"),
+    logging: tableExists(db, "segment_logging_profile"),
+    usability: tableExists(db, "segment_usability_profile"),
+    metadataFts: tableExists(db, "segment_metadata_fts"),
   };
 }
 
 function metadataJoinSql(metadata: MetadataAvailability): string {
   return [
+    metadata.assetTechnical ? "LEFT JOIN asset_technical_metadata atm ON atm.asset_id = a.asset_id" : "",
     metadata.visualProfile ? "LEFT JOIN segment_visual_profile svp ON svp.segment_id = s.segment_id" : "",
     metadata.audioProfile ? "LEFT JOIN segment_audio_profile sap ON sap.segment_id = s.segment_id" : "",
-    metadata.logging ? "LEFT JOIN segment_logging sl ON sl.segment_id = s.segment_id" : "",
+    metadata.logging ? "LEFT JOIN segment_logging_profile slp ON slp.segment_id = s.segment_id" : "",
+    metadata.usability ? "LEFT JOIN segment_usability_profile sup ON sup.segment_id = s.segment_id" : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -1102,10 +1252,28 @@ function tableExists(db: Database.Database, tableName: string): boolean {
 
 function requestedMetadataFilters(filters: FootageSearchFilters): string[] {
   const names: string[] = [];
+  if (filters.video_codec) names.push("video_codec");
+  if (filters.recording_format) names.push("recording_format");
+  if (filters.frame_rate_mode) names.push("frame_rate_mode");
+  if (filters.min_width != null) names.push("min_width");
+  if (filters.min_height != null) names.push("min_height");
   if (filters.camera_motion) names.push("camera_motion");
+  if (filters.camera_motion_type) names.push("camera_motion_type");
+  if (filters.camera_motion_direction) names.push("camera_motion_direction");
   if (filters.shot_scale) names.push("shot_scale");
   if (filters.stability) names.push("stability");
+  if (filters.camera_stability) names.push("camera_stability");
+  if (filters.audio_role) names.push("audio_role");
+  if (filters.has_music != null) names.push("has_music");
+  if (filters.has_ambient != null) names.push("has_ambient");
+  if (filters.scene_number) names.push("scene_number");
+  if (filters.shot_number) names.push("shot_number");
+  if (filters.take_number) names.push("take_number");
+  if (filters.circle_take != null) names.push("circle_take");
+  if (filters.best_take != null) names.push("best_take");
   if (filters.usability) names.push("usability");
+  if (filters.custom_tags_any?.length) names.push("custom_tags_any");
+  if (filters.noise_flags_exclude?.length) names.push("noise_flags_exclude");
   return names;
 }
 
@@ -1127,15 +1295,34 @@ function appendMissingIndexedDataWarnings(
   if ((filters.place_hint_name || filters.place_hint_category) && !db.prepare("SELECT 1 FROM visual_appraisal WHERE place_hint_name IS NOT NULL OR place_hint_category IS NOT NULL LIMIT 1").get()) {
     warnings.push("place_hint filter requested, but no place_hint values are indexed");
   }
-  if ((filters.camera_motion || filters.shot_scale || filters.stability) && !metadata.visualProfile) {
+  const visualFilterRequested = Boolean(filters.camera_motion || filters.camera_motion_type || filters.camera_motion_direction || filters.shot_scale || filters.stability || filters.camera_stability);
+  const audioFilterRequested = Boolean(filters.audio_role || filters.has_music != null || filters.has_ambient != null || filters.peak_dbfs_max != null || filters.integrated_lufs_min != null || filters.integrated_lufs_max != null || filters.silence_ratio_min != null || filters.silence_ratio_max != null || filters.noise_flags_exclude?.length);
+  const loggingFilterRequested = Boolean(filters.scene_number || filters.shot_number || filters.take_number || filters.circle_take != null || filters.best_take != null || filters.custom_tags_any?.length);
+  const technicalFilterRequested = Boolean(filters.video_codec || filters.recording_format || filters.frame_rate_mode || filters.min_width != null || filters.min_height != null || filters.color_primaries || filters.color_transfer || filters.reel_name || filters.card_id || filters.camera_id);
+  if (technicalFilterRequested && !metadata.assetTechnical) {
+    warnings.push("technical metadata filter requested, but asset_technical_metadata is missing in this footage DB");
+  } else if (technicalFilterRequested && !db.prepare("SELECT 1 FROM asset_technical_metadata LIMIT 1").get()) {
+    warnings.push("technical metadata filter requested, but no asset_technical_metadata rows are indexed");
+  }
+  if (visualFilterRequested && !metadata.visualProfile) {
     warnings.push("visual metadata filter requested, but segment_visual_profile is missing in this footage DB");
-  } else if ((filters.camera_motion || filters.shot_scale || filters.stability) && !db.prepare("SELECT 1 FROM segment_visual_profile LIMIT 1").get()) {
+  } else if (visualFilterRequested && !db.prepare("SELECT 1 FROM segment_visual_profile LIMIT 1").get()) {
     warnings.push("visual metadata filter requested, but no segment_visual_profile rows are indexed");
   }
-  if (filters.usability && !metadata.logging) {
-    warnings.push("usability filter requested, but segment_logging is missing in this footage DB");
-  } else if (filters.usability && !db.prepare("SELECT 1 FROM segment_logging LIMIT 1").get()) {
-    warnings.push("usability filter requested, but no segment_logging rows are indexed");
+  if (audioFilterRequested && !metadata.audioProfile) {
+    warnings.push("audio metadata filter requested, but segment_audio_profile is missing in this footage DB");
+  } else if (audioFilterRequested && !db.prepare("SELECT 1 FROM segment_audio_profile LIMIT 1").get()) {
+    warnings.push("audio metadata filter requested, but no segment_audio_profile rows are indexed");
+  }
+  if (loggingFilterRequested && !metadata.logging) {
+    warnings.push("logging metadata filter requested, but segment_logging_profile is missing in this footage DB");
+  } else if (loggingFilterRequested && !db.prepare("SELECT 1 FROM segment_logging_profile LIMIT 1").get()) {
+    warnings.push("logging metadata filter requested, but no segment_logging_profile rows are indexed");
+  }
+  if (filters.usability && !metadata.usability) {
+    warnings.push("usability filter requested, but segment_usability_profile is missing in this footage DB");
+  } else if (filters.usability && !db.prepare("SELECT 1 FROM segment_usability_profile LIMIT 1").get()) {
+    warnings.push("usability filter requested, but no segment_usability_profile rows are indexed");
   }
 }
 
@@ -1179,6 +1366,73 @@ function expandedPhraseClauses(text: string): string[] {
 function quoteFtsPhrase(text: string): string {
   const cleaned = normalizeSearchText(text).replace(/"/g, "\"\"");
   return cleaned ? `"${cleaned}"` : "";
+}
+
+function addStringFilter(
+  clauses: string[],
+  params: Record<string, unknown>,
+  available: boolean,
+  column: string,
+  key: string,
+  value: string | undefined,
+): void {
+  if (!value) return;
+  if (!available) {
+    clauses.push("0 = 1");
+    return;
+  }
+  clauses.push(`${column} = @${key}`);
+  params[key] = value;
+}
+
+function addStringArrayFilter(
+  clauses: string[],
+  params: Record<string, unknown>,
+  available: boolean,
+  column: string,
+  key: string,
+  value: string | string[] | undefined,
+): void {
+  const values = Array.isArray(value) ? value.filter(Boolean) : value ? [value] : [];
+  if (values.length === 0) return;
+  if (!available) {
+    clauses.push("0 = 1");
+    return;
+  }
+  clauses.push(inClause(column, key, values, params));
+}
+
+function addBooleanFilter(
+  clauses: string[],
+  params: Record<string, unknown>,
+  available: boolean,
+  column: string,
+  key: string,
+  value: boolean,
+): void {
+  if (!available) {
+    clauses.push("0 = 1");
+    return;
+  }
+  clauses.push(`${column} = @${key}`);
+  params[key] = value ? 1 : 0;
+}
+
+function addRangeFilter(
+  clauses: string[],
+  params: Record<string, unknown>,
+  available: boolean,
+  column: string,
+  key: string,
+  operator: ">=" | "<=",
+  value: number,
+): void {
+  if (!available) {
+    clauses.push("0 = 1");
+    return;
+  }
+  clauses.push(`${column} ${operator} @${key}`);
+  params[key] = value;
 }
 
 function inClause(

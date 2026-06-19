@@ -12,6 +12,7 @@ interface Args {
   embeddingPolicy?: FootageDbEmbeddingPolicy;
   rebuildMode?: FootageDbRebuildMode;
   allowRemoteEmbeddingModels?: boolean;
+  skipAudioAnalysis?: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -35,6 +36,8 @@ function parseArgs(argv: string[]): Args {
       index += 1;
     } else if (arg === "--allow-remote-embedding-models") {
       args.allowRemoteEmbeddingModels = true;
+    } else if (arg === "--skip-audio-analysis") {
+      args.skipAudioAnalysis = true;
     } else if (arg === "--help" || arg === "-h") {
       usage(0);
     } else {
@@ -53,6 +56,7 @@ async function main(): Promise<void> {
     embeddingPolicy: args.embeddingPolicy ?? "auto",
     rebuildMode: args.rebuildMode ?? "full",
     allowRemoteEmbeddingModels: args.allowRemoteEmbeddingModels ?? false,
+    skipAudioAnalysis: args.skipAudioAnalysis ?? false,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
@@ -73,6 +77,7 @@ Options:
   --output <path>                  default: <project>/03_analysis/search/footage.db
   --embedding-policy auto|skip|require  default: auto
   --rebuild-mode full|incremental
+  --skip-audio-analysis          leave audio level/silence fields null
   --allow-remote-embedding-models  default false
 `);
   process.exit(exitCode);

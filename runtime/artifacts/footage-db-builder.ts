@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { computeNormalizedJsonHash } from "./p1-manifest-coverage.js";
 import { footageDbPath } from "./footage-db.js";
 import {
+  extractAudioLevels,
   extractCameraMotion,
   extractSceneShotTake,
   extractShotScale,
@@ -23,6 +24,7 @@ export interface BuildFootageDbOptions {
   embeddingPolicy?: FootageDbEmbeddingPolicy;
   rebuildMode?: FootageDbRebuildMode;
   allowRemoteEmbeddingModels?: boolean;
+  skipAudioAnalysis?: boolean;
   now?: Date;
 }
 
@@ -37,10 +39,10 @@ export interface BuildFootageDbResult {
     fts_rows: number;
     marlin_events: number;
     transcript_segments: number;
-    asset_technical: number;
+    asset_technical_metadata: number;
     segment_visual_profiles: number;
     segment_audio_profiles: number;
-    segment_logging: number;
+    segment_logging_profiles: number;
     metadata_fts_rows: number;
     embeddings: number;
   };
@@ -65,6 +67,8 @@ interface LoadedInputs {
   segmentsJson: JsonRecord;
   marlinJson: JsonRecord | null;
   transcripts: TranscriptDocument[];
+  annotations: UserAnnotations;
+  filenameParser: FilenameParserConfig;
   sources: SourceRecord[];
   warnings: string[];
 }
@@ -119,6 +123,21 @@ interface PopulationResult {
   counts: BuildFootageDbResult["counts"];
   embeddingTexts: Array<{ segment_id: string; field: EmbeddingField; text: string; content_hash: string }>;
   warnings: string[];
+}
+
+interface UserAnnotations {
+  bySegmentId: Map<string, JsonRecord>;
+  byAssetId: Map<string, JsonRecord>;
+}
+
+interface FilenameParserConfig {
+  enabled: boolean;
+}
+
+interface UsabilityClassification {
+  usability: "fully_usable" | "partially_usable" | "unusable";
+  confidence: number;
+  evidence: string[];
 }
 
 const ARTIFACT_VERSION = "footage-db-v1" as const;
@@ -176,24 +195,63 @@ CREATE INDEX idx_assets_shooting_date ON assets(shooting_date);
 CREATE INDEX idx_assets_shooting_time ON assets(shooting_time);
 CREATE INDEX idx_assets_camera_type ON assets(camera_type);
 
-CREATE TABLE asset_technical (
+CREATE TABLE asset_technical_metadata (
   asset_id TEXT PRIMARY KEY REFERENCES assets(asset_id) ON DELETE CASCADE,
-  codec TEXT,
-  resolution_width INTEGER CHECK (resolution_width IS NULL OR resolution_width > 0),
-  resolution_height INTEGER CHECK (resolution_height IS NULL OR resolution_height > 0),
+
+  container_format TEXT,
+  container_long_name TEXT,
+  recording_format TEXT,
+
+  video_codec TEXT,
+  video_profile TEXT,
+  codec_tag TEXT,
+  width INTEGER CHECK (width IS NULL OR width > 0),
+  height INTEGER CHECK (height IS NULL OR height > 0),
   fps_num INTEGER CHECK (fps_num IS NULL OR fps_num > 0),
   fps_den INTEGER CHECK (fps_den IS NULL OR fps_den > 0),
+  r_frame_rate TEXT,
+  time_base TEXT,
+  frame_rate_mode TEXT CHECK (
+    frame_rate_mode IS NULL OR frame_rate_mode IN ('cfr', 'vfr', 'audio_only', 'unknown')
+  ),
+  pix_fmt TEXT,
   bit_depth INTEGER CHECK (bit_depth IS NULL OR bit_depth > 0),
+
+  color_primaries TEXT,
+  color_transfer TEXT,
   color_space TEXT,
-  audio_channels INTEGER CHECK (audio_channels IS NULL OR audio_channels >= 0),
-  audio_sample_rate INTEGER CHECK (audio_sample_rate IS NULL OR audio_sample_rate >= 0),
-  timecode TEXT,
-  recording_format TEXT
+  color_range TEXT,
+  rotation INTEGER CHECK (rotation IS NULL OR rotation IN (0, 90, 180, 270)),
+
+  stream_duration_json TEXT NOT NULL DEFAULT '[]',
+  audio_streams_json TEXT NOT NULL DEFAULT '[]',
+
+  timecode_start TEXT,
+  timecode_format TEXT CHECK (
+    timecode_format IS NULL OR timecode_format IN ('none', 'non_drop', 'drop_frame', 'inferred', 'unknown')
+  ),
+  reel_name TEXT,
+  card_id TEXT,
+  camera_id TEXT,
+
+  extraction_source_json TEXT NOT NULL DEFAULT '{}',
+  evidence_json TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE INDEX idx_asset_technical_codec ON asset_technical(codec, recording_format);
-CREATE INDEX idx_asset_technical_resolution ON asset_technical(resolution_width, resolution_height);
-CREATE INDEX idx_asset_technical_fps ON asset_technical(fps_num, fps_den);
+CREATE INDEX idx_asset_technical_codec
+  ON asset_technical_metadata(video_codec, video_profile, recording_format);
+
+CREATE INDEX idx_asset_technical_resolution
+  ON asset_technical_metadata(width, height);
+
+CREATE INDEX idx_asset_technical_rate
+  ON asset_technical_metadata(fps_num, fps_den, frame_rate_mode);
+
+CREATE INDEX idx_asset_technical_color
+  ON asset_technical_metadata(color_primaries, color_transfer, color_space);
+
+CREATE INDEX idx_asset_technical_reel
+  ON asset_technical_metadata(reel_name, card_id, camera_id);
 
 CREATE TABLE segments (
   segment_id TEXT PRIMARY KEY,
@@ -221,52 +279,168 @@ CREATE INDEX idx_segments_type ON segments(segment_type);
 
 CREATE TABLE segment_visual_profile (
   segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
-  camera_motion TEXT NOT NULL DEFAULT 'static' CHECK (
-    camera_motion IN ('static', 'pan_left', 'pan_right', 'tilt_up', 'tilt_down', 'dolly_in', 'dolly_out', 'tracking', 'crane', 'handheld', 'drone')
+
+  camera_motion_description TEXT NOT NULL DEFAULT '',
+  camera_motion_type TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    camera_motion_type IN (
+      'static', 'pan', 'tilt', 'push_in', 'pull_out', 'tracking',
+      'handheld', 'reveal', 'fast_action', 'mixed', 'unknown'
+    )
   ),
-  motion_direction TEXT,
-  motion_speed TEXT CHECK (motion_speed IS NULL OR motion_speed IN ('slow', 'medium', 'fast')),
-  stability TEXT NOT NULL DEFAULT 'stable' CHECK (
-    stability IN ('stable', 'slight_movement', 'shaky')
+  camera_motion_direction TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    camera_motion_direction IN (
+      'none', 'ltr', 'rtl', 'up', 'down', 'toward_camera', 'away_camera', 'mixed', 'unknown'
+    )
   ),
-  shot_scale TEXT NOT NULL DEFAULT 'medium' CHECK (
-    shot_scale IN ('extreme_wide', 'wide', 'full', 'medium', 'medium_closeup', 'closeup', 'extreme_closeup', 'detail')
+  camera_stability TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    camera_stability IN ('stable', 'slight', 'shaky', 'unknown')
   ),
-  dominant_subject_position TEXT CHECK (
-    dominant_subject_position IS NULL OR dominant_subject_position IN ('left', 'center', 'right')
-  )
+  motion_energy REAL CHECK (motion_energy IS NULL OR (motion_energy >= 0 AND motion_energy <= 1)),
+  camera_motion_energy REAL CHECK (
+    camera_motion_energy IS NULL OR (camera_motion_energy >= 0 AND camera_motion_energy <= 1)
+  ),
+
+  shot_scale TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    shot_scale IN (
+      'extreme_wide', 'wide', 'medium_wide', 'medium',
+      'medium_close', 'close', 'extreme_close', 'detail', 'unknown'
+    )
+  ),
+  composition_anchor TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    composition_anchor IN ('left', 'center_left', 'center', 'center_right', 'right', 'unknown')
+  ),
+  subject_screen_side TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    subject_screen_side IN ('left', 'center', 'right', 'mixed', 'none', 'unknown')
+  ),
+  dominant_subject_type TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    dominant_subject_type IN ('person', 'group', 'object', 'vehicle', 'environment', 'none', 'unknown')
+  ),
+  subject_movement_direction TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    subject_movement_direction IN ('ltr', 'rtl', 'toward_camera', 'away_camera', 'static', 'mixed', 'unknown')
+  ),
+
+  exposure_label TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    exposure_label IN ('under', 'normal', 'over', 'mixed', 'unknown')
+  ),
+  color_temperature TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    color_temperature IN ('warm', 'neutral', 'cool', 'mixed', 'unknown')
+  ),
+  contrast_label TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    contrast_label IN ('low', 'normal', 'high', 'mixed', 'unknown')
+  ),
+  saturation_label TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    saturation_label IN ('muted', 'normal', 'vivid', 'mixed', 'unknown')
+  ),
+  dominant_colors_json TEXT NOT NULL DEFAULT '[]',
+  sampled_frame_count INTEGER NOT NULL DEFAULT 0 CHECK (sampled_frame_count >= 0),
+
+  depth_of_field TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    depth_of_field IN ('shallow', 'medium', 'deep', 'unknown')
+  ),
+
+  motion_confidence REAL CHECK (motion_confidence IS NULL OR (motion_confidence >= 0 AND motion_confidence <= 1)),
+  scale_confidence REAL CHECK (scale_confidence IS NULL OR (scale_confidence >= 0 AND scale_confidence <= 1)),
+  subject_confidence REAL CHECK (subject_confidence IS NULL OR (subject_confidence >= 0 AND subject_confidence <= 1)),
+  color_confidence REAL CHECK (color_confidence IS NULL OR (color_confidence >= 0 AND color_confidence <= 1)),
+  depth_confidence REAL CHECK (depth_confidence IS NULL OR (depth_confidence >= 0 AND depth_confidence <= 1)),
+
+  extraction_source_json TEXT NOT NULL DEFAULT '{}',
+  evidence_json TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE INDEX idx_segment_visual_profile_motion ON segment_visual_profile(camera_motion, stability);
-CREATE INDEX idx_segment_visual_profile_scale ON segment_visual_profile(shot_scale);
+CREATE INDEX idx_segment_visual_motion
+  ON segment_visual_profile(camera_motion_type, camera_motion_direction, camera_stability);
+
+CREATE INDEX idx_segment_visual_energy
+  ON segment_visual_profile(motion_energy, camera_motion_energy);
+
+CREATE INDEX idx_segment_visual_scale
+  ON segment_visual_profile(shot_scale, scale_confidence);
+
+CREATE INDEX idx_segment_visual_subject
+  ON segment_visual_profile(subject_screen_side, dominant_subject_type, subject_movement_direction);
+
+CREATE INDEX idx_segment_visual_color
+  ON segment_visual_profile(exposure_label, color_temperature, contrast_label, saturation_label);
 
 CREATE TABLE segment_audio_profile (
   segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
+
+  audio_role TEXT NOT NULL DEFAULT 'unknown' CHECK (
+    audio_role IN ('dialogue', 'music', 'ambient', 'silence', 'mixed', 'unknown')
+  ),
   has_dialogue INTEGER NOT NULL DEFAULT 0 CHECK (has_dialogue IN (0, 1)),
   has_music INTEGER NOT NULL DEFAULT 0 CHECK (has_music IN (0, 1)),
   has_ambient INTEGER NOT NULL DEFAULT 0 CHECK (has_ambient IN (0, 1)),
-  has_silence INTEGER NOT NULL DEFAULT 0 CHECK (has_silence IN (0, 1)),
-  peak_db REAL,
-  rms_db REAL,
-  loudness_lufs REAL
+
+  peak_dbfs REAL,
+  rms_dbfs REAL,
+  integrated_lufs REAL,
+  silence_ratio REAL CHECK (silence_ratio IS NULL OR (silence_ratio >= 0 AND silence_ratio <= 1)),
+  silence_head_us INTEGER CHECK (silence_head_us IS NULL OR silence_head_us >= 0),
+  silence_tail_us INTEGER CHECK (silence_tail_us IS NULL OR silence_tail_us >= 0),
+  speech_density REAL CHECK (speech_density IS NULL OR (speech_density >= 0 AND speech_density <= 1)),
+  music_density REAL CHECK (music_density IS NULL OR (music_density >= 0 AND music_density <= 1)),
+
+  noise_flags_json TEXT NOT NULL DEFAULT '[]',
+  audio_handle_head_us INTEGER CHECK (audio_handle_head_us IS NULL OR audio_handle_head_us >= 0),
+  audio_handle_tail_us INTEGER CHECK (audio_handle_tail_us IS NULL OR audio_handle_tail_us >= 0),
+
+  confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+  extraction_source_json TEXT NOT NULL DEFAULT '{}',
+  evidence_json TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE INDEX idx_segment_audio_profile_dialogue ON segment_audio_profile(has_dialogue);
+CREATE INDEX idx_segment_audio_role
+  ON segment_audio_profile(audio_role, has_dialogue, has_music, has_ambient);
 
-CREATE TABLE segment_logging (
+CREATE INDEX idx_segment_audio_levels
+  ON segment_audio_profile(peak_dbfs, integrated_lufs);
+
+CREATE INDEX idx_segment_audio_silence
+  ON segment_audio_profile(silence_ratio, silence_head_us, silence_tail_us);
+
+CREATE TABLE segment_logging_profile (
   segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
-  scene_number INTEGER,
-  shot_number INTEGER,
-  take_number INTEGER,
-  usability TEXT NOT NULL DEFAULT 'fully_usable' CHECK (
+
+  scene_number TEXT,
+  shot_number TEXT,
+  take_number TEXT,
+  camera_id TEXT,
+  card_id TEXT,
+
+  circle_take INTEGER CHECK (circle_take IS NULL OR circle_take IN (0, 1)),
+  best_take INTEGER CHECK (best_take IS NULL OR best_take IN (0, 1)),
+  custom_tags_json TEXT NOT NULL DEFAULT '[]',
+  operator_notes TEXT NOT NULL DEFAULT '',
+
+  source TEXT NOT NULL CHECK (
+    source IN ('user_annotation', 'filename_parser', 'manifest', 'imported_log', 'unknown')
+  ),
+  confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+  evidence_json TEXT NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX idx_segment_logging_scene_take
+  ON segment_logging_profile(scene_number, shot_number, take_number);
+
+CREATE INDEX idx_segment_logging_camera
+  ON segment_logging_profile(camera_id, card_id);
+
+CREATE INDEX idx_segment_logging_circle
+  ON segment_logging_profile(circle_take, best_take);
+
+CREATE TABLE segment_usability_profile (
+  segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
+  usability TEXT NOT NULL CHECK (
     usability IN ('fully_usable', 'partially_usable', 'unusable')
   ),
-  roll_type TEXT CHECK (roll_type IS NULL OR roll_type IN ('a_roll', 'b_roll', 'cutaway')),
-  user_notes TEXT
+  confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  evidence_json TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE INDEX idx_segment_logging_scene_take ON segment_logging(scene_number, shot_number, take_number);
-CREATE INDEX idx_segment_logging_usability ON segment_logging(usability);
+CREATE INDEX idx_segment_usability
+  ON segment_usability_profile(usability, confidence);
 
 CREATE TABLE visual_quality (
   segment_id TEXT PRIMARY KEY REFERENCES segments(segment_id) ON DELETE CASCADE,
@@ -410,12 +584,12 @@ CREATE VIRTUAL TABLE segments_fts USING fts5(
   tokenize = "unicode61 remove_diacritics 2 tokenchars '_-'"
 );
 
-CREATE VIRTUAL TABLE metadata_fts USING fts5(
+CREATE VIRTUAL TABLE segment_metadata_fts USING fts5(
   segment_id UNINDEXED,
-  camera_motion,
-  shot_scale,
-  dominant_subject_position,
-  user_notes,
+  cinematography,
+  technical,
+  audio,
+  logging,
   tokenize = "unicode61 remove_diacritics 2 tokenchars '_-'"
 );
 `;
@@ -445,7 +619,10 @@ export async function buildFootageDb(options: BuildFootageDbOptions): Promise<Bu
     db.exec(FOOTAGE_DB_DDL);
 
     insertSources(db, inputs.sources, indexedAt);
-    const population = populateStructuredTables(db, inputs, indexedAt);
+    const population = await populateStructuredTables(db, inputs, indexedAt, {
+      skipAudioAnalysis: options.skipAudioAnalysis === true,
+      projectDir,
+    });
     warnings.push(...population.warnings);
     const embedding = await populateEmbeddings(db, population.embeddingTexts, embeddingPolicy, indexedAt, warnings);
     insertMeta(db, {
@@ -511,6 +688,8 @@ function loadInputs(projectDir: string): LoadedInputs {
   const assetsPath = path.join(projectDir, "03_analysis/assets.json");
   const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
   const marlinPath = path.join(projectDir, "03_analysis/marlin_events.json");
+  const annotationsPath = path.join(projectDir, "03_analysis/footage_user_annotations.json");
+  const filenameParserPath = path.join(projectDir, "03_analysis/footage_filename_parser.json");
   const assetsJson = readRequiredJson(assetsPath);
   const segmentsJson = readRequiredJson(segmentsPath);
   const warnings: string[] = [];
@@ -527,6 +706,8 @@ function loadInputs(projectDir: string): LoadedInputs {
     warnings.push("optional source missing: 03_analysis/marlin_events.json");
   }
 
+  const annotations = loadUserAnnotations(projectDir, annotationsPath, sources, warnings);
+  const filenameParser = loadFilenameParser(projectDir, filenameParserPath, sources, warnings);
   const transcripts = readTranscriptDocuments(projectDir);
   for (const transcript of transcripts) {
     sources.push({
@@ -543,12 +724,19 @@ function loadInputs(projectDir: string): LoadedInputs {
     segmentsJson,
     marlinJson,
     transcripts,
+    annotations,
+    filenameParser,
     sources,
     warnings,
   };
 }
 
-function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, indexedAt: string): PopulationResult {
+async function populateStructuredTables(
+  db: Database.Database,
+  inputs: LoadedInputs,
+  indexedAt: string,
+  options: { projectDir: string; skipAudioAnalysis: boolean },
+): Promise<PopulationResult> {
   const warnings: string[] = [];
   const assetItems = readArrayFrom(inputs.assetsJson, "items", "assets");
   const segmentItems = readArrayFrom(inputs.segmentsJson, "items", "segments");
@@ -569,12 +757,18 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
     )
   `);
   const insertAssetTechnical = db.prepare(`
-    INSERT INTO asset_technical (
-      asset_id, codec, resolution_width, resolution_height, fps_num, fps_den, bit_depth,
-      color_space, audio_channels, audio_sample_rate, timecode, recording_format
+    INSERT INTO asset_technical_metadata (
+      asset_id, container_format, container_long_name, recording_format, video_codec, video_profile,
+      codec_tag, width, height, fps_num, fps_den, r_frame_rate, time_base, frame_rate_mode,
+      pix_fmt, bit_depth, color_primaries, color_transfer, color_space, color_range, rotation,
+      stream_duration_json, audio_streams_json, timecode_start, timecode_format, reel_name,
+      card_id, camera_id, extraction_source_json, evidence_json
     ) VALUES (
-      @asset_id, @codec, @resolution_width, @resolution_height, @fps_num, @fps_den, @bit_depth,
-      @color_space, @audio_channels, @audio_sample_rate, @timecode, @recording_format
+      @asset_id, @container_format, @container_long_name, @recording_format, @video_codec, @video_profile,
+      @codec_tag, @width, @height, @fps_num, @fps_den, @r_frame_rate, @time_base, @frame_rate_mode,
+      @pix_fmt, @bit_depth, @color_primaries, @color_transfer, @color_space, @color_range, @rotation,
+      @stream_duration_json, @audio_streams_json, @timecode_start, @timecode_format, @reel_name,
+      @card_id, @camera_id, @extraction_source_json, @evidence_json
     )
   `);
   const insertMarlinAsset = db.prepare(`
@@ -712,23 +906,48 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
   `);
   const insertVisualProfile = db.prepare(`
     INSERT INTO segment_visual_profile (
-      segment_id, camera_motion, motion_direction, motion_speed, stability, shot_scale, dominant_subject_position
+      segment_id, camera_motion_description, camera_motion_type, camera_motion_direction, camera_stability,
+      motion_energy, camera_motion_energy, shot_scale, composition_anchor, subject_screen_side,
+      dominant_subject_type, subject_movement_direction, exposure_label, color_temperature,
+      contrast_label, saturation_label, dominant_colors_json, sampled_frame_count, depth_of_field,
+      motion_confidence, scale_confidence, subject_confidence, color_confidence, depth_confidence,
+      extraction_source_json, evidence_json
     ) VALUES (
-      @segment_id, @camera_motion, @motion_direction, @motion_speed, @stability, @shot_scale, @dominant_subject_position
+      @segment_id, @camera_motion_description, @camera_motion_type, @camera_motion_direction, @camera_stability,
+      @motion_energy, @camera_motion_energy, @shot_scale, @composition_anchor, @subject_screen_side,
+      @dominant_subject_type, @subject_movement_direction, @exposure_label, @color_temperature,
+      @contrast_label, @saturation_label, @dominant_colors_json, @sampled_frame_count, @depth_of_field,
+      @motion_confidence, @scale_confidence, @subject_confidence, @color_confidence, @depth_confidence,
+      @extraction_source_json, @evidence_json
     )
   `);
   const insertAudioProfile = db.prepare(`
     INSERT INTO segment_audio_profile (
-      segment_id, has_dialogue, has_music, has_ambient, has_silence, peak_db, rms_db, loudness_lufs
+      segment_id, audio_role, has_dialogue, has_music, has_ambient, peak_dbfs, rms_dbfs,
+      integrated_lufs, silence_ratio, silence_head_us, silence_tail_us, speech_density,
+      music_density, noise_flags_json, audio_handle_head_us, audio_handle_tail_us, confidence,
+      extraction_source_json, evidence_json
     ) VALUES (
-      @segment_id, @has_dialogue, @has_music, @has_ambient, @has_silence, @peak_db, @rms_db, @loudness_lufs
+      @segment_id, @audio_role, @has_dialogue, @has_music, @has_ambient, @peak_dbfs, @rms_dbfs,
+      @integrated_lufs, @silence_ratio, @silence_head_us, @silence_tail_us, @speech_density,
+      @music_density, @noise_flags_json, @audio_handle_head_us, @audio_handle_tail_us, @confidence,
+      @extraction_source_json, @evidence_json
     )
   `);
   const insertLogging = db.prepare(`
-    INSERT INTO segment_logging (
-      segment_id, scene_number, shot_number, take_number, usability, roll_type, user_notes
+    INSERT INTO segment_logging_profile (
+      segment_id, scene_number, shot_number, take_number, camera_id, card_id, circle_take,
+      best_take, custom_tags_json, operator_notes, source, confidence, evidence_json
     ) VALUES (
-      @segment_id, @scene_number, @shot_number, @take_number, @usability, @roll_type, @user_notes
+      @segment_id, @scene_number, @shot_number, @take_number, @camera_id, @card_id, @circle_take,
+      @best_take, @custom_tags_json, @operator_notes, @source, @confidence, @evidence_json
+    )
+  `);
+  const insertUsability = db.prepare(`
+    INSERT INTO segment_usability_profile (
+      segment_id, usability, confidence, evidence_json
+    ) VALUES (
+      @segment_id, @usability, @confidence, @evidence_json
     )
   `);
   const insertFts = db.prepare(`
@@ -741,10 +960,10 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
     )
   `);
   const insertMetadataFts = db.prepare(`
-    INSERT INTO metadata_fts (
-      segment_id, camera_motion, shot_scale, dominant_subject_position, user_notes
+    INSERT INTO segment_metadata_fts (
+      segment_id, cinematography, technical, audio, logging
     ) VALUES (
-      @segment_id, @camera_motion, @shot_scale, @dominant_subject_position, @user_notes
+      @segment_id, @cinematography, @technical, @audio, @logging
     )
   `);
   const insertEmbeddingText = db.prepare(`
@@ -768,92 +987,97 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
   let segmentAudioProfiles = 0;
   let segmentLogging = 0;
   let metadataFtsRows = 0;
-  const segmentTx = db.transaction(() => {
-    segmentItems.forEach((segment, index) => {
-      const segmentId = stringValue(segment.segment_id) || `SEG_${index + 1}`;
-      const assetId = stringValue(segment.asset_id);
-      const asset = assetById.get(assetId);
-      if (!asset) {
-        warnings.push(`segment ${segmentId} skipped: missing asset_id ${assetId || "unknown"}`);
-        return;
-      }
-      const srcInUs = nonNegativeInteger(segment.src_in_us ?? segment.start_us);
-      const srcOutUs = nonNegativeInteger(segment.src_out_us ?? segment.end_us);
-      if (srcInUs == null || srcOutUs == null || srcOutUs <= srcInUs) {
-        warnings.push(`segment ${segmentId} skipped: invalid source range`);
-        return;
-      }
+  for (const [index, segment] of segmentItems.entries()) {
+    const segmentId = stringValue(segment.segment_id) || `SEG_${index + 1}`;
+    const assetId = stringValue(segment.asset_id);
+    const asset = assetById.get(assetId);
+    if (!asset) {
+      warnings.push(`segment ${segmentId} skipped: missing asset_id ${assetId || "unknown"}`);
+      continue;
+    }
+    const srcInUs = nonNegativeInteger(segment.src_in_us ?? segment.start_us);
+    const srcOutUs = nonNegativeInteger(segment.src_out_us ?? segment.end_us);
+    if (srcInUs == null || srcOutUs == null || srcOutUs <= srcInUs) {
+      warnings.push(`segment ${segmentId} skipped: invalid source range`);
+      continue;
+    }
 
-      const transcript = transcriptForSegment(segment, asset, transcripts, srcInUs, srcOutUs);
-      const appraisal = recordValue(segment.visual_appraisal);
-      const quality = recordValue(segment.visual_quality);
-      const record = segmentBuildRecord(segment, asset, segmentId, assetId, srcInUs, srcOutUs, transcript, marlinByAsset);
-      const segmentType = stringValue(segment.segment_type);
-      const normalizedSegmentType = VALID_SEGMENT_TYPES.has(segmentType) ? segmentType : null;
-      insertSegment.run({
-        segment_id: segmentId,
-        asset_id: assetId,
-        src_in_us: srcInUs,
-        src_out_us: srcOutUs,
-        rep_frame_us: nonNegativeInteger(segment.rep_frame_us),
-        segment_type: normalizedSegmentType,
-        summary: record.summary,
-        transcript_excerpt: record.transcriptExcerpt,
-        transcript_ref: nullableString(segment.transcript_ref ?? asset.transcript_ref),
-        tags_json: JSON.stringify(record.tags),
-        quality_flags_json: JSON.stringify(record.qualityFlags),
-        interest_points_json: jsonArray(segment.interest_points),
-        filmstrip_path: nullableString(segment.filmstrip_path),
-        waveform_path: nullableString(segment.waveform_path),
-      });
-      insertVisualQuality.run(visualQualityRow(segmentId, quality));
-      insertVisualAppraisal.run(visualAppraisalRow(segmentId, appraisal));
-      insertPeakAnalysis.run(peakAnalysisRow(segmentId, recordValue(segment.peak_analysis)));
-      insertPeakMoments(insertPeakMoment, segmentId, recordValue(segment.peak_analysis), warnings);
-      const visualProfile = segmentVisualProfileRow(segmentId, record);
-      const logging = segmentLoggingRow(segmentId, segment, asset, quality);
-      insertTranscript.run({
-        segment_id: segmentId,
-        text: transcript.text,
-        language: transcript.language,
-        confidence_min: transcript.confidenceMin,
-        has_dialogue: transcript.hasDialogue ? 1 : 0,
-        item_refs_json: JSON.stringify(transcript.itemRefs),
-      });
-      if (transcript.text.trim()) transcriptSegments += 1;
-      insertVisualProfile.run(visualProfile);
-      segmentVisualProfiles += 1;
-      insertAudioProfile.run(segmentAudioProfileRow(segmentId, transcript, normalizedSegmentType));
-      segmentAudioProfiles += 1;
-      insertLogging.run(logging);
-      segmentLogging += 1;
-      insertFts.run(ftsRow(record, visualProfile, logging));
-      ftsRows += 1;
-      insertMetadataFts.run(metadataFtsRow(visualProfile, logging));
-      metadataFtsRows += 1;
-
-      const fieldTexts = embeddingTextBundles(record, visualProfile, logging);
-      for (const field of Object.keys(fieldTexts) as EmbeddingField[]) {
-        const text = normalizeSearchText(fieldTexts[field]);
-        const contentHash = hashValue(text);
-        const row = { segment_id: segmentId, field, text, content_hash: contentHash, updated_at: indexedAt };
-        insertEmbeddingText.run(row);
-        embeddingTexts.push(row);
-      }
-      insertIndexState.run({
-        segment_id: segmentId,
-        segment_hash: hashValue(segment),
-        asset_hash: hashValue(asset),
-        transcript_hash: transcript.transcriptHash,
-        marlin_hash: record.marlinSceneText || record.marlinEvents.length > 0 ? hashValue([record.marlinSceneText, record.marlinEvents]) : null,
-        appraisal_hash: segment.visual_appraisal ? hashValue(segment.visual_appraisal) : null,
-        embedding_combined_hash: hashValue(fieldTexts.combined),
-        indexed_at: indexedAt,
-      });
-      segmentCount += 1;
+    const transcript = transcriptForSegment(segment, asset, transcripts, srcInUs, srcOutUs);
+    const appraisal = recordValue(segment.visual_appraisal);
+    const quality = recordValue(segment.visual_quality);
+    const record = segmentBuildRecord(segment, asset, segmentId, assetId, srcInUs, srcOutUs, transcript, marlinByAsset);
+    const segmentType = stringValue(segment.segment_type);
+    const normalizedSegmentType = VALID_SEGMENT_TYPES.has(segmentType) ? segmentType : null;
+    insertSegment.run({
+      segment_id: segmentId,
+      asset_id: assetId,
+      src_in_us: srcInUs,
+      src_out_us: srcOutUs,
+      rep_frame_us: nonNegativeInteger(segment.rep_frame_us),
+      segment_type: normalizedSegmentType,
+      summary: record.summary,
+      transcript_excerpt: record.transcriptExcerpt,
+      transcript_ref: nullableString(segment.transcript_ref ?? asset.transcript_ref),
+      tags_json: JSON.stringify(record.tags),
+      quality_flags_json: JSON.stringify(record.qualityFlags),
+      interest_points_json: jsonArray(segment.interest_points),
+      filmstrip_path: nullableString(segment.filmstrip_path),
+      waveform_path: nullableString(segment.waveform_path),
     });
-  });
-  segmentTx();
+    insertVisualQuality.run(visualQualityRow(segmentId, quality));
+    insertVisualAppraisal.run(visualAppraisalRow(segmentId, appraisal));
+    insertPeakAnalysis.run(peakAnalysisRow(segmentId, recordValue(segment.peak_analysis)));
+    insertPeakMoments(insertPeakMoment, segmentId, recordValue(segment.peak_analysis), warnings);
+    const visualProfile = segmentVisualProfileRow(segmentId, record);
+    const audioProfile = await segmentAudioProfileRow(segmentId, record, transcript, normalizedSegmentType, options, warnings);
+    const logging = segmentLoggingRow(segmentId, segment, asset, inputs.annotations, inputs.filenameParser);
+    const usability = classifyUsability(segmentId, quality, record.qualityFlags);
+    insertTranscript.run({
+      segment_id: segmentId,
+      text: transcript.text,
+      language: transcript.language,
+      confidence_min: transcript.confidenceMin,
+      has_dialogue: transcript.hasDialogue ? 1 : 0,
+      item_refs_json: JSON.stringify(transcript.itemRefs),
+    });
+    if (transcript.text.trim()) transcriptSegments += 1;
+    insertVisualProfile.run(visualProfile);
+    segmentVisualProfiles += 1;
+    insertAudioProfile.run(audioProfile);
+    segmentAudioProfiles += 1;
+    insertLogging.run(logging);
+    insertUsability.run({
+      segment_id: segmentId,
+      usability: usability.usability,
+      confidence: usability.confidence,
+      evidence_json: JSON.stringify(usability.evidence),
+    });
+    segmentLogging += 1;
+    insertFts.run(ftsRow(record, visualProfile, logging, audioProfile, usability));
+    ftsRows += 1;
+    insertMetadataFts.run(metadataFtsRow(record, visualProfile, audioProfile, logging, usability));
+    metadataFtsRows += 1;
+
+    const fieldTexts = embeddingTextBundles(record, visualProfile, logging, audioProfile, usability);
+    for (const field of Object.keys(fieldTexts) as EmbeddingField[]) {
+      const text = normalizeSearchText(fieldTexts[field]);
+      const contentHash = hashValue(text);
+      const row = { segment_id: segmentId, field, text, content_hash: contentHash, updated_at: indexedAt };
+      insertEmbeddingText.run(row);
+      embeddingTexts.push(row);
+    }
+    insertIndexState.run({
+      segment_id: segmentId,
+      segment_hash: hashValue(segment),
+      asset_hash: hashValue(asset),
+      transcript_hash: transcript.transcriptHash,
+      marlin_hash: record.marlinSceneText || record.marlinEvents.length > 0 ? hashValue([record.marlinSceneText, record.marlinEvents]) : null,
+      appraisal_hash: segment.visual_appraisal ? hashValue(segment.visual_appraisal) : null,
+      embedding_combined_hash: hashValue(fieldTexts.combined),
+      indexed_at: indexedAt,
+    });
+    segmentCount += 1;
+  }
 
   return {
     counts: {
@@ -862,10 +1086,10 @@ function populateStructuredTables(db: Database.Database, inputs: LoadedInputs, i
         fts_rows: ftsRows,
         marlin_events: marlinEventCount,
         transcript_segments: transcriptSegments,
-        asset_technical: assetTechnicalCount,
+        asset_technical_metadata: assetTechnicalCount,
         segment_visual_profiles: segmentVisualProfiles,
         segment_audio_profiles: segmentAudioProfiles,
-        segment_logging: segmentLogging,
+        segment_logging_profiles: segmentLogging,
         metadata_fts_rows: metadataFtsRows,
         embeddings: 0,
       },
@@ -1041,8 +1265,14 @@ function segmentBuildRecord(
   };
 }
 
-function ftsRow(record: SegmentBuildRecord, visualProfile: JsonRecord, logging: JsonRecord): Record<string, string> {
-  const metadataTerms = metadataTermsForSearch(visualProfile, logging);
+function ftsRow(
+  record: SegmentBuildRecord,
+  visualProfile: JsonRecord,
+  logging: JsonRecord,
+  audioProfile: JsonRecord,
+  usability: UsabilityClassification,
+): Record<string, string> {
+  const metadataTerms = metadataTermsForSearch(visualProfile, logging, audioProfile, usability);
   return {
     segment_id: record.segmentId,
     asset_id: record.assetId,
@@ -1064,8 +1294,14 @@ function searchFieldText(parts: string[]): string {
   return normalizeSearchText([...normalizedParts, ...expansions].join(" "));
 }
 
-function embeddingTextBundles(record: SegmentBuildRecord, visualProfile: JsonRecord, logging: JsonRecord): Record<EmbeddingField, string> {
-  const metadataTerms = metadataTermsForSearch(visualProfile, logging).join(" ");
+function embeddingTextBundles(
+  record: SegmentBuildRecord,
+  visualProfile: JsonRecord,
+  logging: JsonRecord,
+  audioProfile: JsonRecord,
+  usability: UsabilityClassification,
+): Record<EmbeddingField, string> {
+  const metadataTerms = metadataTermsForSearch(visualProfile, logging, audioProfile, usability).join(" ");
   const summary = [
     record.summary,
     ...record.tags,
@@ -1092,28 +1328,59 @@ function embeddingTextBundles(record: SegmentBuildRecord, visualProfile: JsonRec
 function assetTechnicalRow(assetId: string, asset: JsonRecord): JsonRecord {
   const video = recordValue(asset.video_stream ?? asset.video ?? asset.video_track);
   const audio = recordValue(asset.audio_stream ?? asset.audio ?? asset.audio_track);
+  const audioStreams = Array.isArray(asset.audio_streams) ? asset.audio_streams : audio && Object.keys(audio).length > 0 ? [audio] : [];
   const format = recordValue(asset.format);
   const tags = recordValue(asset.tags);
   const videoTags = recordValue(video.tags);
   const fps = fpsParts(video.r_frame_rate ?? video.avg_frame_rate ?? asset.r_frame_rate);
+  const width = positiveInteger(video.width ?? asset.width);
+  const height = positiveInteger(video.height ?? asset.height);
+  const fpsNum = positiveInteger(video.fps_num ?? fps?.fps_num);
+  const fpsDen = positiveInteger(video.fps_den ?? fps?.fps_den);
+  const audioChannelCount = nonNegativeIntegerLike(audio.channels ?? asset.audio_channels);
+  const audioSampleRate = nonNegativeIntegerLike(audio.sample_rate ?? audio.sample_rate_hz ?? asset.audio_sample_rate);
+  const recordingFormat = nullableString(asset.recording_format ?? format.format_name ?? format.format_long_name ?? extensionFormat(stringValue(asset.filename)));
   return {
     asset_id: assetId,
-    codec: nullableString(
+    container_format: nullableString(format.format_name ?? asset.container_format),
+    container_long_name: nullableString(format.format_long_name ?? asset.container_long_name),
+    recording_format: recordingFormat,
+    video_codec: nullableString(
       video.codec_name ??
       video.codec ??
       asset.codec_name ??
       asset.codec,
     ),
-    resolution_width: positiveInteger(video.width ?? asset.width),
-    resolution_height: positiveInteger(video.height ?? asset.height),
-    fps_num: positiveInteger(video.fps_num ?? fps?.fps_num),
-    fps_den: positiveInteger(video.fps_den ?? fps?.fps_den),
+    video_profile: nullableString(video.profile ?? asset.video_profile),
+    codec_tag: nullableString(video.codec_tag_string ?? video.codec_tag ?? asset.codec_tag),
+    width,
+    height,
+    fps_num: fpsNum,
+    fps_den: fpsDen,
+    r_frame_rate: nullableString(video.r_frame_rate ?? asset.r_frame_rate),
+    time_base: nullableString(video.time_base ?? asset.time_base),
+    frame_rate_mode: frameRateMode(fpsNum, fpsDen, audioStreams.length > 0, width, height),
+    pix_fmt: nullableString(video.pix_fmt ?? asset.pix_fmt),
     bit_depth: positiveInteger(video.bit_depth ?? video.bits_per_raw_sample ?? asset.bit_depth) ?? bitDepthFromPixelFormat(stringValue(video.pix_fmt ?? asset.pix_fmt)),
-    color_space: nullableString(video.color_space ?? video.color_primaries ?? asset.color_space ?? asset.color_primaries),
-    audio_channels: nonNegativeIntegerLike(audio.channels ?? asset.audio_channels),
-    audio_sample_rate: nonNegativeIntegerLike(audio.sample_rate ?? audio.sample_rate_hz ?? asset.audio_sample_rate),
-    timecode: nullableString(asset.timecode ?? video.timecode ?? videoTags.timecode ?? tags.timecode),
-    recording_format: nullableString(asset.recording_format ?? format.format_name ?? format.format_long_name ?? extensionFormat(stringValue(asset.filename))),
+    color_primaries: nullableString(video.color_primaries ?? asset.color_primaries),
+    color_transfer: nullableString(video.color_transfer ?? asset.color_transfer),
+    color_space: nullableString(video.color_space ?? asset.color_space),
+    color_range: nullableString(video.color_range ?? asset.color_range),
+    rotation: normalizedRotation(video.rotation ?? videoTags.rotate ?? asset.rotation),
+    stream_duration_json: JSON.stringify(streamDurations(video, audioStreams)),
+    audio_streams_json: JSON.stringify(audioStreams.map(normalizeAudioStream)),
+    timecode_start: nullableString(asset.timecode ?? video.timecode ?? videoTags.timecode ?? tags.timecode),
+    timecode_format: nullableString(asset.timecode_format) ?? (asset.timecode || video.timecode || videoTags.timecode || tags.timecode ? "unknown" : "none"),
+    reel_name: nullableString(asset.reel_name ?? tags.reel_name),
+    card_id: nullableString(asset.card_id),
+    camera_id: nullableString(asset.camera_id),
+    extraction_source_json: JSON.stringify({ source: "assets_json" }),
+    evidence_json: JSON.stringify([
+      width && height ? `resolution:${width}x${height}` : null,
+      fpsNum && fpsDen ? `fps:${fpsNum}/${fpsDen}` : null,
+      audioChannelCount != null ? `audio_channels:${audioChannelCount}` : null,
+      audioSampleRate != null ? `audio_sample_rate:${audioSampleRate}` : null,
+    ].filter(Boolean)),
   };
 }
 
@@ -1126,69 +1393,202 @@ function segmentVisualProfileRow(segmentId: string, record: SegmentBuildRecord):
     ...record.qualityLabels,
   ].join(" ");
   const motion = extractCameraMotion(description);
+  const shotScale = extractShotScale(description);
+  const quality = recordValue(record.segment.visual_quality);
+  const qualityLabelsRecord = recordValue(quality.labels);
   return {
     segment_id: segmentId,
-    camera_motion: motion.camera_motion,
-    motion_direction: motion.motion_direction,
-    motion_speed: motion.motion_speed,
-    stability: motion.stability,
-    shot_scale: extractShotScale(description),
-    dominant_subject_position: dominantSubjectPosition(description),
+    camera_motion_description: motion.camera_motion_description,
+    camera_motion_type: motion.camera_motion_type,
+    camera_motion_direction: motion.camera_motion_direction,
+    camera_stability: motion.camera_stability,
+    motion_energy: scoreOrNull(recordValue(record.segment.peak_analysis).motion_energy),
+    camera_motion_energy: scoreOrNull(recordValue(record.segment.peak_analysis).camera_motion_energy),
+    shot_scale: shotScale,
+    composition_anchor: compositionAnchor(description),
+    subject_screen_side: dominantSubjectPosition(description),
+    dominant_subject_type: dominantSubjectType(description),
+    subject_movement_direction: subjectMovementDirection(description),
+    exposure_label: exposureLabel(description, record.qualityFlags),
+    color_temperature: colorTemperature(description, record.qualityLabels),
+    contrast_label: contrastLabel(description, record.qualityLabels),
+    saturation_label: saturationLabel(description, record.qualityLabels),
+    dominant_colors_json: jsonArray(qualityLabelsRecord.dominant_colors ?? quality.dominant_colors),
+    sampled_frame_count: nonNegativeInteger(quality.sampled_frame_count) ?? 0,
+    depth_of_field: depthOfField(description),
+    motion_confidence: motion.motion_confidence,
+    scale_confidence: shotScale === "unknown" ? null : 0.55,
+    subject_confidence: dominantSubjectPosition(description) === "unknown" ? null : 0.45,
+    color_confidence: hasColorCue(description, record.qualityLabels, record.qualityFlags) ? 0.45 : null,
+    depth_confidence: depthOfField(description) === "unknown" ? null : 0.45,
+    extraction_source_json: JSON.stringify({ motion: "marlin_phrase_parser", shot_scale: "marlin_phrase_parser" }),
+    evidence_json: JSON.stringify([...motion.evidence, ...record.qualityFlags, ...record.qualityLabels]),
   };
 }
 
-function segmentAudioProfileRow(segmentId: string, transcript: TranscriptSlice, segmentType: string | null): JsonRecord {
+async function segmentAudioProfileRow(
+  segmentId: string,
+  record: SegmentBuildRecord,
+  transcript: TranscriptSlice,
+  segmentType: string | null,
+  options: { projectDir: string; skipAudioAnalysis: boolean },
+  warnings: string[],
+): Promise<JsonRecord> {
   const hasDialogue = transcript.hasDialogue || segmentType === "dialogue";
   const hasMusic = segmentType === "music_driven";
+  const sourcePath = resolveSourceMediaPath(options.projectDir, record.asset);
+  const audio = sourcePath && !options.skipAudioAnalysis
+    ? await extractAudioLevels(sourcePath, { startUs: record.srcInUs, endUs: record.srcOutUs })
+    : null;
+  if (options.skipAudioAnalysis) {
+    warnings.push(`audio analysis skipped for ${segmentId}: --skip-audio-analysis`);
+  } else if (!sourcePath) {
+    warnings.push(`audio analysis unavailable for ${segmentId}: source media not accessible`);
+  } else if (!audio) {
+    warnings.push(`audio analysis unavailable for ${segmentId}: ffmpeg analysis failed`);
+  }
+  const silenceRole = audio?.has_silence && audio.silence_ratio != null && audio.silence_ratio > 0.8;
   return {
     segment_id: segmentId,
+    audio_role: audioRole(hasDialogue, hasMusic, silenceRole),
     has_dialogue: hasDialogue ? 1 : 0,
     has_music: hasMusic ? 1 : 0,
     has_ambient: !hasDialogue && !hasMusic ? 1 : 0,
-    has_silence: 0,
-    peak_db: null,
-    rms_db: null,
-    loudness_lufs: null,
+    peak_dbfs: audio?.peak_dbfs ?? null,
+    rms_dbfs: audio?.rms_dbfs ?? null,
+    integrated_lufs: audio?.integrated_lufs ?? null,
+    silence_ratio: audio?.silence_ratio ?? null,
+    silence_head_us: audio?.silence_head_us ?? null,
+    silence_tail_us: audio?.silence_tail_us ?? null,
+    speech_density: transcriptDensity(transcript, record.srcOutUs - record.srcInUs),
+    music_density: hasMusic ? 1 : null,
+    noise_flags_json: JSON.stringify(audio?.has_silence ? ["silence_detected"] : []),
+    audio_handle_head_us: null,
+    audio_handle_tail_us: null,
+    confidence: audio ? 0.8 : hasDialogue || hasMusic ? 0.65 : null,
+    extraction_source_json: JSON.stringify(audio ? { levels: "ffmpeg", role: "transcript_segment_type" } : { role: "transcript_segment_type" }),
+    evidence_json: JSON.stringify([
+      hasDialogue ? "transcript_dialogue" : null,
+      hasMusic ? "segment_type:music_driven" : null,
+      ...(audio?.evidence ?? []),
+    ].filter(Boolean)),
   };
 }
 
-function segmentLoggingRow(segmentId: string, segment: JsonRecord, asset: JsonRecord, quality: JsonRecord): JsonRecord {
-  const parsed = extractSceneShotTake(
-    stringValue(asset.filename) || stringValue(asset.source_locator),
-    stringValue(asset.shooting_timestamp ?? asset.shooting_date ?? asset.created_at),
-  );
+function segmentLoggingRow(
+  segmentId: string,
+  segment: JsonRecord,
+  asset: JsonRecord,
+  annotations: UserAnnotations,
+  filenameParser: FilenameParserConfig,
+): JsonRecord {
+  const annotation = annotations.bySegmentId.get(segmentId) ?? annotations.byAssetId.get(stringValue(segment.asset_id)) ?? null;
+  if (annotation) {
+    return {
+      segment_id: segmentId,
+      scene_number: nullableString(annotation.scene ?? annotation.scene_number),
+      shot_number: nullableString(annotation.shot ?? annotation.shot_number),
+      take_number: nullableString(annotation.take ?? annotation.take_number),
+      camera_id: nullableString(annotation.camera_id),
+      card_id: nullableString(annotation.card_id),
+      circle_take: optionalBooleanInt(annotation.circle_take),
+      best_take: optionalBooleanInt(annotation.best_take),
+      custom_tags_json: JSON.stringify(uniqueStrings([...arrayStrings(annotation.custom_tags), ...arrayStrings(annotation.tags)])),
+      operator_notes: stringValue(annotation.operator_notes ?? annotation.notes),
+      source: "user_annotation",
+      confidence: scoreOrNull(annotation.confidence) ?? 1,
+      evidence_json: JSON.stringify(["03_analysis/footage_user_annotations.json"]),
+    };
+  }
+  const parsed = filenameParser.enabled
+    ? extractSceneShotTake(stringValue(asset.filename) || stringValue(asset.source_locator))
+    : null;
   return {
     segment_id: segmentId,
-    scene_number: parsed.scene_number,
-    shot_number: parsed.shot_number,
-    take_number: parsed.take_number,
-    usability: allVisualQualityScoresBelow(quality, 0.3) ? "unusable" : "fully_usable",
-    roll_type: null,
-    user_notes: nullableString(segment.user_notes ?? asset.user_notes),
+    scene_number: parsed?.scene_number ?? null,
+    shot_number: parsed?.shot_number ?? null,
+    take_number: parsed?.take_number ?? null,
+    camera_id: parsed?.camera_id ?? null,
+    card_id: parsed?.card_id ?? null,
+    circle_take: null,
+    best_take: null,
+    custom_tags_json: "[]",
+    operator_notes: "",
+    source: parsed?.source === "filename_parser" ? "filename_parser" : "unknown",
+    confidence: parsed?.confidence ?? null,
+    evidence_json: JSON.stringify(parsed?.evidence ?? []),
   };
 }
 
-function metadataFtsRow(visualProfile: JsonRecord, logging: JsonRecord): JsonRecord {
+function metadataFtsRow(
+  record: SegmentBuildRecord,
+  visualProfile: JsonRecord,
+  audioProfile: JsonRecord,
+  logging: JsonRecord,
+  usability: UsabilityClassification,
+): JsonRecord {
+  const technical = assetTechnicalTerms(record.asset);
   return {
     segment_id: stringValue(visualProfile.segment_id),
-    camera_motion: searchFieldText([stringValue(visualProfile.camera_motion), stringValue(visualProfile.motion_direction), stringValue(visualProfile.stability)]),
-    shot_scale: searchFieldText([stringValue(visualProfile.shot_scale)]),
-    dominant_subject_position: searchFieldText([stringValue(visualProfile.dominant_subject_position)]),
-    user_notes: searchFieldText([stringValue(logging.user_notes)]),
+    cinematography: searchFieldText([
+      stringValue(visualProfile.camera_motion_description),
+      stringValue(visualProfile.camera_motion_type),
+      stringValue(visualProfile.camera_motion_direction),
+      stringValue(visualProfile.camera_stability),
+      stringValue(visualProfile.shot_scale),
+      stringValue(visualProfile.subject_screen_side),
+      stringValue(visualProfile.dominant_subject_type),
+      stringValue(visualProfile.exposure_label),
+      stringValue(visualProfile.color_temperature),
+      stringValue(visualProfile.contrast_label),
+      stringValue(visualProfile.saturation_label),
+    ]),
+    technical: searchFieldText(technical),
+    audio: searchFieldText([
+      stringValue(audioProfile.audio_role),
+      stringValue(audioProfile.peak_dbfs),
+      stringValue(audioProfile.integrated_lufs),
+      ...jsonStringArray(audioProfile.noise_flags_json),
+    ]),
+    logging: searchFieldText([
+      stringValue(logging.scene_number),
+      stringValue(logging.shot_number),
+      stringValue(logging.take_number),
+      stringValue(logging.camera_id),
+      stringValue(logging.card_id),
+      ...jsonStringArray(logging.custom_tags_json),
+      stringValue(logging.operator_notes),
+      usability.usability,
+      ...usability.evidence,
+    ]),
   };
 }
 
-function metadataTermsForSearch(visualProfile: JsonRecord, logging: JsonRecord): string[] {
+function metadataTermsForSearch(
+  visualProfile: JsonRecord,
+  logging: JsonRecord,
+  audioProfile: JsonRecord,
+  usability: UsabilityClassification,
+): string[] {
   return uniqueStrings([
-    stringValue(visualProfile.camera_motion),
-    stringValue(visualProfile.motion_direction),
-    stringValue(visualProfile.motion_speed),
-    stringValue(visualProfile.stability),
+    stringValue(visualProfile.camera_motion_type),
+    stringValue(visualProfile.camera_motion_direction),
+    stringValue(visualProfile.camera_stability),
     stringValue(visualProfile.shot_scale),
-    stringValue(visualProfile.dominant_subject_position),
-    stringValue(logging.usability),
-    stringValue(logging.roll_type),
-    stringValue(logging.user_notes),
+    stringValue(visualProfile.subject_screen_side),
+    stringValue(visualProfile.dominant_subject_type),
+    stringValue(visualProfile.exposure_label),
+    stringValue(visualProfile.color_temperature),
+    stringValue(audioProfile.audio_role),
+    stringValue(logging.scene_number),
+    stringValue(logging.shot_number),
+    stringValue(logging.take_number),
+    stringValue(logging.camera_id),
+    stringValue(logging.card_id),
+    ...jsonStringArray(logging.custom_tags_json),
+    stringValue(logging.operator_notes),
+    usability.usability,
+    ...usability.evidence,
   ]);
 }
 
@@ -1282,15 +1682,119 @@ function qualityLabels(segment: JsonRecord): string[] {
   ]);
 }
 
-function dominantSubjectPosition(description: string): string | null {
+function dominantSubjectPosition(description: string): string {
   const text = description.toLowerCase();
   if (/\b(left\s+side|on\s+the\s+left|left\s+of\s+frame|frame\s+left)\b/.test(text)) return "left";
   if (/\b(right\s+side|on\s+the\s+right|right\s+of\s+frame|frame\s+right)\b/.test(text)) return "right";
   if (/\b(center(?:ed)?|centre(?:d)?|middle|center\s+of\s+frame)\b/.test(text)) return "center";
+  return "unknown";
+}
+
+function compositionAnchor(description: string): string {
+  const side = dominantSubjectPosition(description);
+  return side === "unknown" ? "unknown" : side;
+}
+
+function dominantSubjectType(description: string): string {
+  const text = description.toLowerCase();
+  if (/\b(person|child|man|woman|face|hand|speaker|worker|vendor)\b/.test(text)) return "person";
+  if (/\b(people|group|crowd|family|team)\b/.test(text)) return "group";
+  if (/\b(car|bus|bike|bicycle|train|vehicle)\b/.test(text)) return "vehicle";
+  if (/\b(river|mountain|forest|landscape|environment|street|room|market)\b/.test(text)) return "environment";
+  if (/\b(object|tool|dial|food|chestnut|table)\b/.test(text)) return "object";
+  return "unknown";
+}
+
+function subjectMovementDirection(description: string): string {
+  const text = description.toLowerCase();
+  if (/\b(subject|person|child|people|vehicle|object).{0,30}(left\s+to\s+right|toward\s+the\s+right|rightward)\b/.test(text)) return "ltr";
+  if (/\b(subject|person|child|people|vehicle|object).{0,30}(right\s+to\s+left|toward\s+the\s+left|leftward)\b/.test(text)) return "rtl";
+  if (/\b(subject|person|child|people|vehicle|object).{0,30}(toward|closer|approaches)\b/.test(text)) return "toward_camera";
+  if (/\b(subject|person|child|people|vehicle|object).{0,30}(away|recedes|leaves)\b/.test(text)) return "away_camera";
+  if (/\b(static subject|subject remains|still subject)\b/.test(text)) return "static";
+  return "unknown";
+}
+
+function exposureLabel(description: string, qualityFlags: string[]): string {
+  const text = `${description} ${qualityFlags.join(" ")}`.toLowerCase();
+  if (/\b(overexposed|over exposure|blown\s+out|too\s+bright)\b/.test(text)) return "over";
+  if (/\b(underexposed|under exposure|too\s+dark)\b/.test(text)) return "under";
+  if (/\b(normal exposure|well exposed|properly exposed)\b/.test(text)) return "normal";
+  return "unknown";
+}
+
+function colorTemperature(description: string, qualityLabels: string[]): string {
+  const text = `${description} ${qualityLabels.join(" ")}`.toLowerCase();
+  if (/\b(warm|golden|sunset)\b/.test(text)) return "warm";
+  if (/\b(cool|blue|cold)\b/.test(text)) return "cool";
+  if (/\b(neutral|daylight)\b/.test(text)) return "neutral";
+  return "unknown";
+}
+
+function contrastLabel(description: string, qualityLabels: string[]): string {
+  const text = `${description} ${qualityLabels.join(" ")}`.toLowerCase();
+  if (/\b(high contrast|harsh contrast)\b/.test(text)) return "high";
+  if (/\b(low contrast|flat_light|flat light)\b/.test(text)) return "low";
+  if (/\b(normal contrast)\b/.test(text)) return "normal";
+  return "unknown";
+}
+
+function saturationLabel(description: string, qualityLabels: string[]): string {
+  const text = `${description} ${qualityLabels.join(" ")}`.toLowerCase();
+  if (/\b(vivid|saturated|colorful)\b/.test(text)) return "vivid";
+  if (/\b(muted|desaturated)\b/.test(text)) return "muted";
+  if (/\b(normal saturation)\b/.test(text)) return "normal";
+  return "unknown";
+}
+
+function depthOfField(description: string): string {
+  const text = description.toLowerCase();
+  if (/\b(shallow depth|shallow focus|bokeh)\b/.test(text)) return "shallow";
+  if (/\b(deep focus|deep depth)\b/.test(text)) return "deep";
+  if (/\b(medium depth)\b/.test(text)) return "medium";
+  return "unknown";
+}
+
+function hasColorCue(description: string, qualityLabels: string[], qualityFlags: string[]): boolean {
+  return /warm|cool|neutral|contrast|saturation|muted|vivid|overexposed|underexposed/i.test([
+    description,
+    ...qualityLabels,
+    ...qualityFlags,
+  ].join(" "));
+}
+
+function audioRole(hasDialogue: boolean, hasMusic: boolean, silenceRole: boolean | null | undefined): string {
+  if (silenceRole) return "silence";
+  if (hasDialogue && hasMusic) return "mixed";
+  if (hasDialogue) return "dialogue";
+  if (hasMusic) return "music";
+  return "ambient";
+}
+
+function transcriptDensity(transcript: TranscriptSlice, durationUs: number): number | null {
+  if (durationUs <= 0 || transcript.itemRefs.length === 0) return transcript.hasDialogue ? 0.5 : null;
+  const spokenUs = transcript.itemRefs.reduce((sum, item) => {
+    if (item.start_us == null || item.end_us == null || item.end_us <= item.start_us) return sum;
+    return sum + item.end_us - item.start_us;
+  }, 0);
+  return Math.max(0, Math.min(1, spokenUs / durationUs));
+}
+
+function resolveSourceMediaPath(projectDir: string, asset: JsonRecord): string | null {
+  const candidates = [
+    stringValue(asset.source_locator),
+    stringValue(asset.path),
+    stringValue(asset.file_path),
+    stringValue(asset.filename),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    const resolved = path.isAbsolute(candidate) ? candidate : path.resolve(projectDir, candidate);
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) return resolved;
+  }
   return null;
 }
 
-function allVisualQualityScoresBelow(quality: JsonRecord, threshold: number): boolean {
+function classifyUsability(segmentId: string, quality: JsonRecord, qualityFlags: string[]): UsabilityClassification {
   const scores = recordValue(quality.scores);
   const values = [
     scores.light_quality ?? quality.light_quality,
@@ -1299,7 +1803,96 @@ function allVisualQualityScoresBelow(quality: JsonRecord, threshold: number): bo
     scores.composition_score ?? quality.composition_score,
     scores.motion_quality ?? quality.motion_quality,
   ].map(scoreNumber).filter((value): value is number => value != null);
-  return values.length > 0 && values.every((value) => value < threshold);
+  const lowerFlags = qualityFlags.map((flag) => flag.toLowerCase());
+  const explicitBadFlags = lowerFlags.filter((flag) => /\b(blur|blurry|overexposure|overexposed|shake|shaky|underexposed|clipping|unusable)\b/.test(flag));
+  const evidence = [
+    `segment:${segmentId}`,
+    ...values.map((value) => `quality_score:${value.toFixed(2)}`),
+    ...explicitBadFlags.map((flag) => `quality_flag:${flag}`),
+  ];
+  if (values.length > 0 && values.every((value) => value < 0.3)) {
+    return { usability: "unusable", confidence: 0.8, evidence };
+  }
+  if (values.some((value) => value < 0.3) || explicitBadFlags.length > 0) {
+    return { usability: "partially_usable", confidence: explicitBadFlags.length > 0 ? 0.75 : 0.65, evidence };
+  }
+  return { usability: "fully_usable", confidence: values.length > 0 ? 0.6 : 0.4, evidence };
+}
+
+function frameRateMode(
+  fpsNum: number | null,
+  fpsDen: number | null,
+  hasAudio: boolean,
+  width: number | null,
+  height: number | null,
+): string {
+  if (!width && !height && hasAudio) return "audio_only";
+  if (!fpsNum || !fpsDen) return "unknown";
+  return "unknown";
+}
+
+function normalizedRotation(value: unknown): number | null {
+  const parsed = integerLike(value);
+  if (parsed == null) return null;
+  const normalized = ((parsed % 360) + 360) % 360;
+  return normalized === 0 || normalized === 90 || normalized === 180 || normalized === 270 ? normalized : null;
+}
+
+function streamDurations(video: JsonRecord, audioStreams: unknown[]): JsonRecord[] {
+  const rows: JsonRecord[] = [];
+  const videoDuration = nullableString(video.duration);
+  if (videoDuration) rows.push({ type: "video", duration: videoDuration });
+  audioStreams.forEach((stream, index) => {
+    const record = recordValue(stream);
+    const duration = nullableString(record.duration);
+    if (duration) rows.push({ type: "audio", index, duration });
+  });
+  return rows;
+}
+
+function normalizeAudioStream(value: unknown): JsonRecord {
+  const stream = recordValue(value);
+  return {
+    codec: nullableString(stream.codec_name ?? stream.codec),
+    channels: nonNegativeIntegerLike(stream.channels),
+    sample_rate: nonNegativeIntegerLike(stream.sample_rate ?? stream.sample_rate_hz),
+    channel_layout: nullableString(stream.channel_layout),
+  };
+}
+
+function optionalBooleanInt(value: unknown): number | null {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "number" && (value === 0 || value === 1)) return value;
+  return null;
+}
+
+function jsonStringArray(value: unknown): string[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return arrayStrings(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function assetTechnicalTerms(asset: JsonRecord): string[] {
+  const row = assetTechnicalRow(stringValue(asset.asset_id), asset);
+  return uniqueStrings([
+    stringValue(row.video_codec),
+    stringValue(row.video_profile),
+    stringValue(row.recording_format),
+    stringValue(row.container_format),
+    stringValue(row.width),
+    stringValue(row.height),
+    stringValue(row.frame_rate_mode),
+    stringValue(row.color_primaries),
+    stringValue(row.color_transfer),
+    stringValue(row.color_space),
+    stringValue(row.reel_name),
+    stringValue(row.card_id),
+    stringValue(row.camera_id),
+  ]);
 }
 
 function transcriptForSegment(
@@ -1356,6 +1949,47 @@ function transcriptForSegment(
     })),
     transcriptHash: doc.hash,
   };
+}
+
+function loadUserAnnotations(
+  projectDir: string,
+  annotationsPath: string,
+  sources: SourceRecord[],
+  warnings: string[],
+): UserAnnotations {
+  const empty = { bySegmentId: new Map<string, JsonRecord>(), byAssetId: new Map<string, JsonRecord>() };
+  if (!fs.existsSync(annotationsPath)) return empty;
+  try {
+    const data = JSON.parse(fs.readFileSync(annotationsPath, "utf-8")) as JsonRecord;
+    sources.push(sourceRecord(projectDir, "footage_user_annotations", "03_analysis/footage_user_annotations.json", false, data));
+    for (const annotation of readArrayFrom(data, "annotations")) {
+      const segmentId = stringValue(annotation.segment_id);
+      const assetId = stringValue(annotation.asset_id);
+      if (segmentId) empty.bySegmentId.set(segmentId, annotation);
+      else if (assetId) empty.byAssetId.set(assetId, annotation);
+      else warnings.push("footage_user_annotations entry skipped: missing segment_id or asset_id");
+    }
+  } catch (error) {
+    warnings.push(`footage_user_annotations skipped: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return empty;
+}
+
+function loadFilenameParser(
+  projectDir: string,
+  configPath: string,
+  sources: SourceRecord[],
+  warnings: string[],
+): FilenameParserConfig {
+  if (!fs.existsSync(configPath)) return { enabled: false };
+  try {
+    const data = JSON.parse(fs.readFileSync(configPath, "utf-8")) as JsonRecord;
+    sources.push(sourceRecord(projectDir, "footage_filename_parser", "03_analysis/footage_filename_parser.json", false, data));
+    return { enabled: data.enabled !== false };
+  } catch (error) {
+    warnings.push(`footage_filename_parser skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return { enabled: false };
+  }
 }
 
 function readTranscriptDocuments(projectDir: string): TranscriptDocument[] {

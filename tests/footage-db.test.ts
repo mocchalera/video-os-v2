@@ -4,6 +4,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+const execFileMock = vi.hoisted(() => vi.fn());
+
+vi.mock("node:child_process", () => ({
+  execFile: execFileMock,
+}));
+
 vi.mock("../runtime/eval/semantic-match.js", () => {
   function normalize(values: number[]): Float32Array {
     const magnitude = Math.sqrt(values.reduce((sum, value) => sum + value * value, 0));
@@ -33,6 +39,7 @@ vi.mock("../runtime/eval/semantic-match.js", () => {
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  execFileMock.mockReset();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -63,38 +70,46 @@ describe("footage database", () => {
       expect(db.prepare("SELECT COUNT(*) FROM assets").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segments").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segments_fts").pluck().get()).toBe(2);
-      expect(db.prepare("SELECT COUNT(*) FROM asset_technical").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM asset_technical_metadata").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segment_visual_profile").pluck().get()).toBe(2);
       expect(db.prepare("SELECT COUNT(*) FROM segment_audio_profile").pluck().get()).toBe(2);
-      expect(db.prepare("SELECT COUNT(*) FROM segment_logging").pluck().get()).toBe(2);
-      expect(db.prepare("SELECT COUNT(*) FROM metadata_fts").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM segment_logging_profile").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM segment_metadata_fts").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM segment_usability_profile").pluck().get()).toBe(2);
       expect(db.prepare("SELECT value FROM footage_db_meta WHERE key = 'artifact_version'").pluck().get()).toBe("footage-db-v1");
       expect(db.prepare("SELECT value FROM footage_db_meta WHERE key = 'metadata_schema_version'").pluck().get()).toBe("1");
-      expect(db.prepare("SELECT codec, resolution_width, resolution_height, fps_num, fps_den, audio_channels, audio_sample_rate FROM asset_technical WHERE asset_id = 'AST_food'").get()).toMatchObject({
-        codec: "prores",
-        resolution_width: 3840,
-        resolution_height: 2160,
+      expect(db.prepare("SELECT video_codec, width, height, fps_num, fps_den, audio_streams_json FROM asset_technical_metadata WHERE asset_id = 'AST_food'").get()).toMatchObject({
+        video_codec: "prores",
+        width: 3840,
+        height: 2160,
         fps_num: 60000,
         fps_den: 1001,
-        audio_channels: 4,
-        audio_sample_rate: 48000,
       });
-      expect(db.prepare("SELECT camera_motion, motion_direction, stability, shot_scale FROM segment_visual_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
-        camera_motion: "pan_right",
-        motion_direction: "right",
-        stability: "stable",
+      expect(JSON.parse((db.prepare("SELECT audio_streams_json FROM asset_technical_metadata WHERE asset_id = 'AST_food'").pluck().get() as string))[0]).toMatchObject({
+        channels: 4,
+        sample_rate: 48000,
+      });
+      expect(db.prepare("SELECT camera_motion_type, camera_motion_direction, camera_stability, shot_scale FROM segment_visual_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
+        camera_motion_type: "pan",
+        camera_motion_direction: "ltr",
+        camera_stability: "unknown",
         shot_scale: "detail",
       });
-      expect(db.prepare("SELECT has_dialogue, peak_db, rms_db, loudness_lufs FROM segment_audio_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
+      expect(db.prepare("SELECT audio_role, has_dialogue, peak_dbfs, rms_dbfs, integrated_lufs FROM segment_audio_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
+        audio_role: "dialogue",
         has_dialogue: 1,
-        peak_db: null,
-        rms_db: null,
-        loudness_lufs: null,
+        peak_dbfs: null,
+        rms_dbfs: null,
+        integrated_lufs: null,
       });
-      expect(db.prepare("SELECT scene_number, shot_number, take_number, usability FROM segment_logging WHERE segment_id = 'SEG_river'").get()).toMatchObject({
-        scene_number: 20260619,
-        shot_number: 143015,
-        take_number: 7,
+      expect(db.prepare("SELECT scene_number, shot_number, take_number, circle_take, source FROM segment_logging_profile WHERE segment_id = 'SEG_river'").get()).toMatchObject({
+        scene_number: null,
+        shot_number: null,
+        take_number: null,
+        circle_take: null,
+        source: "unknown",
+      });
+      expect(db.prepare("SELECT usability FROM segment_usability_profile WHERE segment_id = 'SEG_river'").get()).toMatchObject({
         usability: "unusable",
       });
     } finally {
@@ -198,7 +213,7 @@ describe("footage database", () => {
     expect(excluded.results).toHaveLength(0);
   });
 
-  it("applies metadata filters for camera motion, shot scale, stability, dialogue, and usability", async () => {
+  it("applies metadata filters for camera motion, shot scale, stability, dialogue, audio role, and usability", async () => {
     const projectDir = makeProject();
     const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
     const { searchFootage } = await import("../runtime/tools/footage-search.js");
@@ -207,10 +222,10 @@ describe("footage database", () => {
     const pan = await searchFootage(projectDir, {
       query: "",
       mode: "structured",
-      filters: { camera_motion: "pan_right" },
+      filters: { camera_motion_type: "pan" },
     });
     expect(pan.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
-    expect(pan.results[0].metadata).toMatchObject({ camera_motion: "pan_right", shot_scale: "detail" });
+    expect(pan.results[0].metadata).toMatchObject({ camera_motion_type: "pan", shot_scale: "detail" });
 
     const wide = await searchFootage(projectDir, {
       query: "",
@@ -222,7 +237,7 @@ describe("footage database", () => {
     const shaky = await searchFootage(projectDir, {
       query: "",
       mode: "structured",
-      filters: { stability: "shaky" },
+      filters: { camera_stability: "shaky" },
     });
     expect(shaky.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
 
@@ -233,12 +248,156 @@ describe("footage database", () => {
     });
     expect(dialogue.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
 
+    const audioRole = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { audio_role: "dialogue" },
+    });
+    expect(audioRole.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+
     const unusable = await searchFootage(projectDir, {
       query: "",
       mode: "structured",
       filters: { usability: "unusable" },
     });
     expect(unusable.results.map((result) => result.segment_id)).toEqual(["SEG_river"]);
+  });
+
+  it("loads footage_user_annotations sidecar into logging metadata", async () => {
+    const projectDir = makeProject();
+    writeJson(projectDir, "03_analysis/footage_user_annotations.json", {
+      annotations: [{
+        segment_id: "SEG_food",
+        scene: "03",
+        shot: "02",
+        take: "01",
+        circle_take: true,
+        best_take: true,
+        custom_tags: ["best-light", "hero"],
+        operator_notes: "best light",
+        camera_id: "A",
+        card_id: "CARD_02",
+      }],
+    });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+
+    const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
+    try {
+      expect(db.prepare("SELECT scene_number, shot_number, take_number, circle_take, best_take, camera_id, card_id, source FROM segment_logging_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
+        scene_number: "03",
+        shot_number: "02",
+        take_number: "01",
+        circle_take: 1,
+        best_take: 1,
+        camera_id: "A",
+        card_id: "CARD_02",
+        source: "user_annotation",
+      });
+    } finally {
+      db.close();
+    }
+
+    const circle = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { scene_number: "03", take_number: "01", circle_take: true, custom_tags_any: ["hero"] },
+    });
+    expect(circle.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+  });
+
+  it("queries segment_metadata_fts when segment FTS has no matching rows", async () => {
+    const projectDir = makeProject();
+    writeJson(projectDir, "03_analysis/footage_user_annotations.json", {
+      annotations: [{ segment_id: "SEG_food", notes: "best light", custom_tags: ["circle-select"] }],
+    });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+
+    const db = new Database(footageDbPath(projectDir));
+    try {
+      db.prepare("DELETE FROM segments_fts").run();
+    } finally {
+      db.close();
+    }
+
+    const response = await searchFootage(projectDir, { query: "circle-select", mode: "text" });
+    expect(response.results.map((result) => result.segment_id)).toEqual(["SEG_food"]);
+  });
+
+  it("extracts audio levels and silence from mocked ffmpeg output", async () => {
+    const projectDir = makeProject();
+    fs.mkdirSync(path.join(projectDir, "02_media"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "02_media/food.mov"), "mock media");
+    execFileMock.mockImplementation((_cmd: string, args: string[], _options: unknown, cb: (error: Error | null, stdout: string, stderr: string) => void) => {
+      const filter = args[args.indexOf("-af") + 1];
+      if (filter === "volumedetect") {
+        cb(null, "", "mean_volume: -20.0 dB\nmax_volume: -1.2 dB\n");
+      } else if (filter.startsWith("ebur128")) {
+        cb(null, "", "I: -18.4 LUFS\n");
+      } else if (filter.startsWith("silencedetect")) {
+        cb(null, "", "silence_start: 0\nsilence_end: 0.5 | silence_duration: 0.5\nsilence_start: 3.5\nsilence_end: 4.0 | silence_duration: 0.5\n");
+      } else {
+        cb(new Error(`unexpected filter ${filter}`), "", "");
+      }
+      return {} as never;
+    });
+
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+
+    const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
+    try {
+      expect(db.prepare("SELECT peak_dbfs, rms_dbfs, integrated_lufs, silence_ratio, silence_head_us, silence_tail_us FROM segment_audio_profile WHERE segment_id = 'SEG_food'").get()).toMatchObject({
+        peak_dbfs: -1.2,
+        rms_dbfs: -20,
+        integrated_lufs: -18.4,
+        silence_ratio: 0.25,
+        silence_head_us: 500000,
+        silence_tail_us: 500000,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("classifies partially usable segments from quality flags and mixed scores", async () => {
+    const projectDir = makeProject();
+    const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+    const segmentsJson = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as { items: Array<Record<string, unknown>> };
+    segmentsJson.items[0].quality_flags = ["blur"];
+    segmentsJson.items[0].visual_quality = {
+      scores: {
+        light_quality: 0.9,
+        subject_prominence: 0.85,
+        emotional_expression: 0.5,
+        composition_score: 0.92,
+        motion_quality: 0.2,
+      },
+    };
+    fs.writeFileSync(segmentsPath, `${JSON.stringify(segmentsJson, null, 2)}\n`, "utf-8");
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip" });
+
+    const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare("SELECT usability, confidence, evidence_json FROM segment_usability_profile WHERE segment_id = 'SEG_food'").get() as {
+        usability: string;
+        confidence: number;
+        evidence_json: string;
+      };
+      expect(row.usability).toBe("partially_usable");
+      expect(row.confidence).toBeGreaterThan(0.7);
+      expect(JSON.parse(row.evidence_json)).toContain("quality_flag:blur");
+    } finally {
+      db.close();
+    }
   });
 
   it("stores local embeddings and ranks semantic matches by vector score", async () => {
@@ -278,11 +437,12 @@ describe("footage database", () => {
     const db = new Database(footageDbPath(projectDir));
     try {
       db.exec(`
-        DROP TABLE metadata_fts;
-        DROP TABLE segment_logging;
+        DROP TABLE segment_metadata_fts;
+        DROP TABLE segment_usability_profile;
+        DROP TABLE segment_logging_profile;
         DROP TABLE segment_audio_profile;
         DROP TABLE segment_visual_profile;
-        DROP TABLE asset_technical;
+        DROP TABLE asset_technical_metadata;
       `);
     } finally {
       db.close();
@@ -295,7 +455,7 @@ describe("footage database", () => {
     const metadataFiltered = await searchFootage(projectDir, {
       query: "",
       mode: "structured",
-      filters: { camera_motion: "pan_right" },
+      filters: { camera_motion_type: "pan" },
     });
     expect(metadataFiltered.results).toHaveLength(0);
     expect(metadataFiltered.warnings).toContain("visual metadata filter requested, but segment_visual_profile is missing in this footage DB");

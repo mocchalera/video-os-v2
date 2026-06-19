@@ -6,53 +6,85 @@ import {
 } from "../runtime/artifacts/footage-metadata-extractor.js";
 
 describe("footage metadata extractor", () => {
-  it("extracts camera motion and stability from Marlin-style descriptions", () => {
+  it("extracts unified camera motion, direction, and stability terms", () => {
     expect(extractCameraMotion("The camera pans to the right across the market.")).toMatchObject({
-      camera_motion: "pan_right",
-      motion_direction: "right",
-      motion_speed: "medium",
-      stability: "stable",
+      camera_motion_type: "pan",
+      camera_motion_direction: "ltr",
+      motion_confidence: 0.65,
     });
     expect(extractCameraMotion("Camera tilts down slowly to the table.")).toMatchObject({
-      camera_motion: "tilt_down",
-      motion_direction: "down",
-      motion_speed: "slow",
+      camera_motion_type: "tilt",
+      camera_motion_direction: "down",
     });
-    expect(extractCameraMotion("A shaky handheld view follows the subject.")).toMatchObject({
-      camera_motion: "tracking",
-      stability: "shaky",
+    expect(extractCameraMotion("A shaky handheld camera follows the subject.")).toMatchObject({
+      camera_motion_type: "tracking",
+      camera_stability: "shaky",
     });
     expect(extractCameraMotion("Static shot; the camera remains stationary.")).toMatchObject({
-      camera_motion: "static",
-      motion_direction: null,
-      stability: "stable",
+      camera_motion_type: "static",
+      camera_motion_direction: "none",
+      camera_stability: "stable",
     });
   });
 
-  it("extracts shot scale from description phrases", () => {
-    expect(extractShotScale("close-up of a face")).toBe("closeup");
+  it("defaults ambiguous Marlin prose to unknown instead of concrete labels", () => {
+    expect(extractCameraMotion("The child follows the path through the forest.")).toMatchObject({
+      camera_motion_type: "unknown",
+      camera_motion_direction: "unknown",
+      camera_stability: "unknown",
+    });
+    expect(extractShotScale("ordinary activity with no scale cue")).toBe("unknown");
+  });
+
+  it("extracts unified shot scale from explicit description phrases", () => {
+    expect(extractShotScale("close-up of a face")).toBe("close");
     expect(extractShotScale("A person's hand turns the dial")).toBe("detail");
-    expect(extractShotScale("wide angle establishing view of the river")).toBe("wide");
+    expect(extractShotScale("wide shot establishing view of the river")).toBe("wide");
+    expect(extractShotScale("wide angle lens view of the room")).toBe("unknown");
     expect(extractShotScale("medium shot from the waist up")).toBe("medium");
-    expect(extractShotScale("head to toe full body framing")).toBe("full");
-    expect(extractShotScale("ordinary activity with no scale cue")).toBe("medium");
+    expect(extractShotScale("head to toe full body framing")).toBe("medium_wide");
   });
 
-  it("parses scene, shot, and take from Blackmagic-style filenames", () => {
-    expect(extractSceneShotTake("NINJAV_S001_S002_T084.MOV")).toEqual({
-      scene_number: 1,
-      shot_number: 2,
-      take_number: 84,
+  it("parses configured-production filename patterns as strings", () => {
+    expect(extractSceneShotTake("NINJAV_S001_S002_T084.MOV")).toMatchObject({
+      scene_number: "001",
+      shot_number: "002",
+      take_number: "084",
+      source: "filename_parser",
     });
-    expect(extractSceneShotTake("A001_20260619_143015_C0007.mov")).toEqual({
-      scene_number: 20260619,
-      shot_number: 143015,
-      take_number: 7,
+    expect(extractSceneShotTake("A001_20260619_143015_C0007.mov")).toMatchObject({
+      scene_number: null,
+      shot_number: null,
+      take_number: "0007",
+      card_id: "A001",
+      clip_number: "0007",
     });
-    expect(extractSceneShotTake("clip_C0012.mov", "2026-06-19T10:05:30Z")).toEqual({
-      scene_number: 20260619,
-      shot_number: 100530,
-      take_number: 12,
+  });
+
+  it("extracts GoPro and DJI clip numbers without inventing scene or shot", () => {
+    expect(extractSceneShotTake("GOPR0123.MP4")).toMatchObject({
+      scene_number: null,
+      shot_number: null,
+      take_number: "0123",
+      clip_number: "0123",
+    });
+    expect(extractSceneShotTake("GH0456.MP4")).toMatchObject({
+      scene_number: null,
+      shot_number: null,
+      take_number: "0456",
+      clip_number: "0456",
+    });
+    expect(extractSceneShotTake("GX0789.MP4")).toMatchObject({
+      scene_number: null,
+      shot_number: null,
+      take_number: "0789",
+      clip_number: "0789",
+    });
+    expect(extractSceneShotTake("DJI_0075.MOV")).toMatchObject({
+      scene_number: null,
+      shot_number: null,
+      take_number: "0075",
+      clip_number: "0075",
     });
   });
 });
