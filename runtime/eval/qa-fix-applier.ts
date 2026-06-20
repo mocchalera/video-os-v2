@@ -18,6 +18,7 @@ export interface ApplyResult {
   skipped: QAFix[];
   selects_modified: boolean;
   blueprint_modified: boolean;
+  timeline_changed?: boolean;
   warnings: string[];
   modified_beat_ids: string[];
 }
@@ -26,7 +27,8 @@ export interface ApplyFixesOptions {
   dryRun?: boolean;
   projectDir?: string;
   segmentIds?: Iterable<string>;
-  segments?: Array<Pick<SegmentItem, "segment_id" | "asset_id" | "src_in_us" | "src_out_us"> & Partial<SegmentItem>>;
+  segments?: Array<Pick<SegmentItem, "segment_id" | "asset_id" | "src_in_us" | "src_out_us"> & Partial<SegmentItem> & { trim_hint?: TrimHint }>;
+  recompile?: (selects: SelectsCandidates, blueprint: EditBlueprint) => TimelineIR;
 }
 
 interface SegmentIndex {
@@ -43,6 +45,7 @@ interface SegmentLike {
   transcript_excerpt?: string;
   quality_flags?: string[];
   tags?: string[];
+  trim_hint?: TrimHint;
 }
 
 type ReorderPayload = {
@@ -77,6 +80,7 @@ export function applyFixes(
     skipped: [],
     selects_modified: false,
     blueprint_modified: false,
+    timeline_changed: false,
     warnings: [],
     modified_beat_ids: [],
   };
@@ -92,6 +96,7 @@ export function applyFixes(
   }
 
   result.modified_beat_ids = [...modifiedBeatIds].sort((a, b) => a.localeCompare(b));
+  verifyTimelineChange(timeline, workingSelects, workingBlueprint, opts, result);
   return result;
 }
 
@@ -124,7 +129,7 @@ function applyOneFix(
     case "trim":
       return applyTrim(fix, selects, timeline, result, modifiedBeatIds, beatId);
     case "insert":
-      return applyInsert(fix, selects, beat, segmentIndex, result, modifiedBeatIds);
+      return applyInsert(fix, selects, beat, timeline, segmentIndex, result, modifiedBeatIds);
     case "remove":
       return applyRemove(fix, selects, beat, timeline, result, modifiedBeatIds, beatId);
     default:
@@ -173,6 +178,8 @@ function applySwap(
   }
 
   const oldRefs = refsForCandidate(targetCandidate);
+  const oldPrimarySegmentId = targetClip.segment_id;
+  const oldPrimaryCandidate = structuredClone(targetCandidate);
   const replacementCandidate = candidateForSegment(selects, replacementId);
   const replacementSegment = segmentIndex.byId.get(replacementId);
   const nextCandidate = buildReplacementCandidate({
@@ -190,7 +197,11 @@ function applySwap(
   Object.assign(targetCandidate, nextCandidate);
   result.selects_modified = true;
 
-  if (updateBeatPlanRefs(beat, oldRefs, replacementId)) {
+  if (!candidateForSegment(selects, oldPrimarySegmentId)) {
+    selects.candidates.push(oldPrimaryCandidate);
+  }
+
+  if (updateBeatPlanForSwap(beat, oldRefs, replacementId, oldPrimarySegmentId)) {
     result.blueprint_modified = true;
   }
   modifiedBeatIds.add(beat.id);
@@ -209,22 +220,22 @@ function applyReorder(
     result.warnings.push(`Skipped ${fix.issue_id}: beat has no candidate_plan to reorder: ${beat.id}`);
     return false;
   }
-  const existing = currentPlanRefs(plan);
-  if (existing.length === 0) {
-    result.warnings.push(`Skipped ${fix.issue_id}: beat candidate_plan is empty: ${beat.id}`);
+  const fallbackRefs = plan.fallback_candidate_refs ?? [];
+  if (fallbackRefs.length === 0) {
+    result.warnings.push(`Skipped ${fix.issue_id}: beat candidate_plan has no fallbacks to reorder: ${beat.id}`);
     return false;
   }
 
   const desired = explicitReorderRefs(fix);
-  const nextRefs = desired.length > 0
-    ? mergeExplicitOrder(desired, existing)
-    : fallbackReorder(fix, timeline, existing);
-  if (nextRefs.length === 0 || arraysEqual(existing, nextRefs)) {
+  const nextFallbacks = desired.length > 0
+    ? mergeExplicitOrder(desired, fallbackRefs)
+    : fallbackReorder(fix, timeline, fallbackRefs);
+  if (nextFallbacks.length === 0 || arraysEqual(fallbackRefs, nextFallbacks)) {
     result.warnings.push(`Skipped ${fix.issue_id}: reorder produced no candidate_plan change`);
     return false;
   }
 
-  setPlanRefs(plan, nextRefs);
+  plan.fallback_candidate_refs = nextFallbacks;
   result.blueprint_modified = true;
   modifiedBeatIds.add(beat.id);
   return true;
@@ -263,6 +274,9 @@ function applyTrim(
   }
 
   candidate.trim_hint = nextTrimHint;
+  if (isMicroClipIssue(fix)) {
+    candidate.quality_flags = includeValue(candidate.quality_flags, "qa_micro_clip_trim");
+  }
   result.selects_modified = true;
   modifiedBeatIds.add(beatId);
   return true;
@@ -272,6 +286,7 @@ function applyInsert(
   fix: QAFix,
   selects: SelectsCandidates,
   beat: EditBlueprint["beats"][number],
+  timeline: TimelineIR,
   segmentIndex: SegmentIndex,
   result: ApplyResult,
   modifiedBeatIds: Set<string>,
@@ -300,8 +315,24 @@ function applyInsert(
 
   const plan = ensureCandidatePlan(beat);
   const fallbackRefs = plan.fallback_candidate_refs ?? [];
-  if (plan.primary_candidate_ref !== replacementId && !fallbackRefs.includes(replacementId)) {
-    plan.fallback_candidate_refs = [...fallbackRefs, replacementId];
+  if (!plan.primary_candidate_ref || beatHasOpenCapacity(beat, timeline)) {
+    const previousPrimary = plan.primary_candidate_ref;
+    plan.primary_candidate_ref = replacementId;
+    plan.fallback_candidate_refs = [
+      ...(previousPrimary && previousPrimary !== replacementId ? [previousPrimary] : []),
+      ...fallbackRefs,
+    ].filter((ref, index, refs) => ref !== replacementId && refs.indexOf(ref) === index);
+    result.blueprint_modified = true;
+    changed = true;
+  } else if (plan.primary_candidate_ref === replacementId) {
+    const nextFallbacks = fallbackRefs.filter((ref) => ref !== replacementId);
+    if (!arraysEqual(fallbackRefs, nextFallbacks)) {
+      plan.fallback_candidate_refs = nextFallbacks;
+      result.blueprint_modified = true;
+      changed = true;
+    }
+  } else if (fallbackRefs[0] !== replacementId) {
+    plan.fallback_candidate_refs = [replacementId, ...fallbackRefs.filter((ref) => ref !== replacementId)];
     result.blueprint_modified = true;
     changed = true;
   }
@@ -397,6 +428,12 @@ function buildReplacementCandidate(input: {
     eligible_beats: includeBeat(replacementCandidate?.eligible_beats ?? targetCandidate.eligible_beats, beatId),
     transcript_excerpt: replacementCandidate?.transcript_excerpt ?? replacementSegment?.transcript_excerpt ?? targetCandidate.transcript_excerpt,
   };
+  const trimHint = replacementCandidate?.trim_hint ?? replacementSegment?.trim_hint;
+  if (trimHint) {
+    base.trim_hint = { ...trimHint };
+  } else {
+    delete base.trim_hint;
+  }
   base.candidate_id = generateCandidateId(projectId, base);
   return base;
 }
@@ -422,6 +459,9 @@ function candidateFromSegment(
     eligible_beats: [beatId],
     transcript_excerpt: segment.transcript_excerpt,
   };
+  if (segment.trim_hint) {
+    candidate.trim_hint = { ...segment.trim_hint };
+  }
   candidate.candidate_id = generateCandidateId(projectId, candidate);
   return candidate;
 }
@@ -434,7 +474,7 @@ function computedTrimHint(
 ): TrimHint {
   const payload = fix as QAFix & TrimPayload;
   const authored = payload.new_trim_hint ?? payload.trim_hint;
-  if (authored) return authored;
+  if (authored) return concreteTrimHint(authored, candidate);
 
   const sourceStart = candidate.src_in_us;
   const sourceEnd = candidate.src_out_us;
@@ -508,7 +548,7 @@ function buildSegmentIndex(opts: ApplyFixesOptions): SegmentIndex {
 }
 
 function replacementExists(segmentId: string, selects: SelectsCandidates, segmentIndex: SegmentIndex): boolean {
-  if (segmentIndex.loaded) return segmentIndex.byId.has(segmentId);
+  if (segmentIndex.loaded) return segmentIndex.byId.has(segmentId) || Boolean(candidateForSegment(selects, segmentId));
   return Boolean(candidateForSegment(selects, segmentId));
 }
 
@@ -535,39 +575,24 @@ function ensureCandidatePlan(beat: EditBlueprint["beats"][number]) {
   return beat.candidate_plan;
 }
 
-function currentPlanRefs(plan: NonNullable<EditBlueprint["beats"][number]["candidate_plan"]>): string[] {
-  return [
-    ...(plan.primary_candidate_ref ? [plan.primary_candidate_ref] : []),
-    ...(plan.fallback_candidate_refs ?? []),
-  ].filter((ref, index, refs) => refs.indexOf(ref) === index);
-}
+function updateBeatPlanForSwap(
+  beat: EditBlueprint["beats"][number],
+  oldRefs: Set<string>,
+  replacementRef: string,
+  oldPrimaryRef: string,
+): boolean {
+  const plan = ensureCandidatePlan(beat);
+  const beforePrimary = plan.primary_candidate_ref;
+  const beforeFallbacks = plan.fallback_candidate_refs ?? [];
+  const nextFallbacks = [
+    oldPrimaryRef,
+    ...beforeFallbacks.filter((ref) => ref !== replacementRef && ref !== oldPrimaryRef && !oldRefs.has(ref)),
+  ];
 
-function setPlanRefs(
-  plan: NonNullable<EditBlueprint["beats"][number]["candidate_plan"]>,
-  refs: string[],
-): void {
-  const deduped = refs.filter((ref, index) => refs.indexOf(ref) === index);
-  plan.primary_candidate_ref = deduped[0];
-  plan.fallback_candidate_refs = deduped.slice(1);
-}
+  plan.primary_candidate_ref = replacementRef;
+  plan.fallback_candidate_refs = nextFallbacks.filter((ref, index, refs) => refs.indexOf(ref) === index);
 
-function updateBeatPlanRefs(beat: EditBlueprint["beats"][number], oldRefs: Set<string>, replacementRef: string): boolean {
-  const plan = beat.candidate_plan;
-  if (!plan) return false;
-  let changed = false;
-  if (plan.primary_candidate_ref && oldRefs.has(plan.primary_candidate_ref)) {
-    plan.primary_candidate_ref = replacementRef;
-    changed = true;
-  }
-  if (plan.fallback_candidate_refs) {
-    const next = plan.fallback_candidate_refs.map((ref) => oldRefs.has(ref) ? replacementRef : ref);
-    const deduped = next.filter((ref, index) => next.indexOf(ref) === index);
-    if (!arraysEqual(plan.fallback_candidate_refs, deduped)) {
-      plan.fallback_candidate_refs = deduped;
-      changed = true;
-    }
-  }
-  return changed;
+  return beforePrimary !== plan.primary_candidate_ref || !arraysEqual(beforeFallbacks, plan.fallback_candidate_refs);
 }
 
 function removeBeatPlanRefs(beat: EditBlueprint["beats"][number], refs: Set<string>): boolean {
@@ -619,6 +644,13 @@ function fallbackReorder(fix: QAFix, timeline: TimelineIR, existing: string[]): 
   return existing;
 }
 
+function beatHasOpenCapacity(beat: EditBlueprint["beats"][number], timeline: TimelineIR): boolean {
+  const usedFrames = primaryVideoClips(timeline)
+    .filter((clip) => clip.beat_id === beat.id)
+    .reduce((sum, clip) => sum + Math.max(0, clip.timeline_duration_frames), 0);
+  return usedFrames > 0 && usedFrames < beat.target_duration_frames;
+}
+
 function moveBefore(refs: string[], moving: string, anchor: string): string[] {
   const without = refs.filter((ref) => ref !== moving);
   const index = without.indexOf(anchor);
@@ -641,6 +673,66 @@ function includeBeat(values: string[] | undefined, beatId: string): string[] {
   const next = values ? [...values] : [];
   if (!next.includes(beatId)) next.push(beatId);
   return next;
+}
+
+function includeValue(values: string[] | undefined, value: string): string[] {
+  const next = values ? [...values] : [];
+  if (!next.includes(value)) next.push(value);
+  return next;
+}
+
+function concreteTrimHint(hint: TrimHint, candidate: Candidate): TrimHint {
+  const next: TrimHint = { ...hint };
+  const sourceDuration = Math.max(1, candidate.src_out_us - candidate.src_in_us);
+  if (next.preferred_duration_us === undefined) {
+    if (next.recommended_in_us !== undefined && next.recommended_out_us !== undefined && next.recommended_out_us > next.recommended_in_us) {
+      next.preferred_duration_us = next.recommended_out_us - next.recommended_in_us;
+    } else {
+      next.preferred_duration_us = sourceDuration;
+    }
+  }
+  next.preferred_duration_us = clampInteger(next.preferred_duration_us, 1, sourceDuration);
+  return next;
+}
+
+function isMicroClipIssue(fix: QAFix): boolean {
+  return fix.issue?.type === "micro_clip" || fix.issue?.source_category === "micro_clip";
+}
+
+function verifyTimelineChange(
+  timeline: TimelineIR,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  opts: ApplyFixesOptions,
+  result: ApplyResult,
+): void {
+  if (!opts.recompile || result.applied.length === 0) return;
+  try {
+    const nextTimeline = opts.recompile(selects, blueprint);
+    result.timeline_changed = !arraysEqual(timelineClipSignature(timeline), timelineClipSignature(nextTimeline));
+    if (!result.timeline_changed) {
+      result.warnings.push("Applied fixes did not change the compiled timeline clip list");
+    }
+  } catch (error) {
+    result.warnings.push(`Applied fixes could not be verified against a recompiled timeline: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function timelineClipSignature(timeline: TimelineIR): string[] {
+  return (timeline.tracks.video ?? [])
+    .flatMap((track) =>
+      track.clips.map((clip) => [
+        track.track_id,
+        clip.beat_id,
+        clip.segment_id,
+        clip.asset_id,
+        clip.src_in_us,
+        clip.src_out_us,
+        clip.timeline_in_frame,
+        clip.timeline_duration_frames,
+      ].join(":"))
+    )
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function arraysEqual(left: string[] = [], right: string[] = []): boolean {

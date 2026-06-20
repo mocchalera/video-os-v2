@@ -1,13 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type {
   EditBlueprint,
+  ScoringParams,
   SelectsCandidates,
   TimelineIR,
 } from "../runtime/artifacts/types.js";
+import { assemble } from "../runtime/compiler/assemble.js";
+import { normalize } from "../runtime/compiler/normalize.js";
+import { scoreCandidates } from "../runtime/compiler/score.js";
 import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import { applyFixes } from "../runtime/eval/qa-fix-applier.js";
 import type { QAIssue } from "../runtime/eval/qa-issue-detector.js";
 import type { QAFix } from "../runtime/eval/qa-fix-proposer.js";
+
+const scoringParams: ScoringParams = {
+  motif_reuse_max: 3,
+  adjacency_penalty: 0,
+  beat_alignment_tolerance_frames: 24,
+  duration_fit_tolerance_frames: 12,
+  quality_flag_penalty: 0,
+};
 
 function candidate(segmentId: string, beatId = "b1"): SelectsCandidates["candidates"][number] {
   return {
@@ -181,6 +193,47 @@ function segment(segmentId: string): Pick<SegmentItem, "segment_id" | "asset_id"
   };
 }
 
+function compileMock(selectsInput: SelectsCandidates, blueprintInput: EditBlueprint): TimelineIR {
+  const normalized = normalize({
+    version: "1",
+    project_id: "qa-fixture",
+    project: { id: "qa-fixture", title: "QA Fixture", strategy: "fixture" },
+    message: { primary: "fixture" },
+    emotion_curve: ["start", "finish"],
+  }, blueprintInput);
+  const ranked = scoreCandidates(normalized, selectsInput.candidates, scoringParams, 24, 1);
+  const assembled = assemble(normalized, ranked, scoringParams, 24, 1, undefined, {
+    audioPolicy: "bgm_only",
+    clusterContinuity: false,
+  });
+
+  return {
+    version: "1",
+    project_id: "qa-fixture",
+    created_at: "2026-06-20T00:00:00.000Z",
+    sequence: {
+      name: "qa-fixture",
+      fps_num: 24,
+      fps_den: 1,
+      width: 1920,
+      height: 1080,
+      start_frame: 0,
+    },
+    tracks: assembled.tracks,
+    markers: [],
+    provenance: {
+      brief_path: "",
+      blueprint_path: "",
+      selects_path: "",
+      compiler_version: "test",
+    },
+  };
+}
+
+function videoSegmentIds(timelineInput: TimelineIR): string[] {
+  return timelineInput.tracks.video.flatMap((track) => track.clips.map((clipItem) => clipItem.segment_id));
+}
+
 describe("applyFixes", () => {
   it("applies a swap to selects and the beat candidate_plan without touching other beats", () => {
     const s = selects();
@@ -199,20 +252,34 @@ describe("applyFixes", () => {
       asset_id: "AST_SEG_R",
       eligible_beats: ["b1"],
     });
-    expect(b.beats[0].candidate_plan).toMatchObject({
+    expect(b.beats[0].candidate_plan).toEqual({
       primary_candidate_ref: "SEG_R",
-      fallback_candidate_refs: ["SEG_B", "SEG_R"],
+      fallback_candidate_refs: ["SEG_A", "SEG_B"],
     });
     expect(b.beats[1]).toEqual(untouchedBeat);
     expect(result.modified_beat_ids).toEqual(["b1"]);
   });
 
-  it("reorders candidates inside the beat candidate_plan", () => {
+  it("moves the old swap primary to fallback and updates the selects candidate segment_id", () => {
+    const s = selects();
+    const b = blueprint();
+
+    const result = applyFixes([fix()], s, b, timeline(), {
+      segments: [segment("SEG_R")],
+    });
+
+    expect(result.applied).toHaveLength(1);
+    expect(b.beats[0].candidate_plan?.primary_candidate_ref).toBe("SEG_R");
+    expect(b.beats[0].candidate_plan?.fallback_candidate_refs?.[0]).toBe("SEG_A");
+    expect(s.candidates[0].segment_id).toBe("SEG_R");
+  });
+
+  it("reorders fallback candidates without changing the primary candidate", () => {
     const s = selects();
     const b = blueprint();
     const reorderFix = {
       ...fix({ fix_type: "reorder", replacement: undefined }),
-      candidate_order: ["SEG_B", "SEG_A", "SEG_R"],
+      candidate_order: ["SEG_R", "SEG_B"],
     } as QAFix & { candidate_order: string[] };
 
     const result = applyFixes([reorderFix], s, b, timeline());
@@ -220,8 +287,8 @@ describe("applyFixes", () => {
     expect(result.applied).toHaveLength(1);
     expect(result.selects_modified).toBe(false);
     expect(b.beats[0].candidate_plan).toEqual({
-      primary_candidate_ref: "SEG_B",
-      fallback_candidate_refs: ["SEG_A", "SEG_R"],
+      primary_candidate_ref: "SEG_A",
+      fallback_candidate_refs: ["SEG_R", "SEG_B"],
     });
   });
 
@@ -233,6 +300,7 @@ describe("applyFixes", () => {
 
     expect(result.applied).toHaveLength(1);
     expect(s.candidates[0].trim_hint).toMatchObject({
+      preferred_duration_us: 4_250_000,
       window_start_us: 0,
       window_end_us: 5_000_000,
       rationale: "QA trim for QAISSUE_1",
@@ -240,7 +308,7 @@ describe("applyFixes", () => {
     expect(s.candidates[0].trim_hint?.recommended_out_us).toBeGreaterThan(s.candidates[0].trim_hint?.recommended_in_us ?? 0);
   });
 
-  it("inserts a new candidate and adds it to the beat fallback list", () => {
+  it("inserts a bridge candidate as the first fallback, not the last fallback", () => {
     const s = selects([]);
     const b = blueprint();
 
@@ -260,7 +328,41 @@ describe("applyFixes", () => {
 
     expect(result.applied).toHaveLength(1);
     expect(s.candidates.some((candidateItem) => candidateItem.segment_id === "SEG_X")).toBe(true);
-    expect(b.beats[0].candidate_plan?.fallback_candidate_refs).toContain("SEG_X");
+    expect(b.beats[0].candidate_plan?.fallback_candidate_refs).toEqual(["SEG_X", "SEG_B", "SEG_R"]);
+  });
+
+  it("warns when a recompiled timeline clip list is unchanged", () => {
+    const s = selects();
+    const b = blueprint();
+
+    const result = applyFixes([fix({ fix_type: "reorder", replacement: undefined })], s, b, timeline(), {
+      recompile: () => timeline(),
+    });
+
+    expect(result.timeline_changed).toBe(false);
+    expect(result.warnings).toContain("Applied fixes did not change the compiled timeline clip list");
+  });
+
+  it("applies a swap that changes the compiled timeline clip list", () => {
+    const s = selects();
+    const b = blueprint();
+    const beforeTimeline = compileMock(s, b);
+    const targetClip = beforeTimeline.tracks.video[0].clips[0];
+    const swapFix = fix({
+      target_clip_id: targetClip.clip_id,
+      issue: issue({ clip_id: targetClip.clip_id, beat_id: targetClip.beat_id }),
+    });
+
+    const result = applyFixes([swapFix], s, b, beforeTimeline, {
+      segments: [segment("SEG_R")],
+      recompile: compileMock,
+    });
+    const afterTimeline = compileMock(s, b);
+
+    expect(result.applied).toHaveLength(1);
+    expect(result.timeline_changed).toBe(true);
+    expect(videoSegmentIds(beforeTimeline)).toEqual(["SEG_A", "SEG_C"]);
+    expect(videoSegmentIds(afterTimeline)).toEqual(["SEG_R", "SEG_C"]);
   });
 
   it("marks a removed candidate as reject and removes it from candidate_plan", () => {
