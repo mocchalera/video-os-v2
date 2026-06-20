@@ -37,18 +37,7 @@ import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { MarlinEventsArtifact } from "../runtime/connectors/marlin-types.js";
 import { detectProjectBgm } from "../runtime/compiler/index.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
-import {
-  defaultMarlinQAVideoPath,
-  runMarlinQA,
-  summarizeMarlinQAReport,
-} from "../runtime/eval/marlin-qa.js";
-import { evaluateBriefAlignment } from "../runtime/eval/brief-alignment.js";
-import { detectIssues } from "../runtime/eval/qa-issue-detector.js";
-import { proposeFixes } from "../runtime/eval/qa-fix-proposer.js";
-import {
-  buildQAReport,
-  writeQAImprovementReport,
-} from "../runtime/eval/qa-improvement-report.js";
+import { runQALoop } from "../runtime/eval/qa-loop.js";
 import {
   extractCraftKeyFrames,
   extractRepresentativeFrames,
@@ -304,11 +293,10 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
 
   if (args.skipRender) {
     console.log("[editorial] render skipped");
-    return;
+  } else {
+    console.log("[editorial] render");
+    await runRender(projectDir);
   }
-
-  console.log("[editorial] render");
-  await runRender(projectDir);
 
   if (args.skipQa === true || args.qa === false) {
     console.log("[editorial] qa skipped");
@@ -317,33 +305,28 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
 
   {
     loadLocalEnvForMarlinQA();
-    console.log("[editorial] qa improvement report");
+    console.log("[editorial] qa improvement loop");
     try {
-      let reportPath = "";
-      const qaResult = await runMarlinQA(
+      const timeline = readJson<TimelineIR>(path.join(projectDir, "05_timeline", "timeline.json"));
+      const loopResult = await runQALoop(
         projectDir,
-        defaultMarlinQAVideoPath(projectDir),
         brief,
+        selects,
+        blueprint,
+        timeline,
         {
-          onReportPath: (writtenPath) => {
-            reportPath = writtenPath;
-          },
+          maxIterations: 3,
+          skipRender: args.skipRender,
         },
       );
-      console.log(`[editorial] marlin qa report: ${path.relative(process.cwd(), reportPath)}`);
-      for (const line of summarizeMarlinQAReport(qaResult)) {
-        console.log(`[editorial] ${line}`);
+      console.log(
+        `[editorial] QA loop: ${loopResult.iterations} iterations, ${loopResult.fixes_applied_total} fixes, score ${loopResult.initial_score.toFixed(2)} -> ${loopResult.final_score.toFixed(2)}`,
+      );
+      if (loopResult.warnings.length > 0) {
+        console.warn(`[editorial] QA loop warnings: ${loopResult.warnings.length}`);
       }
-      const alignResult = await evaluateBriefAlignment(projectDir, { useLlm: false });
-      const timeline = readJson<TimelineIR>(path.join(projectDir, "05_timeline", "timeline.json"));
-      const issues = detectIssues(qaResult, alignResult, timeline);
-      const fixes = await proposeFixes(issues, timeline, selects, projectDir);
-      const report = buildQAReport(0, issues, fixes, qaResult, alignResult);
-      const qaReportPath = writeQAImprovementReport(projectDir, report);
-      console.log(`[editorial] qa improvement report: ${path.relative(process.cwd(), qaReportPath)}`);
-      console.log(`[editorial] QA: ${issues.length} issues, ${fixes.length} proposed fixes`);
     } catch (error) {
-      console.warn(`[editorial] qa improvement report failed; render remains complete: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`[editorial] qa improvement loop failed; render remains complete: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
