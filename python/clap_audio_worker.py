@@ -266,7 +266,7 @@ class ClapAudioWorker:
             if audio_indices:
                 target_sample_rate = processor_sample_rate(self.processor)
                 audios = [load_audio_file(records[index].payload, target_sample_rate) for index in audio_indices]
-                inputs = self.processor(audios=audios, sampling_rate=target_sample_rate, return_tensors="pt", padding=True)
+                inputs = self.processor(audio=audios, sampling_rate=target_sample_rate, return_tensors="pt", padding=True)
                 inputs = batch_to_device(inputs, self.resolved_device)
                 with torch_no_grad():
                     features = self.model.get_audio_features(**inputs)
@@ -323,6 +323,8 @@ def processor_sample_rate(processor: Any) -> int:
 
 
 def tensor_to_rows(value: Any) -> list[Any]:
+    if hasattr(value, "pooler_output"):
+        value = value.pooler_output
     if hasattr(value, "detach"):
         value = value.detach()
     if hasattr(value, "cpu"):
