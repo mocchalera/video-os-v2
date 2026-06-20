@@ -8,6 +8,10 @@ const execFileMock = vi.hoisted(() => vi.fn());
 const qwenCreateMock = vi.hoisted(() => vi.fn());
 const qwenEmbedBatchMock = vi.hoisted(() => vi.fn());
 const qwenShutdownMock = vi.hoisted(() => vi.fn());
+const clapCreateMock = vi.hoisted(() => vi.fn());
+const clapEmbedAudioMock = vi.hoisted(() => vi.fn());
+const clapEmbedTextMock = vi.hoisted(() => vi.fn());
+const clapShutdownMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", () => ({
   execFile: execFileMock,
@@ -15,6 +19,10 @@ vi.mock("node:child_process", () => ({
 
 vi.mock("../runtime/connectors/qwen3vl-embedding-local.js", () => ({
   createQwen3VlEmbeddingLocalClient: qwenCreateMock,
+}));
+
+vi.mock("../runtime/connectors/clap-audio-local.js", () => ({
+  createClapAudioEmbeddingLocalClient: clapCreateMock,
 }));
 
 vi.mock("../runtime/eval/semantic-match.js", () => {
@@ -48,6 +56,7 @@ vi.mock("../runtime/eval/semantic-match.js", () => {
 
 const tempDirs: string[] = [];
 const QWEN_DIMENSION = 2048;
+const CLAP_DIMENSION = 512;
 
 beforeEach(() => {
   qwenEmbedBatchMock.mockImplementation(async (items: Array<{ ref?: string }>, options: { outputDimension?: number } = {}) => ({
@@ -78,6 +87,52 @@ beforeEach(() => {
     embedBatch: qwenEmbedBatchMock,
     shutdown: qwenShutdownMock,
   }));
+  clapEmbedAudioMock.mockImplementation(async (audioPaths: string[], options: { outputDimension?: number } = {}) => ({
+    vectors: audioPaths.map((_audioPath, index) => ({
+      ref: String(index),
+      vector: unitVector(options.outputDimension ?? CLAP_DIMENSION, index),
+      dimension: options.outputDimension ?? CLAP_DIMENSION,
+      normalized: true,
+    })),
+    model: {
+      name: "laion/clap-htsat-fused",
+      modelRevision: "mock",
+      outputDimension: options.outputDimension ?? CLAP_DIMENSION,
+      preprocessVersion: "clap-audio-window-v1",
+      runnerName: "typescript-clap-audio-mock",
+      runnerVersion: "clap-audio-worker-v1",
+      precision: "mock",
+      device: "mock",
+      distanceMetric: "cosine",
+    },
+    elapsedMs: 0,
+  }));
+  clapEmbedTextMock.mockImplementation(async (texts: string[], options: { outputDimension?: number } = {}) => ({
+    vectors: texts.map((_text, index) => ({
+      ref: String(index),
+      vector: unitVector(options.outputDimension ?? CLAP_DIMENSION, index),
+      dimension: options.outputDimension ?? CLAP_DIMENSION,
+      normalized: true,
+    })),
+    model: {
+      name: "laion/clap-htsat-fused",
+      modelRevision: "mock",
+      outputDimension: options.outputDimension ?? CLAP_DIMENSION,
+      preprocessVersion: "clap-audio-window-v1",
+      runnerName: "typescript-clap-audio-mock",
+      runnerVersion: "clap-audio-worker-v1",
+      precision: "mock",
+      device: "mock",
+      distanceMetric: "cosine",
+    },
+    elapsedMs: 0,
+  }));
+  clapCreateMock.mockImplementation(() => ({
+    embedText: clapEmbedTextMock,
+    embedAudio: clapEmbedAudioMock,
+    embedBatch: vi.fn(),
+    shutdown: clapShutdownMock,
+  }));
 });
 
 afterEach(() => {
@@ -85,6 +140,10 @@ afterEach(() => {
   qwenCreateMock.mockReset();
   qwenEmbedBatchMock.mockReset();
   qwenShutdownMock.mockReset();
+  clapCreateMock.mockReset();
+  clapEmbedAudioMock.mockReset();
+  clapEmbedTextMock.mockReset();
+  clapShutdownMock.mockReset();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -112,6 +171,7 @@ describe("footage database", () => {
       qwen_visual: 0,
       qwen_mixed: 0,
       qwen_reranker: 0,
+      clap_audio: 0,
     });
     expect(result.embedding_statuses).toEqual({
       e5_text: "skipped",
@@ -119,6 +179,7 @@ describe("footage database", () => {
       qwen_visual: "skipped",
       qwen_mixed: "unsupported",
       qwen_reranker: "deferred",
+      clap_audio: "skipped",
     });
     expect(fs.existsSync(footageDbPath(projectDir))).toBe(true);
     const reportPath = path.join(projectDir, "03_analysis/search/footage-db-build-report.json");
@@ -240,6 +301,153 @@ describe("footage database", () => {
       qwen_visual: 2,
       qwen_text: 0,
     });
+  });
+
+  it("extracts CLAP audio windows and stores audio/text CLAP embeddings", async () => {
+    const projectDir = makeProject();
+    writeSourceMedia(projectDir);
+    mockFrameExtraction();
+    const now = new Date("2026-06-20T00:00:00.000Z");
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+
+    const result = await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: false,
+      clapAudioEnabled: true,
+      skipAudioAnalysis: true,
+      now,
+    });
+
+    expect(clapCreateMock).toHaveBeenCalledTimes(1);
+    expect(clapEmbedAudioMock).toHaveBeenCalledTimes(1);
+    expect(clapEmbedTextMock).toHaveBeenCalledTimes(1);
+    expect(result.embedding_status).toBe("ready");
+    expect(result.embedding_counts).toMatchObject({ clap_audio: 4 });
+    expect(result.embedding_statuses).toMatchObject({ clap_audio: "ready" });
+    expect(result.counts.embeddings).toBe(4);
+
+    const audioCall = clapEmbedAudioMock.mock.calls[0] as [string[]];
+    expect(audioCall[0]).toEqual([
+      path.join(projectDir, "03_analysis/audio_windows/SEG_food/full.wav"),
+      path.join(projectDir, "03_analysis/audio_windows/SEG_river/full.wav"),
+    ]);
+    const ffmpegArgs = execFileMock.mock.calls[0][1] as string[];
+    expect(ffmpegArgs).toEqual([
+      "-ss",
+      "0",
+      "-t",
+      "4",
+      "-i",
+      path.join(projectDir, "02_media/food.mov"),
+      "-ac",
+      "1",
+      "-ar",
+      "48000",
+      "-f",
+      "wav",
+      "-acodec",
+      "pcm_s16le",
+      "-map",
+      "0:a:0",
+      path.join(projectDir, "03_analysis/audio_windows/SEG_food/full.wav"),
+    ]);
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/audio_windows/SEG_food/manifest.json"), "utf-8")) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      segment_id: "SEG_food",
+      window_type: "full",
+      source_ref: "02_media/food.mov",
+      start_us: 0,
+      end_us: 4_000_000,
+      sample_rate: 48000,
+      channels: 1,
+      output_path: "03_analysis/audio_windows/SEG_food/full.wav",
+      preprocess_version: "clap-audio-window-v1",
+      created_at: now.toISOString(),
+    });
+    expect(typeof manifest.content_hash).toBe("string");
+
+    const report = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/search/footage-db-build-report.json"), "utf-8")) as {
+      embedding_counts: { clap_audio: number };
+      embedding_statuses: { clap_audio: string };
+    };
+    expect(report.embedding_counts.clap_audio).toBe(4);
+    expect(report.embedding_statuses.clap_audio).toBe("ready");
+
+    const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
+    try {
+      expect(db.prepare(`
+        SELECT name, input_modality, output_dimension, runner_name, normalized, distance_metric
+        FROM embedding_models
+        WHERE name = 'laion/clap-htsat-fused'
+      `).get()).toMatchObject({
+        name: "laion/clap-htsat-fused",
+        input_modality: "audio",
+        output_dimension: 512,
+        runner_name: "python-clap-audio-worker",
+        normalized: 1,
+        distance_metric: "cosine",
+      });
+      expect(db.prepare("SELECT COUNT(*) FROM segment_embeddings WHERE embedding_type = 'audio_representative'").pluck().get()).toBe(2);
+      expect(db.prepare("SELECT COUNT(*) FROM segment_embeddings WHERE embedding_type = 'audio_text_clap'").pluck().get()).toBe(2);
+      expect(db.prepare(`
+        SELECT source_ref, source_timestamp_us, dimension, length(vector) AS byte_length, created_at
+        FROM segment_embeddings
+        WHERE segment_id = 'SEG_food' AND embedding_type = 'audio_representative'
+      `).get()).toMatchObject({
+        source_ref: "03_analysis/audio_windows/SEG_food/full.wav",
+        source_timestamp_us: 0,
+        dimension: 512,
+        byte_length: 512 * 4,
+        created_at: now.toISOString(),
+      });
+      expect(db.prepare(`
+        SELECT source_ref, source_timestamp_us, dimension, length(vector) AS byte_length, created_at
+        FROM segment_embeddings
+        WHERE segment_id = 'SEG_food' AND embedding_type = 'audio_text_clap'
+      `).get()).toMatchObject({
+        source_ref: "embedding_texts:combined",
+        source_timestamp_us: null,
+        dimension: 512,
+        byte_length: 512 * 4,
+        created_at: now.toISOString(),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("shuts down Qwen before starting the CLAP worker", async () => {
+    const projectDir = makeProject();
+    writeSourceMedia(projectDir);
+    mockFrameExtraction();
+    const lifecycle: string[] = [];
+    qwenShutdownMock.mockImplementation(async () => {
+      lifecycle.push("qwen_shutdown");
+    });
+    clapCreateMock.mockImplementation(() => {
+      lifecycle.push("clap_create");
+      return {
+        embedText: clapEmbedTextMock,
+        embedAudio: clapEmbedAudioMock,
+        embedBatch: vi.fn(),
+        shutdown: clapShutdownMock,
+      };
+    });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+
+    await buildFootageDb({
+      projectDir,
+      embeddingPolicy: "skip",
+      qwen3vlEnabled: true,
+      qwen3vlEmbedTypes: ["visual_representative"],
+      clapAudioEnabled: true,
+      skipAudioAnalysis: true,
+    });
+
+    expect(lifecycle).toEqual(["qwen_shutdown", "clap_create"]);
   });
 
   it("refreshes representative frame cache when output, timestamp, or source identity changes", async () => {

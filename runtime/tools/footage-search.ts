@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { footageDbPath, readFootageDbStatus } from "../artifacts/footage-db.js";
 import { cjkSearchExpansions, normalizeSearchText } from "../artifacts/footage-db-builder.js";
 import type { Qwen3VlEmbeddingClient } from "../connectors/qwen3vl-embedding-local.js";
+import type { ClapAudioEmbeddingClient } from "../connectors/clap-audio-local.js";
 import {
   SEMANTIC_EMBEDDING_DTYPE,
   SEMANTIC_EMBEDDING_MODEL,
@@ -11,7 +12,7 @@ import {
   embedTexts,
 } from "../eval/semantic-match.js";
 
-export type FootageSearchMode = "hybrid" | "text" | "semantic" | "structured" | "visual" | "multimodal";
+export type FootageSearchMode = "hybrid" | "text" | "semantic" | "structured" | "visual" | "multimodal" | "audio";
 export type FootageSortBy = "relevance" | "quality" | "chronological" | "duration";
 export type VisualFrameType =
   | "visual_representative"
@@ -97,6 +98,7 @@ export interface SearchFootageInput {
   text_match?: string;
   semantic?: string;
   image_query_path?: string;
+  audio_query_path?: string;
   visual_anchor?: FootageVisualAnchor;
   visual_goal?: "similarity" | "palette" | "shot_scale" | "match_cut";
   filters?: FootageSearchFilters;
@@ -125,6 +127,8 @@ export interface FootageScoreBreakdown {
   qwen_text?: number;
   qwen_visual?: number;
   qwen_mixed?: number;
+  audio_similarity?: number;
+  clap_audio?: number;
   structured?: number;
   quality?: number;
   peak?: number;
@@ -323,6 +327,8 @@ type QwenSearchEmbeddingType =
   | "visual_keyframe_out"
   | "text_combined_qwen";
 
+type AudioSearchEmbeddingType = "audio_representative" | "audio_text_clap";
+
 interface SegmentEmbeddingDbRow {
   id: number;
   segment_id: string;
@@ -370,12 +376,29 @@ interface VisualInputValidation {
   shouldReturnEmpty: boolean;
 }
 
+interface AudioInputValidation {
+  audioQueryPath?: string;
+  hasAudioIntent: boolean;
+  hasValidAudioQuery: boolean;
+  shouldReturnEmpty: boolean;
+}
+
 interface QwenScoreResult {
   present: boolean;
   available: boolean;
   scores: Map<string, {
     qwenVisual?: number;
     qwenText?: number;
+    matches: SearchEmbeddingMatch[];
+  }>;
+  unavailableChannels: string[];
+}
+
+interface AudioScoreResult {
+  present: boolean;
+  available: boolean;
+  scores: Map<string, {
+    audioSimilarity?: number;
     matches: SearchEmbeddingMatch[];
   }>;
   unavailableChannels: string[];
@@ -408,8 +431,13 @@ const QWEN3VL_MODEL_NAME = "Qwen/Qwen3-VL-Embedding-2B";
 const QWEN3VL_OUTPUT_DIMENSION = 2048;
 const QWEN3VL_INSTRUCTION = "Retrieve relevant video footage for editing.";
 const QWEN3VL_PREPROCESS_VERSION = "qwen3vl-frame-v1";
+const CLAP_AUDIO_MODEL_NAME = "laion/clap-htsat-fused";
+const CLAP_AUDIO_OUTPUT_DIMENSION = 512;
+const CLAP_AUDIO_PREPROCESS_VERSION = "clap-audio-window-v1";
 const VALID_IMAGE_QUERY_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const VALID_AUDIO_QUERY_EXTENSIONS = new Set([".wav", ".mp3", ".flac"]);
 const IMAGE_QUERY_APPROVED_DIRS_ENV = "VOS_FOOTAGE_SEARCH_APPROVED_FRAME_DIRS";
+const AUDIO_QUERY_APPROVED_DIRS_ENV = "VOS_FOOTAGE_SEARCH_APPROVED_AUDIO_DIRS";
 const QWEN_VISUAL_EMBEDDING_TYPES: QwenSearchEmbeddingType[] = [
   "visual_representative",
   "visual_keyframe_in",
@@ -423,9 +451,15 @@ const QWEN_TEXT_QUERY_EMBEDDING_TYPES: QwenSearchEmbeddingType[] = [
 const QWEN_IMAGE_QUERY_EMBEDDING_TYPES: QwenSearchEmbeddingType[] = [
   "visual_representative",
 ];
+const CLAP_AUDIO_EMBEDDING_TYPES: AudioSearchEmbeddingType[] = [
+  "audio_representative",
+  "audio_text_clap",
+];
 const segmentEmbeddingTableCache = new WeakMap<Database.Database, boolean>();
 let qwenClientPromise: Promise<Qwen3VlEmbeddingClient | null> | null = null;
 let qwenClientUnavailable = false;
+let clapClientPromise: Promise<ClapAudioEmbeddingClient | null> | null = null;
+let clapClientUnavailable = false;
 
 function baseSelect(metadata: MetadataAvailability): string {
   return `
@@ -539,10 +573,14 @@ export async function searchFootage(
   const absProjectDir = path.resolve(projectDir);
   const status = readFootageDbStatus(absProjectDir);
   const warnings = [...(status.stale_reasons ?? [])];
-  const mode = input.mode ?? "hybrid";
+  const mode = input.mode ?? (input.audio_query_path ? "audio" : "hybrid");
   const limit = clampLimit(input.limit);
   const visualInput = validateVisualInput(absProjectDir, input, mode, warnings);
   if (visualInput.shouldReturnEmpty) {
+    return emptySearchResponse(absProjectDir, input, mode, status.status, warnings);
+  }
+  const audioInput = validateAudioInput(absProjectDir, input, mode, warnings);
+  if (audioInput.shouldReturnEmpty) {
     return emptySearchResponse(absProjectDir, input, mode, status.status, warnings);
   }
 
@@ -559,7 +597,7 @@ export async function searchFootage(
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     db.pragma("foreign_keys = ON");
-    const response = await searchFootageWithDb(db, dbPath, input, mode, limit, warnings, status.status, visualInput);
+    const response = await searchFootageWithDb(db, dbPath, input, mode, limit, warnings, status.status, visualInput, audioInput);
     return response;
   } catch (error) {
     return fallbackSearch(absProjectDir, input, mode, limit, [
@@ -572,10 +610,14 @@ export async function searchFootage(
 }
 
 export async function disposeFootageSearch(): Promise<void> {
-  const client = await qwenClientPromise;
+  const qwenClient = await qwenClientPromise;
+  const clapClient = await clapClientPromise;
   qwenClientPromise = null;
   qwenClientUnavailable = false;
-  await client?.shutdown();
+  clapClientPromise = null;
+  clapClientUnavailable = false;
+  await qwenClient?.shutdown();
+  await clapClient?.shutdown();
 }
 
 function validateVisualInput(projectDir: string, input: SearchFootageInput, mode: FootageSearchMode, warnings: string[]): VisualInputValidation {
@@ -654,6 +696,72 @@ function validateImageQueryPath(projectDir: string, imagePath: string): { validP
   return { validPath: realPath, warning: "" };
 }
 
+function validateAudioInput(projectDir: string, input: SearchFootageInput, mode: FootageSearchMode, warnings: string[]): AudioInputValidation {
+  const hasAudioIntent = mode === "audio" || Boolean(input.audio_query_path);
+  const validation: AudioInputValidation = {
+    hasAudioIntent,
+    hasValidAudioQuery: false,
+    shouldReturnEmpty: false,
+  };
+
+  if (input.audio_query_path) {
+    const pathValidation = validateAudioQueryPath(projectDir, input.audio_query_path);
+    if (pathValidation.validPath) {
+      validation.audioQueryPath = pathValidation.validPath;
+      validation.hasValidAudioQuery = true;
+    } else {
+      warnings.push(pathValidation.warning);
+    }
+  }
+
+  const text = normalizeSearchText(input.text_match ?? input.query);
+  if (mode === "audio" && !validation.hasValidAudioQuery && !text) {
+    warnings.push("audio mode requires audio_query_path or query text");
+    validation.shouldReturnEmpty = true;
+  }
+
+  return validation;
+}
+
+function validateAudioQueryPath(projectDir: string, audioPath: string): { validPath: string; warning: string } | { validPath?: undefined; warning: string } {
+  if (!path.isAbsolute(audioPath)) {
+    return { warning: "audio_query_path must be an absolute path" };
+  }
+  if (!VALID_AUDIO_QUERY_EXTENSIONS.has(path.extname(audioPath).toLowerCase())) {
+    return { warning: "audio_query_path must be a .wav, .mp3, or .flac file" };
+  }
+  if (!fs.existsSync(audioPath)) {
+    return { warning: `audio_query_path does not exist: ${audioPath}` };
+  }
+
+  let projectRoot: string;
+  let realPath: string;
+  let approvedRoots: string[];
+  try {
+    projectRoot = fs.realpathSync(projectDir);
+    realPath = fs.realpathSync(audioPath);
+    approvedRoots = audioQueryApprovedRoots(projectDir, projectRoot);
+  } catch (error) {
+    return { warning: `audio_query_path could not be resolved: ${audioPath}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(realPath);
+  } catch (error) {
+    return { warning: `audio_query_path is not readable: ${audioPath}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!stat.isFile()) {
+    return { warning: `audio_query_path is not a regular file: ${audioPath}` };
+  }
+
+  if (!approvedRoots.some((root) => isPathWithin(realPath, root))) {
+    return { warning: `audio_query_path must resolve under the project root or approved audio cache directories: ${audioPath}` };
+  }
+
+  return { validPath: realPath, warning: "" };
+}
+
 function imageQueryApprovedRoots(projectDir: string, projectRoot: string): string[] {
   const roots = [projectRoot];
   for (const relPath of ["03_analysis", "02_media"]) {
@@ -665,8 +773,29 @@ function imageQueryApprovedRoots(projectDir: string, projectRoot: string): strin
   return Array.from(new Set(roots));
 }
 
+function audioQueryApprovedRoots(projectDir: string, projectRoot: string): string[] {
+  const roots = [projectRoot];
+  for (const relPath of ["03_analysis", "02_media"]) {
+    addRealDirectoryRoot(roots, path.join(projectDir, relPath));
+  }
+  for (const configuredRoot of configuredAudioQueryRoots(projectDir)) {
+    addRealDirectoryRoot(roots, configuredRoot);
+  }
+  return Array.from(new Set(roots));
+}
+
 function configuredImageQueryRoots(projectDir: string): string[] {
   const value = process.env[IMAGE_QUERY_APPROVED_DIRS_ENV];
+  if (!value) return [];
+  return value
+    .split(path.delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => path.isAbsolute(item) ? item : path.resolve(projectDir, item));
+}
+
+function configuredAudioQueryRoots(projectDir: string): string[] {
+  const value = process.env[AUDIO_QUERY_APPROVED_DIRS_ENV];
   if (!value) return [];
   return value
     .split(path.delimiter)
@@ -764,6 +893,7 @@ async function searchFootageWithDb(
   warnings: string[],
   dbStatus: "ready" | "stale",
   visualInput: VisualInputValidation,
+  audioInput: AudioInputValidation,
 ): Promise<FootageSearchResponse> {
   const filters = input.filters ?? {};
   const metadata = metadataAvailability(db);
@@ -791,11 +921,16 @@ async function searchFootageWithDb(
     ? loadQwenEmbeddingRows(db, rows.map((row) => row.segment_id), qwenEmbeddingTypes, warnings)
     : new Map<string, Map<string, SegmentEmbeddingVectorRow[]>>();
   const qwenRowsPresent = segmentEmbeddingVectorCount(qwenEmbeddings) > 0;
+  const audioEmbeddingTypes = audioEmbeddingTypesForQuery(mode, text, audioInput);
+  const audioEmbeddings = audioEmbeddingTypes.length > 0
+    ? loadClapEmbeddingRows(db, rows.map((row) => row.segment_id), audioEmbeddingTypes, warnings)
+    : new Map<string, Map<string, SegmentEmbeddingVectorRow[]>>();
+  const audioRowsPresent = segmentEmbeddingVectorCount(audioEmbeddings) > 0;
 
   let semanticScores = new Map<string, number>();
   let semanticAvailable = false;
   const needsSemantic =
-    (mode === "hybrid" || mode === "semantic" || mode === "multimodal" || mode === "visual" || (mode === "text" && qwenRowsPresent))
+    (mode === "hybrid" || mode === "semantic" || mode === "multimodal" || mode === "visual" || mode === "audio" || (mode === "text" && qwenRowsPresent))
     && Boolean(semanticText);
   if (needsSemantic) {
     const semantic = await semanticScoresForRows(db, rows, semanticText, warnings);
@@ -817,6 +952,21 @@ async function searchFootageWithDb(
       present: false,
       available: false,
       scores: new Map<string, { qwenVisual?: number; qwenText?: number; matches: SearchEmbeddingMatch[] }>(),
+      unavailableChannels: [],
+    };
+  const audio = audioRowsPresent
+    ? await audioScoresForRows({
+      rows,
+      text,
+      mode,
+      audioInput,
+      embeddings: audioEmbeddings,
+      warnings,
+    })
+    : {
+      present: false,
+      available: false,
+      scores: new Map<string, { audioSimilarity?: number; matches: SearchEmbeddingMatch[] }>(),
       unavailableChannels: [],
     };
 
@@ -847,7 +997,14 @@ async function searchFootageWithDb(
       warnings.push("multimodal visual search unavailable; no text fallback was usable");
       rows = [];
     }
-  } else if (mode === "hybrid" && fts.match && !semanticAvailable && !qwen.available) {
+  } else if (mode === "audio") {
+    if (audio.available) {
+      rows = rows.filter((row) => audio.scores.has(row.segment_id));
+    } else {
+      warnings.push("audio search unavailable; no CLAP audio channel was usable");
+      rows = [];
+    }
+  } else if (mode === "hybrid" && fts.match && !semanticAvailable && !qwen.available && !audio.available) {
     rows = rows.filter((row) => lexicalScores.has(row.segment_id));
   }
 
@@ -859,29 +1016,34 @@ async function searchFootageWithDb(
     const lexical = lexicalScores.get(row.segment_id);
     const semantic = semanticScores.get(row.segment_id);
     const qwenScore = qwen.scores.get(row.segment_id);
+    const audioScore = audio.scores.get(row.segment_id);
     const fusion = finalScore({
       semantic,
       lexical,
       qwenVisual: qwenScore?.qwenVisual,
       qwenText: qwenScore?.qwenText,
+      audioSimilarity: audioScore?.audioSimilarity,
       quality,
       peak,
       duration: durationScores.get(row.segment_id) ?? 0,
       qwenPresent: qwen.present && (mode === "hybrid" || mode === "text" || mode === "visual" || mode === "multimodal"),
+      audioPresent: audio.present && (mode === "hybrid" || mode === "audio" || mode === "multimodal"),
       qwenMode: qwenFusionMode(mode, text, visualInput),
+      audioMode: mode === "audio" ? "audio" : "hybrid",
     });
     return rowToResult(row, {
       semantic,
       lexical,
       qwenText: qwenScore?.qwenText,
       qwenVisual: qwenScore?.qwenVisual,
+      audioSimilarity: audioScore?.audioSimilarity,
       quality,
       peak,
       duration: durationScores.get(row.segment_id) ?? 0,
       final: fusion.final,
       weights: fusion.weights,
-      unavailableChannels: Array.from(new Set([...fusion.unavailableChannels, ...qwen.unavailableChannels])),
-      embeddingMatches: qwenScore?.matches ?? [],
+      unavailableChannels: Array.from(new Set([...fusion.unavailableChannels, ...qwen.unavailableChannels, ...audio.unavailableChannels])),
+      embeddingMatches: [...(qwenScore?.matches ?? []), ...(audioScore?.matches ?? [])],
       marlinEvents: eventLookup.get(row.segment_id) ?? [],
       contextExpansions,
       query: input,
@@ -1239,6 +1401,17 @@ function qwenEmbeddingTypesForQuery(
   return Array.from(types);
 }
 
+function audioEmbeddingTypesForQuery(
+  mode: FootageSearchMode,
+  text: string,
+  audioInput: AudioInputValidation,
+): AudioSearchEmbeddingType[] {
+  if (mode === "audio" || mode === "hybrid" || mode === "multimodal" || audioInput.hasAudioIntent) {
+    if (text || audioInput.hasValidAudioQuery) return [...CLAP_AUDIO_EMBEDDING_TYPES];
+  }
+  return [];
+}
+
 function loadQwenEmbeddingRows(
   db: Database.Database,
   segmentIds: string[],
@@ -1271,6 +1444,65 @@ function loadQwenEmbeddingRows(
     WHERE em.name = @qwen_model_name
       AND em.output_dimension = @qwen_output_dimension
       AND em.input_modality IN ('multimodal', 'mixed', 'image', 'text')
+      AND em.distance_metric = 'cosine'
+      AND ${segmentClause}
+      AND ${typeClause}
+    ORDER BY se.segment_id ASC, se.embedding_type ASC, se.id ASC
+  `).all(params) as SegmentEmbeddingDbRow[];
+
+  for (const row of rows) {
+    const vector = validatedSegmentEmbeddingVector(row, warnings);
+    if (!vector) continue;
+    const byType = result.get(row.segment_id) ?? new Map<string, SegmentEmbeddingVectorRow[]>();
+    const values = byType.get(row.embedding_type) ?? [];
+    values.push({
+      id: row.id,
+      segment_id: row.segment_id,
+      embedding_type: row.embedding_type,
+      model_id: row.model_id,
+      source_ref: row.source_ref,
+      source_timestamp_us: row.source_timestamp_us,
+      vector,
+    });
+    byType.set(row.embedding_type, values);
+    result.set(row.segment_id, byType);
+  }
+
+  return result;
+}
+
+function loadClapEmbeddingRows(
+  db: Database.Database,
+  segmentIds: string[],
+  embeddingTypes: AudioSearchEmbeddingType[],
+  warnings: string[],
+): SegmentEmbeddingVectorMap {
+  const result: SegmentEmbeddingVectorMap = new Map();
+  if (segmentIds.length === 0 || embeddingTypes.length === 0 || !hasSegmentEmbeddingsTables(db)) return result;
+
+  const params: Record<string, unknown> = {
+    clap_model_name: CLAP_AUDIO_MODEL_NAME,
+    clap_output_dimension: CLAP_AUDIO_OUTPUT_DIMENSION,
+  };
+  const segmentClause = inClause("se.segment_id", "clap_segment_id", segmentIds, params);
+  const typeClause = inClause("se.embedding_type", "clap_embedding_type", embeddingTypes, params);
+  const rows = db.prepare(`
+    SELECT
+      se.id,
+      se.segment_id,
+      se.embedding_type,
+      se.dimension,
+      se.vector,
+      se.model_id,
+      se.source_ref,
+      se.source_timestamp_us,
+      em.output_dimension,
+      em.normalized
+    FROM segment_embeddings se
+    JOIN embedding_models em ON em.id = se.model_id
+    WHERE em.name = @clap_model_name
+      AND em.output_dimension = @clap_output_dimension
+      AND em.input_modality IN ('audio', 'audio_text')
       AND em.distance_metric = 'cosine'
       AND ${segmentClause}
       AND ${typeClause}
@@ -1396,6 +1628,79 @@ async function qwenScoresForRows(args: {
   };
 }
 
+async function audioScoresForRows(args: {
+  rows: DbSearchRow[];
+  text: string;
+  mode: FootageSearchMode;
+  audioInput: AudioInputValidation;
+  embeddings: SegmentEmbeddingVectorMap;
+  warnings: string[];
+}): Promise<AudioScoreResult> {
+  const scores = new Map<string, { audioSimilarity?: number; matches: SearchEmbeddingMatch[] }>();
+  const unavailableChannels = new Set<string>();
+  let queryChannelAvailable = false;
+
+  const scoreQueryVector = (queryVector: Float32Array) => {
+    for (const row of args.rows) {
+      const byType = args.embeddings.get(row.segment_id);
+      if (!byType) continue;
+      for (const embeddingType of CLAP_AUDIO_EMBEDDING_TYPES) {
+        const candidates = byType.get(embeddingType) ?? [];
+        for (const candidate of candidates) {
+          if (candidate.vector.length !== queryVector.length) {
+            args.warnings.push(`clap audio embedding skipped for ${candidate.segment_id}/${candidate.embedding_type}: query dimension ${queryVector.length} does not match stored dimension ${candidate.vector.length}`);
+            continue;
+          }
+          const score = roundScore(clamp01((cosineSimilarity(queryVector, candidate.vector) + 1) / 2));
+          const previous = scores.get(row.segment_id) ?? { matches: [] };
+          previous.audioSimilarity = Math.max(previous.audioSimilarity ?? 0, score);
+          previous.matches.push({
+            segment_embedding_id: candidate.id,
+            embedding_type: candidate.embedding_type,
+            model_id: candidate.model_id,
+            score,
+            source_ref: candidate.source_ref || undefined,
+            source_timestamp_us: candidate.source_timestamp_us ?? undefined,
+          });
+          scores.set(row.segment_id, previous);
+        }
+      }
+    }
+  };
+
+  if (args.audioInput.audioQueryPath) {
+    const queryVector = await clapAudioQueryVector(args.audioInput.audioQueryPath, args.warnings);
+    if (queryVector) {
+      queryChannelAvailable = true;
+      scoreQueryVector(queryVector);
+    } else {
+      unavailableChannels.add("audio_similarity");
+    }
+  } else if ((args.mode === "audio" || args.mode === "hybrid" || args.mode === "multimodal") && args.text) {
+    const queryVector = await clapTextQueryVector(args.text, args.warnings);
+    if (queryVector) {
+      queryChannelAvailable = true;
+      scoreQueryVector(queryVector);
+    } else {
+      unavailableChannels.add("audio_similarity");
+    }
+  }
+
+  for (const score of scores.values()) {
+    score.matches.sort((a, b) => b.score - a.score || a.embedding_type.localeCompare(b.embedding_type));
+  }
+  if (Array.from(scores.values()).some((score) => score.audioSimilarity != null)) {
+    unavailableChannels.delete("audio_similarity");
+  }
+
+  return {
+    present: queryChannelAvailable,
+    available: scores.size > 0,
+    scores,
+    unavailableChannels: Array.from(unavailableChannels),
+  };
+}
+
 async function qwenTextQueryVector(text: string, warnings: string[]): Promise<Float32Array | null> {
   const client = await getQwenClient(warnings);
   if (!client) return null;
@@ -1436,6 +1741,30 @@ function qwenAnchorQueryVector(
   return vector;
 }
 
+async function clapTextQueryVector(text: string, warnings: string[]): Promise<Float32Array | null> {
+  const client = await getClapClient(warnings);
+  if (!client) return null;
+  try {
+    const response = await client.embedText([text], clapQueryOptions());
+    return validClapQueryVector(response.vectors[0]?.vector, warnings, "text");
+  } catch (error) {
+    await markClapClientUnavailable(error, warnings);
+    return null;
+  }
+}
+
+async function clapAudioQueryVector(audioPath: string, warnings: string[]): Promise<Float32Array | null> {
+  const client = await getClapClient(warnings);
+  if (!client) return null;
+  try {
+    const response = await client.embedAudio([audioPath], clapQueryOptions());
+    return validClapQueryVector(response.vectors[0]?.vector, warnings, "audio");
+  } catch (error) {
+    await markClapClientUnavailable(error, warnings);
+    return null;
+  }
+}
+
 async function getQwenClient(warnings: string[]): Promise<Qwen3VlEmbeddingClient | null> {
   if (qwenClientUnavailable) return null;
   if (!qwenClientPromise) {
@@ -1450,12 +1779,35 @@ async function getQwenClient(warnings: string[]): Promise<Qwen3VlEmbeddingClient
   return qwenClientPromise;
 }
 
+async function getClapClient(warnings: string[]): Promise<ClapAudioEmbeddingClient | null> {
+  if (clapClientUnavailable) return null;
+  if (!clapClientPromise) {
+    clapClientPromise = import("../connectors/clap-audio-local.js")
+      .then((connector) => connector.createClapAudioEmbeddingLocalClient({ requestTimeoutMs: clapRequestTimeoutMs() }))
+      .catch((error) => {
+        clapClientUnavailable = true;
+        warnings.push(`clap audio search embedding unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      });
+  }
+  return clapClientPromise;
+}
+
 async function markQwenClientUnavailable(error: unknown, warnings: string[]): Promise<void> {
   qwenClientUnavailable = true;
   warnings.push(`qwen3vl search embedding unavailable: ${error instanceof Error ? error.message : String(error)}`);
   const promise = qwenClientPromise;
   const client = promise ? await promise.catch(() => null) : null;
   qwenClientPromise = null;
+  await Promise.resolve(client?.shutdown()).catch(() => undefined);
+}
+
+async function markClapClientUnavailable(error: unknown, warnings: string[]): Promise<void> {
+  clapClientUnavailable = true;
+  warnings.push(`clap audio search embedding unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  const promise = clapClientPromise;
+  const client = promise ? await promise.catch(() => null) : null;
+  clapClientPromise = null;
   await Promise.resolve(client?.shutdown()).catch(() => undefined);
 }
 
@@ -1475,8 +1827,29 @@ function qwenQueryOptions(): {
   };
 }
 
+function clapQueryOptions(): {
+  outputDimension: number;
+  normalize: boolean;
+  preprocessVersion: string;
+  timeoutMs?: number;
+} {
+  return {
+    outputDimension: CLAP_AUDIO_OUTPUT_DIMENSION,
+    normalize: true,
+    preprocessVersion: CLAP_AUDIO_PREPROCESS_VERSION,
+    timeoutMs: clapRequestTimeoutMs(),
+  };
+}
+
 function qwenRequestTimeoutMs(): number | undefined {
   const value = process.env.VOS_QWEN3VL_REQUEST_TIMEOUT_MS;
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function clapRequestTimeoutMs(): number | undefined {
+  const value = process.env.VOS_CLAP_REQUEST_TIMEOUT_MS;
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
@@ -1494,6 +1867,24 @@ function validQwenQueryVector(vector: Float32Array | undefined, warnings: string
   for (let index = 0; index < vector.length; index += 1) {
     if (!Number.isFinite(vector[index])) {
       warnings.push(`qwen3vl ${kind} query embedding contains non-finite value at index ${index}`);
+      return null;
+    }
+  }
+  return vector;
+}
+
+function validClapQueryVector(vector: Float32Array | undefined, warnings: string[], kind: "text" | "audio"): Float32Array | null {
+  if (!vector || vector.length === 0) {
+    warnings.push(`clap audio ${kind} query embedding unavailable`);
+    return null;
+  }
+  if (vector.length !== CLAP_AUDIO_OUTPUT_DIMENSION) {
+    warnings.push(`clap audio ${kind} query embedding dimension ${vector.length} does not match expected ${CLAP_AUDIO_OUTPUT_DIMENSION}`);
+    return null;
+  }
+  for (let index = 0; index < vector.length; index += 1) {
+    if (!Number.isFinite(vector[index])) {
+      warnings.push(`clap audio ${kind} query embedding contains non-finite value at index ${index}`);
       return null;
     }
   }
@@ -1553,6 +1944,7 @@ function rowToResult(
     lexical?: number;
     qwenText?: number;
     qwenVisual?: number;
+    audioSimilarity?: number;
     structured?: number;
     quality: number;
     peak: number;
@@ -1575,6 +1967,7 @@ function rowToResult(
   if (scoring.lexical != null) reasonParts.push(`FTS lexical match score=${scoring.lexical.toFixed(3)}`);
   if (scoring.qwenVisual != null) reasonParts.push(`Qwen visual match score=${scoring.qwenVisual.toFixed(3)}`);
   if (scoring.qwenText != null) reasonParts.push(`Qwen text match score=${scoring.qwenText.toFixed(3)}`);
+  if (scoring.audioSimilarity != null) reasonParts.push(`CLAP audio match score=${scoring.audioSimilarity.toFixed(3)}`);
   for (const [field, value] of Object.entries(quality)) {
     if (value != null) reasonParts.push(`${field}=${value.toFixed(2)}`);
   }
@@ -1599,6 +1992,8 @@ function rowToResult(
       lexical: scoring.lexical,
       qwen_text: scoring.qwenText,
       qwen_visual: scoring.qwenVisual,
+      audio_similarity: scoring.audioSimilarity,
+      clap_audio: scoring.audioSimilarity,
       structured: scoring.structured,
       quality: scoring.quality,
       peak: scoring.peak,
@@ -1672,12 +2067,63 @@ function finalScore(scores: {
   lexical?: number;
   qwenVisual?: number;
   qwenText?: number;
+  audioSimilarity?: number;
   quality: number;
   peak: number;
   duration: number;
   qwenPresent: boolean;
+  audioPresent: boolean;
   qwenMode: QwenFusionMode;
+  audioMode: "hybrid" | "audio";
 }): ScoreFusionResult {
+  if (scores.audioPresent) {
+    if (scores.audioMode === "audio") {
+      return qwenWeightedScore(
+        {
+          audio_similarity: 0.60,
+          e5_text: 0.15,
+          lexical: 0.10,
+          quality: 0.10,
+          peak: 0.05,
+        },
+        {
+          audio_similarity: scores.audioSimilarity,
+          e5_text: scores.semantic,
+          lexical: scores.lexical,
+          quality: scores.quality,
+          peak: scores.peak,
+        },
+        ["audio_similarity", "e5_text", "lexical"],
+        scores,
+      );
+    }
+
+    return qwenWeightedScore(
+      {
+        e5_text: 0.25,
+        qwen_visual: 0.20,
+        qwen_text: 0.08,
+        audio_similarity: 0.10,
+        lexical: 0.20,
+        quality: 0.10,
+        peak: 0.05,
+        duration: 0.02,
+      },
+      {
+        e5_text: scores.semantic,
+        qwen_visual: scores.qwenVisual,
+        qwen_text: scores.qwenText,
+        audio_similarity: scores.audioSimilarity,
+        lexical: scores.lexical,
+        quality: scores.quality,
+        peak: scores.peak,
+        duration: scores.duration,
+      },
+      ["e5_text", "qwen_visual", "qwen_text", "audio_similarity", "lexical"],
+      scores,
+    );
+  }
+
   if (!scores.qwenPresent) {
     return legacyScore(scores);
   }
@@ -1913,6 +2359,10 @@ function fallbackSearch(
     warnings.push("visual search unavailable in JSON fallback; build footage.db with Qwen embeddings or provide a text query");
     rows = [];
   }
+  if (mode === "audio") {
+    warnings.push("audio search unavailable in JSON fallback; build footage.db with CLAP audio embeddings");
+    rows = [];
+  }
   rows = applyPostFilters(rows, filters);
   const durationScores = normalizeDurationScores(rows);
   const results = rows.map((row) => {
@@ -1925,7 +2375,9 @@ function fallbackSearch(
       peak,
       duration: durationScores.get(row.segment_id) ?? 0,
       qwenPresent: false,
+      audioPresent: false,
       qwenMode: "text",
+      audioMode: "hybrid",
     });
     return rowToResult(row, {
       lexical,

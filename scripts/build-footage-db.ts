@@ -16,6 +16,7 @@ interface Args {
   skipAudioAnalysis?: boolean;
   qwen3vlEnabled?: boolean;
   qwen3vlEmbedTypes?: Qwen3VlBuildEmbeddingType[];
+  clapAudioEnabled?: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -48,6 +49,10 @@ function parseArgs(argv: string[]): Args {
     } else if (arg === "--qwen3vl-embed-types") {
       args.qwen3vlEmbedTypes = parseQwen3VlEmbedTypes(value);
       index += 1;
+    } else if (arg === "--clap-audio") {
+      args.clapAudioEnabled = true;
+    } else if (arg === "--no-clap-audio") {
+      args.clapAudioEnabled = false;
     } else if (arg === "--help" || arg === "-h") {
       usage(0);
     } else {
@@ -69,15 +74,20 @@ async function main(): Promise<void> {
     skipAudioAnalysis: args.skipAudioAnalysis ?? false,
     qwen3vlEnabled: args.qwen3vlEnabled,
     qwen3vlEmbedTypes: args.qwen3vlEmbedTypes,
+    clapAudioEnabled: args.clapAudioEnabled,
     onQwen3VlProgress: (progress) => {
       process.stderr.write(`[footage-db] qwen ${progress.phase}: ${progress.completed}/${progress.total}\n`);
+    },
+    onClapAudioProgress: (progress) => {
+      process.stderr.write(`[footage-db] clap ${progress.phase}: ${progress.completed}/${progress.total}\n`);
     },
   });
   if (result.embedding_counts && result.embedding_statuses) {
     process.stderr.write(
       `[footage-db] qwen visual=${result.embedding_statuses.qwen_visual}(${result.embedding_counts.qwen_visual}) ` +
       `text=${result.embedding_statuses.qwen_text}(${result.embedding_counts.qwen_text}) ` +
-      `mixed=${result.embedding_statuses.qwen_mixed} reranker=${result.embedding_statuses.qwen_reranker}\n`
+      `mixed=${result.embedding_statuses.qwen_mixed} reranker=${result.embedding_statuses.qwen_reranker} ` +
+      `clap_audio=${result.embedding_statuses.clap_audio}(${result.embedding_counts.clap_audio})\n`
     );
   }
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -122,6 +132,8 @@ Options:
   --qwen3vl                      enable Qwen3-VL embeddings (default)
   --no-qwen3vl                   disable Qwen3-VL embeddings
   --qwen3vl-embed-types visual,text
+  --clap-audio                   enable CLAP audio embeddings
+  --no-clap-audio                disable CLAP audio embeddings
 `);
   process.exit(exitCode);
 }

@@ -21,6 +21,10 @@ import type {
   Qwen3VlEmbeddingClient,
   Qwen3VlVectorResult,
 } from "../connectors/qwen3vl-embedding-local.js";
+import type {
+  ClapAudioEmbeddingClient,
+  ClapAudioVectorResult,
+} from "../connectors/clap-audio-local.js";
 
 export type FootageDbEmbeddingPolicy = "auto" | "skip" | "require";
 export type FootageDbRebuildMode = "full" | "incremental";
@@ -28,6 +32,12 @@ export type Qwen3VlBuildEmbeddingType = "visual_representative" | "text_combined
 
 export interface Qwen3VlBuildProgress {
   phase: "frames" | "visual" | "text";
+  completed: number;
+  total: number;
+}
+
+export interface ClapAudioBuildProgress {
+  phase: "windows" | "audio" | "text";
   completed: number;
   total: number;
 }
@@ -43,6 +53,9 @@ export interface BuildFootageDbOptions {
   qwen3vlEmbedTypes?: Qwen3VlBuildEmbeddingType[];
   qwen3vlRequestTimeoutMs?: number;
   onQwen3VlProgress?: (progress: Qwen3VlBuildProgress) => void;
+  clapAudioEnabled?: boolean;
+  clapAudioRequestTimeoutMs?: number;
+  onClapAudioProgress?: (progress: ClapAudioBuildProgress) => void;
   now?: Date;
 }
 
@@ -52,6 +65,7 @@ export interface EmbeddingCounts {
   qwen_visual: number;
   qwen_mixed: number;
   qwen_reranker: number;
+  clap_audio: number;
 }
 
 export type EmbeddingStatus = "ready" | "skipped" | "unavailable" | "error";
@@ -62,6 +76,7 @@ export interface EmbeddingStatuses {
   qwen_visual: EmbeddingStatus;
   qwen_mixed: EmbeddingStatus | "unsupported";
   qwen_reranker: EmbeddingStatus | "deferred";
+  clap_audio: EmbeddingStatus;
 }
 
 export interface BuildFootageDbResult {
@@ -206,6 +221,24 @@ interface Qwen3VlPopulationResult {
   statuses: Pick<EmbeddingStatuses, "qwen_text" | "qwen_visual" | "qwen_mixed" | "qwen_reranker">;
 }
 
+interface ClapAudioPopulationOptions {
+  projectDir: string;
+  outputPath: string;
+  segments: SegmentBuildRecord[];
+  embeddingTexts: Array<{ segment_id: string; field: EmbeddingField; text: string; content_hash: string }>;
+  enabled: boolean;
+  requestTimeoutMs: number;
+  createdAt: string;
+  warnings: string[];
+  onProgress?: (progress: ClapAudioBuildProgress) => void;
+}
+
+interface ClapAudioPopulationResult {
+  count: number;
+  counts: Pick<EmbeddingCounts, "clap_audio">;
+  statuses: Pick<EmbeddingStatuses, "clap_audio">;
+}
+
 interface RepresentativeFrameRecord {
   segmentId: string;
   framePath: string;
@@ -215,6 +248,21 @@ interface RepresentativeFrameRecord {
 }
 
 interface QwenTextEmbeddingInput {
+  segmentId: string;
+  text: string;
+  contentHash: string;
+}
+
+interface AudioWindowRecord {
+  segmentId: string;
+  windowPath: string;
+  outputRelPath: string;
+  contentHash: string;
+  startUs: number;
+  endUs: number;
+}
+
+interface ClapTextEmbeddingInput {
   segmentId: string;
   text: string;
   contentHash: string;
@@ -261,6 +309,18 @@ const QWEN3VL_TEXT_MAX_CHARS = 4_096;
 const QWEN3VL_TEXT_CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 const FRAME_CACHE_REL_ROOT = "03_analysis/frames";
 const REPRESENTATIVE_FRAME_FILENAME = "representative.jpg";
+const AUDIO_WINDOW_CACHE_REL_ROOT = "03_analysis/audio_windows";
+const AUDIO_WINDOW_FILENAME = "full.wav";
+const CLAP_AUDIO_MODEL_NAME = "laion/clap-htsat-fused";
+const CLAP_AUDIO_MODEL_REVISION = "local-cache";
+const CLAP_AUDIO_OUTPUT_DIMENSION = 512;
+const CLAP_AUDIO_INSTRUCTION = "";
+const CLAP_AUDIO_PREPROCESS_VERSION = "clap-audio-window-v1";
+const CLAP_AUDIO_RUNNER_NAME = "python-clap-audio-worker";
+const CLAP_AUDIO_RUNNER_VERSION = "clap-audio-worker-v1";
+const CLAP_AUDIO_PRECISION = "fp32";
+const CLAP_AUDIO_LICENSE = "Apache-2.0";
+const CLAP_AUDIO_DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const VALID_SEGMENT_TYPES = new Set(["dialogue", "music_driven", "action", "static", "general"]);
 
 const FOOTAGE_DB_DDL = `
@@ -716,7 +776,7 @@ CREATE TABLE embedding_models (
   model_revision TEXT NOT NULL,
   output_dimension INTEGER NOT NULL CHECK (output_dimension >= 0),
   input_modality TEXT NOT NULL CHECK (
-    input_modality IN ('text', 'image', 'screenshot', 'video', 'mixed', 'multimodal', 'reranker')
+    input_modality IN ('text', 'image', 'screenshot', 'video', 'audio', 'audio_text', 'mixed', 'multimodal', 'reranker')
   ),
   instruction TEXT NOT NULL DEFAULT '',
   preprocess_version TEXT NOT NULL,
@@ -737,7 +797,8 @@ CREATE TABLE segment_embeddings (
     embedding_type IN (
       'summary', 'transcript', 'scene', 'combined',
       'visual_representative', 'visual_keyframe_in', 'visual_keyframe_peak',
-      'visual_keyframe_out', 'text_combined_qwen', 'mixed_representative'
+      'visual_keyframe_out', 'text_combined_qwen', 'mixed_representative',
+      'audio_representative', 'audio_text_clap'
     )
   ),
   model_id INTEGER NOT NULL REFERENCES embedding_models(id) ON DELETE RESTRICT,
@@ -798,7 +859,22 @@ export async function buildFootageDb(options: BuildFootageDbOptions): Promise<Bu
       warnings,
       onProgress: options.onQwen3VlProgress,
     });
-    const embedding = mergeEmbeddingResults(e5Embedding, qwenEmbedding);
+    const clapEmbedding = await populateClapAudioEmbeddings(db, {
+      projectDir,
+      outputPath,
+      segments: population.segments,
+      embeddingTexts: population.embeddingTexts,
+      enabled: options.clapAudioEnabled === true || (
+        embeddingPolicy !== "skip"
+        && options.clapAudioEnabled !== false
+        && clapAudioWorkerAvailable(projectDir)
+      ),
+      requestTimeoutMs: options.clapAudioRequestTimeoutMs ?? CLAP_AUDIO_DEFAULT_REQUEST_TIMEOUT_MS,
+      createdAt: indexedAt,
+      warnings,
+      onProgress: options.onClapAudioProgress,
+    });
+    const embedding = mergeEmbeddingResults(e5Embedding, qwenEmbedding, clapEmbedding);
     insertMeta(db, {
       schema_version: SCHEMA_VERSION,
       artifact_version: ARTIFACT_VERSION,
@@ -1484,13 +1560,106 @@ async function populateQwen3VlEmbeddings(
   }
 }
 
-function mergeEmbeddingResults(e5: EmbeddingPopulationResult, qwen: Qwen3VlPopulationResult): EmbeddingPopulationResult {
+async function populateClapAudioEmbeddings(
+  db: Database.Database,
+  options: ClapAudioPopulationOptions,
+): Promise<ClapAudioPopulationResult> {
+  const result = clapAudioPopulationResult();
+  if (!options.enabled) return result;
+
+  const modelId = upsertEmbeddingModel(db, clapAudioEmbeddingModel(options.createdAt));
+  let previousDb: Database.Database | null = null;
+  let client: ClapAudioEmbeddingClient | null = null;
+
+  try {
+    previousDb = openReusableFootageDb(options.outputPath);
+    const windows = await buildAudioWindowCache(
+      options.projectDir,
+      options.segments,
+      options.createdAt,
+      options.warnings,
+      options.onProgress,
+    );
+    const textRows = clapTextEmbeddingInputs(options.embeddingTexts);
+
+    copyReusableClapRows(db, previousDb, modelId, "audio_representative", windows.map((window) => ({
+      segmentId: window.segmentId,
+      sourceRef: window.outputRelPath,
+      sourceTimestampUs: window.startUs,
+      contentHash: window.contentHash,
+    })), options.createdAt);
+    copyReusableClapRows(db, previousDb, modelId, "audio_text_clap", textRows.map((row) => ({
+      segmentId: row.segmentId,
+      sourceRef: "embedding_texts:combined",
+      sourceTimestampUs: null,
+      contentHash: row.contentHash,
+    })), options.createdAt);
+
+    const pendingWindows = windows.filter((window) => !segmentEmbeddingExists(db, window.segmentId, "audio_representative", modelId, window.contentHash));
+    const pendingTextRows = textRows.filter((row) => !segmentEmbeddingExists(db, row.segmentId, "audio_text_clap", modelId, row.contentHash));
+    if (pendingWindows.length > 0 || pendingTextRows.length > 0) {
+      client = await createClapAudioBuilderClient(options.requestTimeoutMs);
+    }
+
+    if (pendingWindows.length > 0 && client) {
+      options.onProgress?.({ phase: "audio", completed: 0, total: pendingWindows.length });
+      await embedAndInsertClapAudioRows(db, client, {
+        modelId,
+        createdAt: options.createdAt,
+        requestTimeoutMs: options.requestTimeoutMs,
+        warnings: options.warnings,
+        windows: pendingWindows,
+      });
+      options.onProgress?.({ phase: "audio", completed: pendingWindows.length, total: pendingWindows.length });
+    }
+
+    if (pendingTextRows.length > 0 && client) {
+      options.onProgress?.({ phase: "text", completed: 0, total: pendingTextRows.length });
+      await embedAndInsertClapTextRows(db, client, {
+        modelId,
+        createdAt: options.createdAt,
+        requestTimeoutMs: options.requestTimeoutMs,
+        warnings: options.warnings,
+        rows: pendingTextRows,
+      });
+      options.onProgress?.({ phase: "text", completed: pendingTextRows.length, total: pendingTextRows.length });
+    }
+
+    result.counts.clap_audio = countClapSegmentEmbeddings(db, modelId);
+    result.statuses.clap_audio = result.counts.clap_audio > 0 ? "ready" : "skipped";
+    result.count = result.counts.clap_audio;
+    return result;
+  } catch (error) {
+    const status = clapAudioFailureStatus(error);
+    options.warnings.push(`clap audio embedding ${status === "unavailable" ? "unavailable" : "failed"}: ${error instanceof Error ? error.message : String(error)}`);
+    result.counts.clap_audio = countClapSegmentEmbeddings(db, modelId);
+    result.statuses.clap_audio = result.counts.clap_audio > 0 ? "ready" : status;
+    result.count = result.counts.clap_audio;
+    return result;
+  } finally {
+    previousDb?.close();
+    if (client) {
+      try {
+        await Promise.resolve(client.shutdown());
+      } catch {
+        // Shutdown should not turn a fail-open optional channel into a build failure.
+      }
+    }
+  }
+}
+
+function mergeEmbeddingResults(
+  e5: EmbeddingPopulationResult,
+  qwen: Qwen3VlPopulationResult,
+  clap: ClapAudioPopulationResult,
+): EmbeddingPopulationResult {
   const counts: EmbeddingCounts = {
     ...e5.counts,
     qwen_text: qwen.counts.qwen_text,
     qwen_visual: qwen.counts.qwen_visual,
     qwen_mixed: qwen.counts.qwen_mixed,
     qwen_reranker: qwen.counts.qwen_reranker,
+    clap_audio: clap.counts.clap_audio,
   };
   const statuses: EmbeddingStatuses = {
     ...e5.statuses,
@@ -1498,21 +1667,27 @@ function mergeEmbeddingResults(e5: EmbeddingPopulationResult, qwen: Qwen3VlPopul
     qwen_visual: qwen.statuses.qwen_visual,
     qwen_mixed: qwen.statuses.qwen_mixed,
     qwen_reranker: qwen.statuses.qwen_reranker,
+    clap_audio: clap.statuses.clap_audio,
   };
   return {
-    status: aggregateEmbeddingStatus(e5, qwen),
-    count: e5.count + qwen.count,
+    status: aggregateEmbeddingStatus(e5, qwen, clap),
+    count: e5.count + qwen.count + clap.count,
     counts,
     statuses,
   };
 }
 
-function aggregateEmbeddingStatus(e5: EmbeddingPopulationResult, qwen: Qwen3VlPopulationResult): EmbeddingStatus {
+function aggregateEmbeddingStatus(
+  e5: EmbeddingPopulationResult,
+  qwen: Qwen3VlPopulationResult,
+  clap: ClapAudioPopulationResult,
+): EmbeddingStatus {
   const retrievalStatuses = [
     e5.status,
     qwen.statuses.qwen_text,
     qwen.statuses.qwen_visual,
     qwen.statuses.qwen_mixed,
+    clap.statuses.clap_audio,
   ];
   if (retrievalStatuses.includes("ready")) return "ready";
   if (retrievalStatuses.includes("error")) return "error";
@@ -1527,6 +1702,7 @@ function embeddingPopulationResult(status: EmbeddingStatus, e5TextCount: number)
     qwen_visual: 0,
     qwen_mixed: 0,
     qwen_reranker: 0,
+    clap_audio: 0,
   };
   const statuses: EmbeddingStatuses = {
     e5_text: status,
@@ -1534,6 +1710,7 @@ function embeddingPopulationResult(status: EmbeddingStatus, e5TextCount: number)
     qwen_visual: "skipped",
     qwen_mixed: "unsupported",
     qwen_reranker: "deferred",
+    clap_audio: "skipped",
   };
   return { status, count: e5TextCount, counts, statuses };
 }
@@ -1556,6 +1733,18 @@ function qwen3VlPopulationResult(): Qwen3VlPopulationResult {
   };
 }
 
+function clapAudioPopulationResult(): ClapAudioPopulationResult {
+  return {
+    count: 0,
+    counts: {
+      clap_audio: 0,
+    },
+    statuses: {
+      clap_audio: "skipped",
+    },
+  };
+}
+
 function qwen3VlEmbeddingModel(createdAt: string): EmbeddingModelInput {
   return {
     name: QWEN3VL_MODEL_NAME,
@@ -1574,9 +1763,50 @@ function qwen3VlEmbeddingModel(createdAt: string): EmbeddingModelInput {
   };
 }
 
+function clapAudioEmbeddingModel(createdAt: string): EmbeddingModelInput {
+  return {
+    name: CLAP_AUDIO_MODEL_NAME,
+    model_revision: CLAP_AUDIO_MODEL_REVISION,
+    output_dimension: CLAP_AUDIO_OUTPUT_DIMENSION,
+    input_modality: "audio",
+    instruction: CLAP_AUDIO_INSTRUCTION,
+    preprocess_version: CLAP_AUDIO_PREPROCESS_VERSION,
+    runner_name: CLAP_AUDIO_RUNNER_NAME,
+    runner_version: CLAP_AUDIO_RUNNER_VERSION,
+    precision: CLAP_AUDIO_PRECISION,
+    normalized: true,
+    distance_metric: "cosine",
+    license: CLAP_AUDIO_LICENSE,
+    created_at: createdAt,
+  };
+}
+
 async function createQwen3VlBuilderClient(requestTimeoutMs: number): Promise<Qwen3VlEmbeddingClient> {
   const connector = await import("../connectors/qwen3vl-embedding-local.js");
   return connector.createQwen3VlEmbeddingLocalClient({ requestTimeoutMs });
+}
+
+async function createClapAudioBuilderClient(requestTimeoutMs: number): Promise<ClapAudioEmbeddingClient> {
+  const connector = await import("../connectors/clap-audio-local.js");
+  return connector.createClapAudioEmbeddingLocalClient({ requestTimeoutMs });
+}
+
+function clapAudioWorkerAvailable(projectDir: string): boolean {
+  if (process.env.VOS_CLAP_MOCK === "1") return true;
+  if (
+    process.env.VOS_CLAP_PYTHON
+    || process.env.VOS_CLAP_WORKER
+    || process.env.VOS_CLAP_MODEL
+    || process.env.VOS_CLAP_CACHE_DIR
+  ) {
+    return true;
+  }
+  return [
+    path.resolve(process.cwd(), "python/.venv-clap/bin/python3"),
+    path.resolve(projectDir, "python/.venv-clap/bin/python3"),
+    path.resolve(process.cwd(), ".venv-clap/bin/python3"),
+    path.resolve(process.cwd(), ".venv/bin/python3"),
+  ].some((candidate) => fs.existsSync(candidate));
 }
 
 function normalizeQwen3VlEmbedTypes(values: Qwen3VlBuildEmbeddingType[] | undefined): Qwen3VlBuildEmbeddingType[] {
@@ -1774,6 +2004,182 @@ function existingFrameCacheHash(
   return null;
 }
 
+async function buildAudioWindowCache(
+  projectDir: string,
+  segments: SegmentBuildRecord[],
+  createdAt: string,
+  warnings: string[],
+  onProgress?: (progress: ClapAudioBuildProgress) => void,
+): Promise<AudioWindowRecord[]> {
+  const windows: AudioWindowRecord[] = [];
+  let completed = 0;
+  onProgress?.({ phase: "windows", completed, total: segments.length });
+  for (const record of segments) {
+    const window = await buildAudioWindow(projectDir, record, createdAt, warnings);
+    if (window) windows.push(window);
+    completed += 1;
+    onProgress?.({ phase: "windows", completed, total: segments.length });
+  }
+  return windows;
+}
+
+async function buildAudioWindow(
+  projectDir: string,
+  record: SegmentBuildRecord,
+  createdAt: string,
+  warnings: string[],
+): Promise<AudioWindowRecord | null> {
+  const sourcePath = resolveSourceMediaPath(projectDir, record.asset);
+  if (!sourcePath) {
+    warnings.push(`clap audio window skipped for ${record.segmentId}: source media not accessible`);
+    return null;
+  }
+  if (assetAudioStreamState(record.asset) === "no") {
+    warnings.push(`clap audio window skipped for ${record.segmentId}: source has no audio stream`);
+    return null;
+  }
+
+  const durationUs = record.srcOutUs - record.srcInUs;
+  if (durationUs <= 0) {
+    warnings.push(`clap audio window skipped for ${record.segmentId}: segment duration is not positive`);
+    return null;
+  }
+
+  const outputDir = path.join(projectDir, AUDIO_WINDOW_CACHE_REL_ROOT, record.segmentId);
+  const outputPath = path.join(outputDir, AUDIO_WINDOW_FILENAME);
+  const manifestPath = path.join(outputDir, "manifest.json");
+  const outputRelPath = toProjectRelativePath(projectDir, outputPath);
+  const sourceRelPath = toProjectRelativePath(projectDir, sourcePath);
+  const sourceHash = stringValue(record.asset.source_fingerprint) || null;
+
+  const existingHash = existingAudioWindowHash(outputPath, manifestPath, {
+    sourceRelPath,
+    sourceHash,
+    startUs: record.srcInUs,
+    endUs: record.srcOutUs,
+    outputRelPath,
+  });
+  if (existingHash) {
+    return {
+      segmentId: record.segmentId,
+      windowPath: outputPath,
+      outputRelPath,
+      contentHash: existingHash,
+      startUs: record.srcInUs,
+      endUs: record.srcOutUs,
+    };
+  }
+
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.rmSync(outputPath, { force: true });
+  const args = [
+    "-ss",
+    formatTimestampSeconds(record.srcInUs),
+    "-t",
+    formatTimestampSeconds(durationUs),
+    "-i",
+    sourcePath,
+    "-ac",
+    "1",
+    "-ar",
+    "48000",
+    "-f",
+    "wav",
+    "-acodec",
+    "pcm_s16le",
+    "-map",
+    "0:a:0",
+    outputPath,
+  ];
+
+  try {
+    await execFilePromise("ffmpeg", args);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/0:a:0|matches no streams|audio stream/i.test(message)) {
+      warnings.push(`clap audio window skipped for ${record.segmentId}: source has no audio stream`);
+    } else {
+      warnings.push(`clap audio window extraction failed for ${record.segmentId}: ${message}`);
+    }
+    return null;
+  }
+
+  if (!fs.existsSync(outputPath) || !fs.statSync(outputPath).isFile()) {
+    warnings.push(`clap audio window extraction failed for ${record.segmentId}: ffmpeg did not create ${outputRelPath}`);
+    return null;
+  }
+
+  const contentHash = sha256File(outputPath);
+  fs.writeFileSync(manifestPath, `${JSON.stringify({
+    segment_id: record.segmentId,
+    window_type: "full",
+    source_ref: sourceRelPath,
+    start_us: record.srcInUs,
+    end_us: record.srcOutUs,
+    duration_us: durationUs,
+    sample_rate: 48000,
+    channels: 1,
+    output_path: outputRelPath,
+    source_hash: sourceHash,
+    content_hash: contentHash,
+    preprocess_version: CLAP_AUDIO_PREPROCESS_VERSION,
+    created_at: createdAt,
+  }, null, 2)}\n`, "utf-8");
+
+  return {
+    segmentId: record.segmentId,
+    windowPath: outputPath,
+    outputRelPath,
+    contentHash,
+    startUs: record.srcInUs,
+    endUs: record.srcOutUs,
+  };
+}
+
+function existingAudioWindowHash(
+  outputPath: string,
+  manifestPath: string,
+  expected: {
+    sourceRelPath: string;
+    sourceHash: string | null;
+    startUs: number;
+    endUs: number;
+    outputRelPath: string;
+  },
+): string | null {
+  if (!fs.existsSync(outputPath) || !fs.statSync(outputPath).isFile()) return null;
+  if (!fs.existsSync(manifestPath) || !fs.statSync(manifestPath).isFile()) return null;
+  try {
+    const currentHash = sha256File(outputPath);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as JsonRecord;
+    if (
+      manifest.window_type === "full"
+      && manifest.source_ref === expected.sourceRelPath
+      && manifest.start_us === expected.startUs
+      && manifest.end_us === expected.endUs
+      && manifest.output_path === expected.outputRelPath
+      && manifest.source_hash === expected.sourceHash
+      && manifest.content_hash === currentHash
+      && manifest.preprocess_version === CLAP_AUDIO_PREPROCESS_VERSION
+    ) {
+      return currentHash;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function assetAudioStreamState(asset: JsonRecord): "yes" | "no" | "unknown" {
+  const streams = Array.isArray(asset.audio_streams) ? asset.audio_streams : [];
+  if (Array.isArray(asset.audio_streams)) return streams.length > 0 ? "yes" : "no";
+  const audio = recordValue(asset.audio_stream ?? asset.audio ?? asset.audio_track);
+  if (Object.keys(audio).length > 0) return "yes";
+  const channels = nonNegativeIntegerLike(asset.audio_channels);
+  if (channels != null) return channels > 0 ? "yes" : "no";
+  return "unknown";
+}
+
 function execFilePromise(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(command, args, { windowsHide: true }, (error, _stdout, stderr) => {
@@ -1862,8 +2268,88 @@ function copyReusableQwenRows(
   tx();
 }
 
+function copyReusableClapRows(
+  db: Database.Database,
+  previousDb: Database.Database | null,
+  modelId: number,
+  embeddingType: "audio_representative" | "audio_text_clap",
+  rows: Array<{ segmentId: string; sourceRef: string; sourceTimestampUs: number | null; contentHash: string }>,
+  createdAt: string,
+): void {
+  if (!previousDb || rows.length === 0) return;
+  const previousModelId = previousClapModelId(previousDb);
+  if (previousModelId == null) return;
+
+  const selectPrevious = previousDb.prepare(`
+    SELECT dimension, vector
+    FROM segment_embeddings
+    WHERE segment_id = @segment_id
+      AND embedding_type = @embedding_type
+      AND model_id = @model_id
+      AND content_hash = @content_hash
+    LIMIT 1
+  `);
+  const insertCurrent = db.prepare(`
+    INSERT OR IGNORE INTO segment_embeddings (
+      segment_id, embedding_type, model_id, source_ref, source_timestamp_us,
+      content_hash, dimension, vector, created_at
+    ) VALUES (
+      @segment_id, @embedding_type, @model_id, @source_ref, @source_timestamp_us,
+      @content_hash, @dimension, @vector, @created_at
+    )
+  `);
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      if (segmentEmbeddingExists(db, row.segmentId, embeddingType, modelId, row.contentHash)) continue;
+      const previous = selectPrevious.get({
+        segment_id: row.segmentId,
+        embedding_type: embeddingType,
+        model_id: previousModelId,
+        content_hash: row.contentHash,
+      }) as { dimension: number; vector: Buffer } | undefined;
+      if (!previous || previous.dimension !== CLAP_AUDIO_OUTPUT_DIMENSION) continue;
+      insertCurrent.run({
+        segment_id: row.segmentId,
+        embedding_type: embeddingType,
+        model_id: modelId,
+        source_ref: row.sourceRef,
+        source_timestamp_us: row.sourceTimestampUs,
+        content_hash: row.contentHash,
+        dimension: previous.dimension,
+        vector: Buffer.from(previous.vector),
+        created_at: createdAt,
+      });
+    }
+  });
+  tx();
+}
+
 function previousQwenModelId(db: Database.Database): number | null {
   const model = qwen3VlEmbeddingModel("");
+  const row = db.prepare(`
+    SELECT id
+    FROM embedding_models
+    WHERE name = @name
+      AND model_revision = @model_revision
+      AND output_dimension = @output_dimension
+      AND input_modality = @input_modality
+      AND instruction = @instruction
+      AND preprocess_version = @preprocess_version
+      AND runner_name = @runner_name
+      AND runner_version = @runner_version
+      AND precision = @precision
+      AND normalized = @normalized
+      AND distance_metric = @distance_metric
+    LIMIT 1
+  `).get({
+    ...model,
+    normalized: model.normalized ? 1 : 0,
+  }) as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
+function previousClapModelId(db: Database.Database): number | null {
+  const model = clapAudioEmbeddingModel("");
   const row = db.prepare(`
     SELECT id
     FROM embedding_models
@@ -1889,7 +2375,7 @@ function previousQwenModelId(db: Database.Database): number | null {
 function segmentEmbeddingExists(
   db: Database.Database,
   segmentId: string,
-  embeddingType: "visual_representative" | "text_combined_qwen",
+  embeddingType: string,
   modelId: number,
   contentHash: string,
 ): boolean {
@@ -1967,14 +2453,147 @@ async function embedAndInsertQwenRows(
   tx();
 }
 
+async function embedAndInsertClapAudioRows(
+  db: Database.Database,
+  client: ClapAudioEmbeddingClient,
+  options: {
+    modelId: number;
+    createdAt: string;
+    requestTimeoutMs: number;
+    warnings: string[];
+    windows: AudioWindowRecord[];
+  },
+): Promise<void> {
+  if (options.windows.length === 0) return;
+  const response = await client.embedAudio(options.windows.map((window) => window.windowPath), {
+    outputDimension: CLAP_AUDIO_OUTPUT_DIMENSION,
+    normalize: true,
+    preprocessVersion: CLAP_AUDIO_PREPROCESS_VERSION,
+    timeoutMs: options.requestTimeoutMs * Math.max(1, options.windows.length),
+  });
+
+  const rowByRef = new Map(options.windows.map((window, index) => [String(index), window]));
+  insertClapVectors(db, {
+    modelId: options.modelId,
+    embeddingType: "audio_representative",
+    createdAt: options.createdAt,
+    warnings: options.warnings,
+    vectors: response.vectors,
+    rowForVector: (vector) => {
+      const row = rowByRef.get(vector.ref);
+      return row ? {
+        segmentId: row.segmentId,
+        sourceRef: row.outputRelPath,
+        sourceTimestampUs: row.startUs,
+        contentHash: row.contentHash,
+      } : null;
+    },
+  });
+}
+
+async function embedAndInsertClapTextRows(
+  db: Database.Database,
+  client: ClapAudioEmbeddingClient,
+  options: {
+    modelId: number;
+    createdAt: string;
+    requestTimeoutMs: number;
+    warnings: string[];
+    rows: ClapTextEmbeddingInput[];
+  },
+): Promise<void> {
+  if (options.rows.length === 0) return;
+  const response = await client.embedText(options.rows.map((row) => row.text), {
+    outputDimension: CLAP_AUDIO_OUTPUT_DIMENSION,
+    normalize: true,
+    preprocessVersion: CLAP_AUDIO_PREPROCESS_VERSION,
+    timeoutMs: options.requestTimeoutMs * Math.max(1, options.rows.length),
+  });
+
+  const rowByRef = new Map(options.rows.map((row, index) => [String(index), row]));
+  insertClapVectors(db, {
+    modelId: options.modelId,
+    embeddingType: "audio_text_clap",
+    createdAt: options.createdAt,
+    warnings: options.warnings,
+    vectors: response.vectors,
+    rowForVector: (vector) => {
+      const row = rowByRef.get(vector.ref);
+      return row ? {
+        segmentId: row.segmentId,
+        sourceRef: "embedding_texts:combined",
+        sourceTimestampUs: null,
+        contentHash: row.contentHash,
+      } : null;
+    },
+  });
+}
+
+function insertClapVectors(
+  db: Database.Database,
+  options: {
+    modelId: number;
+    embeddingType: "audio_representative" | "audio_text_clap";
+    createdAt: string;
+    warnings: string[];
+    vectors: ClapAudioVectorResult[];
+    rowForVector: (vector: ClapAudioVectorResult) => { segmentId: string; sourceRef: string; sourceTimestampUs: number | null; contentHash: string } | null;
+  },
+): void {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO segment_embeddings (
+      segment_id, embedding_type, model_id, source_ref, source_timestamp_us,
+      content_hash, dimension, vector, created_at
+    ) VALUES (
+      @segment_id, @embedding_type, @model_id, @source_ref, @source_timestamp_us,
+      @content_hash, @dimension, @vector, @created_at
+    )
+  `);
+  const tx = db.transaction(() => {
+    for (const vector of options.vectors) {
+      const row = options.rowForVector(vector);
+      if (!row) {
+        options.warnings.push(`clap audio embedding skipped for ${vector.ref}: no matching input row`);
+        continue;
+      }
+      if (!validClapVector(vector)) {
+        options.warnings.push(`clap audio embedding skipped for ${vector.ref}: expected ${CLAP_AUDIO_OUTPUT_DIMENSION} dimensions, got ${vector.dimension}`);
+        continue;
+      }
+      insert.run({
+        segment_id: row.segmentId,
+        embedding_type: options.embeddingType,
+        model_id: options.modelId,
+        source_ref: row.sourceRef,
+        source_timestamp_us: row.sourceTimestampUs,
+        content_hash: row.contentHash,
+        dimension: CLAP_AUDIO_OUTPUT_DIMENSION,
+        vector: float32ArrayToLittleEndianBlob(vector.vector),
+        created_at: options.createdAt,
+      });
+    }
+  });
+  tx();
+}
+
 function validQwenVector(result: Qwen3VlVectorResult): boolean {
   return result.dimension === QWEN3VL_OUTPUT_DIMENSION && result.vector.length === QWEN3VL_OUTPUT_DIMENSION;
+}
+
+function validClapVector(result: ClapAudioVectorResult): boolean {
+  if (result.dimension !== CLAP_AUDIO_OUTPUT_DIMENSION || result.vector.length !== CLAP_AUDIO_OUTPUT_DIMENSION) {
+    return false;
+  }
+  for (let index = 0; index < result.vector.length; index += 1) {
+    if (!Number.isFinite(result.vector[index])) return false;
+  }
+  return true;
 }
 
 function countSegmentEmbeddings(
   db: Database.Database,
   modelId: number,
-  embeddingType: "visual_representative" | "text_combined_qwen",
+  embeddingType: string,
 ): number {
   return db.prepare(`
     SELECT COUNT(*)
@@ -1983,6 +2602,17 @@ function countSegmentEmbeddings(
   `).pluck().get({
     model_id: modelId,
     embedding_type: embeddingType,
+  }) as number;
+}
+
+function countClapSegmentEmbeddings(db: Database.Database, modelId: number): number {
+  return db.prepare(`
+    SELECT COUNT(*)
+    FROM segment_embeddings
+    WHERE model_id = @model_id
+      AND embedding_type IN ('audio_representative', 'audio_text_clap')
+  `).pluck().get({
+    model_id: modelId,
   }) as number;
 }
 
@@ -2006,7 +2636,32 @@ function qwenTextEmbeddingInputs(
     }));
 }
 
+function clapTextEmbeddingInputs(
+  embeddingTexts: Array<{ segment_id: string; field: EmbeddingField; text: string; content_hash: string }>,
+): ClapTextEmbeddingInput[] {
+  return embeddingTexts
+    .filter((row) => row.field === "combined")
+    .map((row) => ({
+      segmentId: row.segment_id,
+      text: normalizeSearchText(row.text),
+    }))
+    .filter((row) => row.text.length > 0)
+    .map((row) => ({
+      ...row,
+      contentHash: hashValue({
+        embedding_type: "audio_text_clap",
+        preprocess_version: CLAP_AUDIO_PREPROCESS_VERSION,
+        text: row.text,
+      }),
+    }));
+}
+
 function qwenFailureStatus(error: unknown): EmbeddingStatus {
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
+  return code === "invalid_input" ? "error" : "unavailable";
+}
+
+function clapAudioFailureStatus(error: unknown): EmbeddingStatus {
   const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code) : "";
   return code === "invalid_input" ? "error" : "unavailable";
 }
