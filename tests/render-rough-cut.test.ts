@@ -2,14 +2,17 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+  buildHardCutGroupFfmpegArgs,
   buildRenderGroups,
   buildRenderClips,
   buildXfadeFilterGraph,
+  computeRenderDurationAccounting,
   extractCrossfadeTransitions,
   extractVideoClips,
   findBgmCandidates,
   generateSourceMapFromAssets,
   selectBgmCandidate,
+  validateRenderDurationAccounting,
   writeConcatList,
   type BgmCandidate,
   type RenderClip,
@@ -175,6 +178,9 @@ describe("timeline clip extraction", () => {
         startSec: 1.5,
         durationSec: 2,
         timelineInFrame: 12,
+        timelineDurationSec: 2,
+        sourceRangeDurationSec: 2.5,
+        timelineOutFrame: 60,
       },
     ]);
     expect(warnings[0]).toContain("missing source_map entry");
@@ -389,13 +395,153 @@ describe("crossfade render planning", () => {
   });
 });
 
-function renderClip(clipId: string, durationSec: number): RenderClip {
+describe("duration accounting", () => {
+  it("computes collapsed gaps, source clamps, and crossfade overlap", () => {
+    const clips: RenderClip[] = [
+      renderClip("clip_a", 2, 0, 2, 2),
+      renderClip("clip_b", 2.8, 72, 3, 2.8),
+      renderClip("clip_c", 4, 144, 4, 4),
+    ];
+    const transitions = new Map([
+      ["clip_c", { fromClipId: "clip_b", toClipId: "clip_c", durationSec: 0.5 }],
+    ]);
+    const groups = buildRenderGroups(clips, ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.mp4"], transitions);
+
+    const accounting = computeRenderDurationAccounting(clips, groups, 24);
+
+    expect(accounting).toEqual({
+      timeline_span_sec: 10,
+      timeline_content_sec: 9,
+      gap_sec: 1,
+      gap_count: 1,
+      crossfade_overlap_sec: 0.5,
+      source_clamp_sec: 0.2,
+      expected_rendered_sec: 8.3,
+    });
+  });
+
+  it("sets expected rendered duration to content minus crossfade overlaps and source clamps", () => {
+    const clips: RenderClip[] = [
+      renderClip("clip_a", 1.75, 0, 2, 1.75),
+      renderClip("clip_b", 2, 48, 2, 2),
+    ];
+    const groups = buildRenderGroups(
+      clips,
+      ["/tmp/a.mp4", "/tmp/b.mp4"],
+      new Map([["clip_b", { fromClipId: "clip_a", toClipId: "clip_b", durationSec: 0.25 }]]),
+    );
+
+    const accounting = computeRenderDurationAccounting(clips, groups, 24);
+
+    expect(accounting.timeline_content_sec).toBe(4);
+    expect(accounting.source_clamp_sec).toBe(0.25);
+    expect(accounting.crossfade_overlap_sec).toBe(0.25);
+    expect(accounting.expected_rendered_sec).toBe(3.5);
+  });
+
+  it("passes duration parity when actual duration is within threshold", () => {
+    const warnings: string[] = [];
+
+    const accounting = validateRenderDurationAccounting(
+      {
+        timeline_span_sec: 10,
+        timeline_content_sec: 9,
+        gap_sec: 1,
+        gap_count: 1,
+        crossfade_overlap_sec: 0.5,
+        source_clamp_sec: 0.2,
+        expected_rendered_sec: 8.3,
+      },
+      8,
+      (message) => warnings.push(message),
+    );
+
+    expect(accounting.actual_rendered_sec).toBe(8);
+    expect(accounting.parity_delta_sec).toBe(-0.3);
+    expect(accounting.parity_pass).toBe(true);
+    expect(warnings).toEqual([]);
+  });
+
+  it("warns when duration parity diverges beyond threshold", () => {
+    const warnings: string[] = [];
+
+    const accounting = validateRenderDurationAccounting(
+      {
+        timeline_span_sec: 10,
+        timeline_content_sec: 9,
+        gap_sec: 1,
+        gap_count: 1,
+        crossfade_overlap_sec: 0.5,
+        source_clamp_sec: 0.2,
+        expected_rendered_sec: 8.3,
+      },
+      7,
+      (message) => warnings.push(message),
+    );
+
+    expect(accounting.actual_rendered_sec).toBe(7);
+    expect(accounting.parity_delta_sec).toBe(-1.3);
+    expect(accounting.parity_pass).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("render duration parity delta -1.300s exceeds 0.500s");
+  });
+});
+
+describe("hard-cut group concat command", () => {
+  it("re-encodes groups that will feed an xfade graph", () => {
+    const args = buildHardCutGroupFfmpegArgs("/tmp/list.txt", "/tmp/group.mp4", {
+      fps: 24,
+      normalizeTimestamps: true,
+    });
+
+    expect(args).toContain("-c:v");
+    expect(args).toContain("libx264");
+    expect(args).toContain("-crf");
+    expect(args).toContain("18");
+    expect(args).toContain("-pix_fmt");
+    expect(args).toContain("yuv420p");
+    expect(args).toContain("-r");
+    expect(args[args.indexOf("-r") + 1]).toBe("24");
+    expect(args).toContain("-an");
+    expect(args.join(" ")).not.toContain("-c copy");
+  });
+
+  it("keeps copy concat for hard-cut-only renders", () => {
+    const args = buildHardCutGroupFfmpegArgs("/tmp/list.txt", "/tmp/group.mp4", {
+      fps: 24,
+      normalizeTimestamps: false,
+    });
+
+    expect(args).toEqual([
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      "/tmp/list.txt",
+      "-c",
+      "copy",
+      "/tmp/group.mp4",
+    ]);
+  });
+});
+
+function renderClip(
+  clipId: string,
+  durationSec: number,
+  timelineInFrame = 0,
+  timelineDurationSec = durationSec,
+  sourceRangeDurationSec = durationSec,
+): RenderClip {
   return {
     clipId,
     assetId: `AST_${clipId}`,
     sourcePath: `/tmp/${clipId}.mov`,
     startSec: 0,
     durationSec,
-    timelineInFrame: 0,
+    timelineInFrame,
+    timelineDurationSec,
+    sourceRangeDurationSec,
+    timelineOutFrame: timelineInFrame + Math.round(timelineDurationSec * 24),
   };
 }
