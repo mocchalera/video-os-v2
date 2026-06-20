@@ -13,7 +13,10 @@ import type { CreativeBrief } from "../runtime/artifacts/types.js";
 import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { MarlinEventsArtifact } from "../runtime/connectors/marlin-types.js";
 import type { KeyFrame } from "../runtime/pipeline/stages/craft-frames.js";
-import type { VisualRetrievalEvidence } from "../runtime/agents/visual-retrieval-evidence.js";
+import type {
+  AudioRetrievalEvidence,
+  VisualRetrievalEvidence,
+} from "../runtime/agents/visual-retrieval-evidence.js";
 import { parseArgs } from "../scripts/editorial-pipeline.js";
 
 const require = createRequire(import.meta.url);
@@ -257,8 +260,51 @@ function visualEvidence(): VisualRetrievalEvidence[] {
   ];
 }
 
+function audioEvidence(): AudioRetrievalEvidence[] {
+  return [
+    {
+      query_id: "must_have_02",
+      source: "brief.must_have",
+      query: "quiet room tone",
+      channel: "audio",
+      search_input: visualSearchInput("quiet room tone"),
+      mode: "hybrid",
+      results: [
+        {
+          segment_id: "SEG_001",
+          asset_id: "AST_001",
+          src_in_us: 0,
+          src_out_us: 4_000_000,
+          summary: "Quiet room tone under soft handling sounds.",
+          score: 0.84,
+          score_breakdown: {
+            audio_similarity: 0.812,
+            qwen_text: 0.79,
+            e5_text: 0.78,
+            lexical: 0.3,
+            final: 0.84,
+          },
+          matched_audio_ref: "03_analysis/audio/SEG_001/representative.wav",
+          matched_embedding_type: "audio_representative",
+          tags: ["quiet"],
+        },
+      ],
+      warnings: [],
+    },
+  ];
+}
+
 function extractVisualEvidenceJson(prompt: string): Record<string, unknown> {
   const sectionStart = prompt.indexOf("## Visual Retrieval Evidence (Qwen3-VL)");
+  expect(sectionStart).toBeGreaterThanOrEqual(0);
+  const section = prompt.slice(sectionStart);
+  const match = section.match(/```json\n([\s\S]*?)\n```/);
+  expect(match?.[1]).toBeTruthy();
+  return JSON.parse(match?.[1] ?? "{}") as Record<string, unknown>;
+}
+
+function extractAudioEvidenceJson(prompt: string): Record<string, unknown> {
+  const sectionStart = prompt.indexOf("## Audio Retrieval Evidence (CLAP)");
   expect(sectionStart).toBeGreaterThanOrEqual(0);
   const section = prompt.slice(sectionStart);
   const match = section.match(/```json\n([\s\S]*?)\n```/);
@@ -539,7 +585,56 @@ describe("unified editorial agent", () => {
     }
   });
 
-  it("rough prompt without visual evidence is unchanged for empty evidence", async () => {
+  it("rough prompt includes JSON-formatted audio retrieval evidence after visual evidence", async () => {
+    const geminiCalls: string[] = [];
+    vi.resetModules();
+    vi.doMock("../runtime/connectors/gemini-json.js", () => ({
+      callGeminiJson: async (prompt: string) => {
+        geminiCalls.push(prompt);
+        return "{}";
+      },
+    }));
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key";
+      const mod = await import("../runtime/agents/unified-editorial-agent.js");
+      await mod.roughCutPlanning(
+        brief(),
+        marlinEvents(),
+        representativeFrames(),
+        segments(),
+        24,
+        { mode: "headless", visualEvidence: visualEvidence(), audioEvidence: audioEvidence() },
+      );
+
+      expect(geminiCalls).toHaveLength(1);
+      expect(geminiCalls[0]).toContain("## Audio Retrieval Evidence (CLAP)");
+      const payload = extractAudioEvidenceJson(geminiCalls[0]);
+      const entries = payload.audio_retrieval_evidence as Array<Record<string, unknown>>;
+      const result = (entries[0].results as Array<Record<string, unknown>>)[0];
+      expect(entries[0].query_id).toBe("must_have_02");
+      expect(result).toMatchObject({
+        segment_id: "SEG_001",
+        asset_id: "AST_001",
+        scores: {
+          audio_similarity: 0.812,
+          qwen_text: 0.79,
+          e5_text: 0.78,
+          final: 0.84,
+        },
+        matched_audio_ref: "03_analysis/audio/SEG_001/representative.wav",
+      });
+      expect(geminiCalls[0].indexOf("## Visual Retrieval Evidence (Qwen3-VL)"))
+        .toBeLessThan(geminiCalls[0].indexOf("## Audio Retrieval Evidence (CLAP)"));
+      expect(geminiCalls[0].indexOf("## Audio Retrieval Evidence (CLAP)"))
+        .toBeLessThan(geminiCalls[0].indexOf("## All Marlin asset reports plus representative frames"));
+    } finally {
+      vi.doUnmock("../runtime/connectors/gemini-json.js");
+      vi.resetModules();
+    }
+  });
+
+  it("rough prompt without retrieval evidence is unchanged for empty evidence", async () => {
     const geminiCalls: string[] = [];
     vi.resetModules();
     vi.doMock("../runtime/connectors/gemini-json.js", () => ({
@@ -566,11 +661,12 @@ describe("unified editorial agent", () => {
         representativeFrames(),
         segments(),
         24,
-        { mode: "headless", visualEvidence: [] },
+        { mode: "headless", visualEvidence: [], audioEvidence: [] },
       );
 
       expect(geminiCalls).toHaveLength(2);
       expect(geminiCalls[0]).not.toContain("## Visual Retrieval Evidence (Qwen3-VL)");
+      expect(geminiCalls[0]).not.toContain("## Audio Retrieval Evidence (CLAP)");
       expect(geminiCalls[1]).toBe(geminiCalls[0]);
     } finally {
       vi.doUnmock("../runtime/connectors/gemini-json.js");
@@ -590,6 +686,21 @@ describe("unified editorial agent", () => {
 
     expect(rough.selects.candidates.find((candidate) => candidate.segment_id === "SEG_001")?.evidence).toContain(
       "Qwen visual retrieval: query=must_have_01 qwen_visual=0.852 final=0.867 matched_frame=03_analysis/frames/SEG_001/representative.jpg",
+    );
+  });
+
+  it("enriches selected candidate evidence when a segment matches audio retrieval", async () => {
+    const rough = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+      { mode: "headless", audioEvidence: audioEvidence() },
+    );
+
+    expect(rough.selects.candidates.find((candidate) => candidate.segment_id === "SEG_001")?.evidence).toContain(
+      "CLAP audio retrieval: query=must_have_02 audio_similarity=0.812 final=0.840 matched_embedding=audio_representative matched_audio=03_analysis/audio/SEG_001/representative.wav",
     );
   });
 

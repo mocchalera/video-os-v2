@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CreativeBrief } from "../runtime/artifacts/types.js";
 import type { SearchFootageInput } from "../runtime/tools/footage-search.js";
 import type {
+  AudioRetrievalEvidence,
+  AudioRetrievalResult,
   VisualRetrievalEvidence,
   VisualRetrievalResult,
 } from "../runtime/agents/visual-retrieval-evidence.js";
@@ -37,7 +39,25 @@ function query(query_id = "must_have_01", text = "warm natural light") {
   };
 }
 
+function audioQuery(query_id = "must_have_01", text = "quiet room tone") {
+  return {
+    query_id,
+    source: "brief.must_have" as const,
+    query: text,
+    channel: "audio" as const,
+  };
+}
+
 function searchInput(text = "warm natural light", limit = 8) {
+  return {
+    query: text,
+    semantic: text,
+    mode: "hybrid" as const,
+    limit,
+  };
+}
+
+function audioSearchInput(text = "quiet room tone", limit = 8) {
   return {
     query: text,
     semantic: text,
@@ -84,6 +104,44 @@ function footageResult(
   };
 }
 
+function audioFootageResult(
+  segmentId: string,
+  final: number,
+  audioSimilarity: number,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    segment_id: segmentId,
+    asset_id: `AST_${segmentId}`,
+    src_in_us: 0,
+    src_out_us: 3_000_000,
+    duration_us: 3_000_000,
+    score: final,
+    scores: {
+      audio_similarity: audioSimilarity,
+      clap_audio: audioSimilarity,
+      qwen_text: final - 0.03,
+      e5_text: final - 0.02,
+      lexical: 0.3,
+      final,
+      embedding_matches: [
+        {
+          embedding_type: "audio_representative",
+          model_id: 2,
+          score: audioSimilarity,
+          source_ref: `03_analysis/audio/${segmentId}/representative.wav`,
+        },
+      ],
+    },
+    match_reason: "CLAP audio match",
+    summary: `Audio summary for ${segmentId}`,
+    tags: ["quiet"],
+    quality_flags: [],
+    evidence_refs: [],
+    ...overrides,
+  };
+}
+
 function visualResult(overrides: Partial<VisualRetrievalResult> = {}): VisualRetrievalResult {
   return {
     segment_id: "SEG_001",
@@ -106,6 +164,28 @@ function visualResult(overrides: Partial<VisualRetrievalResult> = {}): VisualRet
   };
 }
 
+function audioResult(overrides: Partial<AudioRetrievalResult> = {}): AudioRetrievalResult {
+  return {
+    segment_id: "SEG_001",
+    asset_id: "AST_001",
+    src_in_us: 0,
+    src_out_us: 3_000_000,
+    summary: "Quiet room tone with soft natural ambience.",
+    score: 0.83,
+    score_breakdown: {
+      audio_similarity: 0.812,
+      qwen_text: 0.79,
+      e5_text: 0.78,
+      lexical: 0.3,
+      final: 0.83,
+    },
+    matched_audio_ref: "03_analysis/audio/SEG_001/representative.wav",
+    matched_embedding_type: "audio_representative",
+    tags: ["quiet"],
+    ...overrides,
+  };
+}
+
 function evidenceEntry(overrides: Partial<VisualRetrievalEvidence> = {}): VisualRetrievalEvidence {
   return {
     query_id: "must_have_01",
@@ -114,6 +194,20 @@ function evidenceEntry(overrides: Partial<VisualRetrievalEvidence> = {}): Visual
     search_input: searchInput("warm natural light", 8),
     mode: "hybrid",
     results: [visualResult()],
+    warnings: [],
+    ...overrides,
+  };
+}
+
+function audioEvidenceEntry(overrides: Partial<AudioRetrievalEvidence> = {}): AudioRetrievalEvidence {
+  return {
+    query_id: "must_have_01",
+    source: "brief.must_have",
+    query: "quiet room tone",
+    channel: "audio",
+    search_input: audioSearchInput("quiet room tone", 8),
+    mode: "hybrid",
+    results: [audioResult()],
     warnings: [],
     ...overrides,
   };
@@ -195,6 +289,57 @@ describe("visual retrieval evidence", () => {
     ]);
   });
 
+  it("extracts audio queries from audio-related must_have items", async () => {
+    const { extractAudioQueries } = await importWithMockedSearch();
+
+    expect(extractAudioQueries(brief({
+      must_have: [
+        "動画の声・環境音のミックス",
+        "Qwen3-VL visual search priority: 静かな朝の空気感",
+        "hands preparing food",
+      ],
+    }))).toEqual([
+      {
+        query_id: "must_have_01",
+        source: "brief.must_have",
+        query: "動画の声・環境音のミックス",
+        channel: "audio",
+      },
+      {
+        query_id: "must_have_02",
+        source: "brief.must_have",
+        query: "静かな朝の空気感",
+        channel: "audio",
+      },
+    ]);
+  });
+
+  it("extracts audio priorities from brief.editorial.policy_hint", async () => {
+    const { extractAudioQueries } = await importWithMockedSearch();
+
+    expect(extractAudioQueries(brief({
+      editorial: {
+        policy_hint: [
+          "Prefer quiet pacing.",
+          "Audio retrieval priority: quiet kitchen ambience",
+        ].join("\n"),
+      },
+    }))).toEqual([
+      {
+        query_id: "policy_hint_01",
+        source: "brief.editorial.policy_hint",
+        query: "Prefer quiet pacing.",
+        channel: "audio",
+      },
+      {
+        query_id: "policy_hint_02",
+        source: "brief.editorial.policy_hint",
+        query: "quiet kitchen ambience",
+        channel: "audio",
+      },
+    ]);
+  });
+
   it("calls searchFootage with mode='hybrid'", async () => {
     const searchFootage = vi.fn(async (_projectDir: string, input: SearchFootageInput) => ({
       query: input,
@@ -213,6 +358,49 @@ describe("visual retrieval evidence", () => {
       mode: "hybrid",
       limit: 3,
     });
+  });
+
+  it("calls searchFootage with mode='hybrid' for audio retrieval", async () => {
+    const searchFootage = vi.fn(async (_projectDir: string, input: SearchFootageInput) => ({
+      query: input,
+      db_status: "ready",
+      mode_used: input.mode ?? "hybrid",
+      results: [audioFootageResult("SEG_001", 0.83, 0.81)],
+      warnings: [],
+    }));
+    const { runAudioRetrieval } = await importWithMockedSearch(searchFootage);
+
+    await runAudioRetrieval("/tmp/project", [audioQuery()], { limitPerQuery: 5 });
+
+    expect(searchFootage).toHaveBeenCalledWith("/tmp/project", {
+      query: "quiet room tone",
+      semantic: "quiet room tone",
+      mode: "hybrid",
+      limit: 5,
+    });
+  });
+
+  it("filters and ranks audio retrieval by audio_similarity", async () => {
+    const searchFootage = vi.fn(async () => ({
+      query: audioSearchInput(),
+      db_status: "ready",
+      mode_used: "hybrid",
+      results: [
+        audioFootageResult("SEG_LOW_FINAL_HIGH_AUDIO", 0.7, 0.91),
+        audioFootageResult("SEG_HIGH_FINAL_LOW_AUDIO", 0.95, 0.52),
+        footageResult("SEG_NO_AUDIO", 0.99, 0.94),
+      ],
+      warnings: [],
+    }));
+    const { runAudioRetrieval } = await importWithMockedSearch(searchFootage);
+
+    const evidence = await runAudioRetrieval("/tmp/project", [audioQuery()]);
+
+    expect(evidence[0].results.map((result) => result.segment_id)).toEqual([
+      "SEG_LOW_FINAL_HIGH_AUDIO",
+      "SEG_HIGH_FINAL_LOW_AUDIO",
+    ]);
+    expect(evidence[0].results[0].score_breakdown.audio_similarity).toBe(0.91);
   });
 
   it("deduplicates by segment_id and keeps the best score", async () => {
@@ -371,6 +559,34 @@ describe("visual retrieval evidence", () => {
     });
   });
 
+  it("produces JSON audio prompt evidence with audio_similarity", async () => {
+    const { formatAudioEvidenceForPrompt } = await importWithMockedSearch();
+
+    const text = formatAudioEvidenceForPrompt([audioEvidenceEntry()]);
+    const payload = parsePromptJsonBlock(text);
+    const entries = payload.audio_retrieval_evidence as Array<Record<string, unknown>>;
+    const result = (entries[0].results as Array<Record<string, unknown>>)[0];
+
+    expect(text).toContain("## Audio Retrieval Evidence (CLAP)");
+    expect(text).toContain("audio_similarity score");
+    expect(entries[0].query_id).toBe("must_have_01");
+    expect(result).toMatchObject({
+      segment_id: "SEG_001",
+      asset_id: "AST_001",
+      src_in_us: 0,
+      src_out_us: 3_000_000,
+      summary: "Quiet room tone with soft natural ambience.",
+      scores: {
+        audio_similarity: 0.812,
+        qwen_text: 0.79,
+        e5_text: 0.78,
+        final: 0.83,
+      },
+      matched_audio_ref: "03_analysis/audio/SEG_001/representative.wav",
+      matched_embedding_type: "audio_representative",
+    });
+  });
+
   it("truncates and JSON-escapes query and summary text in prompt evidence", async () => {
     const { formatEvidenceForPrompt } = await importWithMockedSearch();
 
@@ -395,7 +611,7 @@ describe("visual retrieval evidence", () => {
   });
 
   it("returns an empty string when no evidence is available", async () => {
-    const { formatEvidenceForPrompt } = await importWithMockedSearch();
+    const { formatAudioEvidenceForPrompt, formatEvidenceForPrompt } = await importWithMockedSearch();
 
     expect(formatEvidenceForPrompt([])).toBe("");
     expect(formatEvidenceForPrompt([
@@ -407,6 +623,19 @@ describe("visual retrieval evidence", () => {
         mode: "hybrid",
         results: [],
         warnings: ["no qwen"],
+      },
+    ])).toBe("");
+    expect(formatAudioEvidenceForPrompt([])).toBe("");
+    expect(formatAudioEvidenceForPrompt([
+      {
+        query_id: "must_have_01",
+        source: "brief.must_have",
+        query: "quiet room tone",
+        channel: "audio",
+        search_input: audioSearchInput(),
+        mode: "hybrid",
+        results: [],
+        warnings: ["no clap"],
       },
     ])).toBe("");
   });
@@ -425,6 +654,7 @@ describe("visual retrieval evidence", () => {
         {
           query_id: "must_have_01",
           source: "brief.must_have",
+          channel: "visual",
           query: "warm natural light",
           search_input: {
             query: "warm natural light",
@@ -437,6 +667,32 @@ describe("visual retrieval evidence", () => {
       ],
     });
     expect(trace.queries[0].results[0].segment_id).toBe("SEG_001");
+  });
+
+  it("builds trace entries for visual and audio retrieval evidence", async () => {
+    const { buildVisualRetrievalTrace } = await importWithMockedSearch();
+
+    const trace = buildVisualRetrievalTrace(
+      "visual-test",
+      [evidenceEntry(), audioEvidenceEntry()],
+      "2026-06-19T00:00:00.000Z",
+    );
+
+    expect(trace.total_unique_segments).toBe(1);
+    expect(trace.queries.map((entry) => ({
+      query_id: entry.query_id,
+      channel: entry.channel,
+      result_count: entry.result_count,
+    }))).toEqual([
+      { query_id: "must_have_01", channel: "visual", result_count: 1 },
+      { query_id: "must_have_01", channel: "audio", result_count: 1 },
+    ]);
+    expect(trace.queries[1].results[0]).toMatchObject({
+      segment_id: "SEG_001",
+      score_breakdown: {
+        audio_similarity: 0.812,
+      },
+    });
   });
 
   it("aggregates trace warnings from multiple queries", async () => {

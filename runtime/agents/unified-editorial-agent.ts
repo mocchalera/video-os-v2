@@ -34,7 +34,10 @@ import {
 } from "./llm-triage-agent.js";
 import { parseLlmResponse } from "./llm-json.js";
 import {
+  formatAudioEvidenceForPrompt,
   formatEvidenceForPrompt,
+  type AudioRetrievalEvidence,
+  type AudioRetrievalResult,
   type VisualRetrievalEvidence,
   type VisualRetrievalResult,
 } from "./visual-retrieval-evidence.js";
@@ -148,6 +151,7 @@ export interface EditorialAgentOptions {
    */
   projectDir?: string;
   visualEvidence?: VisualRetrievalEvidence[];
+  audioEvidence?: AudioRetrievalEvidence[];
 }
 
 export interface RoughCutPlanningInput {
@@ -157,6 +161,7 @@ export interface RoughCutPlanningInput {
   segments: SegmentItem[];
   bgmDurationSec: number | null;
   visualEvidence?: VisualRetrievalEvidence[];
+  audioEvidence?: AudioRetrievalEvidence[];
 }
 
 export interface FineCutRefinementInput {
@@ -484,6 +489,7 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
   const totalFrames = Math.round(targetSec * fps);
   const beatCount = 5;
   const visualEvidenceSection = formatEvidenceForPrompt(input.visualEvidence ?? []);
+  const audioEvidenceSection = formatAudioEvidenceForPrompt(input.audioEvidence ?? []);
   return [
     "You are the unified Claude/Codex editorial agent for Video OS.",
     "Pass 1 is rough-cut planning: see all available material, select the best clips, and decide what goes where.",
@@ -494,6 +500,7 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
     JSON.stringify(compactBrief(input.brief, input.bgmDurationSec), null, 2),
     "",
     ...(visualEvidenceSection ? [visualEvidenceSection, ""] : []),
+    ...(audioEvidenceSection ? [audioEvidenceSection, ""] : []),
     "## All Marlin asset reports plus representative frames",
     JSON.stringify(assetEvidence, null, 2),
     "",
@@ -1158,7 +1165,16 @@ interface SelectedVisualRetrievalEvidence {
   result: VisualRetrievalResult;
 }
 
+interface SelectedAudioRetrievalEvidence {
+  queryId: string;
+  result: AudioRetrievalResult;
+}
+
 function visualScoreText(value: number | undefined): string {
+  return value === undefined ? "n/a" : value.toFixed(3);
+}
+
+function audioScoreText(value: number | undefined): string {
   return value === undefined ? "n/a" : value.toFixed(3);
 }
 
@@ -1177,6 +1193,27 @@ function bestVisualRetrievalBySegment(
   return best;
 }
 
+function bestAudioRetrievalBySegment(
+  evidence: AudioRetrievalEvidence[] | undefined,
+): Map<string, SelectedAudioRetrievalEvidence> {
+  const best = new Map<string, SelectedAudioRetrievalEvidence>();
+  for (const entry of evidence ?? []) {
+    for (const result of entry.results) {
+      const previous = best.get(result.segment_id);
+      const nextAudio = result.score_breakdown.audio_similarity ?? Number.NEGATIVE_INFINITY;
+      const previousAudio = previous?.result.score_breakdown.audio_similarity ?? Number.NEGATIVE_INFINITY;
+      if (
+        !previous
+        || nextAudio > previousAudio
+        || (nextAudio === previousAudio && result.score_breakdown.final > previous.result.score_breakdown.final)
+      ) {
+        best.set(result.segment_id, { queryId: entry.query_id, result });
+      }
+    }
+  }
+  return best;
+}
+
 function formatSelectedVisualRetrievalEvidence(match: SelectedVisualRetrievalEvidence): string {
   const parts = [
     "Qwen visual retrieval:",
@@ -1186,6 +1223,22 @@ function formatSelectedVisualRetrievalEvidence(match: SelectedVisualRetrievalEvi
   ];
   if (match.result.matched_frame_path) {
     parts.push(`matched_frame=${match.result.matched_frame_path}`);
+  }
+  return parts.join(" ");
+}
+
+function formatSelectedAudioRetrievalEvidence(match: SelectedAudioRetrievalEvidence): string {
+  const parts = [
+    "CLAP audio retrieval:",
+    `query=${match.queryId}`,
+    `audio_similarity=${audioScoreText(match.result.score_breakdown.audio_similarity)}`,
+    `final=${audioScoreText(match.result.score_breakdown.final)}`,
+  ];
+  if (match.result.matched_embedding_type) {
+    parts.push(`matched_embedding=${match.result.matched_embedding_type}`);
+  }
+  if (match.result.matched_audio_ref) {
+    parts.push(`matched_audio=${match.result.matched_audio_ref}`);
   }
   return parts.join(" ");
 }
@@ -1208,6 +1261,24 @@ function enrichSelectedCandidatesWithVisualEvidence(
   }
 }
 
+function enrichSelectedCandidatesWithAudioEvidence(
+  selects: SelectsCandidates,
+  evidence: AudioRetrievalEvidence[] | undefined,
+): void {
+  const bySegment = bestAudioRetrievalBySegment(evidence);
+  if (bySegment.size === 0) return;
+
+  for (const candidate of selects.candidates) {
+    const match = bySegment.get(candidate.segment_id);
+    if (!match) continue;
+    const evidenceLine = formatSelectedAudioRetrievalEvidence(match);
+    const existing = candidate.evidence ?? [];
+    if (!existing.includes(evidenceLine)) {
+      candidate.evidence = [...existing, evidenceLine];
+    }
+  }
+}
+
 function normalizeRoughResult(
   parsed: Record<string, unknown> | undefined,
   input: {
@@ -1217,6 +1288,7 @@ function normalizeRoughResult(
     segments: SegmentItem[];
     bgmDurationSec: number | null;
     visualEvidence?: VisualRetrievalEvidence[];
+    audioEvidence?: AudioRetrievalEvidence[];
   },
 ): { selects: SelectsCandidates; blueprint: EditBlueprint } {
   const projectId = projectIdFromBrief(input.brief);
@@ -1234,6 +1306,7 @@ function normalizeRoughResult(
   }
   ensureCandidateIds(projectId, selects.candidates);
   enrichSelectedCandidatesWithVisualEvidence(selects, input.visualEvidence);
+  enrichSelectedCandidatesWithAudioEvidence(selects, input.audioEvidence);
   validateArtifact<SelectsCandidates>(selects, "selects-candidates.schema.json");
 
   let blueprint: EditBlueprint;
@@ -1302,6 +1375,7 @@ export async function roughCutPlanning(
     segments,
     bgmDurationSec,
     ...(options?.visualEvidence ? { visualEvidence: options.visualEvidence } : {}),
+    ...(options?.audioEvidence ? { audioEvidence: options.audioEvidence } : {}),
   };
   if (options?.mode === "interactive") {
     return buildRoughInteractivePrompt(input, options);

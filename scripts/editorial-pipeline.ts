@@ -21,7 +21,9 @@ import {
 import {
   buildSelectedLinkage,
   buildVisualRetrievalTrace,
+  extractAudioQueries,
   extractVisualQueries,
+  runAudioRetrieval,
   runVisualRetrieval,
 } from "../runtime/agents/visual-retrieval-evidence.js";
 import { loadCreativeBrief, validateArtifact } from "../runtime/artifacts/loaders.js";
@@ -207,6 +209,11 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
     limitPerQuery: 8,
   });
 
+  console.log("[editorial] audio retrieval");
+  const audioEvidence = await runAudioRetrieval(projectDir, extractAudioQueries(brief), {
+    limitPerQuery: 5,
+  });
+
   console.log("[editorial] rough pass");
   const rough = await roughCutPlanning(
     brief,
@@ -214,14 +221,14 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
     representativeFrames,
     segments,
     bgmDurationSec,
-    { mode: "headless", visualEvidence },
+    { mode: "headless", visualEvidence, audioEvidence },
   );
   writeJsonArtifact(
     projectDir,
     "04_plan/visual_search_trace.json",
     buildVisualRetrievalTrace(
       projectIdFromBrief(brief, projectDir),
-      visualEvidence,
+      [...visualEvidence, ...audioEvidence],
       new Date().toISOString(),
       buildSelectedLinkage(rough.selects, visualEvidence),
     ),
