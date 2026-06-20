@@ -4,7 +4,7 @@
  *
  * Hybrid two-pass editorial pipeline.
  *
- *   npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render]
+ *   npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render] [--skip-qa]
  */
 
 import { config as dotenvConfig } from "dotenv";
@@ -31,6 +31,7 @@ import type {
   CreativeBrief,
   EditBlueprint,
   SelectsCandidates,
+  TimelineIR,
 } from "../runtime/artifacts/types.js";
 import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { MarlinEventsArtifact } from "../runtime/connectors/marlin-types.js";
@@ -41,6 +42,13 @@ import {
   runMarlinQA,
   summarizeMarlinQAReport,
 } from "../runtime/eval/marlin-qa.js";
+import { evaluateBriefAlignment } from "../runtime/eval/brief-alignment.js";
+import { detectIssues } from "../runtime/eval/qa-issue-detector.js";
+import { proposeFixes } from "../runtime/eval/qa-fix-proposer.js";
+import {
+  buildQAReport,
+  writeQAImprovementReport,
+} from "../runtime/eval/qa-improvement-report.js";
 import {
   extractCraftKeyFrames,
   extractRepresentativeFrames,
@@ -48,13 +56,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-const USAGE = "Usage: npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render] [--qa]";
+const USAGE = "Usage: npx tsx scripts/editorial-pipeline.ts --project <dir> [--skip-fine] [--skip-render] [--qa] [--skip-qa]";
 
 export interface EditorialPipelineArgs {
   projectDir: string;
   skipFine: boolean;
   skipRender: boolean;
   qa?: boolean;
+  skipQa?: boolean;
 }
 
 interface SegmentsDoc {
@@ -66,7 +75,8 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
   let projectDir: string | undefined;
   let skipFine = false;
   let skipRender = false;
-  let qa = false;
+  let qa = true;
+  let skipQa = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -87,6 +97,12 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
     }
     if (arg === "--qa") {
       qa = true;
+      skipQa = false;
+      continue;
+    }
+    if (arg === "--skip-qa") {
+      qa = false;
+      skipQa = true;
       continue;
     }
     if (arg.startsWith("--")) {
@@ -105,6 +121,7 @@ export function parseArgs(argv: string[] = process.argv): EditorialPipelineArgs 
     skipFine,
     skipRender,
     qa,
+    skipQa,
   };
 }
 
@@ -293,12 +310,17 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
   console.log("[editorial] render");
   await runRender(projectDir);
 
-  if (args.qa) {
+  if (args.skipQa === true || args.qa === false) {
+    console.log("[editorial] qa skipped");
+    return;
+  }
+
+  {
     loadLocalEnvForMarlinQA();
-    console.log("[editorial] marlin qa");
+    console.log("[editorial] qa improvement report");
     try {
       let reportPath = "";
-      const report = await runMarlinQA(
+      const qaResult = await runMarlinQA(
         projectDir,
         defaultMarlinQAVideoPath(projectDir),
         brief,
@@ -309,11 +331,19 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
         },
       );
       console.log(`[editorial] marlin qa report: ${path.relative(process.cwd(), reportPath)}`);
-      for (const line of summarizeMarlinQAReport(report)) {
+      for (const line of summarizeMarlinQAReport(qaResult)) {
         console.log(`[editorial] ${line}`);
       }
+      const alignResult = await evaluateBriefAlignment(projectDir, { useLlm: false });
+      const timeline = readJson<TimelineIR>(path.join(projectDir, "05_timeline", "timeline.json"));
+      const issues = detectIssues(qaResult, alignResult, timeline);
+      const fixes = await proposeFixes(issues, timeline, selects, projectDir);
+      const report = buildQAReport(0, issues, fixes, qaResult, alignResult);
+      const qaReportPath = writeQAImprovementReport(projectDir, report);
+      console.log(`[editorial] qa improvement report: ${path.relative(process.cwd(), qaReportPath)}`);
+      console.log(`[editorial] QA: ${issues.length} issues, ${fixes.length} proposed fixes`);
     } catch (error) {
-      console.warn(`[editorial] marlin qa failed; render remains complete: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(`[editorial] qa improvement report failed; render remains complete: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
