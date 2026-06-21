@@ -1123,7 +1123,7 @@ Minimum fixture set before Phase 2, plus deferred continuity coverage:
 
 ## Sources Checked
 
-- `/Users/mocchalera/Desktop/multimodal-vector.md`
+- `multimodal-vector.md` (project-local reference)
 - `docs/design-multimodal-qwen3vl-unified-v1.md`
 - `reports/design-review-qwen3vl-unified.md`
 - `docs/research-multimodal-vector-search-models.md`

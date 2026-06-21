@@ -521,6 +521,6 @@ If that improves real rough-pass discovery or fine-pass replacement quality, exp
 
 ## Local Sources Checked
 
-- Local research report: `/Users/mocchalera/Desktop/multimodal-vector.md`
+- Local research report: `multimodal-vector.md` (project-local reference)
 - Existing design docs: `docs/research-multimodal-vector-search-models.md`, `docs/design-multimodal-vector-search-architecture.md`, `docs/design-footage-database-unified.md`, `docs/explanation-footage-database.md`
 - Current footage DB implementation: `runtime/artifacts/footage-db-builder.ts`, `runtime/tools/footage-search.ts`, `runtime/eval/semantic-match.ts`
