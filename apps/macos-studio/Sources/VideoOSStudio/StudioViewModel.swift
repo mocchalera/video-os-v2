@@ -39,6 +39,9 @@ final class StudioViewModel: ObservableObject {
     @Published var audioWaveformStatus = "No waveform loaded."
     @Published var isPlaying = false
     @Published var evidenceStore: ProjectEvidenceStore?
+    @Published var candidateDataSource: CandidateBrowserDataSource?
+    @Published var isSwapBrowserPresented = false
+    @Published var swapBrowserClip: TimelineClip?
     @Published var mediaPreviewSummary = ProjectMediaPreviewSummary(items: [])
     @Published var mediaSourceMapStatus = ProjectMediaSourceMapStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
     @Published var mediaProxyPlan = ProjectMediaProxyPlan(items: [])
@@ -476,6 +479,9 @@ final class StudioViewModel: ObservableObject {
             pausePlayback()
             timeline = nil
             evidenceStore = nil
+            candidateDataSource = nil
+            isSwapBrowserPresented = false
+            swapBrowserClip = nil
             mediaPreviewSummary = ProjectMediaPreviewSummary(items: [])
             mediaSourceMapStatus = ProjectMediaSourceMapStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
             mediaProxyPlan = ProjectMediaProxyPlan(items: [])
@@ -550,6 +556,7 @@ final class StudioViewModel: ObservableObject {
         }
         feedbackSession.loadHistory(projectURL: project.path)
         evidenceStore = ProjectEvidenceStore.load(projectURL: project.path)
+        loadCandidateDataSource(project: project)
         mediaPreviewSummary = ProjectMediaResolver.previewSummary(projectURL: project.path, assets: evidenceStore?.assets)
         analysisRunPlan = ProjectAnalysisRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: project.path)
         analysisRunStatus = analysisRunPlan.canRun
@@ -1794,7 +1801,24 @@ final class StudioViewModel: ObservableObject {
 
     func openSwapBrowser(for clip: TimelineClip) {
         selectedTimelineClipID = clip.id
-        roughCutCompileStatus = "Swap browser is reserved for Phase 2. Selected \(clip.id)."
+        swapBrowserClip = clip
+        isSwapBrowserPresented = true
+        roughCutCompileStatus = "Swap browser opened for \(clip.id)."
+        if candidateDataSource == nil, let selectedProject {
+            loadCandidateDataSource(project: selectedProject)
+        }
+    }
+
+    private func loadCandidateDataSource(project: ProjectSummary) {
+        candidateDataSource = nil
+        let projectID = project.id
+        let projectURL = project.path
+        let root = repositoryRoot
+        Task {
+            let dataSource = await CandidateBrowserDataSource.load(projectURL: projectURL, repositoryRoot: root)
+            guard self.selectedProject?.id == projectID else { return }
+            self.candidateDataSource = dataSource
+        }
     }
 
     private func presentStudioPatchConflictAlert(_ conflicts: [PatchConflict]) {

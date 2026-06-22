@@ -106,6 +106,9 @@ public struct AnalysisAsset: Decodable, Identifiable, Equatable, Sendable {
     public let filename: String
     public let roleGuess: String?
     public let durationUS: Int?
+    public let sourceLocator: String?
+    public let posterPath: String?
+    public let keyFramePath: String?
     public let hasTranscript: Bool
     public let transcriptRef: String?
     public let segmentIDs: [String]
@@ -117,6 +120,9 @@ public struct AnalysisAsset: Decodable, Identifiable, Equatable, Sendable {
         case filename
         case roleGuess = "role_guess"
         case durationUS = "duration_us"
+        case sourceLocator = "source_locator"
+        case posterPath = "poster_path"
+        case keyFramePath = "key_frame_path"
         case hasTranscript = "has_transcript"
         case transcriptRef = "transcript_ref"
         case segmentIDs = "segment_ids"
@@ -130,6 +136,9 @@ public struct AnalysisAsset: Decodable, Identifiable, Equatable, Sendable {
         filename = try container.decode(String.self, forKey: .filename)
         roleGuess = try container.decodeIfPresent(String.self, forKey: .roleGuess)
         durationUS = try container.decodeIfPresent(Int.self, forKey: .durationUS)
+        sourceLocator = try container.decodeIfPresent(String.self, forKey: .sourceLocator)
+        posterPath = try container.decodeIfPresent(String.self, forKey: .posterPath)
+        keyFramePath = try container.decodeIfPresent(String.self, forKey: .keyFramePath)
         hasTranscript = try container.decodeIfPresent(Bool.self, forKey: .hasTranscript) ?? false
         transcriptRef = try container.decodeIfPresent(String.self, forKey: .transcriptRef)
         segmentIDs = try container.decodeIfPresent([String].self, forKey: .segmentIDs) ?? []

@@ -37,6 +37,22 @@ struct ContentView: View {
             )
             .frame(width: 580, height: 540)
         }
+        .sheet(isPresented: $model.isSwapBrowserPresented) {
+            if let clip = model.swapBrowserClip, let dataSource = model.candidateDataSource {
+                CandidateSwapView(
+                    clip: clip,
+                    beatID: clip.beatID,
+                    dataSource: dataSource,
+                    evidenceStore: model.evidenceStore,
+                    projectURL: model.selectedProject?.path,
+                    feedbackSession: model.feedbackSession,
+                    isPresented: $model.isSwapBrowserPresented
+                )
+            } else {
+                ProgressView("Loading candidates...")
+                    .frame(width: 360, height: 180)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openStudioCommandPalette)) { _ in
             commandPaletteQuery = ""
             isCommandPalettePresented = true
