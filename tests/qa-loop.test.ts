@@ -346,6 +346,14 @@ describe("runQALoop", () => {
     expect(result.convergence_reason).toBe("no_fixable_issues");
     expect(result.fixes_applied_total).toBe(0);
     expect(opts.proposeFixes).not.toHaveBeenCalled();
+
+    const index = JSON.parse(
+      fs.readFileSync(path.join(project.projectDir, "06_review", "qa-improvement-index.json"), "utf-8"),
+    ) as { convergence_reason: string; iterations: Array<{ path: string; iteration: number }> };
+    expect(index.convergence_reason).toBe("no_issues");
+    expect(index.iterations).toEqual([
+      { path: "06_review/qa-improvement-report-iter1.json", iteration: 1 },
+    ]);
   });
 
   it("stops early when score drops below the quality floor", async () => {
@@ -403,6 +411,7 @@ describe("runQALoop", () => {
     expect(fs.existsSync(path.join(project.projectDir, "05_timeline", "timeline-iter1.json"))).toBe(true);
     expect(fs.existsSync(path.join(project.projectDir, "09_output", "rough-cut-iter1.mp4"))).toBe(true);
     expect(fs.existsSync(path.join(project.projectDir, "06_review", "qa-improvement-report-iter1.json"))).toBe(true);
+    expect(fs.existsSync(path.join(project.projectDir, "06_review", "qa-improvement-index.json"))).toBe(true);
   });
 
   it("supports skip-render mode with compile only", async () => {
@@ -452,6 +461,51 @@ describe("runQALoop", () => {
     expect(report).toMatchObject({ iteration: 1, proposed_fixes: 1 });
     expect(result.initial_score).toBe(0.75);
     expect(result.final_score).toBe(0.82);
+  });
+
+  it("writes an ordered QA improvement index with timeline hashes", async () => {
+    const project = makeProject();
+    const opts = loopOptions([0.8, 0.8]);
+
+    await runQALoop(
+      project.projectDir,
+      project.brief,
+      project.selects,
+      project.blueprint,
+      project.timeline,
+      opts,
+    );
+
+    const index = JSON.parse(
+      fs.readFileSync(path.join(project.projectDir, "06_review", "qa-improvement-index.json"), "utf-8"),
+    ) as {
+      version: string;
+      project_id: string;
+      run_id: string;
+      base_timeline_hash: string;
+      result_timeline_hash: string;
+      convergence_reason: string;
+      iterations: Array<{ path: string; iteration: number }>;
+    };
+    const secondReport = JSON.parse(
+      fs.readFileSync(path.join(project.projectDir, "06_review", "qa-improvement-report-iter2.json"), "utf-8"),
+    ) as { total_issues: number; issues: QAIssue[] };
+
+    expect(index).toMatchObject({
+      version: "1",
+      project_id: "qa-loop-fixture",
+      run_id: "2026-06-20T00:00:00.000Z",
+      convergence_reason: "score_plateau",
+      iterations: [
+        { path: "06_review/qa-improvement-report-iter1.json", iteration: 1 },
+        { path: "06_review/qa-improvement-report-iter2.json", iteration: 2 },
+      ],
+    });
+    expect(index.base_timeline_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(index.result_timeline_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(index.result_timeline_hash).not.toBe(index.base_timeline_hash);
+    expect(secondReport.total_issues).toBeGreaterThan(0);
+    expect(secondReport.issues.length).toBe(secondReport.total_issues);
   });
 });
 

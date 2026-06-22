@@ -10,6 +10,7 @@ struct TimelinePanel: View {
     var audioCues: [TimelineAudioCue]
     var audioWaveforms: [TimelineAudioWaveform]
     var audioWaveformStatus: String
+    var recentlyChangedClipIDs: Set<String>
     @Binding var selectedClipID: TimelineClip.ID?
     var playheadFrame: Int
     var onScrubPlayhead: (Int) -> Void
@@ -63,6 +64,7 @@ struct TimelinePanel: View {
                                     laneWidth: laneWidth,
                                     audioCues: audioCues.filter { $0.trackID == track.id },
                                     audioWaveforms: audioWaveforms.filter { $0.trackID == track.id },
+                                    recentlyChangedClipIDs: recentlyChangedClipIDs,
                                     selectedClipID: $selectedClipID,
                                     playheadFrame: playheadFrame,
                                     onSelectClip: onSelectClip,
@@ -196,6 +198,7 @@ struct TimelineTrackRow: View {
     var laneWidth: CGFloat
     var audioCues: [TimelineAudioCue]
     var audioWaveforms: [TimelineAudioWaveform]
+    var recentlyChangedClipIDs: Set<String>
     @Binding var selectedClipID: TimelineClip.ID?
     var playheadFrame: Int
     var onSelectClip: (TimelineClip.ID) -> Void
@@ -291,7 +294,8 @@ struct TimelineTrackRow: View {
             isApproved: feedbackSession.approvedClipIDs.contains(clip.id),
             isRejected: feedbackSession.rejectedClipIDs.contains(clip.id),
             isPendingSwap: feedbackSession.hasPendingSwap(for: clip.id),
-            isPendingRemove: feedbackSession.hasPendingRemove(for: clip.id)
+            isPendingRemove: feedbackSession.hasPendingRemove(for: clip.id),
+            isRecentlyChanged: recentlyChangedClipIDs.contains(clip.id)
         )
     }
 }
@@ -390,12 +394,14 @@ struct TimelineClipFeedbackState: Equatable {
     var isRejected: Bool
     var isPendingSwap: Bool
     var isPendingRemove: Bool
+    var isRecentlyChanged: Bool
 
     static let none = TimelineClipFeedbackState(
         isApproved: false,
         isRejected: false,
         isPendingSwap: false,
-        isPendingRemove: false
+        isPendingRemove: false,
+        isRecentlyChanged: false
     )
 }
 
@@ -420,6 +426,11 @@ struct TimelineClipBlock: View {
                     .stroke(Color.red.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
             }
 
+            if feedbackState.isRecentlyChanged {
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.blue.opacity(0.85), lineWidth: 2)
+            }
+
             HStack(spacing: 4) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(clip.role)
@@ -437,6 +448,11 @@ struct TimelineClipBlock: View {
             }
             .padding(.horizontal, 6)
         }
+        .shadow(
+            color: feedbackState.isRecentlyChanged ? Color.blue.opacity(0.8) : .clear,
+            radius: feedbackState.isRecentlyChanged ? 6 : 0
+        )
+        .animation(.easeOut(duration: 5.0), value: feedbackState.isRecentlyChanged)
         .help("\(clip.id) / \(clip.motivation)")
     }
 

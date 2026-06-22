@@ -27,6 +27,10 @@ final class StudioViewModel: ObservableObject {
     @Published var roughCutCompileStatus = "No project selected."
     @Published var isCompilingRoughCut = false
     @Published var feedbackSession = StudioFeedbackSession()
+    @Published var qaDashboard: QADashboardDocument?
+    @Published var changedClipIDs: [String] = []
+    @Published var recentlyChangedClipIDs: Set<String> = []
+    @Published var changedClipHighlightTimer: Timer?
     @Published var selectedTimelineClipID: TimelineClip.ID? {
         didSet { loadSelectedClipNoteDraft() }
     }
@@ -526,6 +530,7 @@ final class StudioViewModel: ObservableObject {
             intentSummary = ProjectIntentSummaryReader.summary(projectURL: URL(fileURLWithPath: "/"))
             intentAlignmentStatus = ProjectIntentAlignmentStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
             reviewArtifactStatus = ProjectReviewArtifactStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
+            qaDashboard = nil
             libraryReadinessStatus = ProjectLibraryReadinessStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
             pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
             studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
@@ -538,6 +543,7 @@ final class StudioViewModel: ObservableObject {
             roughCutCompilePlan = ProjectRoughCutCompilePlanner.plan(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
             roughCutCompileStatus = "No project selected."
             isCompilingRoughCut = false
+            clearChangedClipHighlight()
             selectedTimelineClipID = nil
             timelineAudioWaveforms = []
             audioWaveformStatus = "No project selected."
@@ -554,6 +560,7 @@ final class StudioViewModel: ObservableObject {
         if feedbackSessionProjectID != project.id {
             feedbackSession.clearAll()
             feedbackSession.clearBaseline()
+            clearChangedClipHighlight()
             feedbackSessionProjectID = project.id
         }
         feedbackSession.loadHistory(projectURL: project.path)
@@ -595,6 +602,7 @@ final class StudioViewModel: ObservableObject {
         intentSummary = ProjectIntentSummaryReader.summary(projectURL: project.path)
         intentAlignmentStatus = ProjectIntentAlignmentStatusReader.status(projectURL: project.path)
         reviewArtifactStatus = ProjectReviewArtifactStatusReader.status(projectURL: project.path)
+        qaDashboard = QADashboardDocument.load(projectURL: project.path)
         pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: project.path)
         studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: project.path)
         studioGoalStatus = makeStudioGoalStatus(projectURL: project.path)
@@ -680,6 +688,33 @@ final class StudioViewModel: ObservableObject {
         if let clip = timeline?.clipSelection(for: clipID)?.clip {
             setPlayheadFrame(clip.timelineInFrame, forceSeek: true)
         }
+    }
+
+    func approveSelectedTimelineClip() {
+        guard let clipID = selectedTimelineClipID else {
+            roughCutCompileStatus = "Select a timeline clip before approving."
+            return
+        }
+        feedbackSession.approvedClipIDs.insert(clipID)
+        roughCutCompileStatus = "Approved \(clipID)."
+    }
+
+    func rejectSelectedTimelineClip() {
+        guard let clipID = selectedTimelineClipID else {
+            roughCutCompileStatus = "Select a timeline clip before rejecting."
+            return
+        }
+        feedbackSession.addOp(.removeSegment(target_clip_id: clipID, reason: "Rejected by operator"))
+        feedbackSession.rejectedClipIDs.insert(clipID)
+        roughCutCompileStatus = "Rejected \(clipID)."
+    }
+
+    func openSwapBrowserForSelectedClip() {
+        guard let clip = selectedTimelineClip?.clip else {
+            roughCutCompileStatus = "Select a timeline clip before opening Swap."
+            return
+        }
+        openSwapBrowser(for: clip)
     }
 
     func saveSelectedClipNote() {
@@ -829,6 +864,7 @@ final class StudioViewModel: ObservableObject {
         audioStoryGraphRunPlan = ProjectAudioStoryGraphRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: projectURL)
         intentAlignmentStatus = ProjectIntentAlignmentStatusReader.status(projectURL: projectURL)
         reviewArtifactStatus = ProjectReviewArtifactStatusReader.status(projectURL: projectURL)
+        qaDashboard = QADashboardDocument.load(projectURL: projectURL)
         pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
         studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
         studioGoalStatus = makeStudioGoalStatus(projectURL: projectURL)
@@ -837,6 +873,16 @@ final class StudioViewModel: ObservableObject {
     func scrubPlayhead(to frame: Int) {
         pausePlayback()
         setPlayheadFrame(frame, forceSeek: true)
+    }
+
+    func jumpToQATimestamp(_ timestampSec: Double) {
+        guard let timeline else { return }
+        pausePlayback()
+        let frame = Int((max(0, timestampSec) * timeline.sequence.fps).rounded())
+        setPlayheadFrame(frame, forceSeek: true)
+        if let clip = timeline.programSelection(atFrame: frame)?.clip {
+            selectedTimelineClipID = clip.id
+        }
     }
 
     func togglePlayback() {
@@ -1649,6 +1695,7 @@ final class StudioViewModel: ObservableObject {
             let backupRelativePath = Self.relativeProjectPath(projectURL: projectURL, url: backupURL)
             let changedClipIDs = envelope.patch.operations.compactMap(\.changedClipID)
             let uniqueChangedClipIDs = Array(Set(changedClipIDs)).sorted()
+            let firstChangedFrame = Self.firstChangedClipFrame(in: timeline, changedClipIDs: uniqueChangedClipIDs)
             let opCount = envelope.patch.operations.count
             let baseHash = envelope.base_timeline_hash
             let createdAt = envelope.created_at
@@ -1707,7 +1754,9 @@ final class StudioViewModel: ObservableObject {
                     self.feedbackSession.clearAll()
                     self.feedbackSession.pruneHistory(projectURL: projectURL)
                     self.refresh()
-                    self.roughCutCompileStatus = "Studio patch applied: \(opCount) operation(s), \(uniqueChangedClipIDs.count) clip(s) changed."
+                    self.showChangedClipHighlight(uniqueChangedClipIDs)
+                    self.jumpToFirstChangedClip(changedClipIDs: uniqueChangedClipIDs, fallbackFrame: firstChangedFrame)
+                    self.roughCutCompileStatus = "Timeline updated. \(uniqueChangedClipIDs.count) clips changed."
                     self.indexOperationStatus = "Index rebuild skipped for Studio preview; run rebuild if search context is stale."
                 } catch {
                     self.isCompilingRoughCut = false
@@ -1769,7 +1818,8 @@ final class StudioViewModel: ObservableObject {
             feedbackSession.clearAll()
             feedbackSession.loadHistory(projectURL: projectURL)
             refresh()
-            roughCutCompileStatus = "Undid last Studio patch and restored timeline.json."
+            clearChangedClipHighlight()
+            roughCutCompileStatus = "Reverted to previous timeline."
         } catch {
             roughCutCompileStatus = "Undo Studio patch failed: \(error)"
         }
@@ -1793,12 +1843,87 @@ final class StudioViewModel: ObservableObject {
         }
     }
 
+    private func showChangedClipHighlight(_ clipIDs: [String]) {
+        changedClipHighlightTimer?.invalidate()
+        let uniqueClipIDs = Array(Set(clipIDs)).sorted()
+        changedClipIDs = uniqueClipIDs
+        guard !uniqueClipIDs.isEmpty else {
+            recentlyChangedClipIDs = []
+            changedClipHighlightTimer = nil
+            return
+        }
+
+        recentlyChangedClipIDs = Set(uniqueClipIDs)
+        changedClipHighlightTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] timer in
+            Task { @MainActor in
+                timer.invalidate()
+                withAnimation(.easeOut(duration: 5.0)) {
+                    self?.recentlyChangedClipIDs = []
+                }
+                self?.changedClipHighlightTimer = nil
+            }
+        }
+    }
+
+    private func clearChangedClipHighlight() {
+        changedClipHighlightTimer?.invalidate()
+        changedClipHighlightTimer = nil
+        changedClipIDs = []
+        recentlyChangedClipIDs = []
+    }
+
+    private func jumpToFirstChangedClip(changedClipIDs: [String], fallbackFrame: Int?) {
+        let changedSet = Set(changedClipIDs)
+        guard !changedSet.isEmpty else { return }
+
+        let firstChangedClip = timeline?.displayTracks
+            .flatMap(\.clips)
+            .filter { changedSet.contains($0.id) }
+            .sorted { $0.timelineInFrame < $1.timelineInFrame }
+            .first
+
+        if let firstChangedClip {
+            selectTimelineClip(firstChangedClip.id)
+        } else if let fallbackFrame {
+            selectedTimelineClipID = nil
+            setPlayheadFrame(fallbackFrame, forceSeek: true)
+        }
+    }
+
+    private static func firstChangedClipFrame(in timeline: TimelineDocument, changedClipIDs: [String]) -> Int? {
+        let changedSet = Set(changedClipIDs)
+        guard !changedSet.isEmpty else { return nil }
+        return timeline.displayTracks
+            .flatMap(\.clips)
+            .filter { changedSet.contains($0.id) }
+            .map(\.timelineInFrame)
+            .min()
+    }
+
+    private func latestAppliedReplaceSegmentOps(projectURL: URL, historyIndex: PatchHistoryIndex) -> [ReviewPatchOperation] {
+        guard let latestRecord = historyIndex.records.last else { return [] }
+        let patchURL = projectURL.appendingPathComponent(latestRecord.patch_path)
+        guard
+            let data = try? Data(contentsOf: patchURL),
+            let patch = try? JSONDecoder().decode(ReviewPatchDocument.self, from: data)
+        else {
+            return []
+        }
+        return patch.operations.filter { $0.opName == "replace_segment" }
+    }
+
     func promoteStudioPatch() {
-        guard !feedbackSession.patchHistory.isEmpty else {
+        guard let selectedProject else {
+            roughCutCompileStatus = "Select a project before promoting a Studio patch."
+            return
+        }
+        let historyIndex = PatchHistoryIndex.load(projectURL: selectedProject.path)
+        guard !historyIndex.records.isEmpty else {
             roughCutCompileStatus = "No applied Studio patch to promote."
             return
         }
-        roughCutCompileStatus = "Promote to Planning is reserved for Phase 2."
+        let replaceOps = latestAppliedReplaceSegmentOps(projectURL: selectedProject.path, historyIndex: historyIndex)
+        roughCutCompileStatus = "Promote not yet available. Promote requires scripts/promote-studio-patch.ts (not yet implemented). \(replaceOps.count) replace_segment op(s) found."
     }
 
     func openSwapBrowser(for clip: TimelineClip) {

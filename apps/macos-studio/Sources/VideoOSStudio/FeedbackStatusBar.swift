@@ -3,6 +3,7 @@ import VideoOSStudioCore
 
 struct FeedbackStatusBar: View {
     @ObservedObject var feedbackSession: StudioFeedbackSession
+    var statusMessage: String
     var onApplyAndPreview: () -> Void
     var onPromote: () -> Void
     var onDiscard: () -> Void
@@ -26,6 +27,15 @@ struct FeedbackStatusBar: View {
                 Label("\(conflicts.count) conflict", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .help(conflicts.map(\.message).joined(separator: "\n"))
+            }
+
+            if !statusMessage.isEmpty {
+                Divider()
+                    .frame(height: 18)
+                Text(statusMessage)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
 
             Spacer(minLength: 12)

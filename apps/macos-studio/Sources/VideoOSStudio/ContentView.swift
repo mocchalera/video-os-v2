@@ -487,6 +487,7 @@ private struct StudioCommandPaletteItem: Identifiable {
 
 private struct StudioWorkspaceView: View {
     @ObservedObject var model: StudioViewModel
+    @FocusState private var timelineFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -526,21 +527,94 @@ private struct StudioWorkspaceView: View {
                 audioCues: model.timelineAudioCues,
                 audioWaveforms: model.timelineAudioWaveforms,
                 audioWaveformStatus: model.audioWaveformStatus,
+                recentlyChangedClipIDs: model.recentlyChangedClipIDs,
                 selectedClipID: $model.selectedTimelineClipID,
                 playheadFrame: model.playheadFrame,
-                onScrubPlayhead: { model.scrubPlayhead(to: $0) },
-                onSelectClip: { model.selectTimelineClip($0) },
-                onOpenSwapBrowser: { model.openSwapBrowser(for: $0) },
-                onOpenFootageSearch: { model.openFootageSearch(for: $0) }
+                onScrubPlayhead: {
+                    timelineFocused = true
+                    model.scrubPlayhead(to: $0)
+                },
+                onSelectClip: {
+                    timelineFocused = true
+                    model.selectTimelineClip($0)
+                },
+                onOpenSwapBrowser: {
+                    timelineFocused = true
+                    model.openSwapBrowser(for: $0)
+                },
+                onOpenFootageSearch: {
+                    timelineFocused = true
+                    model.openFootageSearch(for: $0)
+                }
             )
                 .frame(minHeight: 230, idealHeight: 280)
+                .focusable(true)
+                .focused($timelineFocused)
+                .simultaneousGesture(TapGesture().onEnded {
+                    timelineFocused = true
+                })
 
             FeedbackStatusBar(
                 feedbackSession: model.feedbackSession,
+                statusMessage: model.roughCutCompileStatus,
                 onApplyAndPreview: { model.applyStudioPatch() },
                 onPromote: { model.promoteStudioPatch() },
                 onDiscard: { model.feedbackSession.clearAll() }
             )
         }
+        .overlay(alignment: .topLeading) {
+            TimelineShortcutButtons(model: model, isEnabled: timelineFocused)
+        }
+    }
+}
+
+private struct TimelineShortcutButtons: View {
+    @ObservedObject var model: StudioViewModel
+    var isEnabled: Bool
+
+    private var hasSelectedClip: Bool {
+        model.selectedTimelineClip != nil
+    }
+
+    private var hasPatchConflicts: Bool {
+        !model.feedbackSession.detectConflicts().isEmpty
+    }
+
+    var body: some View {
+        VStack {
+            Button("Approve Selected Clip") {
+                model.approveSelectedTimelineClip()
+            }
+            .keyboardShortcut("a", modifiers: [])
+            .disabled(!isEnabled || !hasSelectedClip)
+
+            Button("Reject Selected Clip") {
+                model.rejectSelectedTimelineClip()
+            }
+            .keyboardShortcut("x", modifiers: [])
+            .disabled(!isEnabled || !hasSelectedClip)
+
+            Button("Open Swap Browser") {
+                model.openSwapBrowserForSelectedClip()
+            }
+            .keyboardShortcut("s", modifiers: [])
+            .disabled(!isEnabled || !hasSelectedClip)
+
+            Button("Apply Pending Patch") {
+                model.applyStudioPatch()
+            }
+            .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(!isEnabled || !model.feedbackSession.isDirty || hasPatchConflicts || model.isCompilingRoughCut)
+
+            Button("Undo Last Studio Patch") {
+                model.undoLastPatch()
+            }
+            .keyboardShortcut("z", modifiers: [.command])
+            .disabled(!isEnabled || model.feedbackSession.patchHistory.isEmpty)
+        }
+        .frame(width: 0, height: 0)
+        .clipped()
+        .opacity(0)
+        .accessibilityHidden(true)
     }
 }

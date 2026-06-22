@@ -10,6 +10,7 @@ export interface QAImprovementReport {
   total_issues: number;
   fixable_issues: number;
   proposed_fixes: number;
+  issues: QAIssue[];
   fixes: QAFix[];
   overall_qa_score: number;
   brief_alignment_scores: Record<string, number>;
@@ -29,6 +30,7 @@ export function buildQAReport(
     total_issues: issues.length,
     fixable_issues: issues.filter((issue) => issue.fixable).length,
     proposed_fixes: fixes.length,
+    issues,
     fixes,
     overall_qa_score: marlinQaResult.score,
     brief_alignment_scores: flattenBriefAlignmentScores(briefAlignmentResult),

@@ -16,6 +16,8 @@ struct InspectorPanel: View {
                 .tabItem { Label("Clip", systemImage: "rectangle.on.rectangle") }
             MediaPanel(model: model)
                 .tabItem { Label("Media", systemImage: "film.stack") }
+            QADashboardPanel(model: model)
+                .tabItem { Label("QA", systemImage: "checkmark.diamond") }
         }
         .padding(.top, 8)
     }

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
@@ -40,6 +41,22 @@ export interface QALoopResult {
   warnings: string[];
 }
 
+export type QAImprovementIndexConvergenceReason =
+  | "no_issues"
+  | "max_iterations"
+  | "score_plateau"
+  | "no_fixable_issues";
+
+export interface QAImprovementIndex {
+  version: "1";
+  project_id: string;
+  run_id: string;
+  base_timeline_hash: string;
+  result_timeline_hash: string;
+  convergence_reason: QAImprovementIndexConvergenceReason;
+  iterations: { path: string; iteration: number }[];
+}
+
 export interface QALoopOptions {
   maxIterations?: number;
   qualityFloor?: number;
@@ -78,7 +95,10 @@ export async function runQALoop(
   const maxIterations = Math.max(1, Math.floor(opts.maxIterations ?? 3));
   const maxFixesPerIteration = Math.max(1, Math.floor(opts.maxFixesPerIteration ?? 5));
   const skipRender = opts.skipRender === true;
+  const runStartedAt = (opts.now ?? (() => new Date()))().toISOString();
+  const baseTimelineHash = hashTimeline(timeline);
   const reports: QAImprovementReport[] = [];
+  const reportRefs: QAImprovementIndex["iterations"] = [];
   const warnings: string[] = [];
 
   let workingTimeline = timeline;
@@ -99,25 +119,29 @@ export async function runQALoop(
       qualityFloor ??= round3(initialScore - 0.05);
     }
 
+    const issues = detectIssues(evaluation.marlin, evaluation.alignment, workingTimeline);
+
     if (evaluation.score < (qualityFloor ?? 0)) {
-      const report = writeIterationReport(absProjectDir, iteration, [], [], evaluation, opts);
+      const report = writeIterationReport(absProjectDir, iteration, issues, [], evaluation, opts);
       reports.push(report);
+      reportRefs.push(iterationReportRef(iteration));
       convergenceReason = "quality_floor";
       break;
     }
 
     if (previousScore !== null && evaluation.score <= previousScore + 0.0001) {
-      const report = writeIterationReport(absProjectDir, iteration, [], [], evaluation, opts);
+      const report = writeIterationReport(absProjectDir, iteration, issues, [], evaluation, opts);
       reports.push(report);
+      reportRefs.push(iterationReportRef(iteration));
       convergenceReason = "no_improvement";
       break;
     }
 
-    const issues = detectIssues(evaluation.marlin, evaluation.alignment, workingTimeline);
     const fixableIssues = issues.filter((issue) => issue.fixable);
     if (fixableIssues.length === 0) {
       const report = writeIterationReport(absProjectDir, iteration, issues, [], evaluation, opts);
       reports.push(report);
+      reportRefs.push(iterationReportRef(iteration));
       convergenceReason = "no_fixable_issues";
       break;
     }
@@ -132,6 +156,7 @@ export async function runQALoop(
     const fixes = proposedFixes.slice(0, maxFixesPerIteration);
     const report = writeIterationReport(absProjectDir, iteration, issues, fixes, evaluation, opts);
     reports.push(report);
+    reportRefs.push(iterationReportRef(iteration));
 
     if (fixes.length === 0) {
       convergenceReason = "no_improvement";
@@ -174,6 +199,16 @@ export async function runQALoop(
   }
 
   const initial = initialScore ?? finalScore;
+  writeQAImprovementIndex(absProjectDir, {
+    version: "1",
+    project_id: brief.project?.id ?? brief.project_id ?? path.basename(absProjectDir),
+    run_id: runStartedAt,
+    base_timeline_hash: baseTimelineHash,
+    result_timeline_hash: hashTimeline(workingTimeline),
+    convergence_reason: indexConvergenceReason(convergenceReason, reports.at(-1)),
+    iterations: reportRefs,
+  });
+
   return {
     iterations,
     initial_score: round3(initial),
@@ -307,8 +342,32 @@ function writeIterationReport(
     evaluation.alignment,
     opts.now ? { now: opts.now } : {},
   );
-  writeQAImprovementReport(projectDir, report, `06_review/qa-improvement-report-iter${iteration}.json`);
+  writeQAImprovementReport(projectDir, report, iterationReportRef(iteration).path);
   return report;
+}
+
+function iterationReportRef(iteration: number): QAImprovementIndex["iterations"][number] {
+  return {
+    path: `06_review/qa-improvement-report-iter${iteration}.json`,
+    iteration,
+  };
+}
+
+function writeQAImprovementIndex(projectDir: string, index: QAImprovementIndex): string {
+  const filePath = path.join(projectDir, "06_review", "qa-improvement-index.json");
+  writeJson(filePath, index);
+  return filePath;
+}
+
+function indexConvergenceReason(
+  reason: QALoopResult["convergence_reason"],
+  lastReport: QAImprovementReport | undefined,
+): QAImprovementIndexConvergenceReason {
+  if (reason === "max_iterations") return "max_iterations";
+  if (reason === "no_fixable_issues") {
+    return lastReport?.total_issues === 0 ? "no_issues" : "no_fixable_issues";
+  }
+  return "score_plateau";
 }
 
 async function defaultRunMarlinQA(
@@ -431,6 +490,13 @@ function writeJson(filePath: string, data: unknown): void {
   const tmp = `${filePath}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
   fs.renameSync(tmp, filePath);
+}
+
+function hashTimeline(timeline: TimelineIR): string {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(timeline))
+    .digest("hex");
 }
 
 function defaultRenderPath(projectDir: string): string {
