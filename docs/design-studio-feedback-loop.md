@@ -171,7 +171,7 @@ final class StudioFeedbackSession: ObservableObject {
     @Published var baseTimelineVersion: String?
     @Published var patchHistory: [AppliedPatchRecord] = []
     @Published var isDirty: Bool = false
-    
+
     func addOp(_ op: PatchOperation)        // validates, dedupes, sets isDirty
     func removeOp(at index: Int)            // undo single op
     func clearAll()                         // discard all pending
@@ -400,7 +400,7 @@ Per-iteration: clips changed, duration delta, fixes applied.
 // New in VideoOSStudioCore
 public struct QADashboardDocument: Decodable, Sendable {
     public let iterations: [QAIterationReport]
-    
+
     public static func load(projectURL: URL) -> QADashboardDocument {
         // Load all qa-improvement-report-iter*.json files
         // Merge into unified document

@@ -85,7 +85,7 @@ final class StudioFeedbackSessionTests: XCTestCase {
         XCTAssertEqual(envelope.patch.operations.map(\.opName), ["remove_segment"])
     }
 
-    func testChangedClipIDsUseCompilerBoundTargetClipsOnly() {
+    func testChangedClipIDsUseCompilerBoundTargetsAndInsertBeats() {
         let session = StudioFeedbackSession()
 
         session.addOp(.addNote(target_clip_id: "CLP_NOTE", text: "operator note"))
@@ -112,7 +112,7 @@ final class StudioFeedbackSessionTests: XCTestCase {
         ))
         session.addOp(.removeSegment(target_clip_id: "CLP_002", reason: "remove"))
 
-        XCTAssertEqual(session.changedClipIDs, ["CLP_001", "CLP_002"])
+        XCTAssertEqual(session.changedClipIDs, ["CLP_001", "CLP_002", "b02"])
     }
 
     func testSerializeProducesCompilerSchemaShape() throws {

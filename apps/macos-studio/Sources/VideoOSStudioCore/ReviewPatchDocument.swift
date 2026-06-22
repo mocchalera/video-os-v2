@@ -180,7 +180,12 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
     }
 
     public var changedClipID: String? {
-        targetClipID
+        switch self {
+        case let .insertSegment(beatID, _, _, _, _, _):
+            return beatID
+        default:
+            return targetClipID
+        }
     }
 
     var deduplicationKey: String? {

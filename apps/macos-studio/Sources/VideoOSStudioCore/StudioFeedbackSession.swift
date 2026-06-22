@@ -158,7 +158,7 @@ public final class StudioFeedbackSession: ObservableObject {
     }
 
     public var changedClipIDs: [String] {
-        Array(Set(pendingOps.compactMap(\.changedClipID))).sorted()
+        Array(Set(pendingOps.filter(\.isValidForCompilerSchema).compactMap(\.changedClipID))).sorted()
     }
 
     private func updateDirtyState() {

@@ -92,7 +92,7 @@ function briefReport(): BriefAlignmentReport {
         "narrative_structure",
         "pacing_coherence",
         "visual_variety_and_focus",
-      ] as BriefAlignmentAxis[]).map((axisName) => [
+      ] as BriefAlignmentAxis[]).map((axisName): [BriefAlignmentAxis, StageResult["axes"][BriefAlignmentAxis]] => [
         axisName,
         {
           score: axisName === "intent_message_alignment"
@@ -104,7 +104,7 @@ function briefReport(): BriefAlignmentReport {
           gaps: [],
         },
       ]),
-    ) as StageResult["axes"];
+    ) as unknown as StageResult["axes"];
 
   return {
     version: "1",

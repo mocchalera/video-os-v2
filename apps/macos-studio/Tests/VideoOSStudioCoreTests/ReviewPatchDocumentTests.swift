@@ -52,6 +52,19 @@ final class ReviewPatchDocumentTests: XCTestCase {
             text: "operator note"
         ).isValidForCompilerSchema)
     }
+
+    func testInsertSegmentChangedClipIDUsesBeatID() {
+        let operation = ReviewPatchOperation.insertSegment(
+            beat_id: "beat-01",
+            segment_id: "SEG_004",
+            role: "support",
+            new_timeline_in_frame: 72,
+            new_duration_frames: 24,
+            reason: "add cutaway"
+        )
+
+        XCTAssertEqual(operation.changedClipID, "beat-01")
+    }
 }
 
 private let allOperationFixtures: [ReviewPatchOperation] = [
