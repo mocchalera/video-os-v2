@@ -26,6 +26,7 @@ struct ContentView: View {
             Divider()
 
             StudioWorkspaceView(model: model)
+                .environmentObject(model.feedbackSession)
         }
         .frame(minWidth: 1180, minHeight: 760)
         .sheet(isPresented: $isCommandPalettePresented) {
@@ -481,9 +482,17 @@ private struct StudioWorkspaceView: View {
                 selectedClipID: $model.selectedTimelineClipID,
                 playheadFrame: model.playheadFrame,
                 onScrubPlayhead: { model.scrubPlayhead(to: $0) },
-                onSelectClip: { model.selectTimelineClip($0) }
+                onSelectClip: { model.selectTimelineClip($0) },
+                onOpenSwapBrowser: { model.openSwapBrowser(for: $0) }
             )
                 .frame(minHeight: 230, idealHeight: 280)
+
+            FeedbackStatusBar(
+                feedbackSession: model.feedbackSession,
+                onApplyAndPreview: { model.applyStudioPatch() },
+                onPromote: { model.promoteStudioPatch() },
+                onDiscard: { model.feedbackSession.clearAll() }
+            )
         }
     }
 }

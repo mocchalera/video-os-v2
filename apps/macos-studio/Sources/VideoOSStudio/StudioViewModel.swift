@@ -26,6 +26,7 @@ final class StudioViewModel: ObservableObject {
     @Published var roughCutCompilePlan = ProjectRoughCutCompilePlanner.plan(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
     @Published var roughCutCompileStatus = "No project selected."
     @Published var isCompilingRoughCut = false
+    @Published var feedbackSession = StudioFeedbackSession()
     @Published var selectedTimelineClipID: TimelineClip.ID? {
         didSet { loadSelectedClipNoteDraft() }
     }
@@ -118,6 +119,7 @@ final class StudioViewModel: ObservableObject {
     private var audioPlaybackSyncState = TimelinePlaybackSyncState()
     private var commandObserverTokens: [NSObjectProtocol] = []
     private var userSelectedProject = false
+    private var feedbackSessionProjectID: ProjectSummary.ID?
 
     init() {
         let root = ProjectScanner.locateRepositoryRoot()
@@ -468,6 +470,9 @@ final class StudioViewModel: ObservableObject {
 
     func loadTimelineForSelection() {
         guard let project = selectedProject else {
+            feedbackSession.clearAll()
+            feedbackSession.clearBaseline()
+            feedbackSessionProjectID = nil
             pausePlayback()
             timeline = nil
             evidenceStore = nil
@@ -538,6 +543,12 @@ final class StudioViewModel: ObservableObject {
             timelineStatus = "No project selected."
             return
         }
+        if feedbackSessionProjectID != project.id {
+            feedbackSession.clearAll()
+            feedbackSession.clearBaseline()
+            feedbackSessionProjectID = project.id
+        }
+        feedbackSession.loadHistory(projectURL: project.path)
         evidenceStore = ProjectEvidenceStore.load(projectURL: project.path)
         mediaPreviewSummary = ProjectMediaResolver.previewSummary(projectURL: project.path, assets: evidenceStore?.assets)
         analysisRunPlan = ProjectAnalysisRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: project.path)
@@ -594,6 +605,7 @@ final class StudioViewModel: ObservableObject {
             ? "Index ready: \(indexStatus.documentCount) searchable documents."
             : "Build the SQLite index for material search and RAG context."
         guard project.hasTimeline else {
+            feedbackSession.clearBaseline()
             pausePlayback()
             timeline = nil
             selectedTimelineClipID = nil
@@ -607,6 +619,9 @@ final class StudioViewModel: ObservableObject {
         do {
             timeline = try TimelineDocument.load(projectURL: project.path)
             if let timeline {
+                if !feedbackSession.isDirty {
+                    feedbackSession.captureBaseline(from: timeline)
+                }
                 timelineStatus = "\(timeline.sequence.name) / \(timeline.displayTracks.count) tracks / \(formatSeconds(timeline.totalSeconds))"
                 if timeline.clipSelection(for: selectedTimelineClipID) == nil {
                     selectedTimelineClipID = nil
@@ -616,6 +631,7 @@ final class StudioViewModel: ObservableObject {
                 loadAudioWaveforms(project: project, timeline: timeline)
             }
         } catch {
+            feedbackSession.clearBaseline()
             pausePlayback()
             timeline = nil
             selectedTimelineClipID = nil
@@ -1541,6 +1557,321 @@ final class StudioViewModel: ObservableObject {
             options: ProjectRoughCutCompileOptions(patchURL: patchURL),
             statusPrefix: "Applying review_patch.json and recompiling timeline..."
         )
+    }
+
+    func applyStudioPatch() {
+        guard let selectedProject else {
+            roughCutCompileStatus = "Select a project before applying Studio feedback."
+            return
+        }
+        guard let timeline else {
+            roughCutCompileStatus = "Compile the project before applying Studio feedback."
+            return
+        }
+        guard feedbackSession.isDirty else {
+            roughCutCompileStatus = "No pending Studio patch operations."
+            return
+        }
+
+        let conflicts = feedbackSession.detectConflicts()
+        guard conflicts.isEmpty else {
+            presentStudioPatchConflictAlert(conflicts)
+            roughCutCompileStatus = "Studio patch has \(conflicts.count) conflict(s)."
+            return
+        }
+
+        if feedbackSession.baseTimelineHash == nil || feedbackSession.baseTimelineVersion == nil {
+            feedbackSession.captureBaseline(from: timeline)
+        }
+
+        let envelope = feedbackSession.serialize(projectID: selectedProject.id)
+        let projectURL = selectedProject.path
+        let timelineURL = TimelineDocument.timelineURL(for: projectURL)
+        let preflightPlan = ProjectRoughCutCompilePlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            options: ProjectRoughCutCompileOptions()
+        )
+        roughCutCompilePlan = preflightPlan
+        guard preflightPlan.canRun else {
+            roughCutCompileStatus = "Studio patch compile is not runnable: \(preflightPlan.readinessLabel)."
+            return
+        }
+        guard !envelope.patch.operations.isEmpty else {
+            roughCutCompileStatus = "No compiler-bound Studio patch operations to apply."
+            return
+        }
+
+        do {
+            let currentTimelineHash = try Self.fileHash16(at: timelineURL)
+            if !envelope.base_timeline_hash.isEmpty, envelope.base_timeline_hash != currentTimelineHash {
+                presentStudioPatchStaleAlert()
+                roughCutCompileStatus = "Studio patch is stale; reload the timeline before applying."
+                return
+            }
+
+            let reviewDir = projectURL.appendingPathComponent("06_review")
+            let historyDir = PatchHistoryIndex.historyDirectory(projectURL: projectURL)
+            try FileManager.default.createDirectory(at: reviewDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: historyDir, withIntermediateDirectories: true)
+
+            let timestamp = Self.fileTimestamp()
+            let patchURL = reviewDir.appendingPathComponent("studio_patch_\(timestamp).json")
+            let encoder = Self.studioJSONEncoder()
+            try encoder.encode(envelope.patch).write(to: patchURL, options: .atomic)
+
+            let plan = ProjectRoughCutCompilePlanner.plan(
+                repositoryRoot: repositoryRoot,
+                projectURL: projectURL,
+                options: ProjectRoughCutCompileOptions(patchURL: patchURL)
+            )
+            roughCutCompilePlan = plan
+            guard plan.canRun else {
+                roughCutCompileStatus = "Studio patch compile is not runnable: \(plan.readinessLabel)."
+                Self.cleanupStudioPatchArtifacts(patchURL: patchURL, backupURL: nil)
+                return
+            }
+
+            var historyIndex = PatchHistoryIndex.load(projectURL: projectURL)
+            let backupURL = Self.nextTimelineBackupURL(projectURL: projectURL, historyIndex: historyIndex)
+            try FileManager.default.copyItem(at: timelineURL, to: backupURL)
+
+            let patchRelativePath = Self.relativeProjectPath(projectURL: projectURL, url: patchURL)
+            let backupRelativePath = Self.relativeProjectPath(projectURL: projectURL, url: backupURL)
+            let changedClipIDs = envelope.patch.operations.compactMap(\.changedClipID)
+            let uniqueChangedClipIDs = Array(Set(changedClipIDs)).sorted()
+            let opCount = envelope.patch.operations.count
+            let baseHash = envelope.base_timeline_hash
+            let createdAt = envelope.created_at
+            let source = envelope.source
+
+            isCompilingRoughCut = true
+            roughCutCompileStatus = "Applying Studio patch and refreshing preview..."
+
+            Task {
+                do {
+                    let (result, resultHash) = try await Task.detached(priority: .userInitiated) {
+                        let result = try ProjectRoughCutCompileRunner.run(plan: plan, rebuildIndex: false)
+                        let resultHash = try? Self.fileHash16(at: timelineURL)
+                        return (result, resultHash)
+                    }.value
+                    self.isCompilingRoughCut = false
+                    guard result.succeeded else {
+                        self.rollbackFailedStudioPatch(
+                            patchURL: patchURL,
+                            backupURL: backupURL,
+                            timelineURL: timelineURL,
+                            reason: "Studio patch compile failed with exit \(result.exitCode)."
+                        )
+                        return
+                    }
+                    guard let resultHash else {
+                        self.rollbackFailedStudioPatch(
+                            patchURL: patchURL,
+                            backupURL: backupURL,
+                            timelineURL: timelineURL,
+                            reason: "Studio patch compile did not produce a readable timeline hash."
+                        )
+                        return
+                    }
+                    historyIndex.append(record: PatchHistoryRecord(
+                        patch_path: patchRelativePath,
+                        base_timeline_hash: baseHash,
+                        result_timeline_hash: resultHash,
+                        timeline_backup_path: backupRelativePath,
+                        created_at: createdAt,
+                        source: source,
+                        changed_clip_ids: uniqueChangedClipIDs,
+                        op_count: opCount
+                    ))
+                    do {
+                        try historyIndex.save(projectURL: projectURL)
+                    } catch {
+                        self.rollbackFailedStudioPatch(
+                            patchURL: patchURL,
+                            backupURL: backupURL,
+                            timelineURL: timelineURL,
+                            reason: "Studio patch history save failed: \(error)."
+                        )
+                        return
+                    }
+                    self.feedbackSession.clearAll()
+                    self.feedbackSession.pruneHistory(projectURL: projectURL)
+                    self.refresh()
+                    self.roughCutCompileStatus = "Studio patch applied: \(opCount) operation(s), \(uniqueChangedClipIDs.count) clip(s) changed."
+                    self.indexOperationStatus = "Index rebuild skipped for Studio preview; run rebuild if search context is stale."
+                } catch {
+                    self.isCompilingRoughCut = false
+                    self.rollbackFailedStudioPatch(
+                        patchURL: patchURL,
+                        backupURL: backupURL,
+                        timelineURL: timelineURL,
+                        reason: "Studio patch compile failed: \(error)."
+                    )
+                }
+            }
+        } catch {
+            roughCutCompileStatus = "Studio patch failed before compile: \(error)"
+        }
+    }
+
+    func undoLastPatch() {
+        guard let selectedProject else {
+            roughCutCompileStatus = "Select a project before undoing a Studio patch."
+            return
+        }
+
+        let projectURL = selectedProject.path
+        var historyIndex = PatchHistoryIndex.load(projectURL: projectURL)
+        guard let record = historyIndex.records.last else {
+            roughCutCompileStatus = "No Studio patch history to undo."
+            return
+        }
+        guard record.purged != true else {
+            roughCutCompileStatus = "Last Studio patch backup was purged and cannot be restored."
+            return
+        }
+
+        let backupURL = projectURL.appendingPathComponent(record.timeline_backup_path)
+        let timelineURL = TimelineDocument.timelineURL(for: projectURL)
+        guard FileManager.default.fileExists(atPath: backupURL.path) else {
+            roughCutCompileStatus = "Last Studio patch backup is missing."
+            return
+        }
+        guard !record.result_timeline_hash.isEmpty else {
+            roughCutCompileStatus = "Cannot safely undo Studio patch: result timeline hash is missing."
+            return
+        }
+
+        do {
+            let currentTimelineHash = try Self.fileHash16(at: timelineURL)
+            guard currentTimelineHash == record.result_timeline_hash else {
+                roughCutCompileStatus = "Cannot safely undo Studio patch: timeline.json changed outside Studio."
+                return
+            }
+            _ = try FileManager.default.replaceItemAt(
+                timelineURL,
+                withItemAt: backupURL,
+                backupItemName: nil,
+                options: []
+            )
+            _ = historyIndex.removeLast()
+            try historyIndex.save(projectURL: projectURL)
+            feedbackSession.clearAll()
+            feedbackSession.loadHistory(projectURL: projectURL)
+            refresh()
+            roughCutCompileStatus = "Undid last Studio patch and restored timeline.json."
+        } catch {
+            roughCutCompileStatus = "Undo Studio patch failed: \(error)"
+        }
+    }
+
+    private func rollbackFailedStudioPatch(
+        patchURL: URL,
+        backupURL: URL,
+        timelineURL: URL,
+        reason: String
+    ) {
+        do {
+            try Self.restoreTimelineBackup(from: backupURL, to: timelineURL)
+            Self.cleanupStudioPatchArtifacts(patchURL: patchURL, backupURL: backupURL)
+            refresh()
+            roughCutCompileStatus = "\(reason) timeline.json restored from backup."
+        } catch {
+            Self.cleanupStudioPatchArtifacts(patchURL: patchURL, backupURL: nil)
+            refresh()
+            roughCutCompileStatus = "\(reason) Rollback failed: \(error). Backup retained at \(backupURL.path)."
+        }
+    }
+
+    func promoteStudioPatch() {
+        guard !feedbackSession.patchHistory.isEmpty else {
+            roughCutCompileStatus = "No applied Studio patch to promote."
+            return
+        }
+        roughCutCompileStatus = "Promote to Planning is reserved for Phase 2."
+    }
+
+    func openSwapBrowser(for clip: TimelineClip) {
+        selectedTimelineClipID = clip.id
+        roughCutCompileStatus = "Swap browser is reserved for Phase 2. Selected \(clip.id)."
+    }
+
+    private func presentStudioPatchConflictAlert(_ conflicts: [PatchConflict]) {
+        let alert = NSAlert()
+        alert.messageText = "Studio Patch Conflict"
+        alert.informativeText = conflicts
+            .prefix(4)
+            .map(\.message)
+            .joined(separator: "\n")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    private func presentStudioPatchStaleAlert() {
+        let alert = NSAlert()
+        alert.messageText = "Timeline Changed"
+        alert.informativeText = "The timeline changed after this Studio patch baseline was captured. Reload the project and rebuild the pending feedback."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    nonisolated private static func studioJSONEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+
+    nonisolated private static func fileTimestamp(date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss'Z'"
+        return formatter.string(from: date)
+    }
+
+    nonisolated private static func fileHash16(at url: URL) throws -> String {
+        try ProjectPlaybackContractStatusReader.fileHash16(Data(contentsOf: url))
+    }
+
+    nonisolated private static func restoreTimelineBackup(from backupURL: URL, to timelineURL: URL) throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: timelineURL.path) {
+            try fileManager.removeItem(at: timelineURL)
+        }
+        try fileManager.copyItem(at: backupURL, to: timelineURL)
+    }
+
+    nonisolated private static func cleanupStudioPatchArtifacts(patchURL: URL?, backupURL: URL?) {
+        let fileManager = FileManager.default
+        for url in [patchURL, backupURL].compactMap(\.self) where fileManager.fileExists(atPath: url.path) {
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
+    nonisolated private static func relativeProjectPath(projectURL: URL, url: URL) -> String {
+        let root = projectURL.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        if path.hasPrefix(root + "/") {
+            return String(path.dropFirst(root.count + 1))
+        }
+        return url.lastPathComponent
+    }
+
+    nonisolated private static func nextTimelineBackupURL(
+        projectURL: URL,
+        historyIndex: PatchHistoryIndex
+    ) -> URL {
+        let directory = PatchHistoryIndex.historyDirectory(projectURL: projectURL)
+        var index = historyIndex.records.count + 1
+        var candidate = directory.appendingPathComponent("timeline_backup_\(index).json")
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            index += 1
+            candidate = directory.appendingPathComponent("timeline_backup_\(index).json")
+        }
+        return candidate
     }
 
     private func compileSelectedProjectRoughCut(

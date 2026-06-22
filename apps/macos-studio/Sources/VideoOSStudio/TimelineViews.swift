@@ -14,6 +14,7 @@ struct TimelinePanel: View {
     var playheadFrame: Int
     var onScrubPlayhead: (Int) -> Void
     var onSelectClip: (TimelineClip.ID) -> Void
+    var onOpenSwapBrowser: (TimelineClip) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -63,7 +64,8 @@ struct TimelinePanel: View {
                                     audioWaveforms: audioWaveforms.filter { $0.trackID == track.id },
                                     selectedClipID: $selectedClipID,
                                     playheadFrame: playheadFrame,
-                                    onSelectClip: onSelectClip
+                                    onSelectClip: onSelectClip,
+                                    onOpenSwapBrowser: onOpenSwapBrowser
                                 )
                             }
                         }
@@ -185,6 +187,8 @@ struct TimelineMarkerChip: View {
 }
 
 struct TimelineTrackRow: View {
+    @EnvironmentObject private var feedbackSession: StudioFeedbackSession
+
     var track: TimelineTrack
     var totalFrames: Int
     var laneWidth: CGFloat
@@ -193,6 +197,7 @@ struct TimelineTrackRow: View {
     @Binding var selectedClipID: TimelineClip.ID?
     var playheadFrame: Int
     var onSelectClip: (TimelineClip.ID) -> Void
+    var onOpenSwapBrowser: (TimelineClip) -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -221,7 +226,8 @@ struct TimelineTrackRow: View {
                             clip: clip,
                             trackKind: track.kind,
                             isSelected: selectedClipID == clip.id,
-                            isUnderPlayhead: clip.containsTimelineFrame(playheadFrame)
+                            isUnderPlayhead: clip.containsTimelineFrame(playheadFrame),
+                            feedbackState: feedbackState(for: clip)
                         )
                     }
                     .buttonStyle(.plain)
@@ -230,6 +236,21 @@ struct TimelineTrackRow: View {
                         height: 28
                     )
                     .offset(x: clipOffset(clip))
+                    .contextMenu {
+                        Button("Approve") {
+                            feedbackSession.approvedClipIDs.insert(clip.id)
+                        }
+                        Button("Reject") {
+                            feedbackSession.addOp(.removeSegment(target_clip_id: clip.id, reason: "Rejected by operator"))
+                            feedbackSession.rejectedClipIDs.insert(clip.id)
+                        }
+                        Button("Swap...") {
+                            onOpenSwapBrowser(clip)
+                        }
+                        Button("Remove") {
+                            feedbackSession.addOp(.removeSegment(target_clip_id: clip.id, reason: "Removed by operator"))
+                        }
+                    }
                 }
                 ForEach(audioCues) { cue in
                     TimelineAudioCueOverlay(
@@ -257,6 +278,15 @@ struct TimelineTrackRow: View {
 
     private func clipWidth(_ clip: TimelineClip) -> CGFloat {
         max(44, laneWidth * CGFloat(clip.timelineDurationFrames) / CGFloat(max(totalFrames, 1)))
+    }
+
+    private func feedbackState(for clip: TimelineClip) -> TimelineClipFeedbackState {
+        TimelineClipFeedbackState(
+            isApproved: feedbackSession.approvedClipIDs.contains(clip.id),
+            isRejected: feedbackSession.rejectedClipIDs.contains(clip.id),
+            isPendingSwap: feedbackSession.hasPendingSwap(for: clip.id),
+            isPendingRemove: feedbackSession.hasPendingRemove(for: clip.id)
+        )
     }
 }
 
@@ -349,20 +379,42 @@ struct TimelineAudioCueOverlay: View {
     }
 }
 
+struct TimelineClipFeedbackState: Equatable {
+    var isApproved: Bool
+    var isRejected: Bool
+    var isPendingSwap: Bool
+    var isPendingRemove: Bool
+
+    static let none = TimelineClipFeedbackState(
+        isApproved: false,
+        isRejected: false,
+        isPendingSwap: false,
+        isPendingRemove: false
+    )
+}
+
 struct TimelineClipBlock: View {
     var clip: TimelineClip
     var trackKind: TimelineTrackKind
     var isSelected: Bool
     var isUnderPlayhead: Bool
+    var feedbackState: TimelineClipFeedbackState = .none
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(color.opacity(isUnderPlayhead ? 0.98 : (trackKind == .audio ? 0.70 : 0.82)))
-            .overlay {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(color.opacity(isUnderPlayhead ? 0.98 : (trackKind == .audio ? 0.70 : 0.82)))
+                .opacity(feedbackState.isRejected ? 0.30 : 1)
+
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(borderColor, lineWidth: borderLineWidth)
+
+            if feedbackState.isPendingRemove {
                 RoundedRectangle(cornerRadius: 4)
-                    .stroke(isSelected ? Color.accentColor : (isUnderPlayhead ? Color.primary.opacity(0.45) : Color.clear), lineWidth: 2)
+                    .stroke(Color.red.opacity(0.85), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
             }
-            .overlay(alignment: .leading) {
+
+            HStack(spacing: 4) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(clip.role)
                         .font(.caption2.weight(.semibold))
@@ -371,10 +423,15 @@ struct TimelineClipBlock: View {
                         .foregroundStyle(.secondary)
                 }
                 .lineLimit(1)
-                .padding(.horizontal, 6)
                 .foregroundStyle(.primary)
+
+                Spacer(minLength: 2)
+
+                feedbackIcons
             }
-            .help("\(clip.id) / \(clip.motivation)")
+            .padding(.horizontal, 6)
+        }
+        .help("\(clip.id) / \(clip.motivation)")
     }
 
     private var color: Color {
@@ -388,6 +445,39 @@ struct TimelineClipBlock: View {
         case "nat_sound", "ambient": return .orange
         case "title": return .pink
         default: return trackKind == .audio ? .orange : .gray
+        }
+    }
+
+    private var borderColor: Color {
+        if feedbackState.isApproved {
+            return .green
+        }
+        if isSelected {
+            return .accentColor
+        }
+        if isUnderPlayhead {
+            return Color.primary.opacity(0.45)
+        }
+        return .clear
+    }
+
+    private var borderLineWidth: CGFloat {
+        feedbackState.isApproved || isSelected ? 2 : 1
+    }
+
+    @ViewBuilder
+    private var feedbackIcons: some View {
+        if feedbackState.isApproved {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        }
+        if feedbackState.isRejected {
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.red)
+        }
+        if feedbackState.isPendingSwap {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .foregroundStyle(.blue)
         }
     }
 }

@@ -6,6 +6,7 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
     public let sequence: TimelineSequence
     public let tracks: TimelineTrackCollection
     public let markers: [TimelineMarker]
+    public let sourceHash: String?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -22,6 +23,23 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
         sequence = try container.decode(TimelineSequence.self, forKey: .sequence)
         tracks = try container.decode(TimelineTrackCollection.self, forKey: .tracks)
         markers = try container.decodeIfPresent([TimelineMarker].self, forKey: .markers) ?? []
+        sourceHash = nil
+    }
+
+    public init(
+        version: String,
+        projectID: String,
+        sequence: TimelineSequence,
+        tracks: TimelineTrackCollection,
+        markers: [TimelineMarker],
+        sourceHash: String? = nil
+    ) {
+        self.version = version
+        self.projectID = projectID
+        self.sequence = sequence
+        self.tracks = tracks
+        self.markers = markers
+        self.sourceHash = sourceHash
     }
 
     public var displayTracks: [TimelineTrack] {
@@ -133,7 +151,15 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
     public static func load(from url: URL) throws -> TimelineDocument {
         let data = try Data(contentsOf: url)
         let decoder = JSONDecoder()
-        return try decoder.decode(TimelineDocument.self, from: data)
+        let document = try decoder.decode(TimelineDocument.self, from: data)
+        return TimelineDocument(
+            version: document.version,
+            projectID: document.projectID,
+            sequence: document.sequence,
+            tracks: document.tracks,
+            markers: document.markers,
+            sourceHash: ProjectPlaybackContractStatusReader.fileHash16(data)
+        )
     }
 }
 
