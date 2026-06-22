@@ -1,21 +1,33 @@
 # RoughCut Agent
 
-素材フォルダと一言の依頼で粗編集まで自走する映像編集エージェント。
+素材フォルダと一言の依頼から、解析・検索・粗編集・レンダー・QA 改善まで進める映像編集エージェント。
 
 ![RoughCut Agent](docs/images/demo-00-intro.jpg)
 
 ## このプロジェクトについて
 
-RoughCut Agent は、映像素材から意図整理、素材解析、候補抽出、構成設計、粗編集、自己レビューまでを artifact-driven に進める映像編集エージェントです。  
-VLM/STT による解析と deterministic compiler を組み合わせ、同じ入力から同じ `timeline.json` を再現できます。  
-Premiere Pro との FCP7 XML ラウンドトリップにも対応しており、AI が作った rough cut を NLE で微調整して戻せます。  
-映像クリエイターや、粗編集にかかる時間を圧縮したい人向けのリポジトリです。
+RoughCut Agent は、映像素材から意図整理、素材解析、マルチモーダル検索、構成設計、粗編集、レンダー、QA 改善ループまでを artifact-driven に進める映像編集エージェントです。
+
+Marlin-2B が映像を見て、Qwen3-VL / CLAP / E5 が素材を検索し、Claude/Codex が evidence を引用しながら rough / fine pass を作り、deterministic compiler が同じ入力から同じ `timeline.json` を再現します。
+
+現在は複数プロジェクトの検証を通じて、`footage.db`、`timeline.json`、`render-report.json`、QA レポートなどの実 artifact を見ながら品質を上げる設計に寄せています。
+
+Premiere Pro との FCP7 XML ラウンドトリップにも対応しており、AI が作った rough cut を NLE で微調整して戻せます。
+映像クリエイターや、素材探しから粗編集の手戻りまでを短くしたい人向けのリポジトリです。
 
 ## 特徴
 
-- 自律パイプライン: `intent -> analysis -> triage -> blueprint -> compile -> review`
-- VLM ピーク検出: Progressive Resolution（`contact sheet -> filmstrip -> precision`）
+- 自律パイプライン: `intent -> analysis -> footage DB -> retrieval -> rough/fine planning -> compile -> render -> QA loop`
+- 3 モダリティ検索: Qwen3-VL visual 2048-dim、E5/Qwen text 384/2048-dim、CLAP audio 512-dim を同じ検索レイヤで扱う
+- マルチモーダル footage DB: SQLite + FTS5 + `embedding_models` + `segment_embeddings` で、モデル ID / 次元 / runner / preprocess を追跡
+- Visual pre-selection retrieval: brief の visual intent から Qwen3-VL hybrid search を走らせ、rough pass の prompt に evidence を注入
+- Audio pre-selection retrieval: brief の audio intent から CLAP hybrid search を走らせ、音の質感・環境音・ムードの候補を prompt に注入
+- Marlin-2B primary VLM: Apple Silicon / ローカル worker で video-native な scene / event / peak analysis を実行
+- VLM ピーク検出: Progressive Resolution（`contact sheet -> filmstrip -> precision`）と Marlin event を使って、編集上おいしい瞬間を候補化
 - `content-hint` CLI: `--content-hint` で VLM に文脈情報を渡し、認識精度を補強
+- Scene continuity ordering: timestamp clustering と Qwen visual coherence による greedy chain で、同一シーンや見た目のつながりを保つ
+- QA auto-improvement loop: `render -> Marlin QA -> brief alignment -> issue detection -> fix proposal -> apply -> recompile -> rerender` を最大 3 iteration で実行
+- Render duration accounting: expected / actual render duration、gap、xfade overlap、source clamp を `render-report.json` で検証
 - 編集技法の自動選択: Transition Skill Cards + Adjacency Analyzer + Walter Murch の Rule of Six
 - BGM ビートシンク: カットポイントを beat / downbeat にスナップ
 - Duration Mode: `strict` / `guide` を creative brief と profile から解決。`guide` は VLM peak 保護を優先
@@ -23,7 +35,9 @@ Premiere Pro との FCP7 XML ラウンドトリップにも対応しており、
 - アスペクト比自動対応: 最頻アスペクト比を推定し、`letterbox` / `pillarbox` を判定
 - 時系列順コンパイル: `keepsake` / `event-recap` 系は chronological order を選択可能
 - Schema 駆動 + Gate 制御: canonical artifacts を validate しながら進行
-- Full Autonomy Mode: `autonomy.mode: full` で brief 確定後の全ゲートを自動通過。粗編集まで一気に自走
+- Full Autonomy Mode: `autonomy.mode: full` で brief 確定後の確認ゲートを自動通過し、粗編集まで自走
+- ローカル推論 / 埋め込み実行: Qwen3-VL、CLAP、E5、Marlin はローカル実行を前提にし、外部 embedding API は不要
+- Fail-open: Qwen / CLAP / Marlin のローカルモデルが無い場合も、既存の E5 / FTS / deterministic path を壊さない
 
 ## クイックスタート
 
@@ -33,14 +47,24 @@ Premiere Pro との FCP7 XML ラウンドトリップにも対応しており、
 npm install
 ```
 
-### 2. 環境変数テンプレートを用意
+### 2. 環境変数とローカルモデルを用意
 
 ```bash
 cp .env.example .env.local
 ```
 
-`.env.local` を編集して必要な API キーを設定してください。最低限、VLM を使う場合は `GEMINI_API_KEY`、Groq STT を使う場合は `GROQ_API_KEY` が必要です。
 `.env.local` は Git 管理対象外です。公開 issue や PR に API キー、素材ファイル、生成済み動画を含めないでください。
+
+埋め込み検索はローカルモデルで動くため外部 API キーは不要です。Gemini / Groq / OpenAI / pyannote などの外部解析を使う場合だけ、対応するキーを `.env.local` に設定してください。
+
+Qwen3-VL と CLAP は任意ですが、現在の推奨フローでは有効化します。smoke test は Python venv を作り、ローカル cache にある model weight だけを使います。
+
+```bash
+bash scripts/smoke-test-qwen3vl.sh
+bash scripts/smoke-test-clap.sh
+```
+
+ローカル model cache がまだ無い場合、smoke test は失敗します。その場合も E5 / FTS5 中心の検索と deterministic compile は継続できます。
 
 ### 3. デモを実行
 
@@ -116,19 +140,44 @@ npx tsx scripts/analyze.ts \
 
 `--content-hint` は VLM prompt に文脈情報を追加し、タグ付けや peak 検出の認識精度向上に使えます。
 
+### 6. Footage DB を構築
+
+```bash
+npx tsx scripts/build-footage-db.ts \
+  --project projects/my-project \
+  --embedding-policy auto \
+  --qwen3vl \
+  --clap-audio
+```
+
+`projects/my-project/03_analysis/search/footage.db` に SQLite / FTS5 / embedding rows を作ります。Qwen3-VL や CLAP が使えない場合は warning を残し、利用可能な検索 channel だけで続行します。
+
+### 7. Editorial pipeline を実行
+
+```bash
+npx tsx scripts/editorial-pipeline.ts --project projects/my-project --qa
+```
+
+このコマンドは visual / audio retrieval、rough pass、fine pass、compile、render、QA improvement loop を順に実行します。主な出力は `04_plan/selects_candidates.yaml`、`04_plan/edit_blueprint.yaml`、`04_plan/visual_search_trace.json`、`05_timeline/timeline.json`、`09_output/rough-cut.mp4`、`09_output/render-report.json` です。
+
 ## CLI EntryPoints
 
-公開サポートしている CLI は次の 7 本です。
+公開サポートしている主要 CLI は次の通りです。
 
 | Entry point | Purpose | Command |
 |-------------|---------|---------|
 | `init-project` | 新規プロジェクトの雛形作成 | `npx tsx scripts/init-project.ts <project-id> [--source-dir /path/to/footage]` |
 | `analyze` | 素材解析と `03_analysis/` 生成 | `npx tsx scripts/analyze.ts <source-files...> --project projects/<project-id>` |
+| `build-footage-db` | SQLite / FTS5 / Qwen3-VL / CLAP embedding DB 生成 | `npx tsx scripts/build-footage-db.ts --project projects/<project-id> [--qwen3vl] [--clap-audio]` |
+| `editorial-pipeline` | retrieval → planning → compile → render → QA の統合実行 | `npx tsx scripts/editorial-pipeline.ts --project projects/<project-id> [--skip-fine] [--skip-render] [--skip-qa]` |
+| `render-rough-cut` | `timeline.json` を BGM 付き MP4 にレンダーし duration parity を記録 | `npx tsx scripts/render-rough-cut.ts --project projects/<project-id> [--output path] [--bgm path]` |
 | `status` | Gate 状態と次アクション確認 | `npx tsx scripts/status.ts projects/<project-id>` |
 | `compile` | `timeline.json` と preview manifest 生成 | `npx tsx scripts/compile-timeline.ts projects/<project-id>` |
 | `preview` | preview clip / overview 生成 | `npx tsx scripts/preview-segment.ts projects/<project-id> [--beat <beat-name>]` |
 | `export-premiere` | Premiere 向け FCP7 XML 出力 | `npx tsx scripts/export-premiere-xml.ts projects/<project-id>` |
 | `import-premiere` | Premiere で編集した XML の差分読込 | `npx tsx scripts/import-premiere-xml.ts projects/<project-id> --xml edited.xml [--dry-run]` |
+| `smoke-test-qwen3vl.sh` | Qwen3-VL local worker / 2048-dim embedding の確認 | `bash scripts/smoke-test-qwen3vl.sh` |
+| `smoke-test-clap.sh` | CLAP local worker / 512-dim audio embedding の確認 | `bash scripts/smoke-test-clap.sh` |
 
 ## 完全な E2E フロー
 
@@ -137,19 +186,29 @@ npx tsx scripts/analyze.ts \
 ```text
 素材投入
   -> scripts/analyze.ts
-  -> 03_analysis/assets.json / segments.json / transcripts / contact sheets / filmstrips / peak_analysis
-  -> /intent
+  -> 03_analysis/assets.json / segments.json / transcripts / marlin_events.json / contact sheets / filmstrips / peak_analysis
+  -> scripts/build-footage-db.ts
+  -> 03_analysis/search/footage.db
+     - SQLite structured metadata
+     - FTS5 text index
+     - embedding_models / segment_embeddings
+     - E5 text + Qwen3-VL visual/text + CLAP audio
   -> 01_intent/creative_brief.yaml / unresolved_blockers.yaml
-  -> /triage
+  -> Visual / Audio Retrieval
+  -> 04_plan/visual_search_trace.json
+  -> Rough Pass
   -> 04_plan/selects_candidates.yaml
-  -> /blueprint
+  -> Fine Pass
   -> 04_plan/edit_blueprint.yaml / uncertainty_register.yaml
   -> scripts/compile-timeline.ts
   -> 05_timeline/timeline.json / adjacency_analysis.json
-  -> /review
-  -> 06_review/review_report.yaml / review_patch.json
-  -> /caption -> /package
-  -> 07_package/* / final.mp4
+  -> scripts/render-rough-cut.ts
+  -> 09_output/rough-cut.mp4 / render-report.json
+  -> QA Loop
+     -> Marlin QA / brief alignment
+     -> issue detection / fix proposals
+     -> apply / recompile / rerender (max 3 iterations)
+  -> 06_review/* / 07_package/* / 09_output/*
 ```
 
 ![ブループリント作成結果プレビュー](docs/images/demo-04-blueprint.png)
@@ -158,7 +217,9 @@ npx tsx scripts/analyze.ts \
 
 - `runtime/commands/` には `/intent`, `/triage`, `/blueprint`, `/review`, `/caption`, `/package` の command contract が実装されています。
 - `scripts/analyze.ts` では STT/VLM と VLM peak detection を実行し、`peak_analysis` を `segments.json` に書き戻します。
-- `scripts/compile-timeline.ts` は deterministic compile の公開 CLI です。
+- `scripts/build-footage-db.ts` は project-local の検索 DB を作り、Qwen3-VL / CLAP が無い場合も fail-open で進みます。
+- `scripts/editorial-pipeline.ts` は retrieval、rough/fine pass、compile、render、QA improvement loop を統合します。
+- `scripts/compile-timeline.ts` は deterministic compile の公開 CLI です。scene continuity ordering と visual coherence cache がある場合はコンパイル時に利用します。
 - Premiere で詰めたい場合は、`timeline.json -> FCP7 XML -> Premiere -> FCP7 XML -> timeline.json` の往復が可能です。
 
 ## Premiere Pro 連携
@@ -186,13 +247,14 @@ UXP プラグイン:
 
 ## 書き出し先
 
-最終動画のユーザー向け保存先は常に次のパスです。
+現在の rough-cut renderer は次のパスに MP4 と duration accounting を出力します。
 
 ```text
-projects/<project-id>/09_output/final.mp4
+projects/<project-id>/09_output/rough-cut.mp4
+projects/<project-id>/09_output/render-report.json
 ```
 
-`07_package/` は QA、manifest、音声 stem、caption sidecar などの内部パッケージ用ディレクトリです。`/render` または `/package` は QA 通過後に最終動画を `09_output/final.mp4` へ発行します。
+`07_package/` は QA、manifest、音声 stem、caption sidecar などの内部パッケージ用ディレクトリです。公開・納品用に固定した成果物は `/package` または後段の publish flow で `09_output/final.mp4` に発行する想定です。
 
 ## アーキテクチャ
 
@@ -200,17 +262,20 @@ projects/<project-id>/09_output/final.mp4
 
 ```text
 Creative Brief
-  -> Selects Candidates
-  -> Edit Blueprint
-  -> Deterministic Compiler
-  -> timeline.json
-  -> Review Report / Review Patch
-  -> Package or Premiere Roundtrip
+  -> Visual/Audio Retrieval (Qwen3-VL + CLAP pre-selection)
+  -> Rough Pass (LLM with multimodal evidence)
+  -> Fine Pass (LLM refinement)
+  -> Deterministic Compiler (scene continuity + visual coherence)
+  -> Render (ffmpeg xfade + BGM)
+  -> QA Loop (Marlin QA -> fix proposals -> apply -> recompile -> rerender)
+  -> Final Output
 ```
 
+- 2-model architecture: Marlin が「目」として scene / event / peak を読み、Claude/Codex が「脳」として evidence を使って編集判断を行います。Qwen3-VL / CLAP / E5 は planner ではなく検索 channel です。
+- 3-modality search: visual、text、audio を同じ footage DB と検索 API で扱います。ただし Qwen / E5 / CLAP のベクトル空間は混ぜず、`embedding_models.id` 単位で比較し、score fusion で統合します。
+- Deterministic Compiler: `normalize -> score -> assemble -> trim -> resolve -> export` を純関数的に進め、timestamp clustering と Qwen visual coherence cache がある場合は scene continuity ordering に使います。
+- QA Loop: Marlin QA と brief alignment から issue を検出し、bounded fixes を提案・適用・再コンパイル・再レンダーします。最大 3 iteration、score 低下、duration/fill/render parity regression で停止します。
 - Canonical Artifacts: 各ステージは YAML / JSON の canonical artifact を出力し、隠れた状態を持ちません。
-- Deterministic Engine: `normalize -> score -> assemble -> trim -> resolve -> export` を純関数的に進めます。
-- Self-Critique Loop: `review_report.yaml` と `review_patch.json` により rough cut を再評価できます。
 - Transition Skill Cards: P0 の 5 スキル (`match_cut_bridge`, `build_to_peak`, `crossfade_bridge`, `smash_cut_energy`, `silence_beat`) を隣接クリップ単位で自動選択します。
 
 ## Agent Skills
@@ -241,7 +306,7 @@ npm test
 npm run build
 ```
 
-CI でも `validate -> test -> build` を実行します。テスト件数は開発中に変動するため、現在の正確な件数は `npm test` の出力を確認してください。
+CI でも `validate -> test -> build` を実行します。現在は Vitest ベースで 2370+ 件のテストがあり、件数は開発中に変動します。正確な件数は `npm test` の出力を確認してください。
 `npm run validate` は公開デモ `projects/demo` を検証します。checkout 内のローカル作業プロジェクトも含めて確認したい場合は `npm run validate:all-local` を使ってください。
 
 ## OSS と貢献
@@ -258,7 +323,13 @@ CI でも `validate -> test -> build` を実行します。テスト件数は開
 - TypeScript / Node.js / `tsx`
 - Vitest
 - AJV + JSON Schema + YAML
+- SQLite / FTS5 / `better-sqlite3`
 - `ffmpeg` / `ffprobe`
+- Qwen3-VL-Embedding-2B（visual / text embedding、2048-dim）
+- CLAP `laion/clap-htsat-fused`（audio embedding、512-dim）
+- Marlin-2B（local video VLM）
+- `Xenova/multilingual-e5-small`（text embedding、384-dim）
+- Python JSONL workers（Qwen3-VL / CLAP / Marlin local inference）
 - Gemini VLM / Groq STT / OpenAI STT / pyannote diarization
 - OpenTimelineIO Python bridge
 - FCP7 XML exporter / importer
@@ -266,7 +337,10 @@ CI でも `validate -> test -> build` を実行します。テスト件数は開
 
 ## 制限事項
 
-- 公開 CLI は `init-project`, `analyze`, `status`, `compile`, `preview`, Premiere XML import/export が中心です。
+- Qwen3-VL / CLAP / Marlin の real model 実行には Python venv とローカル model cache が必要です。未設定時は warning を出して、利用可能な channel だけで続行します。
+- Qwen3-VL mixed input、Qwen reranker、before/after 両側を使う visual bridge search は設計済みですが、公開 API としては段階的に拡張中です。
+- CLAP は音の質感・環境音・ムード検索に使います。発話内容そのものの検索は transcript / FTS5 / E5 / Qwen text channel が担当します。
+- QA improvement loop は bounded auto-fix です。創作判断を完全に置き換えるものではなく、score 低下や duration parity 失敗では停止します。
 - `/intent` などの slash command は `runtime/commands/` の command contract として実装されており、専用アプリ UI はまだありません。
 - 高精度 analysis には `ffmpeg` 系ツールと API key、場合によっては Python / `opentimelineio` / `pyannote` が必要です。
 - Premiere UXP plugin は手動インストールと Premiere 上での手動確認が前提です。
