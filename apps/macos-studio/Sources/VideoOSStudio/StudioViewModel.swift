@@ -41,6 +41,7 @@ final class StudioViewModel: ObservableObject {
     @Published var evidenceStore: ProjectEvidenceStore?
     @Published var candidateDataSource: CandidateBrowserDataSource?
     @Published var isSwapBrowserPresented = false
+    @Published var isFootageSearchPresented = false
     @Published var swapBrowserClip: TimelineClip?
     @Published var mediaPreviewSummary = ProjectMediaPreviewSummary(items: [])
     @Published var mediaSourceMapStatus = ProjectMediaSourceMapStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
@@ -481,6 +482,7 @@ final class StudioViewModel: ObservableObject {
             evidenceStore = nil
             candidateDataSource = nil
             isSwapBrowserPresented = false
+            isFootageSearchPresented = false
             swapBrowserClip = nil
             mediaPreviewSummary = ProjectMediaPreviewSummary(items: [])
             mediaSourceMapStatus = ProjectMediaSourceMapStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
@@ -1807,6 +1809,36 @@ final class StudioViewModel: ObservableObject {
         if candidateDataSource == nil, let selectedProject {
             loadCandidateDataSource(project: selectedProject)
         }
+    }
+
+    func openFootageSearch() {
+        guard selectedProject != nil else {
+            roughCutCompileStatus = "Select a project before searching footage."
+            return
+        }
+        isFootageSearchPresented = true
+        roughCutCompileStatus = "Footage search opened."
+    }
+
+    func openFootageSearch(for clip: TimelineClip) {
+        selectedTimelineClipID = clip.id
+        swapBrowserClip = clip
+        isFootageSearchPresented = true
+        roughCutCompileStatus = "Footage search opened for \(clip.id)."
+    }
+
+    func previewFootageSearchResult(_ result: FootageSearchRunner.SearchResult) {
+        guard let timeline else {
+            roughCutCompileStatus = "Compile the project before previewing search results."
+            return
+        }
+        let clips = timeline.displayTracks.flatMap(\.clips)
+        guard let clip = clips.first(where: { $0.segmentID == result.segment_id }) else {
+            roughCutCompileStatus = "\(result.segment_id) is not in the current timeline."
+            return
+        }
+        selectTimelineClip(clip.id)
+        roughCutCompileStatus = "Previewing \(result.segment_id) in the current timeline."
     }
 
     private func loadCandidateDataSource(project: ProjectSummary) {

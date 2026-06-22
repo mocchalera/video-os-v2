@@ -15,6 +15,7 @@ struct TimelinePanel: View {
     var onScrubPlayhead: (Int) -> Void
     var onSelectClip: (TimelineClip.ID) -> Void
     var onOpenSwapBrowser: (TimelineClip) -> Void
+    var onOpenFootageSearch: (TimelineClip) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -65,7 +66,8 @@ struct TimelinePanel: View {
                                     selectedClipID: $selectedClipID,
                                     playheadFrame: playheadFrame,
                                     onSelectClip: onSelectClip,
-                                    onOpenSwapBrowser: onOpenSwapBrowser
+                                    onOpenSwapBrowser: onOpenSwapBrowser,
+                                    onOpenFootageSearch: onOpenFootageSearch
                                 )
                             }
                         }
@@ -198,6 +200,7 @@ struct TimelineTrackRow: View {
     var playheadFrame: Int
     var onSelectClip: (TimelineClip.ID) -> Void
     var onOpenSwapBrowser: (TimelineClip) -> Void
+    var onOpenFootageSearch: (TimelineClip) -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -246,6 +249,9 @@ struct TimelineTrackRow: View {
                         }
                         Button("Swap...") {
                             onOpenSwapBrowser(clip)
+                        }
+                        Button("Search for replacement...") {
+                            onOpenFootageSearch(clip)
                         }
                         Button("Remove") {
                             feedbackSession.addOp(.removeSegment(target_clip_id: clip.id, reason: "Removed by operator"))

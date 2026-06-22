@@ -46,10 +46,32 @@ struct ContentView: View {
                     evidenceStore: model.evidenceStore,
                     projectURL: model.selectedProject?.path,
                     feedbackSession: model.feedbackSession,
+                    onSearchForMore: {
+                        model.isSwapBrowserPresented = false
+                        model.openFootageSearch(for: clip)
+                    },
                     isPresented: $model.isSwapBrowserPresented
                 )
             } else {
                 ProgressView("Loading candidates...")
+                    .frame(width: 360, height: 180)
+            }
+        }
+        .sheet(isPresented: $model.isFootageSearchPresented) {
+            if let project = model.selectedProject {
+                FootageSearchView(
+                    feedbackSession: model.feedbackSession,
+                    projectURL: project.path,
+                    repositoryRoot: model.repositoryRoot,
+                    evidenceStore: model.evidenceStore,
+                    timeline: model.timeline,
+                    selectedClip: model.selectedTimelineClip?.clip,
+                    initialBeatID: model.selectedTimelineClip?.clip.beatID,
+                    onPreview: { model.previewFootageSearchResult($0) },
+                    isPresented: $model.isFootageSearchPresented
+                )
+            } else {
+                ProgressView("Loading project...")
                     .frame(width: 360, height: 180)
             }
         }
@@ -328,6 +350,15 @@ private struct StudioCommandPaletteView: View {
                 perform: { model.compileSelectedProjectWithReviewPatch() }
             ),
             StudioCommandPaletteItem(
+                title: "Search Footage",
+                subtitle: "Find footage with text, Qwen visual, CLAP audio, or hybrid vector search.",
+                systemImage: "waveform.badge.magnifyingglass",
+                keywords: ["footage", "visual", "audio", "qwen", "clap", "search"],
+                isEnabled: hasProject,
+                disabledReason: "No project",
+                perform: { model.openFootageSearch() }
+            ),
+            StudioCommandPaletteItem(
                 title: "Rebuild Search Index",
                 subtitle: "Rebuild the derived SQLite material/RAG index.",
                 systemImage: "magnifyingglass.circle",
@@ -499,7 +530,8 @@ private struct StudioWorkspaceView: View {
                 playheadFrame: model.playheadFrame,
                 onScrubPlayhead: { model.scrubPlayhead(to: $0) },
                 onSelectClip: { model.selectTimelineClip($0) },
-                onOpenSwapBrowser: { model.openSwapBrowser(for: $0) }
+                onOpenSwapBrowser: { model.openSwapBrowser(for: $0) },
+                onOpenFootageSearch: { model.openFootageSearch(for: $0) }
             )
                 .frame(minHeight: 230, idealHeight: 280)
 

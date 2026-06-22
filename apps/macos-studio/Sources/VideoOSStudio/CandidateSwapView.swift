@@ -9,6 +9,7 @@ struct CandidateSwapView: View {
     let evidenceStore: ProjectEvidenceStore?
     let projectURL: URL?
     @ObservedObject var feedbackSession: StudioFeedbackSession
+    var onSearchForMore: (() -> Void)?
     @Binding var isPresented: Bool
 
     private var resolvedBeatID: String {
@@ -128,6 +129,14 @@ struct CandidateSwapView: View {
                     .padding(.vertical, 3)
                     .background(.quaternary, in: Capsule())
                 Spacer()
+                Button {
+                    onSearchForMore?()
+                } label: {
+                    Label("Search for more", systemImage: "magnifyingglass")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(onSearchForMore == nil)
             }
 
             if let loadError = dataSource.loadError {
