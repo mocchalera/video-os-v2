@@ -511,7 +511,21 @@ const summary = [
   ["Latest US-061 follow-up", "TL-263 keeps the Marlin-first preference gate strict and fixes the next-action logistics: repo-level canPreferMarlinAsDefault remains false because rokutaro-graduation-20260319 is evaluated but blocked by 9 missing original media files under /Volumes/Extreme 500/動画/麓太朗卒園式. The queue now reports defaultSelected=0 for the bounded skip-existing path, marlin-eval-next returns no next project, and Project/Goal default commands point directly to media-relink-plan rokutaro-graduation-20260319 --from-source-map."],
   ["Latest US-045 root cause", "The latest preview failures had two separate causes. AX-1 could select a short Web-era preview-editor MP4 at the end of the timeline, masking a longer rendered fallback. ena-promo-ai had an exact preview generation bug where the segment renderer extracted source trim duration instead of timeline clip duration, so the MP4 became longer than the compiled timeline."],
   ["Latest US-045 fix/verification", "ProjectMediaResolver still skips known-short timeline-preview candidates beyond their duration, runtime/preview/segment-renderer.ts clamps generated extracts to timeline_duration_frames/fps, and Viewer diagnostics now have native visual evidence for missing media. Verification: ProjectMediaResolverTests 25/0, preview.test.ts 29/0, npm run build, build_and_run --verify, ffprobe 75.914714s for ena-promo-ai preview-full.mp4, ena playback-contract exact hash f3bc3e6fef222e1a, AX-1 playback-contract exact hash 171378fe2bfe3a7c, fresh computer-use Viewer evidence for ena-promo-ai with near_black_pct=0.0000, fresh AX-1 Viewer evidence with viewer_person_actual near_black_pct=0.0004, and demo missing-media diagnostic screenshot /tmp/videoos-debug/us049-viewer-diagnostic-missing-media-20260624.png."],
+  ["Open gates", "One open external dependency is tracked in the Open Gates sheet: GATE-001 / ISS-050 / US-061. The missing rokutaro-graduation-20260319 original MOV root prevents repo-level Marlin-first preference promotion; current relink planning finds no local matches."],
   ["Remaining caveat", "US-045 is promoted for native exact-preview playback, missing-media diagnostic display, and pixel evidence on ena-promo-ai, AX-1, and demo. US-046 is promoted for native New Project alert, NSOpenPanel source-folder selection, project shelf selection, Project creation status, source symlink, and project_state verification on a disposable project. US-047 Command Palette is promoted for top-bar open/close, Cmd-K open, filtered Return execution, and Esc dismiss. US-048 Agent panel is promoted for Check/Start/Stop lifecycle. US-049 is promoted for native read-only Status job execution, stable AgentPanel identifiers, and workspace-write approval-cancel gate behavior; live approved write execution remains intentionally pending operator approval. US-050 is promoted for Project readiness/action queue visibility, Copy behavior, stable action-scoped AX identifiers, and rough-cut-review Start & Run stopping at the Codex approval gate; approved workspace-write review execution and Final render Open remain intentionally pending. US-051 is promoted for native local Source Analysis on a disposable project, but full external STT/VLM/Appraiser analysis remains a deliberate CLI/operator path. US-052 is promoted for native rough-cut compile and review_patch compile on a disposable project. US-053 is promoted for native timeline marker/audio/waveform inspection plus right-click approve/reject/swap/search actions. US-054 is promoted for native disposable apply/undo and promote-button enablement, while live promotion of a real editorial decision remains an operator-approved action. US-055 is promoted for native selection/evidence inspection, Save/Clear persistence and cleanup, and live read-only Ask Codex proposal drafting without pressing Save. US-065 is promoted for native SQLite/RAG Search/Add, cited Agent prompt insertion, and InspectorTab.* Agent/Media switching without AX hangs. US-061 is promoted for runtime/model/mock/native AX, live non-mock representative chunks, source-map-aware chunk controls, resumable checkpointed evaluation, caption-only CLI support, bounded skip-existing routing, and media-relink fallback commands; repo-level Marlin-first preference promotion remains pending until the missing rokutaro-graduation-20260319 media root is mounted or relinked. US-057 is promoted for native text search, preview, beat targeting, replacement staging, and Discard cleanup. US-059 is promoted for native Media Relink status/buttons, NSOpenPanel open/cancel, source-map-root relink, source_map/symlink verification, and cleanup on a disposable project. US-060 is promoted for native synthetic demo media build, proxy build, and Studio synthetic smoke execution with CLI/ffprobe verification and cleanup on disposable projects; acceptance smoke remains covered by CLI/test gates. US-062 is promoted for native MediaPanel Build Audio Story Graph button execution, command-line visibility, graph/index/library verification, and cleanup on a disposable project. US-063 is promoted for native MediaPanel Render Final Package button execution, supplied_final_path command visibility, render-status/QA/manifest/final-media verification, and cleanup on a disposable project. US-064 is promoted for native MediaPanel Export Premiere XML, Export Editor Packet, Reveal Packet, Finder selection, manifest/final-media/final-audio verification, and cleanup on disposable projects. US-066 is promoted for Settings window inspection, transport picker mutation, defaults persistence, and defaults cleanup. US-056 Candidate Swap and US-058 radar/issues/jump remain promoted with native AX/pixel/file evidence. Visual/manual gaps for other native stories are unchanged unless specifically promoted in their story rows and Test Log entries."],
+];
+
+const openGates = [
+  [
+    "GATE-001",
+    "ISS-050 / US-061",
+    "External media root unavailable",
+    "Repo-level Marlin-first preference promotion is intentionally held because one evaluated project is media-blocked.",
+    "marlin-preference-status reports mediaBlockedEvaluatedProjects=1 and canPreferMarlinAsDefault=false; media-status rokutaro-graduation-20260319 reports assets=11, ready=2, missing=9; media-relink-plan rokutaro-graduation-20260319 --from-source-map reports matched=0 and unmatched=9.",
+    "Mount or relink the original source root containing IMG_2894.MOV, IMG_2896.MOV, IMG_2897.MOV, IMG_2898.MOV, IMG_2899.MOV, IMG_2900.MOV, IMG_2901.MOV, IMG_2902.MOV, and IMG_2908.MOV under /Volumes/Extreme 500/動画/麓太朗卒園式 or provide an equivalent search root.",
+    "Run media-relink-plan first; if matched=9, run media-relink-apply, then marlin-eval-next --execute --request-timeout-ms=900000 --max-sources=2 --skip-existing --caption-only --chunk-seconds=30 --chunk-overlap-seconds=3 --max-chunks=2 and marlin-preference-status.",
+    "Open external dependency",
+  ],
 ];
 
 function colName(index) {
@@ -530,6 +544,7 @@ const defaultColumnWidths = {
   Stories: [12, 28, 62, 72, 64, 58, 18, 72],
   Issues: [12, 12, 12, 22, 64, 74, 74, 74, 16],
   "Test Log": [12, 16, 22, 54, 84, 18],
+  "Open Gates": [12, 18, 28, 58, 82, 82, 82, 24],
   "Code Map": [34, 64, 92],
 };
 
@@ -570,8 +585,8 @@ writeTable(
   ["Metric", "Value"],
   summary,
 );
-summarySheet.getRange("A9:B14").format.rowHeight = 220;
-summarySheet.getRange("A9:B14").format.verticalAlignment = "top";
+summarySheet.getRange("A9:B16").format.rowHeight = 220;
+summarySheet.getRange("A9:B16").format.verticalAlignment = "top";
 
 writeTable(
   workbook.worksheets.add("Stories"),
@@ -590,6 +605,13 @@ writeTable(
   ["Log ID", "Story ID", "Method", "Action", "Evidence", "Result"],
   testLog,
   { rowHeight: 44 },
+);
+
+writeTable(
+  workbook.worksheets.add("Open Gates"),
+  ["Gate ID", "Related", "Gate Type", "Current Gate", "Current Evidence", "Required External Action", "Verification After Action", "Status"],
+  openGates,
+  { rowHeight: 120 },
 );
 
 writeTable(

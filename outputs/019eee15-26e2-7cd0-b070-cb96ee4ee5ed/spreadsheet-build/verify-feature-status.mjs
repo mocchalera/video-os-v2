@@ -36,7 +36,7 @@ const errors = await workbook.inspect({
 console.log("FORMULA ERRORS");
 console.log(errors.ndjson);
 
-for (const sheetName of ["Summary", "Stories", "Issues", "Test Log", "Code Map"]) {
+for (const sheetName of ["Summary", "Stories", "Issues", "Test Log", "Open Gates", "Code Map"]) {
   const blob = await workbook.render({
     sheetName,
     autoCrop: "all",
