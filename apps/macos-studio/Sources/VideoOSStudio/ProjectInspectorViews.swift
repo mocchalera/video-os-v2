@@ -17,7 +17,10 @@ struct ProjectPanel: View {
                 LabeledContent("Gate", value: project?.stateLabel ?? "-")
                 LabeledContent("Timeline", value: project?.hasTimeline == true ? "available" : "missing")
                 LabeledContent("Review", value: project?.hasReview == true ? "available" : "missing")
-                LabeledContent("Project creation", value: model.projectInitializationStatus)
+                Text("Project creation: \(model.projectInitializationStatus)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("ProjectPanel.ProjectInitializationStatus")
             }
 
             Section("Goal Coverage") {

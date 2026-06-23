@@ -476,6 +476,8 @@ final class StudioViewModel: ObservableObject {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
+        panel.directoryURL = repositoryRoot
+        panel.identifier = NSUserInterfaceItemIdentifier("ProjectInitializer.SourceFolderPanel")
 
         guard panel.runModal() == .OK, let sourceURL = panel.urls.first else {
             projectInitializationStatus = "Source folder selection cancelled."
@@ -489,11 +491,14 @@ final class StudioViewModel: ObservableObject {
         let alert = NSAlert()
         alert.messageText = "New Video OS Project"
         alert.informativeText = "Enter a stable project id. Use letters, numbers, dots, underscores, or hyphens."
-        alert.addButton(withTitle: "Create")
-        alert.addButton(withTitle: "Cancel")
+        let createButton = alert.addButton(withTitle: "Create")
+        createButton.setAccessibilityIdentifier("ProjectInitializer.CreateButton")
+        let cancelButton = alert.addButton(withTitle: "Cancel")
+        cancelButton.setAccessibilityIdentifier("ProjectInitializer.CancelButton")
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
         field.placeholderString = "client-cut-001"
+        field.setAccessibilityIdentifier("ProjectInitializer.ProjectIDField")
         alert.accessoryView = field
 
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
