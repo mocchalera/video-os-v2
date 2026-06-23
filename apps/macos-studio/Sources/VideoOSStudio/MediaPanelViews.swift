@@ -262,6 +262,7 @@ struct MediaPanel: View {
                 Text(model.mediaRelinkStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.MediaRelinkStatus")
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -275,6 +276,8 @@ struct MediaPanel: View {
                             }
                         }
                         .disabled(project == nil || model.mediaPreviewSummary.missingCount == 0 || model.isRelinkingMedia)
+                        .accessibilityIdentifier("MediaPanel.RelinkMissingMediaButton")
+                        .help("Relink Missing Media")
 
                         Button {
                             model.relinkSelectedProjectMediaFromSourceMap()
@@ -282,6 +285,8 @@ struct MediaPanel: View {
                             Label("Use Source Map Roots", systemImage: "externaldrive.connected.to.line.below")
                         }
                         .disabled(project == nil || model.mediaPreviewSummary.missingCount == 0 || model.isRelinkingMedia || suggestedRoots.allSatisfy { !$0.exists })
+                        .accessibilityIdentifier("MediaPanel.UseSourceMapRootsButton")
+                        .help("Use Source Map Roots")
                     }
 
                     Button {
@@ -290,6 +295,8 @@ struct MediaPanel: View {
                         Label("Replace Synthetic Media", systemImage: "arrow.triangle.2.circlepath")
                     }
                     .disabled(project == nil || model.mediaPreviewSummary.syntheticPreviewCount == 0 || model.isRelinkingMedia)
+                    .accessibilityIdentifier("MediaPanel.ReplaceSyntheticMediaButton")
+                    .help("Replace Synthetic Media")
                 }
 
                 if let plan = model.mediaRelinkPlan {
