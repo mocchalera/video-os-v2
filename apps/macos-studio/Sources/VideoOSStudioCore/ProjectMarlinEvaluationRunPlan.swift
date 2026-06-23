@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
@@ -6,6 +7,9 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
     public let sourceURLs: [URL]
     public let skippedSourceCount: Int
     public let scriptURL: URL
+    public var sourceAssetIDsByPath: [String: String] = [:]
+    public var existingMarlinItemsByAssetID: [String: MarlinAssetEvents] = [:]
+    public var sourceDurationsByPath: [String: Double] = [:]
 
     public var sourceCount: Int {
         sourceURLs.count
@@ -23,6 +27,33 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
             return "no video sources"
         }
         return "ready"
+    }
+
+    public func selectedSourceURLs(
+        skipExisting: Bool = false,
+        chunkSeconds: Int? = nil,
+        chunkOverlapSeconds: Int? = nil
+    ) -> [URL] {
+        guard skipExisting else { return sourceURLs }
+        return sourceURLs.filter { sourceURL in
+            shouldEvaluateSource(
+                sourceURL,
+                chunkSeconds: chunkSeconds,
+                chunkOverlapSeconds: chunkOverlapSeconds
+            )
+        }
+    }
+
+    public func selectedSourceCount(
+        skipExisting: Bool = false,
+        chunkSeconds: Int? = nil,
+        chunkOverlapSeconds: Int? = nil
+    ) -> Int {
+        selectedSourceURLs(
+            skipExisting: skipExisting,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds
+        ).count
     }
 
     public func processArguments(
@@ -73,7 +104,11 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
             args.append("--max-chunks")
             args.append(String(maxChunks))
         }
-        args.append(contentsOf: sourceURLs.map(\.path))
+        args.append(contentsOf: selectedSourceURLs(
+            skipExisting: skipExisting,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds
+        ).map(\.path))
         return args
     }
 
@@ -108,6 +143,64 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
             return value
         }
         return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func shouldEvaluateSource(
+        _ sourceURL: URL,
+        chunkSeconds: Int?,
+        chunkOverlapSeconds: Int?
+    ) -> Bool {
+        guard let assetID = sourceAssetIDsByPath[sourceURL.path],
+              let artifactItem = existingMarlinItemsByAssetID[assetID]
+        else {
+            return true
+        }
+        guard let chunkSeconds else {
+            return false
+        }
+        guard let durationSeconds = sourceDurationsByPath[sourceURL.path],
+              durationSeconds > Double(chunkSeconds)
+        else {
+            return false
+        }
+
+        let chunks = chunkIndices(
+            durationSeconds: durationSeconds,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds ?? 0
+        )
+        guard !chunks.isEmpty else { return false }
+        let completed = Set(artifactItem.events.compactMap(\.chunkIndex))
+        if completed.isEmpty {
+            return true
+        }
+        return chunks.contains { !completed.contains($0) }
+    }
+
+    private func chunkIndices(
+        durationSeconds: Double,
+        chunkSeconds: Int,
+        chunkOverlapSeconds: Int
+    ) -> [Int] {
+        guard durationSeconds.isFinite, durationSeconds > 0, chunkSeconds > 0 else { return [] }
+        let overlap = max(0, chunkOverlapSeconds)
+        guard overlap < chunkSeconds else { return [] }
+        if durationSeconds <= Double(chunkSeconds) {
+            return [0]
+        }
+
+        let step = Double(chunkSeconds - overlap)
+        var indices: [Int] = []
+        var start = 0.0
+        var index = 0
+        while start < durationSeconds {
+            let end = min(durationSeconds, start + Double(chunkSeconds))
+            indices.append(index)
+            if end >= durationSeconds { break }
+            start += step
+            index += 1
+        }
+        return indices
     }
 }
 
@@ -264,19 +357,41 @@ public enum ProjectMarlinEvaluationRunPlanner {
         assets: AnalysisAssetDocument? = nil
     ) -> ProjectMarlinEvaluationRunPlan {
         let summary = ProjectMediaResolver.previewSummary(projectURL: projectURL, assets: assets)
+        var sourceAssetIDsByPath: [String: String] = [:]
+        var sourceDurationsByPath: [String: Double] = [:]
         let sourceURLs = summary.items.compactMap { item -> URL? in
             guard item.exists, item.playbackStatus != .directAudio else { return nil }
-            return item.url
+            guard let url = item.url else { return nil }
+            sourceAssetIDsByPath[url.path] = item.assetID
+            if let duration = mediaDurationSeconds(url) {
+                sourceDurationsByPath[url.path] = duration
+            }
+            return url
         }
         let skipped = summary.items.count - sourceURLs.count
+        let artifact = try? MarlinEventDocument.load(
+            from: projectURL.appendingPathComponent("03_analysis/marlin_events.json")
+        )
+        let existingItemsByAssetID = Dictionary(
+            uniqueKeysWithValues: (artifact?.items ?? []).map { ($0.assetID, $0) }
+        )
 
         return ProjectMarlinEvaluationRunPlan(
             repositoryRoot: repositoryRoot,
             projectURL: projectURL,
             sourceURLs: sourceURLs,
             skippedSourceCount: skipped,
-            scriptURL: repositoryRoot.appendingPathComponent("scripts/marlin-evaluate.ts")
+            scriptURL: repositoryRoot.appendingPathComponent("scripts/marlin-evaluate.ts"),
+            sourceAssetIDsByPath: sourceAssetIDsByPath,
+            existingMarlinItemsByAssetID: existingItemsByAssetID,
+            sourceDurationsByPath: sourceDurationsByPath
         )
+    }
+
+    private static func mediaDurationSeconds(_ url: URL) -> Double? {
+        let asset = AVURLAsset(url: url)
+        let seconds = CMTimeGetSeconds(asset.duration)
+        return seconds.isFinite && seconds > 0 ? seconds : nil
     }
 }
 
@@ -313,6 +428,17 @@ public enum ProjectMarlinEvaluationRunner {
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
     ) throws -> ProjectMarlinEvaluationRunResult {
+        guard !plan.selectedSourceURLs(
+            skipExisting: skipExisting,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds
+        ).isEmpty else {
+            return ProjectMarlinEvaluationRunResult(
+                exitCode: 1,
+                standardOutput: "",
+                standardError: "No selected Marlin source files remain after applying skip-existing."
+            )
+        }
         if !mock, runner == nil {
             let runtime = runtimeStatus ?? ProjectMarlinRuntimeStatusReader.status(repositoryRoot: plan.repositoryRoot)
             guard runtime.isReadyForLiveMarlin else {

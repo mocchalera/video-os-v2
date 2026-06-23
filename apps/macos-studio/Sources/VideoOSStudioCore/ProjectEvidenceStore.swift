@@ -367,6 +367,7 @@ public struct MarlinEvent: Decodable, Identifiable, Equatable, Sendable {
     public let description: String
     public let confidence: Double?
     public let sourcePass: String?
+    public let chunkIndex: Int?
 
     enum CodingKeys: String, CodingKey {
         case id = "event_id"
@@ -375,6 +376,7 @@ public struct MarlinEvent: Decodable, Identifiable, Equatable, Sendable {
         case description
         case confidence
         case sourcePass = "source_pass"
+        case chunkIndex = "chunk_index"
     }
 
     public func overlaps(startUS: Int, endUS: Int) -> Bool {

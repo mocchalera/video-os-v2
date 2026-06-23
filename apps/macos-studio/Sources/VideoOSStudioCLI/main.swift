@@ -1834,7 +1834,6 @@ struct VideoOSStudioCLI {
             Foundation.exit(1)
         }
         let next = ProjectMarlinEvaluationNextPlanner.plan(repositoryRoot: root)
-        print("status: \(next.readinessLabel)")
         print("queue: \(next.queue.readinessLabel)")
         print("execute: \(execute)")
         print("mock: \(mock)")
@@ -1846,27 +1845,44 @@ struct VideoOSStudioCLI {
         print("chunkOverlapSeconds: \(chunkOverlapSeconds.map(String.init) ?? "-")")
         print("maxChunks: \(maxChunks.map(String.init) ?? "all")")
         guard let item = next.item, let plan = next.runPlan else {
+            print("status: \(next.readinessLabel)")
             print("nextProject: -")
             print("canRun: false")
             print("recommendation: \(next.recommendation)")
             return
         }
-        print("nextProject: \(item.id)")
-        print("canRun: \(plan.canRun)")
-        print("sourceCount: \(plan.sourceCount)")
-        print("skippedSourceCount: \(plan.skippedSourceCount)")
-        let commandLine = plan.commandLine(
-            mock: mock,
-            requestTimeoutMs: requestTimeoutMs,
-            maxSources: maxSources,
+        let selectedSourceCount = plan.selectedSourceCount(
             skipExisting: skipExisting,
-            captionOnly: captionOnly,
             chunkSeconds: chunkSeconds,
-            chunkOverlapSeconds: chunkOverlapSeconds,
-            maxChunks: maxChunks
+            chunkOverlapSeconds: chunkOverlapSeconds
         )
-        print("command: \(commandLine)")
-        print("recommendation: \(next.recommendation)")
+        let canRunSelectedSources = plan.canRun && selectedSourceCount > 0
+        let readinessLabel = canRunSelectedSources
+            ? plan.readinessLabel
+            : (plan.canRun ? "no unevaluated video sources" : plan.readinessLabel)
+        print("status: \(readinessLabel)")
+        print("nextProject: \(item.id)")
+        print("canRun: \(canRunSelectedSources)")
+        print("sourceCount: \(plan.sourceCount)")
+        print("selectedSourceCount: \(selectedSourceCount)")
+        print("skippedSourceCount: \(plan.skippedSourceCount)")
+        if canRunSelectedSources {
+            let commandLine = plan.commandLine(
+                mock: mock,
+                requestTimeoutMs: requestTimeoutMs,
+                maxSources: maxSources,
+                skipExisting: skipExisting,
+                captionOnly: captionOnly,
+                chunkSeconds: chunkSeconds,
+                chunkOverlapSeconds: chunkOverlapSeconds,
+                maxChunks: maxChunks
+            )
+            print("command: \(commandLine)")
+            print("recommendation: \(next.recommendation)")
+        } else {
+            print("command: -")
+            print("recommendation: No unevaluated ready source files remain for \(item.id). Relink missing media or choose a different representative project.")
+        }
         if !mock {
             let modelAccess = ProjectMarlinModelAccessStatusReader.status(repositoryRoot: root)
             print("modelAccess: \(modelAccess.readinessLabel)")
@@ -1881,8 +1897,8 @@ struct VideoOSStudioCLI {
         }
 
         do {
-            guard plan.canRun else {
-                throw CLIError.message("Marlin evaluation is not runnable: \(plan.readinessLabel)")
+            guard canRunSelectedSources else {
+                throw CLIError.message("Marlin evaluation is not runnable: \(readinessLabel)")
             }
             let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(
                 plan: plan,
@@ -1944,10 +1960,20 @@ struct VideoOSStudioCLI {
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
+            let selectedSourceCount = plan.selectedSourceCount(
+                skipExisting: skipExisting,
+                chunkSeconds: chunkSeconds,
+                chunkOverlapSeconds: chunkOverlapSeconds
+            )
+            let canRunSelectedSources = plan.canRun && selectedSourceCount > 0
+            let readinessLabel = canRunSelectedSources
+                ? plan.readinessLabel
+                : (plan.canRun ? "no unevaluated video sources" : plan.readinessLabel)
             print("project: \(project.id)")
-            print("status: \(plan.readinessLabel)")
-            print("canRun: \(plan.canRun)")
+            print("status: \(readinessLabel)")
+            print("canRun: \(canRunSelectedSources)")
             print("sourceCount: \(plan.sourceCount)")
+            print("selectedSourceCount: \(selectedSourceCount)")
             print("skippedSourceCount: \(plan.skippedSourceCount)")
             print("requestTimeoutMs: \(requestTimeoutMs.map(String.init) ?? "\(defaultMarlinRequestTimeoutMs) (default)")")
             print("maxSources: \(maxSources.map(String.init) ?? "all")")
@@ -1957,19 +1983,28 @@ struct VideoOSStudioCLI {
             print("chunkOverlapSeconds: \(chunkOverlapSeconds.map(String.init) ?? "-")")
             print("maxChunks: \(maxChunks.map(String.init) ?? "all")")
             print("script: \(plan.scriptURL.path)")
-            let commandLine = plan.commandLine(
-                requestTimeoutMs: requestTimeoutMs,
-                maxSources: maxSources,
+            if canRunSelectedSources {
+                let commandLine = plan.commandLine(
+                    requestTimeoutMs: requestTimeoutMs,
+                    maxSources: maxSources,
+                    skipExisting: skipExisting,
+                    captionOnly: captionOnly,
+                    chunkSeconds: chunkSeconds,
+                    chunkOverlapSeconds: chunkOverlapSeconds,
+                    maxChunks: maxChunks
+                )
+                print("command: \(commandLine)")
+            } else {
+                print("command: -")
+            }
+            let selectedSourceURLs = plan.selectedSourceURLs(
                 skipExisting: skipExisting,
-                captionOnly: captionOnly,
                 chunkSeconds: chunkSeconds,
-                chunkOverlapSeconds: chunkOverlapSeconds,
-                maxChunks: maxChunks
+                chunkOverlapSeconds: chunkOverlapSeconds
             )
-            print("command: \(commandLine)")
-            if !plan.sourceURLs.isEmpty {
+            if !selectedSourceURLs.isEmpty {
                 print("sources:")
-                for url in plan.sourceURLs {
+                for url in selectedSourceURLs {
                     print("- \(url.path)")
                 }
             }
@@ -2018,8 +2053,15 @@ struct VideoOSStudioCLI {
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
-            guard plan.canRun else {
-                throw CLIError.message("Marlin evaluation is not runnable: \(plan.readinessLabel)")
+            let selectedSourceCount = plan.selectedSourceCount(
+                    skipExisting: skipExisting,
+                    chunkSeconds: chunkSeconds,
+                    chunkOverlapSeconds: chunkOverlapSeconds
+            )
+            guard plan.canRun, selectedSourceCount > 0
+            else {
+                let readinessLabel = plan.canRun ? "no unevaluated video sources" : plan.readinessLabel
+                throw CLIError.message("Marlin evaluation is not runnable: \(readinessLabel)")
             }
             let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(
                 plan: plan,
