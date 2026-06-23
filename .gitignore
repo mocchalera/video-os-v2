@@ -58,7 +58,7 @@ projects/demo/project_state.yaml
 projects/*/03_analysis/search/
 projects/*/09_output/
 reports/eval/regen-scratch/
-reports/eval/ena-golden/_scratch/
+reports/eval/*/_scratch/
 
 # Local screenshots and visual debugging captures
 /editor-*.png
