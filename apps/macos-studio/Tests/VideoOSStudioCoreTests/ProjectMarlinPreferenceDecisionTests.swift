@@ -66,6 +66,23 @@ final class ProjectMarlinPreferenceDecisionTests: XCTestCase {
         XCTAssertFalse(decision.canPreferMarlinAsDefault)
     }
 
+    func testDecisionNamesMediaBlockedEvaluatedProjectsInRecommendation() throws {
+        let root = try makeMarlinPreferenceRepository()
+        try writePreferenceProject(root: root, id: "interview", includeMarlinPeak: true)
+        try writePreferenceProject(root: root, id: "music-video", includeMarlinPeak: true)
+        try writePreferenceProject(root: root, id: "documentary", includeMarlinPeak: false, writeMissingMediaAsset: true)
+
+        let decision = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: root)
+
+        XCTAssertEqual(decision.blockedEvaluatedProjectCount, 1)
+        XCTAssertEqual(decision.mediaBlockedEvaluatedProjectCount, 1)
+        XCTAssertEqual(decision.mediaBlockedEvaluatedProjects.map(\.id), ["documentary"])
+        XCTAssertEqual(decision.decisionLabel, "partially ready")
+        XCTAssertTrue(decision.recommendation.contains("documentary (1 missing)"))
+        XCTAssertTrue(decision.recommendation.contains("mount the original source volume"))
+        XCTAssertFalse(decision.canPreferMarlinAsDefault)
+    }
+
     func testDecisionIgnoresMockArtifactsAsRepresentativeEvidence() throws {
         let root = try makeMarlinPreferenceRepository()
         try writePreferenceProject(root: root, id: "interview", includeMarlinPeak: true, inferenceMode: "mock")
@@ -100,12 +117,33 @@ private func writePreferenceProject(
     root: URL,
     id: String,
     includeMarlinPeak: Bool,
-    inferenceMode: String = "live"
+    inferenceMode: String = "live",
+    writeMissingMediaAsset: Bool = false
 ) throws {
     let project = root.appendingPathComponent("projects/\(id)")
     try FileManager.default.createDirectory(at: project.appendingPathComponent("01_intent"), withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: project.appendingPathComponent("03_analysis"), withIntermediateDirectories: true)
     try writePreferenceBrief(project: project, id: id)
+    if writeMissingMediaAsset {
+        try """
+        {
+          "project_id": "\(id)",
+          "artifact_version": "1",
+          "items": [
+            {
+              "asset_id": "A001",
+              "filename": "missing-source.mov",
+              "role_guess": "interview",
+              "duration_us": 9000000,
+              "has_transcript": false,
+              "segment_ids": ["S001", "S002", "S003"],
+              "quality_flags": [],
+              "tags": []
+            }
+          ]
+        }
+        """.write(to: project.appendingPathComponent("03_analysis/assets.json"), atomically: true, encoding: .utf8)
+    }
     try """
     {
       "project_id": "\(id)",

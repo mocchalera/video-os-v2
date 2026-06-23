@@ -1755,6 +1755,7 @@ struct VideoOSStudioCLI {
         print("evaluatedProjects: \(decision.evaluatedProjectCount)")
         print("candidateProjects: \(decision.candidateProjectCount)")
         print("blockedEvaluatedProjects: \(decision.blockedEvaluatedProjectCount)")
+        print("mediaBlockedEvaluatedProjects: \(decision.mediaBlockedEvaluatedProjectCount)")
         print("events: \(decision.totalEventCount)")
         print("findResults: \(decision.totalFindResultCount)")
         print("segments: \(decision.totalSegmentCount)")

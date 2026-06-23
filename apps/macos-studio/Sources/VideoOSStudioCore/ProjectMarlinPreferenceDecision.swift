@@ -4,6 +4,7 @@ public struct ProjectMarlinPreferenceProjectStatus: Identifiable, Equatable, Sen
     public let id: String
     public let projectURL: URL
     public let readinessLabel: String
+    public let mediaMissingCount: Int
     public let eventCount: Int
     public let findResultCount: Int
     public let segmentCount: Int
@@ -31,6 +32,19 @@ public struct ProjectMarlinPreferenceDecision: Equatable, Sendable {
 
     public var blockedEvaluatedProjectCount: Int {
         evaluatedProjectCount - candidateProjectCount
+    }
+
+    public var mediaBlockedEvaluatedProjects: [ProjectMarlinPreferenceProjectStatus] {
+        projects.filter {
+            !$0.isMockArtifact
+                && !$0.canPreferMarlin
+                && ($0.eventCount + $0.findResultCount) > 0
+                && $0.mediaMissingCount > 0
+        }
+    }
+
+    public var mediaBlockedEvaluatedProjectCount: Int {
+        mediaBlockedEvaluatedProjects.count
     }
 
     public var totalEventCount: Int {
@@ -97,6 +111,13 @@ public struct ProjectMarlinPreferenceDecision: Equatable, Sendable {
         case "ready for Marlin-first temporal VLM":
             return "Marlin is affecting segment peaks across representative projects. It is reasonable to promote Marlin-first temporal semantics while keeping the existing VLM fallback."
         case "partially ready":
+            if mediaBlockedEvaluatedProjectCount > 0 {
+                let projectList = mediaBlockedEvaluatedProjects
+                    .prefix(3)
+                    .map { "\($0.id) (\($0.mediaMissingCount) missing)" }
+                    .joined(separator: ", ")
+                return "Some evaluated projects are blocked by missing source media: \(projectList). Relink those media roots or mount the original source volume before changing defaults."
+            }
             return "Some evaluated projects are not Marlin candidates yet. Re-run materialization or evaluate why those projects lack Marlin-derived peak coverage before changing defaults."
         case "needs representative coverage":
             return "At least \(minimumCandidateProjectCount) representative projects should be Marlin candidates before changing the default temporal VLM policy."
@@ -122,11 +143,14 @@ public enum ProjectMarlinPreferenceDecisionReader {
         let policy = ProjectAnalysisPolicyStatusReader.status(repositoryRoot: repositoryRoot)
         let representativePlan = ProjectMarlinRepresentativePlanReader.plan(repositoryRoot: repositoryRoot)
         let projects = ProjectScanner.scanProjects(in: repositoryRoot).map { project in
+            let evidence = ProjectEvidenceStore.load(projectURL: project.path)
             let status = ProjectMarlinEvaluationStatusReader.status(projectURL: project.path, repositoryRoot: repositoryRoot)
+            let media = ProjectMediaResolver.previewSummary(projectURL: project.path, assets: evidence.assets)
             return ProjectMarlinPreferenceProjectStatus(
                 id: project.id,
                 projectURL: project.path,
                 readinessLabel: status.readinessLabel,
+                mediaMissingCount: media.missingCount,
                 eventCount: status.eventCount,
                 findResultCount: status.findResultCount,
                 segmentCount: status.segmentCount,
