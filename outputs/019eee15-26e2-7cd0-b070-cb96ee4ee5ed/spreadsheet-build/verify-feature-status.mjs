@@ -4,11 +4,126 @@ import { FileBlob, SpreadsheetFile } from "@oai/artifact-tool";
 
 const outputDir = "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed";
 const workbookPath = path.join(outputDir, "video-os-v2-feature-status.xlsx");
+const inspectPath = path.join(outputDir, "video-os-v2-feature-status.xlsx.inspect.ndjson");
 const renderDir = path.join(outputDir, "spreadsheet-build", "renders");
 
 await fs.mkdir(renderDir, { recursive: true });
 
 const workbook = await SpreadsheetFile.importXlsx(await FileBlob.load(workbookPath));
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function parseNDJSON(text) {
+  return text
+    .trim()
+    .split(/\n+/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+async function readInspectTables() {
+  const [workbookStats, inspectStats, inspectText] = await Promise.all([
+    fs.stat(workbookPath),
+    fs.stat(inspectPath),
+    fs.readFile(inspectPath, "utf8"),
+  ]);
+  assert(
+    inspectStats.mtimeMs >= workbookStats.mtimeMs - 1000,
+    `Inspect NDJSON is older than workbook: ${inspectPath}`,
+  );
+  const tables = new Map();
+  for (const item of parseNDJSON(inspectText)) {
+    if (item.kind === "table" && item.sheet && Array.isArray(item.values)) {
+      tables.set(item.sheet, item.values);
+    }
+  }
+  return tables;
+}
+
+function tableRows(tables, sheetName) {
+  const table = tables.get(sheetName);
+  assert(table, `Missing table for sheet ${sheetName}`);
+  const [headers, ...rows] = table;
+  return rows.map((row, index) => ({
+    rowNumber: index + 2,
+    ...Object.fromEntries(headers.map((header, column) => [String(header), row[column]])),
+  }));
+}
+
+function verifyTrackerSemantics(tables) {
+  const summary = tableRows(tables, "Summary");
+  const stories = tableRows(tables, "Stories");
+  const issues = tableRows(tables, "Issues");
+  const testLog = tableRows(tables, "Test Log");
+  const openGates = tableRows(tables, "Open Gates");
+  const completionAudit = tableRows(tables, "Completion Audit");
+
+  const summaryValue = (metric) => summary.find((row) => row.Metric === metric)?.Value;
+  assert(summaryValue("Stories tracked") === stories.length, "Summary Stories tracked does not match Stories rows");
+  assert(summaryValue("Issues tracked") === issues.length, "Summary Issues tracked does not match Issues rows");
+
+  const unresolvedIssues = issues.filter((row) => !String(row.Status ?? "").startsWith("Fixed"));
+  assert(
+    unresolvedIssues.length === 1 && unresolvedIssues[0]["Issue ID"] === "ISS-050",
+    `Expected only ISS-050 unresolved; got ${unresolvedIssues
+      .map((row) => `${row["Issue ID"]}:${row.Status}`)
+      .join(", ")}`,
+  );
+  assert(
+    String(unresolvedIssues[0].Status).includes("repo preference gate pending"),
+    "ISS-050 status must keep the repo preference gate caveat",
+  );
+
+  assert(openGates.length === 1, `Expected one open gate, got ${openGates.length}`);
+  assert(openGates[0]["Gate ID"] === "GATE-001", "Open gate must be GATE-001");
+  assert(openGates[0].Related === "ISS-050 / US-061", "GATE-001 must point to ISS-050 / US-061");
+  assert(openGates[0].Status === "Open external dependency", "GATE-001 must remain an open external dependency");
+  assert(
+    String(openGates[0]["Current Evidence"]).includes("TL-265")
+      && String(openGates[0]["Current Evidence"]).includes("matched=0")
+      && String(openGates[0]["Current Evidence"]).includes("unmatched=9"),
+    "GATE-001 evidence must include the latest TL-265 relink recheck",
+  );
+
+  const auditByID = new Map(completionAudit.map((row) => [row["Requirement ID"], row]));
+  assert(auditByID.get("REQ-007")?.["Current Verdict"] === "Not complete", "REQ-007 must remain Not complete");
+  assert(
+    String(auditByID.get("REQ-004")?.["Current Verdict"]).includes("one external gate remains"),
+    "REQ-004 must describe the remaining external gate",
+  );
+  assert(
+    String(auditByID.get("REQ-005")?.Evidence).includes("ISS-050 remains non-Fixed"),
+    "REQ-005 must identify ISS-050 as the only non-Fixed issue",
+  );
+
+  assert(testLog.length === 266, `Expected 266 Test Log rows, got ${testLog.length}`);
+  const latestLog = testLog.find((row) => row["Log ID"] === "TL-265");
+  assert(latestLog, "Missing TL-265 test log entry");
+  assert(
+    String(latestLog.Result).includes("GATE-001 unchanged"),
+    "TL-265 result must preserve the current external-gate outcome",
+  );
+  const semanticVerifierLog = testLog.find((row) => row["Log ID"] === "TL-266");
+  assert(semanticVerifierLog, "Missing TL-266 semantic verifier test log entry");
+  assert(
+    String(semanticVerifierLog.Result).includes("semantic verification pass"),
+    "TL-266 result must record the tracker semantic verifier pass",
+  );
+
+  const storyByID = new Map(stories.map((row) => [row["Story ID"], row]));
+  assert(
+    String(storyByID.get("US-060")?.["Current Status"]).includes("acceptance smoke CLI hang fixed"),
+    "US-060 status must mention the acceptance smoke CLI hang fix",
+  );
+  assert(
+    String(storyByID.get("US-061")?.["Current Status"]).includes("repo preference gate pending"),
+    "US-061 status must preserve the repo preference gate caveat",
+  );
+}
 
 const sheets = await workbook.inspect({
   kind: "sheet",
@@ -17,6 +132,8 @@ const sheets = await workbook.inspect({
 });
 console.log("SHEETS");
 console.log(sheets.ndjson);
+const sheetItems = parseNDJSON(sheets.ndjson).filter((item) => item.kind === "sheet");
+assert(sheetItems.length === 7, `Expected 7 sheets, got ${sheetItems.length}`);
 
 const macEntries = await workbook.inspect({
   kind: "match",
@@ -35,6 +152,12 @@ const errors = await workbook.inspect({
 });
 console.log("FORMULA ERRORS");
 console.log(errors.ndjson);
+const formulaErrorItems = parseNDJSON(errors.ndjson).filter((item) => item.kind === "match");
+assert(formulaErrorItems.length === 0, `Formula errors found: ${formulaErrorItems.length}`);
+
+const inspectTables = await readInspectTables();
+verifyTrackerSemantics(inspectTables);
+console.log("TRACKER SEMANTICS OK");
 
 for (const sheetName of ["Summary", "Stories", "Issues", "Test Log", "Open Gates", "Completion Audit", "Code Map"]) {
   const blob = await workbook.render({
