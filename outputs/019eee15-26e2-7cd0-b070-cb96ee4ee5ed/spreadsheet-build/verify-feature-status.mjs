@@ -121,7 +121,7 @@ function verifyTrackerSemantics(tables) {
   assert(summaryValue("Issues tracked") === issues.length, "Summary Issues tracked does not match Issues rows");
   assertContinuousIDs(stories, "Story ID", "US", 66);
   assertContinuousIDs(issues, "Issue ID", "ISS", 85);
-  assertContinuousIDs(testLog, "Log ID", "TL", 269);
+  assertContinuousIDs(testLog, "Log ID", "TL", 270);
 
   const storyIDs = new Set(stories.map((row) => row["Story ID"]));
   for (const issue of issues) {
@@ -158,10 +158,11 @@ function verifyTrackerSemantics(tables) {
   assert(openGates[0].Related === "ISS-050 / US-061", "GATE-001 must point to ISS-050 / US-061");
   assert(openGates[0].Status === "Open external dependency", "GATE-001 must remain an open external dependency");
   assert(
-    String(openGates[0]["Current Evidence"]).includes("TL-269")
+    String(openGates[0]["Current Evidence"]).includes("TL-270")
+      && String(openGates[0]["Current Evidence"]).includes("TL-269")
       && String(openGates[0]["Current Evidence"]).includes("matched=0")
       && String(openGates[0]["Current Evidence"]).includes("unmatched=9"),
-    "GATE-001 evidence must include the latest TL-269 relink recheck",
+    "GATE-001 evidence must include the latest TL-270 search and TL-269 relink recheck",
   );
 
   const auditByID = new Map(completionAudit.map((row) => [row["Requirement ID"], row]));
@@ -175,13 +176,22 @@ function verifyTrackerSemantics(tables) {
     "REQ-005 must identify ISS-050 as the only non-Fixed issue",
   );
 
-  assert(testLog.length === 269, `Expected 269 Test Log rows, got ${testLog.length}`);
-  const latestLog = testLog.find((row) => row["Log ID"] === "TL-269");
-  assert(latestLog, "Missing TL-269 test log entry");
+  assert(testLog.length === 270, `Expected 270 Test Log rows, got ${testLog.length}`);
+  const latestLog = testLog.find((row) => row["Log ID"] === "TL-270");
+  assert(latestLog, "Missing TL-270 test log entry");
   assert(
     String(latestLog.Result).includes("GATE-001 unchanged")
-      && String(latestLog.Evidence).includes("matched=0 unmatched=9")
-      && String(latestLog.Evidence).includes("lock screen"),
+      && String(latestLog.Evidence).includes("Spotlight")
+      && String(latestLog.Evidence).includes("/Volumes/DATA05")
+      && String(latestLog.Evidence).includes("no matches"),
+    "TL-270 result must preserve the current missing-MOV local search outcome",
+  );
+  const lockedGateLog = testLog.find((row) => row["Log ID"] === "TL-269");
+  assert(lockedGateLog, "Missing TL-269 locked-session gate test log entry");
+  assert(
+    String(lockedGateLog.Result).includes("GATE-001 unchanged")
+      && String(lockedGateLog.Evidence).includes("matched=0 unmatched=9")
+      && String(lockedGateLog.Evidence).includes("lock screen"),
     "TL-269 result must preserve the current lock-screen and external-gate outcome",
   );
   const semanticVerifierLog = testLog.find((row) => row["Log ID"] === "TL-266");
