@@ -152,16 +152,18 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
   const model = opts.model ?? defaultMarlinModel();
   const queries = normalizeQueries(opts.queries);
   const chunkingEnabled = opts.chunkSeconds !== undefined;
+  const deferMaxSourcesUntilUnfinished = chunkingEnabled && opts.skipExisting === true;
   const assetInputs = selectMarlinAssetInputsForRun(
     loadMarlinAssetInputs(absProjectDir, opts.sourceFiles),
     {
       outputPath,
       skipExisting: opts.skipExisting && !chunkingEnabled,
-      maxSources: opts.maxSources,
+      maxSources: deferMaxSourcesUntilUnfinished ? undefined : opts.maxSources,
     },
   );
 
   const items: MarlinAssetEvents[] = [];
+  let evaluatedSourceCount = 0;
   for (const asset of assetInputs) {
     const assetItem = chunkingEnabled
       ? await runMarlinAssetChunks({
@@ -182,6 +184,7 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
       });
 
     if (assetItem) {
+      evaluatedSourceCount += 1;
       upsertAssetItem(items, assetItem);
       writeMarlinArtifactCheckpoint({
         projectDir: absProjectDir,
@@ -190,6 +193,13 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
         model,
         items,
       });
+      if (
+        deferMaxSourcesUntilUnfinished &&
+        opts.maxSources !== undefined &&
+        evaluatedSourceCount >= opts.maxSources
+      ) {
+        break;
+      }
     }
   }
 
@@ -250,6 +260,10 @@ async function runMarlinAssetChunks(args: {
     chunkOverlapSeconds: args.opts.chunkOverlapSeconds,
   });
   if (chunks === null) {
+    const alreadyEvaluated = existingArtifact?.items.some((item) => item.asset_id === args.asset.assetId) ?? false;
+    if (args.opts.skipExisting && alreadyEvaluated) {
+      return null;
+    }
     return runMarlinWholeAsset({
       opts: args.opts,
       projectDir: args.projectDir,

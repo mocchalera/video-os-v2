@@ -632,6 +632,94 @@ describe("Marlin analysis stage", () => {
     });
   }, 30_000);
 
+  fxit("skip-existing with chunking continues past completed short assets", async () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    makeVideo(path.join(projectDir, "media/a.mp4"), 1);
+    makeVideo(path.join(projectDir, "media/b.mp4"), 1);
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/assets.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            asset_id: "AST_A",
+            filename: "a.mp4",
+            source_locator: "media/a.mp4",
+          },
+          {
+            asset_id: "AST_B",
+            filename: "b.mp4",
+            source_locator: "media/b.mp4",
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/marlin_events.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "marlin-events-v1",
+        model: MODEL,
+        items: [
+          {
+            asset_id: "AST_A",
+            source_path: "media/a.mp4",
+            scene: "existing A",
+            caption: "existing A caption",
+            events: [],
+            find_results: [],
+          },
+        ],
+      }),
+    );
+
+    const captionInputs: string[] = [];
+    const marlinFn: MarlinFn = {
+      async caption(videoPath) {
+        captionInputs.push(videoPath);
+        return {
+          scene: "new B",
+          caption: "new B caption",
+          events: [
+            {
+              start: 0.1,
+              end: 0.4,
+              description: "new B event",
+              confidence: 0.7,
+            },
+          ],
+        };
+      },
+      async find() {
+        throw new Error("caption-only test should not call find");
+      },
+    };
+
+    const outputPath = await runMarlinAnalysis({
+      projectDir,
+      projectId: "marlin-fixture",
+      sourceFiles: [],
+      marlinFn,
+      model: MODEL,
+      skipExisting: true,
+      maxSources: 1,
+      captionOnly: true,
+      chunkSeconds: 30,
+      chunkOverlapSeconds: 3,
+      maxChunks: 2,
+    });
+
+    const artifact = JSON.parse(fs.readFileSync(outputPath, "utf-8")) as {
+      items: Array<{ asset_id: string; scene: string }>;
+    };
+    expect(captionInputs).toHaveLength(1);
+    expect(artifact.items.map((item) => item.asset_id).sort()).toEqual(["AST_A", "AST_B"]);
+    expect(artifact.items.find((item) => item.asset_id === "AST_A")?.scene).toBe("existing A");
+    expect(artifact.items.find((item) => item.asset_id === "AST_B")?.scene).toBe("new B");
+  }, 30_000);
+
   it("extracts compact Marlin scene tags from common local concepts", () => {
     expect(extractTagsFromScene("A grape vineyard with rows of vines.")).toContain("grape_vineyard");
     expect(extractTagsFromScene("Soba noodles being prepared at a counter.")).toContain("soba_noodles");
