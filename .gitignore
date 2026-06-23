@@ -45,6 +45,8 @@ Thumbs.db
 .claude/
 .codex/
 .build/
+.playwright-cli/
+.playwright-mcp/
 
 # Project-specific results
 projects/*
@@ -55,6 +57,8 @@ projects/*
 projects/demo/project_state.yaml
 projects/*/03_analysis/search/
 projects/*/09_output/
+reports/eval/regen-scratch/
+reports/eval/ena-golden/_scratch/
 
 # Local screenshots and visual debugging captures
 /editor-*.png
