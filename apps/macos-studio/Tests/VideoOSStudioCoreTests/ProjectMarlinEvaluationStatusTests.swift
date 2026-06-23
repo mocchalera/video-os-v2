@@ -56,13 +56,13 @@ final class ProjectMarlinEvaluationStatusTests: XCTestCase {
         XCTAssertEqual(status.readinessLabel, "needs segment materialization")
         XCTAssertFalse(status.canPreferMarlin)
         XCTAssertEqual(status.segmentsWithMarlinPeakCount, 0)
-        XCTAssertEqual(status.materializableSegmentCount, 3)
+        XCTAssertEqual(status.materializableSegmentCount, 1)
     }
 
     func testStatusRoutesPartialUnmaterializedCoverageToMaterialization() throws {
         let project = try makeProjectFixture(name: "videoos-marlin-partial-materialization")
         try writeMarlinEvents(project: project, eventCount: 2, findCount: 1)
-        try writeSegmentsWithPeakFlags(project: project, marlinPeaks: [true, false, false, false])
+        try writeSegmentsWithPeakFlags(project: project, marlinPeaks: [false, true, false, false])
 
         let status = ProjectMarlinEvaluationStatusReader.status(projectURL: project)
 
@@ -70,8 +70,22 @@ final class ProjectMarlinEvaluationStatusTests: XCTestCase {
         XCTAssertFalse(status.canPreferMarlin)
         XCTAssertEqual(status.segmentCount, 4)
         XCTAssertEqual(status.segmentsWithMarlinPeakCount, 1)
-        XCTAssertEqual(status.materializableSegmentCount, 3)
+        XCTAssertEqual(status.materializableSegmentCount, 1)
         XCTAssertEqual(status.coverageRatio, 0.25, accuracy: 0.001)
+    }
+
+    func testStatusDoesNotLoopMaterializationForStrongerExistingPeak() throws {
+        let project = try makeProjectFixture(name: "videoos-marlin-nonreplaceable-peak")
+        try writeTwoAssetMarlinEvents(project: project)
+        try writeMixedMaterializedAndStrongPeakSegments(project: project, fusedPeakScore: 0.86)
+
+        let status = ProjectMarlinEvaluationStatusReader.status(projectURL: project)
+
+        XCTAssertEqual(status.readinessLabel, "needs more footage evaluation")
+        XCTAssertFalse(status.canPreferMarlin)
+        XCTAssertEqual(status.segmentCount, 4)
+        XCTAssertEqual(status.segmentsWithMarlinPeakCount, 1)
+        XCTAssertEqual(status.materializableSegmentCount, 0)
     }
 }
 
@@ -133,6 +147,62 @@ private func writeMarlinEvents(
           "caption": "subject reacts",
           "events": [\(events)],
           "find_results": [\(finds)]
+        }
+      ]
+    }
+    """.write(
+        to: project.appendingPathComponent("03_analysis/marlin_events.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+private func writeTwoAssetMarlinEvents(project: URL) throws {
+    try """
+    {
+      "project_id": "fixture",
+      "artifact_version": "1",
+      "model": {
+        "provider": "marlin",
+        "model_alias": "NemoStation/Marlin-2B",
+        "model_snapshot": "test-snapshot",
+        "connector_version": "marlin-local-v1",
+        "inference_mode": "live"
+      },
+      "items": [
+        {
+          "asset_id": "A001",
+          "source_path": "02_media/source/a001.mp4",
+          "scene": "first materialized scene",
+          "caption": "subject reacts",
+          "events": [
+            {
+              "event_id": "MEV_A001_0001",
+              "start_us": 0,
+              "end_us": 1000000,
+              "description": "existing marlin-covered moment",
+              "confidence": 0.8,
+              "source_pass": "marlin_caption"
+            }
+          ],
+          "find_results": []
+        },
+        {
+          "asset_id": "A002",
+          "source_path": "02_media/source/a002.mp4",
+          "scene": "second strong existing scene",
+          "caption": "subject reacts",
+          "events": [
+            {
+              "event_id": "MEV_A002_0001",
+              "start_us": 0,
+              "end_us": 1000000,
+              "description": "lower confidence marlin moment",
+              "confidence": 0.8,
+              "source_pass": "marlin_caption"
+            }
+          ],
+          "find_results": []
         }
       ]
     }
@@ -242,6 +312,84 @@ private func writeSegmentsWithPeakFlags(project: URL, marlinPeaks: [Bool]) throw
       "artifact_version": "1",
       "items": [
     \(items)
+      ]
+    }
+    """.write(
+        to: project.appendingPathComponent("03_analysis/segments.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+private func writeMixedMaterializedAndStrongPeakSegments(project: URL, fusedPeakScore: Double) throws {
+    try """
+    {
+      "project_id": "fixture",
+      "artifact_version": "1",
+      "items": [
+        {
+          "segment_id": "S001",
+          "asset_id": "A001",
+          "src_in_us": 0,
+          "src_out_us": 3000000,
+          "summary": "opening",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": [],
+          "peak_analysis": {
+            "selected_peak_us": 1500000,
+            "confidence": 0.82,
+            "provenance": {
+              "precision_mode": "marlin_temporal_semantics",
+              "fusion_version": "marlin-segment-peak-v1"
+            }
+          }
+        },
+        {
+          "segment_id": "S002",
+          "asset_id": "A002",
+          "src_in_us": 0,
+          "src_out_us": 3000000,
+          "summary": "second",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": [],
+          "peak_analysis": {
+            "selected_peak_us": 1500000,
+            "confidence": 0.86,
+            "support_signals": {
+              "fused_peak_score": \(fusedPeakScore)
+            },
+            "provenance": {
+              "precision_mode": "action_only",
+              "fusion_version": "peak-fusion-v1"
+            }
+          }
+        },
+        {
+          "segment_id": "S003",
+          "asset_id": "A003",
+          "src_in_us": 0,
+          "src_out_us": 3000000,
+          "summary": "third",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        },
+        {
+          "segment_id": "S004",
+          "asset_id": "A004",
+          "src_in_us": 0,
+          "src_out_us": 3000000,
+          "summary": "fourth",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        }
       ]
     }
     """.write(

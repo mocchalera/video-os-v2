@@ -223,12 +223,22 @@ public struct SegmentInterestPoint: Decodable, Equatable, Sendable {
 public struct SegmentPeakAnalysis: Decodable, Equatable, Sendable {
     public let selectedPeakUS: Int?
     public let confidence: Double?
+    public let supportSignals: SegmentPeakSupportSignals?
     public let provenance: SegmentPeakProvenance?
 
     enum CodingKeys: String, CodingKey {
         case selectedPeakUS = "selected_peak_us"
         case confidence
+        case supportSignals = "support_signals"
         case provenance
+    }
+}
+
+public struct SegmentPeakSupportSignals: Decodable, Equatable, Sendable {
+    public let fusedPeakScore: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case fusedPeakScore = "fused_peak_score"
     }
 }
 

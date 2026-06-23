@@ -155,15 +155,41 @@ public enum ProjectMarlinEvaluationStatusReader {
         segments: [AnalysisSegment],
         artifactItems: [MarlinAssetEvents]
     ) -> Int {
-        let materializableAssetIDs = Set(
-            artifactItems
-                .filter { !$0.scene.isEmpty || !$0.events.isEmpty || !$0.findResults.isEmpty }
-                .map(\.assetID)
-        )
+        let artifactItemsByAssetID = Dictionary(uniqueKeysWithValues: artifactItems.map { ($0.assetID, $0) })
         return segments.filter { segment in
-            !isMarlinPeak(segment.peakAnalysis)
-                && materializableAssetIDs.contains(segment.assetID)
+            guard !isMarlinPeak(segment.peakAnalysis),
+                  let artifactItem = artifactItemsByAssetID[segment.assetID],
+                  let marlinPeakConfidence = bestMarlinPeakConfidence(segment: segment, artifactItem: artifactItem)
+            else {
+                return false
+            }
+            return canMaterializePeak(segment.peakAnalysis, marlinConfidence: marlinPeakConfidence)
         }.count
+    }
+
+    private static func bestMarlinPeakConfidence(
+        segment: AnalysisSegment,
+        artifactItem: MarlinAssetEvents
+    ) -> Double? {
+        let eventConfidence = artifactItem.events
+            .filter { $0.overlaps(startUS: segment.sourceInUS, endUS: segment.sourceOutUS) }
+            .map { $0.confidence ?? 0.7 }
+        let findConfidence = artifactItem.findResults
+            .filter { $0.formatOK && $0.overlaps(startUS: segment.sourceInUS, endUS: segment.sourceOutUS) }
+            .map { $0.confidence ?? 0.75 }
+        return (eventConfidence + findConfidence).max()
+    }
+
+    private static func canMaterializePeak(_ peak: SegmentPeakAnalysis?, marlinConfidence: Double) -> Bool {
+        guard let peak else { return true }
+        if isDegradedPeak(peak) { return true }
+        return (peak.supportSignals?.fusedPeakScore ?? 0) < marlinConfidence
+    }
+
+    private static func isDegradedPeak(_ peak: SegmentPeakAnalysis?) -> Bool {
+        guard let provenance = peak?.provenance else { return false }
+        if provenance.precisionMode == "never" { return true }
+        return provenance.fusionVersion?.hasPrefix("degraded-") == true
     }
 }
 
