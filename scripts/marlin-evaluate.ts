@@ -24,6 +24,7 @@ export interface MarlinEvaluateOptions {
   requestTimeoutMs?: number;
   maxSources?: number;
   skipExisting: boolean;
+  captionOnly: boolean;
 }
 
 export interface MarlinEvaluateResult {
@@ -42,6 +43,7 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
   let requestTimeoutMs: number | undefined;
   let maxSources: number | undefined;
   let skipExisting = false;
+  let captionOnly = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -63,6 +65,8 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
       maxSources = parsePositiveIntegerOption("--max-sources", arg.slice("--max-sources=".length));
     } else if (arg === "--skip-existing") {
       skipExisting = true;
+    } else if (arg === "--caption-only") {
+      captionOnly = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -85,6 +89,7 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
     requestTimeoutMs,
     maxSources,
     skipExisting,
+    captionOnly,
   };
 }
 
@@ -141,6 +146,7 @@ export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise
       queries: marlinQueriesFromEnvironment(projectDir, repoRoot),
       skipExisting: options.skipExisting,
       maxSources: options.maxSources,
+      captionOnly: options.captionOnly,
     });
 
     return {
@@ -165,6 +171,7 @@ Options:
                  Worker request timeout in milliseconds for slow live caption runs
   --max-sources   Evaluate only the next N selected sources
   --skip-existing Skip asset IDs already present in 03_analysis/marlin_events.json
+  --caption-only  Skip Marlin find queries after captioning; useful for long local MPS chunks
   --help, -h     Show this help
 
 If source files are omitted, assets are resolved from 03_analysis/assets.json source_locator fields.

@@ -1813,6 +1813,7 @@ struct VideoOSStudioCLI {
         let execute = args.contains("--execute")
         let mock = args.contains("--mock")
         let skipExisting = args.contains("--skip-existing")
+        let captionOnly = args.contains("--caption-only")
         let requestTimeoutMs: Int?
         let maxSources: Int?
         do {
@@ -1830,6 +1831,7 @@ struct VideoOSStudioCLI {
         print("requestTimeoutMs: \(requestTimeoutMs.map(String.init) ?? "\(defaultMarlinRequestTimeoutMs) (default)")")
         print("maxSources: \(maxSources.map(String.init) ?? "all")")
         print("skipExisting: \(skipExisting)")
+        print("captionOnly: \(captionOnly)")
         guard let item = next.item, let plan = next.runPlan else {
             print("nextProject: -")
             print("canRun: false")
@@ -1844,7 +1846,8 @@ struct VideoOSStudioCLI {
             mock: mock,
             requestTimeoutMs: requestTimeoutMs,
             maxSources: maxSources,
-            skipExisting: skipExisting
+            skipExisting: skipExisting,
+            captionOnly: captionOnly
         )
         print("command: \(commandLine)")
         print("recommendation: \(next.recommendation)")
@@ -1870,7 +1873,8 @@ struct VideoOSStudioCLI {
                 mock: mock,
                 requestTimeoutMs: requestTimeoutMs,
                 maxSources: maxSources,
-                skipExisting: skipExisting
+                skipExisting: skipExisting,
+                captionOnly: captionOnly
             )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
@@ -1914,6 +1918,7 @@ struct VideoOSStudioCLI {
             let requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
             let maxSources = try marlinMaxSources(from: args)
             let skipExisting = args.contains("--skip-existing")
+            let captionOnly = args.contains("--caption-only")
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
@@ -1925,11 +1930,13 @@ struct VideoOSStudioCLI {
             print("requestTimeoutMs: \(requestTimeoutMs.map(String.init) ?? "\(defaultMarlinRequestTimeoutMs) (default)")")
             print("maxSources: \(maxSources.map(String.init) ?? "all")")
             print("skipExisting: \(skipExisting)")
+            print("captionOnly: \(captionOnly)")
             print("script: \(plan.scriptURL.path)")
             let commandLine = plan.commandLine(
                 requestTimeoutMs: requestTimeoutMs,
                 maxSources: maxSources,
-                skipExisting: skipExisting
+                skipExisting: skipExisting,
+                captionOnly: captionOnly
             )
             print("command: \(commandLine)")
             if !plan.sourceURLs.isEmpty {
@@ -1948,6 +1955,7 @@ struct VideoOSStudioCLI {
         do {
             let mock = args.contains("--mock")
             let skipExisting = args.contains("--skip-existing")
+            let captionOnly = args.contains("--caption-only")
             let requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
             let maxSources = try marlinMaxSources(from: args)
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
@@ -1961,7 +1969,8 @@ struct VideoOSStudioCLI {
                 mock: mock,
                 requestTimeoutMs: requestTimeoutMs,
                 maxSources: maxSources,
-                skipExisting: skipExisting
+                skipExisting: skipExisting,
+                captionOnly: captionOnly
             )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
@@ -2335,9 +2344,9 @@ struct VideoOSStudioCLI {
           marlin-eval-queue
                             Print runnable and blocked projects for representative Marlin-2B evaluation.
           marlin-eval-next
-                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing.
-          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms> --max-sources=<n> --skip-existing.
-          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing.
+                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only.
+          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only.
+          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only.
           playback-contract-status
                             Print whether preview-manifest.json matches the current timeline (approval-grade playback).
           render-status     Print final render/package artifact readiness.

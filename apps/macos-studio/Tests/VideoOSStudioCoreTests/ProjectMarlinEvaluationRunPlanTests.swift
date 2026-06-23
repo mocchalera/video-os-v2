@@ -52,11 +52,12 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
             scriptURL: root.appendingPathComponent("scripts/marlin-evaluate.ts")
         )
 
-        let args = plan.processArguments(maxSources: 1, skipExisting: true)
+        let args = plan.processArguments(maxSources: 1, skipExisting: true, captionOnly: true)
 
-        XCTAssertTrue(plan.commandLine(maxSources: 1, skipExisting: true).contains("--max-sources"))
+        XCTAssertTrue(plan.commandLine(maxSources: 1, skipExisting: true, captionOnly: true).contains("--max-sources"))
         XCTAssertTrue(args.contains("--skip-existing"))
-        XCTAssertEqual(Array(args.suffix(4)), ["--max-sources", "1", "--skip-existing", source.path])
+        XCTAssertTrue(args.contains("--caption-only"))
+        XCTAssertEqual(Array(args.suffix(5)), ["--max-sources", "1", "--skip-existing", "--caption-only", source.path])
     }
 
     func testPlanReportsNoVideoSourcesWhenAssetsAreMissing() throws {
@@ -135,9 +136,10 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
             plan: plan,
             mock: true,
             maxSources: 1,
-            skipExisting: true
+            skipExisting: true,
+            captionOnly: true
         ) { _, args in
-            XCTAssertEqual(Array(args.suffix(4)), ["--max-sources", "1", "--skip-existing", project.appendingPathComponent("02_media/source/clip.mp4").path])
+            XCTAssertEqual(Array(args.suffix(5)), ["--max-sources", "1", "--skip-existing", "--caption-only", project.appendingPathComponent("02_media/source/clip.mp4").path])
             return ProjectMarlinEvaluationRunResult(exitCode: 0, standardOutput: "ok", standardError: "")
         }
 

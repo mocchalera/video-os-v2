@@ -29,7 +29,8 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         mock: Bool = false,
         requestTimeoutMs: Int? = nil,
         maxSources: Int? = nil,
-        skipExisting: Bool = false
+        skipExisting: Bool = false,
+        captionOnly: Bool = false
     ) -> [String] {
         var args = [
             "npx",
@@ -54,6 +55,9 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         if skipExisting {
             args.append("--skip-existing")
         }
+        if captionOnly {
+            args.append("--caption-only")
+        }
         args.append(contentsOf: sourceURLs.map(\.path))
         return args
     }
@@ -62,13 +66,15 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         mock: Bool = false,
         requestTimeoutMs: Int? = nil,
         maxSources: Int? = nil,
-        skipExisting: Bool = false
+        skipExisting: Bool = false,
+        captionOnly: Bool = false
     ) -> String {
         processArguments(
             mock: mock,
             requestTimeoutMs: requestTimeoutMs,
             maxSources: maxSources,
-            skipExisting: skipExisting
+            skipExisting: skipExisting,
+            captionOnly: captionOnly
         )
             .map(shellQuote)
             .joined(separator: " ")
@@ -173,6 +179,7 @@ public enum ProjectMarlinEvaluationRunner {
         requestTimeoutMs: Int? = nil,
         maxSources: Int? = nil,
         skipExisting: Bool = false,
+        captionOnly: Bool = false,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -202,7 +209,8 @@ public enum ProjectMarlinEvaluationRunner {
             mock: mock,
             requestTimeoutMs: requestTimeoutMs,
             maxSources: maxSources,
-            skipExisting: skipExisting
+            skipExisting: skipExisting,
+            captionOnly: captionOnly
         ))
     }
 
@@ -212,6 +220,7 @@ public enum ProjectMarlinEvaluationRunner {
         requestTimeoutMs: Int? = nil,
         maxSources: Int? = nil,
         skipExisting: Bool = false,
+        captionOnly: Bool = false,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -222,6 +231,7 @@ public enum ProjectMarlinEvaluationRunner {
             requestTimeoutMs: requestTimeoutMs,
             maxSources: maxSources,
             skipExisting: skipExisting,
+            captionOnly: captionOnly,
             runtimeStatus: runtimeStatus,
             modelAccessStatus: modelAccessStatus,
             runner: runner

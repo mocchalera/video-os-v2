@@ -232,12 +232,14 @@ describe("Marlin analysis stage", () => {
         "900000",
         "--max-sources=2",
         "--skip-existing",
+        "--caption-only",
       ]),
     ).toMatchObject({
       projectDir: "projects/demo",
       requestTimeoutMs: 900_000,
       maxSources: 2,
       skipExisting: true,
+      captionOnly: true,
     });
 
     expect(
@@ -251,6 +253,7 @@ describe("Marlin analysis stage", () => {
     ).toMatchObject({
       projectDir: "projects/demo",
       requestTimeoutMs: 600_000,
+      captionOnly: false,
     });
 
     expect(() =>
@@ -308,6 +311,7 @@ describe("Marlin analysis stage", () => {
         sourceFiles: ["media/a.mp4"],
         mock: true,
         skipExisting: true,
+        captionOnly: false,
       });
 
       expect(result.sourceCount).toBe(0);
@@ -443,6 +447,70 @@ describe("Marlin analysis stage", () => {
       peak_ref: "MEV_AST_INTERVIEW_0001",
     });
     expect(segments.items[0].interest_points?.[0].label).toContain("emotional_peak");
+  });
+
+  it("can skip Marlin find queries for caption-only long source chunks", async () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/assets.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            asset_id: "AST_LONG_SOURCE",
+            filename: "long.mp4",
+            source_locator: "media/long.mp4",
+          },
+        ],
+      }),
+    );
+
+    let findCount = 0;
+    const marlinFn: MarlinFn = {
+      async caption() {
+        return {
+          scene: "A long source with multiple documentary moments.",
+          caption: "The camera follows the subject through the scene.",
+          events: [
+            {
+              start: 12,
+              end: 18,
+              description: "The subject reaches the key visual moment.",
+              confidence: 0.72,
+            },
+          ],
+        };
+      },
+      async find(_videoPath, event) {
+        findCount += 1;
+        return {
+          query: event,
+          span: [12, 18],
+          format_ok: true,
+          confidence: 0.5,
+        };
+      },
+    };
+
+    const outputPath = await runMarlinAnalysis({
+      projectDir,
+      projectId: "marlin-fixture",
+      sourceFiles: ["media/long.mp4"],
+      marlinFn,
+      model: MODEL,
+      queries: ["slow query"],
+      captionOnly: true,
+    });
+
+    const artifact = JSON.parse(fs.readFileSync(outputPath, "utf-8"));
+    expect(findCount).toBe(0);
+    expect(artifact.items[0]).toMatchObject({
+      asset_id: "AST_LONG_SOURCE",
+      find_results: [],
+    });
+    expect(artifact.items[0].events).toHaveLength(1);
   });
 
   it("extracts compact Marlin scene tags from common local concepts", () => {

@@ -44,6 +44,7 @@ export interface MarlinAnalysisOptions {
   outputPath?: string;
   skipExisting?: boolean;
   maxSources?: number;
+  captionOnly?: boolean;
 }
 
 interface AssetsDoc {
@@ -158,8 +159,10 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
     const proxy = await prepareMarlinProxy(absProjectDir, asset.sourcePath);
     const caption = await opts.marlinFn.caption(proxy.evaluationPath);
     const findResults = [];
-    for (const query of queries) {
-      findResults.push(await opts.marlinFn.find(proxy.evaluationPath, query));
+    if (!opts.captionOnly) {
+      for (const query of queries) {
+        findResults.push(await opts.marlinFn.find(proxy.evaluationPath, query));
+      }
     }
     items.push(
       normalizeMarlinAssetEvents({
