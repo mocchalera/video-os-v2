@@ -25,6 +25,9 @@ export interface MarlinEvaluateOptions {
   maxSources?: number;
   skipExisting: boolean;
   captionOnly: boolean;
+  chunkSeconds?: number;
+  chunkOverlapSeconds?: number;
+  maxChunks?: number;
 }
 
 export interface MarlinEvaluateResult {
@@ -44,6 +47,9 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
   let maxSources: number | undefined;
   let skipExisting = false;
   let captionOnly = false;
+  let chunkSeconds: number | undefined;
+  let chunkOverlapSeconds: number | undefined;
+  let maxChunks: number | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -67,6 +73,18 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
       skipExisting = true;
     } else if (arg === "--caption-only") {
       captionOnly = true;
+    } else if (arg === "--chunk-seconds") {
+      chunkSeconds = parsePositiveNumberOption(arg, args[++index]);
+    } else if (arg.startsWith("--chunk-seconds=")) {
+      chunkSeconds = parsePositiveNumberOption("--chunk-seconds", arg.slice("--chunk-seconds=".length));
+    } else if (arg === "--chunk-overlap-seconds") {
+      chunkOverlapSeconds = parseNonNegativeNumberOption(arg, args[++index]);
+    } else if (arg.startsWith("--chunk-overlap-seconds=")) {
+      chunkOverlapSeconds = parseNonNegativeNumberOption("--chunk-overlap-seconds", arg.slice("--chunk-overlap-seconds=".length));
+    } else if (arg === "--max-chunks") {
+      maxChunks = parsePositiveIntegerOption(arg, args[++index]);
+    } else if (arg.startsWith("--max-chunks=")) {
+      maxChunks = parsePositiveIntegerOption("--max-chunks", arg.slice("--max-chunks=".length));
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -90,6 +108,9 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
     maxSources,
     skipExisting,
     captionOnly,
+    chunkSeconds,
+    chunkOverlapSeconds,
+    maxChunks,
   };
 }
 
@@ -97,6 +118,22 @@ function parsePositiveIntegerOption(name: string, value?: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`${name} requires a positive integer value`);
+  }
+  return parsed;
+}
+
+function parsePositiveNumberOption(name: string, value?: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} requires a positive number value`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeNumberOption(name: string, value?: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} requires a non-negative number value`);
   }
   return parsed;
 }
@@ -122,7 +159,7 @@ export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise
     allInputs,
     {
       outputPath,
-      skipExisting: options.skipExisting,
+      skipExisting: options.skipExisting && options.chunkSeconds === undefined,
       maxSources: options.maxSources,
     },
   );
@@ -147,6 +184,9 @@ export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise
       skipExisting: options.skipExisting,
       maxSources: options.maxSources,
       captionOnly: options.captionOnly,
+      chunkSeconds: options.chunkSeconds,
+      chunkOverlapSeconds: options.chunkOverlapSeconds,
+      maxChunks: options.maxChunks,
     });
 
     return {
@@ -172,6 +212,10 @@ Options:
   --max-sources   Evaluate only the next N selected sources
   --skip-existing Skip asset IDs already present in 03_analysis/marlin_events.json
   --caption-only  Skip Marlin find queries after captioning; useful for long local MPS chunks
+  --chunk-seconds Split long sources into fixed-length caption chunks
+  --chunk-overlap-seconds
+                 Overlap adjacent chunks by this many seconds
+  --max-chunks   Evaluate only the next N unfinished chunks per selected source
   --help, -h     Show this help
 
 If source files are omitted, assets are resolved from 03_analysis/assets.json source_locator fields.

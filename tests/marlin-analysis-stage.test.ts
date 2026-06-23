@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -6,6 +7,7 @@ import { createRequire } from "node:module";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import { parseArgs as parseMarlinEvaluateArgs, runMarlinEvaluate } from "../scripts/marlin-evaluate.js";
 import {
+  computeMarlinChunkBoundaries,
   createMarlinFnFromEnvironment,
   extractTagsFromScene,
   loadMarlinAssetInputs,
@@ -46,6 +48,27 @@ function createSegmentsValidator() {
 
 function makeTempProject(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "video-os-marlin-stage-"));
+}
+
+function ffmpegAvailable(): boolean {
+  try {
+    execFileSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const fxit = ffmpegAvailable() ? it : it.skip;
+
+function makeVideo(filePath: string, seconds: number): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  execFileSync("ffmpeg", [
+    "-y", "-f", "lavfi",
+    "-i", `testsrc2=d=${seconds}:s=160x90:r=10`,
+    "-pix_fmt", "yuv420p",
+    filePath,
+  ], { stdio: "ignore" });
 }
 
 describe("Marlin analysis stage", () => {
@@ -221,6 +244,17 @@ describe("Marlin analysis stage", () => {
     ]);
   });
 
+  it("computes deterministic Marlin chunk boundaries with overlap", () => {
+    expect(computeMarlinChunkBoundaries(65, 30, 5)).toEqual([
+      { index: 0, startSec: 0, endSec: 30 },
+      { index: 1, startSec: 25, endSec: 55 },
+      { index: 2, startSec: 50, endSec: 65 },
+    ]);
+    expect(() => computeMarlinChunkBoundaries(65, 30, 30)).toThrow(
+      "--chunk-overlap-seconds must be smaller than --chunk-seconds",
+    );
+  });
+
   it("parses request timeout overrides from the marlin evaluation CLI", () => {
     expect(
       parseMarlinEvaluateArgs([
@@ -233,6 +267,10 @@ describe("Marlin analysis stage", () => {
         "--max-sources=2",
         "--skip-existing",
         "--caption-only",
+        "--chunk-seconds",
+        "30",
+        "--chunk-overlap-seconds=5",
+        "--max-chunks=2",
       ]),
     ).toMatchObject({
       projectDir: "projects/demo",
@@ -240,6 +278,9 @@ describe("Marlin analysis stage", () => {
       maxSources: 2,
       skipExisting: true,
       captionOnly: true,
+      chunkSeconds: 30,
+      chunkOverlapSeconds: 5,
+      maxChunks: 2,
     });
 
     expect(
@@ -512,6 +553,83 @@ describe("Marlin analysis stage", () => {
     });
     expect(artifact.items[0].events).toHaveLength(1);
   });
+
+  fxit("can checkpoint a bounded chunk from a long source asset", async () => {
+    const projectDir = makeTempProject();
+    const sourcePath = path.join(projectDir, "media/long.mp4");
+    makeVideo(sourcePath, 4);
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/assets.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            asset_id: "AST_LONG_SOURCE",
+            filename: "long.mp4",
+            source_locator: "media/long.mp4",
+          },
+        ],
+      }),
+    );
+
+    const captionInputs: string[] = [];
+    const marlinFn: MarlinFn = {
+      async caption(videoPath) {
+        captionInputs.push(videoPath);
+        return {
+          scene: `Chunk scene ${captionInputs.length}`,
+          caption: `Chunk caption ${captionInputs.length}`,
+          events: [
+            {
+              start: 0.2,
+              end: 0.7,
+              description: `Chunk event ${captionInputs.length}`,
+              confidence: 0.7,
+            },
+          ],
+        };
+      },
+      async find(_videoPath, event) {
+        return {
+          query: event,
+          span: [0.2, 0.7],
+          format_ok: true,
+          confidence: 0.5,
+        };
+      },
+    };
+
+    const outputPath = await runMarlinAnalysis({
+      projectDir,
+      projectId: "marlin-fixture",
+      sourceFiles: ["media/long.mp4"],
+      marlinFn,
+      model: MODEL,
+      queries: ["slow query"],
+      captionOnly: true,
+      chunkSeconds: 2,
+      maxChunks: 1,
+    });
+
+    const artifact = JSON.parse(fs.readFileSync(outputPath, "utf-8"));
+    expect(captionInputs).toHaveLength(1);
+    expect(captionInputs[0]).toContain(path.join(".marlin-proxy-cache", "ranges"));
+    expect(artifact.items[0]).toMatchObject({
+      asset_id: "AST_LONG_SOURCE",
+      source_path: "media/long.mp4",
+      scene: "Chunk scene 1",
+      caption: "Chunk caption 1",
+      find_results: [],
+    });
+    expect(artifact.items[0].events[0]).toMatchObject({
+      event_id: "MEV_AST_LONG_SOURCE_C0001_0001",
+      start_us: 200_000,
+      end_us: 700_000,
+      chunk_index: 0,
+    });
+  }, 30_000);
 
   it("extracts compact Marlin scene tags from common local concepts", () => {
     expect(extractTagsFromScene("A grape vineyard with rows of vines.")).toContain("grape_vineyard");

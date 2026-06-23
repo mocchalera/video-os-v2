@@ -16,7 +16,7 @@ import {
   type ContextKnowledge,
 } from "../../context-knowledge.js";
 import { atomicWriteJson, readJsonIfExists } from "./_util.js";
-import { prepareMarlinProxy } from "./marlin-proxy.js";
+import { createMarlinRangeProxy, prepareMarlinProxy, probeVideoDurationSeconds } from "./marlin-proxy.js";
 import { loadSourceMap, type MediaSourceMapEntry } from "../../media/source-map.js";
 
 export const MARLIN_EVENTS_RELATIVE_PATH = "03_analysis/marlin_events.json";
@@ -45,6 +45,9 @@ export interface MarlinAnalysisOptions {
   skipExisting?: boolean;
   maxSources?: number;
   captionOnly?: boolean;
+  chunkSeconds?: number;
+  chunkOverlapSeconds?: number;
+  maxChunks?: number;
 }
 
 interface AssetsDoc {
@@ -130,6 +133,12 @@ interface MarlinSegmentPeak {
   sourcePass: "marlin_caption" | "marlin_find";
 }
 
+interface MarlinChunkBoundary {
+  index: number;
+  startSec: number;
+  endSec: number;
+}
+
 const DEFAULT_MARLIN_QUERIES = [
   "the strongest action moment",
   "the strongest emotional reaction",
@@ -142,45 +151,46 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
   const outputPath = opts.outputPath ?? path.join(absProjectDir, MARLIN_EVENTS_RELATIVE_PATH);
   const model = opts.model ?? defaultMarlinModel();
   const queries = normalizeQueries(opts.queries);
+  const chunkingEnabled = opts.chunkSeconds !== undefined;
   const assetInputs = selectMarlinAssetInputsForRun(
     loadMarlinAssetInputs(absProjectDir, opts.sourceFiles),
     {
       outputPath,
-      skipExisting: opts.skipExisting,
+      skipExisting: opts.skipExisting && !chunkingEnabled,
       maxSources: opts.maxSources,
     },
   );
 
   const items: MarlinAssetEvents[] = [];
   for (const asset of assetInputs) {
-    // Bounded proxy: never hand an unbounded-resolution source to the
-    // worker (marlin-proxy.ts). Timestamps are unaffected — the proxy
-    // keeps the source duration, so spans map 1:1 onto the original.
-    const proxy = await prepareMarlinProxy(absProjectDir, asset.sourcePath);
-    const caption = await opts.marlinFn.caption(proxy.evaluationPath);
-    const findResults = [];
-    if (!opts.captionOnly) {
-      for (const query of queries) {
-        findResults.push(await opts.marlinFn.find(proxy.evaluationPath, query));
-      }
-    }
-    items.push(
-      normalizeMarlinAssetEvents({
-        projectId: opts.projectId,
-        assetId: asset.assetId,
-        sourcePath: toProjectRelativePath(absProjectDir, asset.sourcePath),
+    const assetItem = chunkingEnabled
+      ? await runMarlinAssetChunks({
+        opts,
+        projectDir: absProjectDir,
+        outputPath,
         model,
-        caption,
-        findResults,
-      }),
-    );
-    writeMarlinArtifactCheckpoint({
-      projectDir: absProjectDir,
-      projectId: opts.projectId,
-      outputPath,
-      model,
-      items,
-    });
+        queries,
+        asset,
+        items,
+      })
+      : await runMarlinWholeAsset({
+        opts,
+        projectDir: absProjectDir,
+        model,
+        queries,
+        asset,
+      });
+
+    if (assetItem) {
+      upsertAssetItem(items, assetItem);
+      writeMarlinArtifactCheckpoint({
+        projectDir: absProjectDir,
+        projectId: opts.projectId,
+        outputPath,
+        model,
+        items,
+      });
+    }
   }
 
   return writeMarlinArtifactCheckpoint({
@@ -190,6 +200,250 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
     model,
     items,
   });
+}
+
+async function runMarlinWholeAsset(args: {
+  opts: MarlinAnalysisOptions;
+  projectDir: string;
+  model: MarlinModelRecord;
+  queries: string[];
+  asset: MarlinAssetInput;
+}): Promise<MarlinAssetEvents> {
+  // Bounded proxy: never hand an unbounded-resolution source to the
+  // worker (marlin-proxy.ts). Timestamps are unaffected — the proxy
+  // keeps the source duration, so spans map 1:1 onto the original.
+  const proxy = await prepareMarlinProxy(args.projectDir, args.asset.sourcePath);
+  const caption = await args.opts.marlinFn.caption(proxy.evaluationPath);
+  const findResults = [];
+  if (!args.opts.captionOnly) {
+    for (const query of args.queries) {
+      findResults.push(await args.opts.marlinFn.find(proxy.evaluationPath, query));
+    }
+  }
+  return normalizeMarlinAssetEvents({
+    projectId: args.opts.projectId,
+    assetId: args.asset.assetId,
+    sourcePath: toProjectRelativePath(args.projectDir, args.asset.sourcePath),
+    model: args.model,
+    caption,
+    findResults,
+  });
+}
+
+async function runMarlinAssetChunks(args: {
+  opts: MarlinAnalysisOptions;
+  projectDir: string;
+  outputPath: string;
+  model: MarlinModelRecord;
+  queries: string[];
+  asset: MarlinAssetInput;
+  items: MarlinAssetEvents[];
+}): Promise<MarlinAssetEvents | null> {
+  const existingArtifact = readJsonIfExists<MarlinEventsArtifact>(args.outputPath);
+  let assetItem = cloneAssetItem(
+    existingArtifact?.items.find((item) => item.asset_id === args.asset.assetId),
+    args.asset,
+    args.projectDir,
+  );
+  const chunks = await marlinChunksForAsset(args.asset.sourcePath, {
+    chunkSeconds: args.opts.chunkSeconds,
+    chunkOverlapSeconds: args.opts.chunkOverlapSeconds,
+  });
+  if (chunks === null) {
+    return runMarlinWholeAsset({
+      opts: args.opts,
+      projectDir: args.projectDir,
+      model: args.model,
+      queries: args.queries,
+      asset: args.asset,
+    });
+  }
+
+  const completed = args.opts.skipExisting ? completedChunkIndices(assetItem) : new Set<number>();
+  let selectedChunks = chunks.filter((chunk) => !completed.has(chunk.index));
+  if (args.opts.maxChunks !== undefined) {
+    selectedChunks = selectedChunks.slice(0, args.opts.maxChunks);
+  }
+  if (selectedChunks.length === 0) {
+    return null;
+  }
+
+  for (const chunk of selectedChunks) {
+    const range = await createMarlinRangeProxy(
+      args.projectDir,
+      args.asset.sourcePath,
+      chunk.startSec,
+      chunk.endSec,
+    );
+    const proxy = await prepareMarlinProxy(args.projectDir, range.rangePath);
+    const caption = await args.opts.marlinFn.caption(proxy.evaluationPath);
+    const findResults = [];
+    if (!args.opts.captionOnly) {
+      for (const query of args.queries) {
+        findResults.push(await args.opts.marlinFn.find(proxy.evaluationPath, query));
+      }
+    }
+    const chunkItem = normalizeMarlinAssetEvents({
+      projectId: args.opts.projectId,
+      assetId: args.asset.assetId,
+      sourcePath: toProjectRelativePath(args.projectDir, args.asset.sourcePath),
+      model: args.model,
+      caption,
+      findResults,
+      chunkOffsetUs: Math.round(chunk.startSec * 1_000_000),
+      chunkIndex: chunk.index,
+    });
+    assetItem = mergeMarlinChunkItem(assetItem, chunkItem, chunk);
+    upsertAssetItem(args.items, assetItem);
+    writeMarlinArtifactCheckpoint({
+      projectDir: args.projectDir,
+      projectId: args.opts.projectId,
+      outputPath: args.outputPath,
+      model: args.model,
+      items: args.items,
+    });
+  }
+
+  return assetItem;
+}
+
+export function computeMarlinChunkBoundaries(
+  durationSec: number,
+  chunkSeconds: number,
+  chunkOverlapSeconds = 0,
+): MarlinChunkBoundary[] {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    return [];
+  }
+  if (!Number.isFinite(chunkSeconds) || chunkSeconds <= 0) {
+    throw new Error("--chunk-seconds requires a positive number");
+  }
+  if (!Number.isFinite(chunkOverlapSeconds) || chunkOverlapSeconds < 0) {
+    throw new Error("--chunk-overlap-seconds requires a non-negative number");
+  }
+  if (chunkOverlapSeconds >= chunkSeconds) {
+    throw new Error("--chunk-overlap-seconds must be smaller than --chunk-seconds");
+  }
+  if (durationSec <= chunkSeconds) {
+    return [{ index: 0, startSec: 0, endSec: durationSec }];
+  }
+
+  const chunks: MarlinChunkBoundary[] = [];
+  const step = chunkSeconds - chunkOverlapSeconds;
+  let startSec = 0;
+  let index = 0;
+  while (startSec < durationSec) {
+    const endSec = Math.min(durationSec, startSec + chunkSeconds);
+    chunks.push({ index, startSec, endSec });
+    if (endSec >= durationSec) break;
+    startSec += step;
+    index += 1;
+  }
+  return chunks;
+}
+
+async function marlinChunksForAsset(
+  sourcePath: string,
+  options: {
+    chunkSeconds?: number;
+    chunkOverlapSeconds?: number;
+  },
+): Promise<MarlinChunkBoundary[] | null> {
+  if (options.chunkSeconds === undefined) {
+    return null;
+  }
+  const durationSec = await probeVideoDurationSeconds(sourcePath);
+  if (durationSec === null || durationSec <= options.chunkSeconds) {
+    return null;
+  }
+  return computeMarlinChunkBoundaries(
+    durationSec,
+    options.chunkSeconds,
+    options.chunkOverlapSeconds ?? 0,
+  );
+}
+
+function cloneAssetItem(
+  item: MarlinAssetEvents | undefined,
+  asset: MarlinAssetInput,
+  projectDir: string,
+): MarlinAssetEvents {
+  if (!item) {
+    return {
+      asset_id: asset.assetId,
+      source_path: toProjectRelativePath(projectDir, asset.sourcePath),
+      scene: "",
+      events: [],
+      find_results: [],
+    };
+  }
+  return {
+    ...item,
+    events: [...item.events],
+    find_results: [...item.find_results],
+  };
+}
+
+function completedChunkIndices(item: MarlinAssetEvents): Set<number> {
+  const indices = new Set<number>();
+  for (const event of item.events) {
+    if (event.chunk_index !== undefined) {
+      indices.add(event.chunk_index);
+    }
+  }
+  return indices;
+}
+
+function mergeMarlinChunkItem(
+  existing: MarlinAssetEvents,
+  chunkItem: MarlinAssetEvents,
+  chunk: MarlinChunkBoundary,
+): MarlinAssetEvents {
+  const chunkStartUs = Math.round(chunk.startSec * 1_000_000);
+  const chunkEndUs = Math.round(chunk.endSec * 1_000_000);
+  const events = [
+    ...existing.events.filter((event) => event.chunk_index !== chunk.index),
+    ...chunkItem.events,
+  ].sort((a, b) => a.start_us - b.start_us || a.event_id.localeCompare(b.event_id));
+  const findResults = [
+    ...existing.find_results.filter((result) =>
+      result.span_start_us === null ||
+      result.span_start_us < chunkStartUs ||
+      result.span_start_us >= chunkEndUs
+    ),
+    ...chunkItem.find_results,
+  ];
+
+  return {
+    ...existing,
+    scene: appendUniqueText(existing.scene, chunkItem.scene, " / "),
+    caption: appendOptionalText(existing.caption, chunkItem.caption),
+    events,
+    find_results: findResults,
+  };
+}
+
+function appendUniqueText(existing: string | undefined, next: string | undefined, separator: string): string {
+  const trimmedExisting = existing?.trim() ?? "";
+  const trimmedNext = next?.trim() ?? "";
+  if (!trimmedNext) return trimmedExisting;
+  if (!trimmedExisting) return trimmedNext;
+  if (trimmedExisting.includes(trimmedNext)) return trimmedExisting;
+  return `${trimmedExisting}${separator}${trimmedNext}`;
+}
+
+function appendOptionalText(existing: string | undefined, next: string | undefined): string | undefined {
+  const value = appendUniqueText(existing, next, "\n");
+  return value || undefined;
+}
+
+function upsertAssetItem(items: MarlinAssetEvents[], item: MarlinAssetEvents): void {
+  const index = items.findIndex((candidate) => candidate.asset_id === item.asset_id);
+  if (index >= 0) {
+    items[index] = item;
+  } else {
+    items.push(item);
+  }
 }
 
 function writeMarlinArtifactCheckpoint(args: {

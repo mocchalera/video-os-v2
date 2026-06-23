@@ -30,7 +30,10 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         requestTimeoutMs: Int? = nil,
         maxSources: Int? = nil,
         skipExisting: Bool = false,
-        captionOnly: Bool = false
+        captionOnly: Bool = false,
+        chunkSeconds: Int? = nil,
+        chunkOverlapSeconds: Int? = nil,
+        maxChunks: Int? = nil
     ) -> [String] {
         var args = [
             "npx",
@@ -58,6 +61,18 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         if captionOnly {
             args.append("--caption-only")
         }
+        if let chunkSeconds {
+            args.append("--chunk-seconds")
+            args.append(String(chunkSeconds))
+        }
+        if let chunkOverlapSeconds {
+            args.append("--chunk-overlap-seconds")
+            args.append(String(chunkOverlapSeconds))
+        }
+        if let maxChunks {
+            args.append("--max-chunks")
+            args.append(String(maxChunks))
+        }
         args.append(contentsOf: sourceURLs.map(\.path))
         return args
     }
@@ -67,14 +82,20 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         requestTimeoutMs: Int? = nil,
         maxSources: Int? = nil,
         skipExisting: Bool = false,
-        captionOnly: Bool = false
+        captionOnly: Bool = false,
+        chunkSeconds: Int? = nil,
+        chunkOverlapSeconds: Int? = nil,
+        maxChunks: Int? = nil
     ) -> String {
         processArguments(
             mock: mock,
             requestTimeoutMs: requestTimeoutMs,
             maxSources: maxSources,
             skipExisting: skipExisting,
-            captionOnly: captionOnly
+            captionOnly: captionOnly,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds,
+            maxChunks: maxChunks
         )
             .map(shellQuote)
             .joined(separator: " ")
@@ -180,6 +201,9 @@ public enum ProjectMarlinEvaluationRunner {
         maxSources: Int? = nil,
         skipExisting: Bool = false,
         captionOnly: Bool = false,
+        chunkSeconds: Int? = nil,
+        chunkOverlapSeconds: Int? = nil,
+        maxChunks: Int? = nil,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -210,7 +234,10 @@ public enum ProjectMarlinEvaluationRunner {
             requestTimeoutMs: requestTimeoutMs,
             maxSources: maxSources,
             skipExisting: skipExisting,
-            captionOnly: captionOnly
+            captionOnly: captionOnly,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds,
+            maxChunks: maxChunks
         ))
     }
 
@@ -221,6 +248,9 @@ public enum ProjectMarlinEvaluationRunner {
         maxSources: Int? = nil,
         skipExisting: Bool = false,
         captionOnly: Bool = false,
+        chunkSeconds: Int? = nil,
+        chunkOverlapSeconds: Int? = nil,
+        maxChunks: Int? = nil,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -232,6 +262,9 @@ public enum ProjectMarlinEvaluationRunner {
             maxSources: maxSources,
             skipExisting: skipExisting,
             captionOnly: captionOnly,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds,
+            maxChunks: maxChunks,
             runtimeStatus: runtimeStatus,
             modelAccessStatus: modelAccessStatus,
             runner: runner

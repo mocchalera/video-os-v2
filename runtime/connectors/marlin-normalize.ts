@@ -84,8 +84,13 @@ export function normalizeMarlinEvent(
     return null;
   }
 
+  const eventNumber = String(index + 1).padStart(4, "0");
+  const chunkPart = chunkIndex !== undefined
+    ? `_C${String(chunkIndex + 1).padStart(4, "0")}`
+    : "";
+
   return {
-    event_id: `MEV_${sanitizeIdPart(assetId)}_${String(index + 1).padStart(4, "0")}`,
+    event_id: `MEV_${sanitizeIdPart(assetId)}${chunkPart}_${eventNumber}`,
     start_us: startUs,
     end_us: endUs,
     description,

@@ -52,12 +52,27 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
             scriptURL: root.appendingPathComponent("scripts/marlin-evaluate.ts")
         )
 
-        let args = plan.processArguments(maxSources: 1, skipExisting: true, captionOnly: true)
+        let args = plan.processArguments(
+            maxSources: 1,
+            skipExisting: true,
+            captionOnly: true,
+            chunkSeconds: 30,
+            chunkOverlapSeconds: 5,
+            maxChunks: 2
+        )
 
-        XCTAssertTrue(plan.commandLine(maxSources: 1, skipExisting: true, captionOnly: true).contains("--max-sources"))
+        XCTAssertTrue(plan.commandLine(maxSources: 1, skipExisting: true, captionOnly: true, chunkSeconds: 30).contains("--chunk-seconds"))
         XCTAssertTrue(args.contains("--skip-existing"))
         XCTAssertTrue(args.contains("--caption-only"))
-        XCTAssertEqual(Array(args.suffix(5)), ["--max-sources", "1", "--skip-existing", "--caption-only", source.path])
+        XCTAssertEqual(Array(args.suffix(11)), [
+            "--max-sources", "1",
+            "--skip-existing",
+            "--caption-only",
+            "--chunk-seconds", "30",
+            "--chunk-overlap-seconds", "5",
+            "--max-chunks", "2",
+            source.path,
+        ])
     }
 
     func testPlanReportsNoVideoSourcesWhenAssetsAreMissing() throws {
@@ -137,9 +152,20 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
             mock: true,
             maxSources: 1,
             skipExisting: true,
-            captionOnly: true
+            captionOnly: true,
+            chunkSeconds: 30,
+            chunkOverlapSeconds: 5,
+            maxChunks: 2
         ) { _, args in
-            XCTAssertEqual(Array(args.suffix(5)), ["--max-sources", "1", "--skip-existing", "--caption-only", project.appendingPathComponent("02_media/source/clip.mp4").path])
+            XCTAssertEqual(Array(args.suffix(11)), [
+                "--max-sources", "1",
+                "--skip-existing",
+                "--caption-only",
+                "--chunk-seconds", "30",
+                "--chunk-overlap-seconds", "5",
+                "--max-chunks", "2",
+                project.appendingPathComponent("02_media/source/clip.mp4").path,
+            ])
             return ProjectMarlinEvaluationRunResult(exitCode: 0, standardOutput: "ok", standardError: "")
         }
 

@@ -33,6 +33,12 @@ export interface MarlinProxyResult {
   proxied: boolean;
 }
 
+export interface MarlinRangeProxyResult {
+  rangePath: string;
+  startSec: number;
+  endSec: number;
+}
+
 function execFilePromise(
   cmd: string,
   args: string[],
@@ -76,6 +82,84 @@ async function probeWidth(sourcePath: string): Promise<number | null> {
     return Number.isFinite(width) && width > 0 ? width : null;
   } catch {
     return null;
+  }
+}
+
+export async function probeVideoDurationSeconds(sourcePath: string): Promise<number | null> {
+  try {
+    const { stdout } = await execFilePromise("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "csv=p=0",
+      sourcePath,
+    ]);
+    const duration = Number(stdout.trim().split(",")[0]);
+    return Number.isFinite(duration) && duration > 0 ? duration : null;
+  } catch {
+    return null;
+  }
+}
+
+export function marlinRangeCacheKey(sourcePath: string, size: number, mtimeMs: number, startSec: number, endSec: number): string {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify({
+      sourcePath,
+      size,
+      mtimeMs: Math.floor(mtimeMs),
+      startSec,
+      endSec,
+    }))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+export async function createMarlinRangeProxy(
+  projectDir: string,
+  sourcePath: string,
+  startSec: number,
+  endSec: number,
+): Promise<MarlinRangeProxyResult> {
+  if (!Number.isFinite(startSec) || startSec < 0) {
+    throw new Error("startSec must be a non-negative finite number");
+  }
+  if (!Number.isFinite(endSec) || endSec <= startSec) {
+    throw new Error("endSec must be greater than startSec");
+  }
+
+  const stat = fs.statSync(sourcePath);
+  const key = marlinRangeCacheKey(sourcePath, stat.size, stat.mtimeMs, startSec, endSec);
+  const rangeDir = path.join(projectDir, MARLIN_PROXY_CACHE_DIRNAME, "ranges");
+  const proxyPath = path.join(rangeDir, `${key}-${startSec.toFixed(3)}-${endSec.toFixed(3)}.mp4`);
+  if (fs.existsSync(proxyPath) && fs.statSync(proxyPath).size > 0) {
+    return { rangePath: proxyPath, startSec, endSec };
+  }
+
+  fs.mkdirSync(rangeDir, { recursive: true });
+  const tmpPath = `${proxyPath}.tmp-${process.pid}.mp4`;
+  try {
+    await execFilePromise("ffmpeg", [
+      "-y",
+      "-ss", startSec.toFixed(6),
+      "-t", (endSec - startSec).toFixed(6),
+      "-i", sourcePath,
+      "-map", "0:v:0",
+      "-an",
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-crf", "28",
+      "-pix_fmt", "yuv420p",
+      tmpPath,
+    ]);
+    fs.renameSync(tmpPath, proxyPath);
+    return { rangePath: proxyPath, startSec, endSec };
+  } catch (err) {
+    try {
+      fs.rmSync(tmpPath, { force: true });
+    } catch {
+      // ignore
+    }
+    throw err;
   }
 }
 

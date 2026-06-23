@@ -60,6 +60,28 @@ describe("Marlin event normalization", () => {
     });
   });
 
+  it("keeps chunked caption event ids unique while preserving chunk metadata", () => {
+    const event = normalizeMarlinEvent(
+      {
+        start: 1.2,
+        end: 4.2,
+        description: "The long source chunk has a usable moment.",
+      },
+      "AST_LONG",
+      0,
+      30_000_000,
+      2,
+    );
+
+    expect(event).toMatchObject({
+      event_id: "MEV_AST_LONG_C0003_0001",
+      start_us: 31_200_000,
+      end_us: 34_200_000,
+      chunk_index: 2,
+      chunk_offset_us: 30_000_000,
+    });
+  });
+
   it("drops malformed caption events that cannot affect editing safely", () => {
     expect(normalizeMarlinEvent({ start: 5, end: 4, description: "bad range" }, "AST_001", 0)).toBeNull();
     expect(normalizeMarlinEvent({ start: 1, end: 2 }, "AST_001", 0)).toBeNull();

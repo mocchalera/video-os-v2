@@ -1816,9 +1816,15 @@ struct VideoOSStudioCLI {
         let captionOnly = args.contains("--caption-only")
         let requestTimeoutMs: Int?
         let maxSources: Int?
+        let chunkSeconds: Int?
+        let chunkOverlapSeconds: Int?
+        let maxChunks: Int?
         do {
             requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
             maxSources = try marlinMaxSources(from: args)
+            chunkSeconds = try marlinChunkSeconds(from: args)
+            chunkOverlapSeconds = try marlinChunkOverlapSeconds(from: args)
+            maxChunks = try marlinMaxChunks(from: args)
         } catch {
             fputs("marlin eval next failed: \(error)\n", stderr)
             Foundation.exit(1)
@@ -1832,6 +1838,9 @@ struct VideoOSStudioCLI {
         print("maxSources: \(maxSources.map(String.init) ?? "all")")
         print("skipExisting: \(skipExisting)")
         print("captionOnly: \(captionOnly)")
+        print("chunkSeconds: \(chunkSeconds.map(String.init) ?? "-")")
+        print("chunkOverlapSeconds: \(chunkOverlapSeconds.map(String.init) ?? "-")")
+        print("maxChunks: \(maxChunks.map(String.init) ?? "all")")
         guard let item = next.item, let plan = next.runPlan else {
             print("nextProject: -")
             print("canRun: false")
@@ -1847,7 +1856,10 @@ struct VideoOSStudioCLI {
             requestTimeoutMs: requestTimeoutMs,
             maxSources: maxSources,
             skipExisting: skipExisting,
-            captionOnly: captionOnly
+            captionOnly: captionOnly,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds,
+            maxChunks: maxChunks
         )
         print("command: \(commandLine)")
         print("recommendation: \(next.recommendation)")
@@ -1874,7 +1886,10 @@ struct VideoOSStudioCLI {
                 requestTimeoutMs: requestTimeoutMs,
                 maxSources: maxSources,
                 skipExisting: skipExisting,
-                captionOnly: captionOnly
+                captionOnly: captionOnly,
+                chunkSeconds: chunkSeconds,
+                chunkOverlapSeconds: chunkOverlapSeconds,
+                maxChunks: maxChunks
             )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
@@ -1919,6 +1934,9 @@ struct VideoOSStudioCLI {
             let maxSources = try marlinMaxSources(from: args)
             let skipExisting = args.contains("--skip-existing")
             let captionOnly = args.contains("--caption-only")
+            let chunkSeconds = try marlinChunkSeconds(from: args)
+            let chunkOverlapSeconds = try marlinChunkOverlapSeconds(from: args)
+            let maxChunks = try marlinMaxChunks(from: args)
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
@@ -1931,12 +1949,18 @@ struct VideoOSStudioCLI {
             print("maxSources: \(maxSources.map(String.init) ?? "all")")
             print("skipExisting: \(skipExisting)")
             print("captionOnly: \(captionOnly)")
+            print("chunkSeconds: \(chunkSeconds.map(String.init) ?? "-")")
+            print("chunkOverlapSeconds: \(chunkOverlapSeconds.map(String.init) ?? "-")")
+            print("maxChunks: \(maxChunks.map(String.init) ?? "all")")
             print("script: \(plan.scriptURL.path)")
             let commandLine = plan.commandLine(
                 requestTimeoutMs: requestTimeoutMs,
                 maxSources: maxSources,
                 skipExisting: skipExisting,
-                captionOnly: captionOnly
+                captionOnly: captionOnly,
+                chunkSeconds: chunkSeconds,
+                chunkOverlapSeconds: chunkOverlapSeconds,
+                maxChunks: maxChunks
             )
             print("command: \(commandLine)")
             if !plan.sourceURLs.isEmpty {
@@ -1958,6 +1982,9 @@ struct VideoOSStudioCLI {
             let captionOnly = args.contains("--caption-only")
             let requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
             let maxSources = try marlinMaxSources(from: args)
+            let chunkSeconds = try marlinChunkSeconds(from: args)
+            let chunkOverlapSeconds = try marlinChunkOverlapSeconds(from: args)
+            let maxChunks = try marlinMaxChunks(from: args)
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
@@ -1970,7 +1997,10 @@ struct VideoOSStudioCLI {
                 requestTimeoutMs: requestTimeoutMs,
                 maxSources: maxSources,
                 skipExisting: skipExisting,
-                captionOnly: captionOnly
+                captionOnly: captionOnly,
+                chunkSeconds: chunkSeconds,
+                chunkOverlapSeconds: chunkOverlapSeconds,
+                maxChunks: maxChunks
             )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
@@ -2344,9 +2374,9 @@ struct VideoOSStudioCLI {
           marlin-eval-queue
                             Print runnable and blocked projects for representative Marlin-2B evaluation.
           marlin-eval-next
-                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only.
-          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only.
-          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only.
+                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only --chunk-seconds=<sec> --chunk-overlap-seconds=<sec> --max-chunks=<n>.
+          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only --chunk-seconds=<sec> --chunk-overlap-seconds=<sec> --max-chunks=<n>.
+          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only --chunk-seconds=<sec> --chunk-overlap-seconds=<sec> --max-chunks=<n>.
           playback-contract-status
                             Print whether preview-manifest.json matches the current timeline (approval-grade playback).
           render-status     Print final render/package artifact readiness.
@@ -2444,6 +2474,42 @@ struct VideoOSStudioCLI {
         return value
     }
 
+    private static func marlinChunkSeconds(from args: [String]) throws -> Int? {
+        try positiveIntegerOption(args, name: "--chunk-seconds")
+    }
+
+    private static func marlinChunkOverlapSeconds(from args: [String]) throws -> Int? {
+        guard let raw = try valueOption(
+            args,
+            names: ["--chunk-overlap-seconds"],
+            errorLabel: "--chunk-overlap-seconds"
+        ) else {
+            return nil
+        }
+        guard let value = Int(raw), value >= 0 else {
+            throw CLIError.message("--chunk-overlap-seconds requires a non-negative integer value")
+        }
+        return value
+    }
+
+    private static func marlinMaxChunks(from args: [String]) throws -> Int? {
+        try positiveIntegerOption(args, name: "--max-chunks")
+    }
+
+    private static func positiveIntegerOption(_ args: [String], name: String) throws -> Int? {
+        guard let raw = try valueOption(
+            args,
+            names: [name],
+            errorLabel: name
+        ) else {
+            return nil
+        }
+        guard let value = Int(raw), value > 0 else {
+            throw CLIError.message("\(name) requires a positive integer value")
+        }
+        return value
+    }
+
     private static func valueOption(_ args: [String], names: Set<String>, errorLabel: String) throws -> String? {
         for name in names {
             let prefix = "\(name)="
@@ -2461,7 +2527,14 @@ struct VideoOSStudioCLI {
     }
 
     private static func marlinEvaluationProjectArgs(from args: [String]) -> [String] {
-        positionalArguments(from: args, valueOptions: ["--request-timeout-ms", "--timeout-ms", "--max-sources"])
+        positionalArguments(from: args, valueOptions: [
+            "--request-timeout-ms",
+            "--timeout-ms",
+            "--max-sources",
+            "--chunk-seconds",
+            "--chunk-overlap-seconds",
+            "--max-chunks",
+        ])
     }
 
     private static func positionalArguments(from args: [String], valueOptions: Set<String>) -> [String] {
