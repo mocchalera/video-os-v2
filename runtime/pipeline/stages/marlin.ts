@@ -17,6 +17,7 @@ import {
 } from "../../context-knowledge.js";
 import { atomicWriteJson, readJsonIfExists } from "./_util.js";
 import { prepareMarlinProxy } from "./marlin-proxy.js";
+import { loadSourceMap, type MediaSourceMapEntry } from "../../media/source-map.js";
 
 export const MARLIN_EVENTS_RELATIVE_PATH = "03_analysis/marlin_events.json";
 export const MARLIN_REPORTER_METHOD = "marlin_reporter";
@@ -348,6 +349,7 @@ export function loadMarlinAssetInputs(projectDir: string, sourceFiles: string[])
   const assetsDoc = readJsonIfExists<AssetsDoc>(assetsPath);
   const sourceCandidates = sourceFiles.map((source) => path.resolve(absProjectDir, source));
   const items = Array.isArray(assetsDoc?.items) ? assetsDoc.items : [];
+  const sourceMap = loadSourceMap(absProjectDir);
 
   if (items.length === 0) {
     return sourceCandidates.map((sourcePath, index) => ({
@@ -360,7 +362,13 @@ export function loadMarlinAssetInputs(projectDir: string, sourceFiles: string[])
     .filter((item): item is AssetDocItem & { asset_id: string } => Boolean(item.asset_id))
     .map((item, index) => ({
       assetId: item.asset_id,
-      sourcePath: resolveAssetSourcePath(absProjectDir, item, sourceCandidates[index], sourceCandidates),
+      sourcePath: resolveAssetSourcePath(
+        absProjectDir,
+        item,
+        sourceMap.entryMap.get(item.asset_id),
+        sourceCandidates[index],
+        sourceCandidates,
+      ),
     }));
 
   if (sourceCandidates.length === 0) {
@@ -702,6 +710,7 @@ function resolveMarlinPolicy(projectDir: string, repoRoot?: string): MarlinPolic
 function resolveAssetSourcePath(
   projectDir: string,
   item: AssetDocItem,
+  sourceMapEntry: MediaSourceMapEntry | undefined,
   indexedFallback: string | undefined,
   sourceCandidates: string[],
 ): string {
@@ -709,6 +718,16 @@ function resolveAssetSourcePath(
     return path.isAbsolute(item.source_locator)
       ? item.source_locator
       : path.resolve(projectDir, item.source_locator);
+  }
+
+  if (sourceMapEntry?.local_source_path) {
+    return path.resolve(sourceMapEntry.local_source_path);
+  }
+  if (sourceMapEntry?.source_locator) {
+    return path.resolve(sourceMapEntry.source_locator);
+  }
+  if (sourceMapEntry?.link_path) {
+    return path.resolve(projectDir, sourceMapEntry.link_path);
   }
 
   if (item.filename) {

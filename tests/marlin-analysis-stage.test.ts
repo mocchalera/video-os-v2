@@ -78,6 +78,63 @@ describe("Marlin analysis stage", () => {
     ]);
   });
 
+  it("loads asset inputs from source_map entries when assets omit source locators", () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, "02_media"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/assets.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            asset_id: "AST_A",
+            filename: "C0004.MP4",
+          },
+          {
+            asset_id: "AST_B",
+            filename: "D5053.MP4",
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "02_media/source_map.json"),
+      JSON.stringify({
+        version: "1",
+        project_id: "marlin-fixture",
+        media_dir: "02_media",
+        generated_at: "2026-06-23T00:00:00.000Z",
+        items: [
+          {
+            asset_id: "AST_A",
+            source_locator: "04-jan-clip.mp4",
+            local_source_path: "04-jan-clip.mp4",
+            link_path: "02_media/04-jan-clip.mp4",
+            kind: "asset",
+          },
+          {
+            asset_id: "AST_B",
+            source_locator: "08-jun-a-man-and-a.mp4",
+            local_source_path: "08-jun-a-man-and-a.mp4",
+            link_path: "02_media/08-jun-a-man-and-a.mp4",
+            kind: "asset",
+          },
+        ],
+      }),
+    );
+
+    const inputs = loadMarlinAssetInputs(projectDir, ["02_media/08-jun-a-man-and-a.mp4"]);
+
+    expect(inputs).toEqual([
+      {
+        assetId: "AST_B",
+        sourcePath: path.join(projectDir, "02_media/08-jun-a-man-and-a.mp4"),
+      },
+    ]);
+  });
+
   it("limits asset inputs to explicitly provided source files when they match assets", () => {
     const projectDir = makeTempProject();
     fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
