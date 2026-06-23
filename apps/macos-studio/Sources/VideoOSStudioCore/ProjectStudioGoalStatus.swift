@@ -259,10 +259,22 @@ public enum ProjectStudioGoalStatusReader {
 
     private static func marlinDefaultCommand(repositoryRoot: URL) -> String {
         let queue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: repositoryRoot)
-        if queue.items.contains(where: { $0.canRunEvaluation && !$0.canPreferMarlin }) {
+        if queue.items.contains(where: { $0.canRunDefaultEvaluation && !$0.canPreferMarlin }) {
             return marlinEvaluationNextCommand()
         }
+        if let relink = queue.items.first(where: { $0.hasNoUnevaluatedReadySources && $0.mediaMissingCount > 0 })
+            ?? queue.items.first(where: { !$0.canPreferMarlin && $0.mediaMissingCount > 0 }) {
+            return marlinRelinkCommand(for: relink)
+        }
         return swiftCommand("marlin-representative-plan")
+    }
+
+    private static func marlinRelinkCommand(for item: ProjectMarlinEvaluationQueueItem) -> String {
+        let sourceMap = ProjectMediaSourceMapStatusReader.status(projectURL: item.projectURL)
+        if sourceMap.exists, !ProjectMediaRelinker.suggestedSearchRoots(projectURL: item.projectURL).isEmpty {
+            return swiftCommand("media-relink-plan", item.id, "--from-source-map")
+        }
+        return swiftCommand("media-relink-plan", item.id, "<search-root>")
     }
 
     private static func swiftCommand(_ parts: String...) -> String {

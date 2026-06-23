@@ -84,6 +84,24 @@ final class ProjectStudioReadinessStatusTests: XCTestCase {
         XCTAssertEqual(status.actionQueue.first { $0.id == "marlin-default" }?.command, expectedBoundedMarlinNextCommand())
     }
 
+    func testMarlinDefaultActionRoutesExhaustedSkipExistingProjectToRelink() throws {
+        let (root, project) = try temporaryStudioProject("videoos-studio-marlin-relink")
+        try writeStudioFixture(
+            root: root,
+            project: project,
+            currentState: "approved",
+            reviewStatus: "approved",
+            patchOperations: 0
+        )
+        try writeExhaustedMarlinProject(root: root, id: "blocked-marlin")
+
+        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+
+        let expected = "swift run videoos-studio-cli media-relink-plan blocked-marlin --from-source-map"
+        XCTAssertEqual(status.marlinDefaultNextCommand, expected)
+        XCTAssertEqual(status.actionQueue.first { $0.id == "marlin-default" }?.command, expected)
+    }
+
     func testStatusRoutesExistingMarlinArtifactsToMaterialization() throws {
         let (root, project) = try temporaryStudioProject("videoos-studio-marlin-materialize")
         try writeStudioFixture(
@@ -219,6 +237,137 @@ private func writeRunnableMarlinProject(root: URL, id: String) throws {
       ]
     }
     """.write(to: analysisDir.appendingPathComponent("segments.json"), atomically: true, encoding: .utf8)
+}
+
+private func writeExhaustedMarlinProject(root: URL, id: String) throws {
+    let project = root.appendingPathComponent("projects/\(id)")
+    let analysisDir = project.appendingPathComponent("03_analysis")
+    let mediaDir = project.appendingPathComponent("02_media")
+    let sourceDir = mediaDir.appendingPathComponent("source")
+    try FileManager.default.createDirectory(at: analysisDir, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+    try Data().write(to: sourceDir.appendingPathComponent("ready.mov"))
+
+    try """
+    {
+      "project_id": "\(id)",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "asset_id": "AST_READY",
+          "filename": "ready.mov",
+          "role_guess": "interview",
+          "duration_us": 1000000,
+          "has_transcript": false,
+          "source_locator": "02_media/source/ready.mov"
+        },
+        {
+          "asset_id": "AST_MISSING",
+          "filename": "missing.mov",
+          "role_guess": "b-roll",
+          "duration_us": 1000000,
+          "has_transcript": false,
+          "source_locator": "/Volumes/Offline/missing.mov"
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("assets.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "project_id": "\(id)",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "segment_id": "SEG_READY",
+          "asset_id": "AST_READY",
+          "src_in_us": 0,
+          "src_out_us": 1000000,
+          "summary": "ready source already evaluated",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": [],
+          "peak_analysis": {
+            "selected_peak_us": 500000,
+            "confidence": 0.95,
+            "support_signals": {
+              "fused_peak_score": 0.95
+            },
+            "provenance": {
+              "precision_mode": "action_only",
+              "fusion_version": "peak-fusion-v1"
+            }
+          }
+        },
+        {
+          "segment_id": "SEG_MISSING",
+          "asset_id": "AST_MISSING",
+          "src_in_us": 0,
+          "src_out_us": 1000000,
+          "summary": "missing source",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("segments.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "project_id": "\(id)",
+      "artifact_version": "marlin-events-v1",
+      "model": {
+        "provider": "marlin",
+        "model_alias": "NemoStation/Marlin-2B",
+        "model_snapshot": "test",
+        "connector_version": "marlin-local-v1"
+      },
+      "items": [
+        {
+          "asset_id": "AST_READY",
+          "source_path": "02_media/source/ready.mov",
+          "scene": "ready",
+          "caption": "ready source",
+          "events": [
+            {
+              "event_id": "MEV_READY",
+              "start_us": 0,
+              "end_us": 1000000,
+              "description": "ready source",
+              "confidence": 0.9,
+              "source_pass": "caption"
+            }
+          ],
+          "find_results": []
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("marlin_events.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "version": "1",
+      "project_id": "\(id)",
+      "media_dir": "02_media",
+      "items": [
+        {
+          "asset_id": "AST_READY",
+          "source_locator": "02_media/source/ready.mov",
+          "local_source_path": "02_media/source/ready.mov",
+          "link_path": "02_media/relinked/AST_READY-ready.mov"
+        },
+        {
+          "asset_id": "AST_MISSING",
+          "source_locator": "/Volumes/Offline/missing.mov",
+          "local_source_path": "/Volumes/Offline/missing.mov",
+          "link_path": "02_media/relinked/AST_MISSING-missing.mov"
+        }
+      ]
+    }
+    """.write(to: mediaDir.appendingPathComponent("source_map.json"), atomically: true, encoding: .utf8)
 }
 
 private func writeStudioAnalysisFixture(project: URL) throws {

@@ -396,18 +396,29 @@ public enum ProjectMarlinEvaluationRunPlanner {
 }
 
 public enum ProjectMarlinEvaluationNextPlanner {
-    public static func plan(repositoryRoot: URL) -> ProjectMarlinEvaluationNextPlan {
+    public static func plan(
+        repositoryRoot: URL,
+        skipExisting: Bool = false,
+        chunkSeconds: Int? = nil,
+        chunkOverlapSeconds: Int? = nil
+    ) -> ProjectMarlinEvaluationNextPlan {
         let queue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: repositoryRoot)
-        guard let item = queue.items.first(where: { $0.canRunEvaluation && !$0.canPreferMarlin && !$0.needsSegmentMaterialization }) else {
-            return ProjectMarlinEvaluationNextPlan(queue: queue, item: nil, runPlan: nil)
+        for item in queue.items where item.canRunEvaluation && !item.canPreferMarlin && !item.needsSegmentMaterialization {
+            let assets = try? AnalysisAssetDocument.load(from: item.projectURL.appendingPathComponent("03_analysis/assets.json"))
+            let runPlan = ProjectMarlinEvaluationRunPlanner.plan(
+                repositoryRoot: repositoryRoot,
+                projectURL: item.projectURL,
+                assets: assets
+            )
+            if runPlan.selectedSourceCount(
+                skipExisting: skipExisting,
+                chunkSeconds: chunkSeconds,
+                chunkOverlapSeconds: chunkOverlapSeconds
+            ) > 0 {
+                return ProjectMarlinEvaluationNextPlan(queue: queue, item: item, runPlan: runPlan)
+            }
         }
-        let assets = try? AnalysisAssetDocument.load(from: item.projectURL.appendingPathComponent("03_analysis/assets.json"))
-        let runPlan = ProjectMarlinEvaluationRunPlanner.plan(
-            repositoryRoot: repositoryRoot,
-            projectURL: item.projectURL,
-            assets: assets
-        )
-        return ProjectMarlinEvaluationNextPlan(queue: queue, item: item, runPlan: runPlan)
+        return ProjectMarlinEvaluationNextPlan(queue: queue, item: nil, runPlan: nil)
     }
 }
 

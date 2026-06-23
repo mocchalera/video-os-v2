@@ -7,6 +7,8 @@ public struct ProjectMarlinRepresentativeProject: Identifiable, Equatable, Senda
     public let title: String
     public let format: String
     public let canRunEvaluation: Bool
+    public let canRunDefaultEvaluation: Bool
+    public let hasNoUnevaluatedReadySources: Bool
     public let canPreferMarlin: Bool
     public let mediaMissingCount: Int
     public let sourceCount: Int
@@ -18,8 +20,9 @@ public struct ProjectMarlinRepresentativeProject: Identifiable, Equatable, Senda
 
     public var readinessLabel: String {
         if canPreferMarlin { return "candidate" }
-        if canRunEvaluation { return "ready to evaluate" }
+        if canRunDefaultEvaluation { return "ready to evaluate" }
         if mediaMissingCount > 0 { return "relink media" }
+        if canRunEvaluation { return "no unevaluated sources" }
         if sourceCount == 0 { return "no video sources" }
         return "not ready"
     }
@@ -78,8 +81,14 @@ public struct ProjectMarlinRepresentativePlan: Equatable, Sendable {
         if let bucket = buckets.first(where: { !$0.isCovered }) {
             return "Import or relink a \(bucket.label) project before promoting Marlin-2B."
         }
-        if let runnable = projects.first(where: { $0.canRunEvaluation && !$0.canPreferMarlin }) {
+        if let runnable = projects.first(where: { $0.canRunDefaultEvaluation && !$0.canPreferMarlin }) {
             return "Run marlin-eval-run \(runnable.id) to collect evidence for \(runnable.tagLabel)."
+        }
+        if let exhausted = projects.first(where: { $0.hasNoUnevaluatedReadySources && $0.mediaMissingCount > 0 }) {
+            return "Relink media for \(exhausted.id) so bounded skip-existing Marlin evaluation can continue."
+        }
+        if let blocked = projects.first(where: { !$0.canPreferMarlin && $0.mediaMissingCount > 0 }) {
+            return "Relink media for \(blocked.id) so bounded skip-existing Marlin evaluation can continue."
         }
         return "Review marlin-preference-status before changing the VLM default."
     }
@@ -116,6 +125,8 @@ public enum ProjectMarlinRepresentativePlanReader {
                 title: intent.displayTitle,
                 format: intent.format ?? "-",
                 canRunEvaluation: item.canRunEvaluation,
+                canRunDefaultEvaluation: item.canRunDefaultEvaluation,
+                hasNoUnevaluatedReadySources: item.hasNoUnevaluatedReadySources,
                 canPreferMarlin: item.canPreferMarlin,
                 mediaMissingCount: item.mediaMissingCount,
                 sourceCount: item.sourceCount,
@@ -130,9 +141,9 @@ public enum ProjectMarlinRepresentativePlanReader {
                 label: bucket.label,
                 rationale: bucket.rationale,
                 projectCount: matches.count,
-                runnableProjectCount: matches.filter(\.canRunEvaluation).count,
+                runnableProjectCount: matches.filter(\.canRunDefaultEvaluation).count,
                 candidateProjectCount: matches.filter(\.canPreferMarlin).count,
-                blockedProjectCount: matches.filter { !$0.canRunEvaluation && !$0.canPreferMarlin }.count
+                blockedProjectCount: matches.filter { !$0.canRunDefaultEvaluation && !$0.canPreferMarlin }.count
             )
         }
 
@@ -144,8 +155,8 @@ public enum ProjectMarlinRepresentativePlanReader {
     }
 
     private static func projectSort(_ lhs: ProjectMarlinRepresentativeProject, _ rhs: ProjectMarlinRepresentativeProject) -> Bool {
-        let leftRank = lhs.canPreferMarlin ? 0 : (lhs.canRunEvaluation ? 1 : 2)
-        let rightRank = rhs.canPreferMarlin ? 0 : (rhs.canRunEvaluation ? 1 : 2)
+        let leftRank = lhs.canPreferMarlin ? 0 : (lhs.canRunDefaultEvaluation ? 1 : 2)
+        let rightRank = rhs.canPreferMarlin ? 0 : (rhs.canRunDefaultEvaluation ? 1 : 2)
         if leftRank != rightRank { return leftRank < rightRank }
         if lhs.tags.count != rhs.tags.count { return lhs.tags.count > rhs.tags.count }
         return lhs.id < rhs.id

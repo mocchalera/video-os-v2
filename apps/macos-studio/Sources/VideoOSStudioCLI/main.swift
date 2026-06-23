@@ -1808,7 +1808,7 @@ struct VideoOSStudioCLI {
         print("mediaBlockedProjects: \(queue.mediaBlockedProjectCount)")
         print("nextAction: \(queue.nextAction)")
         for item in queue.items {
-            print("project.\(item.id): \(item.priorityLabel) | run=\(item.canRunEvaluation) | sources=\(item.sourceCount) skipped=\(item.skippedSourceCount) | mediaMissing=\(item.mediaMissingCount) proxyNeeded=\(item.proxyNeededCount) | marlin=\(item.evaluationReadinessLabel) | coverage=\(item.coveredSegmentCount)/\(item.segmentCount)")
+            print("project.\(item.id): \(item.priorityLabel) | run=\(item.canRunEvaluation) defaultSelected=\(item.defaultSelectedSourceCount) | sources=\(item.sourceCount) skipped=\(item.skippedSourceCount) | mediaMissing=\(item.mediaMissingCount) proxyNeeded=\(item.proxyNeededCount) | marlin=\(item.evaluationReadinessLabel) | coverage=\(item.coveredSegmentCount)/\(item.segmentCount)")
             print("  sourceMap: \(item.sourceMapReadinessLabel)")
             print("  recommendation: \(item.recommendation)")
         }
@@ -1834,7 +1834,12 @@ struct VideoOSStudioCLI {
             fputs("marlin eval next failed: \(error)\n", stderr)
             Foundation.exit(1)
         }
-        let next = ProjectMarlinEvaluationNextPlanner.plan(repositoryRoot: root)
+        let next = ProjectMarlinEvaluationNextPlanner.plan(
+            repositoryRoot: root,
+            skipExisting: skipExisting,
+            chunkSeconds: chunkSeconds,
+            chunkOverlapSeconds: chunkOverlapSeconds
+        )
         print("queue: \(next.queue.readinessLabel)")
         print("execute: \(execute)")
         print("mock: \(mock)")
