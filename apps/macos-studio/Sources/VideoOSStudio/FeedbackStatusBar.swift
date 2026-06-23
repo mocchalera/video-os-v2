@@ -17,17 +17,22 @@ struct FeedbackStatusBar: View {
         HStack(spacing: 14) {
             Label("\(feedbackSession.pendingOps.count) changes pending", systemImage: "slider.horizontal.3")
                 .foregroundStyle(feedbackSession.isDirty ? Color.primary : Color.secondary)
+                .accessibilityIdentifier("FeedbackStatus.PendingCount")
             Label("\(feedbackSession.approvedClipIDs.count) approved", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(feedbackSession.approvedClipIDs.isEmpty ? Color.secondary : Color.green)
+                .accessibilityIdentifier("FeedbackStatus.ApprovedCount")
             Label("\(feedbackSession.rejectedClipIDs.count) rejected", systemImage: "xmark.circle.fill")
                 .foregroundStyle(feedbackSession.rejectedClipIDs.isEmpty ? Color.secondary : Color.red)
+                .accessibilityIdentifier("FeedbackStatus.RejectedCount")
             Label("\(feedbackSession.pendingSwapCount) swapped", systemImage: "arrow.triangle.2.circlepath")
                 .foregroundStyle(feedbackSession.pendingSwapCount == 0 ? Color.secondary : Color.blue)
+                .accessibilityIdentifier("FeedbackStatus.SwappedCount")
 
             if !conflicts.isEmpty {
                 Label("\(conflicts.count) conflict", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .help(conflicts.map(\.message).joined(separator: "\n"))
+                    .accessibilityIdentifier("FeedbackStatus.ConflictCount")
             }
 
             if !statusMessage.isEmpty {
@@ -37,6 +42,7 @@ struct FeedbackStatusBar: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .accessibilityIdentifier("FeedbackStatus.Message")
             }
 
             Spacer(minLength: 12)
@@ -45,17 +51,20 @@ struct FeedbackStatusBar: View {
                 Label("Apply & Preview", systemImage: "play.rectangle")
             }
             .disabled(!feedbackSession.isDirty || !conflicts.isEmpty)
+            .accessibilityIdentifier("FeedbackStatus.ApplyAndPreviewButton")
 
             Button(action: onPromote) {
                 Label("Promote", systemImage: "arrow.up.doc")
             }
             .disabled(!canPromote)
             .help(canPromote ? "Promote the latest applied Studio patch to planning artifacts." : "Promote is available after a replace/remove Studio patch has been applied.")
+            .accessibilityIdentifier("FeedbackStatus.PromoteButton")
 
             Button(action: onDiscard) {
                 Label("Discard", systemImage: "trash")
             }
             .disabled(!feedbackSession.isDirty)
+            .accessibilityIdentifier("FeedbackStatus.DiscardButton")
         }
         .font(.caption)
         .controlSize(.small)

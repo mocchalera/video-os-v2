@@ -187,6 +187,7 @@ struct TimelineMarkerChip: View {
         }
         .foregroundStyle(color)
         .help("\(marker.kind.rawValue) / \(marker.timecode) / \(marker.label)")
+        .accessibilityIdentifier("Timeline.Marker.\(timelineAccessibilitySuffix(marker.id))")
     }
 
     private var color: Color {
@@ -266,6 +267,7 @@ struct TimelineTrackRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(accessibilityLabel(for: clip))
+                    .accessibilityIdentifier("Timeline.Clip.\(timelineAccessibilitySuffix(track.id)).\(timelineAccessibilitySuffix(clip.id))")
                     .frame(
                         width: clipWidth(clip),
                         height: 28
@@ -276,21 +278,26 @@ struct TimelineTrackRow: View {
                         Button("Approve") {
                             feedbackSession.approvedClipIDs.insert(clip.id)
                         }
+                        .accessibilityIdentifier("Timeline.ContextMenu.Approve.\(timelineAccessibilitySuffix(track.id)).\(timelineAccessibilitySuffix(clip.id))")
                         Button("Reject") {
                             feedbackSession.addOp(.removeSegment(target_clip_id: clip.id, reason: "Rejected by operator"))
                             feedbackSession.rejectedClipIDs.insert(clip.id)
                         }
+                        .accessibilityIdentifier("Timeline.ContextMenu.Reject.\(timelineAccessibilitySuffix(track.id)).\(timelineAccessibilitySuffix(clip.id))")
                         if track.kind == .video || track.kind == .audio {
                             Button("Swap...") {
                                 onOpenSwapBrowser(clip)
                             }
+                            .accessibilityIdentifier("Timeline.ContextMenu.Swap.\(timelineAccessibilitySuffix(track.id)).\(timelineAccessibilitySuffix(clip.id))")
                             Button("Search for replacement...") {
                                 onOpenFootageSearch(clip)
                             }
+                            .accessibilityIdentifier("Timeline.ContextMenu.SearchReplacement.\(timelineAccessibilitySuffix(track.id)).\(timelineAccessibilitySuffix(clip.id))")
                         }
                         Button("Remove") {
                             feedbackSession.addOp(.removeSegment(target_clip_id: clip.id, reason: "Removed by operator"))
                         }
+                        .accessibilityIdentifier("Timeline.ContextMenu.Remove.\(timelineAccessibilitySuffix(track.id)).\(timelineAccessibilitySuffix(clip.id))")
                     }
                 }
                 Rectangle()
@@ -370,6 +377,7 @@ struct TimelineWaveformOverlay: View {
         .offset(x: offset, y: 4)
         .allowsHitTesting(false)
         .help("waveform: \(waveform.assetID) / \(waveform.resolvedFrom)")
+        .accessibilityIdentifier("Timeline.Waveform.\(timelineAccessibilitySuffix(waveform.trackID)).\(timelineAccessibilitySuffix(waveform.clipID))")
     }
 
     private var offset: CGFloat {
@@ -410,6 +418,7 @@ struct TimelineAudioCueOverlay: View {
             }
         }
         .help("\(cue.kind.rawValue): \(cue.label)\(cue.detail.map { " / \($0)" } ?? "")")
+        .accessibilityIdentifier("Timeline.AudioCue.\(timelineAccessibilitySuffix(cue.id))")
     }
 
     private var width: CGFloat {
@@ -573,4 +582,13 @@ struct TimelineEmptyState: View {
         }
         .frame(minHeight: 120)
     }
+}
+
+private func timelineAccessibilitySuffix(_ text: String) -> String {
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+    let mapped = text.unicodeScalars.map { scalar -> String in
+        allowed.contains(scalar) ? String(scalar) : "-"
+    }.joined()
+    let collapsed = mapped.split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+    return collapsed.isEmpty ? "item" : collapsed
 }
