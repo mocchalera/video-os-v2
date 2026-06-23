@@ -54,6 +54,60 @@ function tableRows(tables, sheetName) {
   }));
 }
 
+function idNumber(id, prefix) {
+  const match = String(id ?? "").match(new RegExp(`^${prefix}-(\\d{3})$`));
+  assert(match, `Invalid ${prefix} id: ${id}`);
+  return Number(match[1]);
+}
+
+function assertContinuousIDs(rows, column, prefix, expectedMax) {
+  const ids = rows.map((row) => String(row[column] ?? ""));
+  const counts = new Map();
+  for (const id of ids) {
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const duplicates = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([id, count]) => `${id}x${count}`);
+  assert(duplicates.length === 0, `${prefix} duplicate ids: ${duplicates.join(", ")}`);
+
+  const numbers = ids.map((id) => idNumber(id, prefix)).sort((a, b) => a - b);
+  assert(numbers.length === expectedMax, `Expected ${expectedMax} ${prefix} ids, got ${numbers.length}`);
+  for (let index = 0; index < expectedMax; index += 1) {
+    assert(numbers[index] === index + 1, `${prefix} ids must be continuous; expected ${index + 1}, got ${numbers[index]}`);
+  }
+}
+
+function expandUSReferences(value, storyIDs) {
+  const text = String(value ?? "").trim();
+  if (text === "All" || text === "General" || text === "All macOS native stories" || text.startsWith("REQ-")) {
+    return [];
+  }
+  const refs = [];
+  for (const part of text.split("/")) {
+    const token = part.trim();
+    if (!token || token.startsWith("REQ-")) {
+      continue;
+    }
+    const range = token.match(/^US-(\d{3})-US-(\d{3})$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      assert(start <= end, `Invalid descending US range: ${token}`);
+      for (let value = start; value <= end; value += 1) {
+        refs.push(`US-${String(value).padStart(3, "0")}`);
+      }
+      continue;
+    }
+    assert(/^US-\d{3}$/.test(token), `Invalid story reference: ${token}`);
+    refs.push(token);
+  }
+  for (const ref of refs) {
+    assert(storyIDs.has(ref), `Reference points to missing story: ${ref}`);
+  }
+  return refs;
+}
+
 function verifyTrackerSemantics(tables) {
   const summary = tableRows(tables, "Summary");
   const stories = tableRows(tables, "Stories");
@@ -65,6 +119,17 @@ function verifyTrackerSemantics(tables) {
   const summaryValue = (metric) => summary.find((row) => row.Metric === metric)?.Value;
   assert(summaryValue("Stories tracked") === stories.length, "Summary Stories tracked does not match Stories rows");
   assert(summaryValue("Issues tracked") === issues.length, "Summary Issues tracked does not match Issues rows");
+  assertContinuousIDs(stories, "Story ID", "US", 66);
+  assertContinuousIDs(issues, "Issue ID", "ISS", 84);
+  assertContinuousIDs(testLog, "Log ID", "TL", 267);
+
+  const storyIDs = new Set(stories.map((row) => row["Story ID"]));
+  for (const issue of issues) {
+    expandUSReferences(issue["Story ID"], storyIDs);
+  }
+  for (const log of testLog) {
+    expandUSReferences(log["Story ID"], storyIDs);
+  }
 
   const unresolvedIssues = issues.filter((row) => !String(row.Status ?? "").startsWith("Fixed"));
   assert(
@@ -100,7 +165,7 @@ function verifyTrackerSemantics(tables) {
     "REQ-005 must identify ISS-050 as the only non-Fixed issue",
   );
 
-  assert(testLog.length === 266, `Expected 266 Test Log rows, got ${testLog.length}`);
+  assert(testLog.length === 267, `Expected 267 Test Log rows, got ${testLog.length}`);
   const latestLog = testLog.find((row) => row["Log ID"] === "TL-265");
   assert(latestLog, "Missing TL-265 test log entry");
   assert(
@@ -112,6 +177,12 @@ function verifyTrackerSemantics(tables) {
   assert(
     String(semanticVerifierLog.Result).includes("semantic verification pass"),
     "TL-266 result must record the tracker semantic verifier pass",
+  );
+  const structureVerifierLog = testLog.find((row) => row["Log ID"] === "TL-267");
+  assert(structureVerifierLog, "Missing TL-267 structure verifier test log entry");
+  assert(
+    String(structureVerifierLog.Result).includes("Tracker structure verification pass"),
+    "TL-267 result must record the tracker structure verifier pass",
   );
 
   const storyByID = new Map(stories.map((row) => [row["Story ID"], row]));
