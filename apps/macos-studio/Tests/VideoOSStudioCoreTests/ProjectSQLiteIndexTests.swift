@@ -53,6 +53,26 @@ final class ProjectSQLiteIndexTests: XCTestCase {
         XCTAssertEqual(try ProjectSQLiteIndex.search(projectURL: root, query: "   "), [])
     }
 
+    func testRebuildScopesTranscriptItemIDsByTranscriptRef() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-sqlite-index-transcript-duplicates-\(UUID().uuidString)")
+        let analysisDir = root.appendingPathComponent("03_analysis")
+        let transcriptDir = analysisDir.appendingPathComponent("transcripts")
+        try FileManager.default.createDirectory(at: transcriptDir, withIntermediateDirectories: true)
+        try sqliteFixtureDuplicateTranscriptAssets.write(to: analysisDir.appendingPathComponent("assets.json"), atomically: true, encoding: .utf8)
+        try sqliteFixtureDuplicateTranscriptA.write(to: transcriptDir.appendingPathComponent("TR_AST_A.json"), atomically: true, encoding: .utf8)
+        try sqliteFixtureDuplicateTranscriptB.write(to: transcriptDir.appendingPathComponent("TR_AST_B.json"), atomically: true, encoding: .utf8)
+
+        let summary = try ProjectSQLiteIndex.rebuild(projectURL: root)
+        let results = try ProjectSQLiteIndex.search(projectURL: root, query: "shared opening line")
+
+        XCTAssertEqual(summary.assetCount, 2)
+        XCTAssertEqual(summary.transcriptItemCount, 2)
+        XCTAssertEqual(results.filter { $0.kind == "transcript" }.count, 2)
+        XCTAssertTrue(results.contains { $0.assetID == "AST_A" })
+        XCTAssertTrue(results.contains { $0.assetID == "AST_B" })
+    }
+
     func testRebuildScopesMarlinFindResultIDsByAsset() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-sqlite-index-marlin-duplicate-finds-\(UUID().uuidString)")
@@ -69,6 +89,65 @@ final class ProjectSQLiteIndexTests: XCTestCase {
         XCTAssertTrue(results.contains { $0.assetID == "AST_GREEN" })
     }
 }
+
+private let sqliteFixtureDuplicateTranscriptAssets = """
+{
+  "project_id": "demo",
+  "artifact_version": "analysis-v1",
+  "items": [
+    {
+      "asset_id": "AST_A",
+      "filename": "a.mov",
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_A",
+      "quality_flags": [],
+      "tags": []
+    },
+    {
+      "asset_id": "AST_B",
+      "filename": "b.mov",
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_B",
+      "quality_flags": [],
+      "tags": []
+    }
+  ]
+}
+"""
+
+private let sqliteFixtureDuplicateTranscriptA = """
+{
+  "project_id": "demo",
+  "artifact_version": "analysis-v1",
+  "transcript_ref": "TR_AST_A",
+  "asset_id": "AST_A",
+  "items": [
+    {
+      "speaker": "S1",
+      "start_us": 0,
+      "end_us": 1000000,
+      "text": "shared opening line from the first asset"
+    }
+  ]
+}
+"""
+
+private let sqliteFixtureDuplicateTranscriptB = """
+{
+  "project_id": "demo",
+  "artifact_version": "analysis-v1",
+  "transcript_ref": "TR_AST_B",
+  "asset_id": "AST_B",
+  "items": [
+    {
+      "speaker": "S1",
+      "start_us": 0,
+      "end_us": 1000000,
+      "text": "shared opening line from the second asset"
+    }
+  ]
+}
+"""
 
 private func writeSQLiteFixtureProject(at root: URL) throws {
     let analysisDir = root.appendingPathComponent("03_analysis")

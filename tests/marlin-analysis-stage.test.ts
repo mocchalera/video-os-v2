@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import { parseArgs as parseMarlinEvaluateArgs, runMarlinEvaluate } from "../scripts/marlin-evaluate.js";
 import {
+  applyMarlinEventsToSegments,
   computeMarlinChunkBoundaries,
   createMarlinFnFromEnvironment,
   extractTagsFromScene,
@@ -725,6 +726,96 @@ describe("Marlin analysis stage", () => {
       recommended_out_us: 6_000_000,
       center_source: "precision_proxy_clip",
       peak_ref: "MEV_AST_INTERVIEW_0001",
+    });
+  });
+
+  it("replaces degraded fallback peaks with Marlin temporal semantic peaks", () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/segments.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            segment_id: "SEG_ACTION_0001",
+            asset_id: "AST_ACTION",
+            src_in_us: 0,
+            src_out_us: 10_000_000,
+            summary: "Fallback summary",
+            transcript_excerpt: "",
+            quality_flags: [],
+            tags: [],
+            peak_analysis: {
+              peak_moments: [
+                {
+                  peak_ref: "PK_SEG_ACTION_0001_degraded",
+                  timestamp_us: 5_000_000,
+                  type: "action_peak",
+                  confidence: 0.99,
+                  description: "degraded fallback peak from local motion/audio/speech heuristics",
+                  source_pass: "degraded_ffmpeg_signals",
+                },
+              ],
+              visual_energy_curve: [],
+              support_signals: {
+                motion_support_score: 1,
+                audio_support_score: 0,
+                fused_peak_score: 1,
+              },
+              provenance: {
+                coarse_prompt_template_id: "degraded-fallback",
+                refine_prompt_template_id: "degraded-fallback",
+                precision_mode: "never",
+                fusion_version: "degraded-peak-fusion-v1",
+                support_signal_version: "ffmpeg-sad-rms-v1",
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    const changed = applyMarlinEventsToSegments(projectDir, {
+      project_id: "marlin-fixture",
+      artifact_version: "marlin-events-v1",
+      model: MODEL,
+      items: [
+        {
+          asset_id: "AST_ACTION",
+          source_path: "media/action.mp4",
+          scene: "A cook lifts fried food from hot oil and places it on a rack.",
+          caption: "A cook lifts fried food from hot oil.",
+          events: [
+            {
+              event_id: "MEV_AST_ACTION_0001",
+              start_us: 2_000_000,
+              end_us: 4_000_000,
+              description: "The cook lifts fried food from hot oil.",
+              confidence: 0.64,
+              source_pass: "marlin_caption",
+            },
+          ],
+          find_results: [],
+        },
+      ],
+    });
+
+    const segments = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/segments.json"), "utf-8")) as {
+      items: Array<{
+        peak_analysis?: {
+          peak_moments?: Array<{ peak_ref?: string; source_pass?: string }>;
+          provenance?: { precision_mode?: string };
+        };
+      }>;
+    };
+
+    expect(changed).toBe(true);
+    expect(segments.items[0].peak_analysis?.provenance?.precision_mode).toBe("marlin_temporal_semantics");
+    expect(segments.items[0].peak_analysis?.peak_moments?.[0]).toMatchObject({
+      peak_ref: "MEV_AST_ACTION_0001",
+      source_pass: "marlin_caption",
     });
   });
 });

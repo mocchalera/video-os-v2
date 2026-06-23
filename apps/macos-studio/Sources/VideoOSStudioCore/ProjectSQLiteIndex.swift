@@ -302,9 +302,10 @@ public enum ProjectSQLiteIndex {
 
         for transcript in evidence.transcripts.values {
             for item in transcript.items {
+                let indexedItemID = "\(transcript.transcriptRef):\(item.id)"
                 try database.run(
                     "INSERT INTO transcript_items(item_id, transcript_ref, asset_id, speaker, start_us, end_us, text) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [.text(item.id), .text(transcript.transcriptRef), .text(transcript.assetID), .text(item.speaker), .int(item.startUS), .int(item.endUS), .text(item.text)]
+                    [.text(indexedItemID), .text(transcript.transcriptRef), .text(transcript.assetID), .text(item.speaker), .int(item.startUS), .int(item.endUS), .text(item.text)]
                 )
                 try insertSearchDocument(
                     database,

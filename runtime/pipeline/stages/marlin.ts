@@ -520,6 +520,7 @@ export function applyMarlinEventsToSegments(projectDir: string, artifact: Marlin
       const shouldReplacePeakAnalysis =
         !existing ||
         isMarlinPeakAnalysis(existing) ||
+        isDegradedPeakAnalysis(existing) ||
         (existing.support_signals?.fused_peak_score ?? 0) < peak.confidence;
 
       let interestPoints = nextSegment.interest_points ?? segment.interest_points;
@@ -926,6 +927,15 @@ function isMarlinPeakAnalysis(peakAnalysis: NonNullable<SegmentDocItem["peak_ana
   const mode = peakAnalysis.provenance?.precision_mode;
   const sourcePass = peakAnalysis.peak_moments?.[0]?.source_pass;
   return mode === "marlin_temporal_semantics" || Boolean(sourcePass?.startsWith("marlin_"));
+}
+
+function isDegradedPeakAnalysis(peakAnalysis: NonNullable<SegmentDocItem["peak_analysis"]>): boolean {
+  const mode = peakAnalysis.provenance?.precision_mode;
+  const fusionVersion = peakAnalysis.provenance?.fusion_version;
+  const sourcePass = peakAnalysis.peak_moments?.[0]?.source_pass;
+  return mode === "never" ||
+    Boolean(fusionVersion?.startsWith("degraded-")) ||
+    Boolean(sourcePass?.startsWith("degraded_"));
 }
 
 function classifyPeakType(text: string, sourcePass: "marlin_caption" | "marlin_find"): MarlinSegmentPeak["type"] {
