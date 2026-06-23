@@ -5,21 +5,86 @@ import VideoOSStudioCore
 
 struct InspectorPanel: View {
     @ObservedObject var model: StudioViewModel
+    @State private var selectedTab: InspectorPanelTab = .agent
 
     var body: some View {
-        TabView {
-            AgentPanel(model: model)
-                .tabItem { Label("Agent", systemImage: "sparkles") }
-            ProjectPanel(model: model)
-                .tabItem { Label("Project", systemImage: "doc.text") }
-            ClipInspectorPanel(model: model)
-                .tabItem { Label("Clip", systemImage: "rectangle.on.rectangle") }
-            MediaPanel(model: model)
-                .tabItem { Label("Media", systemImage: "film.stack") }
-            QADashboardPanel(model: model)
-                .tabItem { Label("QA", systemImage: "checkmark.diamond") }
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                ForEach(InspectorPanelTab.allCases) { tab in
+                    Button {
+                        selectedTab = tab
+                    } label: {
+                        Label {
+                            Text(tab.title)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        } icon: {
+                            Image(systemName: tab.systemImage)
+                        }
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                            .contentShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(selectedTab == tab ? .primary : .secondary)
+                    .background {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(selectedTab == tab ? Color(nsColor: .selectedControlColor).opacity(0.18) : .clear)
+                    }
+                    .accessibilityLabel(tab.title)
+                    .accessibilityValue(selectedTab == tab ? "selected" : "not selected")
+                    .accessibilityIdentifier("InspectorTab.\(tab.rawValue)")
+                    .help(tab.title)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            Divider()
+
+            Group {
+                switch selectedTab {
+                case .agent:
+                    AgentPanel(model: model)
+                case .project:
+                    ProjectPanel(model: model)
+                case .clip:
+                    ClipInspectorPanel(model: model)
+                case .media:
+                    MediaPanel(model: model)
+                case .qa:
+                    QADashboardPanel(model: model)
+                }
+            }
         }
-        .padding(.top, 8)
+    }
+}
+
+private enum InspectorPanelTab: String, CaseIterable, Identifiable {
+    case agent = "Agent"
+    case project = "Project"
+    case clip = "Clip"
+    case media = "Media"
+    case qa = "QA"
+
+    var id: String { rawValue }
+
+    var title: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .agent:
+            return "sparkles"
+        case .project:
+            return "doc.text"
+        case .clip:
+            return "rectangle.on.rectangle"
+        case .media:
+            return "film.stack"
+        case .qa:
+            return "checkmark.diamond"
+        }
     }
 }
 
