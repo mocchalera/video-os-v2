@@ -67,6 +67,23 @@ final class ProjectStudioReadinessStatusTests: XCTestCase {
         XCTAssertEqual(status.actionQueue.map(\.id), ["marlin-default"])
     }
 
+    func testMarlinDefaultActionUsesBoundedSkipExistingEvaluationCommand() throws {
+        let (root, project) = try temporaryStudioProject("videoos-studio-marlin-default")
+        try writeStudioFixture(
+            root: root,
+            project: project,
+            currentState: "approved",
+            reviewStatus: "approved",
+            patchOperations: 0
+        )
+        try writeRunnableMarlinProject(root: root, id: "next-marlin")
+
+        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+
+        XCTAssertEqual(status.marlinDefaultNextCommand, expectedBoundedMarlinNextCommand())
+        XCTAssertEqual(status.actionQueue.first { $0.id == "marlin-default" }?.command, expectedBoundedMarlinNextCommand())
+    }
+
     func testStatusRoutesExistingMarlinArtifactsToMaterialization() throws {
         let (root, project) = try temporaryStudioProject("videoos-studio-marlin-materialize")
         try writeStudioFixture(
@@ -101,6 +118,10 @@ private extension ProjectStudioReadinessStatus {
     }
 }
 
+private func expectedBoundedMarlinNextCommand() -> String {
+    "swift run videoos-studio-cli marlin-eval-next --execute --request-timeout-ms=900000 --max-sources=2 --skip-existing --caption-only --chunk-seconds=30 --chunk-overlap-seconds=3 --max-chunks=2"
+}
+
 private func writeStudioFixture(
     root: URL,
     project: URL,
@@ -111,6 +132,7 @@ private func writeStudioFixture(
     try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
     try FileManager.default.createDirectory(at: root.appendingPathComponent("scripts"), withIntermediateDirectories: true)
     try "worker".write(to: root.appendingPathComponent("scripts/editor-job-worker.ts"), atomically: true, encoding: .utf8)
+    try "marlin".write(to: root.appendingPathComponent("scripts/marlin-evaluate.ts"), atomically: true, encoding: .utf8)
 
     try writeStudioAnalysisFixture(project: project)
     _ = try ProjectSQLiteIndex.rebuild(projectURL: project)
@@ -151,6 +173,52 @@ private func writeStudioFixture(
       packaging_gate: blocked
     last_updated: 2026-05-22T00:00:00Z
     """.write(to: project.appendingPathComponent("project_state.yaml"), atomically: true, encoding: .utf8)
+}
+
+private func writeRunnableMarlinProject(root: URL, id: String) throws {
+    let project = root.appendingPathComponent("projects/\(id)")
+    let analysisDir = project.appendingPathComponent("03_analysis")
+    let sourceDir = project.appendingPathComponent("02_media/source")
+    try FileManager.default.createDirectory(at: analysisDir, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+    try Data().write(to: sourceDir.appendingPathComponent("candidate.mov"))
+
+    try """
+    {
+      "project_id": "\(id)",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "asset_id": "AST_RUNNABLE",
+          "filename": "candidate.mov",
+          "role_guess": "interview",
+          "duration_us": 1000000,
+          "has_transcript": false,
+          "source_locator": "02_media/source/candidate.mov"
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("assets.json"), atomically: true, encoding: .utf8)
+
+    try """
+    {
+      "project_id": "\(id)",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "segment_id": "SEG_RUNNABLE",
+          "asset_id": "AST_RUNNABLE",
+          "src_in_us": 0,
+          "src_out_us": 1000000,
+          "summary": "candidate",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("segments.json"), atomically: true, encoding: .utf8)
 }
 
 private func writeStudioAnalysisFixture(project: URL) throws {

@@ -210,7 +210,7 @@ public enum ProjectStudioGoalStatusReader {
                     : (marlinModelAccess.isReadyForLiveMarlin ? representativePlan.nextAction : marlinModelAccess.recommendation),
                 nextCommand: representativeCoverageReady
                     ? swiftCommand("marlin-preference-status")
-                    : (marlinModelAccess.isReadyForLiveMarlin ? swiftCommand("marlin-eval-next", "--execute") : swiftCommand("marlin-model-access-status")),
+                    : (marlinModelAccess.isReadyForLiveMarlin ? marlinEvaluationNextCommand() : swiftCommand("marlin-model-access-status")),
                 isSatisfied: representativeCoverageReady
             )
         ]
@@ -260,12 +260,19 @@ public enum ProjectStudioGoalStatusReader {
     private static func marlinDefaultCommand(repositoryRoot: URL) -> String {
         let queue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: repositoryRoot)
         if queue.items.contains(where: { $0.canRunEvaluation && !$0.canPreferMarlin }) {
-            return swiftCommand("marlin-eval-next", "--execute")
+            return marlinEvaluationNextCommand()
         }
         return swiftCommand("marlin-representative-plan")
     }
 
     private static func swiftCommand(_ parts: String...) -> String {
         (["swift", "run", "videoos-studio-cli"] + parts).joined(separator: " ")
+    }
+
+    private static func marlinEvaluationNextCommand() -> String {
+        (
+            ["swift", "run", "videoos-studio-cli", "marlin-eval-next", "--execute"]
+                + ProjectMarlinEvaluationCommandDefaults.boundedSkipExistingArgs
+        ).joined(separator: " ")
     }
 }

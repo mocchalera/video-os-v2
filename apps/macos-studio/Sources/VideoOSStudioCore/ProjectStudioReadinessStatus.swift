@@ -324,7 +324,10 @@ public enum ProjectStudioReadinessStatusReader {
             return swiftCommand("marlin-materialize", materialize.id)
         }
         if queue.items.contains(where: { $0.canRunEvaluation && !$0.canPreferMarlin && !$0.needsSegmentMaterialization }) {
-            return swiftCommand("marlin-eval-next", "--execute")
+            return swiftCommand(
+                "marlin-eval-next",
+                ["--execute"] + ProjectMarlinEvaluationCommandDefaults.boundedSkipExistingArgs
+            )
         }
         return swiftCommand("marlin-representative-plan")
     }
@@ -350,5 +353,9 @@ public enum ProjectStudioReadinessStatusReader {
 
     private static func swiftCommand(_ parts: String...) -> String {
         (["swift", "run", "videoos-studio-cli"] + parts).joined(separator: " ")
+    }
+
+    private static func swiftCommand(_ command: String, _ args: [String]) -> String {
+        (["swift", "run", "videoos-studio-cli", command] + args).joined(separator: " ")
     }
 }
