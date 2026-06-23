@@ -112,18 +112,21 @@ struct AgentPanel: View {
                 } label: {
                     Label("Check Connection", systemImage: "bolt.horizontal.circle")
                 }
+                .accessibilityIdentifier("AgentPanel.CheckConnectionButton")
                 .disabled(model.appServerStatus == .checking)
                 Button {
                     model.startAgentSession()
                 } label: {
                     Label("Start Agent Session", systemImage: "play.circle")
                 }
+                .accessibilityIdentifier("AgentPanel.StartSessionButton")
                 .disabled(model.appServerStatus == .checking || model.activeThreadID != nil)
                 Button {
                     model.stopAgentSession()
                 } label: {
                     Label("Stop Session", systemImage: "stop.circle")
                 }
+                .accessibilityIdentifier("AgentPanel.StopSessionButton")
                 .disabled(model.activeThreadID == nil)
             }
 
@@ -139,16 +142,19 @@ struct AgentPanel: View {
                 Picker("Job", selection: $model.selectedJob) {
                     ForEach(VideoOSAgentJob.allCases) { job in
                         Label(job.title, systemImage: job.systemImage)
+                            .accessibilityIdentifier("AgentPanel.JobOption.\(job.rawValue)")
                             .tag(job)
                     }
                 }
                 .pickerStyle(.menu)
+                .accessibilityIdentifier("AgentPanel.JobPicker")
 
                 Button {
                     model.runSelectedJob()
                 } label: {
                     Label(model.selectedJob.requiresOperatorApproval ? "Review Write Plan" : "Run Job Turn", systemImage: model.selectedJob.systemImage)
                 }
+                .accessibilityIdentifier("AgentPanel.RunSelectedJobButton")
                 .disabled(!model.selectedJobCanRun)
 
                 LabeledContent("Sandbox", value: model.selectedJob.sandboxLabel)
@@ -156,6 +162,7 @@ struct AgentPanel: View {
                 Text(model.selectedJobReadinessLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("AgentPanel.JobReadinessLabel")
                 AgentWriteContractSummary(
                     contract: model.selectedJob.writeContract(projectID: model.selectedProject?.id ?? "<id>"),
                     showForbidden: model.selectedJob.requiresOperatorApproval
@@ -168,13 +175,16 @@ struct AgentPanel: View {
                 TextEditor(text: $model.agentPrompt)
                     .font(.body)
                     .frame(minHeight: 72)
+                    .accessibilityIdentifier("AgentPanel.PromptEditor")
                 Button {
                     model.runAgentTurn()
                 } label: {
                     Label("Run Read-Only Turn", systemImage: "paperplane")
                 }
+                .accessibilityIdentifier("AgentPanel.RunReadOnlyTurnButton")
                 .disabled(model.appServerStatus == .checking || model.activeThreadID == nil)
                 LabeledContent("Status", value: model.turnStatus)
+                    .accessibilityIdentifier("AgentPanel.TurnStatus")
             }
 
             Section("Turn Results") {
@@ -428,20 +438,26 @@ struct PendingApprovalCard: View {
             HStack {
                 Label("Operator Approval", systemImage: "exclamationmark.shield")
                     .font(.headline)
+                    .accessibilityIdentifier("AgentPanel.PendingApprovalTitle")
                 Spacer()
                 Text(approval.projectName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("AgentPanel.PendingApprovalProject")
             }
 
             LabeledContent("Job", value: approval.job.title)
+                .accessibilityIdentifier("AgentPanel.PendingApprovalJob")
             LabeledContent("Sandbox", value: approval.job.sandboxLabel)
+                .accessibilityIdentifier("AgentPanel.PendingApprovalSandbox")
             LabeledContent("RAG context", value: approval.ragContextSummary)
+                .accessibilityIdentifier("AgentPanel.PendingApprovalRAGContext")
             AgentWriteContractSummary(contract: contract, showForbidden: true)
 
             Text("Codex must still confirm gates and stop before any write outside these scopes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("AgentPanel.PendingApprovalWarning")
 
             HStack {
                 Button(role: .cancel) {
@@ -449,6 +465,7 @@ struct PendingApprovalCard: View {
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
+                .accessibilityIdentifier("AgentPanel.PendingApprovalCancelButton")
 
                 Button {
                     model.approvePendingJob()
@@ -456,6 +473,7 @@ struct PendingApprovalCard: View {
                     Label("Approve and Run", systemImage: "checkmark.shield")
                 }
                 .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("AgentPanel.PendingApprovalApproveButton")
                 .disabled(model.appServerStatus == .checking || model.activeThreadID == nil)
             }
         }
