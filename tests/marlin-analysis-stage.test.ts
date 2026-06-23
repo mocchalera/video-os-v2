@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
 import { parseArgs as parseMarlinEvaluateArgs, runMarlinEvaluate } from "../scripts/marlin-evaluate.js";
+import { parseArgs as parseMarlinMaterializeArgs, runMarlinMaterialize } from "../scripts/marlin-materialize.js";
 import {
   applyMarlinEventsToSegments,
   computeMarlinChunkBoundaries,
@@ -308,6 +309,105 @@ describe("Marlin analysis stage", () => {
         "0",
       ]),
     ).toThrow("--request-timeout-ms requires a positive integer value");
+  });
+
+  it("parses project paths from the marlin materialization CLI", () => {
+    expect(
+      parseMarlinMaterializeArgs([
+        "node",
+        "scripts/marlin-materialize.ts",
+        "--project",
+        "projects/demo",
+        "--repo-root",
+        REPO_ROOT,
+      ]),
+    ).toEqual({
+      projectDir: "projects/demo",
+      repoRoot: REPO_ROOT,
+    });
+
+    expect(
+      parseMarlinMaterializeArgs([
+        "node",
+        "scripts/marlin-materialize.ts",
+        "projects/demo",
+      ]),
+    ).toEqual({
+      projectDir: "projects/demo",
+      repoRoot: undefined,
+    });
+  });
+
+  it("materializes existing Marlin artifacts without running model evaluation", () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/segments.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            segment_id: "SEG_AST_A_0001",
+            asset_id: "AST_A",
+            src_in_us: 0,
+            src_out_us: 2_000_000,
+            summary: "fallback",
+            transcript_excerpt: "",
+            quality_flags: [],
+            tags: [],
+            interest_points: [],
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/marlin_events.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "marlin-events-v1",
+        model: MODEL,
+        items: [
+          {
+            asset_id: "AST_A",
+            source_path: "media/a.mp4",
+            scene: "A speaker raises a hand during the strongest reaction.",
+            caption: "A speaker raises a hand.",
+            events: [
+              {
+                event_id: "MEV_AST_A_0001",
+                start_us: 500_000,
+                end_us: 1_500_000,
+                description: "The speaker raises a hand.",
+                confidence: 0.91,
+                source_pass: "marlin_caption",
+              },
+            ],
+            find_results: [],
+          },
+        ],
+      }),
+    );
+
+    const result = runMarlinMaterialize({ projectDir, repoRoot: REPO_ROOT });
+    const segments = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/segments.json"), "utf-8")) as {
+      items: Array<{
+        peak_analysis?: {
+          peak_moments?: Array<{ peak_ref?: string; source_pass?: string }>;
+          provenance?: { precision_mode?: string };
+        };
+      }>;
+    };
+
+    expect(result.changed).toBe(true);
+    expect(result.marlinPeaksBefore).toBe(0);
+    expect(result.marlinPeaksAfter).toBe(1);
+    expect(result.marlinEventCount).toBe(1);
+    expect(segments.items[0].peak_analysis?.provenance?.precision_mode).toBe("marlin_temporal_semantics");
+    expect(segments.items[0].peak_analysis?.peak_moments?.[0]).toMatchObject({
+      peak_ref: "MEV_AST_A_0001",
+      source_pass: "marlin_caption",
+    });
   });
 
   it("treats skip-existing with no remaining inputs as a no-op", async () => {

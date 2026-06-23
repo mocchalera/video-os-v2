@@ -69,7 +69,7 @@ public struct ProjectMarlinEvaluationStatus: Equatable, Sendable {
         case "mock evaluation":
             return "This Marlin artifact was produced in mock mode. Use it for workflow QA only; run a live Marlin-2B pass before counting it as preference evidence."
         case "needs segment materialization":
-            return "Marlin events exist, but segments do not show Marlin-derived peaks yet. Re-run analysis/triage with Marlin peak materialization before changing VLM priority."
+            return "Marlin events exist, but segments do not show Marlin-derived peaks yet. Run marlin-materialize to apply existing evidence before changing VLM priority."
         case "needs more footage evaluation":
             return "Marlin produced evidence, but coverage is still too low for a default preference decision. Test more representative interview and music-video footage."
         case "no temporal events":

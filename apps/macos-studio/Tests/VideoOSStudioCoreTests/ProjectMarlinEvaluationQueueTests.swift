@@ -10,24 +10,29 @@ final class ProjectMarlinEvaluationQueueTests: XCTestCase {
         try "worker".write(to: root.appendingPathComponent("scripts/marlin-evaluate.ts"), atomically: true, encoding: .utf8)
 
         let readyProject = root.appendingPathComponent("projects/ready-project")
+        let materializeProject = root.appendingPathComponent("projects/materialize-project")
         let blockedProject = root.appendingPathComponent("projects/blocked-project")
         let candidateProject = root.appendingPathComponent("projects/candidate-project")
         try writeQueueProject(at: readyProject, mediaExists: true, marlinCandidate: false)
+        try writeQueueProject(at: materializeProject, mediaExists: true, marlinCandidate: false, marlinArtifact: true)
         try writeQueueProject(at: blockedProject, mediaExists: false, marlinCandidate: false)
         try writeQueueProject(at: candidateProject, mediaExists: true, marlinCandidate: true)
 
         let queue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: root)
 
-        XCTAssertEqual(queue.projectCount, 3)
-        XCTAssertEqual(queue.runnableProjectCount, 2)
+        XCTAssertEqual(queue.projectCount, 4)
+        XCTAssertEqual(queue.runnableProjectCount, 3)
         XCTAssertEqual(queue.candidateProjectCount, 1)
         XCTAssertEqual(queue.mediaBlockedProjectCount, 1)
         XCTAssertEqual(queue.readinessLabel, "candidate evidence exists")
-        XCTAssertEqual(queue.items.map(\.id), ["candidate-project", "ready-project", "blocked-project"])
+        XCTAssertEqual(queue.items.map(\.id), ["candidate-project", "materialize-project", "ready-project", "blocked-project"])
         XCTAssertEqual(queue.items[0].priorityLabel, "candidate")
-        XCTAssertEqual(queue.items[1].priorityLabel, "ready to evaluate")
-        XCTAssertEqual(queue.items[2].priorityLabel, "relink media")
-        XCTAssertTrue(queue.items[1].recommendation.contains("marlin-eval-run ready-project"))
+        XCTAssertEqual(queue.items[1].priorityLabel, "materialize peaks")
+        XCTAssertEqual(queue.items[2].priorityLabel, "ready to evaluate")
+        XCTAssertEqual(queue.items[3].priorityLabel, "relink media")
+        XCTAssertTrue(queue.items[1].recommendation.contains("marlin-materialize materialize-project"))
+        XCTAssertTrue(queue.items[2].recommendation.contains("marlin-eval-run ready-project"))
+        XCTAssertTrue(queue.nextAction.contains("marlin-materialize materialize-project"))
 
         let next = ProjectMarlinEvaluationNextPlanner.plan(repositoryRoot: root)
         XCTAssertTrue(next.canRun)
@@ -36,7 +41,12 @@ final class ProjectMarlinEvaluationQueueTests: XCTestCase {
         XCTAssertTrue(next.runPlan?.commandLine().contains("ready-project") == true)
     }
 
-    private func writeQueueProject(at project: URL, mediaExists: Bool, marlinCandidate: Bool) throws {
+    private func writeQueueProject(
+        at project: URL,
+        mediaExists: Bool,
+        marlinCandidate: Bool,
+        marlinArtifact: Bool = false
+    ) throws {
         let analysisDir = project.appendingPathComponent("03_analysis")
         let mediaDir = project.appendingPathComponent("02_media/source")
         try FileManager.default.createDirectory(at: analysisDir, withIntermediateDirectories: true)
@@ -97,7 +107,7 @@ final class ProjectMarlinEvaluationQueueTests: XCTestCase {
         }
         """.write(to: analysisDir.appendingPathComponent("segments.json"), atomically: true, encoding: .utf8)
 
-        guard marlinCandidate else { return }
+        guard marlinCandidate || marlinArtifact else { return }
         try """
         {
           "project_id": "\(project.lastPathComponent)",

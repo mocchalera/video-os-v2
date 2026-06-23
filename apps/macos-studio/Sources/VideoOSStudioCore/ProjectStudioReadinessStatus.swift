@@ -205,7 +205,7 @@ public enum ProjectStudioReadinessStatusReader {
                 readinessLabel: marlin.readinessLabel,
                 detail: "\(marlin.eventCount + marlin.findResultCount) signals / \(String(format: "%.0f", marlin.coverageRatio * 100))% segment coverage / \(marlin.modelLabel)",
                 nextAction: marlin.recommendation,
-                nextCommand: marlin.canPreferMarlin ? nil : marlinCommand(projectID: projectID, repositoryRoot: repositoryRoot, projectURL: projectURL, assets: evidence.assets),
+                nextCommand: marlin.canPreferMarlin ? nil : marlinCommand(projectID: projectID, repositoryRoot: repositoryRoot, projectURL: projectURL, assets: evidence.assets, marlin: marlin),
                 isReady: marlin.canPreferMarlin
             ),
             ProjectStudioReadinessCapability(
@@ -306,8 +306,12 @@ public enum ProjectStudioReadinessStatusReader {
         projectID: String,
         repositoryRoot: URL,
         projectURL: URL,
-        assets: AnalysisAssetDocument?
+        assets: AnalysisAssetDocument?,
+        marlin: ProjectMarlinEvaluationStatus
     ) -> String {
+        if marlin.readinessLabel == "needs segment materialization" {
+            return swiftCommand("marlin-materialize", projectID)
+        }
         let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: projectURL, assets: assets)
         if plan.canRun {
             return swiftCommand("marlin-eval-run", projectID)
@@ -316,7 +320,10 @@ public enum ProjectStudioReadinessStatusReader {
     }
 
     private static func marlinDefaultCommand(queue: ProjectMarlinEvaluationQueue) -> String {
-        if queue.items.contains(where: { $0.canRunEvaluation && !$0.canPreferMarlin }) {
+        if let materialize = queue.items.first(where: \.needsSegmentMaterialization) {
+            return swiftCommand("marlin-materialize", materialize.id)
+        }
+        if queue.items.contains(where: { $0.canRunEvaluation && !$0.canPreferMarlin && !$0.needsSegmentMaterialization }) {
             return swiftCommand("marlin-eval-next", "--execute")
         }
         return swiftCommand("marlin-representative-plan")

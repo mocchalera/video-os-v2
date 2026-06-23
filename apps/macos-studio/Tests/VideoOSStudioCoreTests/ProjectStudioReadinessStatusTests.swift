@@ -67,6 +67,25 @@ final class ProjectStudioReadinessStatusTests: XCTestCase {
         XCTAssertEqual(status.actionQueue.map(\.id), ["marlin-default"])
     }
 
+    func testStatusRoutesExistingMarlinArtifactsToMaterialization() throws {
+        let (root, project) = try temporaryStudioProject("videoos-studio-marlin-materialize")
+        try writeStudioFixture(
+            root: root,
+            project: project,
+            currentState: "approved",
+            reviewStatus: "approved",
+            patchOperations: 0
+        )
+        try writeStudioSegmentsWithoutMarlinPeaks(project: project)
+
+        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+
+        XCTAssertEqual(status.marlinLabel, "needs segment materialization")
+        XCTAssertEqual(status.capability("marlin-temporal-vlm")?.nextCommand, "swift run videoos-studio-cli marlin-materialize demo")
+        XCTAssertEqual(status.marlinDefaultNextCommand, "swift run videoos-studio-cli marlin-materialize demo")
+        XCTAssertTrue(status.actionQueue.contains { $0.id == "marlin-temporal-vlm" && $0.command == "swift run videoos-studio-cli marlin-materialize demo" })
+    }
+
     private func temporaryStudioProject(_ prefix: String) throws -> (URL, URL) {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
@@ -286,4 +305,49 @@ private func writeStudioAnalysisFixture(project: URL) throws {
       ]
     }
     """.write(to: analysisDir.appendingPathComponent("marlin_events.json"), atomically: true, encoding: .utf8)
+}
+
+private func writeStudioSegmentsWithoutMarlinPeaks(project: URL) throws {
+    let analysisDir = project.appendingPathComponent("03_analysis")
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "analysis-v1",
+      "items": [
+        {
+          "segment_id": "SEG_001",
+          "asset_id": "AST_001",
+          "src_in_us": 0,
+          "src_out_us": 3000000,
+          "summary": "opening quiet reset",
+          "transcript_excerpt": "I came here to get quiet again.",
+          "quality_flags": [],
+          "tags": ["interview"],
+          "interest_points": []
+        },
+        {
+          "segment_id": "SEG_002",
+          "asset_id": "AST_001",
+          "src_in_us": 3000000,
+          "src_out_us": 6000000,
+          "summary": "middle",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        },
+        {
+          "segment_id": "SEG_003",
+          "asset_id": "AST_001",
+          "src_in_us": 6000000,
+          "src_out_us": 9000000,
+          "summary": "ending",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        }
+      ]
+    }
+    """.write(to: analysisDir.appendingPathComponent("segments.json"), atomically: true, encoding: .utf8)
 }

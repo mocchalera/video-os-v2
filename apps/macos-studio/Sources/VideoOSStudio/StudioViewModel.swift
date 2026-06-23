@@ -1191,6 +1191,9 @@ final class StudioViewModel: ObservableObject {
         case let value where value.contains("audio-story"):
             studioReadinessActionStatus = "Building audio story evidence..."
             buildSelectedProjectAudioStoryGraph()
+        case let value where value.contains("marlin-materialize"):
+            studioReadinessActionStatus = "Materializing existing Marlin evidence..."
+            materializeSelectedProjectMarlinEvidence()
         case let value where value.contains("marlin-eval-run"):
             studioReadinessActionStatus = "Running Marlin temporal VLM evaluation..."
             runSelectedProjectMarlinEvaluation()
@@ -1268,6 +1271,11 @@ final class StudioViewModel: ObservableObject {
         if command.contains("audio-story") {
             return !isBuildingAudioStoryGraph && audioStoryGraphRunPlan.canRun
         }
+        if command.contains("marlin-materialize") {
+            guard let selectedProject else { return false }
+            let plan = ProjectMarlinMaterializationPlanner.plan(repositoryRoot: repositoryRoot, projectURL: selectedProject.path)
+            return !isRunningMarlinEvaluation && plan.canRun
+        }
         if command.contains("marlin-eval-run") {
             return !isRunningMarlinEvaluation
                 && marlinEvaluationRunPlan.canRun
@@ -1275,8 +1283,11 @@ final class StudioViewModel: ObservableObject {
                 && marlinModelAccessStatus.isReadyForLiveMarlin
         }
         if command.contains("marlin-eval-next") {
+            let hasEvaluationCandidate = marlinEvaluationQueue.items.contains {
+                $0.canRunEvaluation && !$0.canPreferMarlin && !$0.needsSegmentMaterialization
+            }
             return !isRunningMarlinEvaluation
-                && marlinEvaluationQueue.runnableProjectCount > 0
+                && hasEvaluationCandidate
                 && marlinRuntimeStatus.isReadyForLiveMarlin
                 && marlinModelAccessStatus.isReadyForLiveMarlin
         }
@@ -1315,6 +1326,12 @@ final class StudioViewModel: ObservableObject {
         if command.contains("audio-story"), !audioStoryGraphRunPlan.canRun {
             return audioStoryGraphRunPlan.readinessLabel
         }
+        if command.contains("marlin-materialize"), let selectedProject {
+            let plan = ProjectMarlinMaterializationPlanner.plan(repositoryRoot: repositoryRoot, projectURL: selectedProject.path)
+            if !plan.canRun {
+                return plan.readinessLabel
+            }
+        }
         if command.contains("marlin-eval-run"), !marlinEvaluationRunPlan.canRun {
             return marlinEvaluationRunPlan.readinessLabel
         }
@@ -1324,7 +1341,8 @@ final class StudioViewModel: ObservableObject {
         if (command.contains("marlin-eval-run") || command.contains("marlin-eval-next")), !marlinModelAccessStatus.isReadyForLiveMarlin {
             return marlinModelAccessStatus.readinessLabel
         }
-        if command.contains("marlin-eval-next"), marlinEvaluationQueue.runnableProjectCount == 0 {
+        if command.contains("marlin-eval-next"),
+           !marlinEvaluationQueue.items.contains(where: { $0.canRunEvaluation && !$0.canPreferMarlin && !$0.needsSegmentMaterialization }) {
             return marlinEvaluationQueue.readinessLabel
         }
         if command.contains("marlin-preference-apply"), !marlinPreferenceDecision.canPreferMarlinAsDefault {
@@ -2578,6 +2596,72 @@ final class StudioViewModel: ObservableObject {
                     self.isRunningMarlinEvaluation = false
                     self.marlinEvaluationRunStatus = Self.marlinFailureStatus(
                         prefix: "Marlin evaluation failed",
+                        standardError: String(describing: error)
+                    )
+                    self.studioReadinessActionStatus = self.marlinEvaluationRunStatus
+                }
+            }
+        }
+    }
+
+    func materializeSelectedProjectMarlinEvidence() {
+        guard let selectedProject else {
+            marlinEvaluationRunStatus = "Select a project before materializing Marlin evidence."
+            studioReadinessActionStatus = marlinEvaluationRunStatus
+            return
+        }
+        let plan = ProjectMarlinMaterializationPlanner.plan(repositoryRoot: repositoryRoot, projectURL: selectedProject.path)
+        guard plan.canRun else {
+            marlinEvaluationRunStatus = "Marlin materialization is not runnable: \(plan.readinessLabel)."
+            studioReadinessActionStatus = marlinEvaluationRunStatus
+            return
+        }
+
+        isRunningMarlinEvaluation = true
+        marlinEvaluationRunStatus = "Materializing existing Marlin evidence..."
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let result = try ProjectMarlinMaterializationRunner.runAndRefreshIndex(plan: plan)
+                await MainActor.run {
+                    self.isRunningMarlinEvaluation = false
+                    self.evidenceStore = ProjectEvidenceStore.load(projectURL: selectedProject.path)
+                    self.marlinEvaluationStatus = ProjectMarlinEvaluationStatusReader.status(
+                        projectURL: selectedProject.path,
+                        repositoryRoot: self.repositoryRoot
+                    )
+                    self.marlinPreferenceDecision = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: self.repositoryRoot)
+                    self.marlinEvaluationQueue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: self.repositoryRoot)
+                    self.marlinRepresentativePlan = ProjectMarlinRepresentativePlanReader.plan(repositoryRoot: self.repositoryRoot)
+                    self.marlinEvaluationRunPlan = ProjectMarlinEvaluationRunPlanner.plan(
+                        repositoryRoot: self.repositoryRoot,
+                        projectURL: selectedProject.path,
+                        assets: self.evidenceStore?.assets
+                    )
+                    self.indexStatus = ProjectSQLiteIndex.status(projectURL: selectedProject.path)
+                    self.refreshLibraryReadiness(projectURL: selectedProject.path)
+                    self.studioReadinessStatus = ProjectStudioReadinessStatusReader.status(
+                        repositoryRoot: self.repositoryRoot,
+                        projectURL: selectedProject.path
+                    )
+                    self.studioGoalStatus = self.makeStudioGoalStatus(projectURL: selectedProject.path)
+                    if result.succeeded, let indexSummary = result.indexSummary {
+                        self.indexOperationStatus = "Index refreshed after Marlin materialization: \(indexSummary.marlinEventCount) events, \(indexSummary.marlinFindResultCount) finds."
+                        self.marlinEvaluationRunStatus = "Marlin evidence materialized and refreshed \(indexSummary.searchDocumentCount) search documents."
+                    } else {
+                        self.marlinEvaluationRunStatus = Self.marlinFailureStatus(
+                            prefix: "Marlin materialization failed",
+                            exitCode: result.runResult.exitCode,
+                            standardError: result.runResult.standardError
+                        )
+                    }
+                    self.studioReadinessActionStatus = self.marlinEvaluationRunStatus
+                }
+            } catch {
+                await MainActor.run {
+                    self.isRunningMarlinEvaluation = false
+                    self.marlinEvaluationRunStatus = Self.marlinFailureStatus(
+                        prefix: "Marlin materialization failed",
                         standardError: String(describing: error)
                     )
                     self.studioReadinessActionStatus = self.marlinEvaluationRunStatus

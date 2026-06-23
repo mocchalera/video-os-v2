@@ -17,9 +17,13 @@ public struct ProjectMarlinEvaluationQueueItem: Identifiable, Equatable, Sendabl
     public let canRunEvaluation: Bool
     public let canPreferMarlin: Bool
 
+    public var needsSegmentMaterialization: Bool {
+        evaluationReadinessLabel == "needs segment materialization"
+    }
+
     public var priorityLabel: String {
         if canPreferMarlin { return "candidate" }
-        if eventCount + findResultCount > 0 { return "materialize peaks" }
+        if needsSegmentMaterialization { return "materialize peaks" }
         if canRunEvaluation { return "ready to evaluate" }
         if mediaMissingCount > 0 { return "relink media" }
         if sourceCount == 0 { return "no video sources" }
@@ -30,8 +34,8 @@ public struct ProjectMarlinEvaluationQueueItem: Identifiable, Equatable, Sendabl
         if canPreferMarlin {
             return "Already a Marlin preference candidate; keep this project in the representative set."
         }
-        if eventCount + findResultCount > 0 {
-            return "Marlin artifacts exist; re-run materialization through analysis/triage so segment peaks carry Marlin provenance."
+        if needsSegmentMaterialization {
+            return "Run marlin-materialize \(id) to materialize existing Marlin events into segment peaks and refresh search."
         }
         if canRunEvaluation {
             return "Run marlin-eval-run \(id) to collect temporal semantic evidence for this project."
@@ -79,7 +83,10 @@ public struct ProjectMarlinEvaluationQueue: Equatable, Sendable {
     }
 
     public var nextAction: String {
-        if let runnable = items.first(where: { $0.canRunEvaluation && !$0.canPreferMarlin }) {
+        if let materialize = items.first(where: \.needsSegmentMaterialization) {
+            return "Run marlin-materialize \(materialize.id) so existing Marlin events affect segment peaks."
+        }
+        if let runnable = items.first(where: { $0.canRunEvaluation && !$0.canPreferMarlin && !$0.needsSegmentMaterialization }) {
             return "Run marlin-eval-run \(runnable.id) to start representative Marlin evaluation."
         }
         if let blocked = items.first(where: { $0.mediaMissingCount > 0 }) {
@@ -137,8 +144,8 @@ public enum ProjectMarlinEvaluationQueueReader {
     private static func rank(_ item: ProjectMarlinEvaluationQueueItem) -> Int {
         switch item.priorityLabel {
         case "candidate": return 0
-        case "ready to evaluate": return 1
-        case "materialize peaks": return 2
+        case "materialize peaks": return 1
+        case "ready to evaluate": return 2
         case "relink media": return 3
         case "no video sources": return 4
         default: return 5

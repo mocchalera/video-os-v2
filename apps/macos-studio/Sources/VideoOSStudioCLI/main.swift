@@ -117,6 +117,8 @@ struct VideoOSStudioCLI {
             runNextMarlinEvaluation(root: root, args: Array(args.dropFirst()))
         case "marlin-eval-plan":
             printMarlinEvaluationPlan(root: root, args: Array(args.dropFirst()))
+        case "marlin-materialize":
+            materializeMarlinEvidence(root: root, args: Array(args.dropFirst()))
         case "marlin-eval-run":
             runMarlinEvaluation(root: root, args: Array(args.dropFirst()))
         case "playback-contract-status":
@@ -442,6 +444,8 @@ struct VideoOSStudioCLI {
             buildMediaProxies(root: root, args: [project.id])
         } else if command.contains("audio-story-run") {
             runAudioStoryGraph(root: root, args: [project.id])
+        } else if command.contains("marlin-materialize") {
+            materializeMarlinEvidence(root: root, args: [project.id])
         } else if command.contains("marlin-eval-run") {
             runMarlinEvaluation(root: root, args: [project.id])
         } else if command.contains("marlin-eval-next") {
@@ -1975,6 +1979,32 @@ struct VideoOSStudioCLI {
         }
     }
 
+    private static func materializeMarlinEvidence(root: URL, args: [String]) {
+        do {
+            let project = try resolveProject(root: root, args: args)
+            let plan = ProjectMarlinMaterializationPlanner.plan(repositoryRoot: root, projectURL: project.path)
+            guard plan.canRun else {
+                throw CLIError.message("Marlin materialization is not runnable: \(plan.readinessLabel)")
+            }
+            let result = try ProjectMarlinMaterializationRunner.runAndRefreshIndex(plan: plan)
+            print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+            if let indexSummary = result.indexSummary {
+                print("indexRebuilt: true")
+                print("index: \(indexSummary.indexURL.path)")
+                print("searchDocuments: \(indexSummary.searchDocumentCount)")
+                print("marlinEvents: \(indexSummary.marlinEventCount)")
+                print("marlinFindResults: \(indexSummary.marlinFindResultCount)")
+            }
+            if !result.runResult.standardError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                fputs(result.runResult.standardError + (result.runResult.standardError.hasSuffix("\n") ? "" : "\n"), stderr)
+            }
+            Foundation.exit(result.succeeded ? 0 : Int32(result.runResult.exitCode))
+        } catch {
+            fputs("marlin materialize failed: \(error)\n", stderr)
+            Foundation.exit(1)
+        }
+    }
+
     private static func runMarlinEvaluation(root: URL, args: [String]) {
         do {
             let mock = args.contains("--mock")
@@ -2306,7 +2336,7 @@ struct VideoOSStudioCLI {
 
     private static func printUsage() {
         print("""
-        usage: videoos-studio-cli [doctor|projects|project-init|codex-plan|policy-status|library-status|studio-goal-status|native-editor-visual-qa-status|studio-status|studio-action|gate-status|intent-status|intent-alignment|review-status|planning-status|analysis-plan|analysis-run|compile-plan|compile-run|request-sample|agent-jobs|agent-prompt|annotations-status|clip-note-add|clip-note-clear|clip-note-prompt|index-rebuild|index-status|index-search|index-context|media-status|media-source-map-status|media-relink-plan|media-relink-apply|media-synthetic-plan|media-synthetic-build|media-proxy-plan|media-proxy-build|monitor-status|timeline-markers|audio-map|audio-waveform|audio-story-plan|audio-story-run|marlin-status|marlin-runtime-status|marlin-model-access-status|marlin-preference-status|marlin-preference-apply|marlin-representative-plan|marlin-eval-queue|marlin-eval-next|marlin-eval-plan|marlin-eval-run|playback-contract-status|render-status|render-plan|render-run|handoff-status|handoff-export-premiere|handoff-packet-status|handoff-packet-verify|handoff-export-packet|handoff-synthetic-smoke|studio-synthetic-smoke|studio-acceptance-smoke|app-server-smoke|thread-smoke|turn-smoke]
+        usage: videoos-studio-cli [doctor|projects|project-init|codex-plan|policy-status|library-status|studio-goal-status|native-editor-visual-qa-status|studio-status|studio-action|gate-status|intent-status|intent-alignment|review-status|planning-status|analysis-plan|analysis-run|compile-plan|compile-run|request-sample|agent-jobs|agent-prompt|annotations-status|clip-note-add|clip-note-clear|clip-note-prompt|index-rebuild|index-status|index-search|index-context|media-status|media-source-map-status|media-relink-plan|media-relink-apply|media-synthetic-plan|media-synthetic-build|media-proxy-plan|media-proxy-build|monitor-status|timeline-markers|audio-map|audio-waveform|audio-story-plan|audio-story-run|marlin-status|marlin-runtime-status|marlin-model-access-status|marlin-preference-status|marlin-preference-apply|marlin-representative-plan|marlin-eval-queue|marlin-eval-next|marlin-eval-plan|marlin-materialize|marlin-eval-run|playback-contract-status|render-status|render-plan|render-run|handoff-status|handoff-export-premiere|handoff-packet-status|handoff-packet-verify|handoff-export-packet|handoff-synthetic-smoke|studio-synthetic-smoke|studio-acceptance-smoke|app-server-smoke|thread-smoke|turn-smoke]
 
         Commands:
           doctor            Print repository and app-server readiness.
@@ -2376,6 +2406,8 @@ struct VideoOSStudioCLI {
           marlin-eval-next
                             Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only --chunk-seconds=<sec> --chunk-overlap-seconds=<sec> --max-chunks=<n>.
           marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only --chunk-seconds=<sec> --chunk-overlap-seconds=<sec> --max-chunks=<n>.
+          marlin-materialize
+                            Apply existing 03_analysis/marlin_events.json evidence to segment peaks and rebuild the SQLite RAG index.
           marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing --caption-only --chunk-seconds=<sec> --chunk-overlap-seconds=<sec> --max-chunks=<n>.
           playback-contract-status
                             Print whether preview-manifest.json matches the current timeline (approval-grade playback).

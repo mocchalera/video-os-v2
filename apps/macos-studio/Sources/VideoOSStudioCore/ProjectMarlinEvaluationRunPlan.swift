@@ -130,6 +130,111 @@ public struct ProjectMarlinEvaluationRefreshResult: Equatable, Sendable {
     }
 }
 
+public struct ProjectMarlinMaterializationPlan: Equatable, Sendable {
+    public let repositoryRoot: URL
+    public let projectURL: URL
+    public let scriptURL: URL
+    public let artifactURL: URL
+    public let segmentsURL: URL
+
+    public var canRun: Bool {
+        let fileManager = FileManager.default
+        return fileManager.fileExists(atPath: scriptURL.path)
+            && fileManager.fileExists(atPath: artifactURL.path)
+            && fileManager.fileExists(atPath: segmentsURL.path)
+    }
+
+    public var readinessLabel: String {
+        let fileManager = FileManager.default
+        if !fileManager.fileExists(atPath: scriptURL.path) {
+            return "missing script"
+        }
+        if !fileManager.fileExists(atPath: artifactURL.path) {
+            return "missing marlin artifact"
+        }
+        if !fileManager.fileExists(atPath: segmentsURL.path) {
+            return "missing segments"
+        }
+        return "ready"
+    }
+
+    public func processArguments() -> [String] {
+        [
+            "npx",
+            "tsx",
+            scriptURL.path,
+            "--project",
+            projectURL.path,
+            "--repo-root",
+            repositoryRoot.path
+        ]
+    }
+
+    public func commandLine() -> String {
+        processArguments()
+            .map(shellQuote)
+            .joined(separator: " ")
+    }
+
+    private func shellQuote(_ value: String) -> String {
+        guard !value.isEmpty else { return "''" }
+        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_+-=/:.,")
+        if value.unicodeScalars.allSatisfy({ safe.contains($0) }) {
+            return value
+        }
+        return "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
+public enum ProjectMarlinMaterializationPlanner {
+    public static func plan(repositoryRoot: URL, projectURL: URL) -> ProjectMarlinMaterializationPlan {
+        ProjectMarlinMaterializationPlan(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            scriptURL: repositoryRoot.appendingPathComponent("scripts/marlin-materialize.ts"),
+            artifactURL: projectURL.appendingPathComponent("03_analysis/marlin_events.json"),
+            segmentsURL: projectURL.appendingPathComponent("03_analysis/segments.json")
+        )
+    }
+}
+
+public enum ProjectMarlinMaterializationRunner {
+    public typealias Runner = (URL, [String]) throws -> ProjectMarlinEvaluationRunResult
+
+    public static func run(
+        plan: ProjectMarlinMaterializationPlan,
+        runner: Runner? = nil
+    ) throws -> ProjectMarlinEvaluationRunResult {
+        try (runner ?? runProcess)(plan.repositoryRoot, plan.processArguments())
+    }
+
+    public static func runAndRefreshIndex(
+        plan: ProjectMarlinMaterializationPlan,
+        runner: Runner? = nil
+    ) throws -> ProjectMarlinEvaluationRefreshResult {
+        let runResult = try run(plan: plan, runner: runner)
+        let indexSummary = runResult.succeeded
+            ? try ProjectSQLiteIndex.rebuild(projectURL: plan.projectURL)
+            : nil
+        return ProjectMarlinEvaluationRefreshResult(
+            runResult: runResult,
+            indexSummary: indexSummary
+        )
+    }
+
+    private static func runProcess(cwd: URL, arguments: [String]) throws -> ProjectMarlinEvaluationRunResult {
+        let output = try SubprocessRunner.run(
+            arguments: arguments,
+            currentDirectoryURL: cwd
+        )
+        return ProjectMarlinEvaluationRunResult(
+            exitCode: output.exitCode,
+            standardOutput: output.stdout,
+            standardError: output.stderr
+        )
+    }
+}
+
 public struct ProjectMarlinEvaluationNextPlan: Equatable, Sendable {
     public let queue: ProjectMarlinEvaluationQueue
     public let item: ProjectMarlinEvaluationQueueItem?
@@ -178,7 +283,7 @@ public enum ProjectMarlinEvaluationRunPlanner {
 public enum ProjectMarlinEvaluationNextPlanner {
     public static func plan(repositoryRoot: URL) -> ProjectMarlinEvaluationNextPlan {
         let queue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: repositoryRoot)
-        guard let item = queue.items.first(where: { $0.canRunEvaluation && !$0.canPreferMarlin }) else {
+        guard let item = queue.items.first(where: { $0.canRunEvaluation && !$0.canPreferMarlin && !$0.needsSegmentMaterialization }) else {
             return ProjectMarlinEvaluationNextPlan(queue: queue, item: nil, runPlan: nil)
         }
         let assets = try? AnalysisAssetDocument.load(from: item.projectURL.appendingPathComponent("03_analysis/assets.json"))

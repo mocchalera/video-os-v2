@@ -212,6 +212,55 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
         XCTAssertNil(result.indexSummary)
     }
 
+    func testMaterializationPlanBuildsCommandFromExistingArtifacts() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        try writeAssets(project: project, filename: "interview.mp4", sourceLocator: "02_media/source/interview.mp4")
+        try writeSegments(project: project)
+        try writeMarlinEvents(project: project)
+
+        let plan = ProjectMarlinMaterializationPlanner.plan(repositoryRoot: root, projectURL: project)
+
+        XCTAssertEqual(plan.readinessLabel, "ready")
+        XCTAssertTrue(plan.canRun)
+        XCTAssertTrue(plan.commandLine().contains("scripts/marlin-materialize.ts"))
+        XCTAssertTrue(plan.commandLine().contains("--project"))
+        XCTAssertFalse(plan.commandLine().contains("marlin-evaluate.ts"))
+    }
+
+    func testMaterializationRunnerUsesInjectedProcess() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        let plan = ProjectMarlinMaterializationPlanner.plan(repositoryRoot: root, projectURL: project)
+
+        let result = try ProjectMarlinMaterializationRunner.run(plan: plan) { cwd, args in
+            XCTAssertEqual(cwd, root)
+            XCTAssertTrue(args.contains("npx"))
+            XCTAssertTrue(args.contains("tsx"))
+            XCTAssertTrue(args.contains(root.appendingPathComponent("scripts/marlin-materialize.ts").path))
+            XCTAssertFalse(args.contains("--mock"))
+            return ProjectMarlinEvaluationRunResult(exitCode: 0, standardOutput: "ok", standardError: "")
+        }
+
+        XCTAssertTrue(result.succeeded)
+    }
+
+    func testMaterializationRunAndRefreshIndexRebuildsSearchAfterSuccess() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        try writeAssets(project: project, filename: "interview.mp4", sourceLocator: "02_media/source/interview.mp4")
+        try writeSegments(project: project)
+        let plan = ProjectMarlinMaterializationPlanner.plan(repositoryRoot: root, projectURL: project)
+
+        let result = try ProjectMarlinMaterializationRunner.runAndRefreshIndex(plan: plan) { _, _ in
+            ProjectMarlinEvaluationRunResult(exitCode: 0, standardOutput: "ok", standardError: "")
+        }
+
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(result.indexSummary?.assetCount, 1)
+        XCTAssertEqual(result.indexSummary?.searchDocumentCount, 2)
+    }
+
     func testLiveRunRefusesWhenRuntimePreflightFails() throws {
         let root = try makeRootFixture()
         let project = root.appendingPathComponent("projects/demo")
@@ -296,6 +345,7 @@ private func makeRootFixture() throws -> URL {
         withIntermediateDirectories: true
     )
     try Data([0x00]).write(to: root.appendingPathComponent("scripts/marlin-evaluate.ts"))
+    try Data([0x00]).write(to: root.appendingPathComponent("scripts/marlin-materialize.ts"))
     return root
 }
 
@@ -321,6 +371,69 @@ private func writeAssets(project: URL, filename: String, sourceLocator: String) 
     }
     """.write(
         to: project.appendingPathComponent("03_analysis/assets.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+private func writeSegments(project: URL) throws {
+    try FileManager.default.createDirectory(
+        at: project.appendingPathComponent("03_analysis"),
+        withIntermediateDirectories: true
+    )
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "1",
+      "items": [
+        {
+          "segment_id": "SEG_001",
+          "asset_id": "A001",
+          "src_in_us": 0,
+          "src_out_us": 1000000,
+          "summary": "intro",
+          "transcript_excerpt": "",
+          "quality_flags": [],
+          "tags": [],
+          "interest_points": []
+        }
+      ]
+    }
+    """.write(
+        to: project.appendingPathComponent("03_analysis/segments.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+private func writeMarlinEvents(project: URL) throws {
+    try FileManager.default.createDirectory(
+        at: project.appendingPathComponent("03_analysis"),
+        withIntermediateDirectories: true
+    )
+    try """
+    {
+      "project_id": "demo",
+      "artifact_version": "marlin-events-v1",
+      "model": {
+        "provider": "marlin",
+        "model_alias": "NemoStation/Marlin-2B",
+        "model_snapshot": "test",
+        "connector_version": "marlin-local-v1"
+      },
+      "items": [
+        {
+          "asset_id": "A001",
+          "source_path": "02_media/source/interview.mp4",
+          "scene": "intro",
+          "caption": "intro",
+          "events": [],
+          "find_results": []
+        }
+      ]
+    }
+    """.write(
+        to: project.appendingPathComponent("03_analysis/marlin_events.json"),
         atomically: true,
         encoding: .utf8
     )
