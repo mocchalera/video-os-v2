@@ -41,7 +41,11 @@ struct FootageSearchView: View {
         self.selectedClip = selectedClip
         self.onPreview = onPreview
         self._isPresented = isPresented
-        self._selectedBeatID = State(initialValue: initialBeatID ?? selectedClip?.beatID ?? "")
+        self._selectedBeatID = State(initialValue: Self.initialSelectedBeatID(
+            timeline: timeline,
+            selectedClip: selectedClip,
+            initialBeatID: initialBeatID
+        ))
     }
 
     var body: some View {
@@ -65,9 +69,11 @@ struct FootageSearchView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Search Footage")
                     .font(.headline)
+                    .accessibilityIdentifier("FootageSearch.Title")
                 Text(projectURL.lastPathComponent)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("FootageSearch.ProjectName")
             }
             Spacer()
             Button {
@@ -78,6 +84,7 @@ struct FootageSearchView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .help("Close")
+            .accessibilityIdentifier("FootageSearch.CloseButton")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
@@ -94,9 +101,11 @@ struct FootageSearchView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 460)
+                .accessibilityIdentifier("FootageSearch.ModePicker")
 
                 Stepper("Limit \(limit)", value: $limit, in: 1...50)
                     .frame(width: 140, alignment: .leading)
+                    .accessibilityIdentifier("FootageSearch.LimitStepper")
 
                 Spacer()
             }
@@ -104,6 +113,7 @@ struct FootageSearchView: View {
             HStack(spacing: 8) {
                 TextField("Query", text: $query)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("FootageSearch.QueryField")
                 Button {
                     Task { await runSearch() }
                 } label: {
@@ -111,6 +121,7 @@ struct FootageSearchView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(isSearching)
+                .accessibilityIdentifier("FootageSearch.SearchButton")
             }
 
             HStack(spacing: 10) {
@@ -135,16 +146,19 @@ struct FootageSearchView: View {
             HStack {
                 Text("Results")
                     .font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("FootageSearch.ResultsLabel")
                 Text("\(response?.results.count ?? 0)")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(.quaternary, in: Capsule())
+                    .accessibilityIdentifier("FootageSearch.ResultCount")
                 Spacer()
                 if let dbStatus = response?.db_status {
                     Text(dbStatus)
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("FootageSearch.DBStatus")
                 }
             }
 
@@ -155,9 +169,11 @@ struct FootageSearchView: View {
                     description: Text(error)
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("FootageSearch.ErrorMessage")
             } else if isSearching {
                 ProgressView("Searching footage...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("FootageSearch.Progress")
             } else if let response, response.results.isEmpty {
                 ContentUnavailableView(
                     "No results",
@@ -165,6 +181,7 @@ struct FootageSearchView: View {
                     description: Text((response.warnings ?? []).joined(separator: " "))
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("FootageSearch.EmptyResults")
             } else if let response {
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -185,6 +202,7 @@ struct FootageSearchView: View {
             } else {
                 ContentUnavailableView("No results", systemImage: "magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("FootageSearch.EmptyState")
             }
         }
     }
@@ -240,6 +258,24 @@ struct FootageSearchView: View {
             .sorted { $0.timelineInFrame < $1.timelineInFrame }
             .first { $0.beatID == beatID }
     }
+
+    private static func initialSelectedBeatID(
+        timeline: TimelineDocument?,
+        selectedClip: TimelineClip?,
+        initialBeatID: String?
+    ) -> String {
+        if let initialBeatID, !initialBeatID.isEmpty {
+            return initialBeatID
+        }
+        if let beatID = selectedClip?.beatID, !beatID.isEmpty {
+            return beatID
+        }
+        return timeline?.displayTracks
+            .flatMap(\.clips)
+            .sorted { $0.timelineInFrame < $1.timelineInFrame }
+            .compactMap(\.beatID)
+            .first { !$0.isEmpty } ?? ""
+    }
 }
 
 private enum FootageSearchModeOption: String, CaseIterable, Identifiable {
@@ -277,12 +313,14 @@ private struct PathPickerRow: View {
             TextField(label, text: $value)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption.monospaced())
+                .accessibilityIdentifier("FootageSearch.\(pathPickerAccessibilityKey(label)).Field")
             Button {
                 chooseFile()
             } label: {
                 Image(systemName: "folder")
             }
             .help(label)
+            .accessibilityIdentifier("FootageSearch.\(pathPickerAccessibilityKey(label)).Button")
         }
     }
 
@@ -310,6 +348,7 @@ private struct FootageSearchResultCard: View {
         HStack(alignment: .top, spacing: 12) {
             FootageSearchThumbnailView(url: thumbnailURL)
                 .frame(width: 170, height: 96)
+                .accessibilityIdentifier("FootageSearch.Thumbnail.\(resultAccessibilitySuffix)")
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -317,15 +356,18 @@ private struct FootageSearchResultCard: View {
                         .font(.system(.callout, design: .monospaced).weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .accessibilityIdentifier("FootageSearch.ResultSegment.\(resultAccessibilitySuffix)")
                     Text(formatSearchScore(result.score))
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(Color.green.opacity(0.14), in: Capsule())
                         .foregroundStyle(.green)
+                        .accessibilityIdentifier("FootageSearch.ResultScore.\(resultAccessibilitySuffix)")
                     Text(searchDurationLabel(result))
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("FootageSearch.ResultDuration.\(resultAccessibilitySuffix)")
                     Spacer(minLength: 8)
                 }
 
@@ -333,8 +375,10 @@ private struct FootageSearchResultCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityIdentifier("FootageSearch.ResultSummary.\(resultAccessibilitySuffix)")
 
                 ScoreBars(scores: result.scores ?? [:])
+                    .accessibilityIdentifier("FootageSearch.ScoreBars.\(resultAccessibilitySuffix)")
 
                 HStack(spacing: 8) {
                     Button {
@@ -344,6 +388,7 @@ private struct FootageSearchResultCard: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .accessibilityIdentifier("FootageSearch.PreviewButton.\(resultAccessibilitySuffix)")
 
                     Spacer()
 
@@ -355,6 +400,7 @@ private struct FootageSearchResultCard: View {
                     }
                     .labelsHidden()
                     .frame(width: 170)
+                    .accessibilityIdentifier("FootageSearch.BeatPicker.\(resultAccessibilitySuffix)")
 
                     Button {
                         onUse()
@@ -364,6 +410,7 @@ private struct FootageSearchResultCard: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(!canUse)
+                    .accessibilityIdentifier("FootageSearch.UseButton.\(resultAccessibilitySuffix)")
                 }
             }
         }
@@ -373,6 +420,10 @@ private struct FootageSearchResultCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(.quaternary, lineWidth: 1)
         }
+    }
+
+    private var resultAccessibilitySuffix: String {
+        footageSearchAccessibilitySuffix(result.segment_id)
     }
 }
 
@@ -466,4 +517,17 @@ private extension String {
         let index = self.index(startIndex, offsetBy: max(0, maxLength - 3))
         return "\(self[..<index])..."
     }
+}
+
+private func pathPickerAccessibilityKey(_ label: String) -> String {
+    label
+        .split(separator: " ")
+        .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        .joined()
+}
+
+private func footageSearchAccessibilitySuffix(_ value: String) -> String {
+    let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+    let sanitized = String(value.map { allowed.contains($0) ? $0 : "_" })
+    return sanitized.isEmpty ? "unknown" : sanitized
 }
