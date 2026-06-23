@@ -120,16 +120,26 @@ function verifyTrackerSemantics(tables) {
   assert(summaryValue("Stories tracked") === stories.length, "Summary Stories tracked does not match Stories rows");
   assert(summaryValue("Issues tracked") === issues.length, "Summary Issues tracked does not match Issues rows");
   assertContinuousIDs(stories, "Story ID", "US", 66);
-  assertContinuousIDs(issues, "Issue ID", "ISS", 84);
-  assertContinuousIDs(testLog, "Log ID", "TL", 267);
+  assertContinuousIDs(issues, "Issue ID", "ISS", 85);
+  assertContinuousIDs(testLog, "Log ID", "TL", 268);
 
   const storyIDs = new Set(stories.map((row) => row["Story ID"]));
   for (const issue of issues) {
     expandUSReferences(issue["Story ID"], storyIDs);
   }
+  const storyIDsWithDirectLogs = new Set();
   for (const log of testLog) {
-    expandUSReferences(log["Story ID"], storyIDs);
+    for (const ref of expandUSReferences(log["Story ID"], storyIDs)) {
+      storyIDsWithDirectLogs.add(ref);
+    }
   }
+  const storiesWithoutDirectLogs = stories
+    .map((row) => row["Story ID"])
+    .filter((storyID) => !storyIDsWithDirectLogs.has(storyID));
+  assert(
+    storiesWithoutDirectLogs.length === 0,
+    `Stories missing direct Test Log references: ${storiesWithoutDirectLogs.join(", ")}`,
+  );
 
   const unresolvedIssues = issues.filter((row) => !String(row.Status ?? "").startsWith("Fixed"));
   assert(
@@ -165,7 +175,7 @@ function verifyTrackerSemantics(tables) {
     "REQ-005 must identify ISS-050 as the only non-Fixed issue",
   );
 
-  assert(testLog.length === 267, `Expected 267 Test Log rows, got ${testLog.length}`);
+  assert(testLog.length === 268, `Expected 268 Test Log rows, got ${testLog.length}`);
   const latestLog = testLog.find((row) => row["Log ID"] === "TL-265");
   assert(latestLog, "Missing TL-265 test log entry");
   assert(
@@ -184,8 +194,18 @@ function verifyTrackerSemantics(tables) {
     String(structureVerifierLog.Result).includes("Tracker structure verification pass"),
     "TL-267 result must record the tracker structure verifier pass",
   );
+  const directEvidenceLog = testLog.find((row) => row["Log ID"] === "TL-268");
+  assert(directEvidenceLog, "Missing TL-268 direct story evidence test log entry");
+  assert(
+    String(directEvidenceLog.Result).includes("Direct story evidence pass"),
+    "TL-268 result must record the direct story evidence pass",
+  );
 
   const storyByID = new Map(stories.map((row) => [row["Story ID"], row]));
+  assert(
+    String(storyByID.get("US-010")?.Notes ?? "").includes("resolution=low now maps to coarse"),
+    "US-010 must document the waveform resolution compatibility fix",
+  );
   assert(
     String(storyByID.get("US-060")?.["Current Status"]).includes("acceptance smoke CLI hang fixed"),
     "US-060 status must mention the acceptance smoke CLI hang fix",

@@ -2,6 +2,7 @@
  * Waveform peaks generation API route.
  *
  * GET /api/projects/:id/waveform/:assetId?detail=coarse|medium|fine
+ * Legacy: ?resolution=low|medium|high maps to coarse|medium|fine.
  *
  * Extracts audio peaks from the source file via ffmpeg (raw PCM f32le),
  * downsamples to the requested detail level, and caches results as JSON.
@@ -23,6 +24,26 @@ const DETAIL_SAMPLE_COUNTS: Record<string, number> = {
 };
 
 const DEFAULT_DETAIL = "medium";
+
+const LEGACY_RESOLUTION_TO_DETAIL: Record<string, string> = {
+  low: "coarse",
+  medium: "medium",
+  high: "fine",
+};
+
+function resolveWaveformDetail(query: { detail?: unknown; resolution?: unknown }): string {
+  const rawDetail = typeof query.detail === "string" ? query.detail : undefined;
+  if (rawDetail && rawDetail in DETAIL_SAMPLE_COUNTS) {
+    return rawDetail;
+  }
+
+  const rawResolution = typeof query.resolution === "string" ? query.resolution : undefined;
+  if (rawResolution && rawResolution in LEGACY_RESOLUTION_TO_DETAIL) {
+    return LEGACY_RESOLUTION_TO_DETAIL[rawResolution];
+  }
+
+  return DEFAULT_DETAIL;
+}
 
 // ── Source map resolution ─────────────────────────────────────────────
 
@@ -307,9 +328,9 @@ export function createWaveformRouter(projectsDir: string): Router {
       return;
     }
 
-    // Validate detail level
-    const rawDetail = (req.query.detail as string) ?? DEFAULT_DETAIL;
-    const detail = rawDetail in DETAIL_SAMPLE_COUNTS ? rawDetail : DEFAULT_DETAIL;
+    // Validate detail level. Keep resolution=low|medium|high as a legacy alias
+    // because older tracker/browser smoke paths used that spelling.
+    const detail = resolveWaveformDetail(req.query);
     const targetSamples = DETAIL_SAMPLE_COUNTS[detail];
 
     // Resolve source path
