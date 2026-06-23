@@ -121,7 +121,7 @@ function verifyTrackerSemantics(tables) {
   assert(summaryValue("Issues tracked") === issues.length, "Summary Issues tracked does not match Issues rows");
   assertContinuousIDs(stories, "Story ID", "US", 66);
   assertContinuousIDs(issues, "Issue ID", "ISS", 85);
-  assertContinuousIDs(testLog, "Log ID", "TL", 270);
+  assertContinuousIDs(testLog, "Log ID", "TL", 272);
 
   const storyIDs = new Set(stories.map((row) => row["Story ID"]));
   for (const issue of issues) {
@@ -143,48 +143,68 @@ function verifyTrackerSemantics(tables) {
 
   const unresolvedIssues = issues.filter((row) => !String(row.Status ?? "").startsWith("Fixed"));
   assert(
-    unresolvedIssues.length === 1 && unresolvedIssues[0]["Issue ID"] === "ISS-050",
-    `Expected only ISS-050 unresolved; got ${unresolvedIssues
+    unresolvedIssues.length === 0,
+    `Expected no unresolved issues; got ${unresolvedIssues
       .map((row) => `${row["Issue ID"]}:${row.Status}`)
       .join(", ")}`,
   );
+  const issue50 = issues.find((row) => row["Issue ID"] === "ISS-050");
+  assert(issue50, "Missing ISS-050 issue row");
   assert(
-    String(unresolvedIssues[0].Status).includes("repo preference gate pending"),
-    "ISS-050 status must keep the repo preference gate caveat",
+    String(issue50.Status) === "Fixed",
+    "ISS-050 must be Fixed after GATE-001 closure",
   );
 
-  assert(openGates.length === 1, `Expected one open gate, got ${openGates.length}`);
+  assert(openGates.length === 1, `Expected one gate audit row, got ${openGates.length}`);
   assert(openGates[0]["Gate ID"] === "GATE-001", "Open gate must be GATE-001");
   assert(openGates[0].Related === "ISS-050 / US-061", "GATE-001 must point to ISS-050 / US-061");
-  assert(openGates[0].Status === "Open external dependency", "GATE-001 must remain an open external dependency");
+  assert(openGates[0].Status === "Closed", "GATE-001 must be closed after Extreme 500 validation");
   assert(
-    String(openGates[0]["Current Evidence"]).includes("TL-270")
-      && String(openGates[0]["Current Evidence"]).includes("TL-269")
-      && String(openGates[0]["Current Evidence"]).includes("matched=0")
-      && String(openGates[0]["Current Evidence"]).includes("unmatched=9"),
-    "GATE-001 evidence must include the latest TL-270 search and TL-269 relink recheck",
+    String(openGates[0]["Current Evidence"]).includes("TL-271")
+      && String(openGates[0]["Current Evidence"]).includes("ready=11")
+      && String(openGates[0]["Current Evidence"]).includes("missing=0")
+      && String(openGates[0]["Current Evidence"]).includes("canPreferMarlinAsDefault=true"),
+    "GATE-001 evidence must include the TL-271 closure evidence",
   );
 
   const auditByID = new Map(completionAudit.map((row) => [row["Requirement ID"], row]));
   assert(auditByID.get("REQ-007")?.["Current Verdict"] === "Not complete", "REQ-007 must remain Not complete");
   assert(
-    String(auditByID.get("REQ-004")?.["Current Verdict"]).includes("one external gate remains"),
-    "REQ-004 must describe the remaining external gate",
+    String(auditByID.get("REQ-004")?.["Current Verdict"]).includes("native click proof remains"),
+    "REQ-004 must describe the remaining native click proof",
   );
   assert(
-    String(auditByID.get("REQ-005")?.Evidence).includes("ISS-050 remains non-Fixed"),
-    "REQ-005 must identify ISS-050 as the only non-Fixed issue",
+    String(auditByID.get("REQ-005")?.Evidence).includes("no non-Fixed issue rows"),
+    "REQ-005 must identify zero non-Fixed issues",
   );
 
-  assert(testLog.length === 270, `Expected 270 Test Log rows, got ${testLog.length}`);
-  const latestLog = testLog.find((row) => row["Log ID"] === "TL-270");
-  assert(latestLog, "Missing TL-270 test log entry");
+  assert(testLog.length === 272, `Expected 272 Test Log rows, got ${testLog.length}`);
+  const latestLog = testLog.find((row) => row["Log ID"] === "TL-272");
+  assert(latestLog, "Missing TL-272 test log entry");
   assert(
-    String(latestLog.Result).includes("GATE-001 unchanged")
-      && String(latestLog.Evidence).includes("Spotlight")
-      && String(latestLog.Evidence).includes("/Volumes/DATA05")
-      && String(latestLog.Evidence).includes("no matches"),
-    "TL-270 result must preserve the current missing-MOV local search outcome",
+    String(latestLog.Result).includes("US-060 button click pending")
+      && String(latestLog.Evidence).includes("near_black_pct=1.0")
+      && String(latestLog.Evidence).includes("0 windows")
+      && String(latestLog.Evidence).includes("PID 48881"),
+    "TL-272 result must preserve the native UI accessibility blocker",
+  );
+  const gateClosureLog = testLog.find((row) => row["Log ID"] === "TL-271");
+  assert(gateClosureLog, "Missing TL-271 GATE-001 closure test log entry");
+  assert(
+    String(gateClosureLog.Result).includes("GATE-001 closed")
+      && String(gateClosureLog.Evidence).includes("ready=11")
+      && String(gateClosureLog.Evidence).includes("canPreferMarlinAsDefault=true")
+      && String(gateClosureLog.Evidence).includes("Marlin-first"),
+    "TL-271 result must preserve the GATE-001 closure outcome",
+  );
+  const localSearchLog = testLog.find((row) => row["Log ID"] === "TL-270");
+  assert(localSearchLog, "Missing TL-270 missing-MOV search test log entry");
+  assert(
+    String(localSearchLog.Result).includes("GATE-001 unchanged")
+      && String(localSearchLog.Evidence).includes("Spotlight")
+      && String(localSearchLog.Evidence).includes("/Volumes/DATA05")
+      && String(localSearchLog.Evidence).includes("no matches"),
+    "TL-270 result must preserve the previous missing-MOV local search outcome",
   );
   const lockedGateLog = testLog.find((row) => row["Log ID"] === "TL-269");
   assert(lockedGateLog, "Missing TL-269 locked-session gate test log entry");
@@ -223,8 +243,8 @@ function verifyTrackerSemantics(tables) {
     "US-060 status must mention the acceptance smoke CLI hang fix",
   );
   assert(
-    String(storyByID.get("US-061")?.["Current Status"]).includes("repo preference gate pending"),
-    "US-061 status must preserve the repo preference gate caveat",
+    String(storyByID.get("US-061")?.["Current Status"]).includes("Marlin-first preference gate pass"),
+    "US-061 status must record the Marlin-first preference gate pass",
   );
 }
 
