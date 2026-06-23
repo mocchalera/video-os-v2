@@ -22,6 +22,27 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
         XCTAssertTrue(plan.commandLine(mock: true).contains("--mock"))
     }
 
+    func testPlanKeepsVideoSourceWhenDurationReaderCannotResolve() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        let sourceDir = project.appendingPathComponent("02_media/source")
+        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
+        let source = sourceDir.appendingPathComponent("interview.mp4")
+        try Data([0x00]).write(to: source)
+        try writeAssets(project: project, filename: "interview.mp4", sourceLocator: "02_media/source/interview.mp4")
+
+        let plan = ProjectMarlinEvaluationRunPlanner.plan(
+            repositoryRoot: root,
+            projectURL: project,
+            durationReader: { _ in nil }
+        )
+
+        XCTAssertEqual(plan.readinessLabel, "ready")
+        XCTAssertTrue(plan.canRun)
+        XCTAssertEqual(plan.sourceURLs, [source])
+        XCTAssertTrue(plan.sourceDurationsByPath.isEmpty)
+    }
+
     func testPlanIncludesRequestTimeoutBeforeVideoSources() throws {
         let root = try makeRootFixture()
         let project = root.appendingPathComponent("projects/demo")
@@ -125,6 +146,44 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
         )
 
         XCTAssertEqual(plan.selectedSourceURLs(skipExisting: true, chunkSeconds: 30), [source])
+    }
+
+    func testPlanKeepsChunkedSourceWhenDurationIsUnknown() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        let source = project.appendingPathComponent("02_media/source/long.mp4")
+        let plan = ProjectMarlinEvaluationRunPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            sourceURLs: [source],
+            skippedSourceCount: 0,
+            scriptURL: root.appendingPathComponent("scripts/marlin-evaluate.ts"),
+            sourceAssetIDsByPath: [source.path: "A001"],
+            existingMarlinItemsByAssetID: [
+                "A001": makeMarlinAssetItem(assetID: "A001", chunkIndices: [0]),
+            ]
+        )
+
+        XCTAssertEqual(plan.selectedSourceURLs(skipExisting: true, chunkSeconds: 30), [source])
+    }
+
+    func testPlanDropsWholeAssetSourceWhenDurationIsUnknown() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        let source = project.appendingPathComponent("02_media/source/short.mp4")
+        let plan = ProjectMarlinEvaluationRunPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            sourceURLs: [source],
+            skippedSourceCount: 0,
+            scriptURL: root.appendingPathComponent("scripts/marlin-evaluate.ts"),
+            sourceAssetIDsByPath: [source.path: "A001"],
+            existingMarlinItemsByAssetID: [
+                "A001": makeMarlinAssetItem(assetID: "A001", chunkIndices: [nil]),
+            ]
+        )
+
+        XCTAssertTrue(plan.selectedSourceURLs(skipExisting: true, chunkSeconds: 30).isEmpty)
     }
 
     func testPlanDropsCompletedChunkedSourceWhenSkippingExisting() throws {

@@ -327,7 +327,7 @@ public enum ProjectMediaResolver {
         resolveTimelinePreview(
             projectURL: projectURL,
             playheadSeconds: playheadSeconds,
-            durationReader: mediaDurationSeconds
+            durationReader: { SafeMediaDurationReader.seconds(for: $0) }
         )
     }
 
@@ -530,12 +530,6 @@ public enum ProjectMediaResolver {
             return true
         }
         return normalizedPlayhead <= duration + 0.25
-    }
-
-    private static func mediaDurationSeconds(_ url: URL) -> Double? {
-        let asset = AVURLAsset(url: url)
-        let seconds = CMTimeGetSeconds(asset.duration)
-        return seconds.isFinite && seconds > 0 ? seconds : nil
     }
 
     private static func timelinePreviewCandidates(

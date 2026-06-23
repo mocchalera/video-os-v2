@@ -161,7 +161,7 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         guard let durationSeconds = sourceDurationsByPath[sourceURL.path],
               durationSeconds > Double(chunkSeconds)
         else {
-            return false
+            return artifactItem.events.contains { $0.chunkIndex != nil }
         }
 
         let chunks = chunkIndices(
@@ -354,7 +354,8 @@ public enum ProjectMarlinEvaluationRunPlanner {
     public static func plan(
         repositoryRoot: URL,
         projectURL: URL,
-        assets: AnalysisAssetDocument? = nil
+        assets: AnalysisAssetDocument? = nil,
+        durationReader: ((URL) -> Double?)? = nil
     ) -> ProjectMarlinEvaluationRunPlan {
         let summary = ProjectMediaResolver.previewSummary(projectURL: projectURL, assets: assets)
         var sourceAssetIDsByPath: [String: String] = [:]
@@ -363,7 +364,7 @@ public enum ProjectMarlinEvaluationRunPlanner {
             guard item.exists, item.playbackStatus != .directAudio else { return nil }
             guard let url = item.url else { return nil }
             sourceAssetIDsByPath[url.path] = item.assetID
-            if let duration = mediaDurationSeconds(url) {
+            if let durationReader, let duration = durationReader(url) {
                 sourceDurationsByPath[url.path] = duration
             }
             return url
@@ -386,12 +387,6 @@ public enum ProjectMarlinEvaluationRunPlanner {
             existingMarlinItemsByAssetID: existingItemsByAssetID,
             sourceDurationsByPath: sourceDurationsByPath
         )
-    }
-
-    private static func mediaDurationSeconds(_ url: URL) -> Double? {
-        let asset = AVURLAsset(url: url)
-        let seconds = CMTimeGetSeconds(asset.duration)
-        return seconds.isFinite && seconds > 0 ? seconds : nil
     }
 }
 
