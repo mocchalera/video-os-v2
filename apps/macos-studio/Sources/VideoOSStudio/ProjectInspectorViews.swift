@@ -106,6 +106,7 @@ struct ProjectPanel: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .accessibilityIdentifier("ProjectPanel.ActionQueueStatus")
                     ForEach(model.studioReadinessStatus.actionQueue) { action in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
@@ -125,6 +126,7 @@ struct ProjectPanel: View {
                                     .font(.caption2.monospaced())
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
+                                    .accessibilityIdentifier("ProjectPanel.ActionQueueCommand.\(action.id)")
                                 if command.contains("agent-prompt") {
                                     Text("Codex context: \(model.activeAgentRAGContextSummary)")
                                         .font(.caption2)
@@ -140,6 +142,7 @@ struct ProjectPanel: View {
                                 }
                                 .controlSize(.small)
                                 .disabled(!model.canPerformStudioReadinessAction(action))
+                                .accessibilityIdentifier("ProjectPanel.ActionQueueRunButton.\(action.id)")
 
                                 Button {
                                     model.copyStudioReadinessActionCommand(action)
@@ -148,6 +151,7 @@ struct ProjectPanel: View {
                                 }
                                 .controlSize(.small)
                                 .disabled(action.command == nil)
+                                .accessibilityIdentifier("ProjectPanel.ActionQueueCopyButton.\(action.id)")
 
                                 if let reason = model.studioReadinessActionDisabledReason(action) {
                                     Text(reason)
