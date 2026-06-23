@@ -100,4 +100,46 @@ describe("marlin incremental artifact merge", () => {
     expect(JSON.stringify(itemA)).toContain("run3");
     expect(JSON.stringify(itemA)).not.toContain("run1");
   });
+
+  it("checkpoints completed assets before a later source fails", async () => {
+    writeAssets([
+      { id: "AST_A", file: "media/a.mp4" },
+      { id: "AST_B", file: "media/b.mp4" },
+    ]);
+
+    let captionCount = 0;
+    const failingMarlinFn: MarlinFn = {
+      async caption() {
+        captionCount += 1;
+        if (captionCount === 2) {
+          throw new Error("Marlin worker request timed out after 900000ms for caption");
+        }
+        return {
+          scene: "scene-before-timeout",
+          caption: "caption-before-timeout",
+          events: [
+            { start: 1, end: 2, description: "event-before-timeout", confidence: 0.7 },
+          ],
+        };
+      },
+      async find(_videoPath, event) {
+        return { query: event, span: [1, 2], format_ok: true, confidence: 0.6 };
+      },
+    };
+
+    await expect(
+      runMarlinAnalysis({
+        projectDir,
+        projectId: "merge-fixture",
+        sourceFiles: ["media/a.mp4", "media/b.mp4"],
+        marlinFn: failingMarlinFn,
+        model: MODEL,
+        queries: ["q1"],
+      }),
+    ).rejects.toThrow("timed out");
+
+    const artifact = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/marlin_events.json"), "utf-8"));
+    expect(artifact.items.map((i: { asset_id: string }) => i.asset_id)).toEqual(["AST_A"]);
+    expect(JSON.stringify(artifact.items[0])).toContain("before-timeout");
+  });
 });

@@ -41,6 +41,8 @@ export interface MarlinAnalysisOptions {
   model?: MarlinModelRecord;
   queries?: string[];
   outputPath?: string;
+  skipExisting?: boolean;
+  maxSources?: number;
 }
 
 interface AssetsDoc {
@@ -53,7 +55,7 @@ interface AssetDocItem {
   source_locator?: string;
 }
 
-interface MarlinAssetInput {
+export interface MarlinAssetInput {
   assetId: string;
   sourcePath: string;
 }
@@ -138,9 +140,16 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
   const outputPath = opts.outputPath ?? path.join(absProjectDir, MARLIN_EVENTS_RELATIVE_PATH);
   const model = opts.model ?? defaultMarlinModel();
   const queries = normalizeQueries(opts.queries);
-  const assetInputs = loadMarlinAssetInputs(absProjectDir, opts.sourceFiles);
+  const assetInputs = selectMarlinAssetInputsForRun(
+    loadMarlinAssetInputs(absProjectDir, opts.sourceFiles),
+    {
+      outputPath,
+      skipExisting: opts.skipExisting,
+      maxSources: opts.maxSources,
+    },
+  );
 
-  const items = [];
+  const items: MarlinAssetEvents[] = [];
   for (const asset of assetInputs) {
     // Bounded proxy: never hand an unbounded-resolution source to the
     // worker (marlin-proxy.ts). Timestamps are unaffected — the proxy
@@ -161,28 +170,51 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
         findResults,
       }),
     );
+    writeMarlinArtifactCheckpoint({
+      projectDir: absProjectDir,
+      projectId: opts.projectId,
+      outputPath,
+      model,
+      items,
+    });
   }
 
+  return writeMarlinArtifactCheckpoint({
+    projectDir: absProjectDir,
+    projectId: opts.projectId,
+    outputPath,
+    model,
+    items,
+  });
+}
+
+function writeMarlinArtifactCheckpoint(args: {
+  projectDir: string;
+  projectId: string;
+  outputPath: string;
+  model: MarlinModelRecord;
+  items: MarlinAssetEvents[];
+}): string {
   // Incremental evidence: merge with any existing artifact so partial
   // evaluations accumulate instead of overwriting. Items for assets
   // re-evaluated in this run replace their previous entries; items for
   // assets not in this run are preserved. Representative coverage can
   // then be built up across several bounded runs.
-  const existing = readJsonIfExists<MarlinEventsArtifact>(outputPath);
-  const evaluatedAssetIds = new Set(items.map((item) => item.asset_id));
+  const existing = readJsonIfExists<MarlinEventsArtifact>(args.outputPath);
+  const evaluatedAssetIds = new Set(args.items.map((item) => item.asset_id));
   const preserved = (existing?.items ?? []).filter(
     (item) => !evaluatedAssetIds.has(item.asset_id),
   );
-  const mergedItems = [...preserved, ...items];
+  const mergedItems = [...preserved, ...args.items];
 
   const artifact = createMarlinEventsArtifact({
-    projectId: opts.projectId,
-    model,
+    projectId: args.projectId,
+    model: args.model,
     items: mergedItems,
   });
-  atomicWriteJson(outputPath, artifact);
-  applyMarlinEventsToSegments(absProjectDir, artifact);
-  return outputPath;
+  atomicWriteJson(args.outputPath, artifact);
+  applyMarlinEventsToSegments(args.projectDir, artifact);
+  return args.outputPath;
 }
 
 export function applyMarlinEventsToSegments(projectDir: string, artifact: MarlinEventsArtifact): boolean {
@@ -339,6 +371,26 @@ export function loadMarlinAssetInputs(projectDir: string, sourceFiles: string[])
     sourceCandidates.some((candidate) => pathsReferToSameSource(input.sourcePath, candidate))
   );
   return selected.length > 0 ? selected : inputs;
+}
+
+export function selectMarlinAssetInputsForRun(
+  inputs: MarlinAssetInput[],
+  options: {
+    outputPath: string;
+    skipExisting?: boolean;
+    maxSources?: number;
+  },
+): MarlinAssetInput[] {
+  let selected = inputs;
+  if (options.skipExisting) {
+    const existing = readJsonIfExists<MarlinEventsArtifact>(options.outputPath);
+    const existingAssetIds = new Set((existing?.items ?? []).map((item) => item.asset_id));
+    selected = selected.filter((input) => !existingAssetIds.has(input.assetId));
+  }
+  if (options.maxSources !== undefined) {
+    selected = selected.slice(0, options.maxSources);
+  }
+  return selected;
 }
 
 function marlinPeaksForSegment(

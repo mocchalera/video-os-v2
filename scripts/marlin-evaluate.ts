@@ -9,9 +9,11 @@ import { pathToFileURL } from "node:url";
 import {
   createMarlinFnFromEnvironment,
   loadMarlinAssetInputs,
+  MARLIN_EVENTS_RELATIVE_PATH,
   marlinModelFromEnvironment,
   marlinQueriesFromEnvironment,
   runMarlinAnalysis,
+  selectMarlinAssetInputsForRun,
 } from "../runtime/pipeline/stages/marlin.js";
 
 export interface MarlinEvaluateOptions {
@@ -20,6 +22,8 @@ export interface MarlinEvaluateOptions {
   sourceFiles: string[];
   mock: boolean;
   requestTimeoutMs?: number;
+  maxSources?: number;
+  skipExisting: boolean;
 }
 
 export interface MarlinEvaluateResult {
@@ -36,6 +40,8 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
   let repoRoot: string | undefined;
   let mock = false;
   let requestTimeoutMs: number | undefined;
+  let maxSources: number | undefined;
+  let skipExisting = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -51,6 +57,12 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
       requestTimeoutMs = parsePositiveIntegerOption("--request-timeout-ms", arg.slice("--request-timeout-ms=".length));
     } else if (arg.startsWith("--timeout-ms=")) {
       requestTimeoutMs = parsePositiveIntegerOption("--timeout-ms", arg.slice("--timeout-ms=".length));
+    } else if (arg === "--max-sources") {
+      maxSources = parsePositiveIntegerOption(arg, args[++index]);
+    } else if (arg.startsWith("--max-sources=")) {
+      maxSources = parsePositiveIntegerOption("--max-sources", arg.slice("--max-sources=".length));
+    } else if (arg === "--skip-existing") {
+      skipExisting = true;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -71,13 +83,15 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
     sourceFiles,
     mock,
     requestTimeoutMs,
+    maxSources,
+    skipExisting,
   };
 }
 
 function parsePositiveIntegerOption(name: string, value?: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`${name} requires a positive integer millisecond value`);
+    throw new Error(`${name} requires a positive integer value`);
   }
   return parsed;
 }
@@ -93,10 +107,20 @@ export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise
     process.env.VOS_MARLIN_MOCK = "1";
   }
 
-  const inputs = loadMarlinAssetInputs(projectDir, sourceFiles);
-  if (inputs.length === 0) {
+  const outputPath = path.join(projectDir, MARLIN_EVENTS_RELATIVE_PATH);
+  const allInputs = loadMarlinAssetInputs(projectDir, sourceFiles);
+  if (allInputs.length === 0) {
     throw new Error("No Marlin source inputs found. Pass source files or run analysis to create 03_analysis/assets.json.");
   }
+
+  const inputs = selectMarlinAssetInputsForRun(
+    allInputs,
+    {
+      outputPath,
+      skipExisting: options.skipExisting,
+      maxSources: options.maxSources,
+    },
+  );
 
   const missing = inputs.filter((input) => !fs.existsSync(input.sourcePath));
   if (missing.length > 0) {
@@ -115,6 +139,8 @@ export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise
       marlinFn,
       model,
       queries: marlinQueriesFromEnvironment(projectDir, repoRoot),
+      skipExisting: options.skipExisting,
+      maxSources: options.maxSources,
     });
 
     return {
@@ -137,6 +163,8 @@ Options:
   --mock         Use deterministic mock Marlin worker output
   --request-timeout-ms, --timeout-ms
                  Worker request timeout in milliseconds for slow live caption runs
+  --max-sources   Evaluate only the next N selected sources
+  --skip-existing Skip asset IDs already present in 03_analysis/marlin_events.json
   --help, -h     Show this help
 
 If source files are omitted, assets are resolved from 03_analysis/assets.json source_locator fields.

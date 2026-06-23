@@ -4,12 +4,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
-import { parseArgs as parseMarlinEvaluateArgs } from "../scripts/marlin-evaluate.js";
+import { parseArgs as parseMarlinEvaluateArgs, runMarlinEvaluate } from "../scripts/marlin-evaluate.js";
 import {
   createMarlinFnFromEnvironment,
   extractTagsFromScene,
   loadMarlinAssetInputs,
   runMarlinAnalysis,
+  selectMarlinAssetInputsForRun,
 } from "../runtime/pipeline/stages/marlin.js";
 import { materializePeakSignalsFromSegments } from "../runtime/artifacts/peak-materialization.js";
 
@@ -23,6 +24,11 @@ const Ajv2020 = require_("ajv/dist/2020") as new (opts: Record<string, unknown>)
 };
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const MODEL = {
+  provider: "marlin",
+  model_alias: "NemoStation/Marlin-2B",
+  model_snapshot: "test",
+} as const;
 
 function createMarlinEventsValidator() {
   const ajv = new Ajv2020({ strict: false, allErrors: true });
@@ -122,6 +128,42 @@ describe("Marlin analysis stage", () => {
     });
   });
 
+  it("selects unevaluated Marlin inputs for bounded follow-up runs", () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    const outputPath = path.join(projectDir, "03_analysis/marlin_events.json");
+    fs.writeFileSync(
+      outputPath,
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "marlin-events-v1",
+        model: MODEL,
+        items: [
+          {
+            asset_id: "AST_A",
+            source_path: "media/a.mp4",
+            scene: "done",
+            events: [],
+            find_results: [],
+          },
+        ],
+      }),
+    );
+
+    const selected = selectMarlinAssetInputsForRun(
+      [
+        { assetId: "AST_A", sourcePath: path.join(projectDir, "media/a.mp4") },
+        { assetId: "AST_B", sourcePath: path.join(projectDir, "media/b.mp4") },
+        { assetId: "AST_C", sourcePath: path.join(projectDir, "media/c.mp4") },
+      ],
+      { outputPath, skipExisting: true, maxSources: 1 },
+    );
+
+    expect(selected).toEqual([
+      { assetId: "AST_B", sourcePath: path.join(projectDir, "media/b.mp4") },
+    ]);
+  });
+
   it("parses request timeout overrides from the marlin evaluation CLI", () => {
     expect(
       parseMarlinEvaluateArgs([
@@ -131,10 +173,14 @@ describe("Marlin analysis stage", () => {
         "projects/demo",
         "--request-timeout-ms",
         "900000",
+        "--max-sources=2",
+        "--skip-existing",
       ]),
     ).toMatchObject({
       projectDir: "projects/demo",
       requestTimeoutMs: 900_000,
+      maxSources: 2,
+      skipExisting: true,
     });
 
     expect(
@@ -159,7 +205,64 @@ describe("Marlin analysis stage", () => {
         "--request-timeout-ms",
         "0",
       ]),
-    ).toThrow("--request-timeout-ms requires a positive integer millisecond value");
+    ).toThrow("--request-timeout-ms requires a positive integer value");
+  });
+
+  it("treats skip-existing with no remaining inputs as a no-op", async () => {
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/assets.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "2.0.0",
+        items: [
+          {
+            asset_id: "AST_A",
+            filename: "a.mp4",
+            source_locator: "media/a.mp4",
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/marlin_events.json"),
+      JSON.stringify({
+        project_id: "marlin-fixture",
+        artifact_version: "marlin-events-v1",
+        model: MODEL,
+        items: [
+          {
+            asset_id: "AST_A",
+            source_path: "media/a.mp4",
+            scene: "already done",
+            events: [],
+            find_results: [],
+          },
+        ],
+      }),
+    );
+
+    const previousMock = process.env.VOS_MARLIN_MOCK;
+    try {
+      const result = await runMarlinEvaluate({
+        projectDir,
+        repoRoot: REPO_ROOT,
+        sourceFiles: ["media/a.mp4"],
+        mock: true,
+        skipExisting: true,
+      });
+
+      expect(result.sourceCount).toBe(0);
+      const artifact = JSON.parse(fs.readFileSync(result.outputPath, "utf-8"));
+      expect(artifact.items.map((item: { asset_id: string }) => item.asset_id)).toEqual(["AST_A"]);
+    } finally {
+      if (previousMock === undefined) {
+        delete process.env.VOS_MARLIN_MOCK;
+      } else {
+        process.env.VOS_MARLIN_MOCK = previousMock;
+      }
+    }
   });
 
   it("writes schema-valid marlin_events.json from caption and find passes", async () => {

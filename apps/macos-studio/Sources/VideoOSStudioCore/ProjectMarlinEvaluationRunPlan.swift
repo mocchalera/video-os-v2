@@ -25,7 +25,12 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         return "ready"
     }
 
-    public func processArguments(mock: Bool = false, requestTimeoutMs: Int? = nil) -> [String] {
+    public func processArguments(
+        mock: Bool = false,
+        requestTimeoutMs: Int? = nil,
+        maxSources: Int? = nil,
+        skipExisting: Bool = false
+    ) -> [String] {
         var args = [
             "npx",
             "tsx",
@@ -42,12 +47,29 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
             args.append("--request-timeout-ms")
             args.append(String(requestTimeoutMs))
         }
+        if let maxSources {
+            args.append("--max-sources")
+            args.append(String(maxSources))
+        }
+        if skipExisting {
+            args.append("--skip-existing")
+        }
         args.append(contentsOf: sourceURLs.map(\.path))
         return args
     }
 
-    public func commandLine(mock: Bool = false, requestTimeoutMs: Int? = nil) -> String {
-        processArguments(mock: mock, requestTimeoutMs: requestTimeoutMs)
+    public func commandLine(
+        mock: Bool = false,
+        requestTimeoutMs: Int? = nil,
+        maxSources: Int? = nil,
+        skipExisting: Bool = false
+    ) -> String {
+        processArguments(
+            mock: mock,
+            requestTimeoutMs: requestTimeoutMs,
+            maxSources: maxSources,
+            skipExisting: skipExisting
+        )
             .map(shellQuote)
             .joined(separator: " ")
     }
@@ -149,6 +171,8 @@ public enum ProjectMarlinEvaluationRunner {
         plan: ProjectMarlinEvaluationRunPlan,
         mock: Bool = false,
         requestTimeoutMs: Int? = nil,
+        maxSources: Int? = nil,
+        skipExisting: Bool = false,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -176,7 +200,9 @@ public enum ProjectMarlinEvaluationRunner {
         }
         return try (runner ?? runProcess)(plan.repositoryRoot, plan.processArguments(
             mock: mock,
-            requestTimeoutMs: requestTimeoutMs
+            requestTimeoutMs: requestTimeoutMs,
+            maxSources: maxSources,
+            skipExisting: skipExisting
         ))
     }
 
@@ -184,6 +210,8 @@ public enum ProjectMarlinEvaluationRunner {
         plan: ProjectMarlinEvaluationRunPlan,
         mock: Bool = false,
         requestTimeoutMs: Int? = nil,
+        maxSources: Int? = nil,
+        skipExisting: Bool = false,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -192,6 +220,8 @@ public enum ProjectMarlinEvaluationRunner {
             plan: plan,
             mock: mock,
             requestTimeoutMs: requestTimeoutMs,
+            maxSources: maxSources,
+            skipExisting: skipExisting,
             runtimeStatus: runtimeStatus,
             modelAccessStatus: modelAccessStatus,
             runner: runner

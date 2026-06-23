@@ -1812,9 +1812,12 @@ struct VideoOSStudioCLI {
     private static func runNextMarlinEvaluation(root: URL, args: [String]) {
         let execute = args.contains("--execute")
         let mock = args.contains("--mock")
+        let skipExisting = args.contains("--skip-existing")
         let requestTimeoutMs: Int?
+        let maxSources: Int?
         do {
             requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
+            maxSources = try marlinMaxSources(from: args)
         } catch {
             fputs("marlin eval next failed: \(error)\n", stderr)
             Foundation.exit(1)
@@ -1825,6 +1828,8 @@ struct VideoOSStudioCLI {
         print("execute: \(execute)")
         print("mock: \(mock)")
         print("requestTimeoutMs: \(requestTimeoutMs.map(String.init) ?? "\(defaultMarlinRequestTimeoutMs) (default)")")
+        print("maxSources: \(maxSources.map(String.init) ?? "all")")
+        print("skipExisting: \(skipExisting)")
         guard let item = next.item, let plan = next.runPlan else {
             print("nextProject: -")
             print("canRun: false")
@@ -1835,7 +1840,13 @@ struct VideoOSStudioCLI {
         print("canRun: \(plan.canRun)")
         print("sourceCount: \(plan.sourceCount)")
         print("skippedSourceCount: \(plan.skippedSourceCount)")
-        print("command: \(plan.commandLine(mock: mock, requestTimeoutMs: requestTimeoutMs))")
+        let commandLine = plan.commandLine(
+            mock: mock,
+            requestTimeoutMs: requestTimeoutMs,
+            maxSources: maxSources,
+            skipExisting: skipExisting
+        )
+        print("command: \(commandLine)")
         print("recommendation: \(next.recommendation)")
         if !mock {
             let modelAccess = ProjectMarlinModelAccessStatusReader.status(repositoryRoot: root)
@@ -1857,7 +1868,9 @@ struct VideoOSStudioCLI {
             let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(
                 plan: plan,
                 mock: mock,
-                requestTimeoutMs: requestTimeoutMs
+                requestTimeoutMs: requestTimeoutMs,
+                maxSources: maxSources,
+                skipExisting: skipExisting
             )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
@@ -1899,6 +1912,8 @@ struct VideoOSStudioCLI {
     private static func printMarlinEvaluationPlan(root: URL, args: [String]) {
         do {
             let requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
+            let maxSources = try marlinMaxSources(from: args)
+            let skipExisting = args.contains("--skip-existing")
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
@@ -1908,8 +1923,15 @@ struct VideoOSStudioCLI {
             print("sourceCount: \(plan.sourceCount)")
             print("skippedSourceCount: \(plan.skippedSourceCount)")
             print("requestTimeoutMs: \(requestTimeoutMs.map(String.init) ?? "\(defaultMarlinRequestTimeoutMs) (default)")")
+            print("maxSources: \(maxSources.map(String.init) ?? "all")")
+            print("skipExisting: \(skipExisting)")
             print("script: \(plan.scriptURL.path)")
-            print("command: \(plan.commandLine(requestTimeoutMs: requestTimeoutMs))")
+            let commandLine = plan.commandLine(
+                requestTimeoutMs: requestTimeoutMs,
+                maxSources: maxSources,
+                skipExisting: skipExisting
+            )
+            print("command: \(commandLine)")
             if !plan.sourceURLs.isEmpty {
                 print("sources:")
                 for url in plan.sourceURLs {
@@ -1925,7 +1947,9 @@ struct VideoOSStudioCLI {
     private static func runMarlinEvaluation(root: URL, args: [String]) {
         do {
             let mock = args.contains("--mock")
+            let skipExisting = args.contains("--skip-existing")
             let requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
+            let maxSources = try marlinMaxSources(from: args)
             let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
@@ -1935,7 +1959,9 @@ struct VideoOSStudioCLI {
             let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(
                 plan: plan,
                 mock: mock,
-                requestTimeoutMs: requestTimeoutMs
+                requestTimeoutMs: requestTimeoutMs,
+                maxSources: maxSources,
+                skipExisting: skipExisting
             )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
@@ -2309,9 +2335,9 @@ struct VideoOSStudioCLI {
           marlin-eval-queue
                             Print runnable and blocked projects for representative Marlin-2B evaluation.
           marlin-eval-next
-                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms>.
-          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms>.
-          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms>.
+                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing.
+          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms> --max-sources=<n> --skip-existing.
+          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms> --max-sources=<n> --skip-existing.
           playback-contract-status
                             Print whether preview-manifest.json matches the current timeline (approval-grade playback).
           render-status     Print final render/package artifact readiness.
@@ -2395,6 +2421,20 @@ struct VideoOSStudioCLI {
         return value
     }
 
+    private static func marlinMaxSources(from args: [String]) throws -> Int? {
+        guard let raw = try valueOption(
+            args,
+            names: ["--max-sources"],
+            errorLabel: "--max-sources"
+        ) else {
+            return nil
+        }
+        guard let value = Int(raw), value > 0 else {
+            throw CLIError.message("--max-sources requires a positive integer value")
+        }
+        return value
+    }
+
     private static func valueOption(_ args: [String], names: Set<String>, errorLabel: String) throws -> String? {
         for name in names {
             let prefix = "\(name)="
@@ -2412,7 +2452,7 @@ struct VideoOSStudioCLI {
     }
 
     private static func marlinEvaluationProjectArgs(from args: [String]) -> [String] {
-        positionalArguments(from: args, valueOptions: ["--request-timeout-ms", "--timeout-ms"])
+        positionalArguments(from: args, valueOptions: ["--request-timeout-ms", "--timeout-ms", "--max-sources"])
     }
 
     private static func positionalArguments(from args: [String], valueOptions: Set<String>) -> [String] {

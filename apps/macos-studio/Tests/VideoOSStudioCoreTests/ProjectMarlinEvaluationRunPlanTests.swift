@@ -40,6 +40,25 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
         XCTAssertEqual(Array(args.suffix(3)), ["--request-timeout-ms", "900000", source.path])
     }
 
+    func testPlanIncludesChunkingOptionsBeforeVideoSources() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        let source = project.appendingPathComponent("02_media/source/interview.mp4")
+        let plan = ProjectMarlinEvaluationRunPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            sourceURLs: [source],
+            skippedSourceCount: 0,
+            scriptURL: root.appendingPathComponent("scripts/marlin-evaluate.ts")
+        )
+
+        let args = plan.processArguments(maxSources: 1, skipExisting: true)
+
+        XCTAssertTrue(plan.commandLine(maxSources: 1, skipExisting: true).contains("--max-sources"))
+        XCTAssertTrue(args.contains("--skip-existing"))
+        XCTAssertEqual(Array(args.suffix(4)), ["--max-sources", "1", "--skip-existing", source.path])
+    }
+
     func testPlanReportsNoVideoSourcesWhenAssetsAreMissing() throws {
         let root = try makeRootFixture()
         let project = root.appendingPathComponent("projects/demo")
@@ -95,6 +114,30 @@ final class ProjectMarlinEvaluationRunPlanTests: XCTestCase {
             requestTimeoutMs: 900_000
         ) { _, args in
             XCTAssertEqual(Array(args.suffix(3)), ["--request-timeout-ms", "900000", project.appendingPathComponent("02_media/source/clip.mp4").path])
+            return ProjectMarlinEvaluationRunResult(exitCode: 0, standardOutput: "ok", standardError: "")
+        }
+
+        XCTAssertTrue(result.succeeded)
+    }
+
+    func testRunnerPassesChunkingOptionsToInjectedProcess() throws {
+        let root = try makeRootFixture()
+        let project = root.appendingPathComponent("projects/demo")
+        let plan = ProjectMarlinEvaluationRunPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            sourceURLs: [project.appendingPathComponent("02_media/source/clip.mp4")],
+            skippedSourceCount: 0,
+            scriptURL: root.appendingPathComponent("scripts/marlin-evaluate.ts")
+        )
+
+        let result = try ProjectMarlinEvaluationRunner.run(
+            plan: plan,
+            mock: true,
+            maxSources: 1,
+            skipExisting: true
+        ) { _, args in
+            XCTAssertEqual(Array(args.suffix(4)), ["--max-sources", "1", "--skip-existing", project.appendingPathComponent("02_media/source/clip.mp4").path])
             return ProjectMarlinEvaluationRunResult(exitCode: 0, standardOutput: "ok", standardError: "")
         }
 
