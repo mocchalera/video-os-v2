@@ -334,6 +334,7 @@ struct MediaPanel: View {
                 Text(model.syntheticMediaStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.SyntheticMediaStatus")
 
                 Button {
                     model.buildSelectedProjectSyntheticMedia()
@@ -345,6 +346,8 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(project == nil || model.mediaSourceMapStatus.assetCount == 0 || model.isBuildingSyntheticMedia)
+                .accessibilityIdentifier("MediaPanel.BuildDemoMediaButton")
+                .help("Build Demo Media")
 
                 Text("Creates short local test videos under 02_media/synthetic and maps analyzed assets for preview and handoff QA.")
                     .font(.caption2)
@@ -355,6 +358,7 @@ struct MediaPanel: View {
                 Text(model.studioSyntheticSmokeStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.StudioSyntheticSmokeStatus")
 
                 Button {
                     model.runStudioSyntheticSmoke()
@@ -366,6 +370,8 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(model.isRunningStudioSyntheticSmoke)
+                .accessibilityIdentifier("MediaPanel.RunStudioSmokeButton")
+                .help("Run Studio Smoke")
 
                 Text("Builds a temporary approved project, packages final media, and verifies editor packet media without changing the selected project.")
                     .font(.caption2)
@@ -376,6 +382,7 @@ struct MediaPanel: View {
                 Text(model.studioAcceptanceSmokeStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.StudioAcceptanceSmokeStatus")
 
                 Button {
                     model.runStudioAcceptanceSmoke()
@@ -387,6 +394,8 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(model.isRunningStudioAcceptanceSmoke)
+                .accessibilityIdentifier("MediaPanel.RunAcceptanceSmokeButton")
+                .help("Run Acceptance Smoke")
 
                 Text("Checks the Codex App Server handshake and the temporary render/package/editor-packet loop as one runtime acceptance gate.")
                     .font(.caption2)
@@ -397,6 +406,7 @@ struct MediaPanel: View {
                 Text(model.mediaProxyOperationStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.MediaProxyOperationStatus")
 
                 Button {
                     model.buildSelectedProjectMediaProxies()
@@ -408,11 +418,14 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(project == nil || model.mediaProxyPlan.pendingCount == 0 || model.isBuildingMediaProxies)
+                .accessibilityIdentifier("MediaPanel.BuildProxiesButton")
+                .help("Build Proxies")
 
                 if model.mediaProxyPlan.items.isEmpty {
                     Text("No unsupported source media needs a preview proxy.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("MediaPanel.MediaProxyEmptyState")
                 } else {
                     ForEach(model.mediaProxyPlan.items) { item in
                         VStack(alignment: .leading, spacing: 4) {
@@ -436,6 +449,8 @@ struct MediaPanel: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(2)
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("MediaPanel.MediaProxyPlanItem.\(item.assetID)")
                     }
                 }
             }
