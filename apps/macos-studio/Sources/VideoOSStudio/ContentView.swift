@@ -773,8 +773,10 @@ private struct StudioWorkspaceView: View {
                 feedbackSession: model.feedbackSession,
                 statusMessage: model.roughCutCompileStatus,
                 canPromote: model.canPromoteLatestStudioPatch,
+                canUndo: !model.feedbackSession.patchHistory.isEmpty,
                 onApplyAndPreview: { model.applyStudioPatch() },
                 onPromote: { model.promoteStudioPatch() },
+                onUndo: { model.undoLastPatch() },
                 onDiscard: { model.feedbackSession.clearAll() }
             )
         }

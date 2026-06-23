@@ -5,8 +5,10 @@ struct FeedbackStatusBar: View {
     @ObservedObject var feedbackSession: StudioFeedbackSession
     var statusMessage: String
     var canPromote: Bool
+    var canUndo: Bool
     var onApplyAndPreview: () -> Void
     var onPromote: () -> Void
+    var onUndo: () -> Void
     var onDiscard: () -> Void
 
     private var conflicts: [PatchConflict] {
@@ -59,6 +61,13 @@ struct FeedbackStatusBar: View {
             .disabled(!canPromote)
             .help(canPromote ? "Promote the latest applied Studio patch to planning artifacts." : "Promote is available after a replace/remove Studio patch has been applied.")
             .accessibilityIdentifier("FeedbackStatus.PromoteButton")
+
+            Button(action: onUndo) {
+                Label("Undo", systemImage: "arrow.uturn.backward")
+            }
+            .disabled(!canUndo)
+            .help(canUndo ? "Restore the timeline backup from the latest Studio patch." : "Undo is available after a Studio patch has been applied.")
+            .accessibilityIdentifier("FeedbackStatus.UndoButton")
 
             Button(action: onDiscard) {
                 Label("Discard", systemImage: "trash")
