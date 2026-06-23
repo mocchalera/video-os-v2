@@ -1,0 +1,549 @@
+{
+  "version": "2",
+  "project_id": "ax1-participant-voices-20260401",
+  "created_at": "2026-04-01T08:45:00Z",
+  "sequence": {
+    "name": "AX-1 参加者の声 集客インタビュー",
+    "fps_num": 24,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0,
+    "output_aspect_ratio": "16:9"
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_0007",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 300930000,
+            "src_out_us": 310930000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 240,
+            "role": "support",
+            "motivation": "AI がある前提で経営や提供価値を考え直すという経営者向けの締めができる",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:300930000:320930000",
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 300930000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 300930000,
+                "resolved_src_out_us": 310930000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0004",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 224370000,
+            "src_out_us": 234370000,
+            "timeline_in_frame": 240,
+            "timeline_duration_frames": 240,
+            "role": "support",
+            "motivation": "年齢を重ねても感動したという人間的な余韻があり、終盤の感情補強になる",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.87,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:224370000:241890000",
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 224370000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 224370000,
+                "resolved_src_out_us": 234370000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0006",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 250930000,
+            "src_out_us": 260930000,
+            "timeline_in_frame": 480,
+            "timeline_duration_frames": 240,
+            "role": "hero",
+            "motivation": "一人でも多くの人に知ってほしいという推奨の言葉が testimonial として強く、終盤の熱量を担保する",
+            "beat_id": "b05",
+            "fallback_segment_ids": [],
+            "confidence": 0.92,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:250930000:272930000",
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 250930000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 250930000,
+                "resolved_src_out_us": 260930000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "track_id": "V2",
+        "kind": "video",
+        "clips": []
+      }
+    ],
+    "audio": [
+      {
+        "track_id": "A1",
+        "kind": "audio",
+        "clips": [
+          {
+            "clip_id": "CLP_0001",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 8880000,
+            "src_out_us": 18880000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 240,
+            "role": "dialogue",
+            "motivation": "セミナー参加に慎重な経営者でも AI への危機感から動いたという導入が hook として強い",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.95,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:8880000:24880000",
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 8880000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 8880000,
+                "resolved_src_out_us": 18880000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0002",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 63080000,
+            "src_out_us": 73080000,
+            "timeline_in_frame": 240,
+            "timeline_duration_frames": 240,
+            "role": "dialogue",
+            "motivation": "実践性、自信、明日からの行動という参加価値が一つの流れで入っており最重要の中盤証言になる",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.98,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:63080000:81920000",
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 63080000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 63080000,
+                "resolved_src_out_us": 73080000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0003",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 85720000,
+            "src_out_us": 95720000,
+            "timeline_in_frame": 600,
+            "timeline_duration_frames": 240,
+            "role": "dialogue",
+            "motivation": "自分でアプリを作れると知った驚きと感動が AX-1 の体験価値を具体化する",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.94,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:85720000:105420000",
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 85720000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 85720000,
+                "resolved_src_out_us": 95720000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0005",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 191370000,
+            "src_out_us": 201370000,
+            "timeline_in_frame": 960,
+            "timeline_duration_frames": 240,
+            "role": "dialogue",
+            "motivation": "漠然としていた状態から具体化し、業務活用まで見えたという変化が説明会誘導に効く",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.96,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:191370000:224370000",
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 191370000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 191370000,
+                "resolved_src_out_us": 201370000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "ACL_0008",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 300930000,
+            "src_out_us": 310930000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 240,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:300930000:320930000",
+            "audio_policy": {
+              "mode": "ducking",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            },
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 300930000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 300930000,
+                "resolved_src_out_us": 310930000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "ACL_0009",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 224370000,
+            "src_out_us": 234370000,
+            "timeline_in_frame": 240,
+            "timeline_duration_frames": 240,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:224370000:241890000",
+            "audio_policy": {
+              "mode": "ducking",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            },
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 224370000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 224370000,
+                "resolved_src_out_us": 234370000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          },
+          {
+            "clip_id": "ACL_0010",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 250930000,
+            "src_out_us": 260930000,
+            "timeline_in_frame": 480,
+            "timeline_duration_frames": 240,
+            "role": "nat_sound",
+            "motivation": "original clip audio",
+            "beat_id": "b05",
+            "fallback_segment_ids": [],
+            "confidence": 0.92,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:250930000:272930000",
+            "audio_policy": {
+              "mode": "ducking",
+              "preserve_nat_sound": true,
+              "nat_gain": 1.8,
+              "a1_loudnorm": true
+            },
+            "metadata": {
+              "trim": {
+                "mode": "adaptive_peak_center",
+                "source_center_us": 250930000,
+                "preferred_duration_us": 10000000,
+                "resolved_src_in_us": 250930000,
+                "resolved_src_out_us": 260930000,
+                "interest_point_label": "the strongest action moment",
+                "peak_type": "action_peak",
+                "peak_confidence": 0.75,
+                "peak_ref": "MFIND_AST_76B05D86_0001"
+              },
+              "editorial": {
+                "peak": {
+                  "primary_peak_ref": "MFIND_AST_76B05D86_0001",
+                  "peak_type": "action_peak",
+                  "peak_confidence": 0.75,
+                  "peak_summary": "the strongest action moment"
+                }
+              },
+              "peak_signals": {
+                "motion": 0.75,
+                "audio_rms": 0,
+                "peak_strength_score": 0.75,
+                "peak_type": "action_peak"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "track_id": "A2",
+        "kind": "audio",
+        "clips": []
+      },
+      {
+        "track_id": "A3",
+        "kind": "audio",
+        "clips": []
+      }
+    ]
+  },
+  "markers": [
+    {
+      "frame": 0,
+      "kind": "beat",
+      "label": "b01: hook"
+    },
+    {
+      "frame": 12,
+      "kind": "review",
+      "label": "US-052 smoke marker"
+    },
+    {
+      "frame": 240,
+      "kind": "beat",
+      "label": "b02: value"
+    },
+    {
+      "frame": 240,
+      "kind": "beat",
+      "label": "b04: application"
+    },
+    {
+      "frame": 480,
+      "kind": "beat",
+      "label": "b05: conviction"
+    },
+    {
+      "frame": 600,
+      "kind": "beat",
+      "label": "b03: breakthrough"
+    }
+  ],
+  "provenance": {
+    "brief_path": "01_intent/creative_brief.yaml",
+    "blueprint_path": "04_plan/edit_blueprint.yaml",
+    "selects_path": "04_plan/selects_candidates.yaml",
+    "compiler_version": "1.0.0",
+    "duration_policy": {
+      "mode": "guide",
+      "source": "explicit_brief",
+      "target_source": "explicit_brief",
+      "target_duration_sec": 75
+    },
+    "audio_policy": {
+      "mode": "ducking",
+      "source": "global_default",
+      "a1_loudnorm": true
+    },
+    "caption_policy": {
+      "mode": "off",
+      "source": "global_default"
+    },
+    "compiler_defaults_hash": "994083935c7de513"
+  }
+}

@@ -1,0 +1,66 @@
+version: "1"
+entries:
+  - stage: derivatives
+    asset_id: AST_2F5B86AF
+    issue: derivatives_not_generated
+    severity: warning
+  - stage: diarize
+    asset_id: AST_01C251D3
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_2F5B86AF
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_34EA5E88
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_3D474C76
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_45310186
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_50EBFBBE
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_5395FFCE
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_66F572EB
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_6A478DEC
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_7EC7D225
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_7F2E9F12
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_8BED5B08
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_DA4D2912
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_EF7B9E5B
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_FB322087
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning

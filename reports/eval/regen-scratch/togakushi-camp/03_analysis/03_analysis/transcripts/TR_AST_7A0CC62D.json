@@ -1,0 +1,30 @@
+{
+  "project_id": "togakushi-camp",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_7A0CC62D",
+  "asset_id": "AST_7A0CC62D",
+  "items": [
+    {
+      "item_id": "TRI_AST_7A0CC62D_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_7A0CC62D:speaker_1",
+      "start_us": 0,
+      "end_us": 7900000,
+      "text": "ご視聴ありがとうございました"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "14383a79e232dd6c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

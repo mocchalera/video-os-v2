@@ -1,0 +1,68 @@
+{
+  "version": "1",
+  "project_id": "clean-ui",
+  "media_dir": "02_media",
+  "generated_at": "2026-06-22T06:55:41.408Z",
+  "items": [
+    {
+      "asset_id": "AST_001",
+      "filename": "source.mp4",
+      "source_locator": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "local_source_path": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "link_path": "02_media/source.mp4",
+      "display_name": "ast_001_cabin_interview.mov",
+      "kind": "asset",
+      "link_type": "generated-test-fixture"
+    },
+    {
+      "asset_id": "AST_002",
+      "filename": "source.mp4",
+      "source_locator": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "local_source_path": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "link_path": "02_media/source.mp4",
+      "display_name": "ast_002_kitchen_broll.mov",
+      "kind": "asset",
+      "link_type": "generated-test-fixture"
+    },
+    {
+      "asset_id": "AST_003",
+      "filename": "source.mp4",
+      "source_locator": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "local_source_path": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "link_path": "02_media/source.mp4",
+      "display_name": "ast_003_hands_prep.mov",
+      "kind": "asset",
+      "link_type": "generated-test-fixture"
+    },
+    {
+      "asset_id": "AST_004",
+      "filename": "source.mp4",
+      "source_locator": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "local_source_path": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "link_path": "02_media/source.mp4",
+      "display_name": "ast_004_trail_walk.mov",
+      "kind": "asset",
+      "link_type": "generated-test-fixture"
+    },
+    {
+      "asset_id": "AST_005",
+      "filename": "source.mp4",
+      "source_locator": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "local_source_path": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "link_path": "02_media/source.mp4",
+      "display_name": "ast_005_summit_release.mov",
+      "kind": "asset",
+      "link_type": "generated-test-fixture"
+    },
+    {
+      "asset_id": "AST_006",
+      "filename": "source.mp4",
+      "source_locator": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "local_source_path": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/ui-test-projects/clean-ui/02_media/source.mp4",
+      "link_path": "02_media/source.mp4",
+      "display_name": "ast_006_forest_textures.mov",
+      "kind": "asset",
+      "link_type": "generated-test-fixture"
+    }
+  ]
+}

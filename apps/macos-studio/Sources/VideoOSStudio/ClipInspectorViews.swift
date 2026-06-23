@@ -59,21 +59,28 @@ struct ClipInspectorPanel: View {
 
                 Section("Editor Note") {
                     LabeledContent("Handoff", value: model.editorAnnotationSummary?.statusLabel ?? "no editor annotations")
+                        .accessibilityIdentifier("ClipInspector.EditorAnnotationSummary")
                     if let saved = model.selectedClipNote {
                         LabeledContent("Saved", value: saved.updatedAt)
+                            .accessibilityIdentifier("ClipInspector.SavedNoteUpdatedAt")
                         Text(saved.handoffInstruction)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
+                            .accessibilityIdentifier("ClipInspector.SavedHandoffInstruction")
                     }
 
                     TextEditor(text: $model.selectedClipNoteDraft)
                         .font(.body)
                         .frame(minHeight: 72)
+                        .accessibilityLabel("Editor note draft")
+                        .accessibilityIdentifier("ClipInspector.NoteDraftEditor")
 
                     TextEditor(text: $model.selectedClipHandoffInstructionDraft)
                         .font(.body)
                         .frame(minHeight: 58)
+                        .accessibilityLabel("Handoff instruction draft")
+                        .accessibilityIdentifier("ClipInspector.HandoffInstructionDraftEditor")
 
                     HStack {
                         Button {
@@ -82,6 +89,7 @@ struct ClipInspectorPanel: View {
                             Label("Ask Codex", systemImage: "sparkles")
                         }
                         .disabled(model.appServerStatus == .checking || model.activeThreadID == nil)
+                        .accessibilityIdentifier("ClipInspector.AskCodexButton")
 
                         Button {
                             model.saveSelectedClipNote()
@@ -89,6 +97,7 @@ struct ClipInspectorPanel: View {
                             Label("Save Note", systemImage: "note.text.badge.plus")
                         }
                         .disabled(model.selectedClipNoteDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("ClipInspector.SaveNoteButton")
 
                         Button(role: .destructive) {
                             model.clearSelectedClipNote()
@@ -96,11 +105,13 @@ struct ClipInspectorPanel: View {
                             Label("Clear", systemImage: "xmark.circle")
                         }
                         .disabled(model.selectedClipNote == nil)
+                        .accessibilityIdentifier("ClipInspector.ClearNoteButton")
                     }
 
                     Text(model.editorAnnotationStatus)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("ClipInspector.EditorAnnotationStatus")
                 }
 
                 if let evidence, evidence.hasAnalysis {
@@ -115,6 +126,7 @@ struct ClipInspectorPanel: View {
                 Section("Selection") {
                     Label("Select a timeline clip to inspect source, timing, and editorial rationale.", systemImage: "cursorarrow.click.2")
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("ClipInspector.NoSelectionMessage")
                 }
             }
         }

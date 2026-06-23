@@ -3,6 +3,12 @@ import XCTest
 @testable import VideoOSStudioCore
 
 final class ProjectAudioWaveformMapTests: XCTestCase {
+    func testExtractorUsesAssetReaderForVideoContainers() {
+        XCTAssertEqual(AudioWaveformExtractor.preferredBackend(for: URL(fileURLWithPath: "/tmp/interview.mp4")), .assetReader)
+        XCTAssertEqual(AudioWaveformExtractor.preferredBackend(for: URL(fileURLWithPath: "/tmp/interview.mov")), .assetReader)
+        XCTAssertEqual(AudioWaveformExtractor.preferredBackend(for: URL(fileURLWithPath: "/tmp/tone.wav")), .audioFile)
+    }
+
     func testBuildExtractsNormalizedPeaksForAudioTimelineClip() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-waveform-\(UUID().uuidString)")

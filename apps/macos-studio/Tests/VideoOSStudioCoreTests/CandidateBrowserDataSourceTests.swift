@@ -137,13 +137,58 @@ final class CandidateBrowserDataSourceTests: XCTestCase {
         XCTAssertEqual(dataSource.fallbacks(forBeat: "b01"), ["SEG_002", "cand_3"])
         XCTAssertEqual(dataSource.fallbacks(forBeat: "missing"), [])
     }
+
+    func testCandidateReplacementOperationUsesCandidateReference() {
+        let candidate = makeCandidate(
+            candidateID: "cand_hero",
+            segmentID: "SEG_HERO",
+            confidence: 0.91,
+            beats: ["b01"],
+            why: "strong opening image"
+        )
+
+        let op = candidate.makeReplaceSegmentOperation(targetClipID: "CLP_001")
+
+        guard case let .replaceSegment(targetClipID, segmentID, candidateRef, reason) = op else {
+            return XCTFail("Expected replace_segment")
+        }
+        XCTAssertEqual(targetClipID, "CLP_001")
+        XCTAssertEqual(segmentID, "SEG_HERO")
+        XCTAssertEqual(candidateRef, "cand_hero")
+        XCTAssertEqual(reason, "Swap selected in Candidate Browser: strong opening image")
+        XCTAssertTrue(op.isValidForStudioSession)
+    }
+
+    func testCandidateReplacementOperationFallsBackToSegmentReferenceAndTruncatesReason() {
+        let longWhy = String(repeating: "specific visual evidence ", count: 8)
+        let candidate = makeCandidate(
+            candidateID: nil,
+            segmentID: "SEG_FALLBACK",
+            confidence: 0.72,
+            beats: ["b01"],
+            why: longWhy
+        )
+
+        let op = candidate.makeReplaceSegmentOperation(targetClipID: "CLP_002")
+
+        guard case let .replaceSegment(_, segmentID, candidateRef, reason) = op else {
+            return XCTFail("Expected replace_segment")
+        }
+        XCTAssertEqual(segmentID, "SEG_FALLBACK")
+        XCTAssertEqual(candidateRef, "SEG_FALLBACK")
+        XCTAssertTrue(reason.hasPrefix("Swap selected in Candidate Browser: specific visual evidence"))
+        XCTAssertTrue(reason.hasSuffix("..."))
+        XCTAssertLessThanOrEqual(reason.count, "Swap selected in Candidate Browser: ".count + 96)
+        XCTAssertTrue(op.isValidForStudioSession)
+    }
 }
 
 private func makeCandidate(
     candidateID: String? = nil,
     segmentID: String,
     confidence: Double,
-    beats: [String]
+    beats: [String],
+    why: String = "test"
 ) -> BrowserCandidate {
     BrowserCandidate(
         candidate_id: candidateID,
@@ -153,7 +198,7 @@ private func makeCandidate(
         src_out_us: 1_000_000,
         role: "support",
         confidence: confidence,
-        why_it_matches: "test",
+        why_it_matches: why,
         risks: [],
         eligible_beats: beats,
         story_role: nil,

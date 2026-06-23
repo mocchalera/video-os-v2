@@ -271,7 +271,8 @@ describe("footage database", () => {
 
     expect(result.embedding_status).toBe("ready");
     expect(result.counts.embeddings).toBeGreaterThan(0);
-    expect(result.embedding_counts?.e5_text).toBe(result.counts.embeddings);
+    expect(result.embedding_counts?.e5_text).toBeGreaterThan(0);
+    expect(result.counts.embeddings).toBeGreaterThanOrEqual(result.embedding_counts?.e5_text ?? 0);
     expect(result.embedding_statuses?.e5_text).toBe("ready");
   });
 
@@ -808,15 +809,19 @@ describe("footage database", () => {
     const build = await buildFootageDb({ projectDir, embeddingPolicy: "require", qwen3vlEnabled: false });
     expect(build.embedding_status).toBe("ready");
     expect(build.counts.embeddings).toBeGreaterThan(0);
-    expect(build.embedding_counts?.e5_text).toBe(build.counts.embeddings);
+    expect(build.embedding_counts?.e5_text).toBeGreaterThan(0);
+    expect(build.counts.embeddings).toBeGreaterThanOrEqual(build.embedding_counts?.e5_text ?? 0);
     expect(build.embedding_statuses?.e5_text).toBe("ready");
 
     const db = new Database(footageDbPath(projectDir));
     try {
       const legacyCount = db.prepare("SELECT COUNT(*) FROM embeddings").pluck().get() as number;
-      const segmentEmbeddingCount = db.prepare("SELECT COUNT(*) FROM segment_embeddings").pluck().get() as number;
+      const segmentTextEmbeddingCount = db
+        .prepare("SELECT COUNT(*) FROM segment_embeddings WHERE embedding_type NOT LIKE 'audio_%'")
+        .pluck()
+        .get() as number;
       expect(legacyCount).toBeGreaterThan(0);
-      expect(segmentEmbeddingCount).toBe(legacyCount);
+      expect(segmentTextEmbeddingCount).toBe(legacyCount);
       expect(db.prepare(`
         SELECT
           name,

@@ -1,0 +1,67 @@
+{
+  "project_id": "project",
+  "artifact_version": "marlin-events-v1",
+  "model": {
+    "provider": "marlin",
+    "model_alias": "NemoStation/Marlin-2B",
+    "model_snapshot": "required_for_canonical_runs",
+    "connector_version": "marlin-local-v1",
+    "inference_mode": "mock"
+  },
+  "items": [
+    {
+      "asset_id": "AST_US061_SMOKE",
+      "source_path": "02_media/source/smoke.mp4",
+      "scene": "Mock Marlin scene for smoke.mp4.",
+      "caption": "smoke.mp4 contains a visible action moment suitable for temporal analysis.",
+      "events": [
+        {
+          "event_id": "MEV_AST_US061_SMOKE_0001",
+          "start_us": 1000000,
+          "end_us": 3500000,
+          "description": "smoke.mp4 establishes the main subject.",
+          "confidence": 0.72,
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_US061_SMOKE_0002",
+          "start_us": 4000000,
+          "end_us": 6250000,
+          "description": "smoke.mp4 reaches the strongest visible action.",
+          "confidence": 0.84,
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 4000000,
+          "span_end_us": 6250000,
+          "format_ok": true,
+          "confidence": 0.8
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 4000000,
+          "span_end_us": 6250000,
+          "format_ok": true,
+          "confidence": 0.8
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 4000000,
+          "span_end_us": 6250000,
+          "format_ok": true,
+          "confidence": 0.8
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 4000000,
+          "span_end_us": 6250000,
+          "format_ok": true,
+          "confidence": 0.8
+        }
+      ]
+    }
+  ]
+}

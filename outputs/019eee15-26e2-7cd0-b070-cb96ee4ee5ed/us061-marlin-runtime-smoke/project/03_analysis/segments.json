@@ -1,0 +1,44 @@
+{
+  "project_id": "us061-marlin-runtime-smoke",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "segment_id": "SEG_US061_SMOKE_0001",
+      "asset_id": "AST_US061_SMOKE",
+      "src_in_us": 0,
+      "src_out_us": 1000000,
+      "summary": "Mock Marlin scene for smoke.mp4.",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "marlin",
+        "runtime",
+        "smoke",
+        "mock_marlin",
+        "smoke_mp4"
+      ],
+      "interest_points": [],
+      "confidence": {
+        "summary": {
+          "score": 0.8,
+          "source": "marlin-2b",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "summary": {
+          "stage": "marlin",
+          "method": "marlin_reporter",
+          "connector_version": "marlin-local-v1",
+          "policy_hash": "9f94b09a7c2984f9",
+          "request_hash": "d9d938734bb9ff4e",
+          "model_alias": "marlin-2b",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_template_id": "marlin-caption-v1",
+          "prompt_hash": "3fd3d0145427a621",
+          "response_format": "marlin_events_v1"
+        }
+      }
+    }
+  ]
+}

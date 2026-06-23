@@ -80,7 +80,9 @@ export default function App() {
     onConflict: (remoteRev) => ts.triggerConflict(remoteRev),
   });
   const selectedClipId = sel.selection?.clipId ?? null;
-  const alts = useAlternatives(ts.projectId, selectedClipId);
+  const selectedMediaClipId =
+    sel.selection && isMediaTrackKind(sel.selection.trackKind) ? sel.selection.clipId : null;
+  const alts = useAlternatives(ts.projectId, selectedMediaClipId);
   const clipDiffs = useDiff(ts.sessionBaseline, ts.timeline, ts.historyOrigins, ts.historySnapshots);
   const aiJob = useAiJob(ts.projectId, {
     onCompileComplete: () => { void ts.reload(); review.reload(); },
@@ -164,7 +166,7 @@ export default function App() {
     if (previewingPatchIndex === filteredIdx) {
       // Exit preview: restore baseline
       if (previewBaselineRef.current) {
-        ts.replacePresent(previewBaselineRef.current);
+        ts.previewTimeline(previewBaselineRef.current);
         previewBaselineRef.current = null;
       }
       setPreviewingPatchIndex(null);
@@ -176,7 +178,7 @@ export default function App() {
       previewBaselineRef.current = structuredClone(timeline);
     } else {
       // Restore previous baseline before applying new preview
-      ts.replacePresent(previewBaselineRef.current);
+      ts.previewTimeline(previewBaselineRef.current);
     }
 
     // Apply single op preview client-side
@@ -244,14 +246,14 @@ export default function App() {
     }
     // add_marker and add_note are non-visual: no preview effect needed
 
-    ts.replacePresent(previewTl);
+    ts.previewTimeline(previewTl);
     setPreviewingPatchIndex(filteredIdx);
-  }, [timeline, review.patch, ts.replacePresent, previewingPatchIndex]);
+  }, [timeline, review.patch, ts.previewTimeline, previewingPatchIndex]);
 
   // Exit preview when patch data changes
   useEffect(() => {
     if (previewingPatchIndex != null && previewBaselineRef.current) {
-      ts.replacePresent(previewBaselineRef.current);
+      ts.previewTimeline(previewBaselineRef.current);
       previewBaselineRef.current = null;
       setPreviewingPatchIndex(null);
     }
@@ -302,7 +304,7 @@ export default function App() {
 
     // Exit preview if active
     if (previewingPatchIndex != null && previewBaselineRef.current) {
-      ts.replacePresent(previewBaselineRef.current);
+      ts.previewTimeline(previewBaselineRef.current);
       previewBaselineRef.current = null;
       setPreviewingPatchIndex(null);
     }
@@ -532,10 +534,15 @@ export default function App() {
 
   // ── Load source when clip selected ─────────────────────────────────
   useEffect(() => {
-    if (selectedClip && sourcePlayback.sourceMapLoaded) {
+    if (
+      selectedClip &&
+      sourcePlayback.sourceMapLoaded &&
+      sel.selection &&
+      isMediaTrackKind(sel.selection.trackKind)
+    ) {
       sourcePlayback.loadSource(selectedClip.asset_id, selectedClip.segment_id);
     }
-  }, [sel.selection?.clipId, sourcePlayback.sourceMapLoaded]);
+  }, [sel.selection?.clipId, sel.selection?.trackKind, sourcePlayback.sourceMapLoaded]);
 
   // ── Link toggle (Cmd+L) for J/L-cut ─────────────────────────────────
   const handleToggleLink = useCallback(() => {
@@ -789,6 +796,8 @@ export default function App() {
   // ── Match frame (F key) ───────────────────────────────────────────
   const handleMatchFrame = useCallback(() => {
     if (!timeline || !selectedClip) return;
+    const s = sel.selection;
+    if (!s || !isMediaTrackKind(s.trackKind)) return;
     // Load the selected clip's source in the Source Monitor at the current playhead offset
     if (sourcePlayback.sourceMapLoaded) {
       sourcePlayback.loadSource(selectedClip.asset_id, selectedClip.segment_id);
@@ -798,7 +807,7 @@ export default function App() {
         sourcePlayback.seekToFrame?.(offset);
       }
     }
-  }, [timeline, selectedClip, sourcePlayback, playback.playheadFrame]);
+  }, [timeline, selectedClip, sel.selection, sourcePlayback, playback.playheadFrame]);
 
   // ── Reveal low confidence clips ────────────────────────────────────
   const handleRevealLowConfidence = useCallback(() => {

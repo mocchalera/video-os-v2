@@ -1,0 +1,15 @@
+{
+  "contact_sheet_id": "CS_AST_C3CE5B20_01",
+  "asset_id": "AST_C3CE5B20",
+  "image_path": "contact_sheets/CS_AST_C3CE5B20_01.png",
+  "mode": "shot_keyframes",
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "segment_id": "SEG_AST_C3CE5B20_0001",
+      "rep_frame_us": 12374792,
+      "src_in_us": 0,
+      "src_out_us": 24749583
+    }
+  ]
+}

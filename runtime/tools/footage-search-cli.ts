@@ -1,11 +1,6 @@
 #!/usr/bin/env tsx
 import * as path from "node:path";
-import {
-  disposeFootageSearch,
-  searchFootage,
-  type FootageSearchMode,
-  type SearchFootageInput,
-} from "./footage-search.js";
+import type { FootageSearchMode, SearchFootageInput } from "./footage-search.js";
 
 type CliSearchMode = Extract<FootageSearchMode, "text" | "visual" | "audio" | "hybrid" | "multimodal">;
 
@@ -20,6 +15,7 @@ interface Args {
 }
 
 const VALID_MODES = new Set<CliSearchMode>(["text", "visual", "audio", "hybrid", "multimodal"]);
+let disposeSearch: (() => Promise<void>) | null = null;
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {};
@@ -75,10 +71,12 @@ async function main(): Promise<void> {
   };
 
   try {
+    const { disposeFootageSearch, searchFootage } = await import("./footage-search.js");
+    disposeSearch = disposeFootageSearch;
     const response = await searchFootage(projectDir, input);
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
   } finally {
-    await disposeFootageSearch();
+    if (disposeSearch) await disposeSearch();
   }
 }
 
@@ -118,7 +116,7 @@ Options:
 
 main().catch(async (error) => {
   try {
-    await disposeFootageSearch();
+    if (disposeSearch) await disposeSearch();
   } catch {
     // Preserve the original error as the CLI diagnostic.
   }

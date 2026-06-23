@@ -1,0 +1,293 @@
+version: "1"
+project_id: fumoto-growth
+created_at: "2026-06-15T00:00:00Z"
+selection_notes:
+  - "Opening with newborn establishes tenderness"
+  - "Training-wheels montage (8 distinct clips) shows persistence per coverage feedback"
+  - "Success moments climax with pride and joy; progression summary closes"
+editorial_summary:
+  dominant_visual_mode: event_broll
+  speaker_topology: multi_speaker
+  motion_profile: high
+  transcript_density: sparse
+candidates:
+  - candidate_id: cand_01
+    segment_id: SEG_AST_9435E35C_0001
+    asset_id: AST_9435E35C
+    src_in_us: 6516666
+    src_out_us: 15205555
+    role: hero
+    why_it_matches: "Newborn sleeping — tenderness at day 0; opens the arc"
+    risks: []
+    confidence: 0.95
+    semantic_rank: 1
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [opening]
+    motif_tags: [newborn]
+  - candidate_id: cand_02
+    segment_id: SEG_AST_7F2E9F12_0001
+    asset_id: AST_7F2E9F12
+    src_in_us: 2074027
+    src_out_us: 3074027
+    role: support
+    why_it_matches: "Child walking — first motor milestone"
+    risks: []
+    confidence: 0.85
+    semantic_rank: 2
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [walking]
+    motif_tags: [walking]
+  - candidate_id: cand_03
+    segment_id: SEG_AST_87841CCA_0001
+    asset_id: AST_87841CCA
+    src_in_us: 1264862
+    src_out_us: 3264862
+    role: hero
+    why_it_matches: "Child running with a big smile — joy and freedom"
+    risks: []
+    confidence: 0.90
+    semantic_rank: 3
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [running]
+    motif_tags: [running]
+  - candidate_id: cand_04
+    segment_id: SEG_AST_9DFCE350_0001
+    asset_id: AST_9DFCE350
+    src_in_us: 1204305
+    src_out_us: 3204305
+    role: hero
+    why_it_matches: "Walking to balance bike — strider confidence"
+    risks: []
+    confidence: 0.92
+    semantic_rank: 4
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [strider]
+    motif_tags: [strider]
+  - candidate_id: cand_05
+    segment_id: SEG_AST_7E54B334_0001
+    asset_id: AST_7E54B334
+    src_in_us: 11368055
+    src_out_us: 15368055
+    role: support
+    why_it_matches: "Strider in motion — balance learning"
+    risks: []
+    confidence: 0.88
+    semantic_rank: 5
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [strider]
+    motif_tags: [strider]
+  - candidate_id: cand_06
+    segment_id: SEG_AST_3D474C76_0001
+    asset_id: AST_3D474C76
+    src_in_us: 0
+    src_out_us: 6433334
+    role: texture
+    why_it_matches: "Training-wheels montage 1 — pedaling on pavement"
+    risks: []
+    confidence: 0.90
+    semantic_rank: 6
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_07
+    segment_id: SEG_AST_75D600FA_0001
+    asset_id: AST_75D600FA
+    src_in_us: 15806258
+    src_out_us: 17806258
+    role: texture
+    why_it_matches: "Training-wheels montage 2 — different angle"
+    risks: []
+    confidence: 0.87
+    semantic_rank: 7
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_08
+    segment_id: SEG_AST_7E5C9A8A_0001
+    asset_id: AST_7E5C9A8A
+    src_in_us: 0
+    src_out_us: 4223888
+    role: texture
+    why_it_matches: "Training-wheels montage 3 — stable pedaling"
+    risks: []
+    confidence: 0.88
+    semantic_rank: 8
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_09
+    segment_id: SEG_AST_8BDBBA9F_0001
+    asset_id: AST_8BDBBA9F
+    src_in_us: 4499722
+    src_out_us: 6499722
+    role: texture
+    why_it_matches: "Training-wheels montage 4 — dirt path, location variety"
+    risks: []
+    confidence: 0.86
+    semantic_rank: 9
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_10
+    segment_id: SEG_AST_8BED5B08_0001
+    asset_id: AST_8BED5B08
+    src_in_us: 9340277
+    src_out_us: 16812500
+    role: texture
+    why_it_matches: "Training-wheels montage 5 — sustained motion"
+    risks: []
+    confidence: 0.87
+    semantic_rank: 10
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_11
+    segment_id: SEG_AST_D60A0C89_0001
+    asset_id: AST_D60A0C89
+    src_in_us: 2132639
+    src_out_us: 4132639
+    role: texture
+    why_it_matches: "Training-wheels montage 6 — pump track"
+    risks: []
+    confidence: 0.85
+    semantic_rank: 11
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_12
+    segment_id: SEG_AST_FB322087_0001
+    asset_id: AST_FB322087
+    src_in_us: 8438752
+    src_out_us: 16438752
+    role: texture
+    why_it_matches: "Training-wheels montage 7 — dirt track, sustained action"
+    risks: []
+    confidence: 0.86
+    semantic_rank: 12
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_13
+    segment_id: SEG_AST_DA4D2912_0001
+    asset_id: AST_DA4D2912
+    src_in_us: 2890972
+    src_out_us: 5203749
+    role: texture
+    why_it_matches: "Training-wheels montage 8 — progress and competence"
+    risks: []
+    confidence: 0.84
+    semantic_rank: 13
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [training_wheels_montage]
+    motif_tags: [training_wheels]
+  - candidate_id: cand_14
+    segment_id: SEG_AST_15427158_0001
+    asset_id: AST_15427158
+    src_in_us: 0
+    src_out_us: 2000000
+    role: hero
+    why_it_matches: "Bicycle success with parental encouragement"
+    risks: []
+    confidence: 0.93
+    semantic_rank: 14
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [bicycle_success]
+    motif_tags: [bicycle, success]
+  - candidate_id: cand_15
+    segment_id: SEG_AST_567028AD_0001
+    asset_id: AST_567028AD
+    src_in_us: 13033749
+    src_out_us: 17378333
+    role: hero
+    why_it_matches: "First successful ride with cheering — climax"
+    risks: []
+    confidence: 0.92
+    semantic_rank: 15
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [bicycle_success]
+    motif_tags: [bicycle, celebration]
+  - candidate_id: cand_16
+    segment_id: SEG_AST_19B25163_0001
+    asset_id: AST_19B25163
+    src_in_us: 0
+    src_out_us: 5500000
+    role: support
+    why_it_matches: "Assisted to independent riding transition"
+    risks: []
+    confidence: 0.89
+    semantic_rank: 16
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [bicycle_learning]
+    motif_tags: [bicycle, independence]
+  - candidate_id: cand_17
+    segment_id: SEG_AST_BE87AF55_0001
+    asset_id: AST_BE87AF55
+    src_in_us: 28000000
+    src_out_us: 34000000
+    role: hero
+    why_it_matches: "Completes a lap with encouragement — mastery, family warmth"
+    risks: []
+    confidence: 0.91
+    semantic_rank: 17
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [bicycle_mastery]
+    motif_tags: [bicycle, family]
+  - candidate_id: cand_18
+    segment_id: SEG_AST_DAD1F79C_0001
+    asset_id: AST_DAD1F79C
+    src_in_us: 2000000
+    src_out_us: 3500000
+    role: hero
+    why_it_matches: "Yatta! — pure joy of achievement"
+    risks: []
+    confidence: 0.90
+    semantic_rank: 18
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [bicycle_success]
+    motif_tags: [bicycle, joy]
+  - candidate_id: cand_19
+    segment_id: SEG_AST_D0EB3FF3_0001
+    asset_id: AST_D0EB3FF3
+    src_in_us: 7740977
+    src_out_us: 13933758
+    role: support
+    why_it_matches: "Riding in snow — mastery across varied conditions"
+    risks: []
+    confidence: 0.87
+    semantic_rank: 19
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [bicycle_mastery]
+    motif_tags: [bicycle, snow]
+  - candidate_id: cand_20
+    segment_id: SEG_AST_2F5B86AF_0001
+    asset_id: AST_2F5B86AF
+    src_in_us: 0
+    src_out_us: 5000000
+    role: transition
+    why_it_matches: "Bicycle learning footage with the project music"
+    risks: []
+    confidence: 0.84
+    semantic_rank: 20
+    quality_flags: []
+    evidence: [brief.must_have]
+    eligible_beats: [bicycle_learning]
+    motif_tags: [bicycle, learning]

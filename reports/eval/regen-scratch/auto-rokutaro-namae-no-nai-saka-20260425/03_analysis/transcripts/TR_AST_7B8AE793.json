@@ -1,0 +1,46 @@
+{
+  "project_id": "rokutaro-namae-no-nai-saka-20260425",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_7B8AE793",
+  "asset_id": "AST_7B8AE793",
+  "items": [
+    {
+      "item_id": "TRI_AST_7B8AE793_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_7B8AE793:speaker_1",
+      "start_us": 0,
+      "end_us": 11240000,
+      "text": "うただ結局3日"
+    },
+    {
+      "item_id": "TRI_AST_7B8AE793_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_7B8AE793:speaker_1",
+      "start_us": 11320000,
+      "end_us": 18180000,
+      "text": "雨が降りたので"
+    },
+    {
+      "item_id": "TRI_AST_7B8AE793_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_7B8AE793:speaker_1",
+      "start_us": 18180000,
+      "end_us": 21080000,
+      "text": "lain年"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

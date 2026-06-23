@@ -1,0 +1,70 @@
+{
+  "project_id": "rokutaro-namae-no-nai-saka-20260425",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_D60A0C89",
+  "asset_id": "AST_D60A0C89",
+  "items": [
+    {
+      "item_id": "TRI_AST_D60A0C89_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_D60A0C89:speaker_1",
+      "start_us": 0,
+      "end_us": 3940000,
+      "text": "きれいで"
+    },
+    {
+      "item_id": "TRI_AST_D60A0C89_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_D60A0C89:speaker_1",
+      "start_us": 3940000,
+      "end_us": 8260000,
+      "text": "ペイト"
+    },
+    {
+      "item_id": "TRI_AST_D60A0C89_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_D60A0C89:speaker_1",
+      "start_us": 8260000,
+      "end_us": 22160000,
+      "text": "ゴメ"
+    },
+    {
+      "item_id": "TRI_AST_D60A0C89_0004",
+      "speaker": "S1",
+      "speaker_key": "AST_D60A0C89:speaker_1",
+      "start_us": 19500000,
+      "end_us": 26320000,
+      "text": "Emmett"
+    },
+    {
+      "item_id": "TRI_AST_D60A0C89_0005",
+      "speaker": "S1",
+      "speaker_key": "AST_D60A0C89:speaker_1",
+      "start_us": 26320000,
+      "end_us": 33600000,
+      "text": "れいこん"
+    },
+    {
+      "item_id": "TRI_AST_D60A0C89_0006",
+      "speaker": "S1",
+      "speaker_key": "AST_D60A0C89:speaker_1",
+      "start_us": 33600000,
+      "end_us": 37580000,
+      "text": "はい"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

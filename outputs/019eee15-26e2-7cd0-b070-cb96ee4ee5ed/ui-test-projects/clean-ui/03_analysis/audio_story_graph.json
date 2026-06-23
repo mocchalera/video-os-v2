@@ -1,0 +1,215 @@
+{
+  "version": "1.0.0",
+  "project_id": "sample-mountain-reset",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-05-21T21:37:29.007Z",
+  "source_media_manifest_hash": "sha256:287a506a1eb1ef7c15bbee4bf9e02bc17607a357d982052aa12ca7bae9f1c356",
+  "inputs": {
+    "transcript_hashes": [
+      "sha256:623b7f9d980880f559a33d5dcae5e90296605c0c75f6a80adcb5a44d5f4ac81a",
+      "sha256:442e5df7a1b5e5998829104345dd19657332e6404b24a83ae91bf59c9cef8056",
+      "sha256:094425037a9cddfa676d4123c1e5435cb44aac7f7ed541b218b6e1be5958d615"
+    ],
+    "audio_events_hash": null,
+    "bgm_analysis_hash": null,
+    "coverage_report_hash": "sha256:eb4ba6a9ccec111502ca3c56794b475438d0ffac857cb6706043bf005a454ee9"
+  },
+  "nodes": [
+    {
+      "node_id": "UTTREF_AST_001_6600000",
+      "node_type": "utterance",
+      "asset_id": "AST_001",
+      "start_us": 6600000,
+      "end_us": 10700000,
+      "text": "I came up here to get quiet again.",
+      "story_role": "setup",
+      "refs": {
+        "transcript_ref": "UTT_AST_001_6600000",
+        "speaker_ref": "SPK_S1",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.75,
+        "source": "transcript",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "UTTREF_AST_001_18200000",
+      "node_type": "utterance",
+      "asset_id": "AST_001",
+      "start_us": 18200000,
+      "end_us": 23200000,
+      "text": "The week gets loud fast.",
+      "story_role": "experience",
+      "refs": {
+        "transcript_ref": "UTT_AST_001_18200000",
+        "speaker_ref": "SPK_S1",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.75,
+        "source": "transcript",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "UTTREF_AST_001_41600000",
+      "node_type": "utterance",
+      "asset_id": "AST_001",
+      "start_us": 41600000,
+      "end_us": 47200000,
+      "text": "Up here the air tells me to slow down.",
+      "story_role": "payoff",
+      "refs": {
+        "transcript_ref": "UTT_AST_001_41600000",
+        "speaker_ref": "SPK_S1",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.75,
+        "source": "transcript",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "UTTREF_AST_004_14700000",
+      "node_type": "utterance",
+      "asset_id": "AST_004",
+      "start_us": 14700000,
+      "end_us": 19800000,
+      "text": "I do not need a summit to feel reset.",
+      "story_role": "payoff",
+      "refs": {
+        "transcript_ref": "UTT_AST_004_14700000",
+        "speaker_ref": "SPK_S1",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.75,
+        "source": "transcript",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "UTTREF_AST_004_33800000",
+      "node_type": "utterance",
+      "asset_id": "AST_004",
+      "start_us": 33800000,
+      "end_us": 39100000,
+      "text": "I just need enough space to hear myself think.",
+      "story_role": "payoff",
+      "refs": {
+        "transcript_ref": "UTT_AST_004_33800000",
+        "speaker_ref": "SPK_S1",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.75,
+        "source": "transcript",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "UTTREF_AST_005_12200000",
+      "node_type": "utterance",
+      "asset_id": "AST_005",
+      "start_us": 12200000,
+      "end_us": 17400000,
+      "text": "When I head back down, I carry that pace with me.",
+      "story_role": "payoff",
+      "refs": {
+        "transcript_ref": "UTT_AST_005_12200000",
+        "speaker_ref": "SPK_S1",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.75,
+        "source": "transcript",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "UTTREF_AST_005_29200000",
+      "node_type": "utterance",
+      "asset_id": "AST_005",
+      "start_us": 29200000,
+      "end_us": 33800000,
+      "text": "That is enough.",
+      "story_role": "payoff",
+      "refs": {
+        "transcript_ref": "UTT_AST_005_29200000",
+        "speaker_ref": "SPK_S1",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.75,
+        "source": "transcript",
+        "status": "ready"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "ASGEDGE_AST_001_2",
+      "from_node_id": "UTTREF_AST_001_18200000",
+      "to_node_id": "UTTREF_AST_001_41600000",
+      "type": "precedes"
+    },
+    {
+      "edge_id": "ASGEDGE_AST_001_1",
+      "from_node_id": "UTTREF_AST_001_6600000",
+      "to_node_id": "UTTREF_AST_001_18200000",
+      "type": "precedes"
+    },
+    {
+      "edge_id": "ASGEDGE_AST_004_1",
+      "from_node_id": "UTTREF_AST_004_14700000",
+      "to_node_id": "UTTREF_AST_004_33800000",
+      "type": "precedes"
+    },
+    {
+      "edge_id": "ASGEDGE_AST_005_1",
+      "from_node_id": "UTTREF_AST_005_12200000",
+      "to_node_id": "UTTREF_AST_005_29200000",
+      "type": "precedes"
+    }
+  ],
+  "coverage": {
+    "status": "partial",
+    "dialogue_lane": "ready",
+    "audio_event_lane": "skipped",
+    "music_lane": "skipped",
+    "missing_inputs": [
+      "audio_events",
+      "bgm_analysis"
+    ]
+  },
+  "provenance": {
+    "producer": "analysis-pipeline",
+    "inputs": [
+      {
+        "path": "02_media/source_media_manifest.json",
+        "hash": "sha256:287a506a1eb1ef7c15bbee4bf9e02bc17607a357d982052aa12ca7bae9f1c356"
+      },
+      {
+        "path": "03_analysis/analysis_coverage_report.json",
+        "hash": "sha256:eb4ba6a9ccec111502ca3c56794b475438d0ffac857cb6706043bf005a454ee9"
+      }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": [
+        "created_at"
+      ]
+    }
+  }
+}

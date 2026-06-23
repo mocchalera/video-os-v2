@@ -21,15 +21,22 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
     public let projectURL: URL
     public let scriptURL: URL
     public let options: ProjectRenderRunOptions
+    public let hasCreativeBrief: Bool
+    public let hasBlueprint: Bool
     public let hasTimeline: Bool
     public let hasReview: Bool
     public let currentState: String?
+    public let sourceOfTruthDecision: String?
+    public let hasPackageFinalVideo: Bool
 
     public var canRun: Bool {
         FileManager.default.fileExists(atPath: scriptURL.path)
+            && hasCreativeBrief
+            && hasBlueprint
             && hasTimeline
             && hasReview
             && stateIsEligible
+            && nleFinalIsAvailable
             && assemblyIsReadable
             && suppliedFinalIsReadable
     }
@@ -37,6 +44,12 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
     public var readinessLabel: String {
         if !FileManager.default.fileExists(atPath: scriptURL.path) {
             return "missing render worker"
+        }
+        if !hasCreativeBrief {
+            return "missing creative brief"
+        }
+        if !hasBlueprint {
+            return "missing edit blueprint"
         }
         if !hasTimeline {
             return "missing timeline"
@@ -46,6 +59,9 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
         }
         if !stateIsEligible {
             return "state must be approved or packaged"
+        }
+        if !nleFinalIsAvailable {
+            return "supplied final missing"
         }
         if !assemblyIsReadable {
             return "assembly file missing"
@@ -83,6 +99,13 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
 
     private var suppliedFinalIsReadable: Bool {
         guard let suppliedFinalURL = options.suppliedFinalURL else { return true }
+        return FileManager.default.fileExists(atPath: suppliedFinalURL.path)
+    }
+
+    private var nleFinalIsAvailable: Bool {
+        guard sourceOfTruthDecision == "nle_finishing" else { return true }
+        if hasPackageFinalVideo { return true }
+        guard let suppliedFinalURL = options.suppliedFinalURL else { return false }
         return FileManager.default.fileExists(atPath: suppliedFinalURL.path)
     }
 
@@ -139,14 +162,28 @@ public enum ProjectRenderRunPlanner {
         projectURL: URL,
         options: ProjectRenderRunOptions = ProjectRenderRunOptions()
     ) -> ProjectRenderRunPlan {
-        ProjectRenderRunPlan(
+        let sourceOfTruth = sourceOfTruthDecision(projectURL: projectURL)
+        let packageFinalVideoURL = projectURL.appendingPathComponent("07_package/video/final.mp4")
+        var resolvedOptions = options
+        if sourceOfTruth == "nle_finishing", resolvedOptions.suppliedFinalURL == nil {
+            let publishedFinalURL = projectURL.appendingPathComponent("09_output/final.mp4")
+            if FileManager.default.fileExists(atPath: publishedFinalURL.path) {
+                resolvedOptions.suppliedFinalURL = publishedFinalURL
+            }
+        }
+
+        return ProjectRenderRunPlan(
             repositoryRoot: repositoryRoot,
             projectURL: projectURL,
             scriptURL: repositoryRoot.appendingPathComponent("scripts/editor-job-worker.ts"),
-            options: options,
+            options: resolvedOptions,
+            hasCreativeBrief: FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("01_intent/creative_brief.yaml").path),
+            hasBlueprint: FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("04_plan/edit_blueprint.yaml").path),
             hasTimeline: FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("05_timeline/timeline.json").path),
             hasReview: FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("06_review/review_report.yaml").path),
-            currentState: currentState(projectURL: projectURL)
+            currentState: currentState(projectURL: projectURL),
+            sourceOfTruthDecision: sourceOfTruth,
+            hasPackageFinalVideo: FileManager.default.fileExists(atPath: packageFinalVideoURL.path)
         )
     }
 
@@ -158,6 +195,18 @@ public enum ProjectRenderRunPlanner {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             guard line.hasPrefix("current_state:") else { continue }
             return String(line.dropFirst("current_state:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
+    private static func sourceOfTruthDecision(projectURL: URL) -> String? {
+        guard let text = try? String(contentsOf: projectURL.appendingPathComponent("project_state.yaml"), encoding: .utf8) else {
+            return nil
+        }
+        for rawLine in text.split(separator: "\n").map(String.init) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("source_of_truth_decision:") else { continue }
+            return String(line.dropFirst("source_of_truth_decision:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return nil
     }

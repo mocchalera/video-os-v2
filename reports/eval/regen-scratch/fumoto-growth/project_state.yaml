@@ -1,0 +1,29 @@
+version: "1"
+project_id: fumoto-growth
+current_state: selects_ready
+last_updated: 2026-06-17T07:53:13.618Z
+last_agent: footage-triager
+last_command: /triage
+artifact_hashes:
+  brief_hash: 3fe3ada47e8f5428
+  blockers_hash: 999622b0eab7b7e2
+  style_hash: aa699c768555e0cc
+  analysis_artifact_version: 2.0.0
+analysis_override:
+  status: active
+  artifact_version: 2.0.0
+  reason: story_role eval
+gates:
+  analysis_gate: partial_override
+  compile_gate: open
+  planning_gate: open
+  timeline_gate: blocked
+  review_gate: blocked
+  packaging_gate: blocked
+history:
+  - from_state: media_analyzed
+    to_state: selects_ready
+    trigger: /triage
+    actor: footage-triager
+    timestamp: 2026-06-17T07:53:13.618Z
+    note: selects candidates finalized

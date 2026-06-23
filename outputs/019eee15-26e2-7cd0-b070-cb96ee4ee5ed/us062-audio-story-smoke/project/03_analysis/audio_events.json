@@ -1,0 +1,18 @@
+{
+  "version": "1",
+  "project_id": "us062-audio-story-smoke",
+  "items": [
+    {
+      "event_id": "hit_001",
+      "asset_id": "AST_DIALOGUE",
+      "type": "impact",
+      "start_us": 1700000,
+      "end_us": 1900000,
+      "confidence": {
+        "score": 0.82,
+        "source": "fixture",
+        "status": "ready"
+      }
+    }
+  ]
+}

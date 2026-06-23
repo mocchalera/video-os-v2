@@ -1,0 +1,15 @@
+{
+  "project_id": "ena-promo",
+  "phase": "triage",
+  "gate": 2,
+  "status": "completed",
+  "completed": 4,
+  "total": 4,
+  "eta_sec": 0,
+  "artifacts_created": [
+    "04_plan/selects_candidates.yaml"
+  ],
+  "errors": [],
+  "started_at": "2026-06-17T07:54:35.285Z",
+  "updated_at": "2026-06-17T07:57:00.741Z"
+}

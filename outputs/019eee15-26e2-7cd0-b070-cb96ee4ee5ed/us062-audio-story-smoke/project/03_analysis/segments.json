@@ -1,0 +1,31 @@
+{
+  "project_id": "us062-audio-story-smoke",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "segment_id": "SEG_DIALOGUE",
+      "asset_id": "AST_DIALOGUE",
+      "src_in_us": 0,
+      "src_out_us": 4000000,
+      "summary": "Opening line with impact beat.",
+      "transcript_excerpt": "We found the turning point here.",
+      "quality_flags": [],
+      "tags": [
+        "dialogue",
+        "story"
+      ]
+    },
+    {
+      "segment_id": "SEG_MUSIC",
+      "asset_id": "AST_MUSIC",
+      "src_in_us": 0,
+      "src_out_us": 4000000,
+      "summary": "Intro music section.",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "music"
+      ]
+    }
+  ]
+}

@@ -43,10 +43,13 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(project == nil || model.isBuildingAudioStoryGraph || !model.audioStoryGraphRunPlan.canRun)
+                .accessibilityIdentifier("MediaPanel.BuildAudioStoryGraphButton")
+                .help("Build Audio Story Graph")
                 Text(model.audioStoryGraphRunPlan.commandLine)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityIdentifier("MediaPanel.AudioStoryGraphCommandLine")
             }
 
             Section("Marlin Evaluation") {
@@ -69,15 +72,19 @@ struct MediaPanel: View {
                 Text(model.marlinEvaluationStatus.recommendation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.MarlinEvaluationRecommendation")
                 Text(model.marlinPreferenceDecision.recommendation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.MarlinPreferenceRecommendation")
                 Text(model.marlinEvaluationQueue.nextAction)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.MarlinQueueNextAction")
                 Text(model.marlinRepresentativePlan.nextAction)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.MarlinRepresentativeNextAction")
                 ForEach(model.marlinRepresentativePlan.buckets) { bucket in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -93,6 +100,8 @@ struct MediaPanel: View {
                             .foregroundStyle(bucket.isCovered ? Color.green : Color.secondary)
                     }
                     .padding(.vertical, 2)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("MediaPanel.MarlinRepresentativeBucket.\(bucket.id)")
                 }
                 ForEach(model.marlinEvaluationQueue.items.prefix(4)) { item in
                     VStack(alignment: .leading, spacing: 3) {
@@ -112,10 +121,13 @@ struct MediaPanel: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 2)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("MediaPanel.MarlinQueueItem.\(item.id)")
                 }
                 Text(model.marlinEvaluationRunStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.MarlinEvaluationRunStatus")
                 HStack {
                     Button {
                         model.runSelectedProjectMarlinEvaluation()
@@ -127,6 +139,8 @@ struct MediaPanel: View {
                         }
                     }
                     .disabled(project == nil || model.isRunningMarlinEvaluation || !model.marlinEvaluationRunPlan.canRun || !model.marlinRuntimeStatus.isReadyForLiveMarlin)
+                    .accessibilityIdentifier("MediaPanel.RunMarlinEvaluationButton")
+                    .help("Run Marlin Evaluation")
 
                     Button {
                         model.applyMarlinPreferencePolicy()
@@ -134,21 +148,26 @@ struct MediaPanel: View {
                         Label("Apply Marlin Preference", systemImage: "checkmark.seal")
                     }
                     .disabled(!model.marlinPreferenceDecision.canPreferMarlinAsDefault)
+                    .accessibilityIdentifier("MediaPanel.ApplyMarlinPreferenceButton")
+                    .help("Apply Marlin Preference")
                 }
                 Text(model.marlinEvaluationRunPlan.commandLine())
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityIdentifier("MediaPanel.MarlinEvaluationCommandLine")
                 Text(model.marlinEvaluationStatus.artifactURL.path)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .accessibilityIdentifier("MediaPanel.MarlinEvaluationArtifactPath")
             }
 
             Section("Preview Readiness") {
                 LabeledContent("Ready", value: "\(model.mediaPreviewSummary.readyCount)")
                 LabeledContent("Missing", value: "\(model.mediaPreviewSummary.missingCount)")
                 LabeledContent("Proxy needed", value: "\(model.mediaPreviewSummary.proxyNeededCount)")
+                LabeledContent("Synthetic previews", value: "\(model.mediaPreviewSummary.syntheticPreviewCount)")
                 LabeledContent("Proxy plans", value: "\(model.mediaProxyPlan.pendingCount)")
 
                 if model.mediaPreviewSummary.items.isEmpty {
@@ -244,24 +263,33 @@ struct MediaPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                HStack {
-                    Button {
-                        model.chooseAndRelinkSelectedProjectMedia()
-                    } label: {
-                        if model.isRelinkingMedia {
-                            Label("Relinking Media", systemImage: "hourglass")
-                        } else {
-                            Label("Relink Missing Media", systemImage: "link")
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Button {
+                            model.chooseAndRelinkSelectedProjectMedia()
+                        } label: {
+                            if model.isRelinkingMedia {
+                                Label("Relinking Media", systemImage: "hourglass")
+                            } else {
+                                Label("Relink Missing Media", systemImage: "link")
+                            }
                         }
+                        .disabled(project == nil || model.mediaPreviewSummary.missingCount == 0 || model.isRelinkingMedia)
+
+                        Button {
+                            model.relinkSelectedProjectMediaFromSourceMap()
+                        } label: {
+                            Label("Use Source Map Roots", systemImage: "externaldrive.connected.to.line.below")
+                        }
+                        .disabled(project == nil || model.mediaPreviewSummary.missingCount == 0 || model.isRelinkingMedia || suggestedRoots.allSatisfy { !$0.exists })
                     }
-                    .disabled(project == nil || model.mediaPreviewSummary.missingCount == 0 || model.isRelinkingMedia)
 
                     Button {
-                        model.relinkSelectedProjectMediaFromSourceMap()
+                        model.chooseAndRelinkSelectedProjectMedia(includeSynthetic: true)
                     } label: {
-                        Label("Use Source Map Roots", systemImage: "externaldrive.connected.to.line.below")
+                        Label("Replace Synthetic Media", systemImage: "arrow.triangle.2.circlepath")
                     }
-                    .disabled(project == nil || model.mediaPreviewSummary.missingCount == 0 || model.isRelinkingMedia || suggestedRoots.allSatisfy { !$0.exists })
+                    .disabled(project == nil || model.mediaPreviewSummary.syntheticPreviewCount == 0 || model.isRelinkingMedia)
                 }
 
                 if let plan = model.mediaRelinkPlan {
@@ -439,10 +467,12 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(project == nil || model.isRunningRender || !model.renderRunPlan.canRun)
+                .accessibilityIdentifier("MediaPanel.RenderFinalPackageButton")
                 Text(model.renderRunPlan.commandLine)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityIdentifier("MediaPanel.RenderFinalPackageCommandLine")
             }
 
             Section("Editor Handoff") {
@@ -482,6 +512,7 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(project == nil || model.isExportingPremiereXML || model.handoffExportPlan?.canExportPremiereXML != true)
+                .accessibilityIdentifier("MediaPanel.ExportPremiereXMLButton")
 
                 Divider()
 
@@ -516,6 +547,7 @@ struct MediaPanel: View {
                     }
                 }
                 .disabled(project == nil || model.isExportingEditorPacket || model.editorPacketPlan?.canExportPacket != true)
+                .accessibilityIdentifier("MediaPanel.ExportEditorPacketButton")
 
                 Button {
                     model.revealEditorPacketInFinder()
@@ -523,12 +555,14 @@ struct MediaPanel: View {
                     Label("Reveal Packet", systemImage: "folder")
                 }
                 .disabled(model.editorPacketPlan == nil)
+                .accessibilityIdentifier("MediaPanel.RevealEditorPacketButton")
 
                 if let command = model.handoffExportPlan?.commandLine {
                     Text(command)
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .accessibilityIdentifier("MediaPanel.HandoffCommandLine")
                 }
             }
 
@@ -539,18 +573,21 @@ struct MediaPanel: View {
                 Text(model.indexOperationStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("MediaPanel.IndexOperationStatus")
                 Button {
                     model.rebuildSelectedProjectIndex()
                 } label: {
                     Label("Rebuild Index", systemImage: "externaldrive.badge.plus")
                 }
                 .disabled(project == nil)
+                .accessibilityIdentifier("MediaPanel.RebuildIndexButton")
             }
 
             Section("Search") {
                 HStack {
                     TextField("Search transcript, tags, Marlin events", text: $model.indexSearchQuery)
                         .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("MediaPanel.IndexSearchField")
                         .onSubmit {
                             model.searchSelectedProjectIndex()
                         }
@@ -560,6 +597,7 @@ struct MediaPanel: View {
                         Image(systemName: "magnifyingglass")
                     }
                     .disabled(model.indexSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("MediaPanel.IndexSearchButton")
                 }
 
                 Button {
@@ -568,15 +606,18 @@ struct MediaPanel: View {
                     Label("Add RAG Context to Agent", systemImage: "text.badge.plus")
                 }
                 .disabled(model.indexContextPack.isEmpty)
+                .accessibilityIdentifier("MediaPanel.AddRAGContextButton")
 
                 if model.indexSearchResults.isEmpty {
                     Text("Build the index, then search by dialogue, visual tags, audio cues, or Marlin descriptions.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("MediaPanel.IndexSearchEmptyState")
                 } else {
                     Text("\(model.indexContextPack.items.count) cited items ready for Codex prompt context.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("MediaPanel.IndexContextSummary")
                     ForEach(model.indexSearchResults) { result in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
@@ -597,6 +638,8 @@ struct MediaPanel: View {
                                     .lineLimit(2)
                             }
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("MediaPanel.IndexSearchResult.\(result.id)")
                     }
                 }
             }

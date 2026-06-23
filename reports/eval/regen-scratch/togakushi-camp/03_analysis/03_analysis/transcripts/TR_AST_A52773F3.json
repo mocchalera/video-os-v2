@@ -1,0 +1,59 @@
+{
+  "project_id": "togakushi-camp",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_A52773F3",
+  "asset_id": "AST_A52773F3",
+  "items": [
+    {
+      "item_id": "TRI_AST_A52773F3_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_A52773F3:S1",
+      "start_us": 0,
+      "end_us": 2000000,
+      "text": "ヨーグルトみたいな"
+    },
+    {
+      "item_id": "TRI_AST_A52773F3_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_A52773F3:S1",
+      "start_us": 2000000,
+      "end_us": 4000000,
+      "text": "そば?"
+    },
+    {
+      "item_id": "TRI_AST_A52773F3_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_A52773F3:S1",
+      "start_us": 4000000,
+      "end_us": 6000000,
+      "text": "発泡酒なんだ"
+    },
+    {
+      "item_id": "TRI_AST_A52773F3_0004",
+      "speaker": "S1",
+      "speaker_key": "AST_A52773F3:S1",
+      "start_us": 8000000,
+      "end_us": 12000000,
+      "text": "うわっ、コイン入れこれ"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "14383a79e232dd6c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  },
+  "diarization": {
+    "provider": "pyannote",
+    "speaker_count": 1,
+    "turn_count": 5
+  }
+}

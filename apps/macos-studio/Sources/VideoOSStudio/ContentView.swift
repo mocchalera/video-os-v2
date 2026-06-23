@@ -28,15 +28,16 @@ struct ContentView: View {
             StudioWorkspaceView(model: model)
                 .environmentObject(model.feedbackSession)
         }
-        .frame(minWidth: 1180, minHeight: 760)
-        .sheet(isPresented: $isCommandPalettePresented) {
-            StudioCommandPaletteView(
+        .frame(minWidth: 980, minHeight: 700)
+        .background(
+            CommandPalettePanelPresenter(
                 model: model,
                 query: $commandPaletteQuery,
                 isPresented: $isCommandPalettePresented
             )
-            .frame(width: 580, height: 540)
-        }
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        )
         .sheet(isPresented: $model.isSwapBrowserPresented) {
             if let clip = model.swapBrowserClip, let dataSource = model.candidateDataSource {
                 CandidateSwapView(
@@ -79,6 +80,179 @@ struct ContentView: View {
             commandPaletteQuery = ""
             isCommandPalettePresented = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .closeStudioCommandPalette)) { _ in
+            isCommandPalettePresented = false
+        }
+    }
+}
+
+private struct CommandPalettePanelPresenter: NSViewRepresentable {
+    @ObservedObject var model: StudioViewModel
+    @Binding var query: String
+    @Binding var isPresented: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        NSView(frame: .zero)
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.parent = self
+        if isPresented {
+            context.coordinator.show(attachedTo: view)
+        } else {
+            context.coordinator.closePanelFromBinding()
+        }
+    }
+
+    final class Coordinator: NSObject, NSWindowDelegate {
+        var parent: CommandPalettePanelPresenter
+        private var panel: NSPanel?
+        private var hostingController: NSHostingController<AnyView>?
+        private var isClosingFromBinding = false
+
+        init(parent: CommandPalettePanelPresenter) {
+            self.parent = parent
+        }
+
+        func show(attachedTo anchorView: NSView) {
+            let panel = existingOrNewPanel()
+            updateRootView()
+            let parentWindow = anchorView.window
+                ?? NSApp.mainWindow
+                ?? NSApp.keyWindow
+                ?? NSApp.windows.first { $0.title == "Video OS Studio" }
+            position(panel, near: parentWindow)
+            NSApp.activate(ignoringOtherApps: true)
+            panel.makeKeyAndOrderFront(nil)
+            panel.orderFrontRegardless()
+            DispatchQueue.main.async { [weak self, weak panel] in
+                guard let self, let panel else { return }
+                panel.makeKey()
+                self.focusSearchField(in: panel.contentView)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak panel] in
+                guard let self, let panel, panel.isVisible else { return }
+                panel.makeKey()
+                self.focusSearchField(in: panel.contentView)
+            }
+        }
+
+        func closePanelFromBinding() {
+            guard let panel, panel.isVisible else { return }
+            isClosingFromBinding = true
+            panel.close()
+            isClosingFromBinding = false
+        }
+
+        func windowWillClose(_ notification: Notification) {
+            guard !isClosingFromBinding else { return }
+            if parent.isPresented {
+                parent.isPresented = false
+            }
+        }
+
+        private func existingOrNewPanel() -> NSPanel {
+            if let panel { return panel }
+
+            let panel = CommandPalettePanel(
+                contentRect: NSRect(x: 0, y: 0, width: 580, height: 540),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false
+            )
+            panel.title = "Command Palette"
+            panel.identifier = NSUserInterfaceItemIdentifier("CommandPalettePanel")
+            panel.isReleasedWhenClosed = false
+            panel.hidesOnDeactivate = false
+            panel.becomesKeyOnlyIfNeeded = false
+            panel.level = .floating
+            panel.collectionBehavior = [.transient, .moveToActiveSpace]
+            panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            panel.standardWindowButton(.zoomButton)?.isHidden = true
+            panel.delegate = self
+
+            let hostingController = NSHostingController(rootView: rootView())
+            hostingController.view.setAccessibilityIdentifier("CommandPaletteHost")
+            panel.contentViewController = hostingController
+            self.hostingController = hostingController
+            self.panel = panel
+            return panel
+        }
+
+        private func updateRootView() {
+            hostingController?.rootView = rootView()
+        }
+
+        private func rootView() -> AnyView {
+            AnyView(
+                StudioCommandPaletteView(
+                    model: parent.model,
+                    query: Binding(
+                        get: { [weak self] in self?.parent.query ?? "" },
+                        set: { [weak self] newValue in self?.parent.query = newValue }
+                    ),
+                    isPresented: Binding(
+                        get: { [weak self] in self?.parent.isPresented ?? false },
+                        set: { [weak self] newValue in self?.parent.isPresented = newValue }
+                    )
+                )
+                .frame(width: 580, height: 540)
+            )
+        }
+
+        private func position(_ panel: NSPanel, near window: NSWindow?) {
+            guard let window else {
+                panel.center()
+                return
+            }
+
+            let parentFrame = window.frame
+            let panelFrame = panel.frame
+            let origin = NSPoint(
+                x: parentFrame.midX - panelFrame.width / 2,
+                y: parentFrame.midY - panelFrame.height / 2
+            )
+            panel.setFrameOrigin(origin)
+        }
+
+        @discardableResult
+        private func focusSearchField(in view: NSView?) -> Bool {
+            guard let view else { return false }
+            if let textField = view as? NSTextField {
+                textField.stringValue = parent.query
+                view.window?.makeFirstResponder(textField)
+                textField.currentEditor()?.string = parent.query
+                textField.selectText(nil)
+                return true
+            }
+            for subview in view.subviews {
+                if focusSearchField(in: subview) {
+                    return true
+                }
+            }
+            return false
+        }
+    }
+}
+
+private final class CommandPalettePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+
+    override func cancelOperation(_ sender: Any?) {
+        close()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            close()
+            return
+        }
+        super.keyDown(with: event)
     }
 }
 
@@ -94,6 +268,8 @@ private struct ProjectShelf: View {
                     Label(model.isInitializingProject ? "Creating" : "New Project", systemImage: "folder.badge.plus")
                 }
                 .disabled(model.isInitializingProject)
+                .accessibilityLabel(model.isInitializingProject ? "Creating new project" : "New Project")
+                .accessibilityIdentifier("ProjectShelf.NewProject")
 
                 Divider()
                     .frame(height: 24)
@@ -115,9 +291,12 @@ private struct ProjectShelf: View {
                                     .foregroundStyle(.secondary)
                             }
                             .padding(.horizontal, 2)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.bordered)
                         .tint(project.id == model.selectedProjectID ? .accentColor : .secondary)
+                        .accessibilityLabel("\(project.name), \(project.stateLabel)")
+                        .accessibilityIdentifier("ProjectShelf.\(project.id)")
                     }
                 }
             }
@@ -134,32 +313,82 @@ private struct StudioTopBar: View {
     var onRefresh: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Picker("Agent Surface", selection: $selectedSurface) {
-                ForEach(StudioAgentSurface.allCases) { surface in
-                    Text(surface.rawValue).tag(surface)
-                }
+        ViewThatFits(in: .horizontal) {
+            topBarContent {
+                surfacePicker(maxWidth: 720)
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 720)
-
-            Spacer(minLength: 12)
-
-            Button(action: onOpenCommandPalette) {
-                Image(systemName: "command")
+            topBarContent {
+                surfacePicker(maxWidth: 420)
             }
-            .help("Command Palette")
-
-            Button(action: onRefresh) {
-                Image(systemName: "arrow.clockwise")
+            topBarContent {
+                surfaceMenu
             }
-            .help("Refresh Projects")
         }
         .buttonStyle(.borderless)
         .controlSize(.large)
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
         .background(.regularMaterial)
+    }
+
+    private func topBarContent<SurfaceControl: View>(
+        @ViewBuilder surfaceControl: () -> SurfaceControl
+    ) -> some View {
+        HStack(spacing: 12) {
+            surfaceControl()
+
+            Spacer(minLength: 12)
+
+            Button(action: onOpenCommandPalette) {
+                Label("Command Palette", systemImage: "command")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 30, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .keyboardShortcut("k", modifiers: [.command])
+            .accessibilityLabel("Command Palette")
+            .accessibilityIdentifier("CommandPaletteButton")
+            .help("Command Palette")
+
+            Button(action: onRefresh) {
+                Label("Refresh Projects", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 30, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Refresh Projects")
+            .accessibilityIdentifier("RefreshProjectsButton")
+            .help("Refresh Projects")
+        }
+    }
+
+    private func surfacePicker(maxWidth: CGFloat) -> some View {
+        Picker("Agent Surface", selection: $selectedSurface) {
+            ForEach(StudioAgentSurface.allCases) { surface in
+                Text(surface.rawValue).tag(surface)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: maxWidth)
+    }
+
+    private var surfaceMenu: some View {
+        Menu {
+            ForEach(StudioAgentSurface.allCases) { surface in
+                Button {
+                    selectedSurface = surface
+                } label: {
+                    Label(
+                        surface.rawValue,
+                        systemImage: surface == selectedSurface ? "checkmark" : "circle"
+                    )
+                }
+            }
+        } label: {
+            Label(selectedSurface.rawValue, systemImage: "rectangle.3.group")
+                .lineLimit(1)
+        }
+        .help("Agent Surface")
     }
 }
 
@@ -174,8 +403,12 @@ private struct StudioCommandPaletteView: View {
         let commands = commandItems
         guard !normalized.isEmpty else { return commands }
         return commands.filter { item in
-            item.searchText.localizedCaseInsensitiveContains(normalized)
+            item.matches(query: normalized)
         }
+    }
+
+    private var firstEnabledCommand: StudioCommandPaletteItem? {
+        filteredCommands.first { $0.isEnabled }
     }
 
     var body: some View {
@@ -186,6 +419,13 @@ private struct StudioCommandPaletteView: View {
                 TextField("Search commands", text: $query)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
+                    .accessibilityLabel("Search commands")
+                    .accessibilityIdentifier("CommandPaletteSearchField")
+                    .onSubmit {
+                        if let item = firstEnabledCommand {
+                            performCommand(item)
+                        }
+                    }
                 Button {
                     isPresented = false
                 } label: {
@@ -193,6 +433,9 @@ private struct StudioCommandPaletteView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Close Command Palette")
+                .accessibilityIdentifier("CommandPaletteCloseButton")
+                .keyboardShortcut(.cancelAction)
             }
             .padding(10)
             .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
@@ -201,9 +444,7 @@ private struct StudioCommandPaletteView: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(filteredCommands) { item in
                         Button {
-                            guard item.isEnabled else { return }
-                            isPresented = false
-                            item.perform()
+                            performCommand(item)
                         } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: item.systemImage)
@@ -230,6 +471,8 @@ private struct StudioCommandPaletteView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(!item.isEnabled)
+                        .accessibilityLabel(item.title)
+                        .accessibilityIdentifier(item.accessibilityIdentifier)
                         Divider()
                     }
                 }
@@ -241,209 +484,177 @@ private struct StudioCommandPaletteView: View {
             }
         }
         .padding(18)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Command Palette")
+        .accessibilityIdentifier("CommandPaletteSheet")
         .onAppear {
             searchFocused = true
         }
+        .onExitCommand {
+            isPresented = false
+        }
+    }
+
+    private func performCommand(_ item: StudioCommandPaletteItem) {
+        guard item.isEnabled else { return }
+        isPresented = false
+        item.perform()
     }
 
     private var commandItems: [StudioCommandPaletteItem] {
         let hasProject = model.selectedProject != nil
-        let hasThread = model.activeThreadID != nil
-        let hasPendingApproval = model.pendingApproval != nil
+        let availability = model.commandAvailabilityContext
         return [
             StudioCommandPaletteItem(
-                title: "Refresh Projects",
+                command: .refreshProjects,
                 subtitle: "Reload project list, artifact status, and readiness panels.",
-                systemImage: "arrow.clockwise",
-                keywords: ["project", "reload", "status"],
                 isEnabled: true,
                 perform: { model.refresh() }
             ),
             StudioCommandPaletteItem(
-                title: "New Project from Source",
+                command: .newProjectFromSource,
                 subtitle: "Create a project from the template and link a source media folder.",
-                systemImage: "folder.badge.plus",
-                keywords: ["import", "source", "ingest"],
                 isEnabled: !model.isInitializingProject,
                 disabledReason: model.isInitializingProject ? "Creating" : nil,
                 perform: { model.chooseAndInitializeProject() }
             ),
             StudioCommandPaletteItem(
-                title: "Check Codex App Server",
+                command: .checkCodexAppServer,
                 subtitle: "Run the initialize handshake for the Codex runtime.",
-                systemImage: "network",
-                keywords: ["agent", "runtime", "codex"],
-                isEnabled: model.appServerStatus != .checking,
-                disabledReason: model.appServerStatus == .checking ? "Checking" : nil,
+                isEnabled: availability.isEnabled(.checkCodexAppServer),
+                disabledReason: availability.disabledReason(for: .checkCodexAppServer),
                 perform: { model.checkAppServer() }
             ),
             StudioCommandPaletteItem(
-                title: "Start Agent Session",
+                command: .startAgentSession,
                 subtitle: "Start a project-scoped Codex App Server thread.",
-                systemImage: "play.circle",
-                keywords: ["codex", "thread", "agent"],
-                isEnabled: hasProject && model.activeThreadID == nil && model.appServerStatus != .checking,
-                disabledReason: hasProject ? "Already active" : "No project",
+                isEnabled: availability.isEnabled(.startAgentSession),
+                disabledReason: availability.disabledReason(for: .startAgentSession),
                 perform: { model.startAgentSession() }
             ),
             StudioCommandPaletteItem(
-                title: "Stop Agent Session",
+                command: .stopAgentSession,
                 subtitle: "Stop the active Codex session.",
-                systemImage: "stop.circle",
-                keywords: ["codex", "thread", "agent"],
-                isEnabled: hasThread,
-                disabledReason: "No active thread",
+                isEnabled: availability.isEnabled(.stopAgentSession),
+                disabledReason: availability.disabledReason(for: .stopAgentSession),
                 perform: { model.stopAgentSession() }
             ),
             StudioCommandPaletteItem(
-                title: "Run Selected Agent Job",
+                command: .runSelectedAgentJob,
                 subtitle: "Run the selected Codex job or open the approval gate for write jobs.",
-                systemImage: "sparkles",
-                keywords: ["codex", "job", "approval"],
-                isEnabled: hasProject && hasThread,
-                disabledReason: hasProject ? "No active thread" : "No project",
+                isEnabled: availability.isEnabled(.runSelectedAgentJob),
+                disabledReason: availability.disabledReason(for: .runSelectedAgentJob),
                 perform: { model.runSelectedJob() }
             ),
             StudioCommandPaletteItem(
-                title: "Run Read-Only Agent Turn",
+                command: .runReadOnlyAgentTurn,
                 subtitle: "Run the freeform prompt in read-only sandbox mode.",
-                systemImage: "text.bubble",
-                keywords: ["codex", "prompt", "read only"],
-                isEnabled: hasThread,
-                disabledReason: "No active thread",
+                isEnabled: availability.isEnabled(.runReadOnlyAgentTurn),
+                disabledReason: availability.disabledReason(for: .runReadOnlyAgentTurn),
                 perform: { model.runAgentTurn() }
             ),
             StudioCommandPaletteItem(
-                title: "Approve Pending Agent Job",
+                command: .approvePendingAgentJob,
                 subtitle: "Approve the currently pending workspace-write Codex job.",
-                systemImage: "checkmark.shield",
-                keywords: ["approval", "write", "codex"],
-                isEnabled: hasPendingApproval,
-                disabledReason: "No pending job",
+                isEnabled: availability.isEnabled(.approvePendingAgentJob),
+                disabledReason: availability.disabledReason(for: .approvePendingAgentJob),
                 perform: { model.approvePendingJob() }
             ),
             StudioCommandPaletteItem(
-                title: "Run Source Analysis",
+                command: .runSourceAnalysis,
                 subtitle: model.analysisRunStatus,
-                systemImage: "waveform.path.ecg",
-                keywords: ["analysis", "ingest", "source"],
                 isEnabled: hasProject && !model.isRunningAnalysis && model.analysisRunPlan.canRun,
                 disabledReason: hasProject ? model.analysisRunPlan.readinessLabel : "No project",
                 perform: { model.runSelectedProjectAnalysis() }
             ),
             StudioCommandPaletteItem(
-                title: "Compile Rough Cut",
+                command: .compileRoughCut,
                 subtitle: model.roughCutCompileStatus,
-                systemImage: "timeline.selection",
-                keywords: ["compile", "timeline", "rough cut"],
                 isEnabled: hasProject && !model.isCompilingRoughCut && model.roughCutCompilePlan.canRun,
                 disabledReason: hasProject ? model.roughCutCompilePlan.readinessLabel : "No project",
                 perform: { model.compileSelectedProjectRoughCut() }
             ),
             StudioCommandPaletteItem(
-                title: "Apply Review Patch",
+                command: .applyReviewPatch,
                 subtitle: "Apply review_patch.json through the deterministic compiler.",
-                systemImage: "wrench.and.screwdriver",
-                keywords: ["review", "patch", "compile"],
                 isEnabled: hasProject && !model.isCompilingRoughCut,
                 disabledReason: hasProject ? nil : "No project",
                 perform: { model.compileSelectedProjectWithReviewPatch() }
             ),
             StudioCommandPaletteItem(
-                title: "Search Footage",
+                command: .searchFootage,
                 subtitle: "Find footage with text, Qwen visual, CLAP audio, or hybrid vector search.",
-                systemImage: "waveform.badge.magnifyingglass",
-                keywords: ["footage", "visual", "audio", "qwen", "clap", "search"],
                 isEnabled: hasProject,
                 disabledReason: "No project",
                 perform: { model.openFootageSearch() }
             ),
             StudioCommandPaletteItem(
-                title: "Rebuild Search Index",
+                command: .rebuildSearchIndex,
                 subtitle: "Rebuild the derived SQLite material/RAG index.",
-                systemImage: "magnifyingglass.circle",
-                keywords: ["rag", "sqlite", "search"],
                 isEnabled: hasProject,
                 disabledReason: "No project",
                 perform: { model.rebuildSelectedProjectIndex() }
             ),
             StudioCommandPaletteItem(
-                title: "Run Marlin Evaluation",
+                command: .runMarlinEvaluation,
                 subtitle: model.marlinEvaluationRunStatus,
-                systemImage: "sparkles.tv",
-                keywords: ["vlm", "marlin", "temporal"],
                 isEnabled: hasProject && !model.isRunningMarlinEvaluation && model.marlinEvaluationRunPlan.canRun,
                 disabledReason: hasProject ? model.marlinEvaluationRunPlan.readinessLabel : "No project",
                 perform: { model.runSelectedProjectMarlinEvaluation() }
             ),
             StudioCommandPaletteItem(
-                title: "Build Audio Story Graph",
+                command: .buildAudioStoryGraph,
                 subtitle: model.audioStoryGraphRunStatus,
-                systemImage: "waveform.badge.magnifyingglass",
-                keywords: ["audio", "story", "bgm"],
                 isEnabled: hasProject && !model.isBuildingAudioStoryGraph && model.audioStoryGraphRunPlan.canRun,
                 disabledReason: hasProject ? model.audioStoryGraphRunPlan.readinessLabel : "No project",
                 perform: { model.buildSelectedProjectAudioStoryGraph() }
             ),
             StudioCommandPaletteItem(
-                title: "Build Preview Proxies",
+                command: .buildPreviewProxies,
                 subtitle: model.mediaProxyOperationStatus,
-                systemImage: "film.stack",
-                keywords: ["media", "proxy", "preview"],
                 isEnabled: hasProject && !model.isBuildingMediaProxies && model.mediaProxyPlan.pendingCount > 0,
                 disabledReason: hasProject ? "No pending proxies" : "No project",
                 perform: { model.buildSelectedProjectMediaProxies() }
             ),
             StudioCommandPaletteItem(
-                title: "Relink Missing Media",
+                command: .relinkMissingMedia,
                 subtitle: model.mediaRelinkStatus,
-                systemImage: "link",
-                keywords: ["media", "source map", "relink"],
                 isEnabled: hasProject && !model.isRelinkingMedia,
                 disabledReason: "No project",
                 perform: { model.chooseAndRelinkSelectedProjectMedia() }
             ),
             StudioCommandPaletteItem(
-                title: "Export Premiere XML",
+                command: .exportPremiereXML,
                 subtitle: model.handoffExportStatus,
-                systemImage: "square.and.arrow.up",
-                keywords: ["handoff", "premiere", "xml"],
                 isEnabled: hasProject && !model.isExportingPremiereXML && (model.handoffExportPlan?.canExportPremiereXML ?? false),
                 disabledReason: hasProject ? model.handoffExportPlan?.readinessLabel : "No project",
                 perform: { model.exportSelectedProjectPremiereXML() }
             ),
             StudioCommandPaletteItem(
-                title: "Export Editor Packet",
+                command: .exportEditorPacket,
                 subtitle: model.editorPacketStatus,
-                systemImage: "shippingbox",
-                keywords: ["handoff", "packet", "editor"],
                 isEnabled: hasProject && !model.isExportingEditorPacket && (model.editorPacketPlan?.canExportPacket ?? false),
                 disabledReason: hasProject ? model.editorPacketPlan?.readinessLabel : "No project",
                 perform: { model.exportSelectedProjectEditorPacket() }
             ),
             StudioCommandPaletteItem(
-                title: "Render Final Package",
+                command: .renderFinalPackage,
                 subtitle: model.renderRunStatus,
-                systemImage: "film",
-                keywords: ["render", "package", "final"],
                 isEnabled: hasProject && !model.isRunningRender && model.renderRunPlan.canRun,
                 disabledReason: hasProject ? model.renderRunPlan.readinessLabel : "No project",
                 perform: { model.runSelectedProjectRender() }
             ),
             StudioCommandPaletteItem(
-                title: "Run Studio Acceptance Smoke",
+                command: .runStudioAcceptanceSmoke,
                 subtitle: model.studioAcceptanceSmokeStatus,
-                systemImage: "checkmark.shield",
-                keywords: ["smoke", "acceptance", "codex"],
                 isEnabled: !model.isRunningStudioAcceptanceSmoke,
                 disabledReason: "Running",
                 perform: { model.runStudioAcceptanceSmoke() }
             ),
             StudioCommandPaletteItem(
-                title: model.isPlaying ? "Pause Playback" : "Play Timeline",
+                command: .playTimeline,
+                isPlaying: model.isPlaying,
                 subtitle: model.timelineStatus,
-                systemImage: model.isPlaying ? "pause.fill" : "play.fill",
-                keywords: ["transport", "viewer", "timeline"],
                 isEnabled: model.timeline != nil,
                 disabledReason: "No timeline",
                 perform: { model.togglePlayback() }
@@ -453,35 +664,39 @@ private struct StudioCommandPaletteView: View {
 }
 
 private struct StudioCommandPaletteItem: Identifiable {
-    let id = UUID()
+    let command: StudioCommandPaletteCommand
+    let id: StudioCommandPaletteCommand
     let title: String
     let subtitle: String
     let systemImage: String
-    let keywords: [String]
     let isEnabled: Bool
     let disabledReason: String?
     let perform: () -> Void
 
     init(
-        title: String,
+        command: StudioCommandPaletteCommand,
+        isPlaying: Bool = false,
         subtitle: String,
-        systemImage: String,
-        keywords: [String],
         isEnabled: Bool,
         disabledReason: String? = nil,
         perform: @escaping () -> Void
     ) {
-        self.title = title
+        self.command = command
+        self.id = command
+        self.title = command.title(isPlaying: isPlaying)
         self.subtitle = subtitle
-        self.systemImage = systemImage
-        self.keywords = keywords
+        self.systemImage = command.systemImage(isPlaying: isPlaying)
         self.isEnabled = isEnabled
         self.disabledReason = disabledReason
         self.perform = perform
     }
 
-    var searchText: String {
-        ([title, subtitle] + keywords).joined(separator: " ")
+    var accessibilityIdentifier: String {
+        command.accessibilityIdentifier
+    }
+
+    func matches(query: String) -> Bool {
+        command.matches(query: query, title: title, subtitle: subtitle)
     }
 }
 
@@ -490,33 +705,33 @@ private struct StudioWorkspaceView: View {
     @FocusState private var timelineFocused: Bool
 
     var body: some View {
+        GeometryReader { proxy in
+            workspaceLayout(isCompact: proxy.size.width < 1040)
+        }
+    }
+
+    @ViewBuilder
+    private func workspaceLayout(isCompact: Bool) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ViewerPanel(
-                    project: model.selectedProject,
-                    playbackContract: model.playbackContractStatus,
-                    selection: model.programTimelineClip ?? model.selectedTimelineClip,
-                    media: model.programMediaReference,
-                    audioMedia: model.programAudioMediaReference,
-                    nextMedia: model.nextProgramMediaReference,
-                    playheadLabel: model.timeline?.sequence.framesToTimecode(model.playheadFrame),
-                    isPlaying: model.isPlaying,
-                    syncGeneration: model.mediaPlaybackSyncGeneration,
-                    audioSyncGeneration: model.audioPlaybackSyncGeneration,
-                    audioMuted: model.monitorAudioMuted,
-                    audioVolume: model.monitorAudioVolume,
-                    onTogglePlayback: { model.togglePlayback() },
-                    onStepBackward: { model.stepBackward() },
-                    onStepForward: { model.stepForward() },
-                    onToggleAudioMute: { model.toggleMonitorAudioMute() },
-                    onAudioVolumeChange: { model.setMonitorAudioVolume($0) }
-                )
-                    .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                InspectorPanel(model: model)
-                    .frame(width: 360)
+            if isCompact {
+                VStack(spacing: 0) {
+                    viewerPanel
+                        .frame(minHeight: 280, maxHeight: .infinity)
+                    Divider()
+                    InspectorPanel(model: model)
+                        .frame(minHeight: 180, idealHeight: 220, maxHeight: 260)
+                }
+                .frame(minHeight: 430, maxHeight: .infinity)
+            } else {
+                HStack(spacing: 0) {
+                    viewerPanel
+                        .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
+                    Divider()
+                    InspectorPanel(model: model)
+                        .frame(minWidth: 300, idealWidth: 340, maxWidth: 360)
+                }
+                .frame(minHeight: 430, maxHeight: .infinity)
             }
-            .frame(minHeight: 430, maxHeight: .infinity)
 
             Divider()
 
@@ -557,6 +772,7 @@ private struct StudioWorkspaceView: View {
             FeedbackStatusBar(
                 feedbackSession: model.feedbackSession,
                 statusMessage: model.roughCutCompileStatus,
+                canPromote: model.canPromoteLatestStudioPatch,
                 onApplyAndPreview: { model.applyStudioPatch() },
                 onPromote: { model.promoteStudioPatch() },
                 onDiscard: { model.feedbackSession.clearAll() }
@@ -565,6 +781,30 @@ private struct StudioWorkspaceView: View {
         .overlay(alignment: .topLeading) {
             TimelineShortcutButtons(model: model, isEnabled: timelineFocused)
         }
+    }
+
+    private var viewerPanel: some View {
+        ViewerPanel(
+            project: model.selectedProject,
+            playbackContract: model.playbackContractStatus,
+            selection: model.programTimelineClip ?? model.selectedTimelineClip,
+            media: model.programMediaReference,
+            audioMedia: model.programAudioMediaReference,
+            nextMedia: model.nextProgramMediaReference,
+            mediaPreviewSummary: model.mediaPreviewSummary,
+            playheadLabel: model.timeline?.sequence.framesToTimecode(model.playheadFrame),
+            isPlaying: model.isPlaying,
+            syncGeneration: model.mediaPlaybackSyncGeneration,
+            audioSyncGeneration: model.audioPlaybackSyncGeneration,
+            audioMuted: model.monitorAudioMuted,
+            audioVolume: model.monitorAudioVolume,
+            onDiagnosticAction: { model.performViewerDiagnosticAction($0) },
+            onTogglePlayback: { model.togglePlayback() },
+            onStepBackward: { model.stepBackward() },
+            onStepForward: { model.stepForward() },
+            onToggleAudioMute: { model.toggleMonitorAudioMute() },
+            onAudioVolumeChange: { model.setMonitorAudioVolume($0) }
+        )
     }
 }
 

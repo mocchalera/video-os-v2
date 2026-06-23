@@ -79,6 +79,7 @@ export default function SourceMonitor({
   return (
     <section
       onClick={onClick}
+      aria-label="Source Monitor"
       className={`flex min-h-0 cursor-pointer flex-col overflow-hidden border-r border-white/[0.06] ${
         isActive ? 'monitor-active' : 'monitor-inactive'
       }`}
@@ -165,6 +166,7 @@ export default function SourceMonitor({
           className="flex h-6 w-6 items-center justify-center bg-white/[0.06] text-[11px] text-white transition hover:bg-white/[0.12]"
           onClick={(e) => { e.stopPropagation(); onTogglePlayback(); }}
           title={isPlaying ? 'Stop (Space)' : 'Play (Space)'}
+          aria-label={isPlaying ? 'Source monitor stop' : 'Source monitor play'}
         >
           {isPlaying ? '\u25A0' : '\u25B6'}
         </button>
@@ -206,6 +208,7 @@ export default function SourceMonitor({
         <button
           type="button"
           className="font-mono text-[9px] text-[var(--accent)] transition hover:text-white"
+          aria-label={`Cycle source video target, current ${videoTarget}`}
           onClick={(e) => {
             e.stopPropagation();
             if (!videoTrackIds?.length || !onToggleVideoTarget) return;
@@ -229,6 +232,8 @@ export default function SourceMonitor({
                     ? 'text-[var(--accent)]'
                     : 'text-[color:var(--text-subtle)] opacity-50'
                 } hover:text-white`}
+                aria-label={`Toggle source audio target ${tid}`}
+                aria-pressed={audioTargets.has(tid)}
                 onClick={(e) => { e.stopPropagation(); onToggleAudioTarget?.(tid); }}
                 title={`Toggle audio target ${tid}`}
               >

@@ -28,6 +28,51 @@ final class ProjectRenderRunnerTests: XCTestCase {
         XCTAssertEqual(plan.readinessLabel, "state must be approved or packaged")
     }
 
+    func testPlanRequiresWorkerInputsBeforeEnablingRender() throws {
+        let (root, project) = try temporaryRenderProject("videoos-render-inputs", state: "approved")
+        try FileManager.default.removeItem(at: project.appendingPathComponent("01_intent/creative_brief.yaml"))
+
+        var plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(plan.readinessLabel, "missing creative brief")
+
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("01_intent"), withIntermediateDirectories: true)
+        try """
+        autonomy:
+          mode: full
+        """.write(to: project.appendingPathComponent("01_intent/creative_brief.yaml"), atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: project.appendingPathComponent("04_plan/edit_blueprint.yaml"))
+
+        plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(plan.readinessLabel, "missing edit blueprint")
+    }
+
+    func testPlanUsesPublishedFinalForPackagedNLEFinishingProject() throws {
+        let (root, project) = try temporaryRenderProject(
+            "videoos-render-nle",
+            state: "packaged",
+            sourceOfTruthDecision: "nle_finishing"
+        )
+
+        var plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(plan.readinessLabel, "supplied final missing")
+
+        let publishedFinal = project.appendingPathComponent("09_output/final.mp4")
+        try FileManager.default.createDirectory(at: publishedFinal.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([0x00, 0x01]).write(to: publishedFinal, options: .atomic)
+
+        plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+
+        XCTAssertTrue(plan.canRun)
+        XCTAssertEqual(plan.options.suppliedFinalURL, publishedFinal)
+        XCTAssertTrue(plan.commandLine.contains("supplied_final_path"))
+    }
+
     func testRunUsesInjectedWorkerAndReadsRenderedPackageStatus() throws {
         let (root, project) = try temporaryRenderProject("videoos-render-run", state: "approved")
         let plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
@@ -44,15 +89,30 @@ final class ProjectRenderRunnerTests: XCTestCase {
         XCTAssertTrue(result.status.publishedFinalVideoExists)
     }
 
-    private func temporaryRenderProject(_ prefix: String, state: String) throws -> (URL, URL) {
+    private func temporaryRenderProject(
+        _ prefix: String,
+        state: String,
+        sourceOfTruthDecision: String = "engine_render"
+    ) throws -> (URL, URL) {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
         let project = root.appendingPathComponent("projects/demo")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("01_intent"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("04_plan"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: project.appendingPathComponent("05_timeline"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: project.appendingPathComponent("06_review"), withIntermediateDirectories: true)
         try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
         try "script".write(to: root.appendingPathComponent("scripts/editor-job-worker.ts"), atomically: true, encoding: .utf8)
+        try """
+        autonomy:
+          mode: full
+        """.write(to: project.appendingPathComponent("01_intent/creative_brief.yaml"), atomically: true, encoding: .utf8)
+        try """
+        caption_policy:
+          source: none
+          delivery_mode: both
+        """.write(to: project.appendingPathComponent("04_plan/edit_blueprint.yaml"), atomically: true, encoding: .utf8)
         try #"{"version":"1","sequence":{"fps":24},"tracks":{"video":[],"audio":[]}}"#
             .write(to: project.appendingPathComponent("05_timeline/timeline.json"), atomically: true, encoding: .utf8)
         try """
@@ -61,6 +121,11 @@ final class ProjectRenderRunnerTests: XCTestCase {
         """.write(to: project.appendingPathComponent("06_review/review_report.yaml"), atomically: true, encoding: .utf8)
         try """
         current_state: \(state)
+        approval_record:
+          status: clean
+        handoff_resolution:
+          status: decided
+          source_of_truth_decision: \(sourceOfTruthDecision)
         gates:
           review_gate: open
         """.write(to: project.appendingPathComponent("project_state.yaml"), atomically: true, encoding: .utf8)

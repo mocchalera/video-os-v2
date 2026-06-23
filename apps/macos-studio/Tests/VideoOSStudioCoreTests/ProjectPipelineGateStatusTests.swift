@@ -76,9 +76,20 @@ final class ProjectPipelineGateStatusTests: XCTestCase {
             .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
         let project = root.appendingPathComponent("projects/demo")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("01_intent"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("04_plan"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: project.appendingPathComponent("06_review"), withIntermediateDirectories: true)
         try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
         try "script".write(to: root.appendingPathComponent("scripts/editor-job-worker.ts"), atomically: true, encoding: .utf8)
+        try """
+        autonomy:
+          mode: full
+        """.write(to: project.appendingPathComponent("01_intent/creative_brief.yaml"), atomically: true, encoding: .utf8)
+        try """
+        caption_policy:
+          source: none
+          delivery_mode: both
+        """.write(to: project.appendingPathComponent("04_plan/edit_blueprint.yaml"), atomically: true, encoding: .utf8)
         if timeline {
             try FileManager.default.createDirectory(at: project.appendingPathComponent("05_timeline"), withIntermediateDirectories: true)
             try #"{"version":"1","sequence":{"fps":24},"tracks":{"video":[],"audio":[]}}"#

@@ -1,0 +1,15 @@
+{
+  "project_id": "fumoto-growth",
+  "phase": "triage",
+  "gate": 2,
+  "status": "completed",
+  "completed": 4,
+  "total": 4,
+  "eta_sec": 0,
+  "artifacts_created": [
+    "04_plan/selects_candidates.yaml"
+  ],
+  "errors": [],
+  "started_at": "2026-06-17T07:53:02.074Z",
+  "updated_at": "2026-06-17T07:53:13.618Z"
+}

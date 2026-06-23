@@ -817,9 +817,9 @@ export function createReviewRouter(
           reason = "same_role";
         }
 
-        // Build thumbnail URL (matches GET /api/projects/:id/thumbnail/:assetId)
+        // Build thumbnail URL (matches GET /api/projects/:id/thumbnail/by-asset/:assetId)
         const frameUs = c.trim_hint?.source_center_us ?? Math.round((c.src_in_us + c.src_out_us) / 2);
-        const thumbnailUrl = `/api/projects/${req.params.id as string}/thumbnail/${encodeURIComponent(c.asset_id)}?frame_us=${frameUs}&width=160&height=90`;
+        const thumbnailUrl = `/api/projects/${req.params.id as string}/thumbnail/by-asset/${encodeURIComponent(c.asset_id)}?frame_us=${frameUs}&width=160&height=90`;
 
         return {
           segment_id: c.segment_id,

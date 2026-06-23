@@ -1,0 +1,687 @@
+version: "1"
+entries:
+  - stage: vlm
+    asset_id: AST_01C251D3
+    segment_id: SEG_AST_01C251D3_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.188Z
+  - stage: vlm
+    asset_id: AST_0DA6AE45
+    segment_id: SEG_AST_0DA6AE45_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_31A9CDC2
+    segment_id: SEG_AST_31A9CDC2_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_411F7A75
+    segment_id: SEG_AST_411F7A75_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_45310186
+    segment_id: SEG_AST_45310186_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_500A492B
+    segment_id: SEG_AST_500A492B_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_50EBFBBE
+    segment_id: SEG_AST_50EBFBBE_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_5275474A
+    segment_id: SEG_AST_5275474A_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_5395FFCE
+    segment_id: SEG_AST_5395FFCE_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_56C25409
+    segment_id: SEG_AST_56C25409_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_6A478DEC
+    segment_id: SEG_AST_6A478DEC_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_75D600FA
+    segment_id: SEG_AST_75D600FA_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_7B8AE793
+    segment_id: SEG_AST_7B8AE793_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_7E54B334
+    segment_id: SEG_AST_7E54B334_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_87FCAC7B
+    segment_id: SEG_AST_87FCAC7B_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_8BED5B08
+    segment_id: SEG_AST_8BED5B08_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_A4EEE8E2
+    segment_id: SEG_AST_A4EEE8E2_0002
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_B9A9E38D
+    segment_id: SEG_AST_B9A9E38D_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_BE87AF55
+    segment_id: SEG_AST_BE87AF55_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_C592C0AF
+    segment_id: SEG_AST_C592C0AF_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_C5B4FC88
+    segment_id: SEG_AST_C5B4FC88_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_CE4B4C6F
+    segment_id: SEG_AST_CE4B4C6F_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_CFD7BB2D
+    segment_id: SEG_AST_CFD7BB2D_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_D3155EAD
+    segment_id: SEG_AST_D3155EAD_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_DAD1F79C
+    segment_id: SEG_AST_DAD1F79C_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: vlm
+    asset_id: AST_EF7B9E5B
+    segment_id: SEG_AST_EF7B9E5B_0001
+    issue: >
+      vlm_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: peak_detection
+    asset_id: AST_31A9CDC2
+    segment_id: SEG_AST_31A9CDC2_0001
+    issue: >
+      peak_detection_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: peak_detection
+    asset_id: AST_7F2E9F12
+    segment_id: SEG_AST_7F2E9F12_0001
+    issue: >
+      peak_detection_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: peak_detection
+    asset_id: AST_9435E35C
+    segment_id: SEG_AST_9435E35C_0001
+    issue: >
+      peak_detection_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: peak_detection
+    asset_id: AST_ABBF0124
+    segment_id: SEG_AST_ABBF0124_0001
+    issue: >
+      peak_detection_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: peak_detection
+    asset_id: AST_D6238973
+    segment_id: SEG_AST_D6238973_0001
+    issue: >
+      peak_detection_failed: Gemini API error 429: {
+        "error": {
+          "code": 429,
+          "message": "Resource exhausted. Please try again later. Please refer to https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429 for more details.",
+          "status": "RESOURCE_EXHAUSTED"
+        }
+      }
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-24T18:22:14.190Z
+  - stage: diarize
+    asset_id: AST_01C251D3
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_02DA7FDF
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_03273779
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_0ADDAA84
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_0C9FA88A
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_0DA6AE45
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_15427158
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_19B25163
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_261E6D3D
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_31A9CDC2
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_34EA5E88
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_3D474C76
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_411F7A75
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_45310186
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_500A492B
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_50EBFBBE
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_5275474A
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_5395FFCE
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_567028AD
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_56C25409
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_571C5D6B
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_57DD39CB
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_66F572EB
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_6A478DEC
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_75D600FA
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_7B8AE793
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_7E54B334
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_7E5C9A8A
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_7EC7D225
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_7F2E9F12
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_87841CCA
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_87FCAC7B
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_8BDBBA9F
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_8BED5B08
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_9435E35C
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_9DFCE350
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_9E5795ED
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_A4EEE8E2
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_ABBF0124
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_B9A9E38D
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_BE87AF55
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_C592C0AF
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_C5B4FC88
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_CE4B4C6F
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_CFD7BB2D
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_D0EB3FF3
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_D3155EAD
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_D60A0C89
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_D6238973
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_DA4D2912
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_DAD1F79C
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_DF524E7F
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_EF7B9E5B
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_F734F145
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_FB322087
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning

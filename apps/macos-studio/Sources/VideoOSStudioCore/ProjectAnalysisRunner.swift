@@ -6,6 +6,8 @@ public struct ProjectAnalysisRunOptions: Equatable, Sendable {
     public var skipDiarize: Bool
     public var skipPeak: Bool
     public var skipMarlin: Bool
+    public var skipAppraiser: Bool
+    public var skipMediaLink: Bool
     public var skipPreflight: Bool
     public var language: String?
     public var contentHint: String?
@@ -19,6 +21,8 @@ public struct ProjectAnalysisRunOptions: Equatable, Sendable {
         skipDiarize: Bool = false,
         skipPeak: Bool = false,
         skipMarlin: Bool = false,
+        skipAppraiser: Bool = false,
+        skipMediaLink: Bool = false,
         skipPreflight: Bool = false,
         language: String? = nil,
         contentHint: String? = nil,
@@ -31,6 +35,8 @@ public struct ProjectAnalysisRunOptions: Equatable, Sendable {
         self.skipDiarize = skipDiarize
         self.skipPeak = skipPeak
         self.skipMarlin = skipMarlin
+        self.skipAppraiser = skipAppraiser
+        self.skipMediaLink = skipMediaLink
         self.skipPreflight = skipPreflight
         self.language = language
         self.contentHint = contentHint
@@ -38,6 +44,19 @@ public struct ProjectAnalysisRunOptions: Equatable, Sendable {
         self.noCache = noCache
         self.clearCache = clearCache
     }
+
+    public static let nativeLocalDefaults = ProjectAnalysisRunOptions(
+        skipSTT: true,
+        skipVLM: true,
+        skipDiarize: true,
+        skipPeak: true,
+        skipMarlin: true,
+        skipAppraiser: true,
+        skipMediaLink: true,
+        skipPreflight: true,
+        concurrency: 1,
+        noCache: true
+    )
 }
 
 public struct ProjectAnalysisRunPlan: Equatable, Sendable {
@@ -79,6 +98,8 @@ public struct ProjectAnalysisRunPlan: Equatable, Sendable {
         if options.skipDiarize { args.append("--skip-diarize") }
         if options.skipPeak { args.append("--skip-peak") }
         if options.skipMarlin { args.append("--skip-marlin") }
+        if options.skipAppraiser { args.append("--skip-appraiser") }
+        if options.skipMediaLink { args.append("--skip-media-link") }
         if options.skipPreflight { args.append("--skip-preflight") }
         if let language = options.language, !language.isEmpty {
             args += ["--language", language]

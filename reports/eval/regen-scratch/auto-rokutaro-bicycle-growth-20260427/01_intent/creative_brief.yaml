@@ -1,0 +1,88 @@
+version: "1"
+project_id: rokutaro-bicycle-growth-20260427
+created_at: "2026-04-27T00:00:00Z"
+
+project:
+  id: rokutaro-bicycle-growth-20260427
+  title: 坂本麓太朗 自転車成長記録
+  strategy: keepsake / family-growth-recap / chronological
+  client: Family keepsake
+  format: family-growth-record
+  runtime_target_sec: 150
+  duration_mode: guide
+
+message:
+  primary: 自転車の練習を通じて、麓太朗が少しずつ怖さを越え、自分の力で前へ進めるようになる成長の軌跡。
+  secondary:
+    - 補助輪ありから補助輪なし、そして自分でこげるようになる流れを最優先する
+    - 家族が見守る温かさと、日常の中にある小さな達成を大切にする
+    - 成功だけでなく、揺れや迷いも成長の一部として残す
+
+audience:
+  primary: 麓太朗の家族、祖父母、親しい親族
+  secondary:
+    - 幼い頃からの成長を知っている人
+    - 子どもの挑戦を温かく見守る視聴者
+  excluded:
+    - 競技スポーツのハイライトを期待する視聴者
+
+emotion_curve:
+  - なつかしさ
+  - 小さな挑戦
+  - 迷いと粘り
+  - できた瞬間の喜び
+  - あたたかい余韻
+
+must_have:
+  - 主人公は坂本麓太朗（2019/7/7生まれ、2026/4/27時点で6歳）
+  - 自転車、補助輪、公園、家族、成長を示す素材を優先する
+  - 補助輪ありから補助輪なし、こげるようになる流れが見つかれば時系列で採用する
+  - BGM「名前のない坂 (Remastered).mp3」を beat-sync の対象にする
+  - 家族向けに視聴できる、エモーショナルであたたかい粗編集にする
+
+must_avoid:
+  - 危険な転倒や失敗を怖く見せる演出
+  - 成長記録を競技成績やスピード勝負として見せること
+  - 家庭用映像の温かさを消す過剰な演出
+  - strict duration に合わせるために余韻を削りすぎること
+
+autonomy:
+  mode: full
+  may_decide:
+    - exact clip boundaries within each segment
+    - chronological ordering when metadata and filename evidence support it
+    - which bicycle practice shots best show progression
+    - cut points aligned to BGM beats and downbeats
+    - letterbox or pillarbox handling based on source aspect ratio
+  must_ask:
+    - replacing the specified BGM
+    - removing the bicycle-growth theme
+    - changing the tone from warm keepsake to comedy or sports highlight
+
+resolved_assumptions:
+  - 新規プロジェクトとして 0 から走らせ、既存 rokutaro-bicycle 系プロジェクトは参考に留める
+  - 素材フォルダ内の macOS メタファイル `._*` は無視する
+  - target duration は 90-180 秒程度の guide mode とし、150 秒を中心目安にする
+  - aspect ratio は source media から自動判定し、必要なら letterbox/pillarbox を許容する
+  - 祖父母にも伝わるように、意味の分かりやすい時系列と余韻を優先する
+
+hypotheses:
+  - early wobble, support, then solo riding will make the growth arc legible without narration
+  - the named BGM can carry transitions and afterglow if cuts align to beat/downbeat markers
+
+forbidden_interpretations:
+  - bicycle learning as competition
+  - childhood challenge as pressure or obligation
+  - montage that ignores chronology when growth progression is available
+
+content_hint: "坂本麓太朗（2019/7/7生まれ）の自転車成長記録。補助輪あり、補助輪なし、公園での練習、家族の見守り、こげるようになる瞬間、日常のあたたかい成長を探す。"
+
+editorial:
+  distribution_channel: unknown
+  aspect_ratio: unknown
+  embed_context: standalone
+  hook_priority: balanced
+  credibility_bias: high
+  profile_hint: keepsake family-growth-recap chronological bicycle
+  policy_hint: guide-duration 90-180sec, beat-sync BGM, warm afterglow
+  allow_inference: true

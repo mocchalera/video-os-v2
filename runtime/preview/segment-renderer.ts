@@ -166,9 +166,13 @@ export function buildClipExtractArgs(
   srcInUs: number,
   srcOutUs: number,
   outputPath: string,
+  targetDurationSec?: number,
 ): string[] {
   const startSec = srcInUs / 1_000_000;
-  const durationSec = (srcOutUs - srcInUs) / 1_000_000;
+  const sourceDurationSec = Math.max(0, (srcOutUs - srcInUs) / 1_000_000);
+  const durationSec = Number.isFinite(targetDurationSec) && targetDurationSec !== undefined
+    ? Math.min(sourceDurationSec, Math.max(0, targetDurationSec))
+    : sourceDurationSec;
 
   return [
     "-y",
@@ -192,6 +196,16 @@ export function buildConcatFileContent(clipPaths: string[]): string {
   return clipPaths
     .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
     .join("\n");
+}
+
+export function clipTimelineDurationSec(
+  clip: PreviewClip,
+  fpsNum: number,
+  fpsDen: number,
+): number {
+  const fps = fpsNum / fpsDen;
+  if (!Number.isFinite(fps) || fps <= 0) return 0;
+  return clip.timeline_duration_frames / fps;
 }
 
 /**
@@ -276,11 +290,17 @@ export async function renderPreviewSegment(
       }
 
       const clipOutPath = path.join(tmpDir, `clip_${String(i).padStart(4, "0")}.mp4`);
+      const targetDurationSec = clipTimelineDurationSec(
+        clip,
+        timeline.sequence.fps_num,
+        timeline.sequence.fps_den,
+      );
       const args = buildClipExtractArgs(
         sourcePath,
         clip.src_in_us,
         clip.src_out_us,
         clipOutPath,
+        targetDurationSec,
       );
       await execFilePromise("ffmpeg", args);
       clipPaths.push(clipOutPath);

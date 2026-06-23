@@ -1,0 +1,3744 @@
+{
+  "project_id": "rokutaro-bicycle-growth-20260427",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "segment_id": "SEG_AST_7F2E9F12_0001",
+      "asset_id": "AST_7F2E9F12",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "39B2F532-BEAD-45B3-B316-531EED5BB9A0: bicycle practice / family growth record candidate (1/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 1700000,
+          "label": "emotional_peak: the strongest emotional reaction",
+          "confidence": 0.75
+        },
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_7F2E9F12_0002",
+            "timestamp_us": 1700000,
+            "type": "emotional_peak",
+            "confidence": 0.75,
+            "description": "the strongest emotional reaction",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 700000,
+          "best_out_us": 2700000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 1700000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.5,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_EF7B9E5B_0001",
+      "asset_id": "AST_EF7B9E5B",
+      "src_in_us": 0,
+      "src_out_us": 11908344,
+      "duration_us": 11908344,
+      "rep_frame_us": 5954172,
+      "segment_type": "action",
+      "summary": "IMG_0117: bicycle practice / family growth record candidate (2/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 5954172,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 10300000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_EF7B9E5B_0001",
+            "timestamp_us": 10300000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 9500000,
+          "best_out_us": 11100000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 10300000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 11908344,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_9435E35C_0001",
+      "asset_id": "AST_9435E35C",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_0359: bicycle practice / family growth record candidate (3/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 13050000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_9435E35C_0001",
+            "timestamp_us": 13050000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 18000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 13050000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_7E54B334_0001",
+      "asset_id": "AST_7E54B334",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_0543: bicycle practice / family growth record candidate (4/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 11500000,
+          "label": "action_peak: a person enters or exits",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_7E54B334_0004",
+            "timestamp_us": 11500000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "a person enters or exits",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 18000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 11500000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_D60A0C89_0001",
+      "asset_id": "AST_D60A0C89",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_0601: bicycle practice / family growth record candidate (5/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 17500000,
+          "label": "emotional_peak: the strongest emotional reaction",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_D60A0C89_0002",
+            "timestamp_us": 17500000,
+            "type": "emotional_peak",
+            "confidence": 0.75,
+            "description": "the strongest emotional reaction",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 16500000,
+          "best_out_us": 18000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 17500000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.5,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_03273779_0001",
+      "asset_id": "AST_03273779",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_0752: bicycle practice / family growth record candidate (6/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 1750000,
+          "label": "action_peak: A man in a grey shirt walks across the field.",
+          "confidence": 0.7
+        },
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MEV_AST_03273779_0001",
+            "timestamp_us": 1750000,
+            "type": "action_peak",
+            "confidence": 0.7,
+            "description": "A man in a grey shirt walks across the field.",
+            "source_pass": "marlin_caption"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 4000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_caption"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 1750000,
+            "energy": 0.7,
+            "source": "marlin_caption"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.7,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.7
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_3D474C76_0001",
+      "asset_id": "AST_3D474C76",
+      "src_in_us": 0,
+      "src_out_us": 12866666,
+      "duration_us": 12866666,
+      "rep_frame_us": 6433333,
+      "segment_type": "action",
+      "summary": "IMG_0805: bicycle practice / family growth record candidate (7/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 6433333,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 10500000,
+          "label": "emotional_peak: the strongest emotional reaction",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_3D474C76_0002",
+            "timestamp_us": 10500000,
+            "type": "emotional_peak",
+            "confidence": 0.75,
+            "description": "the strongest emotional reaction",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 9500000,
+          "best_out_us": 11500000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 10500000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 12866666,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.5,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_F734F145_0001",
+      "asset_id": "AST_F734F145",
+      "src_in_us": 0,
+      "src_out_us": 4536666,
+      "duration_us": 4536666,
+      "rep_frame_us": 2268333,
+      "segment_type": "action",
+      "summary": "IMG_0943: bicycle practice / family growth record candidate (8/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 1500000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        },
+        {
+          "frame_us": 2268333,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_F734F145_0001",
+            "timestamp_us": 1500000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 3500000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 1500000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 4536666,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_45310186_0001",
+      "asset_id": "AST_45310186",
+      "src_in_us": 0,
+      "src_out_us": 4866666,
+      "duration_us": 4866666,
+      "rep_frame_us": 2433333,
+      "segment_type": "action",
+      "summary": "IMG_0944: bicycle practice / family growth record candidate (9/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 500000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        },
+        {
+          "frame_us": 2433333,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_45310186_0001",
+            "timestamp_us": 500000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 1500000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 500000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 4866666,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_7EC7D225_0001",
+      "asset_id": "AST_7EC7D225",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_0953: bicycle practice / family growth record candidate (10/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 2250000,
+          "label": "action_peak: The child climbs the concrete stairs.",
+          "confidence": 0.7
+        },
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MEV_AST_7EC7D225_0001",
+            "timestamp_us": 2250000,
+            "type": "action_peak",
+            "confidence": 0.7,
+            "description": "The child climbs the concrete stairs.",
+            "source_pass": "marlin_caption"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 5000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_caption"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 2250000,
+            "energy": 0.7,
+            "source": "marlin_caption"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.7,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.7
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_87FCAC7B_0001",
+      "asset_id": "AST_87FCAC7B",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_0988: bicycle practice / family growth record candidate (11/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 16000000,
+          "label": "action_peak: a person enters or exits",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_87FCAC7B_0004",
+            "timestamp_us": 16000000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "a person enters or exits",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 14500000,
+          "best_out_us": 17500000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 16000000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_DF524E7F_0001",
+      "asset_id": "AST_DF524E7F",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_0997: bicycle practice / family growth record candidate (12/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 18000000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_DF524E7F_0001",
+            "timestamp_us": 18000000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 16500000,
+          "best_out_us": 18000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_5395FFCE_0001",
+      "asset_id": "AST_5395FFCE",
+      "src_in_us": 0,
+      "src_out_us": 12271666,
+      "duration_us": 12271666,
+      "rep_frame_us": 6135833,
+      "segment_type": "action",
+      "summary": "IMG_1004: bicycle practice / family growth record candidate (13/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 250000,
+          "label": "action_peak: a person enters or exits",
+          "confidence": 0.75
+        },
+        {
+          "frame_us": 6135833,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_5395FFCE_0004",
+            "timestamp_us": 250000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "a person enters or exits",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 1000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 250000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 12271666,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_7B8AE793_0001",
+      "asset_id": "AST_7B8AE793",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1020: bicycle practice / family growth record candidate (14/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 10850000,
+          "label": "action_peak: the strongest action moment",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_7B8AE793_0001",
+            "timestamp_us": 10850000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "the strongest action moment",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 9500000,
+          "best_out_us": 12200000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 10850000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_0DA6AE45_0001",
+      "asset_id": "AST_0DA6AE45",
+      "src_in_us": 0,
+      "src_out_us": 11671666,
+      "duration_us": 11671666,
+      "rep_frame_us": 5835833,
+      "segment_type": "action",
+      "summary": "IMG_1086: bicycle practice / family growth record candidate (15/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 250000,
+          "label": "action_peak: a clear visual reveal",
+          "confidence": 0.75
+        },
+        {
+          "frame_us": 5835833,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_0DA6AE45_0003",
+            "timestamp_us": 250000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "a clear visual reveal",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 1000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 250000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 11671666,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_50EBFBBE_0001",
+      "asset_id": "AST_50EBFBBE",
+      "src_in_us": 0,
+      "src_out_us": 8071666,
+      "duration_us": 8071666,
+      "rep_frame_us": 4035833,
+      "segment_type": "action",
+      "summary": "IMG_1163: bicycle practice / family growth record candidate (16/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 750000,
+          "label": "action_peak: a person enters or exits",
+          "confidence": 0.75
+        },
+        {
+          "frame_us": 4035833,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_50EBFBBE_0004",
+            "timestamp_us": 750000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "a person enters or exits",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 2000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 750000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 8071666,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_A4EEE8E2_0001",
+      "asset_id": "AST_A4EEE8E2",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1166: bicycle practice / family growth record candidate (17/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_DAD1F79C_0001",
+      "asset_id": "AST_DAD1F79C",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1199: bicycle practice / family growth record candidate (18/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_D6238973_0001",
+      "asset_id": "AST_D6238973",
+      "src_in_us": 0,
+      "src_out_us": 12471699,
+      "duration_us": 12471699,
+      "rep_frame_us": 6235849,
+      "segment_type": "action",
+      "summary": "IMG_1200: bicycle practice / family growth record candidate (19/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 6235849,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_CFD7BB2D_0001",
+      "asset_id": "AST_CFD7BB2D",
+      "src_in_us": 0,
+      "src_out_us": 15706666,
+      "duration_us": 15706666,
+      "rep_frame_us": 7853333,
+      "segment_type": "action",
+      "summary": "IMG_1267: bicycle practice / family growth record candidate (20/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 7853333,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_56C25409_0001",
+      "asset_id": "AST_56C25409",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1290: bicycle practice / family growth record candidate (21/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_0ADDAA84_0001",
+      "asset_id": "AST_0ADDAA84",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1301: bicycle practice / family growth record candidate (22/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_19B25163_0001",
+      "asset_id": "AST_19B25163",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1311: bicycle practice / family growth record candidate (23/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_C5B4FC88_0001",
+      "asset_id": "AST_C5B4FC88",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1334: bicycle practice / family growth record candidate (24/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_CE4B4C6F_0001",
+      "asset_id": "AST_CE4B4C6F",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1335: bicycle practice / family growth record candidate (25/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_6A478DEC_0001",
+      "asset_id": "AST_6A478DEC",
+      "src_in_us": 0,
+      "src_out_us": 10999999,
+      "duration_us": 10999999,
+      "rep_frame_us": 5499999,
+      "segment_type": "action",
+      "summary": "IMG_1470: bicycle practice / family growth record candidate (26/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 5499999,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_5275474A_0001",
+      "asset_id": "AST_5275474A",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1546: bicycle practice / family growth record candidate (27/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_D3155EAD_0001",
+      "asset_id": "AST_D3155EAD",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1549: bicycle practice / family growth record candidate (28/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_571C5D6B_0001",
+      "asset_id": "AST_571C5D6B",
+      "src_in_us": 0,
+      "src_out_us": 16178332,
+      "duration_us": 16178332,
+      "rep_frame_us": 8089166,
+      "segment_type": "action",
+      "summary": "IMG_1629: bicycle practice / family growth record candidate (29/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 8089166,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_500A492B_0001",
+      "asset_id": "AST_500A492B",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_1636: bicycle practice / family growth record candidate (30/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_57DD39CB_0001",
+      "asset_id": "AST_57DD39CB",
+      "src_in_us": 0,
+      "src_out_us": 10941666,
+      "duration_us": 10941666,
+      "rep_frame_us": 5470833,
+      "segment_type": "action",
+      "summary": "IMG_1884: bicycle practice / family growth record candidate (31/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early_practice",
+        "wobble",
+        "support"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 5470833,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_567028AD_0001",
+      "asset_id": "AST_567028AD",
+      "src_in_us": 0,
+      "src_out_us": 17378332,
+      "duration_us": 17378332,
+      "rep_frame_us": 8689166,
+      "segment_type": "action",
+      "summary": "IMG_2481: bicycle practice / family growth record candidate (32/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 8689166,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_C592C0AF_0001",
+      "asset_id": "AST_C592C0AF",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_2716: bicycle practice / family growth record candidate (33/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_9E5795ED_0001",
+      "asset_id": "AST_9E5795ED",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_2726: bicycle practice / family growth record candidate (34/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_B9A9E38D_0001",
+      "asset_id": "AST_B9A9E38D",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_2728: bicycle practice / family growth record candidate (35/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_FB322087_0001",
+      "asset_id": "AST_FB322087",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_2733: bicycle practice / family growth record candidate (36/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_66F572EB_0001",
+      "asset_id": "AST_66F572EB",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_3941: bicycle practice / family growth record candidate (37/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        },
+        {
+          "frame_us": 14500000,
+          "label": "action_peak: a clear visual reveal",
+          "confidence": 0.75
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MFIND_AST_66F572EB_0003",
+            "timestamp_us": 14500000,
+            "type": "action_peak",
+            "confidence": 0.75,
+            "description": "a clear visual reveal",
+            "source_pass": "marlin_find"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 13500000,
+          "best_out_us": 15500000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_find"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 14500000,
+            "energy": 0.75,
+            "source": "marlin_find"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.75,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.75
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_8BED5B08_0001",
+      "asset_id": "AST_8BED5B08",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_4149: bicycle practice / family growth record candidate (38/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_87841CCA_0001",
+      "asset_id": "AST_87841CCA",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_4178: bicycle practice / family growth record candidate (39/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_34EA5E88_0001",
+      "asset_id": "AST_34EA5E88",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_4342: bicycle practice / family growth record candidate (40/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_15427158_0001",
+      "asset_id": "AST_15427158",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_4719: bicycle practice / family growth record candidate (41/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_BE87AF55_0001",
+      "asset_id": "AST_BE87AF55",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_4742: bicycle practice / family growth record candidate (42/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "practice",
+        "balance",
+        "progress"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_75D600FA_0001",
+      "asset_id": "AST_75D600FA",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_6015: bicycle practice / family growth record candidate (43/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_9DFCE350_0001",
+      "asset_id": "AST_9DFCE350",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_6482: bicycle practice / family growth record candidate (44/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_31A9CDC2_0001",
+      "asset_id": "AST_31A9CDC2",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_6519: bicycle practice / family growth record candidate (45/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_7E5C9A8A_0001",
+      "asset_id": "AST_7E5C9A8A",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_6570: bicycle practice / family growth record candidate (46/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_0C9FA88A_0001",
+      "asset_id": "AST_0C9FA88A",
+      "src_in_us": 0,
+      "src_out_us": 3565010,
+      "duration_us": 3565010,
+      "rep_frame_us": 1782505,
+      "segment_type": "action",
+      "summary": "IMG_6645: bicycle practice / family growth record candidate (47/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 1782505,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_411F7A75_0001",
+      "asset_id": "AST_411F7A75",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_6940: bicycle practice / family growth record candidate (48/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_8BDBBA9F_0001",
+      "asset_id": "AST_8BDBBA9F",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_7014: bicycle practice / family growth record candidate (49/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_DA4D2912_0001",
+      "asset_id": "AST_DA4D2912",
+      "src_in_us": 0,
+      "src_out_us": 6938332,
+      "duration_us": 6938332,
+      "rep_frame_us": 3469166,
+      "segment_type": "action",
+      "summary": "IMG_7040: bicycle practice / family growth record candidate (50/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 3469166,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_01C251D3_0001",
+      "asset_id": "AST_01C251D3",
+      "src_in_us": 0,
+      "src_out_us": 8471677,
+      "duration_us": 8471677,
+      "rep_frame_us": 4235838,
+      "segment_type": "action",
+      "summary": "IMG_7167: bicycle practice / family growth record candidate (51/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 4235838,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_261E6D3D_0001",
+      "asset_id": "AST_261E6D3D",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_7345: bicycle practice / family growth record candidate (52/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 750000,
+          "label": "action_peak: The child rides the bike forward on the grass.",
+          "confidence": 0.7
+        },
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      },
+      "peak_analysis": {
+        "peak_moments": [
+          {
+            "peak_ref": "MEV_AST_261E6D3D_0001",
+            "timestamp_us": 750000,
+            "type": "action_peak",
+            "confidence": 0.7,
+            "description": "The child rides the bike forward on the grass.",
+            "source_pass": "marlin_caption"
+          }
+        ],
+        "recommended_in_out": {
+          "best_in_us": 0,
+          "best_out_us": 2000000,
+          "rationale": "Marlin temporal semantic event overlapped this segment.",
+          "source_pass": "marlin_caption"
+        },
+        "visual_energy_curve": [
+          {
+            "timestamp_us": 0,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          },
+          {
+            "timestamp_us": 750000,
+            "energy": 0.7,
+            "source": "marlin_caption"
+          },
+          {
+            "timestamp_us": 18000000,
+            "energy": 0.2,
+            "source": "marlin-local-v1"
+          }
+        ],
+        "support_signals": {
+          "motion_support_score": 0.7,
+          "audio_support_score": 0,
+          "fused_peak_score": 0.7
+        },
+        "provenance": {
+          "coarse_prompt_template_id": "marlin-caption-find-v1",
+          "refine_prompt_template_id": "marlin-caption-find-v1",
+          "precision_mode": "marlin_temporal_semantics",
+          "fusion_version": "marlin-segment-peak-v1",
+          "support_signal_version": "marlin-confidence-v1"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_D0EB3FF3_0001",
+      "asset_id": "AST_D0EB3FF3",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_8681: bicycle practice / family growth record candidate (53/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_ABBF0124_0001",
+      "asset_id": "AST_ABBF0124",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "IMG_9823: bicycle practice / family growth record candidate (54/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "confident_riding",
+        "solo",
+        "payoff"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    },
+    {
+      "segment_id": "SEG_AST_02DA7FDF_0001",
+      "asset_id": "AST_02DA7FDF",
+      "src_in_us": 0,
+      "src_out_us": 18000000,
+      "duration_us": 18000000,
+      "rep_frame_us": 9000000,
+      "segment_type": "action",
+      "summary": "VID_20201024_082154: bicycle practice / family growth record candidate (55/55)",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [
+        "bicycle",
+        "growth",
+        "family",
+        "park",
+        "early",
+        "training_wheels",
+        "first_attempt"
+      ],
+      "interest_points": [
+        {
+          "frame_us": 9000000,
+          "label": "bicycle growth moment",
+          "confidence": 0.55
+        }
+      ],
+      "transcript_ref": null,
+      "confidence": {
+        "boundary": {
+          "score": 0.6,
+          "source": "manual-degraded-analysis",
+          "status": "partial"
+        },
+        "summary": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "tags": {
+          "score": 0.45,
+          "source": "content-hint",
+          "status": "partial"
+        },
+        "quality_flags": {
+          "score": 0.4,
+          "source": "ffprobe-partial",
+          "status": "partial"
+        }
+      }
+    }
+  ]
+}

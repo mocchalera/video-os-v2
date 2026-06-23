@@ -1,0 +1,136 @@
+version: "1"
+project_id: ax1-participant-voices-20260401
+created_at: "2026-04-01T09:02:00Z"
+
+sequence_goals:
+  - AIへの危機感から始めて、参加理由の切実さを最初に伝える
+  - 実践性と手触りのある学びを中盤の証言で立てる
+  - 行動変化と経営視点の更新まで進めて、説明会参加の動機になる熱量で締める
+
+beats:
+  - id: b01
+    label: hook
+    purpose: セミナーに積極的ではない経営者でも危機感から動いたという導入で視聴を止める
+    target_duration_frames: 240
+    required_roles: [dialogue]
+    preferred_roles: [hero]
+    story_role: hook
+    notes: 冒頭 10 秒前後で危機感と参加理由を明確にする
+
+  - id: b02
+    label: value
+    purpose: AX-1 の特徴が実践的で手を動かせる場だと伝える
+    target_duration_frames: 360
+    required_roles: [dialogue]
+    preferred_roles: [support]
+    story_role: setup
+    notes: 実践的、自信、明日から使うの三点を崩さない
+
+  - id: b03
+    label: breakthrough
+    purpose: 自分でも作れると気づいた驚きと感動で体験価値を具体化する
+    target_duration_frames: 360
+    required_roles: [dialogue]
+    preferred_roles: [hero]
+    story_role: experience
+    notes: ここで一度感情のピークを作る
+
+  - id: b04
+    label: application
+    purpose: 漠然とした不安が具体的な業務活用イメージへ変わったことを示す
+    target_duration_frames: 420
+    required_roles: [dialogue]
+    preferred_roles: [support]
+    story_role: experience
+    notes: 活用イメージが立ったことを示しつつ、だらつかないよう中盤を圧縮する
+
+  - id: b05
+    label: conviction
+    purpose: 他の経営者にも知ってほしいという推薦か、AI前提の経営再定義で終える
+    target_duration_frames: 300
+    required_roles: [hero]
+    preferred_roles: [dialogue, support]
+    story_role: closing
+    notes: 最後は熱量を残しつつ売り込みに見えない証言で締める
+
+pacing:
+  opening_cadence: direct
+  middle_cadence: assertive
+  ending_cadence: rising
+  max_shot_length_frames: 420
+  default_duration_target_sec: 75
+
+music_policy:
+  start_sparse: false
+  allow_release_late: false
+  entry_beat: b01
+  avoid_anthemic_lift: true
+  permitted_energy_curve: dialogue_only
+
+caption_policy:
+  language: ja
+  delivery_mode: both
+  source: transcript
+  styling_class: clean-lower-third
+
+dialogue_policy:
+  preserve_natural_breath: true
+  avoid_wall_to_wall_voiceover: false
+  prioritize_lines:
+    - 正直AIについては危機感をずっと持っていまして
+    - とにかく、実践的で、触りながら回れるってところで
+    - 今の僕なりのものはできちゃうんだっていうところで感動しました
+    - 今までのアナログから脱却してすべての業務に活用していきたい
+    - 一人でも多くの方に触れてもらいたい
+
+transition_policy:
+  prefer_match_texture_over_flashy_fx: false
+  allow_hard_cuts: true
+  avoid_speed_ramps: true
+
+ending_policy:
+  should_feel: energized
+  final_line_strategy: end on participant conviction, not narrator CTA
+  avoid_cta: true
+  final_hold_min_frames: 12
+
+rejection_rules:
+  - interviewer の質問だけで意味が立たない区間は使わない
+  - 同じ論点を繰り返す発言は短くするか落とす
+  - 聞き取りが不安定な区間は主要メッセージに使わない
+  - talking head 疲れを増やす長尺ワンカットは避ける
+
+story_arc:
+  summary: 危機感から参加し、実践的な学びで自信を得て、具体的な行動と経営再定義まで進んだ testimonial
+  strategy: testimonial_highlight
+  chronology_bias: medium
+  allow_time_reorder: true
+  causal_links:
+    - 危機感が参加理由
+    - 実践性が自信を生む
+    - 自信が業務活用イメージにつながる
+    - 経営視点の更新が推薦の熱量につながる
+
+quality_targets:
+  hook_density_min: 0.7
+  novelty_rate_min: 0.3
+  duration_pacing_tolerance_pct: 20
+  emotion_gradient_min: 0.55
+  causal_connectivity_min: 0.7
+
+trim_policy:
+  mode: adaptive
+  default_preferred_duration_frames: 240
+  default_min_duration_frames: 96
+  default_max_duration_frames: 420
+  action_cut_guard: false
+
+duration_policy:
+  mode: guide
+  source: explicit_brief
+  target_source: explicit_brief
+  target_duration_sec: 75
+  hard_gate: false
+  protect_vlm_peaks: false
+
+timeline_order: editorial

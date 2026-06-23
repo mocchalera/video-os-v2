@@ -1,0 +1,28 @@
+version: "1"
+project_id: ena-promo-ai
+current_state: intent_locked
+last_updated: 2026-06-18T00:21:44.470Z
+last_agent: pipeline
+last_command: analyze
+artifact_hashes:
+  brief_hash: 6e352b004ba4878a
+  blockers_hash: 440b7d9a37e33970
+  analysis_artifact_version: 2.0.0
+analysis_override:
+  status: active
+  artifact_version: 2.0.0
+  reason: Marlin summaries
+gates:
+  analysis_gate: blocked
+  compile_gate: open
+  planning_gate: open
+  timeline_gate: blocked
+  review_gate: blocked
+  packaging_gate: blocked
+history:
+  - from_state: media_analyzed
+    to_state: intent_locked
+    trigger: /triage
+    actor: /triage
+    timestamp: 2026-06-18T00:21:04.270Z
+    note: "self-heal: media_analyzed -> intent_locked"

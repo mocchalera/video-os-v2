@@ -1,0 +1,17 @@
+{
+  "version": "1",
+  "project_id": "us051-analysis-smoke",
+  "media_dir": "02_media",
+  "generated_at": "2026-06-22T16:09:04.195Z",
+  "items": [
+    {
+      "asset_id": "AST_5B827A4C",
+      "source_locator": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/us051-analysis-smoke/02_media/01-jun-clip.mp4",
+      "local_source_path": "/Users/mocchalera/Dev/video-os-v2-spec/outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/us051-analysis-smoke/02_media/source/us051-smoke.mp4",
+      "link_path": "02_media/01-jun-clip.mp4",
+      "display_name": "01_jun_clip",
+      "kind": "asset",
+      "link_type": "symlink"
+    }
+  ]
+}

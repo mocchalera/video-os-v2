@@ -73,7 +73,7 @@ struct ProjectPanel: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
-                ForEach(Array(model.studioReadinessStatus.capabilities.prefix(5)), id: \.id) { capability in
+                ForEach(model.studioReadinessStatus.capabilities, id: \.id) { capability in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Image(systemName: capability.isReady ? "checkmark.circle.fill" : "circle.dotted")
                             .foregroundStyle(capability.isReady ? .green : .secondary)
@@ -103,7 +103,7 @@ struct ProjectPanel: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
-                    ForEach(model.studioReadinessStatus.actionQueue.prefix(5)) { action in
+                    ForEach(model.studioReadinessStatus.actionQueue) { action in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
                                 Text(action.title)
@@ -268,13 +268,14 @@ struct ProjectPanel: View {
                 Button {
                     model.compileSelectedProjectWithReviewPatch()
                 } label: {
-                    if model.isCompilingRoughCut {
+                    if model.isApplyingReviewPatch {
                         Label("Applying Review Patch", systemImage: "hourglass")
                     } else {
                         Label("Apply Review Patch", systemImage: "arrow.triangle.2.circlepath")
                     }
                 }
                 .disabled(project == nil || model.isCompilingRoughCut || !model.reviewArtifactStatus.patchReadable || !model.roughCutCompilePlan.canRun)
+                .accessibilityIdentifier("ProjectPanel.ApplyReviewPatchButton")
             }
 
             Section("Source Analysis") {
@@ -294,10 +295,12 @@ struct ProjectPanel: View {
                     }
                 }
                 .disabled(project == nil || model.isRunningAnalysis || !model.analysisRunPlan.canRun)
+                .accessibilityIdentifier("ProjectPanel.RunSourceAnalysisButton")
                 Text(model.analysisRunPlan.commandLine)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityIdentifier("ProjectPanel.SourceAnalysisCommandLine")
             }
 
             Section("Rough Cut Compile") {
@@ -306,20 +309,23 @@ struct ProjectPanel: View {
                 Text(model.roughCutCompileStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("ProjectPanel.RoughCutCompileStatus")
                 Button {
                     model.compileSelectedProjectRoughCut()
                 } label: {
-                    if model.isCompilingRoughCut {
+                    if model.isCompilingPlainRoughCut {
                         Label("Compiling Rough Cut", systemImage: "hourglass")
                     } else {
                         Label("Compile Rough Cut", systemImage: "timeline.selection")
                     }
                 }
                 .disabled(project == nil || model.isCompilingRoughCut || !model.roughCutCompilePlan.canRun)
+                .accessibilityIdentifier("ProjectPanel.CompileRoughCutButton")
                 Text(model.roughCutCompilePlan.commandLine)
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .accessibilityIdentifier("ProjectPanel.RoughCutCompileCommandLine")
             }
         }
         .formStyle(.grouped)

@@ -4,6 +4,7 @@ import VideoOSStudioCore
 struct FeedbackStatusBar: View {
     @ObservedObject var feedbackSession: StudioFeedbackSession
     var statusMessage: String
+    var canPromote: Bool
     var onApplyAndPreview: () -> Void
     var onPromote: () -> Void
     var onDiscard: () -> Void
@@ -48,7 +49,8 @@ struct FeedbackStatusBar: View {
             Button(action: onPromote) {
                 Label("Promote", systemImage: "arrow.up.doc")
             }
-            .disabled(feedbackSession.patchHistory.isEmpty)
+            .disabled(!canPromote)
+            .help(canPromote ? "Promote the latest applied Studio patch to planning artifacts." : "Promote is available after a replace/remove Studio patch has been applied.")
 
             Button(action: onDiscard) {
                 Label("Discard", systemImage: "trash")

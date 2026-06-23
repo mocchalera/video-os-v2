@@ -1,0 +1,13 @@
+{
+  "renderSpecHash": "f6b4af93cff02286",
+  "timelineRevision": "sha256:2d8ce4a570d91380",
+  "sequence": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 24
+  },
+  "generatedAt": "2026-06-22T08:47:49.368Z",
+  "status": "ready",
+  "warnings": [],
+  "videoPath": "preview-f6b4af93cff02286.mp4"
+}

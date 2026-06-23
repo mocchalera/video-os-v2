@@ -19,6 +19,7 @@ struct QADashboardPanel: View {
                     QAScoreSummaryView(dashboard: dashboard, latestReport: latestReport)
                     if let convergenceReason = dashboard.convergenceReason {
                         LabeledContent("Convergence", value: convergenceReason)
+                            .accessibilityIdentifier("QADashboard.ConvergenceReason")
                     }
                 }
 
@@ -30,6 +31,7 @@ struct QADashboardPanel: View {
                     } else {
                         Label("No brief alignment scores found in QA reports.", systemImage: "chart.line.uptrend.xyaxis")
                             .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("QADashboard.BriefAlignmentEmptyState")
                     }
                 }
 
@@ -54,10 +56,12 @@ struct QADashboardPanel: View {
                         systemImage: "checkmark.diamond",
                         description: Text("Run the QA loop to create 06_review/qa-improvement-index.json or qa-improvement-report-iter*.json.")
                     )
+                    .accessibilityIdentifier("QADashboard.EmptyState")
                 }
             }
         }
         .formStyle(.grouped)
+        .accessibilityIdentifier("QADashboard.Panel")
     }
 }
 
@@ -81,6 +85,8 @@ private struct QAScoreSummaryView: View {
                 QAMetricTile(title: "Baseline", value: dashboard.baselineScore.map { "\($0)/100" } ?? "-")
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("QADashboard.ScoreSummary")
     }
 
     private func scoreDeltaLabel(_ delta: Int?) -> String {
@@ -111,6 +117,18 @@ private struct QAMetricTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
         .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) \(value)")
+        .accessibilityIdentifier("QADashboard.Metric.\(accessibilitySuffix(title))")
+    }
+
+    private func accessibilitySuffix(_ text: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let mapped = text.unicodeScalars.map { scalar -> String in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }.joined()
+        let collapsed = mapped.split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+        return collapsed.isEmpty ? "metric" : collapsed
     }
 }
 
@@ -156,6 +174,7 @@ private struct BriefAlignmentRadarChart: View {
             drawSeries(stage: "blueprint", color: .green, context: &context, center: center, radius: radius)
         }
         .accessibilityLabel("Brief alignment radar chart")
+        .accessibilityIdentifier("QADashboard.BriefAlignmentRadar")
     }
 
     private func drawSeries(
@@ -218,6 +237,8 @@ private struct QABriefAlignmentLegend: View {
             Spacer(minLength: 0)
         }
         .font(.caption)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("QADashboard.BriefAlignmentLegend")
     }
 
     private func legendItem(_ title: String, color: Color, score: Double?) -> some View {
@@ -230,6 +251,9 @@ private struct QABriefAlignmentLegend: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title) \(score.map { $0.formatted(.number.precision(.fractionLength(3))) } ?? "-")")
+        .accessibilityIdentifier("QADashboard.BriefAlignmentLegend.\(title)")
     }
 }
 
@@ -242,11 +266,16 @@ private struct QAIssueListView: View {
         if total == 0 {
             Label("No issue details found in QA reports.", systemImage: "checkmark.circle")
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier("QADashboard.IssueEmptyState")
         } else {
             ForEach(reports, id: \.iteration) { report in
                 let issues = visibleIssues(for: report)
                 if !issues.isEmpty {
-                    DisclosureGroup("Iteration \(report.iteration)  \(issues.count) issues") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Iteration \(report.iteration)  \(issues.count) issues")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("QADashboard.IssueGroup.Iteration\(report.iteration)")
                         ForEach(issues) { issue in
                             QAIssueRow(
                                 issue: issue,
@@ -309,12 +338,18 @@ private struct QAIssueRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
+                        .accessibilityIdentifier("QADashboard.IssueFixSummary.\(issueIdentifier)")
                 }
             }
             .contentShape(Rectangle())
+            .accessibilityIdentifier("QADashboard.IssueRow.\(issueIdentifier)")
         }
         .buttonStyle(.plain)
         .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(issueAccessibilityLabel)
+        .accessibilityHint("Jumps the playhead to \(formatSeconds(issue.timestamp_sec))")
+        .accessibilityIdentifier("QADashboard.IssueJumpButton.\(issueIdentifier)")
     }
 
     private var statusLabel: String {
@@ -335,11 +370,29 @@ private struct QAIssueRow: View {
         return .orange
     }
 
+    private var issueIdentifier: String {
+        accessibilitySuffix(issue.issue_id)
+    }
+
+    private var issueAccessibilityLabel: String {
+        let severity = issue.severity.formatted(.number.precision(.fractionLength(2)))
+        return "\(issue.issue_id), \(issue.type), severity \(severity), \(statusLabel), \(formatSeconds(issue.timestamp_sec)), \(issue.description)"
+    }
+
     private func fixSummary(_ fix: QAFixItem) -> String {
         if let replacement = fix.replacement?.segment_id {
             return "\(fix.fix_type) \(fix.target_clip_id) -> \(replacement)"
         }
         return "\(fix.fix_type) \(fix.target_clip_id)"
+    }
+
+    private func accessibilitySuffix(_ text: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let mapped = text.unicodeScalars.map { scalar -> String in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }.joined()
+        let collapsed = mapped.split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+        return collapsed.isEmpty ? "issue" : collapsed
     }
 
     private func formatSeconds(_ seconds: Double) -> String {
@@ -401,6 +454,7 @@ private struct QAScoreTrendView: View {
             }
         }
         .accessibilityLabel("QA score trend")
+        .accessibilityIdentifier("QADashboard.ScoreTrend")
     }
 }
 
@@ -421,5 +475,7 @@ private struct QAIterationHistoryRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("QADashboard.IterationHistoryRow.Iteration\(report.iteration)")
     }
 }

@@ -1,0 +1,46 @@
+{
+  "project_id": "rokutaro-namae-no-nai-saka-20260425",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_31A9CDC2",
+  "asset_id": "AST_31A9CDC2",
+  "items": [
+    {
+      "item_id": "TRI_AST_31A9CDC2_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_31A9CDC2:speaker_1",
+      "start_us": 640000,
+      "end_us": 3000000,
+      "text": "感謝しましょう"
+    },
+    {
+      "item_id": "TRI_AST_31A9CDC2_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_31A9CDC2:speaker_1",
+      "start_us": 14440000,
+      "end_us": 20040000,
+      "text": "おなぎ"
+    },
+    {
+      "item_id": "TRI_AST_31A9CDC2_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_31A9CDC2:speaker_1",
+      "start_us": 19500000,
+      "end_us": 45040000,
+      "text": "お現地"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

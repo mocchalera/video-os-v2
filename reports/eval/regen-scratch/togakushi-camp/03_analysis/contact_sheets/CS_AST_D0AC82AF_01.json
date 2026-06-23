@@ -1,0 +1,15 @@
+{
+  "contact_sheet_id": "CS_AST_D0AC82AF_01",
+  "asset_id": "AST_D0AC82AF",
+  "image_path": "contact_sheets/CS_AST_D0AC82AF_01.png",
+  "mode": "shot_keyframes",
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "segment_id": "SEG_AST_D0AC82AF_0001",
+      "rep_frame_us": 10051709,
+      "src_in_us": 0,
+      "src_out_us": 20103417
+    }
+  ]
+}

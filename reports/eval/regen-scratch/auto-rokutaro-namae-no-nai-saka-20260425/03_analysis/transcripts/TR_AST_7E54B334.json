@@ -1,0 +1,70 @@
+{
+  "project_id": "rokutaro-namae-no-nai-saka-20260425",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_7E54B334",
+  "asset_id": "AST_7E54B334",
+  "items": [
+    {
+      "item_id": "TRI_AST_7E54B334_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:speaker_1",
+      "start_us": 0,
+      "end_us": 3400000,
+      "text": "ヒ internet"
+    },
+    {
+      "item_id": "TRI_AST_7E54B334_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:speaker_1",
+      "start_us": 8060000,
+      "end_us": 8960000,
+      "text": "物凄走"
+    },
+    {
+      "item_id": "TRI_AST_7E54B334_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:speaker_1",
+      "start_us": 9180000,
+      "end_us": 10780000,
+      "text": "ゴリ"
+    },
+    {
+      "item_id": "TRI_AST_7E54B334_0004",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:speaker_1",
+      "start_us": 14840000,
+      "end_us": 15780000,
+      "text": "ゴリ"
+    },
+    {
+      "item_id": "TRI_AST_7E54B334_0005",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:speaker_1",
+      "start_us": 18600000,
+      "end_us": 20800000,
+      "text": "グラニバス"
+    },
+    {
+      "item_id": "TRI_AST_7E54B334_0006",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:speaker_1",
+      "start_us": 20900000,
+      "end_us": 22920000,
+      "text": "ゴリ"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

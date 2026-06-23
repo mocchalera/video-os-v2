@@ -1,0 +1,19 @@
+version: "1"
+entries:
+  - stage: vlm
+    asset_id: AST_610FB4A0
+    segment_id: SEG_AST_610FB4A0_0001
+    issue: "vlm_failed: Expected ',' or ']' after array element in JSON at position
+      1588 (line 49 column 6)"
+    severity: warning
+    blocking: false
+    retriable: true
+    attempted_at: 2026-04-01T08:44:26.611Z
+  - stage: diarize
+    asset_id: AST_610FB4A0
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning
+  - stage: diarize
+    asset_id: AST_76B05D86
+    issue: "diarization_no_turns: pyannote returned no speaker turns"
+    severity: warning

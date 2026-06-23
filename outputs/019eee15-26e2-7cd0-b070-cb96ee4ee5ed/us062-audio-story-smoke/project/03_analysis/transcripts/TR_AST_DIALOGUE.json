@@ -1,0 +1,16 @@
+{
+  "transcript_ref": "TR_AST_DIALOGUE",
+  "asset_id": "AST_DIALOGUE",
+  "analysis_status": "ready",
+  "items": [
+    {
+      "item_id": "intro_001",
+      "speaker": "Host",
+      "speaker_key": "SPK_HOST",
+      "start_us": 500000,
+      "end_us": 1600000,
+      "text": "We found the turning point here.",
+      "confidence": 0.93
+    }
+  ]
+}

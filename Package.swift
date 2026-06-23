@@ -22,7 +22,8 @@ let package = Package(
             dependencies: ["VideoOSStudioCore"],
             path: "apps/macos-studio/Sources/VideoOSStudio",
             linkerSettings: [
-                .linkedFramework("AVFoundation")
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("AVKit")
             ]
         ),
         .executableTarget(

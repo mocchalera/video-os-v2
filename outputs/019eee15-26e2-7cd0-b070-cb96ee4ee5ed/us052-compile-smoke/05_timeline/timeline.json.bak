@@ -1,0 +1,263 @@
+{
+  "version": "1",
+  "project_id": "ax1-participant-voices-20260401",
+  "created_at": "2026-04-01T08:45:00Z",
+  "sequence": {
+    "name": "AX-1 参加者の声 集客インタビュー",
+    "fps_num": 30,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0,
+    "output_aspect_ratio": "16:9"
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_0006",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 257930000,
+            "src_out_us": 265930000,
+            "timeline_in_frame": 1380,
+            "timeline_duration_frames": 300,
+            "role": "hero",
+            "motivation": "一人でも多くの人に知ってほしいという推奨の言葉が testimonial として強く、終盤の熱量を担保する",
+            "beat_id": "b05",
+            "fallback_segment_ids": [],
+            "confidence": 0.92,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:250930000:272930000",
+            "metadata": {
+              "trim": {
+                "mode": "fixed_midpoint",
+                "source_center_us": 261930000,
+                "preferred_duration_us": 8000000.000000001,
+                "resolved_src_in_us": 257930000,
+                "resolved_src_out_us": 265930000
+              }
+            }
+          }
+        ]
+      },
+      {
+        "track_id": "V2",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_0004",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 229130000,
+            "src_out_us": 237130000,
+            "timeline_in_frame": 960,
+            "timeline_duration_frames": 420,
+            "role": "support",
+            "motivation": "年齢を重ねても感動したという人間的な余韻があり、終盤の感情補強になる",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.87,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:224370000:241890000",
+            "metadata": {
+              "trim": {
+                "mode": "fixed_midpoint",
+                "source_center_us": 233130000,
+                "preferred_duration_us": 8000000.000000001,
+                "resolved_src_in_us": 229130000,
+                "resolved_src_out_us": 237130000
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0007",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 306930000,
+            "src_out_us": 314930000,
+            "timeline_in_frame": 1380,
+            "timeline_duration_frames": 300,
+            "role": "support",
+            "motivation": "AI がある前提で経営や提供価値を考え直すという経営者向けの締めができる",
+            "beat_id": "b05",
+            "fallback_segment_ids": [],
+            "confidence": 0.9,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:300930000:320930000",
+            "metadata": {
+              "trim": {
+                "mode": "fixed_midpoint",
+                "source_center_us": 310930000,
+                "preferred_duration_us": 8000000.000000001,
+                "resolved_src_in_us": 306930000,
+                "resolved_src_out_us": 314930000
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "audio": [
+      {
+        "track_id": "A1",
+        "kind": "audio",
+        "clips": [
+          {
+            "clip_id": "CLP_0001",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 12880000,
+            "src_out_us": 20880000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 240,
+            "role": "dialogue",
+            "motivation": "セミナー参加に慎重な経営者でも AI への危機感から動いたという導入が hook として強い",
+            "beat_id": "b01",
+            "fallback_segment_ids": [],
+            "confidence": 0.95,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:8880000:24880000",
+            "metadata": {
+              "trim": {
+                "mode": "fixed_midpoint",
+                "source_center_us": 16880000,
+                "preferred_duration_us": 8000000.000000001,
+                "resolved_src_in_us": 12880000,
+                "resolved_src_out_us": 20880000
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0002",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 68500000,
+            "src_out_us": 76500000,
+            "timeline_in_frame": 240,
+            "timeline_duration_frames": 360,
+            "role": "dialogue",
+            "motivation": "実践性、自信、明日からの行動という参加価値が一つの流れで入っており最重要の中盤証言になる",
+            "beat_id": "b02",
+            "fallback_segment_ids": [],
+            "confidence": 0.98,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:63080000:81920000",
+            "metadata": {
+              "trim": {
+                "mode": "fixed_midpoint",
+                "source_center_us": 72500000,
+                "preferred_duration_us": 8000000.000000001,
+                "resolved_src_in_us": 68500000,
+                "resolved_src_out_us": 76500000
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0003",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 91570000,
+            "src_out_us": 99570000,
+            "timeline_in_frame": 600,
+            "timeline_duration_frames": 360,
+            "role": "dialogue",
+            "motivation": "自分でアプリを作れると知った驚きと感動が AX-1 の体験価値を具体化する",
+            "beat_id": "b03",
+            "fallback_segment_ids": [],
+            "confidence": 0.94,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:85720000:105420000",
+            "metadata": {
+              "trim": {
+                "mode": "fixed_midpoint",
+                "source_center_us": 95570000,
+                "preferred_duration_us": 8000000.000000001,
+                "resolved_src_in_us": 91570000,
+                "resolved_src_out_us": 99570000
+              }
+            }
+          },
+          {
+            "clip_id": "CLP_0005",
+            "segment_id": "SEG_AST_76B05D86_0001",
+            "asset_id": "AST_76B05D86",
+            "src_in_us": 203870000,
+            "src_out_us": 211870000,
+            "timeline_in_frame": 960,
+            "timeline_duration_frames": 420,
+            "role": "dialogue",
+            "motivation": "漠然としていた状態から具体化し、業務活用まで見えたという変化が説明会誘導に効く",
+            "beat_id": "b04",
+            "fallback_segment_ids": [],
+            "confidence": 0.96,
+            "quality_flags": [],
+            "candidate_ref": "legacy:SEG_AST_76B05D86_0001:191370000:224370000",
+            "metadata": {
+              "trim": {
+                "mode": "fixed_midpoint",
+                "source_center_us": 207870000,
+                "preferred_duration_us": 8000000.000000001,
+                "resolved_src_in_us": 203870000,
+                "resolved_src_out_us": 211870000
+              }
+            }
+          }
+        ]
+      },
+      {
+        "track_id": "A2",
+        "kind": "audio",
+        "clips": []
+      },
+      {
+        "track_id": "A3",
+        "kind": "audio",
+        "clips": []
+      }
+    ]
+  },
+  "markers": [
+    {
+      "frame": 0,
+      "kind": "beat",
+      "label": "b01: hook"
+    },
+    {
+      "frame": 240,
+      "kind": "beat",
+      "label": "b02: value"
+    },
+    {
+      "frame": 600,
+      "kind": "beat",
+      "label": "b03: breakthrough"
+    },
+    {
+      "frame": 960,
+      "kind": "beat",
+      "label": "b04: application"
+    },
+    {
+      "frame": 1380,
+      "kind": "beat",
+      "label": "b05: conviction"
+    }
+  ],
+  "provenance": {
+    "brief_path": "01_intent/creative_brief.yaml",
+    "blueprint_path": "04_plan/edit_blueprint.yaml",
+    "selects_path": "04_plan/selects_candidates.yaml",
+    "compiler_version": "1.0.0",
+    "duration_policy": {
+      "mode": "guide",
+      "source": "explicit_brief",
+      "target_source": "explicit_brief",
+      "target_duration_sec": 75
+    },
+    "compiler_defaults_hash": "994083935c7de513"
+  }
+}

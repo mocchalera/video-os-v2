@@ -1,0 +1,369 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic:
+          - generic: Video OS v2
+          - generic: Timeline Editor
+        - generic [ref=e7]:
+          - combobox [ref=e8]:
+            - option "sample-ui" [selected]
+          - generic [ref=e9]: Live API
+        - generic [ref=e10]:
+          - button "NLE" [ref=e11]
+          - button "AI" [ref=e12]
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - generic [ref=e15]: Program TC
+          - generic [ref=e16]: 00:00:00.000
+        - generic [ref=e18]:
+          - button "Compile" [ref=e19]
+          - button "Review" [ref=e20]
+          - button "Render" [ref=e21]
+        - generic [ref=e23]:
+          - button "Undo" [disabled] [ref=e24]
+          - button "Redo" [ref=e25]
+          - button "Save" [ref=e26]
+  - main [ref=e27]:
+    - generic [ref=e28]:
+      - generic [ref=e29] [cursor=pointer]:
+        - generic [ref=e34]:
+          - button "▶" [ref=e35]
+          - generic [ref=e36]: 00:00:00.000
+          - generic [ref=e37]: 0f
+          - generic [ref=e362]: / 00:00:00.041
+          - generic [ref=e363]: SEG_0025
+          - generic [ref=e38]: Source
+        - generic [ref=e39]:
+          - generic [ref=e40]: Patch
+          - button "SV1→V1" [ref=e41]
+          - generic [ref=e164]:
+            - generic [ref=e165]: SA→
+            - button "A1" [ref=e166]
+            - button "A2" [ref=e167]
+            - button "A3" [ref=e168]
+      - generic [ref=e43] [cursor=pointer]:
+        - generic [ref=e45]:
+          - generic [ref=e170]: No clip
+          - generic [ref=e438]: rendering
+          - generic "Preview manifest matches the current timeline. Playback is approval-grade.":
+            - text: Stale preview
+            - generic: Source
+        - generic [ref=e50]:
+          - button "▶" [ref=e51]
+          - generic [ref=e52]: 00:00:00.000
+          - generic [ref=e53]: 0f
+          - generic [ref=e54]: Source
+          - generic [ref=e55]: rendering…
+          - button "Export Render" [disabled] [ref=e56]
+      - complementary [ref=e58]:
+        - generic [ref=e60]:
+          - button "Properties" [ref=e364]
+          - button "AI Context" [ref=e365]
+          - button "Review" [ref=e366]
+        - generic [ref=e61]:
+          - generic [ref=e367]:
+            - generic [ref=e368]: Clip Info
+            - generic [ref=e369]:
+              - generic [ref=e370]: b01 / sunrise flare provides a restrained reveal of warmth without reading as conquest
+              - generic [ref=e371]: CLP_0001
+              - generic [ref=e372]:
+                - generic [ref=e373]:
+                  - generic [ref=e374]: Asset
+                  - generic [ref=e375]: AST_005
+                - generic [ref=e376]:
+                  - generic [ref=e377]: Role
+                  - generic [ref=e378]: hero
+                - generic [ref=e379]:
+                  - generic [ref=e380]: Track
+                  - generic [ref=e381]: video
+                - generic [ref=e382]:
+                  - generic [ref=e383]: Beat
+                  - generic [ref=e384]: b01
+                - generic [ref=e385]:
+                  - generic [ref=e386]: Source In
+                  - generic [ref=e387]: 00:00:01.416
+                - generic [ref=e388]:
+                  - generic [ref=e389]: Source Out
+                  - generic [ref=e390]: 00:00:06.000
+                - generic [ref=e391]:
+                  - generic [ref=e392]: Timeline
+                  - generic [ref=e393]: 0f / 110f
+          - generic [ref=e394]:
+            - generic [ref=e395]: Audio
+            - generic [ref=e397]:
+              - generic [ref=e398]:
+                - generic [ref=e399]:
+                  - generic [ref=e400]: Nat Gain
+                  - generic [ref=e401]: 0.0 dB
+                - slider [ref=e402]: "0"
+              - generic [ref=e403]:
+                - generic [ref=e404]:
+                  - generic [ref=e405]: Nat Sound
+                  - generic [ref=e406]: 0.0 dB
+                - slider [ref=e407]: "0"
+              - generic [ref=e408]:
+                - generic [ref=e409]:
+                  - generic [ref=e410]: BGM Gain
+                  - generic [ref=e411]: 0.0 dB
+                - slider [ref=e412]: "0"
+              - generic [ref=e413]:
+                - generic [ref=e414]:
+                  - generic [ref=e415]: Duck
+                  - generic [ref=e416]: 0.0 dB
+                - slider [ref=e417]: "0"
+          - generic [ref=e418]:
+            - generic [ref=e419]: Fade
+            - generic [ref=e421]:
+              - generic [ref=e422]:
+                - generic [ref=e423]: Fade In
+                - spinbutton "Fade In" [ref=e424]: "0"
+              - generic [ref=e425]:
+                - generic [ref=e426]: Fade Out
+                - spinbutton "Fade Out" [ref=e427]: "0"
+              - generic [ref=e428]:
+                - checkbox "Preserve nat sound" [ref=e429]
+                - text: Preserve nat sound
+          - button "AI Decision" [ref=e431]:
+            - generic [ref=e432]: AI Decision
+            - img [ref=e433]
+      - generic [ref=e66]:
+        - generic [ref=e67]:
+          - generic [ref=e68]:
+            - button "Assembly Dock" [ref=e70]
+            - generic [ref=e71]:
+              - generic [ref=e72]: /
+              - button "Patches3" [ref=e171]
+            - generic [ref=e74]:
+              - generic [ref=e75]: /
+              - button "Alternatives13" [ref=e435]
+            - generic [ref=e77]:
+              - generic [ref=e78]: /
+              - button "Diff" [ref=e440]
+          - generic [ref=e80]: 3T +2h · 4M
+          - generic [ref=e81]:
+            - generic [ref=e82]: Zoom
+            - slider "Zoom 1.52 px/f" [ref=e172]: "1.5"
+            - generic [ref=e84]: 1.52 px/f
+        - generic [ref=e85]:
+          - generic [ref=e86]: Filter
+          - button "All" [ref=e87]
+          - button "Low Confidence" [ref=e88]
+          - button "Warnings" [ref=e89]
+        - generic [ref=e91]:
+          - generic [ref=e92]:
+            - generic [ref=e93]: Trim
+            - button "Select A" [ref=e94]:
+              - text: Select
+              - generic [ref=e95]: A
+            - button "Ripple B" [ref=e96]:
+              - text: Ripple
+              - generic [ref=e97]: B
+            - button "Roll N" [ref=e98]:
+              - text: Roll
+              - generic [ref=e99]: "N"
+            - button "Slip Y" [ref=e100]:
+              - text: Slip
+              - generic [ref=e101]: "Y"
+            - button "Slide U" [ref=e102]:
+              - text: Slide
+              - generic [ref=e103]: U
+          - generic [ref=e175]:
+            - generic [ref=e176]: needs revision
+            - generic [ref=e177]: Overall structure is solid but hook beat could use tighter trim and b02 texture could be swapped for stronger support.
+            - generic [ref=e178]: 2 weaknesses
+            - generic [ref=e179]: 2 warnings
+          - generic [ref=e106]:
+            - generic [ref=e108]: Snap
+            - generic [ref=e114]:
+              - generic [ref=e116]:
+                - generic [ref=e117]:
+                  - generic [ref=e119]: V1
+                  - generic [ref=e120]: Pic
+                - generic [ref=e121]:
+                  - button "L" [ref=e122]
+                  - button "M" [ref=e123]
+                  - button "S" [ref=e124]
+                  - button "⚡" [ref=e125]
+                  - button "M" [ref=e126]
+              - generic [ref=e181]:
+                - generic [ref=e182]:
+                  - generic [ref=e184]: V2
+                  - generic [ref=e185]: Pic
+                - generic [ref=e186]:
+                  - button "L" [ref=e187]
+                  - button "M" [ref=e188]
+                  - button "S" [ref=e189]
+                  - button "⚡" [ref=e190]
+                  - button "M" [ref=e191]
+              - generic [ref=e128]:
+                - generic [ref=e129]:
+                  - generic [ref=e131]: A1
+                  - generic [ref=e132]: Aud
+                - generic [ref=e133]:
+                  - button "L" [ref=e134]
+                  - button "M" [ref=e135]
+                  - button "S" [ref=e136]
+                  - button "⚡" [ref=e137]
+                  - button "M" [ref=e138]
+            - generic [ref=e151]:
+              - generic:
+                - generic:
+                  - 'generic "CLP_0001 sunrise flare provides a restrained reveal of warmth without reading as conquest Source 00:00:01.416 → 00:00:06.000 Confidence: 93%" [ref=e192] [cursor=pointer]':
+                    - generic [ref=e194]:
+                      - generic [ref=e195]:
+                        - generic [ref=e196]:
+                          - generic [ref=e197]: b01
+                          - generic [ref=e198]: H
+                        - generic [ref=e199]: 110f
+                      - generic [ref=e200]: sunrise flare provides a restrained reveal of warmth without reading as conquest
+                    - generic:
+                      - generic: 1P
+                  - 'generic "CLP_0002 strap-tightening continues the prep motif while adding forward motion into the exterior section Source 00:00:05.208 → 00:00:09.416 Confidence: 87%" [ref=e202] [cursor=pointer]':
+                    - generic [ref=e204]:
+                      - generic [ref=e205]:
+                        - generic [ref=e206]:
+                          - generic [ref=e207]: b02
+                          - generic [ref=e208]: H
+                        - generic [ref=e209]: 101f
+                      - generic [ref=e210]: strap-tightening continues the prep motif while adding forward motion into the exterior section
+                  - 'generic "CLP_0003 moving water gives the middle beat a reset motif without competing with spoken lines Source 00:00:05.000 → 00:00:09.708 Confidence: 88%" [ref=e212] [cursor=pointer]':
+                    - generic [ref=e214]:
+                      - generic [ref=e215]:
+                        - generic [ref=e216]:
+                          - generic [ref=e217]: b02
+                          - generic [ref=e218]: H
+                        - generic [ref=e219]: 113f
+                      - generic [ref=e220]: moving water gives the middle beat a reset motif without competing with spoken lines
+                    - generic:
+                      - generic: 1P
+                  - 'generic "CLP_0004 hands lacing boots satisfies the tactile ritual brief and opens small before the landscape expands Source 00:00:01.000 → 00:00:04.791 Confidence: 91%" [ref=e222] [cursor=pointer]':
+                    - generic [ref=e225]:
+                      - generic [ref=e226]:
+                        - generic [ref=e227]: b02
+                        - generic [ref=e228]: H
+                      - generic [ref=e229]: 91f
+                  - 'generic "CLP_0007 profile movement with visible breath widens the film while keeping the pace measured Source 00:00:08.000 → 00:00:13.791 Confidence: 89%" [ref=e231] [cursor=pointer]':
+                    - generic [ref=e233]:
+                      - generic [ref=e234]:
+                        - generic [ref=e235]:
+                          - generic [ref=e236]: b03
+                          - generic [ref=e237]: H
+                        - generic [ref=e238]: 139f
+                      - generic [ref=e239]: profile movement with visible breath widens the film while keeping the pace measured
+                  - 'generic "CLP_0008 uphill wide introduces scale without requiring a summit payoff Source 00:00:27.000 → 00:00:32.791 Confidence: 84%" [ref=e241] [cursor=pointer]':
+                    - generic [ref=e243]:
+                      - generic [ref=e244]:
+                        - generic [ref=e245]:
+                          - generic [ref=e246]: b03
+                          - generic [ref=e247]: H
+                        - generic [ref=e248]: 139f
+                      - generic [ref=e249]: uphill wide introduces scale without requiring a summit payoff
+                  - 'generic "CLP_0010 the restrained exhale gives the release beat a human ending without overplaying emotion Source 00:00:18.208 → 00:00:23.000 Confidence: 90%" [ref=e251] [cursor=pointer]':
+                    - generic [ref=e253]:
+                      - generic [ref=e254]:
+                        - generic [ref=e255]:
+                          - generic [ref=e256]: b04
+                          - generic [ref=e257]: H
+                        - generic [ref=e258]: 115f
+                      - generic [ref=e259]: the restrained exhale gives the release beat a human ending without overplaying emotion
+                - generic:
+                  - generic: No clips on V2
+                - generic:
+                  - 'generic "ACL_0012 original clip audio Source 00:00:01.416 → 00:00:06.000 Confidence: 93%" [ref=e261] [cursor=pointer]':
+                    - generic [ref=e263]:
+                      - generic [ref=e264]:
+                        - generic [ref=e265]:
+                          - generic [ref=e266]: b01
+                          - generic [ref=e267]: H
+                        - generic [ref=e268]: 110f
+                      - generic: original clip audio
+                  - 'generic "ACL_0013 original clip audio Source 00:00:05.208 → 00:00:09.416 Confidence: 90%" [ref=e270] [cursor=pointer]':
+                    - generic [ref=e272]:
+                      - generic [ref=e273]:
+                        - generic [ref=e274]:
+                          - generic [ref=e275]: b02
+                          - generic [ref=e276]: H
+                        - generic [ref=e277]: 101f
+                      - generic: original clip audio
+                  - 'generic "CLP_0005 the line cleanly states the need for quiet without sounding like copy Source 00:00:06.416 → 00:00:11.000 Confidence: 95%" [ref=e279] [cursor=pointer]':
+                    - generic [ref=e281]:
+                      - generic [ref=e282]:
+                        - generic [ref=e283]:
+                          - generic [ref=e284]: b02
+                          - generic [ref=e285]: H
+                        - generic [ref=e286]: 110f
+                      - generic: the line cleanly states the need for quiet without sounding like copy
+                  - 'generic "CLP_0006 explicitly names slowing down and pairs well with breath-focused visuals Source 00:00:41.208 → 00:00:47.583 Confidence: 92%" [ref=e288] [cursor=pointer]':
+                    - generic [ref=e290]:
+                      - generic [ref=e291]:
+                        - generic [ref=e292]:
+                          - generic [ref=e293]: b02
+                          - generic [ref=e294]: H
+                        - generic [ref=e295]: 154f
+                      - generic: explicitly names slowing down and pairs well with breath-focused visuals
+                  - 'generic "ACL_0014 original clip audio Source 00:00:05.000 → 00:00:09.708 Confidence: 90%" [ref=e297] [cursor=pointer]':
+                    - generic [ref=e299]:
+                      - generic [ref=e300]:
+                        - generic [ref=e301]:
+                          - generic [ref=e302]: b02
+                          - generic [ref=e303]: H
+                        - generic [ref=e304]: 113f
+                      - generic: original clip audio
+                  - 'generic "ACL_0015 original clip audio Source 00:00:01.000 → 00:00:04.791 Confidence: 91%" [ref=e306] [cursor=pointer]':
+                    - generic [ref=e309]:
+                      - generic [ref=e310]:
+                        - generic [ref=e311]: b02
+                        - generic [ref=e312]: H
+                      - generic [ref=e313]: 91f
+                  - 'generic "ACL_0016 original clip audio Source 00:00:08.000 → 00:00:13.791 Confidence: 90%" [ref=e315] [cursor=pointer]':
+                    - generic [ref=e317]:
+                      - generic [ref=e318]:
+                        - generic [ref=e319]:
+                          - generic [ref=e320]: b03
+                          - generic [ref=e321]: H
+                        - generic [ref=e322]: 139f
+                      - generic: original clip audio
+                  - 'generic "CLP_0009 explicitly rejects summit rhetoric and protects the brief from drifting into achievement language Source 00:00:14.500 → 00:00:20.208 Confidence: 88%" [ref=e324] [cursor=pointer]':
+                    - generic [ref=e326]:
+                      - generic [ref=e327]:
+                        - generic [ref=e328]:
+                          - generic [ref=e329]: b03
+                          - generic [ref=e330]: H
+                        - generic [ref=e331]: 137f
+                      - generic: explicitly rejects summit rhetoric and protects the brief from drifting into achievement language
+                  - 'generic "ACL_0017 original clip audio Source 00:00:27.000 → 00:00:32.791 Confidence: 90%" [ref=e333] [cursor=pointer]':
+                    - generic [ref=e335]:
+                      - generic [ref=e336]:
+                        - generic [ref=e337]:
+                          - generic [ref=e338]: b03
+                          - generic [ref=e339]: H
+                        - generic [ref=e340]: 139f
+                      - generic: original clip audio
+                  - 'generic "ACL_0018 original clip audio Source 00:00:18.208 → 00:00:23.000 Confidence: 90%" [ref=e342] [cursor=pointer]':
+                    - generic [ref=e344]:
+                      - generic [ref=e345]:
+                        - generic [ref=e346]:
+                          - generic [ref=e347]: b04
+                          - generic [ref=e348]: H
+                        - generic [ref=e349]: 115f
+                      - generic: original clip audio
+                  - 'generic "CLP_0011 this line lands the central message and turns the ending toward lived carryover instead of achievement Source 00:00:12.000 → 00:00:17.583 Confidence: 94%" [ref=e351] [cursor=pointer]':
+                    - generic [ref=e353]:
+                      - generic [ref=e354]:
+                        - generic [ref=e355]:
+                          - generic [ref=e356]: b04
+                          - generic [ref=e357]: H
+                        - generic [ref=e358]: 134f
+                      - generic: this line lands the central message and turns the ending toward lived carryover instead of achievement
+  - contentinfo [ref=e154]:
+    - generic [ref=e155]:
+      - generic [ref=e156]: ready
+      - generic [ref=e157]: 1920x1080
+      - generic [ref=e158]: 24 fps
+      - generic [ref=e159]: 00:00:28.583
+      - generic [ref=e160]: 5 tracks
+      - 'generic "video.V1.clips[1].timeline_in_frame: Track V1 has overlapping clips. video.V1.clips[4].timeline_in_frame: Track V1 has overlapping clips. video.V1.clips[6].timeline_in_frame: Track V1 has overlapping clips. audio.A1.clips[1].timeline_in_frame: Track A1 has overlapping clips. audio.A1.clips[6].timeline_in_frame: Track A1 has overlapping clips. audio.A1.clips[9].timeline_in_frame: Track A1 has overlapping clips." [ref=e360]': 6 validation issues
+    - generic [ref=e161]:
+      - generic [ref=e162]: Synced
+      - generic [ref=e163]: WS...

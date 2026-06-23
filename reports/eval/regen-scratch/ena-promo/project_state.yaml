@@ -1,0 +1,28 @@
+version: "1"
+project_id: ena-promo
+current_state: selects_ready
+last_updated: 2026-06-17T07:57:00.741Z
+last_agent: footage-triager
+last_command: /triage
+artifact_hashes:
+  brief_hash: 4fffa7c3115604e0
+  blockers_hash: 999622b0eab7b7e2
+  analysis_artifact_version: 2.0.0
+analysis_override:
+  status: active
+  artifact_version: 2.0.0
+  reason: story_role eval
+gates:
+  analysis_gate: ready
+  compile_gate: open
+  planning_gate: open
+  timeline_gate: blocked
+  review_gate: blocked
+  packaging_gate: blocked
+history:
+  - from_state: media_analyzed
+    to_state: selects_ready
+    trigger: /triage
+    actor: footage-triager
+    timestamp: 2026-06-17T07:57:00.741Z
+    note: selects candidates finalized

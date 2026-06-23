@@ -152,6 +152,25 @@ final class TimelineDocumentTests: XCTestCase {
         XCTAssertEqual(audioSync.update(currentClipID: "ACL_001", forceSeek: false), 1)
         XCTAssertEqual(audioSync.update(currentClipID: nil, forceSeek: false), 2)
     }
+
+    func testQATimestampJumpTargetNormalizesFrameAndProgramClip() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-timeline-qa-jump-\(UUID().uuidString)")
+        let timelineDir = root.appendingPathComponent("05_timeline")
+        try FileManager.default.createDirectory(at: timelineDir, withIntermediateDirectories: true)
+        try fixtureTimeline.write(
+            to: timelineDir.appendingPathComponent("timeline.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let document = try TimelineDocument.load(projectURL: root)
+
+        XCTAssertEqual(document.qaTimestampJumpTarget(for: 1.5), QATimestampJumpTarget(frame: 45, clipID: "CLP_001"))
+        XCTAssertEqual(document.qaTimestampJumpTarget(for: 3.25), QATimestampJumpTarget(frame: 98, clipID: "ACL_001"))
+        XCTAssertEqual(document.qaTimestampJumpTarget(for: -2), QATimestampJumpTarget(frame: 0, clipID: "CLP_001"))
+        XCTAssertEqual(document.qaTimestampJumpTarget(for: .nan), QATimestampJumpTarget(frame: 0, clipID: "CLP_001"))
+        XCTAssertEqual(document.qaTimestampJumpTarget(for: 99), QATimestampJumpTarget(frame: 150, clipID: nil))
+    }
 }
 
 private let fixtureTimeline = """

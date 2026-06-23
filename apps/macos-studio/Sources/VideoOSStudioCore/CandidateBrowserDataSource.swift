@@ -176,6 +176,21 @@ public struct BrowserCandidate: Codable, Equatable, Identifiable, Sendable {
     fileprivate func matches(reference: String) -> Bool {
         referenceKeys.contains(reference)
     }
+
+    public func makeReplaceSegmentOperation(targetClipID: String) -> ReviewPatchOperation {
+        .replaceSegment(
+            target_clip_id: targetClipID,
+            with_segment_id: segment_id,
+            with_candidate_ref: id,
+            reason: "Swap selected in Candidate Browser: \(Self.truncate(why_it_matches, to: 96))"
+        )
+    }
+
+    private static func truncate(_ value: String, to maxLength: Int) -> String {
+        guard value.count > maxLength else { return value }
+        let index = value.index(value.startIndex, offsetBy: max(0, maxLength - 3))
+        return "\(value[..<index])..."
+    }
 }
 
 public struct BrowserTrimHint: Codable, Equatable, Sendable {

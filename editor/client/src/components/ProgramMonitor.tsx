@@ -67,11 +67,12 @@ export default function ProgramMonitor({
   return (
     <section
       onClick={onClick}
-      className={`flex min-h-0 cursor-pointer flex-col overflow-hidden border-r border-white/[0.06] ${
+      aria-label="Program Monitor"
+      className={`flex h-full min-h-0 cursor-pointer flex-col overflow-hidden border-r border-white/[0.06] ${
         isActive ? 'monitor-active' : 'monitor-inactive'
       }`}
     >
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         <PreviewPlayer
           videoRef={playback.videoRef}
           exactVideoRef={playback.exactVideoRef}

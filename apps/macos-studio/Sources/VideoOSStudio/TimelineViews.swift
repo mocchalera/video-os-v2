@@ -34,6 +34,8 @@ struct TimelinePanel: View {
                 Text(audioWaveformStatus)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 Slider(
                     value: Binding(
                         get: { Double(playheadFrame) },
@@ -95,16 +97,34 @@ struct TimelineRuler: View {
     var playheadFrame: Int
 
     var body: some View {
-        HStack(spacing: 12) {
-            LabeledContent("Sequence", value: timeline.sequence.name)
-            LabeledContent("Playhead", value: timeline.sequence.framesToTimecode(playheadFrame))
-            LabeledContent("FPS", value: timeline.sequence.fps.formatted(.number.precision(.fractionLength(0...2))))
-            LabeledContent("Duration", value: formatSeconds(timeline.totalSeconds))
-            LabeledContent("Canvas", value: "\(timeline.sequence.width)x\(timeline.sequence.height)")
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                rulerItems
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 12) {
+                    LabeledContent("Sequence", value: timeline.sequence.name)
+                    LabeledContent("Playhead", value: timeline.sequence.framesToTimecode(playheadFrame))
+                    LabeledContent("FPS", value: timeline.sequence.fps.formatted(.number.precision(.fractionLength(0...2))))
+                }
+                HStack(spacing: 12) {
+                    LabeledContent("Duration", value: formatSeconds(timeline.totalSeconds))
+                    LabeledContent("Canvas", value: "\(timeline.sequence.width)x\(timeline.sequence.height)")
+                }
+            }
         }
         .font(.caption)
         .foregroundStyle(.secondary)
         .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private var rulerItems: some View {
+        LabeledContent("Sequence", value: timeline.sequence.name)
+        LabeledContent("Playhead", value: timeline.sequence.framesToTimecode(playheadFrame))
+        LabeledContent("FPS", value: timeline.sequence.fps.formatted(.number.precision(.fractionLength(0...2))))
+        LabeledContent("Duration", value: formatSeconds(timeline.totalSeconds))
+        LabeledContent("Canvas", value: "\(timeline.sequence.width)x\(timeline.sequence.height)")
     }
 
     private func formatSeconds(_ seconds: Double) -> String {
@@ -224,6 +244,13 @@ struct TimelineTrackRow: View {
                         )
                     }
                 }
+                ForEach(audioCues) { cue in
+                    TimelineAudioCueOverlay(
+                        cue: cue,
+                        laneWidth: laneWidth,
+                        totalFrames: totalFrames
+                    )
+                }
                 ForEach(track.clips.sorted { $0.timelineInFrame < $1.timelineInFrame }) { clip in
                     Button {
                         onSelectClip(clip.id)
@@ -233,15 +260,18 @@ struct TimelineTrackRow: View {
                             trackKind: track.kind,
                             isSelected: selectedClipID == clip.id,
                             isUnderPlayhead: clip.containsTimelineFrame(playheadFrame),
+                            isWidthExpanded: isClipWidthExpanded(clip),
                             feedbackState: feedbackState(for: clip)
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(accessibilityLabel(for: clip))
                     .frame(
                         width: clipWidth(clip),
                         height: 28
                     )
                     .offset(x: clipOffset(clip))
+                    .zIndex(zIndex(for: clip))
                     .contextMenu {
                         Button("Approve") {
                             feedbackSession.approvedClipIDs.insert(clip.id)
@@ -250,23 +280,18 @@ struct TimelineTrackRow: View {
                             feedbackSession.addOp(.removeSegment(target_clip_id: clip.id, reason: "Rejected by operator"))
                             feedbackSession.rejectedClipIDs.insert(clip.id)
                         }
-                        Button("Swap...") {
-                            onOpenSwapBrowser(clip)
-                        }
-                        Button("Search for replacement...") {
-                            onOpenFootageSearch(clip)
+                        if track.kind == .video || track.kind == .audio {
+                            Button("Swap...") {
+                                onOpenSwapBrowser(clip)
+                            }
+                            Button("Search for replacement...") {
+                                onOpenFootageSearch(clip)
+                            }
                         }
                         Button("Remove") {
                             feedbackSession.addOp(.removeSegment(target_clip_id: clip.id, reason: "Removed by operator"))
                         }
                     }
-                }
-                ForEach(audioCues) { cue in
-                    TimelineAudioCueOverlay(
-                        cue: cue,
-                        laneWidth: laneWidth,
-                        totalFrames: totalFrames
-                    )
                 }
                 Rectangle()
                     .fill(Color.accentColor)
@@ -287,6 +312,25 @@ struct TimelineTrackRow: View {
 
     private func clipWidth(_ clip: TimelineClip) -> CGFloat {
         max(44, laneWidth * CGFloat(clip.timelineDurationFrames) / CGFloat(max(totalFrames, 1)))
+    }
+
+    private func rawClipWidth(_ clip: TimelineClip) -> CGFloat {
+        laneWidth * CGFloat(clip.timelineDurationFrames) / CGFloat(max(totalFrames, 1))
+    }
+
+    private func isClipWidthExpanded(_ clip: TimelineClip) -> Bool {
+        rawClipWidth(clip) < 44
+    }
+
+    private func zIndex(for clip: TimelineClip) -> Double {
+        if selectedClipID == clip.id { return 10 }
+        if clip.containsTimelineFrame(playheadFrame) { return 8 }
+        if isClipWidthExpanded(clip) { return 4 }
+        return 1
+    }
+
+    private func accessibilityLabel(for clip: TimelineClip) -> String {
+        "\(track.id) \(clip.role) \(clip.segmentID)"
     }
 
     private func feedbackState(for clip: TimelineClip) -> TimelineClipFeedbackState {
@@ -410,6 +454,7 @@ struct TimelineClipBlock: View {
     var trackKind: TimelineTrackKind
     var isSelected: Bool
     var isUnderPlayhead: Bool
+    var isWidthExpanded: Bool = false
     var feedbackState: TimelineClipFeedbackState = .none
 
     var body: some View {
@@ -435,9 +480,11 @@ struct TimelineClipBlock: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(clip.role)
                         .font(.caption2.weight(.semibold))
+                        .minimumScaleFactor(isWidthExpanded ? 0.65 : 1)
                     Text(clip.segmentID)
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.secondary)
+                        .minimumScaleFactor(isWidthExpanded ? 0.6 : 1)
                 }
                 .lineLimit(1)
                 .foregroundStyle(.primary)
@@ -454,6 +501,7 @@ struct TimelineClipBlock: View {
         )
         .animation(.easeOut(duration: 5.0), value: feedbackState.isRecentlyChanged)
         .help("\(clip.id) / \(clip.motivation)")
+        .accessibilityElement(children: .combine)
     }
 
     private var color: Color {

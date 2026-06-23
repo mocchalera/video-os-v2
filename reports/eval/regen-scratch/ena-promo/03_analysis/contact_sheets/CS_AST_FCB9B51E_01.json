@@ -1,0 +1,15 @@
+{
+  "contact_sheet_id": "CS_AST_FCB9B51E_01",
+  "asset_id": "AST_FCB9B51E",
+  "image_path": "contact_sheets/CS_AST_FCB9B51E_01.png",
+  "mode": "shot_keyframes",
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "segment_id": "SEG_AST_FCB9B51E_0001",
+      "rep_frame_us": 4666250,
+      "src_in_us": 0,
+      "src_out_us": 9332500
+    }
+  ]
+}

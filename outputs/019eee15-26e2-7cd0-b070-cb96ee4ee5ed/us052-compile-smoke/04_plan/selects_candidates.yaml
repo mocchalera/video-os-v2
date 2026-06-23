@@ -1,0 +1,154 @@
+version: "1"
+project_id: ax1-participant-voices-20260401
+created_at: "2026-04-01T08:58:00Z"
+analysis_artifact_version: local-transcript-v1
+
+selection_notes:
+  - D4887 の一人語りから、危機感、実践性、行動変化、経営視点の更新が伝わる発言を優先抽出した
+  - interviewer の質問は候補から外し、参加者本人の発言だけでストーリーが通る構成に寄せた
+  - D4892 は補助検討中だが、現時点では D4887 単独で 60-80 秒の集客用 testimonial が成立する
+
+editorial_summary:
+  dominant_visual_mode: talking_head
+  speaker_topology: interviewer_guest
+  motion_profile: low
+  transcript_density: medium
+
+candidates:
+  - segment_id: SEG_AST_76B05D86_0001
+    asset_id: AST_76B05D86
+    src_in_us: 8880000
+    src_out_us: 24880000
+    role: dialogue
+    why_it_matches: セミナー参加に慎重な経営者でも AI への危機感から動いたという導入が hook として強い
+    risks:
+      - 冒頭から talking head だけになるため後半の言葉の強さで持たせる必要がある
+    confidence: 0.95
+    semantic_rank: 1
+    evidence:
+      - local_transcript
+      - brief.must_have[0]
+    eligible_beats:
+      - b01
+    transcript_excerpt: 僕はあまりセミナーって出ないんですけど、正直AIについては危機感をずっと持っていまして、何かを変えなきゃいけないと思っていた。
+    motif_tags:
+      - credibility
+      - urgency
+
+  - segment_id: SEG_AST_76B05D86_0001
+    asset_id: AST_76B05D86
+    src_in_us: 63080000
+    src_out_us: 81920000
+    role: dialogue
+    why_it_matches: 実践性、自信、明日からの行動という参加価値が一つの流れで入っており最重要の中盤証言になる
+    risks:
+      - 18 秒超のため前後を詰めないと少し冗長に感じる可能性がある
+    confidence: 0.98
+    semantic_rank: 2
+    evidence:
+      - local_transcript
+      - brief.must_have[1]
+    eligible_beats:
+      - b02
+    transcript_excerpt: とにかく、実践的で、触りながら回れるってところで、こんなAI原始人の僕でも少し自信になりましたし、明日から業務に加えていこうかなと思っています。
+    motif_tags:
+      - practical
+      - action
+
+  - segment_id: SEG_AST_76B05D86_0001
+    asset_id: AST_76B05D86
+    src_in_us: 85720000
+    src_out_us: 105420000
+    role: dialogue
+    why_it_matches: 自分でアプリを作れると知った驚きと感動が AX-1 の体験価値を具体化する
+    risks:
+      - 文脈が薄いと単なる驚きで終わるため前後に危機感や行動変化の発言が必要
+    confidence: 0.94
+    semantic_rank: 3
+    evidence:
+      - local_transcript
+    eligible_beats:
+      - b03
+    transcript_excerpt: 自分でアプリを作れちゃうんだと、今の僕なりのものはできちゃうんだっていうところで感動しました。
+    motif_tags:
+      - possibility
+      - wow
+
+  - segment_id: SEG_AST_76B05D86_0001
+    asset_id: AST_76B05D86
+    src_in_us: 191370000
+    src_out_us: 224370000
+    role: dialogue
+    why_it_matches: 漠然としていた状態から具体化し、業務活用まで見えたという変化が説明会誘導に効く
+    risks:
+      - 30 秒超で長いので重要部分を前後で詰める必要がある
+    confidence: 0.96
+    semantic_rank: 4
+    evidence:
+      - local_transcript
+      - brief.must_have[1]
+    eligible_beats:
+      - b04
+    transcript_excerpt: 何をどう使って何をどうすべきかが漠然としていたところから、少し具体的になった。今までのアナログから脱却してすべての業務に活用していきたい。
+    motif_tags:
+      - concrete
+      - business_use
+
+  - segment_id: SEG_AST_76B05D86_0001
+    asset_id: AST_76B05D86
+    src_in_us: 250930000
+    src_out_us: 272930000
+    role: hero
+    why_it_matches: 一人でも多くの人に知ってほしいという推奨の言葉が testimonial として強く、終盤の熱量を担保する
+    risks:
+      - 熱量は強いが少し長いので終端を浅く切る可能性がある
+    confidence: 0.92
+    semantic_rank: 5
+    evidence:
+      - local_transcript
+      - brief.must_have[0]
+    eligible_beats:
+      - b05
+    transcript_excerpt: 知ってるか知らないかで大きく変わる世界だと思っているので、一人でも多くの方に触れてもらいたい、知ってもらいたいなと思いました。
+    motif_tags:
+      - endorsement
+      - conviction
+
+  - segment_id: SEG_AST_76B05D86_0001
+    asset_id: AST_76B05D86
+    src_in_us: 300930000
+    src_out_us: 320930000
+    role: support
+    why_it_matches: AI がある前提で経営や提供価値を考え直すという経営者向けの締めができる
+    risks:
+      - 概念的で少し硬いため終盤の補強として使う方がよい
+    confidence: 0.9
+    semantic_rank: 6
+    evidence:
+      - local_transcript
+    eligible_beats:
+      - b05
+    transcript_excerpt: もうAIがある前提で経営なり、会社の提供する価値だったり、というのは改めて考えなきゃなと思わされた時間でした。
+    motif_tags:
+      - executive
+      - reframing
+
+  - segment_id: SEG_AST_76B05D86_0001
+    asset_id: AST_76B05D86
+    src_in_us: 224370000
+    src_out_us: 241890000
+    role: support
+    why_it_matches: 年齢を重ねても感動したという人間的な余韻があり、終盤の感情補強になる
+    risks:
+      - 情緒寄りなので入れ過ぎると説明会導線から少し外れる
+    confidence: 0.87
+    semantic_rank: 7
+    evidence:
+      - local_transcript
+    eligible_beats:
+      - b04
+      - b05
+    transcript_excerpt: この年で感動とか興奮とかって日々薄れていくものなんですけど、今日は本当に感動をしました。
+    motif_tags:
+      - emotion
+      - afterglow

@@ -3,6 +3,8 @@ import VideoOSStudioCore
 
 @main
 struct VideoOSStudioCLI {
+    private static let defaultMarlinRequestTimeoutMs = 300_000
+
     static func main() {
         let root = ProjectScanner.locateRepositoryRoot()
         let args = Array(CommandLine.arguments.dropFirst())
@@ -1181,17 +1183,22 @@ struct VideoOSStudioCLI {
 
     private static func printMediaRelinkPlan(root: URL, args: [String]) {
         guard let projectArg = args.first else {
-            fputs("usage: videoos-studio-cli media-relink-plan <project-id-or-path> [<search-root> ...|--from-source-map]\n", stderr)
+            fputs("usage: videoos-studio-cli media-relink-plan <project-id-or-path> [<search-root> ...|--from-source-map] [--include-synthetic]\n", stderr)
             Foundation.exit(2)
         }
 
         do {
             let project = try resolveProject(root: root, args: [projectArg])
             let searchRoots = mediaRelinkSearchRoots(root: root, projectURL: project.path, args: Array(args.dropFirst()))
+            let includeSynthetic = args.contains("--include-synthetic")
             guard !searchRoots.isEmpty else {
                 throw CLIError.message("media relink plan requires one or more search roots, or --from-source-map with absolute paths in source_map.json")
             }
-            let plan = ProjectMediaRelinker.plan(projectURL: project.path, searchRoots: searchRoots)
+            let plan = ProjectMediaRelinker.plan(
+                projectURL: project.path,
+                searchRoots: searchRoots,
+                includeSynthetic: includeSynthetic
+            )
             printMediaRelinkPlan(project: project, plan: plan)
         } catch {
             fputs("media relink plan failed: \(error)\n", stderr)
@@ -1201,17 +1208,22 @@ struct VideoOSStudioCLI {
 
     private static func applyMediaRelink(root: URL, args: [String]) {
         guard let projectArg = args.first else {
-            fputs("usage: videoos-studio-cli media-relink-apply <project-id-or-path> [<search-root> ...|--from-source-map]\n", stderr)
+            fputs("usage: videoos-studio-cli media-relink-apply <project-id-or-path> [<search-root> ...|--from-source-map] [--include-synthetic]\n", stderr)
             Foundation.exit(2)
         }
 
         do {
             let project = try resolveProject(root: root, args: [projectArg])
             let searchRoots = mediaRelinkSearchRoots(root: root, projectURL: project.path, args: Array(args.dropFirst()))
+            let includeSynthetic = args.contains("--include-synthetic")
             guard !searchRoots.isEmpty else {
                 throw CLIError.message("media relink apply requires one or more search roots, or --from-source-map with absolute paths in source_map.json")
             }
-            let plan = ProjectMediaRelinker.plan(projectURL: project.path, searchRoots: searchRoots)
+            let plan = ProjectMediaRelinker.plan(
+                projectURL: project.path,
+                searchRoots: searchRoots,
+                includeSynthetic: includeSynthetic
+            )
             printMediaRelinkPlan(project: project, plan: plan)
             let result = try ProjectMediaRelinker.apply(plan: plan)
             let summary = ProjectMediaResolver.previewSummary(projectURL: project.path, assets: nil)
@@ -1260,13 +1272,14 @@ struct VideoOSStudioCLI {
         print("status: \(plan.statusLabel)")
         print("sourceMap: \(plan.sourceMapURL.path)")
         print("missingAssets: \(plan.missingAssetCount)")
+        print("syntheticAssets: \(plan.syntheticAssetCount)")
         print("matched: \(plan.matchedCount)")
         print("unmatched: \(plan.unmatchedCount)")
         for root in plan.searchRoots {
             print("searchRoot: \(root.path)")
         }
         for item in plan.items {
-            print("\(item.assetID)\t\(item.candidateURL == nil ? "unmatched" : "matched")\t\(item.filename)\t\(item.candidateURL?.path ?? "-")")
+            print("\(item.assetID)\t\(item.reason.rawValue)\t\(item.candidateURL == nil ? "unmatched" : "matched")\t\(item.filename)\t\(item.candidateURL?.path ?? "-")")
         }
     }
 
@@ -1799,11 +1812,19 @@ struct VideoOSStudioCLI {
     private static func runNextMarlinEvaluation(root: URL, args: [String]) {
         let execute = args.contains("--execute")
         let mock = args.contains("--mock")
+        let requestTimeoutMs: Int?
+        do {
+            requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
+        } catch {
+            fputs("marlin eval next failed: \(error)\n", stderr)
+            Foundation.exit(1)
+        }
         let next = ProjectMarlinEvaluationNextPlanner.plan(repositoryRoot: root)
         print("status: \(next.readinessLabel)")
         print("queue: \(next.queue.readinessLabel)")
         print("execute: \(execute)")
         print("mock: \(mock)")
+        print("requestTimeoutMs: \(requestTimeoutMs.map(String.init) ?? "\(defaultMarlinRequestTimeoutMs) (default)")")
         guard let item = next.item, let plan = next.runPlan else {
             print("nextProject: -")
             print("canRun: false")
@@ -1814,7 +1835,7 @@ struct VideoOSStudioCLI {
         print("canRun: \(plan.canRun)")
         print("sourceCount: \(plan.sourceCount)")
         print("skippedSourceCount: \(plan.skippedSourceCount)")
-        print("command: \(plan.commandLine(mock: mock))")
+        print("command: \(plan.commandLine(mock: mock, requestTimeoutMs: requestTimeoutMs))")
         print("recommendation: \(next.recommendation)")
         if !mock {
             let modelAccess = ProjectMarlinModelAccessStatusReader.status(repositoryRoot: root)
@@ -1825,7 +1846,7 @@ struct VideoOSStudioCLI {
         }
 
         guard execute else {
-            print("hint: add --execute after marlin-model-access-status is ready.")
+            print("hint: add --execute after marlin-model-access-status is ready. For slow MPS live runs, pass --request-timeout-ms=900000.")
             return
         }
 
@@ -1833,7 +1854,11 @@ struct VideoOSStudioCLI {
             guard plan.canRun else {
                 throw CLIError.message("Marlin evaluation is not runnable: \(plan.readinessLabel)")
             }
-            let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(plan: plan, mock: mock)
+            let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(
+                plan: plan,
+                mock: mock,
+                requestTimeoutMs: requestTimeoutMs
+            )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
                 print("indexRebuilt: true")
@@ -1873,7 +1898,8 @@ struct VideoOSStudioCLI {
 
     private static func printMarlinEvaluationPlan(root: URL, args: [String]) {
         do {
-            let project = try resolveProject(root: root, args: args.filter { !$0.hasPrefix("--") })
+            let requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
+            let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
             print("project: \(project.id)")
@@ -1881,8 +1907,9 @@ struct VideoOSStudioCLI {
             print("canRun: \(plan.canRun)")
             print("sourceCount: \(plan.sourceCount)")
             print("skippedSourceCount: \(plan.skippedSourceCount)")
+            print("requestTimeoutMs: \(requestTimeoutMs.map(String.init) ?? "\(defaultMarlinRequestTimeoutMs) (default)")")
             print("script: \(plan.scriptURL.path)")
-            print("command: \(plan.commandLine())")
+            print("command: \(plan.commandLine(requestTimeoutMs: requestTimeoutMs))")
             if !plan.sourceURLs.isEmpty {
                 print("sources:")
                 for url in plan.sourceURLs {
@@ -1898,13 +1925,18 @@ struct VideoOSStudioCLI {
     private static func runMarlinEvaluation(root: URL, args: [String]) {
         do {
             let mock = args.contains("--mock")
-            let project = try resolveProject(root: root, args: args.filter { !$0.hasPrefix("--") })
+            let requestTimeoutMs = try marlinRequestTimeoutMs(from: args)
+            let project = try resolveProject(root: root, args: marlinEvaluationProjectArgs(from: args))
             let assets = try? AnalysisAssetDocument.load(from: project.path.appendingPathComponent("03_analysis/assets.json"))
             let plan = ProjectMarlinEvaluationRunPlanner.plan(repositoryRoot: root, projectURL: project.path, assets: assets)
             guard plan.canRun else {
                 throw CLIError.message("Marlin evaluation is not runnable: \(plan.readinessLabel)")
             }
-            let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(plan: plan, mock: mock)
+            let result = try ProjectMarlinEvaluationRunner.runAndRefreshIndex(
+                plan: plan,
+                mock: mock,
+                requestTimeoutMs: requestTimeoutMs
+            )
             print(result.runResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines))
             if let indexSummary = result.indexSummary {
                 print("indexRebuilt: true")
@@ -2230,7 +2262,7 @@ struct VideoOSStudioCLI {
           review-status     Print review_report.yaml and review_patch.json readiness and finding counts.
           planning-status   Print intent, analysis, selects, blueprint, and next Codex planning job readiness.
           analysis-plan     Print source-media analysis command for a project.
-          analysis-run      Run source-media analysis and rebuild the SQLite RAG index. Optional: --skip-stt --skip-vlm --skip-peak --skip-marlin --skip-preflight --no-index.
+          analysis-run      Run source-media analysis and rebuild the SQLite RAG index. Optional: --skip-stt --skip-vlm --skip-peak --skip-marlin --skip-appraiser --skip-media-link --skip-preflight --no-index.
           compile-plan      Print rough-cut timeline compiler command for a project.
           compile-run       Run rough-cut timeline compile and rebuild the SQLite RAG index. Optional: --patch=<file> --review-patch --fps=<num> --source-map=<file> --skip-preview --confirm-brief-defaults --no-index.
           request-sample    Print JSON-RPC requests for the first agent loop.
@@ -2248,9 +2280,9 @@ struct VideoOSStudioCLI {
           media-status      Print source media preview readiness for a project.
           media-source-map-status
                             Print durable source_map.json coverage and broken-path diagnostics.
-          media-relink-plan Plan source_map.json relinks from one or more search roots. Optional: --from-source-map.
+          media-relink-plan Plan source_map.json relinks from one or more search roots. Optional: --from-source-map --include-synthetic.
           media-relink-apply
-                            Write source_map.json relinks and project symlinks for matched missing media. Optional: --from-source-map.
+                            Write source_map.json relinks and project symlinks for matched missing or explicitly included synthetic media. Optional: --from-source-map --include-synthetic.
           media-synthetic-plan
                             Plan short generated source videos for demo/QA projects.
           media-synthetic-build
@@ -2277,9 +2309,9 @@ struct VideoOSStudioCLI {
           marlin-eval-queue
                             Print runnable and blocked projects for representative Marlin-2B evaluation.
           marlin-eval-next
-                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock.
-          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media.
-          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock.
+                            Print or run the next runnable non-candidate Marlin evaluation. Optional: --execute --mock --request-timeout-ms=<ms>.
+          marlin-eval-plan  Print the Marlin-only evaluation command for existing analyzed media. Optional: --request-timeout-ms=<ms>.
+          marlin-eval-run   Run Marlin-only evaluation for existing analyzed media. Optional: --mock --request-timeout-ms=<ms>.
           playback-contract-status
                             Print whether preview-manifest.json matches the current timeline (approval-grade playback).
           render-status     Print final render/package artifact readiness.
@@ -2349,6 +2381,60 @@ struct VideoOSStudioCLI {
             .flatMap(Int.init)
     }
 
+    private static func marlinRequestTimeoutMs(from args: [String]) throws -> Int? {
+        guard let raw = try valueOption(
+            args,
+            names: ["--request-timeout-ms", "--timeout-ms"],
+            errorLabel: "--request-timeout-ms"
+        ) else {
+            return nil
+        }
+        guard let value = Int(raw), value > 0 else {
+            throw CLIError.message("--request-timeout-ms requires a positive integer millisecond value")
+        }
+        return value
+    }
+
+    private static func valueOption(_ args: [String], names: Set<String>, errorLabel: String) throws -> String? {
+        for name in names {
+            let prefix = "\(name)="
+            if let inline = args.first(where: { $0.hasPrefix(prefix) }) {
+                return String(inline.dropFirst(prefix.count))
+            }
+            if let index = args.firstIndex(of: name) {
+                guard args.indices.contains(index + 1), !args[index + 1].hasPrefix("--") else {
+                    throw CLIError.message("\(errorLabel) requires a value")
+                }
+                return args[index + 1]
+            }
+        }
+        return nil
+    }
+
+    private static func marlinEvaluationProjectArgs(from args: [String]) -> [String] {
+        positionalArguments(from: args, valueOptions: ["--request-timeout-ms", "--timeout-ms"])
+    }
+
+    private static func positionalArguments(from args: [String], valueOptions: Set<String>) -> [String] {
+        var result: [String] = []
+        var skipNext = false
+        for arg in args {
+            if skipNext {
+                skipNext = false
+                continue
+            }
+            if valueOptions.contains(arg) {
+                skipNext = true
+                continue
+            }
+            if arg.hasPrefix("--") {
+                continue
+            }
+            result.append(arg)
+        }
+        return result
+    }
+
     private static func sourceDirectoryArgument(_ args: [String]) -> String? {
         if let inline = args.first(where: { $0.hasPrefix("--source-dir=") }) {
             return String(inline.dropFirst("--source-dir=".count))
@@ -2366,6 +2452,8 @@ struct VideoOSStudioCLI {
             skipDiarize: args.contains("--skip-diarize"),
             skipPeak: args.contains("--skip-peak"),
             skipMarlin: args.contains("--skip-marlin"),
+            skipAppraiser: args.contains("--skip-appraiser"),
+            skipMediaLink: args.contains("--skip-media-link"),
             skipPreflight: args.contains("--skip-preflight"),
             language: stringOption("--language", args: args),
             contentHint: stringOption("--content-hint", args: args),

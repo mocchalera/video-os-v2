@@ -36,12 +36,14 @@ function IconButton({
   active,
   label,
   title,
+  ariaLabel,
   activeColor,
   onClick,
 }: {
   active: boolean;
   label: string;
   title: string;
+  ariaLabel: string;
   activeColor: string;
   onClick: () => void;
 }) {
@@ -49,6 +51,7 @@ function IconButton({
     <button
       type="button"
       title={title}
+      aria-label={ariaLabel}
       className="flex h-[18px] w-[18px] items-center justify-center rounded-sm text-[9px] font-bold uppercase leading-none transition-colors"
       style={{
         background: active ? activeColor : 'rgba(148, 163, 184, 0.08)',
@@ -73,6 +76,7 @@ export default function TrackHeader({
   const heightPx = TRACK_HEIGHT_PX[state.height];
   const isCompact = state.height === 'S';
   const appearance = TRACK_APPEARANCE[lane.trackKind];
+  const trackLabel = lane.label || lane.laneId;
 
   return (
     <div
@@ -105,6 +109,7 @@ export default function TrackHeader({
             active={state.locked}
             label="L"
             title="Lock track"
+            ariaLabel={`${trackLabel} lock track`}
             activeColor="#dc2626"
             onClick={onToggleLock}
           />
@@ -112,6 +117,7 @@ export default function TrackHeader({
             active={state.muted}
             label="M"
             title="Mute track"
+            ariaLabel={`${trackLabel} mute track`}
             activeColor="#6b7280"
             onClick={onToggleMute}
           />
@@ -119,6 +125,7 @@ export default function TrackHeader({
             active={state.solo}
             label="S"
             title="Solo track"
+            ariaLabel={`${trackLabel} solo track`}
             activeColor="#eab308"
             onClick={onToggleSolo}
           />
@@ -127,6 +134,7 @@ export default function TrackHeader({
               active={state.syncLock}
               label="⚡"
               title="Sync lock"
+              ariaLabel={`${trackLabel} sync lock`}
               activeColor="#3b82f6"
               onClick={onToggleSyncLock}
             />
@@ -134,6 +142,7 @@ export default function TrackHeader({
           <button
             type="button"
             title={`Track height: ${state.height} (click to cycle)`}
+            aria-label={`${trackLabel} track height ${state.height}`}
             className="ml-auto flex h-[18px] items-center justify-center rounded-sm bg-white/[0.06] px-1.5 text-[8px] font-bold uppercase tracking-wider text-[color:var(--text-subtle)] transition-colors hover:bg-white/[0.12] hover:text-neutral-300"
             onClick={(e) => { e.stopPropagation(); onCycleHeight(); }}
           >

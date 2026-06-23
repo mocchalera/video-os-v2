@@ -11,7 +11,15 @@ final class ProjectAnalysisRunnerTests: XCTestCase {
         let plan = ProjectAnalysisRunPlanner.plan(
             repositoryRoot: root,
             projectURL: project,
-            options: ProjectAnalysisRunOptions(skipSTT: true, skipVLM: true, skipPeak: true, skipMarlin: true, skipPreflight: true)
+            options: ProjectAnalysisRunOptions(
+                skipSTT: true,
+                skipVLM: true,
+                skipPeak: true,
+                skipMarlin: true,
+                skipAppraiser: true,
+                skipMediaLink: true,
+                skipPreflight: true
+            )
         )
 
         XCTAssertTrue(plan.canRun)
@@ -24,6 +32,8 @@ final class ProjectAnalysisRunnerTests: XCTestCase {
         XCTAssertTrue(plan.commandArguments.contains(project.path))
         XCTAssertTrue(plan.commandArguments.contains("--skip-stt"))
         XCTAssertTrue(plan.commandArguments.contains("--skip-vlm"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-appraiser"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-media-link"))
         XCTAssertTrue(plan.commandLine.contains("scripts/analyze.ts"))
     }
 
@@ -43,6 +53,29 @@ final class ProjectAnalysisRunnerTests: XCTestCase {
         XCTAssertTrue(plan.canRun)
         XCTAssertEqual(plan.sourceCount, 1)
         XCTAssertEqual(plan.sourceURLs.first?.path, project.appendingPathComponent("02_media/source/linked.mp4").path)
+    }
+
+    func testNativeLocalDefaultsAvoidHeavyExternalStages() throws {
+        let (root, project) = try temporaryAnalysisProject("videoos-analysis-native-local")
+        try Data([0]).write(to: project.appendingPathComponent("02_media/source/interview.mp4"))
+
+        let plan = ProjectAnalysisRunPlanner.plan(
+            repositoryRoot: root,
+            projectURL: project,
+            options: .nativeLocalDefaults
+        )
+
+        XCTAssertTrue(plan.canRun)
+        XCTAssertTrue(plan.commandArguments.contains("--skip-stt"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-vlm"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-diarize"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-peak"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-marlin"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-appraiser"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-media-link"))
+        XCTAssertTrue(plan.commandArguments.contains("--skip-preflight"))
+        XCTAssertTrue(plan.commandArguments.contains("--no-cache"))
+        XCTAssertEqual(optionValue(after: "--concurrency", in: plan.commandArguments), "1")
     }
 
     func testRunRebuildsIndexAfterSuccessfulAnalysis() throws {
@@ -91,6 +124,13 @@ final class ProjectAnalysisRunnerTests: XCTestCase {
         try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
         try "script".write(to: root.appendingPathComponent("scripts/analyze.ts"), atomically: true, encoding: .utf8)
         return (root, project)
+    }
+
+    private func optionValue(after option: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: option), arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        return arguments[index + 1]
     }
 
     private func writeAnalysisArtifacts(project: URL) throws {

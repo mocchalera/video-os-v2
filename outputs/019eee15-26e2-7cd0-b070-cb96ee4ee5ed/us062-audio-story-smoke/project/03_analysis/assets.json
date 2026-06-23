@@ -1,0 +1,36 @@
+{
+  "project_id": "us062-audio-story-smoke",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "asset_id": "AST_DIALOGUE",
+      "filename": "dialogue.mov",
+      "duration_us": 4000000,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_DIALOGUE",
+      "segment_ids": [
+        "SEG_DIALOGUE"
+      ],
+      "quality_flags": [],
+      "tags": [
+        "dialogue",
+        "story"
+      ]
+    },
+    {
+      "asset_id": "AST_MUSIC",
+      "filename": "music.wav",
+      "duration_us": 4000000,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segment_ids": [
+        "SEG_MUSIC"
+      ],
+      "quality_flags": [],
+      "tags": [
+        "music",
+        "bgm"
+      ]
+    }
+  ]
+}

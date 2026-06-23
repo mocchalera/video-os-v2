@@ -1,0 +1,27 @@
+{
+  "version": "1",
+  "project_id": "us062-audio-story-smoke",
+  "analysis_status": "ready",
+  "music_asset": {
+    "asset_id": "AST_MUSIC",
+    "path": "02_media/source/music.wav",
+    "source_hash": "fixture"
+  },
+  "sections": [
+    {
+      "id": "intro",
+      "label": "intro",
+      "start_sec": 0,
+      "end_sec": 2.5,
+      "energy": 0.66
+    }
+  ],
+  "beats_sec": [
+    0,
+    1,
+    2
+  ],
+  "downbeats_sec": [
+    0
+  ]
+}

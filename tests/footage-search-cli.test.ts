@@ -140,7 +140,12 @@ describe("footage-search-cli", () => {
 });
 
 function runCli(args: string[]): { status: number | null; stdout: string; stderr: string } {
-  const result = spawnSync("npx", ["tsx", "runtime/tools/footage-search-cli.ts", ...args], {
+  const localTsx = path.resolve("node_modules/.bin/tsx");
+  const command = fs.existsSync(localTsx) ? localTsx : "npx";
+  const commandArgs = fs.existsSync(localTsx)
+    ? ["runtime/tools/footage-search-cli.ts", ...args]
+    : ["tsx", "runtime/tools/footage-search-cli.ts", ...args];
+  const result = spawnSync(command, commandArgs, {
     cwd: path.resolve("."),
     encoding: "utf-8",
     env: {

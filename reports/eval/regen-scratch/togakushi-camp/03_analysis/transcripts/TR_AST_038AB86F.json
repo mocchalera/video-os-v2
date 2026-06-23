@@ -1,0 +1,67 @@
+{
+  "project_id": "togakushi-camp",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_038AB86F",
+  "asset_id": "AST_038AB86F",
+  "items": [
+    {
+      "item_id": "TRI_AST_038AB86F_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_038AB86F:S1",
+      "start_us": 0,
+      "end_us": 2000000,
+      "text": "学者の髪を切った"
+    },
+    {
+      "item_id": "TRI_AST_038AB86F_0002",
+      "speaker": "S2",
+      "speaker_key": "AST_038AB86F:S2",
+      "start_us": 2000000,
+      "end_us": 4000000,
+      "text": "切ったよね"
+    },
+    {
+      "item_id": "TRI_AST_038AB86F_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_038AB86F:S1",
+      "start_us": 4000000,
+      "end_us": 6000000,
+      "text": "エロい髪型あんだ"
+    },
+    {
+      "item_id": "TRI_AST_038AB86F_0004",
+      "speaker": "S2",
+      "speaker_key": "AST_038AB86F:S2",
+      "start_us": 10000000,
+      "end_us": 12000000,
+      "text": "おぼっちゃみたいな"
+    },
+    {
+      "item_id": "TRI_AST_038AB86F_0005",
+      "speaker": "S2",
+      "speaker_key": "AST_038AB86F:S2",
+      "start_us": 12000000,
+      "end_us": 12980000,
+      "text": "すごいねー"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "14383a79e232dd6c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  },
+  "diarization": {
+    "provider": "pyannote",
+    "speaker_count": 2,
+    "turn_count": 11
+  }
+}

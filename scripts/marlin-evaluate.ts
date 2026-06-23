@@ -19,6 +19,7 @@ export interface MarlinEvaluateOptions {
   repoRoot?: string;
   sourceFiles: string[];
   mock: boolean;
+  requestTimeoutMs?: number;
 }
 
 export interface MarlinEvaluateResult {
@@ -34,6 +35,7 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
   let projectDir = "";
   let repoRoot: string | undefined;
   let mock = false;
+  let requestTimeoutMs: number | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -43,6 +45,12 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
       repoRoot = args[++index] ?? undefined;
     } else if (arg === "--mock") {
       mock = true;
+    } else if (arg === "--request-timeout-ms" || arg === "--timeout-ms") {
+      requestTimeoutMs = parsePositiveIntegerOption(arg, args[++index]);
+    } else if (arg.startsWith("--request-timeout-ms=")) {
+      requestTimeoutMs = parsePositiveIntegerOption("--request-timeout-ms", arg.slice("--request-timeout-ms=".length));
+    } else if (arg.startsWith("--timeout-ms=")) {
+      requestTimeoutMs = parsePositiveIntegerOption("--timeout-ms", arg.slice("--timeout-ms=".length));
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -62,7 +70,16 @@ export function parseArgs(argv: string[]): MarlinEvaluateOptions {
     repoRoot,
     sourceFiles,
     mock,
+    requestTimeoutMs,
   };
+}
+
+function parsePositiveIntegerOption(name: string, value?: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} requires a positive integer millisecond value`);
+  }
+  return parsed;
 }
 
 export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise<MarlinEvaluateResult> {
@@ -87,7 +104,9 @@ export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise
   }
 
   const model = marlinModelFromEnvironment(projectDir, repoRoot);
-  const marlinFn = createMarlinFnFromEnvironment(projectDir, repoRoot);
+  const marlinFn = createMarlinFnFromEnvironment(projectDir, repoRoot, {
+    requestTimeoutMs: options.requestTimeoutMs,
+  });
   try {
     const outputPath = await runMarlinAnalysis({
       projectDir,
@@ -116,6 +135,8 @@ Options:
   --project, -p  Project directory with existing 03_analysis artifacts
   --repo-root    Repository root for policy and worker resolution
   --mock         Use deterministic mock Marlin worker output
+  --request-timeout-ms, --timeout-ms
+                 Worker request timeout in milliseconds for slow live caption runs
   --help, -h     Show this help
 
 If source files are omitted, assets are resolved from 03_analysis/assets.json source_locator fields.

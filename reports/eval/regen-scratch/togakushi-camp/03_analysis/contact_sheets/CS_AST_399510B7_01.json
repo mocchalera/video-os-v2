@@ -1,0 +1,15 @@
+{
+  "contact_sheet_id": "CS_AST_399510B7_01",
+  "asset_id": "AST_399510B7",
+  "image_path": "contact_sheets/CS_AST_399510B7_01.png",
+  "mode": "shot_keyframes",
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "segment_id": "SEG_AST_399510B7_0001",
+      "rep_frame_us": 5317813,
+      "src_in_us": 0,
+      "src_out_us": 10635625
+    }
+  ]
+}

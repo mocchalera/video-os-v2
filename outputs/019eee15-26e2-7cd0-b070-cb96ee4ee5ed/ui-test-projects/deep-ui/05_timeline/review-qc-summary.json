@@ -1,0 +1,10 @@
+{
+  "version": "1",
+  "created_at": "2026-06-22T07:23:48.885Z",
+  "timeline_path": "05_timeline/timeline.json",
+  "preview_path": "05_timeline/preview-first30s.mp4",
+  "overview_path": "05_timeline/timeline-overview.png",
+  "schema_valid": true,
+  "errors": [],
+  "gap_report": []
+}

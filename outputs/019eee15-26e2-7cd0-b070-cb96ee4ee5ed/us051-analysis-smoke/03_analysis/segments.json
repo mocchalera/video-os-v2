@@ -1,0 +1,38 @@
+{
+  "project_id": "us051-analysis-smoke",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "segment_id": "SEG_AST_5B827A4C_0001",
+      "asset_id": "AST_5B827A4C",
+      "src_in_us": 0,
+      "src_out_us": 1000000,
+      "duration_us": 1000000,
+      "rep_frame_us": 500000,
+      "summary": "",
+      "transcript_excerpt": "",
+      "quality_flags": [],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_5B827A4C",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "3bf92ae6fc0d6673",
+          "request_hash": "adf8abf6d9085366",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_5B827A4C_0001.png"
+    }
+  ]
+}

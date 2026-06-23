@@ -1,0 +1,67 @@
+{
+  "project_id": "fumoto-growth",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_7E5C9A8A",
+  "asset_id": "AST_7E5C9A8A",
+  "items": [
+    {
+      "item_id": "TRI_AST_7E5C9A8A_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_7E5C9A8A:S1",
+      "start_us": 0,
+      "end_us": 4000000,
+      "text": "かわります"
+    },
+    {
+      "item_id": "TRI_AST_7E5C9A8A_0002",
+      "speaker": "S2",
+      "speaker_key": "AST_7E5C9A8A:S2",
+      "start_us": 14000000,
+      "end_us": 16000000,
+      "text": "パッパン"
+    },
+    {
+      "item_id": "TRI_AST_7E5C9A8A_0003",
+      "speaker": "S2",
+      "speaker_key": "AST_7E5C9A8A:S2",
+      "start_us": 16000000,
+      "end_us": 18000000,
+      "text": "パッキーも言ってたかったですよ"
+    },
+    {
+      "item_id": "TRI_AST_7E5C9A8A_0004",
+      "speaker": "S2",
+      "speaker_key": "AST_7E5C9A8A:S2",
+      "start_us": 18000000,
+      "end_us": 20040000,
+      "text": "うん"
+    },
+    {
+      "item_id": "TRI_AST_7E5C9A8A_0005",
+      "speaker": "S1",
+      "speaker_key": "AST_7E5C9A8A:S1",
+      "start_us": 19500000,
+      "end_us": 25300000,
+      "text": "ご視聴ありがとうございました"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  },
+  "diarization": {
+    "provider": "pyannote",
+    "speaker_count": 2,
+    "turn_count": 3
+  }
+}

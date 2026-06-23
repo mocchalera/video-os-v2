@@ -1,0 +1,100 @@
+{
+  "project_id": "ax1-participant-voices-20260401",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "asset_id": "AST_610FB4A0",
+      "filename": "D4892.MP4",
+      "duration_us": 767770000,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_610FB4A0",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_610FB4A0_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "610fb4a056572be1bc3b355708ec19d419b591d7",
+      "video_stream": {
+        "width": 1920,
+        "height": 1080,
+        "fps_num": 30000,
+        "fps_den": 1001,
+        "codec": "h264"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 2,
+        "codec": "pcm_s16be"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_610FB4A0_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "6e75f176d34ab89c",
+        "request_hash": "294177c91ff1ec5a",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_610FB4A0.jpg",
+      "waveform_path": "waveforms/WF_AST_610FB4A0.png",
+      "role_guess": "hybrid",
+      "display_name": "01_mar_clip"
+    },
+    {
+      "asset_id": "AST_76B05D86",
+      "filename": "D4887.MP4",
+      "duration_us": 331335000,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_76B05D86",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_76B05D86_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "76b05d86430a7a6aed8e658a2e310cb9c36cd7e4",
+      "video_stream": {
+        "width": 1920,
+        "height": 1080,
+        "fps_num": 30000,
+        "fps_den": 1001,
+        "codec": "h264"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 2,
+        "codec": "pcm_s16be"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_76B05D86_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "6e75f176d34ab89c",
+        "request_hash": "003cf32a983c4d62",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_76B05D86.jpg",
+      "waveform_path": "waveforms/WF_AST_76B05D86.png",
+      "role_guess": "hybrid",
+      "display_name": "02_mar_an_interviewee"
+    }
+  ]
+}

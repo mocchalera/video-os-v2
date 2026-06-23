@@ -1,0 +1,64 @@
+version: "1"
+project_id: ena-promo
+created_at: 2026-06-16T00:00:00Z
+project:
+  id: ena-promo
+  title: 恵那市観光プロモーション映像
+  strategy: visual-first
+  client: 恵那市
+  format: tourism-promo
+  runtime_target_sec: 230
+message:
+  primary: Ena is a place where nature, culture, and food create quiet, lasting
+    impressions.
+  secondary:
+    - seasonal beauty in mountain landscapes
+    - traditional crafts and local food
+    - aerial perspectives reveal the scale and serenity
+audience:
+  primary: domestic travelers 30-50 seeking cultural and nature experiences
+  secondary:
+    - tourism promotion boards
+    - viewers who respond to contemplative scenic imagery
+  excluded:
+    - viewers expecting fast-paced adventure or action content
+emotion_curve:
+  - wonder
+  - discovery
+  - immersion
+  - warmth
+  - serenity
+must_have:
+  - aerial/drone landscape shots
+  - traditional craft close-ups
+  - local food preparation
+  - seasonal nature scenery
+  - human presence in landscape
+must_avoid:
+  - talking-head interview style
+  - text-heavy information overlays
+  - fast commercial pacing
+  - urban/industrial imagery
+autonomy:
+  may_decide:
+    - clip order within thematic sections
+    - exact in/out points for scenic shots
+    - transition style between sections
+  must_ask:
+    - removing entire thematic categories
+    - changing from contemplative to energetic tone
+    - adding narration or dialogue
+resolved_assumptions:
+  - the film is purely visual with BGM, no narration
+  - multiple shooting days provide seasonal and lighting variety
+  - drone footage serves as section transitions and scale anchors
+caption_policy: off
+audio_policy: ducking
+confirmation_provenance:
+  confirmed_at: 2026-06-17T11:37:58.753Z
+  source: non_interactive_default
+  caption_policy: off
+  audio_policy: ducking
+  questions:
+    - テロップを付けますか?
+    - 原音を活用しますか?

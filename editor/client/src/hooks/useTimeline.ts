@@ -81,6 +81,10 @@ function findTrackInTimeline(
   );
 }
 
+function timelinesEqual(left: TimelineIR, right: TimelineIR): boolean {
+  return JSON.stringify(normalizeTimeline(left)) === JSON.stringify(normalizeTimeline(right));
+}
+
 // normalizeTimeline, validateTimeline, sortTrackClips are now in @shared/timeline-validation
 
 export function useTimeline() {
@@ -101,13 +105,20 @@ export function useTimeline() {
   const [conflict, setConflict] = useState<{ localRevision: string; remoteRevision: string } | null>(null);
 
   const timeline = history.present;
+  const savedBaselineRef = useRef<TimelineIR | null>(null);
   const dragSnapshotRef = useRef<TimelineIR | null>(null);
   const dragDirtyRef = useRef(false);
   const saveRequestRef = useRef<Promise<TimelineSaveResult> | null>(null);
+  const loadRequestSeqRef = useRef(0);
   const validationIssues = useMemo(
     () => (timeline ? validateTimeline(timeline) : []),
     [timeline],
   );
+
+  function isDirtyFromSavedBaseline(nextTimeline: TimelineIR): boolean {
+    const savedBaseline = savedBaselineRef.current;
+    return savedBaseline ? !timelinesEqual(nextTimeline, savedBaseline) : true;
+  }
 
   useEffect(() => {
     void loadProjects();
@@ -164,8 +175,16 @@ export function useTimeline() {
   }
 
   async function loadTimeline(nextProjectId: string): Promise<void> {
+    const requestSeq = ++loadRequestSeqRef.current;
     setStatus('loading');
     setError(null);
+    setConflict(null);
+
+    setHistory((current) =>
+      current.present?.project_id === nextProjectId
+        ? current
+        : { past: [], present: null, future: [] },
+    );
 
     try {
       let nextTimeline: TimelineIR | null = null;
@@ -194,6 +213,11 @@ export function useTimeline() {
       }
 
       const normalized = normalizeTimeline(nextTimeline);
+      if (requestSeq !== loadRequestSeqRef.current) {
+        return;
+      }
+
+      savedBaselineRef.current = structuredClone(normalized);
       setHistory({
         past: [],
         present: normalized,
@@ -213,11 +237,16 @@ export function useTimeline() {
         window.localStorage.setItem(SELECTED_PROJECT_KEY, nextProjectId);
       }
     } catch (loadError) {
+      if (requestSeq !== loadRequestSeqRef.current) {
+        return;
+      }
+
       setHistory({
         past: [],
         present: null,
         future: [],
       });
+      savedBaselineRef.current = null;
       setStatus('error');
       setError(
         loadError instanceof Error ? loadError.message : 'Failed to load timeline.',
@@ -245,7 +274,7 @@ export function useTimeline() {
       };
     });
 
-    setDirty(true);
+    setDirty(isDirtyFromSavedBaseline(normalized));
     setStatus('ready');
     setError(null);
   }
@@ -296,7 +325,7 @@ export function useTimeline() {
       ...current,
       present: normalized,
     }));
-    setDirty(true);
+    setDirty(isDirtyFromSavedBaseline(normalized));
     dragDirtyRef.current = true;
   }
 
@@ -308,8 +337,19 @@ export function useTimeline() {
       ...current,
       present: normalized,
     }));
-    setDirty(true);
+    setDirty(isDirtyFromSavedBaseline(normalized));
     dragDirtyRef.current = true;
+  }
+
+  /** Replace the visible timeline for temporary previews without changing dirty state. */
+  function previewTimeline(nextTimeline: TimelineIR): void {
+    const normalized = normalizeTimeline(nextTimeline);
+    setHistory((current) => ({
+      ...current,
+      present: normalized,
+    }));
+    setStatus('ready');
+    setError(null);
   }
 
   function beginDrag(): void {
@@ -383,44 +423,46 @@ export function useTimeline() {
   }
 
   function undo(): void {
-    setHistory((current) => {
-      if (!current.past.length || !current.present) {
-        return current;
-      }
+    if (!history.past.length || !history.present) {
+      return;
+    }
 
-      const past = [...current.past];
-      const previousEntry = past.pop()!;
-      const futureEntry: HistoryEntry = {
-        timeline: structuredClone(current.present),
-        origin: 'manual_edit',
-      };
-      return {
-        past,
-        present: previousEntry.timeline,
-        future: [futureEntry, ...current.future].slice(0, HISTORY_LIMIT),
-      };
+    const past = [...history.past];
+    const previousEntry = past.pop()!;
+    const futureEntry: HistoryEntry = {
+      timeline: structuredClone(history.present),
+      origin: 'manual_edit',
+    };
+
+    setHistory({
+      past,
+      present: previousEntry.timeline,
+      future: [futureEntry, ...history.future].slice(0, HISTORY_LIMIT),
     });
-    setDirty(true);
+    setDirty(isDirtyFromSavedBaseline(previousEntry.timeline));
+    setStatus('ready');
+    setError(null);
   }
 
   function redo(): void {
-    setHistory((current) => {
-      if (!current.future.length || !current.present) {
-        return current;
-      }
+    if (!history.future.length || !history.present) {
+      return;
+    }
 
-      const [nextEntry, ...future] = current.future;
-      const pastEntry: HistoryEntry = {
-        timeline: structuredClone(current.present),
-        origin: 'manual_edit',
-      };
-      return {
-        past: [...current.past, pastEntry].slice(-HISTORY_LIMIT),
-        present: nextEntry.timeline,
-        future,
-      };
+    const [nextEntry, ...future] = history.future;
+    const pastEntry: HistoryEntry = {
+      timeline: structuredClone(history.present),
+      origin: 'manual_edit',
+    };
+
+    setHistory({
+      past: [...history.past, pastEntry].slice(-HISTORY_LIMIT),
+      present: nextEntry.timeline,
+      future,
     });
-    setDirty(true);
+    setDirty(isDirtyFromSavedBaseline(nextEntry.timeline));
+    setStatus('ready');
+    setError(null);
   }
 
   async function save(): Promise<TimelineSaveResult> {
@@ -536,6 +578,7 @@ export function useTimeline() {
           ...current,
           present: nextTimeline,
         }));
+        savedBaselineRef.current = structuredClone(nextTimeline);
         setConnectionMode('api');
         setDirty(false);
         setStatus('ready');
@@ -562,6 +605,7 @@ export function useTimeline() {
           ...current,
           present: nextTimeline,
         }));
+        savedBaselineRef.current = structuredClone(nextTimeline);
         setConnectionMode('mock');
         setDirty(false);
         setStatus('ready');
@@ -586,6 +630,26 @@ export function useTimeline() {
   }
 
   function setProjectId(nextProjectId: string): void {
+    if (nextProjectId === projectId) {
+      return;
+    }
+
+    loadRequestSeqRef.current += 1;
+    setHistory({
+      past: [],
+      present: null,
+      future: [],
+    });
+    savedBaselineRef.current = null;
+    dragSnapshotRef.current = null;
+    dragDirtyRef.current = false;
+    setTimelineRevision(null);
+    setSessionBaseline(null);
+    setConflict(null);
+    setDirty(false);
+    setLastSavedAt(null);
+    setStatus('loading');
+    setError(null);
     setProjectIdState(nextProjectId);
   }
 
@@ -621,6 +685,7 @@ export function useTimeline() {
     });
 
     setTimelineRevision(newRevision);
+    savedBaselineRef.current = structuredClone(normalized);
     setDirty(false);
     setStatus('ready');
     setError(null);
@@ -683,6 +748,7 @@ export function useTimeline() {
     pushTimeline,
     beginDrag,
     endDrag,
+    previewTimeline,
     swapClip,
     undo,
     redo,

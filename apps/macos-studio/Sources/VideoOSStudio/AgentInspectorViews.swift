@@ -77,7 +77,7 @@ struct AgentPanel: View {
                             .tag(job)
                     }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
 
                 Button {
                     model.runSelectedJob()

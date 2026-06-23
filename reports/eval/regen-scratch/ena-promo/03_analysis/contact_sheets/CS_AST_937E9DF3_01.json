@@ -1,0 +1,15 @@
+{
+  "contact_sheet_id": "CS_AST_937E9DF3_01",
+  "asset_id": "AST_937E9DF3",
+  "image_path": "contact_sheets/CS_AST_937E9DF3_01.png",
+  "mode": "shot_keyframes",
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "segment_id": "SEG_AST_937E9DF3_0001",
+      "rep_frame_us": 10916250,
+      "src_in_us": 0,
+      "src_out_us": 21832500
+    }
+  ]
+}

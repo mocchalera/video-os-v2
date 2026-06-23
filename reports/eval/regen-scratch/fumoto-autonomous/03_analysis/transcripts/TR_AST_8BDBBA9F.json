@@ -1,0 +1,67 @@
+{
+  "project_id": "fumoto-growth",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_8BDBBA9F",
+  "asset_id": "AST_8BDBBA9F",
+  "items": [
+    {
+      "item_id": "TRI_AST_8BDBBA9F_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_8BDBBA9F:S1",
+      "start_us": 0,
+      "end_us": 20000000,
+      "text": "ご視聴ありがとうございました"
+    },
+    {
+      "item_id": "TRI_AST_8BDBBA9F_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_8BDBBA9F:S1",
+      "start_us": 19500000,
+      "end_us": 23400000,
+      "text": "時間が Lamabe"
+    },
+    {
+      "item_id": "TRI_AST_8BDBBA9F_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_8BDBBA9F:S1",
+      "start_us": 37000000,
+      "end_us": 40140000,
+      "text": "2rit"
+    },
+    {
+      "item_id": "TRI_AST_8BDBBA9F_0004",
+      "speaker": "S2",
+      "speaker_key": "AST_8BDBBA9F:S2",
+      "start_us": 39000000,
+      "end_us": 68180000,
+      "text": "着ても 上降にをます"
+    },
+    {
+      "item_id": "TRI_AST_8BDBBA9F_0005",
+      "speaker": "S2",
+      "speaker_key": "AST_8BDBBA9F:S2",
+      "start_us": 58500000,
+      "end_us": 64780000,
+      "text": "おっとっと"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  },
+  "diarization": {
+    "provider": "pyannote",
+    "speaker_count": 2,
+    "turn_count": 2
+  }
+}

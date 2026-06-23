@@ -836,6 +836,58 @@ export function usePlayback({
     }
   }
 
+  function applyPreviewStatus(data: PreviewStatusResponse): void {
+    if (data.status === 'ready' && data.previewUrl) {
+      setPreviewArtifact({
+        renderSpecHash: data.renderSpecHash ?? null,
+        timelineRevision: data.timelineRevision ?? null,
+        previewUrl: data.previewUrl,
+        status: 'ready',
+      });
+      setRenderStatus('ready');
+      setError(null);
+
+      const fetchedRev = data.timelineRevision ?? null;
+      if (!fetchedRev || fetchedRev !== currentTimelineRevision) {
+        setPreviewStale(true);
+        return;
+      }
+
+      const previewHash = data.renderSpecHash ?? null;
+      const currentHash = data.currentRenderSpecHash ?? null;
+      if (previewHash && currentHash && previewHash === currentHash) {
+        expectedRenderSpecHashRef.current = previewHash;
+        setPreviewStale(false);
+      } else {
+        setPreviewStale(true);
+      }
+      return;
+    }
+
+    if (data.status === 'error') {
+      setPreviewArtifact({
+        renderSpecHash: data.renderSpecHash ?? null,
+        timelineRevision: data.timelineRevision ?? null,
+        previewUrl: null,
+        status: 'error',
+      });
+      setRenderStatus('error');
+      setPreviewStale(true);
+      setError(data.error ?? 'Preview render failed.');
+      return;
+    }
+
+    if (data.status === 'idle') {
+      setPreviewArtifact({
+        renderSpecHash: data.renderSpecHash ?? null,
+        timelineRevision: data.timelineRevision ?? null,
+        previewUrl: null,
+        status: 'idle',
+      });
+      setRenderStatus('idle');
+    }
+  }
+
   async function requestFullPreview(
     options: RequestFullPreviewOptions = {},
   ): Promise<ExactPreviewResponse | null> {
@@ -1378,38 +1430,7 @@ export function usePlayback({
         if (!resp.ok || cancelled) return;
         const data = (await resp.json()) as PreviewStatusResponse;
         if (cancelled) return;
-
-        if (data.status === 'ready' && data.previewUrl) {
-          setPreviewArtifact({
-            renderSpecHash: data.renderSpecHash ?? null,
-            timelineRevision: data.timelineRevision ?? null,
-            previewUrl: data.previewUrl,
-            status: 'ready',
-          });
-          setRenderStatus('ready');
-
-          // MAJOR-2 + MAJOR-6: timelineRevision must match
-          const fetchedRev = data.timelineRevision ?? null;
-          if (!fetchedRev || fetchedRev !== currentTimelineRevision) {
-            setPreviewStale(true);
-          } else {
-            // MAJOR-2: Verify renderSpecHash against server-computed
-            // currentRenderSpecHash (built fresh from the on-disk timeline).
-            // This catches divergence from source_map or caption changes
-            // even when the timeline revision is unchanged.
-            const previewHash = data.renderSpecHash ?? null;
-            const currentHash = data.currentRenderSpecHash ?? null;
-            if (previewHash && currentHash && previewHash === currentHash) {
-              // Hash verified — seed expectedRef for future WS comparisons
-              expectedRenderSpecHashRef.current = previewHash;
-              setPreviewStale(false);
-            } else {
-              // currentRenderSpecHash missing or mismatch — cannot verify parity.
-              // Stay stale to prevent showing an unverified preview.
-              setPreviewStale(true);
-            }
-          }
-        }
+        applyPreviewStatus(data);
       } catch {
         // Non-critical — preview status is best-effort on load
       }
@@ -1418,6 +1439,39 @@ export function usePlayback({
     void fetchPreviewStatus();
     return () => { cancelled = true; };
   }, [projectId, currentTimelineRevision, timeline]);
+
+  // WebSocket render.changed is the fast path, but tabs can miss it while
+  // backgrounded or reconnecting. Poll while rendering so the UI cannot spin
+  // forever after the server has already reached ready/error.
+  useEffect(() => {
+    if (renderStatus !== 'rendering' || !projectId || !currentTimelineRevision || !timeline) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function pollPreviewStatus(): Promise<void> {
+      try {
+        const resp = await fetch(`/api/projects/${projectId}/preview/status`);
+        if (!resp.ok || cancelled) return;
+        const data = (await resp.json()) as PreviewStatusResponse;
+        if (cancelled) return;
+        applyPreviewStatus(data);
+      } catch {
+        // Keep rendering state; the next interval may recover.
+      }
+    }
+
+    void pollPreviewStatus();
+    const intervalId = window.setInterval(() => {
+      void pollPreviewStatus();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [renderStatus, projectId, currentTimelineRevision, timeline]);
 
   useEffect(() => {
     if (!projectId || !currentTimelineRevision || !timeline) return;

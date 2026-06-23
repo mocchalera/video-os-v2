@@ -79,6 +79,15 @@ public struct FootageSearchRunner: Sendable {
             try container.encodeIfPresent(summary, forKey: .summary)
         }
 
+        public func makeReplaceSegmentOperation(targetClipID: String, mode: String) -> ReviewPatchOperation {
+            .replaceSegment(
+                target_clip_id: targetClipID,
+                with_segment_id: segment_id,
+                with_candidate_ref: segment_id,
+                reason: "Swap selected in Footage Search (\(mode)): \(Self.truncate(summary ?? segment_id, to: 96))"
+            )
+        }
+
         private static func decodeNumericScores(
             from container: KeyedDecodingContainer<CodingKeys>,
             forKey key: CodingKeys
@@ -95,6 +104,12 @@ public struct FootageSearchRunner: Sendable {
                 }
             }
             return result.isEmpty ? nil : result
+        }
+
+        private static func truncate(_ value: String, to maxLength: Int) -> String {
+            guard value.count > maxLength else { return value }
+            let index = value.index(value.startIndex, offsetBy: max(0, maxLength - 3))
+            return "\(value[..<index])..."
         }
     }
 

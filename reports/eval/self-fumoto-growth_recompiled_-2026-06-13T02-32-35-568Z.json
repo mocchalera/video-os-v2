@@ -1,0 +1,36 @@
+{
+  "version": "1",
+  "mode": "self",
+  "golden_project": "fumoto-growth",
+  "candidate_project": "fumoto-growth (recompiled)",
+  "evaluated_at": "2026-06-13T02:32:35.568Z",
+  "golden_approved_by": "operator",
+  "stages": {
+    "timeline": {
+      "golden_clip_count": 23,
+      "candidate_clip_count": 23,
+      "matched_clip_count": 12,
+      "clip_usage_f1": 0.5217391304347826,
+      "order_agreement": 0.75,
+      "mean_cut_in_deviation_us": 3837893.5,
+      "mean_duration_deviation_frames": 0,
+      "total_duration_deviation_pct": 0.2934131736526946,
+      "beat_structure_score": 0.9005736137667304,
+      "score": 0.5551947377171834
+    }
+  },
+  "llm_judge": {
+    "model": "gemini-2.5-flash",
+    "scores": {
+      "emotion": 0,
+      "story": 0,
+      "rhythm": 0,
+      "agreement_with_golden": 0
+    },
+    "score": 0,
+    "rationale": "The candidate cut fundamentally misunderstands linear video editing by placing multiple clips at the exact same start time, rendering it unplayable as a sequential edit. The chronological order is completely jumbled, with key narrative beats appearing after the events they are meant to precede, destroying the intended emotional arc and story progression. This chaotic arrangement bears no resemblance to the coherent and well-paced golden cut, failing entirely to serve the creative brief."
+  },
+  "overall_score": 38.9,
+  "min_score": null,
+  "pass": null
+}

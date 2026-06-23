@@ -1,0 +1,36 @@
+{
+  "version": "1",
+  "mode": "self",
+  "golden_project": "fumoto-growth",
+  "candidate_project": "fumoto-growth (recompiled)",
+  "evaluated_at": "2026-06-13T05:53:05.189Z",
+  "golden_approved_by": "operator",
+  "stages": {
+    "timeline": {
+      "golden_clip_count": 23,
+      "candidate_clip_count": 23,
+      "matched_clip_count": 12,
+      "clip_usage_f1": 0.5217391304347826,
+      "order_agreement": 0.75,
+      "mean_cut_in_deviation_us": 3837893.5,
+      "mean_duration_deviation_frames": 0,
+      "total_duration_deviation_pct": 0.2934131736526946,
+      "beat_structure_score": 0.9005736137667304,
+      "score": 0.5551947377171834
+    }
+  },
+  "llm_judge": {
+    "model": "gemini-2.5-flash",
+    "scores": {
+      "emotion": 1,
+      "story": 0,
+      "rhythm": 0,
+      "agreement_with_golden": 1
+    },
+    "score": 0.05,
+    "rationale": "The candidate cut fundamentally misinterprets multi-track editing for narrative storytelling, layering numerous clips simultaneously which creates visual and narrative chaos. This approach completely disrupts the intended emotional arc and story progression, making it impossible to follow the 'step by step' journey. Crucial narrative beats are also placed out of chronological order at the end of the timeline, severely undermining the film's climax and overall coherence. The result is an incoherent and ineffective edit that fails to serve the creative brief."
+  },
+  "overall_score": 40.4,
+  "min_score": null,
+  "pass": null
+}

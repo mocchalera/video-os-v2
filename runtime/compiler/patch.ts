@@ -44,6 +44,7 @@ export interface PatchOperation {
   beat_id?: string;
   role?: string;
   label?: string;
+  with_candidate_ref?: string;
 }
 
 export interface ReviewPatch {

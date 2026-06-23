@@ -1,0 +1,164 @@
+{
+  "version": "1",
+  "project": "fumoto-growth",
+  "evaluated_at": "2026-06-17T04:29:36.967Z",
+  "brief_hash": "sha256:3fe3ada47e8f542829243c8e688f840756cc1853b05c4c6e171d795bfa42b596",
+  "stages": {
+    "selects": {
+      "score": 0.459,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.25,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "0/23 active candidates mention primary/secondary message terms"
+          ],
+          "gaps": [
+            "candidate evidence does not explicitly echo the brief message"
+          ]
+        },
+        "must_have_coverage": {
+          "score": 0,
+          "confidence": 0.9,
+          "judge_source": "deterministic",
+          "evidence": [
+            "0/5 selectable must_have items matched",
+            "selection coverage analyzer score 100.0%",
+            "5 production directive must_have items deferred"
+          ],
+          "gaps": [
+            "missing explicit candidate evidence for must_have: 時系列順の成長過程",
+            "missing explicit candidate evidence for must_have: 歩行の初めての瞬間",
+            "missing explicit candidate evidence for must_have: 走る楽しさ",
+            "missing explicit candidate evidence for must_have: ストライダーに乗る姿",
+            "missing explicit candidate evidence for must_have: 自転車に乗れた達成シーン"
+          ]
+        },
+        "emotion_curve_alignment": {
+          "score": 0.5,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "0/23 active candidates carry emotion/peak signals"
+          ],
+          "gaps": [
+            "selects expose little deterministic emotion-curve evidence"
+          ]
+        },
+        "narrative_structure": {
+          "score": 0.458,
+          "confidence": 0.75,
+          "judge_source": "deterministic",
+          "evidence": [
+            "3 role types represented in selects",
+            "eligible_beats present on 23/23 candidates",
+            "hook/opening function detected"
+          ],
+          "gaps": [
+            "selects do not expose experience/development candidates",
+            "selects do not expose a clear closing/payoff candidate"
+          ]
+        },
+        "pacing_coherence": {
+          "score": 1,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "selected source duration 261.5s for 256s target"
+          ],
+          "gaps": []
+        },
+        "visual_variety_and_focus": {
+          "score": 0.903,
+          "confidence": 0.65,
+          "judge_source": "deterministic",
+          "evidence": [
+            "23/23 unique assets",
+            "3 active roles represented",
+            "semantic clusters unavailable; used segment diversity fallback"
+          ],
+          "gaps": []
+        }
+      }
+    },
+    "blueprint": {
+      "score": 0.524,
+      "axes": {
+        "intent_message_alignment": {
+          "score": 0.55,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "blueprint has structural plan text"
+          ],
+          "gaps": [
+            "blueprint does not explicitly echo the brief primary/secondary message"
+          ]
+        },
+        "must_have_coverage": {
+          "score": 0.7,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "6 blueprint beats available for must_have placement"
+          ],
+          "gaps": []
+        },
+        "emotion_curve_alignment": {
+          "score": 0.25,
+          "confidence": 0.55,
+          "judge_source": "deterministic",
+          "evidence": [
+            "2/6 emotion_curve terms appear in blueprint",
+            "hook/closing pair incomplete"
+          ],
+          "gaps": [
+            "not all emotion_curve terms are explicit in blueprint",
+            "blueprint lacks a clear opening and closing emotional container"
+          ]
+        },
+        "narrative_structure": {
+          "score": 0.298,
+          "confidence": 0.85,
+          "judge_source": "deterministic",
+          "evidence": [
+            "no story roles declared",
+            "6 beats with 5 sequence goals"
+          ],
+          "gaps": [
+            "missing story_role: hook",
+            "missing story_role: setup",
+            "missing story_role: experience",
+            "missing story_role: closing",
+            "story_arc summary/strategy is missing"
+          ]
+        },
+        "pacing_coherence": {
+          "score": 0.765,
+          "confidence": 0.82,
+          "judge_source": "deterministic",
+          "evidence": [
+            "brief target 256s; blueprint target unspecifieds",
+            "6 beats planned",
+            "duration_policy unavailable"
+          ],
+          "gaps": [
+            "duration_policy is missing"
+          ]
+        },
+        "visual_variety_and_focus": {
+          "score": 0.65,
+          "confidence": 0.45,
+          "judge_source": "deterministic",
+          "evidence": [
+            "6 beats define role requirements"
+          ],
+          "gaps": []
+        }
+      }
+    }
+  },
+  "composite": 0.489,
+  "notes": []
+}

@@ -74,7 +74,7 @@ export default memo(function ClipLayer({
   }, [lanes]);
 
   return (
-    <div className="pointer-events-none absolute inset-0">
+    <div className="pointer-events-none absolute inset-0 z-30">
       {lanes.map((lane) => {
         const state = trackStates[lane.laneId];
         const laneHeight = state ? TRACK_HEIGHT_PX[state.height] : 64;

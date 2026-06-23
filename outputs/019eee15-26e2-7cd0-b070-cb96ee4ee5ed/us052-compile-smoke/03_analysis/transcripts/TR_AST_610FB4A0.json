@@ -1,0 +1,1382 @@
+{
+  "project_id": "ax1-participant-voices-20260401",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_610FB4A0",
+  "asset_id": "AST_610FB4A0",
+  "items": [
+    {
+      "item_id": "TRI_AST_610FB4A0_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 0,
+      "end_us": 2000000,
+      "text": "行って終わりたらなというふうに思います。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 2000000,
+      "end_us": 4000000,
+      "text": "講師陣はいいんで、じゃあチャン系からいきます。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 4000000,
+      "end_us": 8000000,
+      "text": "はい、まずは今日、ありがとうございました。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0004",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 8000000,
+      "end_us": 14000000,
+      "text": "私自身、AIっていうのを本当にウィルフォワードと関わりをなってから、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0005",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 14000000,
+      "end_us": 19720000,
+      "text": "なんで本当にMCくらいからやっと使い始めたみたいな状況。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0006",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 19173282,
+      "end_us": 25213282,
+      "text": "状況で なんかそれこそ環境って最後あったんですけど"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0007",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 25213282,
+      "end_us": 31133282,
+      "text": "今までは ai を使う環境じゃなかったのが"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0008",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 31133282,
+      "end_us": 39273282,
+      "text": "皆さんが使うのが当たり前っていう環境に入らせていただいたことで 先日初めて lp って"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0009",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 38795906,
+      "end_us": 42635906,
+      "text": "ランディングページを自分で作れたりとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0010",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 42635906,
+      "end_us": 46755906,
+      "text": "今日も自分の自己紹介とか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0011",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 46755906,
+      "end_us": 48095906,
+      "text": "なんでこうやって出してたのに"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0012",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 48095906,
+      "end_us": 50355906,
+      "text": "まとめてなかったんだろうって気づけたりとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0013",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 50355906,
+      "end_us": 55095906,
+      "text": "そういった本当に自分のウィルとかを"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0014",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 55095906,
+      "end_us": 57795906,
+      "text": "もっと出していけるチャンスとかを"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0015",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 57795906,
+      "end_us": 59195906,
+      "text": "自分自身が知って"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0016",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 58722032,
+      "end_us": 77322032,
+      "text": "自信が知れたし、実践できたというのが、その3つの壁の中の経験というところが、本当に今日はできてすごく良かったなという感覚がありましたし、素敵な2人との出会いができたのもすごくありがたい。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0017",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 76840000,
+      "end_us": 81840000,
+      "text": "ありがたい一日だったなと思っております。ありがとうございました。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0018",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 86840000,
+      "end_us": 90840000,
+      "text": "本日は研修館もありがとうございました。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0019",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 91840000,
+      "end_us": 100640000,
+      "text": "初めましての皆さんとこういったご縁にすごく感謝するとともに、自分自身もAIって本当に密集無し"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0020",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 100133782,
+      "end_us": 119853782,
+      "text": "密進逆歩でどんどん出てくるし、オープンAIが来たかと思ったらGoogleのジェミニーがとか、今日も初めて来たクラウドとか、いろいろ聞きすぎていろいろ忘れちゃったんですけど、本当たくさんのものが出てくる中で、きちんとキャッチアップして情報として取って、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0021",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 119370219,
+      "end_us": 124410219,
+      "text": "活用していきたいなという気持ちはすごく思いました"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0022",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 124410219,
+      "end_us": 128930219,
+      "text": "シラスゆでゲームから始まり"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0023",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 128930219,
+      "end_us": 132430219,
+      "text": "自走のツールまで作るまでというところで"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0024",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 132430219,
+      "end_us": 135050219,
+      "text": "本当にこんなことまでできるんだという"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0025",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 135050219,
+      "end_us": 137550219,
+      "text": "本当にびっくり"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0026",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 137060125,
+      "end_us": 138180125,
+      "text": "びっくりしてます"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0027",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 138180125,
+      "end_us": 142080125,
+      "text": "なのでこれを知識だけで終わらせずに"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0028",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 142080125,
+      "end_us": 144980125,
+      "text": "ちゃんと活用していくというところを"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0029",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 144980125,
+      "end_us": 146680125,
+      "text": "野部さんと一緒にやって"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0030",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 146680125,
+      "end_us": 150140125,
+      "text": "松井さん発展させていただきたいと思います"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0031",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 150140125,
+      "end_us": 150660125,
+      "text": "ありがとうございました"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0032",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 150660125,
+      "end_us": 155440125,
+      "text": "ありがとうございました"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0033",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 157223625,
+      "end_us": 164003625,
+      "text": "ありがとうございます"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0034",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 164003625,
+      "end_us": 167863625,
+      "text": "ラルさん本当にお誘いありがとうございました"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0035",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 167863625,
+      "end_us": 175723625,
+      "text": "兄弟のような先生のようなずっと振り返りば"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0036",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 175204688,
+      "end_us": 182204688,
+      "text": "まあ、おなじせたくやここにありみたいなんですけど、そんな関係では本当にもう嬉しく思いますし、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0037",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 182204688,
+      "end_us": 194984688,
+      "text": "このAIとかって、僕の今までの感覚だと、僕らの尊敬する青木社長も今こうやって一生懸命調べてるし、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0038",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 194461844,
+      "end_us": 201461844,
+      "text": "まあまあ必要なんだろうなと。すごくいろいろ情報を送れるだろうなと。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0039",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 201461844,
+      "end_us": 207461844,
+      "text": "一時期僕は占いみたいなのに起こったことがあって、すごく霊能者みたいな。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0040",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 207461844,
+      "end_us": 214461844,
+      "text": "自分の進むべき道とか、サポートをいただいたりとか。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0041",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 214461844,
+      "end_us": 215381844,
+      "text": "最近ではすごくそれにちゃんと、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0042",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 214917344,
+      "end_us": 217437344,
+      "text": "チャッピー君に頼ってる自分もいたりとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0043",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 217437344,
+      "end_us": 220037344,
+      "text": "でも面白いなと思いながら"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0044",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 220037344,
+      "end_us": 221757344,
+      "text": "いながら"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0045",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 221757344,
+      "end_us": 224137344,
+      "text": "なんか今日一日いろんなスキルは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0046",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 224137344,
+      "end_us": 226197344,
+      "text": "学ばせていただいた"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0047",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 226197344,
+      "end_us": 228377344,
+      "text": "そしてそれをどのように活用するかというのは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0048",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 228377344,
+      "end_us": 230237344,
+      "text": "まだまだ深掘りしていかなきゃならないかな"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0049",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 230237344,
+      "end_us": 232037344,
+      "text": "というところはある"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0050",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 232037344,
+      "end_us": 232957344,
+      "text": "ただ"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0051",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 232957344,
+      "end_us": 235337344,
+      "text": "最後"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0052",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 234869719,
+      "end_us": 241069719,
+      "text": "最後、やっぱり、ナルセさんのメッセージで、その落とし穴のところ。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0053",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 241069719,
+      "end_us": 247569719,
+      "text": "これすごく、僕らが分からないがゆえに、頼りすぎることなく、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0054",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 247569719,
+      "end_us": 254209719,
+      "text": "今の僕の生きてきた人生の経験と、そしてこれから見えるビジョンと、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0055",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 253662469,
+      "end_us": 272242469,
+      "text": "そして関わる人とで、かつ今の最新のテクノロジーとかAIとか、こうやって本当にすごい情報をバーっと集めてくれるような、こういったスキルを活用してですね、自分が何ができるかなっていうのを見直す機会かなっていうのはすごく思ったところであります。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0056",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 273178125,
+      "end_us": 275178125,
+      "text": "大変、すごく分かっているの。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0057",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 275178125,
+      "end_us": 281178125,
+      "text": "奈瀬君と20年前と、その後の10年から最高にいい時期だった。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0058",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 281178125,
+      "end_us": 284178125,
+      "text": "今、すごい水産資源も枯渇しているし、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0059",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 284178125,
+      "end_us": 289178125,
+      "text": "いろんな部分で、ただ物を作って売れる時代ではもちろんないし、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0060",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 289178125,
+      "end_us": 292758125,
+      "text": "シラスのトップ、業界のトップをクオリティーで、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0061",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 292255563,
+      "end_us": 293895563,
+      "text": "クオリティーでは張ってるかもしれない"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0062",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 293895563,
+      "end_us": 295255563,
+      "text": "しかしながら"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0063",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 295255563,
+      "end_us": 298955563,
+      "text": "それを届けてるマーケットも弱ってたりとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0064",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 298955563,
+      "end_us": 300655563,
+      "text": "いろんなことが変わって"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0065",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 300655563,
+      "end_us": 302255563,
+      "text": "海外っていうところでは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0066",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 302255563,
+      "end_us": 306255563,
+      "text": "タイやベトナムでは第一人者でガンガンやってきた"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0067",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 306255563,
+      "end_us": 309355563,
+      "text": "シラスといえばアセアナンバーワンの会社ではある"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0068",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 309355563,
+      "end_us": 312035563,
+      "text": "でもそれの先"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0069",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 311518937,
+      "end_us": 320518937,
+      "text": "先、一歩先は、なんかこう揺らぐところが、今までだったらこれもう10年は安泰だなっていうのは、そうじゃないような時代が続いて、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0070",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 320518937,
+      "end_us": 331738937,
+      "text": "その中で、今こうやって皆さん方のいろんな知識とか知恵とか経験なんかも、コラボレーションしながら、素直に受け入れてですね、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0071",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 331239469,
+      "end_us": 340239469,
+      "text": "そして壁をぶち壊してですね"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0072",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 340239469,
+      "end_us": 343239469,
+      "text": "なかなか僕らのくらいの年になって"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0073",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 343239469,
+      "end_us": 346239469,
+      "text": "ちょっとかっこいい経験がついちゃうと"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0074",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 346239469,
+      "end_us": 350239469,
+      "text": "その壁ってすごく壊せないんだけども"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0075",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 350239469,
+      "end_us": 351839469,
+      "text": "これもう一回ですね"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0076",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 351351188,
+      "end_us": 356591188,
+      "text": "素直にクリアにして向かっていきたいなと思います"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0077",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 356591188,
+      "end_us": 361251188,
+      "text": "めんこさんと出会ってお酒もやめたし"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0078",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 361251188,
+      "end_us": 363851188,
+      "text": "一滴も飲んだからちょっと"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0079",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 363851188,
+      "end_us": 367091188,
+      "text": "体も健康になってきたので"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0080",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 368895313,
+      "end_us": 371595313,
+      "text": "日本のため、世界のために頑張っていきたいなと思います。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0081",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 371735313,
+      "end_us": 376315313,
+      "text": "皆さん方の力をお借りできれば楽しい人生になるかなと思ってますので、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0082",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 376655313,
+      "end_us": 380515313,
+      "text": "ぜひ青木社長同じ、70歳で100億目指してですね、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0083",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 381515313,
+      "end_us": 383735313,
+      "text": "実際に形成していきたいと思います。よろしくお願いします。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0084",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 383915313,
+      "end_us": 384735313,
+      "text": "どうもありがとうございました。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0085",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 384995313,
+      "end_us": 385215313,
+      "text": "ありがとうございました。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0086",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 388446031,
+      "end_us": 390446031,
+      "text": "ちょっと聞いてもいいですか?"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0087",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 390446031,
+      "end_us": 393446031,
+      "text": "もともとAIってどのくらい使われてたんですか?"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0088",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 393446031,
+      "end_us": 399446031,
+      "text": "えっと、あの、チャットGPTにいろいろ聞いてるよとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0089",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 399446031,
+      "end_us": 402446031,
+      "text": "そのようなの普通に入れてるよとかって"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0090",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 402446031,
+      "end_us": 405446031,
+      "text": "普段に使ってるよ、そうなんだぐらいだったんですけど"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0091",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 405446031,
+      "end_us": 407766031,
+      "text": "ここ半年ぐらいは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0092",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 407290031,
+      "end_us": 413670031,
+      "text": "自分でも優良アプリを入れていじっている感じで"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0093",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 413670031,
+      "end_us": 419310031,
+      "text": "打つのがとろいたら話してiPhoneでやって"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0094",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 419310031,
+      "end_us": 422410031,
+      "text": "いろいろフィードバックもなっている"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0095",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 422410031,
+      "end_us": 426750031,
+      "text": "ここに来るまでってAI使って事業こんな風にできるなと"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0096",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 426189781,
+      "end_us": 429429781,
+      "text": "できるなとかってなんとなくアイデアとか発想ってあったんですか?"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0097",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 429429781,
+      "end_us": 435009781,
+      "text": "いろいろ考えております。その海外展開とかそれこそ"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0098",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 435009781,
+      "end_us": 439509781,
+      "text": "M&Aとか買う売るもともに"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0099",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 439509781,
+      "end_us": 443589781,
+      "text": "考えてたり、去年タイの一社を"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0100",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 443122813,
+      "end_us": 445582813,
+      "text": "業務資本提携したこともあったりして"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0101",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 445582813,
+      "end_us": 449102813,
+      "text": "いろんなことを自分だけでこうやろうとしていたんですけど今までは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0102",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 449102813,
+      "end_us": 453342813,
+      "text": "でも人の力を借りることでもっと良くなるなとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0103",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 453342813,
+      "end_us": 457142813,
+      "text": "自分だけのパワーよりも"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0104",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 457142813,
+      "end_us": 461342813,
+      "text": "誰かのリソースを入ることで良くなるなというところとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0105",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 461342813,
+      "end_us": 463442813,
+      "text": "あとはそういうやり方とか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0106",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 463780219,
+      "end_us": 466720219,
+      "text": "プラスもマイナスもあると思うので"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0107",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 466720219,
+      "end_us": 469520219,
+      "text": "そういうのなんかも情報を得たりとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0108",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 469520219,
+      "end_us": 472700219,
+      "text": "すごくしていたり"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0109",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 472700219,
+      "end_us": 474520219,
+      "text": "心の相談をしていました"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0110",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 474520219,
+      "end_us": 476740219,
+      "text": "心の相談はあれですね"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0111",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 476740219,
+      "end_us": 480180219,
+      "text": "ただ今日ってツールの使い方とかっていう"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0112",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 480180219,
+      "end_us": 482920219,
+      "text": "どっちかというとAIを学ぶというよりは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0113",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 482383219,
+      "end_us": 487863219,
+      "text": "もうちょっとAIそのものが世の中どう変えるかみたいな話も多かったと思うんですが"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0114",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 487863219,
+      "end_us": 490363219,
+      "text": "その辺って小松社長的にはどうですか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0115",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 490363219,
+      "end_us": 492363219,
+      "text": "僕そこが良かったと思う"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0116",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 492363219,
+      "end_us": 498183219,
+      "text": "AIのやり方みたいなとかいろんなこんなのがあるような"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0117",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 498183219,
+      "end_us": 500483219,
+      "text": "バーっていう羅列の1日であれば"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0118",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 500483219,
+      "end_us": 503443219,
+      "text": "多分半日も待たなかったと思うんだけど"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0119",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 502948594,
+      "end_us": 515948594,
+      "text": "基本やっぱり使う側とか、あとは今までやってきたこととか、最後のそこに頼らない、100%頼ってはいけないよみたいなところの落とし穴を、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0120",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 515948594,
+      "end_us": 522148594,
+      "text": "ちゃんと全部理解しながら、でも絶対に必要なスキルではあるというところをすごく、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0121",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 521673344,
+      "end_us": 524673344,
+      "text": "すごく感じたというところなので"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0122",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 524673344,
+      "end_us": 526673344,
+      "text": "ただまだまだ僕はこう"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0123",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 526673344,
+      "end_us": 528673344,
+      "text": "いろいろ教わった中の"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0124",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 528673344,
+      "end_us": 532673344,
+      "text": "どれが今これにはプラスなのかマイナスなのかというのは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0125",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 532673344,
+      "end_us": 535673344,
+      "text": "ナルシさんとかね、カズさんとかみたいな先生方とは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0126",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 535673344,
+      "end_us": 538673344,
+      "text": "ちょっとまだわからないところがあるけれども"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0127",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 538673344,
+      "end_us": 540673344,
+      "text": "すごく大切な部分だなって"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0128",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 540673344,
+      "end_us": 541953344,
+      "text": "これからは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0129",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 541505250,
+      "end_us": 543905250,
+      "text": "必要な部分だなと思うし"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0130",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 543905250,
+      "end_us": 546045250,
+      "text": "今までの自分の生きてきたこと"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0131",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 546045250,
+      "end_us": 547705250,
+      "text": "やってきたことも"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0132",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 547705250,
+      "end_us": 551725250,
+      "text": "ゼロかなと思ったの"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0133",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 551725250,
+      "end_us": 553405250,
+      "text": "ちょっとこうね"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0134",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 553405250,
+      "end_us": 555165250,
+      "text": "最近よく話すのは"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0135",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 555165250,
+      "end_us": 558625250,
+      "text": "いやもう僕なんか黙ってた方がいいよなみたいな"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0136",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 558625250,
+      "end_us": 560405250,
+      "text": "もうAIとか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0137",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 560762750,
+      "end_us": 566302750,
+      "text": "世の中の流れとか、そういうところを、まだまだ泥臭いことしか言えないから、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0138",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 566302750,
+      "end_us": 570802750,
+      "text": "ちょっと僕の考えなんかは、思っても少し抑えた方がいいなみたいなことをね、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0139",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 570802750,
+      "end_us": 574822750,
+      "text": "よくよく言ってたんだけど、でもそうでもないから、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0140",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 575042750,
+      "end_us": 580802750,
+      "text": "僕のやっぱり生きてきたこととか、やってきたこととかっていうのをちゃんと、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0141",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 580278407,
+      "end_us": 600698407,
+      "text": "共有しながら、そしていろいろなテクノロジーを活用して、AIと協力してもらって、新たな光を見出せるとか、見方をガラッと変えることができるのかなというのはちょっと思うことがあるかな。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0142",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 600159688,
+      "end_us": 603159688,
+      "text": "というふうに思いました"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0143",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 603159688,
+      "end_us": 605159688,
+      "text": "最後の質問で"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0144",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 605159688,
+      "end_us": 606159688,
+      "text": "小町社長も"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0145",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 606159688,
+      "end_us": 607159688,
+      "text": "皆さんも周りに"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0146",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 607159688,
+      "end_us": 609159688,
+      "text": "いろんな経営者の方が"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0147",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 609159688,
+      "end_us": 611159688,
+      "text": "多いと思うんですが"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0148",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 611159688,
+      "end_us": 613159688,
+      "text": "どんな人が受けたら"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0149",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 613159688,
+      "end_us": 615159688,
+      "text": "どんな価値を得そう"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0150",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 615159688,
+      "end_us": 617159688,
+      "text": "だと思うんですか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0151",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 617159688,
+      "end_us": 619159688,
+      "text": "どう思いますか"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0152",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 619159688,
+      "end_us": 621339688,
+      "text": "うーん、そうですね"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0153",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 620871438,
+      "end_us": 634111438,
+      "text": "そうですね、本当に幅広でいろんな価値があるなと思っていて、実作業者の方も、私も今日フォルダ整理とかあっという間にしてくれて、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0154",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 634651438,
+      "end_us": 641191438,
+      "text": "それって私がスタッフに頼んでいることなんですね。でもスタッフがそういうの知っていれば別に人がやる必要もないし、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0155",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 641089282,
+      "end_us": 650089282,
+      "text": "実作業者も知った方がいいし、やっぱり逆に指示を出す側も、そういうツールがあるという前提で仕事を頼んだ方がいいし、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0156",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 650089282,
+      "end_us": 661069282,
+      "text": "のぶさんみたいな意思決定とか経営層もそういう状況を踏まえた上で、AIの力も使いながら描ける未来というのもあるのかなと思います。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0157",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 660558563,
+      "end_us": 672558563,
+      "text": "本当に、僕からまたまでというのは、幅広で、いろんな使い方でみんなが使っていけたらすごくいいなと感じました。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0158",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 672558563,
+      "end_us": 674558563,
+      "text": "ありがとうございます。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0159",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 674558563,
+      "end_us": 681098563,
+      "text": "AIのセミナーですよ、勉強会みたいな側が強く感じたけど、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0160",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 680594656,
+      "end_us": 700694656,
+      "text": "全然そうじゃないから、経営者としてとか、これから世界と、世の中に生きていくにあたっては必ず必要な技術だとは思っているし、そこの中であり方なんかも入ってくるので、僕は"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0161",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 700210875,
+      "end_us": 708210875,
+      "text": "自分が感じたんで、同じようなね、最近壁にぶつかってる経営者の方々とかには、"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0162",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 708210875,
+      "end_us": 719990875,
+      "text": "ぜひトライしてもらいたいなと思うし、社員だけは送るだけじゃなくて、まずトップな感じてもらうことは僕大事かなと思うかな。"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0163",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 719490001,
+      "end_us": 727490001,
+      "text": "それをもっともっと前に出してもらったらいいんじゃないかなと思いますけどね"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0164",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 727490001,
+      "end_us": 729490001,
+      "text": "いいじゃん"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0165",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 729490001,
+      "end_us": 732490001,
+      "text": "社長経営者倍ぐらいの量を厳したら"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0166",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 732490001,
+      "end_us": 737490001,
+      "text": "もう一つの頂点みたいな話です"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0167",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 739172282,
+      "end_us": 743412282,
+      "text": "そうですね、価格をアップしている方向も含めて"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0168",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 743412282,
+      "end_us": 750032282,
+      "text": "ぜひフィットする方がいたらお伝えいただければと思います"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0169",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 750032282,
+      "end_us": 751532282,
+      "text": "今日はどうもありがとうございました"
+    },
+    {
+      "item_id": "TRI_AST_610FB4A0_0170",
+      "speaker": "S1",
+      "speaker_key": "AST_610FB4A0:speaker_1",
+      "start_us": 758558969,
+      "end_us": 765558969,
+      "text": "後で送りますけど、船橋屋の鍋ちゃんとかに誘われたの?AIの…"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

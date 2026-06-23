@@ -1,0 +1,198 @@
+{
+  "project_id": "rokutaro-namae-no-nai-saka-20260425",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_D3155EAD",
+  "asset_id": "AST_D3155EAD",
+  "items": [
+    {
+      "item_id": "TRI_AST_D3155EAD_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 0,
+      "end_us": 4360000,
+      "text": "はい、行きます"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 4360000,
+      "end_us": 6560000,
+      "text": "レディー、ゴー"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 6560000,
+      "end_us": 7040000,
+      "text": "行け"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0004",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 7040000,
+      "end_us": 10560000,
+      "text": "行け、前出ろ"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0005",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 10560000,
+      "end_us": 19800000,
+      "text": "追いかけろ"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0006",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 19500000,
+      "end_us": 23500000,
+      "text": "回せ!回せ!回せ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0007",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 23500000,
+      "end_us": 27500000,
+      "text": "回せ!回せ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0008",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 35500000,
+      "end_us": 39540000,
+      "text": "がんばれ!がんばれ!いにく!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0009",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 39000000,
+      "end_us": 41000000,
+      "text": "いけいけー!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0010",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 41000000,
+      "end_us": 43000000,
+      "text": "上手くるよー!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0011",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 43000000,
+      "end_us": 45000000,
+      "text": "よし!内側!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0012",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 45000000,
+      "end_us": 47000000,
+      "text": "あ!後ろ側来てるよ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0013",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 47000000,
+      "end_us": 49000000,
+      "text": "いけいけいけ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0014",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 49000000,
+      "end_us": 51000000,
+      "text": "ダッシュダッシュ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0015",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 51000000,
+      "end_us": 53000000,
+      "text": "いけいけ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0016",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 53000000,
+      "end_us": 55000000,
+      "text": "ダッシュダッシュ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0017",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 55000000,
+      "end_us": 57000000,
+      "text": "ダッシュダッシュ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0018",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 57000000,
+      "end_us": 59000000,
+      "text": "いけ!前!前!抜かせ!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0019",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 58500000,
+      "end_us": 60500000,
+      "text": "ダッシュ!いける!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0020",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 61940000,
+      "end_us": 62940000,
+      "text": "よーし!"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0021",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 62940000,
+      "end_us": 63940000,
+      "text": "あー"
+    },
+    {
+      "item_id": "TRI_AST_D3155EAD_0022",
+      "speaker": "S1",
+      "speaker_key": "AST_D3155EAD:speaker_1",
+      "start_us": 66820000,
+      "end_us": 67260000,
+      "text": "へー"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

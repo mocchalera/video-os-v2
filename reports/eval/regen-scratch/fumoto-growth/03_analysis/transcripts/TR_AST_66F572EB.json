@@ -1,0 +1,62 @@
+{
+  "project_id": "fumoto-growth",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_66F572EB",
+  "asset_id": "AST_66F572EB",
+  "items": [
+    {
+      "item_id": "TRI_AST_66F572EB_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_66F572EB:speaker_1",
+      "start_us": 0,
+      "end_us": 16560000,
+      "text": "ご視聴ありがとうございました"
+    },
+    {
+      "item_id": "TRI_AST_66F572EB_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_66F572EB:speaker_1",
+      "start_us": 16054125,
+      "end_us": 36094125,
+      "text": "余ってる。"
+    },
+    {
+      "item_id": "TRI_AST_66F572EB_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_66F572EB:speaker_1",
+      "start_us": 35554125,
+      "end_us": 55554125,
+      "text": "おやすみなさい。"
+    },
+    {
+      "item_id": "TRI_AST_66F572EB_0004",
+      "speaker": "S1",
+      "speaker_key": "AST_66F572EB:speaker_1",
+      "start_us": 55334125,
+      "end_us": 59214125,
+      "text": "ん"
+    },
+    {
+      "item_id": "TRI_AST_66F572EB_0005",
+      "speaker": "S1",
+      "speaker_key": "AST_66F572EB:speaker_1",
+      "start_us": 75794125,
+      "end_us": 77674125,
+      "text": "re"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  }
+}

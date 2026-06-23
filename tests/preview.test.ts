@@ -250,6 +250,19 @@ describe("segment-renderer", () => {
       expect(args).toContain("-an");
       expect(args[args.length - 1]).toBe("/path/to/output.mp4");
     });
+
+    it("uses the timeline target duration when source trim range is longer", () => {
+      const args = buildClipExtractArgs(
+        "/path/to/source.mov",
+        2_000_000,
+        12_000_000,
+        "/path/to/output.mp4",
+        3.5,
+      );
+
+      expect(args[args.indexOf("-ss") + 1]).toBe("2.000000");
+      expect(args[args.indexOf("-t") + 1]).toBe("3.500000");
+    });
   });
 
   describe("buildConcatFileContent", () => {
@@ -374,6 +387,22 @@ describe("renderPreviewSegment integration", () => {
 
     expect(result.clipCount).toBe(2);
     expect(result.outputPath).toContain("preview-first5s.mp4");
+  });
+
+  it("extracts preview clips for timeline duration rather than raw source duration", async () => {
+    const { timelinePath, sourceMap } = setupProject();
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+    timeline.tracks.video[0].clips[0].src_out_us = 9_000_000;
+    fs.writeFileSync(timelinePath, JSON.stringify(timeline, null, 2), "utf-8");
+
+    await renderPreviewSegment({
+      projectDir: tmpDir,
+      timelinePath,
+      sourceMap,
+    });
+
+    const firstExtractArgs = execFileMock.mock.calls[0][1] as string[];
+    expect(firstExtractArgs[firstExtractArgs.indexOf("-t") + 1]).toBe("4.000000");
   });
 
   it("throws when beat ID is not found", async () => {

@@ -12,9 +12,18 @@ final class StudioViewModel: ObservableObject {
         case failed = "Failed"
     }
 
+    enum RoughCutCompileActivity {
+        case idle
+        case roughCut
+        case reviewPatch
+        case studioPatch
+    }
+
     @Published var repositoryRoot: URL
     @Published var projects: [ProjectSummary] = []
-    @Published var selectedProjectID: ProjectSummary.ID?
+    @Published var selectedProjectID: ProjectSummary.ID? {
+        didSet { publishAgentMenuCommandAvailability() }
+    }
     @Published var projectInitializationStatus = "Create or link a source project to begin."
     @Published var isInitializingProject = false
     @Published var selectedSurface: StudioAgentSurface = .ingest
@@ -26,13 +35,17 @@ final class StudioViewModel: ObservableObject {
     @Published var roughCutCompilePlan = ProjectRoughCutCompilePlanner.plan(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
     @Published var roughCutCompileStatus = "No project selected."
     @Published var isCompilingRoughCut = false
+    @Published var roughCutCompileActivity: RoughCutCompileActivity = .idle
     @Published var feedbackSession = StudioFeedbackSession()
     @Published var qaDashboard: QADashboardDocument?
     @Published var changedClipIDs: [String] = []
     @Published var recentlyChangedClipIDs: Set<String> = []
     @Published var changedClipHighlightTimer: Timer?
     @Published var selectedTimelineClipID: TimelineClip.ID? {
-        didSet { loadSelectedClipNoteDraft() }
+        didSet {
+            loadSelectedClipNoteDraft()
+            publishAgentMenuCommandAvailability()
+        }
     }
     @Published var playheadFrame = 0
     @Published var mediaPlaybackSyncGeneration = 0
@@ -110,13 +123,21 @@ final class StudioViewModel: ObservableObject {
     @Published var indexContextPack = ProjectRAGContextPack(query: "", items: [])
     @Published var indexOperationStatus = "Index not checked."
     @Published var appServerPlan: CodexAppServerLaunchPlan
-    @Published var appServerStatus: AppServerStatus = .unchecked
+    @Published var appServerStatus: AppServerStatus = .unchecked {
+        didSet { publishAgentMenuCommandAvailability() }
+    }
     @Published var appServerDetail = "Run a handshake check before starting agent work."
-    @Published var activeThreadID: String?
+    @Published var activeThreadID: String? {
+        didSet { publishAgentMenuCommandAvailability() }
+    }
     @Published var activeModel: String?
     @Published var agentPrompt = "Reply with the current Video OS project status in one concise paragraph. Do not modify files."
-    @Published var selectedJob: VideoOSAgentJob = .status
-    @Published var pendingApproval: AgentJobApproval?
+    @Published var selectedJob: VideoOSAgentJob = .status {
+        didSet { publishAgentMenuCommandAvailability() }
+    }
+    @Published var pendingApproval: AgentJobApproval? {
+        didSet { publishAgentMenuCommandAvailability() }
+    }
     @Published var turnStatus = "No turn has run."
     @Published var turnTranscript = ""
     @Published var turnHistory: [AgentTurnRecord] = []
@@ -132,9 +153,10 @@ final class StudioViewModel: ObservableObject {
     init() {
         let root = ProjectScanner.locateRepositoryRoot()
         repositoryRoot = root
-        appServerPlan = CodexAppServerLaunchPlan(workspace: root)
+        appServerPlan = CodexAppServerTransportPreferences.launchPlan(workspace: root)
         marlinModelAccessStatus = ProjectMarlinModelAccessStatusReader.uncheckedStatus(repositoryRoot: root)
         installCommandObservers()
+        publishAgentMenuCommandAvailability()
         Task { @MainActor in
             self.refresh()
         }
@@ -149,6 +171,14 @@ final class StudioViewModel: ObservableObject {
 
     var selectedProject: ProjectSummary? {
         projects.first { $0.id == selectedProjectID } ?? projects.first
+    }
+
+    var isCompilingPlainRoughCut: Bool {
+        isCompilingRoughCut && roughCutCompileActivity == .roughCut
+    }
+
+    var isApplyingReviewPatch: Bool {
+        isCompilingRoughCut && roughCutCompileActivity == .reviewPatch
     }
 
     var selectedTimelineClip: TimelineClipSelection? {
@@ -187,12 +217,23 @@ final class StudioViewModel: ObservableObject {
     }
 
     var programMediaReference: ProjectMediaReference? {
-        guard let project = selectedProject, let selection = programTimelineClip else { return selectedMediaReference }
-        return ProjectMediaResolver.resolveSelectedClip(
+        guard let project = selectedProject else { return nil }
+        let timelinePreview = timelinePreviewMediaReference(project: project)
+        guard let selection = programTimelineClip else {
+            return ProjectMediaResolver.preferredProgramMedia(
+                timelinePreview: timelinePreview,
+                source: selectedMediaReference
+            )
+        }
+        let source = ProjectMediaResolver.resolveSelectedClip(
             projectURL: project.path,
             clip: selection.clip,
             assets: evidenceStore?.assets,
             previewTimeUS: selection.clip.sourceTimeUS(atTimelineFrame: playheadFrame)
+        )
+        return ProjectMediaResolver.preferredProgramMedia(
+            timelinePreview: timelinePreview,
+            source: source
         )
     }
 
@@ -214,6 +255,11 @@ final class StudioViewModel: ObservableObject {
             assets: evidenceStore?.assets,
             previewTimeUS: selection.clip.sourceTimeUS(atTimelineFrame: selection.clip.timelineInFrame)
         )
+    }
+
+    private func timelinePreviewMediaReference(project: ProjectSummary) -> ProjectMediaReference? {
+        let seconds = timeline?.sequence.framesToSeconds(playheadFrame) ?? 0
+        return ProjectMediaResolver.resolveTimelinePreview(projectURL: project.path, playheadSeconds: seconds)
     }
 
     var timelineAudioCues: [TimelineAudioCue] {
@@ -279,6 +325,16 @@ final class StudioViewModel: ObservableObject {
         selectedJobReadiness.label
     }
 
+    var commandAvailabilityContext: StudioCommandAvailabilityContext {
+        StudioCommandAvailabilityContext(
+            hasSelectedProject: selectedProject != nil,
+            isAppServerChecking: appServerStatus == .checking,
+            hasActiveThread: activeThreadID != nil,
+            selectedAgentJobCanRun: selectedJobCanRun,
+            hasPendingApproval: pendingApproval != nil
+        )
+    }
+
     var activeAgentRAGContextSummary: String {
         guard !indexContextPack.isEmpty else {
             return "No indexed context selected."
@@ -296,6 +352,11 @@ final class StudioViewModel: ObservableObject {
         )
     }
 
+    private func publishAgentMenuCommandAvailability() {
+        StudioMenuCommandAvailabilityStore.shared.context = commandAvailabilityContext
+        NSApp.mainMenu?.update()
+    }
+
     func refresh() {
         projects = ProjectScanner.scanProjects(in: repositoryRoot)
         if selectedProjectID == nil || !projects.contains(where: { $0.id == selectedProjectID }) {
@@ -306,7 +367,8 @@ final class StudioViewModel: ObservableObject {
     }
 
     private func defaultProjectID() -> ProjectSummary.ID? {
-        projects.first { $0.hasTimeline && $0.stateLabel == "packaged" }?.id
+        Self.preferredReadyProjectID(from: projects)
+            ?? projects.first { $0.hasTimeline && $0.stateLabel == "packaged" }?.id
             ?? projects.first(where: \.hasTimeline)?.id
             ?? projects.first?.id
     }
@@ -353,11 +415,7 @@ final class StudioViewModel: ObservableObject {
     nonisolated private static func preferredReadyProjectID(from projects: [ProjectSummary]) -> ProjectSummary.ID? {
         projects.first { project in
             guard project.hasTimeline else { return false }
-            let sourceMapStatus = ProjectMediaSourceMapStatusReader.status(projectURL: project.path)
-            return sourceMapStatus.exists
-                && sourceMapStatus.assetCount > 0
-                && sourceMapStatus.coveredAssetCount == sourceMapStatus.assetCount
-                && sourceMapStatus.brokenEntries.isEmpty
+            return ProjectMediaResolver.previewSummary(projectURL: project.path, assets: nil).isViewerVideoReady
         }?.id
     }
 
@@ -543,6 +601,7 @@ final class StudioViewModel: ObservableObject {
             roughCutCompilePlan = ProjectRoughCutCompilePlanner.plan(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
             roughCutCompileStatus = "No project selected."
             isCompilingRoughCut = false
+            roughCutCompileActivity = .idle
             clearChangedClipHighlight()
             selectedTimelineClipID = nil
             timelineAudioWaveforms = []
@@ -567,10 +626,9 @@ final class StudioViewModel: ObservableObject {
         evidenceStore = ProjectEvidenceStore.load(projectURL: project.path)
         loadCandidateDataSource(project: project)
         mediaPreviewSummary = ProjectMediaResolver.previewSummary(projectURL: project.path, assets: evidenceStore?.assets)
-        analysisRunPlan = ProjectAnalysisRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: project.path)
-        analysisRunStatus = analysisRunPlan.canRun
-            ? "Ready to analyze \(analysisRunPlan.sourceCount) linked source files."
-            : "Analysis is not runnable: \(analysisRunPlan.readinessLabel)."
+        analysisRunPlan = ProjectAnalysisRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
+        analysisRunStatus = "Checking source analysis readiness..."
+        refreshAnalysisRunPlan(projectID: project.id, projectURL: project.path)
         roughCutCompilePlan = ProjectRoughCutCompilePlanner.plan(repositoryRoot: repositoryRoot, projectURL: project.path)
         roughCutCompileStatus = roughCutCompilePlan.canRun
             ? "Ready to compile timeline.json."
@@ -656,6 +714,21 @@ final class StudioViewModel: ObservableObject {
             audioWaveformStatus = "Waveform unavailable: timeline failed to load."
             setPlayheadFrame(0, forceSeek: true)
             timelineStatus = "Failed to read timeline.json: \(error.localizedDescription)"
+        }
+    }
+
+    private func refreshAnalysisRunPlan(projectID: ProjectSummary.ID, projectURL: URL) {
+        let root = repositoryRoot
+        let options = ProjectAnalysisRunOptions.nativeLocalDefaults
+        Task.detached(priority: .utility) {
+            let plan = ProjectAnalysisRunPlanner.plan(repositoryRoot: root, projectURL: projectURL, options: options)
+            await MainActor.run {
+                guard self.selectedProjectID == projectID else { return }
+                self.analysisRunPlan = plan
+                self.analysisRunStatus = plan.canRun
+                    ? "Ready to analyze \(plan.sourceCount) linked source files locally."
+                    : "Analysis is not runnable: \(plan.readinessLabel)."
+            }
         }
     }
 
@@ -878,11 +951,9 @@ final class StudioViewModel: ObservableObject {
     func jumpToQATimestamp(_ timestampSec: Double) {
         guard let timeline else { return }
         pausePlayback()
-        let frame = Int((max(0, timestampSec) * timeline.sequence.fps).rounded())
-        setPlayheadFrame(frame, forceSeek: true)
-        if let clip = timeline.programSelection(atFrame: frame)?.clip {
-            selectedTimelineClipID = clip.id
-        }
+        let target = timeline.qaTimestampJumpTarget(for: timestampSec)
+        setPlayheadFrame(target.frame, forceSeek: true)
+        selectedTimelineClipID = target.clipID
     }
 
     func togglePlayback() {
@@ -967,14 +1038,17 @@ final class StudioViewModel: ObservableObject {
 
     func checkAppServer() {
         guard appServerStatus != .checking else { return }
+        let plan = preferredAppServerLaunchPlan()
         appServerStatus = .checking
-        appServerDetail = "Starting Codex App Server over stdio..."
+        appServerDetail = "Starting Codex App Server over \(plan.displayName)..."
 
-        let root = repositoryRoot
         Task {
             do {
                 let response = try await Task.detached(priority: .userInitiated) {
-                    let session = CodexAppServerSession(workspace: root)
+                    let session = CodexAppServerSession(
+                        launchPlan: plan,
+                        requestFactory: CodexAppServerRequestFactory(workspace: plan.workspace)
+                    )
                     defer { session.stop() }
                     try session.start()
                     return try session.initialize(timeout: 15)
@@ -995,14 +1069,17 @@ final class StudioViewModel: ObservableObject {
 
     private func startAgentSession(afterStart: (@MainActor () -> Void)?) {
         guard appServerStatus != .checking else { return }
+        let plan = preferredAppServerLaunchPlan()
         appServerStatus = .checking
-        appServerDetail = "Starting a Codex thread for this repository..."
+        appServerDetail = "Starting a Codex thread over \(plan.displayName)..."
 
-        let root = repositoryRoot
         Task {
             do {
                 let result = try await Task.detached(priority: .userInitiated) {
-                    let session = CodexAppServerSession(workspace: root)
+                    let session = CodexAppServerSession(
+                        launchPlan: plan,
+                        requestFactory: CodexAppServerRequestFactory(workspace: plan.workspace)
+                    )
                     try session.start()
                     _ = try session.initialize(timeout: 15)
                     let thread = try session.startThread(ephemeral: false, timeout: 20)
@@ -1021,6 +1098,12 @@ final class StudioViewModel: ObservableObject {
                 appServerDetail = "\(error)"
             }
         }
+    }
+
+    private func preferredAppServerLaunchPlan() -> CodexAppServerLaunchPlan {
+        let plan = CodexAppServerTransportPreferences.launchPlan(workspace: repositoryRoot)
+        appServerPlan = plan
+        return plan
     }
 
     func stopAgentSession() {
@@ -1547,23 +1630,33 @@ final class StudioViewModel: ObservableObject {
             return
         }
 
-        let plan = ProjectAnalysisRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: selectedProject.path)
-        analysisRunPlan = plan
+        guard analysisRunPlan.projectURL == selectedProject.path else {
+            analysisRunStatus = "Analysis readiness is still loading."
+            refreshAnalysisRunPlan(projectID: selectedProject.id, projectURL: selectedProject.path)
+            return
+        }
+
+        let plan = analysisRunPlan
         guard plan.canRun else {
             analysisRunStatus = "Analysis is not runnable: \(plan.readinessLabel)."
             return
         }
 
         isRunningAnalysis = true
-        analysisRunStatus = "Analyzing \(plan.sourceCount) source files..."
+        analysisRunStatus = "Analyzing \(plan.sourceCount) source files locally..."
 
         Task.detached(priority: .userInitiated) {
             do {
                 let result = try ProjectAnalysisRunner.run(plan: plan)
+                let refreshedPlan = ProjectAnalysisRunPlanner.plan(
+                    repositoryRoot: plan.repositoryRoot,
+                    projectURL: selectedProject.path,
+                    options: plan.options
+                )
                 await MainActor.run {
                     self.isRunningAnalysis = false
                     self.evidenceStore = ProjectEvidenceStore.load(projectURL: selectedProject.path)
-                    self.analysisRunPlan = ProjectAnalysisRunPlanner.plan(repositoryRoot: self.repositoryRoot, projectURL: selectedProject.path)
+                    self.analysisRunPlan = refreshedPlan
                     self.planningStatus = ProjectPlanningStatusReader.status(projectURL: selectedProject.path)
                     self.indexStatus = ProjectSQLiteIndex.status(projectURL: selectedProject.path)
                     self.mediaPreviewSummary = ProjectMediaResolver.previewSummary(projectURL: selectedProject.path, assets: self.evidenceStore?.assets)
@@ -1580,7 +1673,7 @@ final class StudioViewModel: ObservableObject {
                     if result.succeeded {
                         let docs = result.indexSummary?.searchDocumentCount ?? self.indexStatus.documentCount
                         self.indexOperationStatus = "Index refreshed after analysis: \(docs) searchable documents."
-                        self.analysisRunStatus = "Analysis completed for \(result.plan.sourceCount) sources."
+                        self.analysisRunStatus = "Local analysis completed for \(result.plan.sourceCount) sources."
                     } else {
                         self.analysisRunStatus = "Analysis failed with exit \(result.exitCode)."
                     }
@@ -1595,7 +1688,11 @@ final class StudioViewModel: ObservableObject {
     }
 
     func compileSelectedProjectRoughCut() {
-        compileSelectedProjectRoughCut(options: ProjectRoughCutCompileOptions(), statusPrefix: "Compiling timeline.json...")
+        compileSelectedProjectRoughCut(
+            options: ProjectRoughCutCompileOptions(),
+            statusPrefix: "Compiling timeline.json...",
+            activity: .roughCut
+        )
     }
 
     func compileSelectedProjectWithReviewPatch() {
@@ -1610,7 +1707,8 @@ final class StudioViewModel: ObservableObject {
         }
         compileSelectedProjectRoughCut(
             options: ProjectRoughCutCompileOptions(patchURL: patchURL),
-            statusPrefix: "Applying review_patch.json and recompiling timeline..."
+            statusPrefix: "Applying review_patch.json and recompiling timeline...",
+            activity: .reviewPatch
         )
     }
 
@@ -1702,6 +1800,7 @@ final class StudioViewModel: ObservableObject {
             let source = envelope.source
 
             isCompilingRoughCut = true
+            roughCutCompileActivity = .studioPatch
             roughCutCompileStatus = "Applying Studio patch and refreshing preview..."
 
             Task {
@@ -1712,6 +1811,7 @@ final class StudioViewModel: ObservableObject {
                         return (result, resultHash)
                     }.value
                     self.isCompilingRoughCut = false
+                    self.roughCutCompileActivity = .idle
                     guard result.succeeded else {
                         self.rollbackFailedStudioPatch(
                             patchURL: patchURL,
@@ -1760,6 +1860,7 @@ final class StudioViewModel: ObservableObject {
                     self.indexOperationStatus = "Index rebuild skipped for Studio preview; run rebuild if search context is stale."
                 } catch {
                     self.isCompilingRoughCut = false
+                    self.roughCutCompileActivity = .idle
                     self.rollbackFailedStudioPatch(
                         patchURL: patchURL,
                         backupURL: backupURL,
@@ -1900,7 +2001,21 @@ final class StudioViewModel: ObservableObject {
             .min()
     }
 
-    private func latestAppliedReplaceSegmentOps(projectURL: URL, historyIndex: PatchHistoryIndex) -> [ReviewPatchOperation] {
+    var canPromoteLatestStudioPatch: Bool {
+        guard let selectedProject else { return false }
+        let historyIndex = PatchHistoryIndex.load(projectURL: selectedProject.path)
+        guard let latestRecord = historyIndex.records.last else { return false }
+        let patchURL = selectedProject.path.appendingPathComponent(latestRecord.patch_path)
+        guard FileManager.default.fileExists(atPath: patchURL.path) else { return false }
+        let plan = ProjectStudioPatchPromotionPlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: selectedProject.path,
+            patchURL: patchURL
+        )
+        return plan.canRun && !latestAppliedPromotableOps(projectURL: selectedProject.path, historyIndex: historyIndex).isEmpty
+    }
+
+    private func latestAppliedPromotableOps(projectURL: URL, historyIndex: PatchHistoryIndex) -> [ReviewPatchOperation] {
         guard let latestRecord = historyIndex.records.last else { return [] }
         let patchURL = projectURL.appendingPathComponent(latestRecord.patch_path)
         guard
@@ -1909,7 +2024,7 @@ final class StudioViewModel: ObservableObject {
         else {
             return []
         }
-        return patch.operations.filter { $0.opName == "replace_segment" }
+        return patch.operations.filter { ["replace_segment", "remove_segment"].contains($0.opName) }
     }
 
     func promoteStudioPatch() {
@@ -1918,12 +2033,43 @@ final class StudioViewModel: ObservableObject {
             return
         }
         let historyIndex = PatchHistoryIndex.load(projectURL: selectedProject.path)
-        guard !historyIndex.records.isEmpty else {
+        guard let latestRecord = historyIndex.records.last else {
             roughCutCompileStatus = "No applied Studio patch to promote."
             return
         }
-        let replaceOps = latestAppliedReplaceSegmentOps(projectURL: selectedProject.path, historyIndex: historyIndex)
-        roughCutCompileStatus = "Promote not yet available. Promote requires scripts/promote-studio-patch.ts (not yet implemented). \(replaceOps.count) replace_segment op(s) found."
+        let promotableOps = latestAppliedPromotableOps(projectURL: selectedProject.path, historyIndex: historyIndex)
+        guard !promotableOps.isEmpty else {
+            roughCutCompileStatus = "Latest Studio patch has no promotable replace/remove operations."
+            return
+        }
+        let patchURL = selectedProject.path.appendingPathComponent(latestRecord.patch_path)
+        let plan = ProjectStudioPatchPromotionPlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: selectedProject.path,
+            patchURL: patchURL
+        )
+        guard plan.canRun else {
+            roughCutCompileStatus = "Studio patch promotion is not runnable: \(plan.readinessLabel)."
+            return
+        }
+
+        roughCutCompileStatus = "Promoting Studio patch to planning artifacts..."
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try ProjectStudioPatchPromotionRunner.run(plan: plan)
+                }.value
+                if result.succeeded, let output = result.output {
+                    self.refresh()
+                    self.roughCutCompileStatus = "Studio patch promoted to planning. \(output.modified_beat_ids.count) beat(s) updated."
+                } else {
+                    let detail = result.output?.warnings.joined(separator: " ") ?? result.stderr
+                    self.roughCutCompileStatus = "Studio patch promotion failed: \(detail)"
+                }
+            } catch {
+                self.roughCutCompileStatus = "Studio patch promotion failed: \(error)"
+            }
+        }
     }
 
     func openSwapBrowser(for clip: TimelineClip) {
@@ -2057,7 +2203,8 @@ final class StudioViewModel: ObservableObject {
 
     private func compileSelectedProjectRoughCut(
         options: ProjectRoughCutCompileOptions,
-        statusPrefix: String
+        statusPrefix: String,
+        activity: RoughCutCompileActivity
     ) {
         guard let selectedProject else {
             roughCutCompileStatus = "Select a project before compiling a rough cut."
@@ -2072,6 +2219,7 @@ final class StudioViewModel: ObservableObject {
         }
 
         isCompilingRoughCut = true
+        roughCutCompileActivity = activity
         roughCutCompileStatus = statusPrefix
 
         Task.detached(priority: .userInitiated) {
@@ -2079,6 +2227,7 @@ final class StudioViewModel: ObservableObject {
                 let result = try ProjectRoughCutCompileRunner.run(plan: plan)
                 await MainActor.run {
                     self.isCompilingRoughCut = false
+                    self.roughCutCompileActivity = .idle
                     self.refresh()
                     self.selectProject(selectedProject.id, userInitiated: false)
                     self.roughCutCompilePlan = ProjectRoughCutCompilePlanner.plan(repositoryRoot: self.repositoryRoot, projectURL: selectedProject.path)
@@ -2096,6 +2245,7 @@ final class StudioViewModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.isCompilingRoughCut = false
+                    self.roughCutCompileActivity = .idle
                     self.roughCutCompileStatus = "Compile failed: \(error)"
                 }
             }
@@ -2138,16 +2288,36 @@ final class StudioViewModel: ObservableObject {
         }
     }
 
-    func chooseAndRelinkSelectedProjectMedia() {
+    func performViewerDiagnosticAction(_ action: ProjectViewerReadinessDiagnostic.Action) {
+        selectedSurface = .ingest
+        switch action {
+        case .relinkSourceMedia:
+            chooseAndRelinkSelectedProjectMedia()
+        case .buildPreviewProxies:
+            buildSelectedProjectMediaProxies()
+        case .buildPreviewMedia:
+            if mediaProxyPlan.pendingCount > 0 {
+                buildSelectedProjectMediaProxies()
+            } else {
+                buildSelectedProjectSyntheticMedia()
+            }
+        case .reviewPreviewSource:
+            mediaRelinkStatus = "Review the current preview source in the Media panel."
+        }
+    }
+
+    func chooseAndRelinkSelectedProjectMedia(includeSynthetic: Bool = false) {
         guard selectedProject != nil else {
             mediaRelinkStatus = "Select a project before relinking media."
             return
         }
 
         let panel = NSOpenPanel()
-        panel.title = "Relink Missing Media"
+        panel.title = includeSynthetic ? "Replace Synthetic Media" : "Relink Missing Media"
         panel.prompt = "Relink"
-        panel.message = "Choose one or more folders or files to search for the selected project's missing source media."
+        panel.message = includeSynthetic
+            ? "Choose one or more folders or files to search for real source media that should replace generated synthetic previews."
+            : "Choose one or more folders or files to search for the selected project's missing source media."
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = true
@@ -2157,10 +2327,10 @@ final class StudioViewModel: ObservableObject {
             mediaRelinkStatus = "Relink cancelled."
             return
         }
-        relinkSelectedProjectMedia(searchRoots: panel.urls)
+        relinkSelectedProjectMedia(searchRoots: panel.urls, includeSynthetic: includeSynthetic)
     }
 
-    func relinkSelectedProjectMediaFromSourceMap() {
+    func relinkSelectedProjectMediaFromSourceMap(includeSynthetic: Bool = false) {
         guard let selectedProject else {
             mediaRelinkStatus = "Select a project before relinking media."
             return
@@ -2178,11 +2348,13 @@ final class StudioViewModel: ObservableObject {
             return
         }
 
-        mediaRelinkStatus = "Scanning \(roots.count) mounted source-map roots."
-        relinkSelectedProjectMedia(searchRoots: roots)
+        mediaRelinkStatus = includeSynthetic
+            ? "Scanning \(roots.count) mounted source-map roots including synthetic previews."
+            : "Scanning \(roots.count) mounted source-map roots."
+        relinkSelectedProjectMedia(searchRoots: roots, includeSynthetic: includeSynthetic)
     }
 
-    func relinkSelectedProjectMedia(searchRoots: [URL]) {
+    func relinkSelectedProjectMedia(searchRoots: [URL], includeSynthetic: Bool = false) {
         guard let selectedProject else {
             mediaRelinkStatus = "Select a project before relinking media."
             return
@@ -2190,7 +2362,12 @@ final class StudioViewModel: ObservableObject {
 
         let projectURL = selectedProject.path
         let assets = evidenceStore?.assets
-        let plan = ProjectMediaRelinker.plan(projectURL: projectURL, searchRoots: searchRoots, assets: assets)
+        let plan = ProjectMediaRelinker.plan(
+            projectURL: projectURL,
+            searchRoots: searchRoots,
+            assets: assets,
+            includeSynthetic: includeSynthetic
+        )
         mediaRelinkPlan = plan
         guard plan.canApply else {
             mediaRelinkStatus = "Relink scan found no matching files."
@@ -2220,7 +2397,7 @@ final class StudioViewModel: ObservableObject {
                     if let timeline = self.timeline {
                         self.loadAudioWaveforms(project: selectedProject, timeline: timeline)
                     }
-                    self.mediaRelinkStatus = "Relinked \(result.linkedCount) files. \(self.mediaPreviewSummary.missingCount) still missing."
+                    self.mediaRelinkStatus = "Relinked \(result.linkedCount) files. \(self.mediaPreviewSummary.missingCount) missing; \(self.mediaPreviewSummary.syntheticPreviewCount) synthetic previews remain."
                 }
             } catch {
                 await MainActor.run {

@@ -227,12 +227,7 @@ struct FootageSearchView: View {
 
     private func use(_ result: FootageSearchRunner.SearchResult) {
         guard let target = targetClip(for: selectedBeatID) else { return }
-        feedbackSession.addOp(.replaceSegment(
-            target_clip_id: target.id,
-            with_segment_id: result.segment_id,
-            with_candidate_ref: "footage_search:\(mode.rawValue)",
-            reason: "Swap selected in Footage Search: \(result.summary ?? result.segment_id)"
-        ))
+        feedbackSession.addOp(result.makeReplaceSegmentOperation(targetClipID: target.id, mode: mode.rawValue))
     }
 
     private func targetClip(for beatID: String) -> TimelineClip? {

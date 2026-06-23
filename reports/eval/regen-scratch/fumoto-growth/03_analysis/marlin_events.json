@@ -1,0 +1,872 @@
+{
+  "project_id": "fumoto-growth",
+  "artifact_version": "marlin-events-v1",
+  "model": {
+    "provider": "marlin",
+    "model_alias": "NemoStation/Marlin-2B",
+    "model_snapshot": "required_for_canonical_runs",
+    "connector_version": "marlin-local-v1",
+    "inference_mode": "live"
+  },
+  "items": [
+    {
+      "asset_id": "AST_01C251D3",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_7167.MOV",
+      "scene": "A young child wearing a blue ' NASA' t-shirt, tan pants, and a blue full-face helmet is riding a small blue and orange push-bike. The setting is an outdoor dirt path or trail winding through a wooded area with tall pine trees and green grass. The path is uneven with small mounds and turns. In the background, another child on a green bike is briefly visible. The camera follows the child as they navigate the trail, capturing their movements from various angles as they approach, turn, and ride away.",
+      "caption": "Scene: A young child wearing a blue ' NASA' t-shirt, tan pants, and a blue full-face helmet is riding a small blue and orange push-bike. The setting is an outdoor dirt path or trail winding through a wooded area with tall pine trees and green grass. The path is uneven with small mounds and turns. In the background, another child on a green bike is briefly visible. The camera follows the child as they navigate the trail, capturing their movements from various angles as they approach, turn, and ride away.\n\nEvents:\n<0.0 - 3.5> The child rides the push-bike toward the camera.\n<3.5 - 5.5> The child turns the bike and rides past the camera.\n<5.5 - 8.5> The child rides the push-bike away down the trail.",
+      "events": [
+        {
+          "event_id": "MEV_AST_01C251D3_0001",
+          "start_us": 0,
+          "end_us": 3500000,
+          "description": "The child rides the push-bike toward the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_01C251D3_0002",
+          "start_us": 3500000,
+          "end_us": 5500000,
+          "description": "The child turns the bike and rides past the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_01C251D3_0003",
+          "start_us": 5500000,
+          "end_us": 8500000,
+          "description": "The child rides the push-bike away down the trail.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 3000000,
+          "span_end_us": 4000000,
+          "format_ok": true,
+          "raw": "From 3.0 to 4.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 3300000,
+          "span_end_us": 4000000,
+          "format_ok": true,
+          "raw": "From 3.3 to 4.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 3000000,
+          "span_end_us": 4000000,
+          "format_ok": true,
+          "raw": "From 3.0 to 4.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 3000000,
+          "span_end_us": 3500000,
+          "format_ok": true,
+          "raw": "From 3.0 to 3.5."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_02DA7FDF",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/VID_20201024_082154.mov",
+      "scene": "A young child wearing a blue helmet and a dark jacket is practicing on a yellow and black balance bike in an outdoor paved area. The setting appears to be a park or a residential courtyard during autumn, with fallen leaves scattered on the ground and trees in the background. The child is attempting to balance on the bike, which has a 'STRIDEK' logo on the handlebars. The camera follows the child's movements, capturing their efforts to maintain balance and eventually fall. The lighting is bright, suggesting a sunny day, with long shadows cast across the patterned stone tiles of the pavement.",
+      "caption": "Scene: A young child wearing a blue helmet and a dark jacket is practicing on a yellow and black balance bike in an outdoor paved area. The setting appears to be a park or a residential courtyard during autumn, with fallen leaves scattered on the ground and trees in the background. The child is attempting to balance on the bike, which has a 'STRIDEK' logo on the handlebars. The camera follows the child's movements, capturing their efforts to maintain balance and eventually fall. The lighting is bright, suggesting a sunny day, with long shadows cast across the patterned stone tiles of the pavement.\n\nEvents:\n<0.0 - 6.5> The child balances on the bike while standing.\n<6.5 - 12.5> The child adjusts their grip and balance.\n<12.5 - 16.5> The child turns the bike to the side.\n<16.5 - 21.0> The child loses balance and falls off.\n<21.0 - 24.1> The child stands over the fallen bike.",
+      "events": [
+        {
+          "event_id": "MEV_AST_02DA7FDF_0001",
+          "start_us": 0,
+          "end_us": 6500000,
+          "description": "The child balances on the bike while standing.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_02DA7FDF_0002",
+          "start_us": 6500000,
+          "end_us": 12500000,
+          "description": "The child adjusts their grip and balance.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_02DA7FDF_0003",
+          "start_us": 12500000,
+          "end_us": 16500000,
+          "description": "The child turns the bike to the side.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_02DA7FDF_0004",
+          "start_us": 16500000,
+          "end_us": 21000000,
+          "description": "The child loses balance and falls off.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_02DA7FDF_0005",
+          "start_us": 21000000,
+          "end_us": 24100000,
+          "description": "The child stands over the fallen bike.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 20000000,
+          "span_end_us": 21000000,
+          "format_ok": true,
+          "raw": "From 20.0 to 21.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 21000000,
+          "span_end_us": 23000000,
+          "format_ok": true,
+          "raw": "From 21.0 to 23.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 21000000,
+          "span_end_us": 23000000,
+          "format_ok": true,
+          "raw": "From 21.0 to 23.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 22000000,
+          "span_end_us": 23000000,
+          "format_ok": true,
+          "raw": "From 22.0 to 23.0."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_0C9FA88A",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_6645.MOV",
+      "scene": "A young child stands in a grassy field next to a dense patch of golden rice. The child is wearing a wide-brimmed green sun hat, a light-colored short-sleeved shirt, and striped pants. In the background, a vast mountain range with snow-capped peaks is visible under a clear blue sky. A paved road runs along the right side of the frame, and a few distant buildings are visible on the horizon. The lighting is bright and sunny, suggesting a clear day. The camera remains relatively stable, capturing the child's movements as they interact with the environment and the camera.",
+      "caption": "Scene: A young child stands in a grassy field next to a dense patch of golden rice. The child is wearing a wide-brimmed green sun hat, a light-colored short-sleeved shirt, and striped pants. In the background, a vast mountain range with snow-capped peaks is visible under a clear blue sky. A paved road runs along the right side of the frame, and a few distant buildings are visible on the horizon. The lighting is bright and sunny, suggesting a clear day. The camera remains relatively stable, capturing the child's movements as they interact with the environment and the camera.\n\nEvents:\n<0.0 - 1.0> The child stands still looking toward the right.\n<1.0 - 2.5> The child turns their head to face the camera.\n<2.5 - 4.0> The child leans forward and steps into the grass.",
+      "events": [
+        {
+          "event_id": "MEV_AST_0C9FA88A_0001",
+          "start_us": 0,
+          "end_us": 1000000,
+          "description": "The child stands still looking toward the right.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_0C9FA88A_0002",
+          "start_us": 1000000,
+          "end_us": 2500000,
+          "description": "The child turns their head to face the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_0C9FA88A_0003",
+          "start_us": 2500000,
+          "end_us": 4000000,
+          "description": "The child leans forward and steps into the grass.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 2000000,
+          "span_end_us": 3000000,
+          "format_ok": true,
+          "raw": "From 2.0 to 3.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 0,
+          "span_end_us": 1000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 1.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 0,
+          "span_end_us": 4000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 4.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 0,
+          "span_end_us": 1000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 1.0."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_15427158",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_4719.mov",
+      "scene": "A young child wearing a blue helmet and a grey hoodie is riding a small, light blue push-bike with orange accents along a paved path. The path is bordered by green grass and trees, with long shadows cast by the child and the camera operator. The camera is held by an adult, whose hands and arms occasionally enter the frame to assist the child. The child is learning to balance and ride, using their feet to propel the bike forward. The environment is bright and sunny, suggesting an outdoor park or residential area during the day. The child's focus is on maintaining balance as they navigate the path, occasionally looking up at the camera operator.",
+      "caption": "Scene: A young child wearing a blue helmet and a grey hoodie is riding a small, light blue push-bike with orange accents along a paved path. The path is bordered by green grass and trees, with long shadows cast by the child and the camera operator. The camera is held by an adult, whose hands and arms occasionally enter the frame to assist the child. The child is learning to balance and ride, using their feet to propel the bike forward. The environment is bright and sunny, suggesting an outdoor park or residential area during the day. The child's focus is on maintaining balance as they navigate the path, occasionally looking up at the camera operator.\n\nEvents:\n<0.0 - 1.5> The child pushes the bike forward with their feet.\n<1.5 - 3.5> The child continues pedaling while the camera operator assists.\n<3.5 - 5.5> The child balances on the bike as the operator reaches out.\n<5.5 - 8.5> The child rides the bike forward along the path.\n<8.5 - 11.5> The child looks up at the camera operator while riding.\n<11.5 - 15.0> The child continues pedaling as the operator's hand appears.\n<15.0 - 18.5> The child rides the bike past a tree.\n<18.5 - 22.0> The child balances the bike while the operator watches.\n<22.0 - 25.0> The child looks up and smiles at the camera.\n<25.0 - 28.5> The child rides the bike forward on the path.\n<28.5 - 31.5> The child looks around while riding the bike.\n<31.5 - 34.5> The child continues pedaling as the camera operator assists.\n<34.5 - 38.4> The child rides the bike toward the end of the clip.",
+      "events": [
+        {
+          "event_id": "MEV_AST_15427158_0001",
+          "start_us": 0,
+          "end_us": 1500000,
+          "description": "The child pushes the bike forward with their feet.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0002",
+          "start_us": 1500000,
+          "end_us": 3500000,
+          "description": "The child continues pedaling while the camera operator assists.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0003",
+          "start_us": 3500000,
+          "end_us": 5500000,
+          "description": "The child balances on the bike as the operator reaches out.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0004",
+          "start_us": 5500000,
+          "end_us": 8500000,
+          "description": "The child rides the bike forward along the path.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0005",
+          "start_us": 8500000,
+          "end_us": 11500000,
+          "description": "The child looks up at the camera operator while riding.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0006",
+          "start_us": 11500000,
+          "end_us": 15000000,
+          "description": "The child continues pedaling as the operator's hand appears.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0007",
+          "start_us": 15000000,
+          "end_us": 18500000,
+          "description": "The child rides the bike past a tree.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0008",
+          "start_us": 18500000,
+          "end_us": 22000000,
+          "description": "The child balances the bike while the operator watches.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0009",
+          "start_us": 22000000,
+          "end_us": 25000000,
+          "description": "The child looks up and smiles at the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0010",
+          "start_us": 25000000,
+          "end_us": 28500000,
+          "description": "The child rides the bike forward on the path.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0011",
+          "start_us": 28500000,
+          "end_us": 31500000,
+          "description": "The child looks around while riding the bike.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0012",
+          "start_us": 31500000,
+          "end_us": 34500000,
+          "description": "The child continues pedaling as the camera operator assists.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_15427158_0013",
+          "start_us": 34500000,
+          "end_us": 38400000,
+          "description": "The child rides the bike toward the end of the clip.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 33000000,
+          "span_end_us": 35000000,
+          "format_ok": true,
+          "raw": "From 33.0 to 35.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 24000000,
+          "span_end_us": 25000000,
+          "format_ok": true,
+          "raw": "From 24.0 to 25.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 24000000,
+          "span_end_us": 25000000,
+          "format_ok": true,
+          "raw": "From 24.0 to 25.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 0,
+          "span_end_us": 1500000,
+          "format_ok": true,
+          "raw": "From 0.0 to 1.5."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_19B25163",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_1311.MOV",
+      "scene": "A young child is riding a small, light-blue push-bike with orange front forks along a paved path. The child is wearing a bright yellow and black jacket, white pants, and a blue and black full-face helmet. The setting is an outdoor area with flooded rice paddies on one side and a grassy embankment with some buildings and trees in the background. The sky is overcast, and the ground appears damp. The camera follows the child from various angles, including side profiles and rear views, as they navigate the path. The child appears to be practicing balance and pedaling, occasionally looking back or forward while maintaining their grip on the handlebars.",
+      "caption": "Scene: A young child is riding a small, light-blue push-bike with orange front forks along a paved path. The child is wearing a bright yellow and black jacket, white pants, and a blue and black full-face helmet. The setting is an outdoor area with flooded rice paddies on one side and a grassy embankment with some buildings and trees in the background. The sky is overcast, and the ground appears damp. The camera follows the child from various angles, including side profiles and rear views, as they navigate the path. The child appears to be practicing balance and pedaling, occasionally looking back or forward while maintaining their grip on the handlebars.\n\nEvents:\n<0.0 - 3.5> The child rides the bike forward along the path.\n<3.5 - 6.5> The child turns the bike to face the camera.\n<6.5 - 10.5> The child turns the bike away from the camera.\n<10.5 - 13.5> The child rides the bike away down the path.\n<13.5 - 16.5> The child turns the bike back to the side.\n<16.5 - 21.0> The child rides the bike forward in a side profile.\n<21.0 - 26.1> The child turns the bike and rides away again.",
+      "events": [
+        {
+          "event_id": "MEV_AST_19B25163_0001",
+          "start_us": 0,
+          "end_us": 3500000,
+          "description": "The child rides the bike forward along the path.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_19B25163_0002",
+          "start_us": 3500000,
+          "end_us": 6500000,
+          "description": "The child turns the bike to face the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_19B25163_0003",
+          "start_us": 6500000,
+          "end_us": 10500000,
+          "description": "The child turns the bike away from the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_19B25163_0004",
+          "start_us": 10500000,
+          "end_us": 13500000,
+          "description": "The child rides the bike away down the path.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_19B25163_0005",
+          "start_us": 13500000,
+          "end_us": 16500000,
+          "description": "The child turns the bike back to the side.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_19B25163_0006",
+          "start_us": 16500000,
+          "end_us": 21000000,
+          "description": "The child rides the bike forward in a side profile.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_19B25163_0007",
+          "start_us": 21000000,
+          "end_us": 26100000,
+          "description": "The child turns the bike and rides away again.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 22000000,
+          "span_end_us": 25000000,
+          "format_ok": true,
+          "raw": "From 22.0 to 25.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 14000000,
+          "span_end_us": 15000000,
+          "format_ok": true,
+          "raw": "From 14.0 to 15.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 14000000,
+          "span_end_us": 15000000,
+          "format_ok": true,
+          "raw": "From 14.0 to 15.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 24000000,
+          "span_end_us": 25900000,
+          "format_ok": true,
+          "raw": "From 24.0 to 25.9."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_2F5B86AF",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_4342.MOV",
+      "scene": "A young child wearing a blue helmet, a beige long-sleeved shirt, and yellow pants is riding a yellow and black balance bike on a paved outdoor area. The setting appears to be a schoolyard or a park, with a soccer goal visible in the background and a building with large windows and a yellow exterior further down the path. The ground is asphalt, and there are trees and grassy areas bordering the path. The child is positioned in the center of the frame, initially facing the camera before turning to ride away into the distance. The camera follows the child's movement, maintaining a side-view perspective for the first half of the clip before switching to a rear-view perspective as the child moves further away.",
+      "caption": "Scene: A young child wearing a blue helmet, a beige long-sleeved shirt, and yellow pants is riding a yellow and black balance bike on a paved outdoor area. The setting appears to be a schoolyard or a park, with a soccer goal visible in the background and a building with large windows and a yellow exterior further down the path. The ground is asphalt, and there are trees and grassy areas bordering the path. The child is positioned in the center of the frame, initially facing the camera before turning to ride away into the distance. The camera follows the child's movement, maintaining a side-view perspective for the first half of the clip before switching to a rear-view perspective as the child moves further away.\n\nEvents:\n<0.0 - 1.5> The child sits still on the balance bike.\n<1.5 - 15.5> The child pedals the balance bike forward.\n<15.5 - 19.2> The child continues riding away from the camera.",
+      "events": [
+        {
+          "event_id": "MEV_AST_2F5B86AF_0001",
+          "start_us": 0,
+          "end_us": 1500000,
+          "description": "The child sits still on the balance bike.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_2F5B86AF_0002",
+          "start_us": 1500000,
+          "end_us": 15500000,
+          "description": "The child pedals the balance bike forward.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_2F5B86AF_0003",
+          "start_us": 15500000,
+          "end_us": 19200000,
+          "description": "The child continues riding away from the camera.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 0,
+          "span_end_us": 19000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 19.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 16000000,
+          "span_end_us": 19000000,
+          "format_ok": true,
+          "raw": "From 16.0 to 19.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 14000000,
+          "span_end_us": 17000000,
+          "format_ok": true,
+          "raw": "From 14.0 to 17.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 16000000,
+          "span_end_us": 17000000,
+          "format_ok": true,
+          "raw": "From 16.0 to 17.0."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_34EA5E88",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_4342.MOV",
+      "scene": "A young child wearing a blue helmet, a beige long-sleeved shirt, and yellow pants is riding a yellow and black balance bike on a paved outdoor area. The setting appears to be a schoolyard or a park, with a soccer goal visible in the background and a building with large windows and a yellow exterior further down the path. The ground is asphalt, and there are trees and grassy areas bordering the path. The child is positioned in the center of the frame, initially facing the camera before turning to ride away into the distance. The camera follows the child's movement, maintaining a side-view perspective for the first half of the clip before switching to a rear-view perspective as the child moves further away.",
+      "caption": "Scene: A young child wearing a blue helmet, a beige long-sleeved shirt, and yellow pants is riding a yellow and black balance bike on a paved outdoor area. The setting appears to be a schoolyard or a park, with a soccer goal visible in the background and a building with large windows and a yellow exterior further down the path. The ground is asphalt, and there are trees and grassy areas bordering the path. The child is positioned in the center of the frame, initially facing the camera before turning to ride away into the distance. The camera follows the child's movement, maintaining a side-view perspective for the first half of the clip before switching to a rear-view perspective as the child moves further away.\n\nEvents:\n<0.0 - 1.5> The child sits still on the balance bike.\n<1.5 - 15.5> The child pedals the balance bike forward.\n<15.5 - 19.2> The child continues riding away from the camera.",
+      "events": [
+        {
+          "event_id": "MEV_AST_34EA5E88_0001",
+          "start_us": 0,
+          "end_us": 1500000,
+          "description": "The child sits still on the balance bike.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_34EA5E88_0002",
+          "start_us": 1500000,
+          "end_us": 15500000,
+          "description": "The child pedals the balance bike forward.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_34EA5E88_0003",
+          "start_us": 15500000,
+          "end_us": 19200000,
+          "description": "The child continues riding away from the camera.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 0,
+          "span_end_us": 19000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 19.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 16000000,
+          "span_end_us": 19000000,
+          "format_ok": true,
+          "raw": "From 16.0 to 19.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 14000000,
+          "span_end_us": 17000000,
+          "format_ok": true,
+          "raw": "From 14.0 to 17.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 16000000,
+          "span_end_us": 17000000,
+          "format_ok": true,
+          "raw": "From 16.0 to 17.0."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_3D474C76",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_0805.MOV",
+      "scene": "A baby is lying on a colorful, patterned play mat featuring various animal illustrations like lions, tigers, and elephants. The baby is wearing a white sleeveless onesie. A wooden hanging toy, shaped like a monkey with red and yellow beads, is suspended from the ceiling by a red string. The baby is actively engaged with the toy, reaching out with their hands to grab and pull at the monkey's body. The setting appears to be a domestic indoor environment, likely a play area or a baby crib, with a woven mat visible in the background. The camera remains relatively stable, focusing on the baby's upper body and head as they interact with the hanging toy.",
+      "caption": "Scene: A baby is lying on a colorful, patterned play mat featuring various animal illustrations like lions, tigers, and elephants. The baby is wearing a white sleeveless onesie. A wooden hanging toy, shaped like a monkey with red and yellow beads, is suspended from the ceiling by a red string. The baby is actively engaged with the toy, reaching out with their hands to grab and pull at the monkey's body. The setting appears to be a domestic indoor environment, likely a play area or a baby crib, with a woven mat visible in the background. The camera remains relatively stable, focusing on the baby's upper body and head as they interact with the hanging toy.\n\nEvents:\n<0.0 - 1.0> The baby reaches up and grabs the hanging toy.\n<1.0 - 2.0> The baby pulls the toy away from the ceiling.\n<2.0 - 3.5> The baby reaches back up to grab the toy.\n<3.5 - 5.0> The baby pulls the toy down toward their chest.\n<5.0 - 6.5> The baby reaches up and grabs the toy again.\n<6.5 - 8.5> The baby pulls the toy down and then up.\n<8.5 - 10.5> The baby reaches up and grabs the toy.\n<10.5 - 12.0> The baby pulls the toy down and then up.\n<12.0 - 13.1> The baby reaches up and grabs the toy.",
+      "events": [
+        {
+          "event_id": "MEV_AST_3D474C76_0001",
+          "start_us": 0,
+          "end_us": 1000000,
+          "description": "The baby reaches up and grabs the hanging toy.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0002",
+          "start_us": 1000000,
+          "end_us": 2000000,
+          "description": "The baby pulls the toy away from the ceiling.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0003",
+          "start_us": 2000000,
+          "end_us": 3500000,
+          "description": "The baby reaches back up to grab the toy.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0004",
+          "start_us": 3500000,
+          "end_us": 5000000,
+          "description": "The baby pulls the toy down toward their chest.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0005",
+          "start_us": 5000000,
+          "end_us": 6500000,
+          "description": "The baby reaches up and grabs the toy again.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0006",
+          "start_us": 6500000,
+          "end_us": 8500000,
+          "description": "The baby pulls the toy down and then up.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0007",
+          "start_us": 8500000,
+          "end_us": 10500000,
+          "description": "The baby reaches up and grabs the toy.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0008",
+          "start_us": 10500000,
+          "end_us": 12000000,
+          "description": "The baby pulls the toy down and then up.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_3D474C76_0009",
+          "start_us": 12000000,
+          "end_us": 13100000,
+          "description": "The baby reaches up and grabs the toy.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 10900000,
+          "span_end_us": 11600000,
+          "format_ok": true,
+          "raw": "From 10.9 to 11.6."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 10000000,
+          "span_end_us": 11000000,
+          "format_ok": true,
+          "raw": "From 10.0 to 11.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 10000000,
+          "span_end_us": 11000000,
+          "format_ok": true,
+          "raw": "From 10.0 to 11.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 10000000,
+          "span_end_us": 12000000,
+          "format_ok": true,
+          "raw": "From 10.0 to 12.0."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_45310186",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_0944.mov",
+      "scene": "An outdoor dirt bike track is set up in a wooded area with lush green trees in the background. A young boy wearing a blue helmet and a blue t-shirt is riding a small blue mountain bike with orange accents. In the background, a person is standing behind a blue and white 'Kobalt' branded stand, likely managing the track. To the left, a woman in a white shirt and a child in a pink shirt are seated on a wooden bench near a stroller. The foreground is dominated by a large, light-colored dirt mound that the boy is navigating. The ground is a mix of dirt and gravel, typical of a specialized bike course.",
+      "caption": "Scene: An outdoor dirt bike track is set up in a wooded area with lush green trees in the background. A young boy wearing a blue helmet and a blue t-shirt is riding a small blue mountain bike with orange accents. In the background, a person is standing behind a blue and white 'Kobalt' branded stand, likely managing the track. To the left, a woman in a white shirt and a child in a pink shirt are seated on a wooden bench near a stroller. The foreground is dominated by a large, light-colored dirt mound that the boy is navigating. The ground is a mix of dirt and gravel, typical of a specialized bike course.\n\nEvents:\n<0.0 - 1.0> The boy rides the bike over a dirt mound.\n<1.0 - 2.0> The boy jumps the bike over a small hump.\n<2.0 - 3.0> The boy lands and continues riding forward.\n<3.0 - 4.0> The boy rides the bike across the dirt path.\n<4.0 - 5.1> The boy rides the bike out of the frame.",
+      "events": [
+        {
+          "event_id": "MEV_AST_45310186_0001",
+          "start_us": 0,
+          "end_us": 1000000,
+          "description": "The boy rides the bike over a dirt mound.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_45310186_0002",
+          "start_us": 1000000,
+          "end_us": 2000000,
+          "description": "The boy jumps the bike over a small hump.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_45310186_0003",
+          "start_us": 2000000,
+          "end_us": 3000000,
+          "description": "The boy lands and continues riding forward.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_45310186_0004",
+          "start_us": 3000000,
+          "end_us": 4000000,
+          "description": "The boy rides the bike across the dirt path.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_45310186_0005",
+          "start_us": 4000000,
+          "end_us": 5100000,
+          "description": "The boy rides the bike out of the frame.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 0,
+          "span_end_us": 1000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 1.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 3000000,
+          "span_end_us": 4000000,
+          "format_ok": true,
+          "raw": "From 3.0 to 4.0."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 0,
+          "span_end_us": 1000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 1.0."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 3200000,
+          "span_end_us": 5100000,
+          "format_ok": true,
+          "raw": "From 3.2 to 5.1."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_50EBFBBE",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_1163.mov",
+      "scene": "A park setting featuring a grassy hill with a dirt path, surrounded by green bushes and trees. A paved walkway runs along the bottom of the hill, bordered by a low stone curb. In the background, a large, open paved plaza is visible, bordered by more trees and a distant hill. A young child wearing a blue helmet and a striped shirt is riding a small blue and orange bicycle. The camera follows the child as they navigate the path and enter the plaza, capturing the transition from a natural, wooded environment to a more open public space.",
+      "caption": "Scene: A park setting featuring a grassy hill with a dirt path, surrounded by green bushes and trees. A paved walkway runs along the bottom of the hill, bordered by a low stone curb. In the background, a large, open paved plaza is visible, bordered by more trees and a distant hill. A young child wearing a blue helmet and a striped shirt is riding a small blue and orange bicycle. The camera follows the child as they navigate the path and enter the plaza, capturing the transition from a natural, wooded environment to a more open public space.\n\nEvents:\n<0.0 - 1.5> The camera pans across the park landscape.\n<1.5 - 3.5> A child rides a bicycle down the grassy path.\n<3.5 - 5.5> The child turns and rides toward the camera.\n<5.5 - 8.1> The child rides away into the open plaza.",
+      "events": [
+        {
+          "event_id": "MEV_AST_50EBFBBE_0001",
+          "start_us": 0,
+          "end_us": 1500000,
+          "description": "The camera pans across the park landscape.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_50EBFBBE_0002",
+          "start_us": 1500000,
+          "end_us": 3500000,
+          "description": "A child rides a bicycle down the grassy path.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_50EBFBBE_0003",
+          "start_us": 3500000,
+          "end_us": 5500000,
+          "description": "The child turns and rides toward the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_50EBFBBE_0004",
+          "start_us": 5500000,
+          "end_us": 8100000,
+          "description": "The child rides away into the open plaza.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 5000000,
+          "span_end_us": 6000000,
+          "format_ok": true,
+          "raw": "From 5.0 to 6.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 5000000,
+          "span_end_us": 5500000,
+          "format_ok": true,
+          "raw": "From 5.0 to 5.5."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 5000000,
+          "span_end_us": 5500000,
+          "format_ok": true,
+          "raw": "From 5.0 to 5.5."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 0,
+          "span_end_us": 1500000,
+          "format_ok": true,
+          "raw": "From 0.0 to 1.5."
+        }
+      ]
+    },
+    {
+      "asset_id": "AST_5395FFCE",
+      "source_path": "/Volumes/Extreme 500/動画/麓太朗自転車/IMG_1004.MOV",
+      "scene": "A young child wearing a blue helmet, white t-shirt, and white shorts is riding a small blue and orange mountain bike through a wooded trail area. The setting is a dirt path surrounded by tall, thin trees with green foliage. The path features several man-made obstacles, including a long wooden log and small mounds or ramps designed for bike riding. The camera follows the child from a side-on perspective as they navigate the course, eventually moving behind them as they head toward a larger dirt mound in the distance. The lighting is bright and natural, suggesting a sunny day in a park or forest environment.",
+      "caption": "Scene: A young child wearing a blue helmet, white t-shirt, and white shorts is riding a small blue and orange mountain bike through a wooded trail area. The setting is a dirt path surrounded by tall, thin trees with green foliage. The path features several man-made obstacles, including a long wooden log and small mounds or ramps designed for bike riding. The camera follows the child from a side-on perspective as they navigate the course, eventually moving behind them as they head toward a larger dirt mound in the distance. The lighting is bright and natural, suggesting a sunny day in a park or forest environment.\n\nEvents:\n<0.0 - 1.0> The child rides the bike toward a wooden log.\n<1.0 - 2.0> The child jumps the bike over the wooden log.\n<2.0 - 3.5> The child lands and continues riding forward.\n<3.5 - 4.5> The child jumps the bike over a small mound.\n<4.5 - 8.0> The child rides the bike across the dirt path.\n<8.0 - 9.0> The child jumps the bike over another small mound.\n<9.0 - 10.0> The child rides the bike toward the camera.\n<10.0 - 12.3> The child rides the bike away from the camera.",
+      "events": [
+        {
+          "event_id": "MEV_AST_5395FFCE_0001",
+          "start_us": 0,
+          "end_us": 1000000,
+          "description": "The child rides the bike toward a wooden log.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_5395FFCE_0002",
+          "start_us": 1000000,
+          "end_us": 2000000,
+          "description": "The child jumps the bike over the wooden log.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_5395FFCE_0003",
+          "start_us": 2000000,
+          "end_us": 3500000,
+          "description": "The child lands and continues riding forward.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_5395FFCE_0004",
+          "start_us": 3500000,
+          "end_us": 4500000,
+          "description": "The child jumps the bike over a small mound.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_5395FFCE_0005",
+          "start_us": 4500000,
+          "end_us": 8000000,
+          "description": "The child rides the bike across the dirt path.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_5395FFCE_0006",
+          "start_us": 8000000,
+          "end_us": 9000000,
+          "description": "The child jumps the bike over another small mound.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_5395FFCE_0007",
+          "start_us": 9000000,
+          "end_us": 10000000,
+          "description": "The child rides the bike toward the camera.",
+          "source_pass": "marlin_caption"
+        },
+        {
+          "event_id": "MEV_AST_5395FFCE_0008",
+          "start_us": 10000000,
+          "end_us": 12300000,
+          "description": "The child rides the bike away from the camera.",
+          "source_pass": "marlin_caption"
+        }
+      ],
+      "find_results": [
+        {
+          "query": "the strongest action moment",
+          "span_start_us": 0,
+          "span_end_us": 1000000,
+          "format_ok": true,
+          "raw": "From 0.0 to 1.0."
+        },
+        {
+          "query": "the strongest emotional reaction",
+          "span_start_us": 10000000,
+          "span_end_us": 12300000,
+          "format_ok": true,
+          "raw": "From 10.0 to 12.3."
+        },
+        {
+          "query": "a clear visual reveal",
+          "span_start_us": 10000000,
+          "span_end_us": 12300000,
+          "format_ok": true,
+          "raw": "From 10.0 to 12.3."
+        },
+        {
+          "query": "a person enters or exits",
+          "span_start_us": 0,
+          "span_end_us": 500000,
+          "format_ok": true,
+          "raw": "From 0.0 to 0.5."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,362 @@
+[
+  {
+    "hash": "2f71fb052ac1a533c51cf24c5604370a4ba56b9e2410e3ed30a10d477ffc4d4a",
+    "asset_id": "AST_00725A11",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T084.MOV"
+  },
+  {
+    "hash": "5b5ec3db71095cd7e52011d68d5ee6f436f710defa969107718640d5a44d6a49",
+    "asset_id": "AST_038AB86F",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T001.MOV"
+  },
+  {
+    "hash": "85603257dc3d6515859e394fb2dff9adfbf59515fd172bd0c27e51b15ce0fb16",
+    "asset_id": "AST_06D3223E",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T056.MOV"
+  },
+  {
+    "hash": "82cbfd517f39e5f41fb1e86742aef6291c529257961020a8b209afecef72bcf5",
+    "asset_id": "AST_08BC00DF",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T071.MOV"
+  },
+  {
+    "hash": "d42cd0881e5f978c8c3427aac9e7d9cb470426dd8759607ac872a8fc8f559461",
+    "asset_id": "AST_0AD9FD1C",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T035.MOV"
+  },
+  {
+    "hash": "d9fc628cb2d02e0e910f45378987c61e53e8469c9fcdcb9f23d3bdfed7753e6b",
+    "asset_id": "AST_0C10D8D8",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T039.MOV"
+  },
+  {
+    "hash": "67b1a925b813985d0cd7c0285f7b3d6b74eaeefd127d7d276d34d85bb9da4405",
+    "asset_id": "AST_1AA38FF9",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T243.MOV"
+  },
+  {
+    "hash": "0106dbec452f7da8a2f4283c0d7195761afb3a6ca96425eeaf06d62713c4949d",
+    "asset_id": "AST_1FD2260C",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T177.MOV"
+  },
+  {
+    "hash": "d486e535519dbb95f0b50a63ba3358ca621cd44f6d886cae7dfb8992b3c64a62",
+    "asset_id": "AST_2373D82B",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T074.MOV"
+  },
+  {
+    "hash": "7792a2f5eb8faf5197a65c46c814e26caed7b2a7219fc91636b5a2d8b84674cd",
+    "asset_id": "AST_2759B31C",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T010.MOV"
+  },
+  {
+    "hash": "914c61f71f27708588f85ca58662d44a3facda2467bb4ecb56070c21208aab3a",
+    "asset_id": "AST_287B7B3F",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T003.MOV"
+  },
+  {
+    "hash": "4378858660f62bc518c733723877361aced19df35e0447ad349cb0b3a216c13e",
+    "asset_id": "AST_29C1662F",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T221.MOV"
+  },
+  {
+    "hash": "9d2ab741141d121e81b000e3c5f6dc910e97fd5ce236b752c6d0153216156348",
+    "asset_id": "AST_330996D5",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T098.MOV"
+  },
+  {
+    "hash": "2b461e8c4c27d7aaadde8bbc585ec83877034fbd7e0b6babb8bc5bcc8869f456",
+    "asset_id": "AST_34237612",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T241.MOV"
+  },
+  {
+    "hash": "f7a5ceee167c764035e41e275e75e97a672956fde8ce685a27953908f1d5f596",
+    "asset_id": "AST_343F59BE",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/DJI_0075.MOV"
+  },
+  {
+    "hash": "14368c323983da0bbb4f4e85a4c3af3f6530c035b25cf79aa2f8b55f0459a66c",
+    "asset_id": "AST_34FEC43F",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T249.MOV"
+  },
+  {
+    "hash": "ce93720cb22428c887bb99d23e52e4f689a2e54bf08b9c230426d3a67b0db8a3",
+    "asset_id": "AST_38AC5E78",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T167.MOV"
+  },
+  {
+    "hash": "af6dc4530ef84610974f50c33041ba7a265ae46312b272e1e87cebb1bfd06b31",
+    "asset_id": "AST_399510B7",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T018.MOV"
+  },
+  {
+    "hash": "74aacb06f5003157bbb2ba266faf82fabfccba56cfac3495dbd40974d9675e10",
+    "asset_id": "AST_43E0E46A",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T042.MOV"
+  },
+  {
+    "hash": "d6a47b9dd791151c6aedb3ae78302e8cace95467f9071e6d523fa8a88543554a",
+    "asset_id": "AST_44EFC7B2",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T030.MOV"
+  },
+  {
+    "hash": "4ebcec542e8221085e2e9ba61e7522e611c088c900642ba85075badd57ffce6a",
+    "asset_id": "AST_4E3BBB2A",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T029.MOV"
+  },
+  {
+    "hash": "b8c6013d6407c735b9d2202e7dc62fd763b82797915224da22c074041d6afc97",
+    "asset_id": "AST_50CC5A4E",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T067.MOV"
+  },
+  {
+    "hash": "6a14f2b074ee7af82e5c5ea7a7ae01dcf64cfb1b61bafb94c89d066510611a0e",
+    "asset_id": "AST_54FA9ED0",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T058.MOV"
+  },
+  {
+    "hash": "7f3c53ac423c8b4af054a97a32bf16dacf632ab4f82cd9cf473534a60aa0cd61",
+    "asset_id": "AST_5D2B5B35",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T050.MOV"
+  },
+  {
+    "hash": "a046c787109176dceacf8476f20ef724657d166560ff1fc59cee003f72a65b02",
+    "asset_id": "AST_5DFD06CE",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T020.MOV"
+  },
+  {
+    "hash": "39ac794546e16ca605c9f72cb58876fe36c61ad49d2da564e8459a1d1f66ef18",
+    "asset_id": "AST_6793F326",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T037.MOV"
+  },
+  {
+    "hash": "3992830c0e6dfc83e9431fd50699d67247e17c05ba9e8fbd9f3a4c2149eb162a",
+    "asset_id": "AST_6E4BB9B4",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T016.MOV"
+  },
+  {
+    "hash": "34ecc3626e24e65087d692e0759cec146346b8d9afd6eb35e203bd18b8ac1186",
+    "asset_id": "AST_7647C815",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T026.MOV"
+  },
+  {
+    "hash": "e020644973589e5722122888a99c5274e1426f7896dea8313d3e3daf72b0c8f5",
+    "asset_id": "AST_79DA5F7C",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T012.MOV"
+  },
+  {
+    "hash": "eec3e21a5dfa572abe51df86f718789187f2b608313731e665106bafaa971bae",
+    "asset_id": "AST_7A0CC62D",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T023.MOV"
+  },
+  {
+    "hash": "c7cb29aa7c7213d9e4e7fd05c58a9f88a29f4a33b33305a431040a9513570ea0",
+    "asset_id": "AST_83763628",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/DJI_0077.MOV"
+  },
+  {
+    "hash": "86adc6f25a0c5fd37463b41f9f10759c7408028aaeb4b9d576e58bda42303b46",
+    "asset_id": "AST_8855E384",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T128.MOV"
+  },
+  {
+    "hash": "e90475c2519d7021e094b65c1a949d589c0c2d3e0985df6e8d53afc3a257b181",
+    "asset_id": "AST_8A0FFB9A",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T005.MOV"
+  },
+  {
+    "hash": "f5bfa47b601ba5cd5e33e0f6370c27e584aa42513e83941c5c55fceb1aa7ba1b",
+    "asset_id": "AST_8E953316",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T139.MOV"
+  },
+  {
+    "hash": "c82bcb3d5dc506eb455a920b61e9bb922fefcd59e80e4fd79af17bcf2f70b52a",
+    "asset_id": "AST_8F24F2A0",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T234.MOV"
+  },
+  {
+    "hash": "b7a1a7cf9560fb8e89fd2fddb1d18e67176beb8448407ddd166ceb1fa24e7240",
+    "asset_id": "AST_97B20168",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T295.MOV"
+  },
+  {
+    "hash": "3319a0b2f61e49998683f7fa9c1a5364dce57fe3641b4f0333c15422b5958017",
+    "asset_id": "AST_99161EEB",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T062.MOV"
+  },
+  {
+    "hash": "b5de2b4870fd547b9033b821930ec2b776e5eb4fcdb46a6ba6e2ceae71527bd4",
+    "asset_id": "AST_A52773F3",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T296.MOV"
+  },
+  {
+    "hash": "5e18923fa48756ed43b8ade455183adf4120f6f771e0c61895583b281d8ce8b4",
+    "asset_id": "AST_AB1AD3B9",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T015.MOV"
+  },
+  {
+    "hash": "4fa4d9ad5265dd7f39d5cc70c616e1f45344672df957d43a6e2fdae31e50acc8",
+    "asset_id": "AST_B2342E8C",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T028.MOV"
+  },
+  {
+    "hash": "6ee3b9c0041b95456e7795d880e54059874bb4dd8ad551639a1ef0afde2a5700",
+    "asset_id": "AST_B254ED8B",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T009.MOV"
+  },
+  {
+    "hash": "385d3bec41b8f2ee23c58466d9b448b6275e295fd72ac1c93369caf6c304408b",
+    "asset_id": "AST_B314D9EC",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T033.MOV"
+  },
+  {
+    "hash": "96a91b1c9eee58cd9244451da0dafe0dadb09eb3c203bc6319637d6bc9aebc49",
+    "asset_id": "AST_B32B0A34",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T285.MOV"
+  },
+  {
+    "hash": "46f04baabddeffce9eb99fb203df9600ff234962c8d11a33eb4e2b555149139e",
+    "asset_id": "AST_B39BAEE6",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T027.MOV"
+  },
+  {
+    "hash": "4e5da3a3b96ff74d9ba28193e9b219692e8ab3e7bbb97bf76a383e0099545faa",
+    "asset_id": "AST_B8612888",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/DJI_0078.MOV"
+  },
+  {
+    "hash": "49c7b52a77b66141db580ce9d84ca6927c37f2c35504a63f9cbbbca9dfefa2bd",
+    "asset_id": "AST_BE79D064",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T233.MOV"
+  },
+  {
+    "hash": "80621a89cc48eca8233d8951634948d3625845c888c5dca68d0c4f6edc49dae7",
+    "asset_id": "AST_C05C0DCE",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T205.MOV"
+  },
+  {
+    "hash": "50fea2b6a05939c9243764efa6b046c7790392d59bb931fb7cdabc07f04d6ce0",
+    "asset_id": "AST_C216ACFE",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T004.MOV"
+  },
+  {
+    "hash": "5dcd5d4124628c8dcd43fa8b38481dd5fbfad6a939bc66a0d33cc488c9ee2f0a",
+    "asset_id": "AST_C7D644B1",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T036.MOV"
+  },
+  {
+    "hash": "e21317fd1ba5019d443a6fa8e9d8279d6fe0e53f51f23eb1af7055799473a0b7",
+    "asset_id": "AST_CBCA942F",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T079.MOV"
+  },
+  {
+    "hash": "2814460c1cd0afcfe685160be98f96bd43963c49dbc0b300f00c75cd0a6f1d54",
+    "asset_id": "AST_D0AC82AF",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T138.MOV"
+  },
+  {
+    "hash": "761f5ec28436b167930e928b5e11a321fb5234a410d94aa3150fd0c793691943",
+    "asset_id": "AST_D16E3D7A",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T019.MOV"
+  },
+  {
+    "hash": "d1ed250f0b3f9aefb986b09d0293f84afbe6b332a6c4c9e139970a23719bd5c2",
+    "asset_id": "AST_DFE104F9",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T146.MOV"
+  },
+  {
+    "hash": "397bf24c69be8e65b74e40c57f92c81682a5990d44f82c9be498b88e71826492",
+    "asset_id": "AST_E2CEF3DB",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T152.MOV"
+  },
+  {
+    "hash": "0240a9d45cc7c7c30def370281732f43a44ae0f8529f2205a891fe27944a96c4",
+    "asset_id": "AST_ECA4E6B4",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/DJI_0076.MOV"
+  },
+  {
+    "hash": "40fcd2e747e92d908cdc8deea4f4940f8741a68f2ab87d2057613071068250a6",
+    "asset_id": "AST_F010BF35",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T031.MOV"
+  },
+  {
+    "hash": "f3926b9caf1a2066d377bede2c0d055860f6fb8eae63a47f24cbdeb4c03a3616",
+    "asset_id": "AST_F11D204E",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T034.MOV"
+  },
+  {
+    "hash": "3c15ee5b0d28b65f6b6c25cc34c572d76ebce831bbdc7f5677c1c0523030e63c",
+    "asset_id": "AST_F45A9E48",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T008.MOV"
+  },
+  {
+    "hash": "1b3d56f56be9af60439fc3d631eb0736b3a185b4c87bc7e0c1cca4cbd39837f0",
+    "asset_id": "AST_F465D53F",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T135.MOV"
+  },
+  {
+    "hash": "dd0e6e14625cf8be855550c6ed254927cb071c03b767f5f47b7e36eedca24cf9",
+    "asset_id": "AST_F4D174A3",
+    "cached_at": "2026-06-16T04:43:59.308Z",
+    "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/reports/eval/togakushi-golden/_staging/NINJAV_S001_S001_T141.MOV"
+  }
+]

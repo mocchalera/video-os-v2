@@ -1,0 +1,1232 @@
+{
+  "project": "恵那プロモーション",
+  "sequence": "最終補正 / ストーリーライン (lane=2)",
+  "export_duration_s": 229.75,
+  "clip_count": 100,
+  "unique_source_count": 93,
+  "total_clip_duration_s": 173.29,
+  "timeline": [
+    {
+      "position": 0,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0917_C0007",
+      "duration_s": 0.625,
+      "src_start_s": 33440.583333,
+      "type": "clip"
+    },
+    {
+      "position": 1,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 2,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1708_C0000",
+      "duration_s": 1.25,
+      "src_start_s": 61718.875,
+      "type": "clip"
+    },
+    {
+      "position": 3,
+      "display_name": "カスタム：岐阜県恵那市",
+      "duration_s": 3.666667,
+      "src_start_s": 3600.0,
+      "type": "generator"
+    },
+    {
+      "position": 4,
+      "display_name": "ギャップ",
+      "duration_s": 1.583333,
+      "src_start_s": 3600.0,
+      "type": "gap"
+    },
+    {
+      "position": 5,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0320_C0010",
+      "duration_s": 1.333333,
+      "src_start_s": 12064.25,
+      "type": "clip"
+    },
+    {
+      "position": 6,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0902_C0001",
+      "duration_s": 1.291667,
+      "src_start_s": 32570.958333,
+      "type": "clip"
+    },
+    {
+      "position": 7,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 8,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 9,
+      "display_name": "DJI_0011",
+      "duration_s": 6.625,
+      "src_start_s": 237.302083,
+      "type": "clip"
+    },
+    {
+      "position": 10,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_0658_C0005",
+      "duration_s": 0.416667,
+      "src_start_s": 25099.958333,
+      "type": "clip"
+    },
+    {
+      "position": 11,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 12,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1013_C0021",
+      "duration_s": 2.041667,
+      "src_start_s": 36851.916667,
+      "type": "clip"
+    },
+    {
+      "position": 13,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_1053_C0002",
+      "duration_s": 2.458333,
+      "src_start_s": 39196.458333,
+      "type": "clip"
+    },
+    {
+      "position": 14,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0317_C0002",
+      "duration_s": 2.541667,
+      "src_start_s": 11857.083333,
+      "type": "clip"
+    },
+    {
+      "position": 15,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0341_C0001",
+      "duration_s": 1.25,
+      "src_start_s": 13273.916667,
+      "type": "clip"
+    },
+    {
+      "position": 16,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0826_C0006",
+      "duration_s": 0.416667,
+      "src_start_s": 30399.166667,
+      "type": "clip"
+    },
+    {
+      "position": 17,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 18,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0320_C0009",
+      "duration_s": 0.541667,
+      "src_start_s": 12047.75,
+      "type": "clip"
+    },
+    {
+      "position": 19,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1536_C0005",
+      "duration_s": 0.625,
+      "src_start_s": 56191.458333,
+      "type": "clip"
+    },
+    {
+      "position": 20,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.708333,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 21,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1710_C0000",
+      "duration_s": 0.708333,
+      "src_start_s": 61836.958333,
+      "type": "clip"
+    },
+    {
+      "position": 22,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0608_C0013",
+      "duration_s": 1.208333,
+      "src_start_s": 22105.708333,
+      "type": "clip"
+    },
+    {
+      "position": 23,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0919_C0009",
+      "duration_s": 2.416667,
+      "src_start_s": 33564.333333,
+      "type": "clip"
+    },
+    {
+      "position": 24,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1711_C0002",
+      "duration_s": 2.125,
+      "src_start_s": 61875.375,
+      "type": "clip"
+    },
+    {
+      "position": 25,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0623_C0011",
+      "duration_s": 1.458333,
+      "src_start_s": 23053.708333,
+      "type": "clip"
+    },
+    {
+      "position": 26,
+      "display_name": "DJI_0023",
+      "duration_s": 3.375,
+      "src_start_s": 164.797917,
+      "type": "clip"
+    },
+    {
+      "position": 27,
+      "display_name": "カラーフェード",
+      "duration_s": 0.916667,
+      "src_start_s": 3600.041667,
+      "type": "transition"
+    },
+    {
+      "position": 28,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1657_C0004",
+      "duration_s": 4.166667,
+      "src_start_s": 61050.958333,
+      "type": "clip"
+    },
+    {
+      "position": 29,
+      "display_name": "ファブリック",
+      "duration_s": 1.541667,
+      "src_start_s": 3600.0,
+      "type": "generator"
+    },
+    {
+      "position": 30,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_0743_C0002",
+      "duration_s": 3.458333,
+      "src_start_s": 27794.125,
+      "type": "clip"
+    },
+    {
+      "position": 31,
+      "display_name": "DJI_0021",
+      "duration_s": 2.5,
+      "src_start_s": 57.871667,
+      "type": "clip"
+    },
+    {
+      "position": 32,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1126_C0018",
+      "duration_s": 2.583333,
+      "src_start_s": 41186.541667,
+      "type": "clip"
+    },
+    {
+      "position": 33,
+      "display_name": "ギャップ",
+      "duration_s": 1.5,
+      "src_start_s": 3600.0,
+      "type": "gap"
+    },
+    {
+      "position": 34,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.333333,
+      "src_start_s": 3600.333333,
+      "type": "transition"
+    },
+    {
+      "position": 35,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1013_C0021",
+      "duration_s": 0.666667,
+      "src_start_s": 36851.083333,
+      "type": "clip"
+    },
+    {
+      "position": 36,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 37,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0622_C0010",
+      "duration_s": 0.625,
+      "src_start_s": 22972.375,
+      "type": "clip"
+    },
+    {
+      "position": 38,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1531_C0003",
+      "duration_s": 3.208333,
+      "src_start_s": 55915.125,
+      "type": "clip"
+    },
+    {
+      "position": 39,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0609_C0017",
+      "duration_s": 1.208333,
+      "src_start_s": 22198.166667,
+      "type": "clip"
+    },
+    {
+      "position": 40,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0617_C0006",
+      "duration_s": 1.208333,
+      "src_start_s": 22681.041667,
+      "type": "clip"
+    },
+    {
+      "position": 41,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 42,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_1048_C0009",
+      "duration_s": 1.958333,
+      "src_start_s": 38905.125,
+      "type": "clip"
+    },
+    {
+      "position": 43,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0615_C0003",
+      "duration_s": 0.75,
+      "src_start_s": 22555.541667,
+      "type": "clip"
+    },
+    {
+      "position": 44,
+      "display_name": "栗",
+      "duration_s": 2.458333,
+      "src_start_s": 0.375,
+      "type": "compound_clip"
+    },
+    {
+      "position": 45,
+      "display_name": "ギャップ",
+      "duration_s": 0.416667,
+      "src_start_s": 3600.0,
+      "type": "gap"
+    },
+    {
+      "position": 46,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0927_C0001",
+      "duration_s": 2.583333,
+      "src_start_s": 34068.625,
+      "type": "clip"
+    },
+    {
+      "position": 47,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.708333,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 48,
+      "display_name": "ギャップ",
+      "duration_s": 10.166667,
+      "src_start_s": 3599.833333,
+      "type": "gap"
+    },
+    {
+      "position": 49,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0822_C0000",
+      "duration_s": 0.583333,
+      "src_start_s": 30161.708333,
+      "type": "clip"
+    },
+    {
+      "position": 50,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1222_C0002",
+      "duration_s": 3.25,
+      "src_start_s": 44530.5,
+      "type": "clip"
+    },
+    {
+      "position": 51,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.833333,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 52,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0536_C0008",
+      "duration_s": 0.625,
+      "src_start_s": 20191.125,
+      "type": "clip"
+    },
+    {
+      "position": 53,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0602_C0003",
+      "duration_s": 2.041667,
+      "src_start_s": 21761.458333,
+      "type": "clip"
+    },
+    {
+      "position": 54,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 55,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0904_C0004",
+      "duration_s": 1.333333,
+      "src_start_s": 32659.541667,
+      "type": "clip"
+    },
+    {
+      "position": 56,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1121_C0010",
+      "duration_s": 0.583333,
+      "src_start_s": 40888.916667,
+      "type": "clip"
+    },
+    {
+      "position": 57,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1024_C0040",
+      "duration_s": 3.416667,
+      "src_start_s": 37451.791667,
+      "type": "clip"
+    },
+    {
+      "position": 58,
+      "display_name": "ギャップ",
+      "duration_s": 1.541667,
+      "src_start_s": 3599.833333,
+      "type": "gap"
+    },
+    {
+      "position": 59,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0622_C0010",
+      "duration_s": 1.583333,
+      "src_start_s": 22992.666667,
+      "type": "clip"
+    },
+    {
+      "position": 60,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1555_C0002",
+      "duration_s": 0.625,
+      "src_start_s": 57355.291667,
+      "type": "clip"
+    },
+    {
+      "position": 61,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-08_2109_C0005",
+      "duration_s": 0.666667,
+      "src_start_s": 76186.708333,
+      "type": "clip"
+    },
+    {
+      "position": 62,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.666667,
+      "src_start_s": 3600.166667,
+      "type": "transition"
+    },
+    {
+      "position": 63,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1017_C0025",
+      "duration_s": 0.625,
+      "src_start_s": 37030.0,
+      "type": "clip"
+    },
+    {
+      "position": 64,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1811_C0004",
+      "duration_s": 0.625,
+      "src_start_s": 65491.75,
+      "type": "clip"
+    },
+    {
+      "position": 65,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1136_C0005",
+      "duration_s": 2.458333,
+      "src_start_s": 41765.041667,
+      "type": "clip"
+    },
+    {
+      "position": 66,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1643_C0015",
+      "duration_s": 0.625,
+      "src_start_s": 60204.708333,
+      "type": "clip"
+    },
+    {
+      "position": 67,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0604_C0005",
+      "duration_s": 0.583333,
+      "src_start_s": 21852.166667,
+      "type": "clip"
+    },
+    {
+      "position": 68,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0614_C0001",
+      "duration_s": 1.375,
+      "src_start_s": 22493.666667,
+      "type": "clip"
+    },
+    {
+      "position": 69,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 70,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1813_C0008",
+      "duration_s": 0.625,
+      "src_start_s": 65606.791667,
+      "type": "clip"
+    },
+    {
+      "position": 71,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 72,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1811_C0003",
+      "duration_s": 1.666667,
+      "src_start_s": 65482.916667,
+      "type": "clip"
+    },
+    {
+      "position": 73,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0902_C0000",
+      "duration_s": 2.541667,
+      "src_start_s": 32565.708333,
+      "type": "clip"
+    },
+    {
+      "position": 74,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 75,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_0742_C0000",
+      "duration_s": 0.625,
+      "src_start_s": 27743.541667,
+      "type": "clip"
+    },
+    {
+      "position": 76,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0605_C0003",
+      "duration_s": 1.75,
+      "src_start_s": 21951.291667,
+      "type": "clip"
+    },
+    {
+      "position": 77,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0811_C0000",
+      "duration_s": 0.75,
+      "src_start_s": 29493.916667,
+      "type": "clip"
+    },
+    {
+      "position": 78,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1536_C0006",
+      "duration_s": 0.708333,
+      "src_start_s": 56215.458333,
+      "type": "clip"
+    },
+    {
+      "position": 79,
+      "display_name": "ギャップ",
+      "duration_s": 1.541667,
+      "src_start_s": 3600.0,
+      "type": "gap"
+    },
+    {
+      "position": 80,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0604_C0005",
+      "duration_s": 1.25,
+      "src_start_s": 21851.416667,
+      "type": "clip"
+    },
+    {
+      "position": 81,
+      "display_name": "カラーフェード",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 82,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1801_C0002",
+      "duration_s": 3.333333,
+      "src_start_s": 64872.375,
+      "type": "clip"
+    },
+    {
+      "position": 83,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_1050_C0015",
+      "duration_s": 1.166667,
+      "src_start_s": 39061.875,
+      "type": "clip"
+    },
+    {
+      "position": 84,
+      "display_name": "DJI_0021",
+      "duration_s": 0.458333,
+      "src_start_s": 28.4775,
+      "type": "clip"
+    },
+    {
+      "position": 85,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0611_C0021",
+      "duration_s": 1.25,
+      "src_start_s": 22291.291667,
+      "type": "clip"
+    },
+    {
+      "position": 86,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.75,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 87,
+      "display_name": "レンズフレア",
+      "duration_s": 0.291667,
+      "src_start_s": 3600.708333,
+      "type": "transition"
+    },
+    {
+      "position": 88,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1538_C0000",
+      "duration_s": 1.5,
+      "src_start_s": 56325.416667,
+      "type": "clip"
+    },
+    {
+      "position": 89,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_1054_C0005",
+      "duration_s": 2.166667,
+      "src_start_s": 39315.291667,
+      "type": "clip"
+    },
+    {
+      "position": 90,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.708333,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 91,
+      "display_name": "ファブリック",
+      "duration_s": 1.291667,
+      "src_start_s": 3600.0,
+      "type": "generator"
+    },
+    {
+      "position": 92,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1011_C0016",
+      "duration_s": 1.291667,
+      "src_start_s": 36697.958333,
+      "type": "clip"
+    },
+    {
+      "position": 93,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0935_C0002",
+      "duration_s": 2.708333,
+      "src_start_s": 34552.416667,
+      "type": "clip"
+    },
+    {
+      "position": 94,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 95,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.708333,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 96,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.666667,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 97,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 98,
+      "display_name": "ギャップ",
+      "duration_s": 0.666667,
+      "src_start_s": 3600.0,
+      "type": "gap"
+    },
+    {
+      "position": 99,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0903_C0002",
+      "duration_s": 1.208333,
+      "src_start_s": 32595.791667,
+      "type": "clip"
+    },
+    {
+      "position": 100,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0324_C0017",
+      "duration_s": 1.25,
+      "src_start_s": 12285.708333,
+      "type": "clip"
+    },
+    {
+      "position": 101,
+      "display_name": "DJI_0021",
+      "duration_s": 4.416667,
+      "src_start_s": 9.822083,
+      "type": "clip"
+    },
+    {
+      "position": 102,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1005_C0002",
+      "duration_s": 2.291667,
+      "src_start_s": 36320.916667,
+      "type": "clip"
+    },
+    {
+      "position": 103,
+      "display_name": "DJI_0021",
+      "duration_s": 5.125,
+      "src_start_s": 14.477083,
+      "type": "clip"
+    },
+    {
+      "position": 104,
+      "display_name": "ギャップ",
+      "duration_s": 1.458333,
+      "src_start_s": 3600.0,
+      "type": "gap"
+    },
+    {
+      "position": 105,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1642_C0013",
+      "duration_s": 0.625,
+      "src_start_s": 60139.625,
+      "type": "clip"
+    },
+    {
+      "position": 106,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1541_C0004",
+      "duration_s": 1.041667,
+      "src_start_s": 56484.541667,
+      "type": "clip"
+    },
+    {
+      "position": 107,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0605_C0009",
+      "duration_s": 0.666667,
+      "src_start_s": 21963.0,
+      "type": "clip"
+    },
+    {
+      "position": 108,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.708333,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 109,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.375,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 110,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1633_C0001",
+      "duration_s": 0.625,
+      "src_start_s": 59592.125,
+      "type": "clip"
+    },
+    {
+      "position": 111,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0307_C0007",
+      "duration_s": 0.666667,
+      "src_start_s": 11305.583333,
+      "type": "clip"
+    },
+    {
+      "position": 112,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0756_C0001",
+      "duration_s": 1.416667,
+      "src_start_s": 28611.875,
+      "type": "clip"
+    },
+    {
+      "position": 113,
+      "display_name": "ギャップ",
+      "duration_s": 0.25,
+      "src_start_s": 3600.666667,
+      "type": "gap"
+    },
+    {
+      "position": 114,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0939_C0007",
+      "duration_s": 1.25,
+      "src_start_s": 34798.458333,
+      "type": "clip"
+    },
+    {
+      "position": 115,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1149_C0000",
+      "duration_s": 3.958333,
+      "src_start_s": 42560.916667,
+      "type": "clip"
+    },
+    {
+      "position": 116,
+      "display_name": "感動接続",
+      "duration_s": 8.0,
+      "src_start_s": 0.125,
+      "type": "compound_clip"
+    },
+    {
+      "position": 117,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1826_C0028",
+      "duration_s": 2.666667,
+      "src_start_s": 66435.041667,
+      "type": "clip"
+    },
+    {
+      "position": 118,
+      "display_name": "ギャップ",
+      "duration_s": 1.5,
+      "src_start_s": 3600.208333,
+      "type": "gap"
+    },
+    {
+      "position": 119,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.25,
+      "src_start_s": 3600.666667,
+      "type": "transition"
+    },
+    {
+      "position": 120,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.75,
+      "src_start_s": 3600.083333,
+      "type": "transition"
+    },
+    {
+      "position": 121,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0608_C0014",
+      "duration_s": 1.375,
+      "src_start_s": 22135.166667,
+      "type": "clip"
+    },
+    {
+      "position": 122,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.041667,
+      "src_start_s": 3599.916667,
+      "type": "transition"
+    },
+    {
+      "position": 123,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1011_C0017",
+      "duration_s": 1.416667,
+      "src_start_s": 36712.416667,
+      "type": "clip"
+    },
+    {
+      "position": 124,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0602_C0000",
+      "duration_s": 1.75,
+      "src_start_s": 21790.541667,
+      "type": "clip"
+    },
+    {
+      "position": 125,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 126,
+      "display_name": "ファブリック",
+      "duration_s": 1.416667,
+      "src_start_s": 3600.0,
+      "type": "generator"
+    },
+    {
+      "position": 127,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1009_C0013",
+      "duration_s": 1.625,
+      "src_start_s": 36577.0,
+      "type": "clip"
+    },
+    {
+      "position": 128,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_1046_C0005",
+      "duration_s": 2.083333,
+      "src_start_s": 38770.291667,
+      "type": "clip"
+    },
+    {
+      "position": 129,
+      "display_name": "ライトノイズ",
+      "duration_s": 3.291667,
+      "src_start_s": 0.0,
+      "type": "compound_clip"
+    },
+    {
+      "position": 130,
+      "display_name": "ギャップ",
+      "duration_s": 1.583333,
+      "src_start_s": 3600.0,
+      "type": "gap"
+    },
+    {
+      "position": 131,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.375,
+      "src_start_s": 3600.291667,
+      "type": "transition"
+    },
+    {
+      "position": 132,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_0751_C0000",
+      "duration_s": 3.75,
+      "src_start_s": 28315.583333,
+      "type": "clip"
+    },
+    {
+      "position": 133,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_1049_C0012",
+      "duration_s": 2.166667,
+      "src_start_s": 38959.375,
+      "type": "clip"
+    },
+    {
+      "position": 134,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_0646_C0001",
+      "duration_s": 3.125,
+      "src_start_s": 24409.166667,
+      "type": "clip"
+    },
+    {
+      "position": 135,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0347_C0005",
+      "duration_s": 2.291667,
+      "src_start_s": 13686.166667,
+      "type": "clip"
+    },
+    {
+      "position": 136,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0928_C0002",
+      "duration_s": 1.25,
+      "src_start_s": 34102.458333,
+      "type": "clip"
+    },
+    {
+      "position": 137,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0307_C0007",
+      "duration_s": 2.041667,
+      "src_start_s": 11304.083333,
+      "type": "clip"
+    },
+    {
+      "position": 138,
+      "display_name": "オープニング",
+      "duration_s": 12.0,
+      "src_start_s": 0.0,
+      "type": "compound_clip"
+    },
+    {
+      "position": 139,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 140,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0354_C0014",
+      "duration_s": 3.458333,
+      "src_start_s": 14058.416667,
+      "type": "clip"
+    },
+    {
+      "position": 141,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-07-25_0618_C0007",
+      "duration_s": 2.041667,
+      "src_start_s": 22747.75,
+      "type": "clip"
+    },
+    {
+      "position": 142,
+      "display_name": "ギャップ",
+      "duration_s": 0.541667,
+      "src_start_s": 3600.416667,
+      "type": "gap"
+    },
+    {
+      "position": 143,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.875,
+      "src_start_s": 3600.041667,
+      "type": "transition"
+    },
+    {
+      "position": 144,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.208333,
+      "src_start_s": 3600.208333,
+      "type": "transition"
+    },
+    {
+      "position": 145,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1535_C0002",
+      "duration_s": 1.291667,
+      "src_start_s": 56113.125,
+      "type": "clip"
+    },
+    {
+      "position": 146,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_1120_C0009",
+      "duration_s": 2.5,
+      "src_start_s": 40842.958333,
+      "type": "clip"
+    },
+    {
+      "position": 147,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.291667,
+      "src_start_s": 3600.333333,
+      "type": "transition"
+    },
+    {
+      "position": 148,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.75,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 149,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-22_1137_C0005",
+      "duration_s": 1.375,
+      "src_start_s": 41840.958333,
+      "type": "clip"
+    },
+    {
+      "position": 150,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1812_C0007",
+      "duration_s": 1.625,
+      "src_start_s": 65567.458333,
+      "type": "clip"
+    },
+    {
+      "position": 151,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.0,
+      "src_start_s": 3600.0,
+      "type": "transition"
+    },
+    {
+      "position": 152,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-08_1530_C0000",
+      "duration_s": 1.333333,
+      "src_start_s": 55825.666667,
+      "type": "clip"
+    },
+    {
+      "position": 153,
+      "display_name": "DJI_0008",
+      "duration_s": 2.666667,
+      "src_start_s": 105.049167,
+      "type": "clip"
+    },
+    {
+      "position": 154,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-21_0605_C0008",
+      "duration_s": 2.083333,
+      "src_start_s": 21939.5,
+      "type": "clip"
+    },
+    {
+      "position": 155,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 1.083333,
+      "src_start_s": 3599.958333,
+      "type": "transition"
+    },
+    {
+      "position": 156,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.75,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 157,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-08-20_0937_C0005",
+      "duration_s": 1.25,
+      "src_start_s": 34694.666667,
+      "type": "clip"
+    },
+    {
+      "position": 158,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-07_1654_C0000",
+      "duration_s": 0.458333,
+      "src_start_s": 60860.458333,
+      "type": "clip"
+    },
+    {
+      "position": 159,
+      "display_name": "クロスディゾルブ",
+      "duration_s": 0.75,
+      "src_start_s": 3600.125,
+      "type": "transition"
+    },
+    {
+      "position": 160,
+      "display_name": "Blackmagic Pocket Cinema Camera_1_2015-09-08_2112_C0008",
+      "duration_s": 0.708333,
+      "src_start_s": 76362.083333,
+      "type": "clip"
+    }
+  ],
+  "unique_sources": [
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0536_C0008",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0602_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0605_C0003",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0614_C0001",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0615_C0003",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0617_C0006",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0618_C0007",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0622_C0010",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0623_C0011",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0756_C0001",
+    "Blackmagic Pocket Cinema Camera_1_2015-07-25_0822_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0811_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0826_C0006",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0902_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0917_C0007",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0919_C0009",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0927_C0001",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0928_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0937_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_0939_C0007",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_1053_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-20_1054_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0307_C0007",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0317_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0320_C0009",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0320_C0010",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0324_C0017",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0341_C0001",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0347_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0354_C0014",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0602_C0003",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0604_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0605_C0008",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0605_C0009",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0608_C0013",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0608_C0014",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0609_C0017",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0611_C0021",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0902_C0001",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0903_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0904_C0004",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_0935_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1005_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1009_C0013",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1011_C0016",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1011_C0017",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1013_C0021",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1017_C0025",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1024_C0040",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1120_C0009",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1121_C0010",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1126_C0018",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1136_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1149_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-21_1222_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_0646_C0001",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_0658_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_0742_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_0743_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_0751_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_1046_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_1048_C0009",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_1049_C0012",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_1050_C0015",
+    "Blackmagic Pocket Cinema Camera_1_2015-08-22_1137_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1531_C0003",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1535_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1536_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1536_C0006",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1538_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1541_C0004",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1555_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1633_C0001",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1642_C0013",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1643_C0015",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1654_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1657_C0004",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1708_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1710_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1711_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1801_C0002",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1811_C0003",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1811_C0004",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1812_C0007",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1813_C0008",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-07_1826_C0028",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-08_1530_C0000",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-08_2109_C0005",
+    "Blackmagic Pocket Cinema Camera_1_2015-09-08_2112_C0008",
+    "DJI_0008",
+    "DJI_0011",
+    "DJI_0021",
+    "DJI_0023"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "contact_sheet_id": "CS_AST_BE79D064_01",
+  "asset_id": "AST_BE79D064",
+  "image_path": "contact_sheets/CS_AST_BE79D064_01.png",
+  "mode": "shot_keyframes",
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "segment_id": "SEG_AST_BE79D064_0001",
+      "rep_frame_us": 4295959,
+      "src_in_us": 0,
+      "src_out_us": 8591917
+    }
+  ]
+}

@@ -1,0 +1,302 @@
+version: "1"
+project_id: sample-mountain-reset
+created_at: "2026-03-21T03:20:00Z"
+analysis_artifact_version: analysis-v1
+
+selection_notes:
+  - candidates intentionally cover interior ritual, trail movement, spoken thesis, and release
+  - minor quality issues are preserved on a few options so the compiler and critic can exercise trade-offs
+
+candidates:
+  - segment_id: SEG_0025
+    asset_id: AST_005
+    src_in_us: 1400000
+    src_out_us: 6000000
+    role: hero
+    why_it_matches: sunrise flare provides a restrained reveal of warmth without reading as conquest
+    risks:
+      - minor highlight clipping may need a shorter trim
+    confidence: 0.93
+    semantic_rank: 1
+    quality_flags:
+      - minor_highlight_clip
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b01
+      - b04
+    motif_tags:
+      - sunrise
+      - release
+
+  - segment_id: SEG_0013
+    asset_id: AST_003
+    src_in_us: 1000000
+    src_out_us: 4800000
+    role: texture
+    why_it_matches: hands lacing boots satisfies the tactile ritual brief and opens small before the landscape expands
+    risks:
+      - repeated hand details could feel redundant if paired with too many other prep shots
+    confidence: 0.91
+    semantic_rank: 2
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b01
+      - b02
+    motif_tags:
+      - hands
+      - ritual
+
+  - segment_id: SEG_0002
+    asset_id: AST_001
+    src_in_us: 6400000
+    src_out_us: 11000000
+    role: dialogue
+    why_it_matches: the line cleanly states the need for quiet without sounding like copy
+    risks:
+      - if used too early it can over-explain the piece
+    confidence: 0.95
+    semantic_rank: 3
+    quality_flags: []
+    evidence:
+      - transcript
+      - qc
+    eligible_beats:
+      - b02
+    transcript_excerpt: I came up here to get quiet again.
+    motif_tags:
+      - quiet
+      - thesis
+
+  - segment_id: SEG_0006
+    asset_id: AST_001
+    src_in_us: 41200000
+    src_out_us: 47600000
+    role: dialogue
+    why_it_matches: explicitly names slowing down and pairs well with breath-focused visuals
+    risks:
+      - the line is slightly more explicit than the mood-first material around it
+    confidence: 0.92
+    semantic_rank: 4
+    quality_flags: []
+    evidence:
+      - transcript
+      - visual_tag
+    eligible_beats:
+      - b02
+      - b04
+    transcript_excerpt: Up here the air tells me to slow down.
+    motif_tags:
+      - slow_down
+      - breath
+
+  - segment_id: SEG_0020
+    asset_id: AST_004
+    src_in_us: 8000000
+    src_out_us: 13800000
+    role: hero
+    why_it_matches: profile movement with visible breath widens the film while keeping the pace measured
+    risks:
+      - if cut too long the walk becomes illustrative instead of felt
+    confidence: 0.89
+    semantic_rank: 5
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b03
+    motif_tags:
+      - breath
+      - movement
+
+  - segment_id: SEG_0023
+    asset_id: AST_004
+    src_in_us: 27000000
+    src_out_us: 32800000
+    role: support
+    why_it_matches: uphill wide introduces scale without requiring a summit payoff
+    risks:
+      - slight wind could compete with dialogue if audio is not managed
+    confidence: 0.84
+    semantic_rank: 6
+    quality_flags:
+      - slight_wind
+    evidence:
+      - contact_sheet
+      - qc
+    eligible_beats:
+      - b03
+    motif_tags:
+      - scale
+      - trail
+
+  - segment_id: SEG_0014
+    asset_id: AST_003
+    src_in_us: 5200000
+    src_out_us: 9400000
+    role: support
+    why_it_matches: strap-tightening continues the prep motif while adding forward motion into the exterior section
+    risks:
+      - can feel too functional if surrounded by other gear shots only
+    confidence: 0.87
+    semantic_rank: 7
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b02
+      - b03
+    motif_tags:
+      - hands
+      - prep
+
+  - segment_id: SEG_0032
+    asset_id: AST_006
+    src_in_us: 5000000
+    src_out_us: 9700000
+    role: texture
+    why_it_matches: moving water gives the middle beat a reset motif without competing with spoken lines
+    risks:
+      - overuse of pure texture could slow momentum too much
+    confidence: 0.88
+    semantic_rank: 8
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b02
+      - b03
+    motif_tags:
+      - water
+      - reset
+
+  - segment_id: SEG_0012
+    asset_id: AST_002
+    src_in_us: 24000000
+    src_out_us: 29600000
+    role: transition
+    why_it_matches: the door opening creates a literal and emotional threshold from interior quiet to exterior air
+    risks:
+      - can feel too on-the-nose if used as the only transition device
+    confidence: 0.9
+    semantic_rank: 9
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b02
+      - b03
+    motif_tags:
+      - threshold
+      - exterior
+
+  - segment_id: SEG_0034
+    asset_id: AST_006
+    src_in_us: 15000000
+    src_out_us: 19400000
+    role: transition
+    why_it_matches: light through branches is a soft connective tissue between dialogue and movement beats
+    risks:
+      - if stacked with other light shots it can feel generic
+    confidence: 0.86
+    semantic_rank: 10
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b03
+      - b04
+    motif_tags:
+      - light
+      - transition
+
+  - segment_id: SEG_0027
+    asset_id: AST_005
+    src_in_us: 12000000
+    src_out_us: 17600000
+    role: dialogue
+    why_it_matches: this line lands the central message and turns the ending toward lived carryover instead of achievement
+    risks:
+      - may reduce ambiguity if paired with too many explanatory lines earlier
+    confidence: 0.94
+    semantic_rank: 11
+    quality_flags: []
+    evidence:
+      - transcript
+      - qc
+    eligible_beats:
+      - b04
+    transcript_excerpt: When I head back down, I carry that pace with me.
+    motif_tags:
+      - ending
+      - carryover
+
+  - segment_id: SEG_0028
+    asset_id: AST_005
+    src_in_us: 18200000
+    src_out_us: 23000000
+    role: hero
+    why_it_matches: the restrained exhale gives the release beat a human ending without overplaying emotion
+    risks:
+      - needs enough lead-in to avoid feeling like a reaction shot without cause
+    confidence: 0.9
+    semantic_rank: 12
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b04
+    motif_tags:
+      - exhale
+      - warmth
+
+  - segment_id: SEG_0036
+    asset_id: AST_006
+    src_in_us: 25200000
+    src_out_us: 30800000
+    role: transition
+    why_it_matches: the empty trail bend creates an open future-facing image for the final beat without promising triumph
+    risks:
+      - may feel too abstract if used without a preceding human close-up
+    confidence: 0.85
+    semantic_rank: 13
+    quality_flags: []
+    evidence:
+      - contact_sheet
+      - visual_tag
+    eligible_beats:
+      - b04
+    motif_tags:
+      - path
+      - release
+
+  - segment_id: SEG_0021
+    asset_id: AST_004
+    src_in_us: 14500000
+    src_out_us: 20200000
+    role: dialogue
+    why_it_matches: explicitly rejects summit rhetoric and protects the brief from drifting into achievement language
+    risks:
+      - if paired with the final thesis line it may feel too didactic
+    confidence: 0.88
+    semantic_rank: 14
+    quality_flags: []
+    evidence:
+      - transcript
+      - visual_tag
+    eligible_beats:
+      - b03
+    transcript_excerpt: I do not need a summit to feel reset.
+    motif_tags:
+      - anti_triumph
+      - message

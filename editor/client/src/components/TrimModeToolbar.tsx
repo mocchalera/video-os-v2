@@ -29,6 +29,8 @@ export default function TrimModeToolbar({
             key={mode}
             type="button"
             title={description}
+            aria-label={`${label} trim mode`}
+            aria-pressed={active}
             className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
               active
                 ? 'bg-[var(--accent)]/20 text-[var(--accent)]'

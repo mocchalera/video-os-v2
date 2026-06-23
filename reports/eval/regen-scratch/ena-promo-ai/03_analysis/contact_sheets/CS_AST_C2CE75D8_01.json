@@ -1,0 +1,15 @@
+{
+  "contact_sheet_id": "CS_AST_C2CE75D8_01",
+  "asset_id": "AST_C2CE75D8",
+  "image_path": "contact_sheets/CS_AST_C2CE75D8_01.png",
+  "mode": "shot_keyframes",
+  "tile_map": [
+    {
+      "tile_index": 0,
+      "segment_id": "SEG_AST_C2CE75D8_0001",
+      "rep_frame_us": 5208125,
+      "src_in_us": 0,
+      "src_out_us": 10416250
+    }
+  ]
+}

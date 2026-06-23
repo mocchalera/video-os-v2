@@ -70,6 +70,7 @@ function SliderField({
       <input
         className="range-input mt-2 w-full"
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}

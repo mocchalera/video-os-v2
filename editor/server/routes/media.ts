@@ -144,9 +144,16 @@ export function createMediaRouter(projectsDir: string): Router {
 
       // Force transcode when ?transcode=1 is set (MEDIA_ERR_SRC_NOT_SUPPORTED fallback)
       const forceTranscode = req.query.transcode === "1";
-      const needsTranscode = forceTranscode || await checkNeedsTranscode(realPath);
+      const compatibility = await analyzePlaybackCompatibility(realPath);
+      const needsTranscode =
+        forceTranscode ||
+        (compatibility.needsTranscode && compatibility.reason !== "audio");
 
       if (needsTranscode) {
+        if (forceTranscode && isTooLargeForFullTranscode(realPath)) {
+          rejectLargeFullTranscode(res, realPath);
+          return;
+        }
         await serveTranscodedV3(req, res, realPath, projectDir);
       } else {
         serveDirect(req, res, realPath, path.basename(realPath));
@@ -250,9 +257,17 @@ export function createMediaRouter(projectsDir: string): Router {
       const realPath = fs.realpathSync(resolvedPath);
 
       // Check if transcoding is needed
-      const needsTranscode = await checkNeedsTranscode(realPath);
+      const forceTranscode = req.query.transcode === "1";
+      const compatibility = await analyzePlaybackCompatibility(realPath);
+      const needsTranscode =
+        forceTranscode ||
+        (compatibility.needsTranscode && compatibility.reason !== "audio");
 
       if (needsTranscode) {
+        if (forceTranscode && isTooLargeForFullTranscode(realPath)) {
+          rejectLargeFullTranscode(res, realPath);
+          return;
+        }
         await serveTranscoded(req, res, realPath, projectDir, filename);
       } else {
         serveDirect(req, res, realPath, filename);
@@ -275,12 +290,20 @@ interface ProbeResult {
   videoCodec: string | null;
 }
 
+type TranscodeReason = "container" | "video" | "audio";
+
+interface CompatibilityResult extends ProbeResult {
+  needsTranscode: boolean;
+  reason: TranscodeReason | null;
+}
+
+const MAX_FULL_TRANSCODE_BYTES = 1 * 1024 * 1024 * 1024;
+
 async function probeCodecs(filePath: string): Promise<ProbeResult> {
   const { stdout } = await execFileAsync("ffprobe", [
     "-v", "quiet",
     "-print_format", "json",
     "-show_streams",
-    "-select_streams", "v:0,a:0",
     filePath,
   ]);
 
@@ -300,26 +323,50 @@ async function probeCodecs(filePath: string): Promise<ProbeResult> {
   return { audioCodec, videoCodec };
 }
 
-async function checkNeedsTranscode(filePath: string): Promise<boolean> {
+async function analyzePlaybackCompatibility(filePath: string): Promise<CompatibilityResult> {
   try {
     const ext = path.extname(filePath).toLowerCase();
     const { audioCodec, videoCodec } = await probeCodecs(filePath);
 
     if (videoCodec && !DIRECT_PLAYBACK_CONTAINERS.has(ext)) {
-      return true;
-    }
-    if (audioCodec && !BROWSER_COMPATIBLE_AUDIO_CODECS.has(audioCodec)) {
-      return true;
+      return { audioCodec, videoCodec, needsTranscode: true, reason: "container" };
     }
     if (videoCodec && !BROWSER_COMPATIBLE_VIDEO_CODECS.has(videoCodec)) {
-      return true;
+      return { audioCodec, videoCodec, needsTranscode: true, reason: "video" };
+    }
+    if (audioCodec && !BROWSER_COMPATIBLE_AUDIO_CODECS.has(audioCodec)) {
+      return { audioCodec, videoCodec, needsTranscode: true, reason: "audio" };
     }
 
-    return false;
+    return { audioCodec, videoCodec, needsTranscode: false, reason: null };
   } catch {
-    // If ffprobe fails, fall back to direct serving
+    // If ffprobe fails, fall back to direct serving.
+    return { audioCodec: null, videoCodec: null, needsTranscode: false, reason: null };
+  }
+}
+
+async function checkNeedsTranscode(filePath: string): Promise<boolean> {
+  return (await analyzePlaybackCompatibility(filePath)).needsTranscode;
+}
+
+function isTooLargeForFullTranscode(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath).size > MAX_FULL_TRANSCODE_BYTES;
+  } catch {
     return false;
   }
+}
+
+function rejectLargeFullTranscode(
+  res: import("express").Response,
+  realPath: string,
+): void {
+  res.status(422).json({
+    error: "Source transcode is too large for interactive preview. Use exact preview render instead.",
+    code: "source_transcode_too_large",
+    max_bytes: MAX_FULL_TRANSCODE_BYTES,
+    size_bytes: fs.statSync(realPath).size,
+  });
 }
 
 // ── Direct serving (browser-compatible) ─────────────────────────────

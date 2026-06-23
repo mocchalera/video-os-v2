@@ -1,0 +1,17 @@
+{
+  "project_id": "clean-ui",
+  "phase": "review",
+  "gate": 5,
+  "status": "completed",
+  "completed": 5,
+  "total": 5,
+  "eta_sec": 0,
+  "artifacts_created": [
+    "review_metrics.json",
+    "review_report.yaml",
+    "review_patch.json"
+  ],
+  "errors": [],
+  "started_at": "2026-06-22T07:23:48.444Z",
+  "updated_at": "2026-06-22T07:23:53.827Z"
+}

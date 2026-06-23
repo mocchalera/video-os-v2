@@ -88,6 +88,48 @@ function resolveAssetPath(
   return undefined;
 }
 
+function thumbnailFilter(width: number, height: number): string {
+  // ffmpeg can round force_original_aspect_ratio output one pixel above an odd
+  // target size (for example 85x48), which makes the following pad fail.
+  const scaleWidth = Math.max(2, width - (width % 2));
+  const scaleHeight = Math.max(2, height - (height % 2));
+  return `scale=${scaleWidth}:${scaleHeight}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`;
+}
+
+async function extractThumbnail(
+  sourcePath: string,
+  thumbPath: string,
+  seekSec: number,
+  width: number,
+  height: number,
+): Promise<void> {
+  const runFfmpeg = (atSec: number) =>
+    execFilePromise("ffmpeg", [
+      "-y",
+      "-ss",
+      atSec.toFixed(6),
+      "-i",
+      sourcePath,
+      "-vframes",
+      "1",
+      "-vf",
+      thumbnailFilter(width, height),
+      "-q:v",
+      "5",
+      thumbPath,
+    ]);
+
+  try {
+    await runFfmpeg(seekSec);
+  } catch (error) {
+    if (seekSec <= 0) {
+      throw error;
+    }
+    fs.rmSync(thumbPath, { force: true });
+    await runFfmpeg(0);
+  }
+}
+
 export function createThumbnailRouter(projectsDir: string): Router {
   const router = Router();
 
@@ -160,20 +202,7 @@ export function createThumbnailRouter(projectsDir: string): Router {
       const midpointUs = (clip.src_in_us + clip.src_out_us) / 2;
       const seekSec = midpointUs / 1_000_000;
 
-      await execFilePromise("ffmpeg", [
-        "-y",
-        "-ss",
-        seekSec.toFixed(6),
-        "-i",
-        sourcePath,
-        "-vframes",
-        "1",
-        "-vf",
-        "scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2",
-        "-q:v",
-        "5",
-        thumbPath,
-      ]);
+      await extractThumbnail(sourcePath, thumbPath, seekSec, 160, 90);
 
       if (!fs.existsSync(thumbPath)) {
         res.status(500).json({ error: "Thumbnail generation failed" });
@@ -246,20 +275,7 @@ export function createThumbnailRouter(projectsDir: string): Router {
       // Extract thumbnail at specified frame
       const seekSec = frameUs / 1_000_000;
 
-      await execFilePromise("ffmpeg", [
-        "-y",
-        "-ss",
-        seekSec.toFixed(6),
-        "-i",
-        sourcePath,
-        "-vframes",
-        "1",
-        "-vf",
-        `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
-        "-q:v",
-        "5",
-        thumbPath,
-      ]);
+      await extractThumbnail(sourcePath, thumbPath, seekSec, width, height);
 
       if (!fs.existsSync(thumbPath)) {
         res.status(500).json({ error: "Thumbnail generation failed" });

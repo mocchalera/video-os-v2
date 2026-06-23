@@ -9,7 +9,7 @@ final class ProjectInitializerTests: XCTestCase {
 
         let plan = try ProjectInitializer.plan(
             repositoryRoot: root,
-            projectID: "client-cut_001",
+            projectID: " client-cut_001 ",
             sourceDirectory: source
         )
 
@@ -34,6 +34,13 @@ final class ProjectInitializerTests: XCTestCase {
         }
         XCTAssertThrowsError(try ProjectInitializer.plan(repositoryRoot: root, projectID: "bad id")) { error in
             XCTAssertEqual(error as? ProjectInitializationError, .invalidProjectID("bad id"))
+        }
+
+        let missingSource = root.appendingPathComponent("missing-source")
+        XCTAssertThrowsError(
+            try ProjectInitializer.plan(repositoryRoot: root, projectID: "missing-media", sourceDirectory: missingSource)
+        ) { error in
+            XCTAssertEqual(error as? ProjectInitializationError, .sourceDirectoryMissing(missingSource))
         }
 
         let existing = root.appendingPathComponent("projects/existing")
@@ -74,6 +81,30 @@ final class ProjectInitializerTests: XCTestCase {
         XCTAssertEqual(result.projectURL, plan.projectURL)
         XCTAssertEqual(result.sourceLinkURL, plan.projectURL.appendingPathComponent("02_media/source"))
         XCTAssertEqual(result.nextStepCommand, "npx tsx scripts/analyze.ts projects/smoke/02_media/source/* --project projects/smoke")
+    }
+
+    func testRunReportsProcessFailureAndMissingProject() throws {
+        let root = try temporaryRepository("videoos-init-failures")
+        let plan = try ProjectInitializer.plan(repositoryRoot: root, projectID: "broken")
+
+        XCTAssertThrowsError(
+            try ProjectInitializer.run(plan: plan) { _, _ in
+                ProjectInitializationProcessResult(status: 17, stdout: "out", stderr: "err")
+            }
+        ) { error in
+            XCTAssertEqual(
+                error as? ProjectInitializationError,
+                .processFailed(status: 17, stdout: "out", stderr: "err")
+            )
+        }
+
+        XCTAssertThrowsError(
+            try ProjectInitializer.run(plan: plan) { _, _ in
+                ProjectInitializationProcessResult(status: 0, stdout: "", stderr: "")
+            }
+        ) { error in
+            XCTAssertEqual(error as? ProjectInitializationError, .projectMissing(plan.projectURL))
+        }
     }
 
     private func temporaryRepository(_ prefix: String) throws -> URL {

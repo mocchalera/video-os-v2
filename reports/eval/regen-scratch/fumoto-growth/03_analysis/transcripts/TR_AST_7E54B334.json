@@ -1,0 +1,51 @@
+{
+  "project_id": "fumoto-growth",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_7E54B334",
+  "asset_id": "AST_7E54B334",
+  "items": [
+    {
+      "item_id": "TRI_AST_7E54B334_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:S1",
+      "start_us": 0,
+      "end_us": 5760000,
+      "text": "ried"
+    },
+    {
+      "item_id": "TRI_AST_7E54B334_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_7E54B334:S1",
+      "start_us": 5760000,
+      "end_us": 20580000,
+      "text": "盆格"
+    },
+    {
+      "item_id": "TRI_AST_7E54B334_0003",
+      "speaker": "S2",
+      "speaker_key": "AST_7E54B334:S2",
+      "start_us": 20580000,
+      "end_us": 22920000,
+      "text": "ウラ"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "6e75f176d34ab89c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  },
+  "diarization": {
+    "provider": "pyannote",
+    "speaker_count": 2,
+    "turn_count": 4
+  }
+}

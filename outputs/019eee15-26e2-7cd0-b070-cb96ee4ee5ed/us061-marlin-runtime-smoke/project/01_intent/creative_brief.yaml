@@ -1,0 +1,13 @@
+version: "1"
+project:
+  title: US-061 Marlin Runtime Smoke
+  strategy: Verify native Marlin evaluation logistics on a tiny fixture
+  format: runtime-smoke
+message:
+  primary: Marlin evaluation runner should write artifacts and refresh index.
+audience:
+  primary: studio operator
+emotion_curve:
+  - setup
+must_have:
+  - Marlin evaluation smoke

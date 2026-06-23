@@ -1,0 +1,40 @@
+version: 1
+project_id: ''
+current_state: intent_locked
+history:
+  - from_state: intent_pending
+    to_state: critique_ready
+    trigger: /review
+    actor: /review
+    timestamp: 2026-06-22T07:23:48.874Z
+    note: 'self-heal: intent_pending -> critique_ready'
+  - from_state: critique_ready
+    to_state: critique_ready
+    trigger: /review
+    actor: roughcut-critic
+    timestamp: 2026-06-22T07:23:53.826Z
+    note: critique ready — review status is needs_revision
+  - from_state: critique_ready
+    to_state: intent_locked
+    trigger: /compile
+    actor: compile-timeline
+    timestamp: 2026-06-22T08:41:04.794Z
+    note: 'self-heal: critique_ready -> intent_locked'
+artifact_hashes:
+  brief: 8a3a960b48a73d66
+  selects: 17e4f2ed52a7710d
+  blueprint: 0f737ece2d59c126
+  timeline: 2d8ce4a570d91380
+  review_report: 1cee64bf1788984e
+  review_patch: 8ba614e9fb057170
+gates:
+  analysis_gate: ready
+  compile_gate: open
+  planning_gate: open
+  timeline_gate: open
+  review_gate: open
+  packaging_gate: blocked
+last_updated: 2026-06-22T08:41:04.794Z
+last_agent: editor-server
+last_command: /compile
+updated_at: '2026-06-22T08:47:30.690Z'

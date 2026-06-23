@@ -5,6 +5,7 @@ public struct ProjectMediaRelinkPlan: Equatable, Sendable {
     public let sourceMapURL: URL
     public let searchRoots: [URL]
     public let missingAssetCount: Int
+    public let syntheticAssetCount: Int
     public let items: [ProjectMediaRelinkItem]
 
     public var matchedCount: Int {
@@ -20,11 +21,16 @@ public struct ProjectMediaRelinkPlan: Equatable, Sendable {
     }
 
     public var statusLabel: String {
-        if missingAssetCount == 0 { return "no relinks needed" }
+        if items.isEmpty { return "no relinks needed" }
         if matchedCount == 0 { return "no matches" }
         if unmatchedCount > 0 { return "\(matchedCount) matched / \(unmatchedCount) missing" }
         return "\(matchedCount) matched"
     }
+}
+
+public enum ProjectMediaRelinkReason: String, Equatable, Sendable {
+    case missing
+    case syntheticPreview = "synthetic-preview"
 }
 
 public struct ProjectMediaRelinkItem: Identifiable, Equatable, Sendable {
@@ -32,6 +38,8 @@ public struct ProjectMediaRelinkItem: Identifiable, Equatable, Sendable {
     public let assetID: String
     public let filename: String
     public let displayName: String?
+    public let reason: ProjectMediaRelinkReason
+    public let currentURL: URL?
     public let candidateURL: URL?
     public let matchedBy: String?
 }
@@ -103,11 +111,13 @@ public enum ProjectMediaRelinker {
     public static func plan(
         projectURL: URL,
         searchRoots: [URL],
-        assets: AnalysisAssetDocument? = nil
+        assets: AnalysisAssetDocument? = nil,
+        includeSynthetic: Bool = false
     ) -> ProjectMediaRelinkPlan {
         let resolvedAssets = assets ?? (try? AnalysisAssetDocument.load(from: projectURL.appendingPathComponent("03_analysis/assets.json")))
         let mediaSummary = ProjectMediaResolver.previewSummary(projectURL: projectURL, assets: resolvedAssets)
         let missing = mediaSummary.items.filter { $0.playbackStatus == .missing }
+        let synthetic = includeSynthetic ? mediaSummary.items.filter { $0.playbackStatus != .missing && $0.isSyntheticPreview } : []
         let index = CandidateIndex(searchRoots: searchRoots)
         let assetByID = Dictionary(uniqueKeysWithValues: (resolvedAssets?.items ?? []).map { ($0.id, $0) })
 
@@ -116,13 +126,19 @@ public enum ProjectMediaRelinker {
             sourceMapURL: sourceMapURL(for: projectURL),
             searchRoots: searchRoots,
             missingAssetCount: missing.count,
-            items: missing.map { item in
-                let match = index.match(filename: item.filename)
+            syntheticAssetCount: synthetic.count,
+            items: (missing.map { ($0, ProjectMediaRelinkReason.missing) }
+                + synthetic.map { ($0, ProjectMediaRelinkReason.syntheticPreview) })
+                .map { item, reason in
+                let excludedPaths = Set([item.url?.standardizedFileURL.path].compactMap { $0 })
+                let match = index.match(filename: item.filename, excluding: excludedPaths)
                 let asset = assetByID[item.assetID]
                 return ProjectMediaRelinkItem(
                     assetID: item.assetID,
                     filename: item.filename,
                     displayName: asset?.roleGuess ?? item.filename,
+                    reason: reason,
+                    currentURL: item.url,
                     candidateURL: match?.url,
                     matchedBy: match?.matchedBy
                 )
@@ -261,9 +277,11 @@ private struct CandidateIndex {
         }
     }
 
-    func match(filename: String) -> (url: URL, matchedBy: String)? {
+    func match(filename: String, excluding excludedPaths: Set<String> = []) -> (url: URL, matchedBy: String)? {
         let key = URL(fileURLWithPath: filename).lastPathComponent.lowercased()
-        guard let url = candidatesByLowercaseFilename[key]?.first else { return nil }
+        guard let url = candidatesByLowercaseFilename[key]?.first(where: { !excludedPaths.contains($0.standardizedFileURL.path) }) else {
+            return nil
+        }
         return (url, "filename")
     }
 

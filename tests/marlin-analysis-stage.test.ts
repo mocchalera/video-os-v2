@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import type { MarlinFn } from "../runtime/connectors/marlin-types.js";
+import { parseArgs as parseMarlinEvaluateArgs } from "../scripts/marlin-evaluate.js";
 import {
   createMarlinFnFromEnvironment,
   extractTagsFromScene,
@@ -119,6 +120,46 @@ describe("Marlin analysis stage", () => {
       cwd: REPO_ROOT,
       requestTimeoutMs: 120_000,
     });
+  });
+
+  it("parses request timeout overrides from the marlin evaluation CLI", () => {
+    expect(
+      parseMarlinEvaluateArgs([
+        "node",
+        "scripts/marlin-evaluate.ts",
+        "--project",
+        "projects/demo",
+        "--request-timeout-ms",
+        "900000",
+      ]),
+    ).toMatchObject({
+      projectDir: "projects/demo",
+      requestTimeoutMs: 900_000,
+    });
+
+    expect(
+      parseMarlinEvaluateArgs([
+        "node",
+        "scripts/marlin-evaluate.ts",
+        "--project",
+        "projects/demo",
+        "--timeout-ms=600000",
+      ]),
+    ).toMatchObject({
+      projectDir: "projects/demo",
+      requestTimeoutMs: 600_000,
+    });
+
+    expect(() =>
+      parseMarlinEvaluateArgs([
+        "node",
+        "scripts/marlin-evaluate.ts",
+        "--project",
+        "projects/demo",
+        "--request-timeout-ms",
+        "0",
+      ]),
+    ).toThrow("--request-timeout-ms requires a positive integer millisecond value");
   });
 
   it("writes schema-valid marlin_events.json from caption and find passes", async () => {

@@ -140,6 +140,20 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
         )
     }
 
+    public func qaTimestampJumpTarget(for timestampSec: Double) -> QATimestampJumpTarget {
+        let safeSeconds = timestampSec.isFinite ? max(0, timestampSec) : 0
+        let rawFrame = (safeSeconds * sequence.fps).rounded()
+        let frame: Int
+        if rawFrame <= 0 {
+            frame = 0
+        } else if !rawFrame.isFinite || rawFrame >= Double(totalFrames) {
+            frame = totalFrames
+        } else {
+            frame = Int(rawFrame)
+        }
+        return QATimestampJumpTarget(frame: frame, clipID: programSelection(atFrame: frame)?.clip.id)
+    }
+
     public static func timelineURL(for projectURL: URL) -> URL {
         projectURL.appendingPathComponent("05_timeline/timeline.json")
     }
@@ -348,6 +362,11 @@ public struct TimelineMonitorSnapshot: Equatable, Sendable {
     public let audio: TimelineMonitorClip?
     public let program: TimelineMonitorClip?
     public let nextProgram: TimelineMonitorClip?
+}
+
+public struct QATimestampJumpTarget: Equatable, Sendable {
+    public let frame: Int
+    public let clipID: TimelineClip.ID?
 }
 
 public struct TimelineMonitorClip: Equatable, Sendable {

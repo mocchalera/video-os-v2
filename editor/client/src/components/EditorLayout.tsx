@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState } from 'react';
+import { useEffect, useRef, useMemo, useState } from 'react';
 import ErrorBoundary from './ErrorBoundary';
 import type { EditorMode } from './HeaderBar';
 import type {
@@ -43,6 +43,24 @@ export interface CaptionCue {
 }
 
 export type BottomTab = 'timeline' | 'patches' | 'alternatives' | 'diff';
+
+function useCompactEditorGrid(): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 760px)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(max-width: 760px)');
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+
+  return matches;
+}
 
 interface EditorLayoutProps {
   mode: EditorMode;
@@ -388,9 +406,14 @@ export default function EditorLayout({
   ];
 
   // Grid layout changes based on mode
-  const gridStyle = mode === 'nle'
-    ? { gridTemplateColumns: '1fr 1fr 320px', gridTemplateRows: 'minmax(0, 2fr) minmax(0, 3fr)' }
-    : { gridTemplateColumns: 'minmax(0, 1fr) 320px', gridTemplateRows: 'minmax(0, 2fr) minmax(0, 3fr)' };
+  const compactEditorGrid = useCompactEditorGrid();
+  const gridStyle = compactEditorGrid
+    ? mode === 'nle'
+      ? { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(150px, 0.75fr) minmax(190px, 1fr) minmax(150px, 0.75fr) minmax(260px, 1.3fr)' }
+      : { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(190px, 1fr) minmax(180px, 0.85fr) minmax(260px, 1.3fr)' }
+    : mode === 'nle'
+      ? { gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(260px, 320px)', gridTemplateRows: 'minmax(0, 2fr) minmax(0, 3fr)' }
+      : { gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 320px)', gridTemplateRows: 'minmax(0, 2fr) minmax(0, 3fr)' };
 
   return (
     <main className="min-h-0 flex-1 overflow-hidden">
@@ -431,7 +454,7 @@ export default function EditorLayout({
         )}
 
         {/* Program Monitor + Trim Preview Overlay */}
-        <ErrorBoundary label="Program Monitor"><div className="relative min-h-0 overflow-hidden">
+        <ErrorBoundary label="Program Monitor"><div className="relative h-full min-h-0 overflow-hidden">
           <ProgramMonitor
             isActive={mode === 'ai' || activeMonitor === 'program'}
             onClick={() => onSetActiveMonitor('program')}

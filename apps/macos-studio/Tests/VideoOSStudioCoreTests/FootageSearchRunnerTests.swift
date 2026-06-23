@@ -111,4 +111,48 @@ final class FootageSearchRunnerTests: XCTestCase {
         XCTAssertEqual(decoded.mode_used, "visual")
         XCTAssertEqual(decoded.results, [])
     }
+
+    func testSearchResultMakesReplaceSegmentOperationWithSegmentCandidateRef() throws {
+        let result = FootageSearchRunner.SearchResult(
+            segment_id: "SEG_0123",
+            asset_id: "AST_0123",
+            src_in_us: 1_200_000,
+            src_out_us: 4_800_000,
+            score: 0.92,
+            summary: "Low-angle campfire detail with hands entering frame"
+        )
+
+        let operation = result.makeReplaceSegmentOperation(targetClipID: "CLP_0007", mode: "hybrid")
+
+        XCTAssertEqual(operation, .replaceSegment(
+            target_clip_id: "CLP_0007",
+            with_segment_id: "SEG_0123",
+            with_candidate_ref: "SEG_0123",
+            reason: "Swap selected in Footage Search (hybrid): Low-angle campfire detail with hands entering frame"
+        ))
+        XCTAssertTrue(operation.isValidForStudioSession)
+    }
+
+    func testSearchResultReplaceSegmentOperationFallsBackToSegmentIDAndTruncatesReason() throws {
+        let summary = String(repeating: "visual-match-", count: 12)
+        let result = FootageSearchRunner.SearchResult(
+            segment_id: "SEG_LONG",
+            asset_id: "AST_LONG",
+            src_in_us: 0,
+            src_out_us: 3_000_000,
+            score: 0.81,
+            summary: summary
+        )
+
+        let operation = result.makeReplaceSegmentOperation(targetClipID: "CLP_0008", mode: "multimodal")
+        guard case let .replaceSegment(_, segmentID, candidateRef, reason) = operation else {
+            return XCTFail("Expected replace_segment")
+        }
+
+        XCTAssertEqual(segmentID, "SEG_LONG")
+        XCTAssertEqual(candidateRef, "SEG_LONG")
+        XCTAssertLessThanOrEqual(reason.count, "Swap selected in Footage Search (multimodal): ".count + 96)
+        XCTAssertTrue(reason.hasSuffix("..."))
+        XCTAssertTrue(operation.isValidForStudioSession)
+    }
 }

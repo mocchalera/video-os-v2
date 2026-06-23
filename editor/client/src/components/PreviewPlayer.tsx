@@ -118,7 +118,7 @@ export default function PreviewPlayer({
   const badgeTone = contractBadgeTone(playbackContract, previewStale, previewMode);
 
   return (
-    <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
+    <div className="relative h-full min-h-0 overflow-hidden bg-black">
       {/* Source video element — always mounted, src managed by usePlayback */}
       {/* Phase 2: CSS zoom approximation in source_approx mode (Section 6.3).
           Exact parity is guaranteed only by rendered_exact; this is a visual hint.
@@ -126,13 +126,13 @@ export default function PreviewPlayer({
           content is scaled — not the letterbox/pillarbox black bars. */}
       {isSource && clipZoom > 1 ? (
         <div
-          className={`flex h-full w-full items-center justify-center overflow-hidden ${
+          className={`absolute inset-0 flex items-center justify-center overflow-hidden ${
             isExact || isGap ? 'invisible' : ''
           }`}
         >
           <video
             ref={videoRef}
-            className="h-full w-full bg-black object-cover"
+            className="block h-full w-full bg-black object-cover object-center"
             style={{ transform: `scale(${clipZoom})`, transformOrigin: 'center center' }}
             playsInline
             preload="auto"
@@ -149,7 +149,7 @@ export default function PreviewPlayer({
       ) : (
         <video
           ref={videoRef}
-          className={`h-full w-full bg-black object-contain ${
+          className={`absolute inset-0 block h-full w-full bg-black object-contain object-center ${
             isExact || isGap ? 'invisible' : ''
           }`}
           playsInline
@@ -169,7 +169,7 @@ export default function PreviewPlayer({
       {isExact && previewUrl ? (
         <video
           ref={exactVideoRef}
-          className="h-full w-full bg-black object-contain"
+          className="absolute inset-0 block h-full w-full bg-black object-contain object-center"
           src={previewUrl}
           playsInline
           preload="auto"

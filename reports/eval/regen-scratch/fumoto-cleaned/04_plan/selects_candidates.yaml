@@ -1,0 +1,196 @@
+version: "1"
+project_id: fumoto-growth
+created_at: "2026-06-15T00:00:00Z"
+analysis_artifact_version: "2.0.0"
+selection_notes:
+  - "Selected 13 candidates covering full growth arc: baby->walking->running->strider->bicycle-with-training->bicycle-success"
+  - "Prioritized emotional peaks and action peaks; avoided title cards and end screens in main body"
+  - "Respects chronological order and emotion curve"
+editorial_summary:
+  dominant_visual_mode: event_broll
+  speaker_topology: multi_speaker
+  motion_profile: high
+  transcript_density: sparse
+candidates:
+  - candidate_id: cand_01
+    segment_id: SEG_AST_9435E35C_0001
+    asset_id: AST_9435E35C
+    src_in_us: 0
+    src_out_us: 26066667
+    role: hero
+    why_it_matches: "Baby foundation moment establishing tenderness; opening shot"
+    risks: []
+    confidence: 0.85
+    semantic_rank: 1
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["tenderness"]
+    motif_tags: ["baby", "beginning"]
+  - candidate_id: cand_02
+    segment_id: SEG_AST_87841CCA_0001
+    asset_id: AST_87841CCA
+    src_in_us: 0
+    src_out_us: 27178345
+    role: hero
+    why_it_matches: "walking->running->balance_bike->bicycle progression in one shot"
+    risks: []
+    confidence: 0.95
+    semantic_rank: 2
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["wonder", "joy"]
+    motif_tags: ["walking", "running", "strider"]
+  - candidate_id: cand_03
+    segment_id: SEG_AST_9DFCE350_0001
+    asset_id: AST_9DFCE350
+    src_in_us: 0
+    src_out_us: 26451667
+    role: support
+    why_it_matches: "Balance bike learning phase"
+    risks: []
+    confidence: 0.9
+    semantic_rank: 3
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["wonder", "joy"]
+    motif_tags: ["balance_bike"]
+  - candidate_id: cand_04
+    segment_id: SEG_AST_7F2E9F12_0001
+    asset_id: AST_7F2E9F12
+    src_in_us: 0
+    src_out_us: 30888333
+    role: support
+    why_it_matches: "Alternative comprehensive progression"
+    risks: []
+    confidence: 0.75
+    semantic_rank: 4
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["wonder"]
+    motif_tags: ["progression"]
+  - candidate_id: cand_05
+    segment_id: SEG_AST_15427158_0001
+    asset_id: AST_15427158
+    src_in_us: 0
+    src_out_us: 38350000
+    role: hero
+    why_it_matches: "Bicycle success moment with native dialogue encouragement"
+    risks: []
+    confidence: 0.9
+    semantic_rank: 5
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["pride", "joy"]
+    motif_tags: ["bicycle", "success"]
+  - candidate_id: cand_06
+    segment_id: SEG_AST_DAD1F79C_0001
+    asset_id: AST_DAD1F79C
+    src_in_us: 0
+    src_out_us: 32681667
+    role: hero
+    why_it_matches: "Bicycle learning with encouragement and applause"
+    risks: []
+    confidence: 0.88
+    semantic_rank: 6
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["pride", "warmth"]
+    motif_tags: ["bicycle", "family"]
+  - candidate_id: cand_07
+    segment_id: SEG_AST_BE87AF55_0001
+    asset_id: AST_BE87AF55
+    src_in_us: 0
+    src_out_us: 34115011
+    role: support
+    why_it_matches: "Bicycle success lap completion with family encouragement"
+    risks: []
+    confidence: 0.85
+    semantic_rank: 7
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["pride", "warmth"]
+    motif_tags: ["bicycle", "achievement"]
+  - candidate_id: cand_08
+    segment_id: SEG_AST_19B25163_0001
+    asset_id: AST_19B25163
+    src_in_us: 0
+    src_out_us: 25611667
+    role: support
+    why_it_matches: "Assisted->independent bicycle riding progression"
+    risks: []
+    confidence: 0.8
+    semantic_rank: 8
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["joy", "pride"]
+    motif_tags: ["bicycle", "independence"]
+  - candidate_id: cand_09
+    segment_id: SEG_AST_0C9FA88A_0001
+    asset_id: AST_0C9FA88A
+    src_in_us: 0
+    src_out_us: 3565011
+    role: transition
+    why_it_matches: "Quick bicycle balance->pedal transition moment"
+    risks: []
+    confidence: 0.75
+    semantic_rank: 9
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["joy"]
+    motif_tags: ["bicycle", "transition"]
+  - candidate_id: cand_10
+    segment_id: SEG_AST_D0EB3FF3_0001
+    asset_id: AST_D0EB3FF3
+    src_in_us: 0
+    src_out_us: 18578345
+    role: support
+    why_it_matches: "Training wheels->independent riding arc"
+    risks: []
+    confidence: 0.8
+    semantic_rank: 10
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["joy", "wonder"]
+    motif_tags: ["bicycle", "training_wheels"]
+  - candidate_id: cand_11
+    segment_id: SEG_AST_7E54B334_0001
+    asset_id: AST_7E54B334
+    src_in_us: 0
+    src_out_us: 22916667
+    role: support
+    why_it_matches: "Training wheels->no training wheels transition"
+    risks: []
+    confidence: 0.78
+    semantic_rank: 11
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["joy", "pride"]
+    motif_tags: ["bicycle", "independence"]
+  - candidate_id: cand_12
+    segment_id: SEG_AST_567028AD_0001
+    asset_id: AST_567028AD
+    src_in_us: 0
+    src_out_us: 17378333
+    role: support
+    why_it_matches: "First bicycle ride success with cheering"
+    risks: []
+    confidence: 0.82
+    semantic_rank: 12
+    quality_flags: []
+    evidence: ["brief.must_have"]
+    eligible_beats: ["pride", "warmth"]
+    motif_tags: ["bicycle", "first_ride"]
+  - candidate_id: cand_13
+    segment_id: SEG_AST_7EC7D225_0001
+    asset_id: AST_7EC7D225
+    src_in_us: 0
+    src_out_us: 31221667
+    role: texture
+    why_it_matches: "Bedtime scene: quiet intimate moment for nostalgia"
+    risks: []
+    confidence: 0.7
+    semantic_rank: 13
+    quality_flags: []
+    evidence: ["brief.emotion_curve"]
+    eligible_beats: ["nostalgia", "warmth"]
+    motif_tags: ["bedtime", "reflective"]

@@ -53,9 +53,11 @@ struct CandidateSwapView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Swap: \(clip.id)")
                     .font(.headline)
+                    .accessibilityIdentifier("CandidateSwap.Title")
                 Text(resolvedBeatID.isEmpty ? clip.segmentID : "\(clip.segmentID) / \(resolvedBeatID)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("CandidateSwap.Subtitle")
             }
             Spacer()
             Button {
@@ -66,6 +68,8 @@ struct CandidateSwapView: View {
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
             .help("Close")
+            .accessibilityLabel("Close Candidate Swap")
+            .accessibilityIdentifier("CandidateSwap.CloseButton")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
@@ -76,6 +80,7 @@ struct CandidateSwapView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Current Clip")
                 .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("CandidateSwap.CurrentClipHeader")
 
             ThumbnailView(url: thumbnailURL(assetID: clip.assetID))
                 .frame(height: 156)
@@ -128,6 +133,7 @@ struct CandidateSwapView: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(.quaternary, in: Capsule())
+                    .accessibilityIdentifier("CandidateSwap.AlternativeCount")
                 Spacer()
                 Button {
                     onSearchForMore?()
@@ -137,6 +143,7 @@ struct CandidateSwapView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(onSearchForMore == nil)
+                .accessibilityIdentifier("CandidateSwap.SearchForMoreButton")
             }
 
             if let loadError = dataSource.loadError {
@@ -145,6 +152,7 @@ struct CandidateSwapView: View {
                     systemImage: "exclamationmark.triangle"
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("CandidateSwap.LoadError")
             } else if alternatives.isEmpty {
                 ContentUnavailableView(
                     "No candidates are eligible",
@@ -152,6 +160,7 @@ struct CandidateSwapView: View {
                     description: Text(emptyCandidatesDescription)
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("CandidateSwap.EmptyState")
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
@@ -202,12 +211,7 @@ struct CandidateSwapView: View {
     }
 
     private func use(_ candidate: BrowserCandidate) {
-        feedbackSession.addOp(.replaceSegment(
-            target_clip_id: clip.id,
-            with_segment_id: candidate.segment_id,
-            with_candidate_ref: candidate.candidate_id,
-            reason: "Swap selected in Candidate Browser: \(candidate.why_it_matches.truncated(to: 96))"
-        ))
+        feedbackSession.addOp(candidate.makeReplaceSegmentOperation(targetClipID: clip.id))
         isPresented = false
     }
 }
@@ -230,6 +234,7 @@ private struct CandidateCard: View {
                         .font(.system(.callout, design: .monospaced).weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .accessibilityIdentifier("CandidateSwap.CandidateSegment.\(accessibilitySuffix(candidate.id))")
                     confidenceBadge
                     roleChip
                     if isFallback {
@@ -267,6 +272,8 @@ private struct CandidateCard: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(isCurrentSegment)
+                    .accessibilityLabel("Use candidate \(candidate.segment_id)")
+                    .accessibilityIdentifier("CandidateSwap.UseButton.\(accessibilitySuffix(candidate.id))")
                 }
             }
         }
@@ -301,6 +308,15 @@ private struct CandidateCard: View {
         if candidate.confidence >= 0.8 { return .green }
         if candidate.confidence >= 0.6 { return .yellow }
         return .red
+    }
+
+    private func accessibilitySuffix(_ text: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let mapped = text.unicodeScalars.map { scalar -> String in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }.joined()
+        let collapsed = mapped.split(separator: "-", omittingEmptySubsequences: true).joined(separator: "-")
+        return collapsed.isEmpty ? "candidate" : collapsed
     }
 }
 

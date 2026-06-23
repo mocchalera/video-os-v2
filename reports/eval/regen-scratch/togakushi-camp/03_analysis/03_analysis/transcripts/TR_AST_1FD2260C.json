@@ -1,0 +1,75 @@
+{
+  "project_id": "togakushi-camp",
+  "artifact_version": "2.0.0",
+  "transcript_ref": "TR_AST_1FD2260C",
+  "asset_id": "AST_1FD2260C",
+  "items": [
+    {
+      "item_id": "TRI_AST_1FD2260C_0001",
+      "speaker": "S1",
+      "speaker_key": "AST_1FD2260C:S1",
+      "start_us": 0,
+      "end_us": 2000000,
+      "text": "ここに入れよう"
+    },
+    {
+      "item_id": "TRI_AST_1FD2260C_0002",
+      "speaker": "S1",
+      "speaker_key": "AST_1FD2260C:S1",
+      "start_us": 2000000,
+      "end_us": 4000000,
+      "text": "いや、まだだ"
+    },
+    {
+      "item_id": "TRI_AST_1FD2260C_0003",
+      "speaker": "S1",
+      "speaker_key": "AST_1FD2260C:S1",
+      "start_us": 4000000,
+      "end_us": 6000000,
+      "text": "ソーセージでやり取れよう"
+    },
+    {
+      "item_id": "TRI_AST_1FD2260C_0004",
+      "speaker": "S1",
+      "speaker_key": "AST_1FD2260C:S1",
+      "start_us": 6000000,
+      "end_us": 8000000,
+      "text": "その部分"
+    },
+    {
+      "item_id": "TRI_AST_1FD2260C_0005",
+      "speaker": "S1",
+      "speaker_key": "AST_1FD2260C:S1",
+      "start_us": 8000000,
+      "end_us": 12000000,
+      "text": "それさ、やりすぎて"
+    },
+    {
+      "item_id": "TRI_AST_1FD2260C_0006",
+      "speaker": "S1",
+      "speaker_key": "AST_1FD2260C:S1",
+      "start_us": 12000000,
+      "end_us": 12580000,
+      "text": "工房さんに"
+    }
+  ],
+  "language": "Japanese",
+  "analysis_status": "ready",
+  "word_timing_mode": "word",
+  "provenance": {
+    "stage": "stt",
+    "method": "openai_transcribe_diarize",
+    "connector_version": "openai-stt-v2.0.0",
+    "policy_hash": "14383a79e232dd6c",
+    "request_hash": "1a4c57ed71365b73",
+    "model_alias": "whisper-large-v3-turbo",
+    "model_snapshot": "required_for_canonical_runs",
+    "response_format": "verbose_json",
+    "chunking_strategy": "client_audio_chunks_v1"
+  },
+  "diarization": {
+    "provider": "pyannote",
+    "speaker_count": 1,
+    "turn_count": 6
+  }
+}

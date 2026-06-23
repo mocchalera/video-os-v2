@@ -1,0 +1,112 @@
+{
+  "version": "1.0.0",
+  "project_id": "us062-audio-story-smoke",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-06-22T23:11:08.445Z",
+  "source_media_manifest_hash": "sha256:b934955ddcf4fb507fec5aa85ffd3580ace9533b0ae347c8ce20f8287b409951",
+  "inputs": {
+    "transcript_hashes": [
+      "sha256:242f254798ff217e2e9a9c5633fadf654bcb7b1639eee9b1b7fafcfc54cb63fa"
+    ],
+    "audio_events_hash": "sha256:85894831b93a29d813da5c4bbf8150d60489683b4cee153b3c9dadc9c67fe238",
+    "bgm_analysis_hash": "sha256:f65f2f150e15e336a8e231cfe08d01703bcaa1f6687cae79b63df93adfb2e622",
+    "coverage_report_hash": "sha256:4fc331d34067286099e281c5162ef3b758466c48fe711a8800f4435ed9abed65"
+  },
+  "nodes": [
+    {
+      "node_id": "UTTREF_intro_001",
+      "node_type": "utterance",
+      "asset_id": "AST_DIALOGUE",
+      "start_us": 500000,
+      "end_us": 1600000,
+      "text": "We found the turning point here.",
+      "story_role": "setup",
+      "refs": {
+        "transcript_ref": "UTT_intro_001",
+        "speaker_ref": "SPK_HOST",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.93,
+        "source": "transcript",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "AEREF_hit_001",
+      "node_type": "impact",
+      "asset_id": "AST_DIALOGUE",
+      "start_us": 1700000,
+      "end_us": 1900000,
+      "text": null,
+      "story_role": "reaction",
+      "refs": {
+        "transcript_ref": null,
+        "speaker_ref": null,
+        "audio_event_ref": "AE_hit_001",
+        "bgm_ref": null
+      },
+      "confidence": {
+        "score": 0.82,
+        "source": "fixture",
+        "status": "ready"
+      }
+    },
+    {
+      "node_id": "BGMREF_intro",
+      "node_type": "music_section",
+      "asset_id": "AST_MUSIC",
+      "start_us": 0,
+      "end_us": 2500000,
+      "text": null,
+      "story_role": "hook",
+      "refs": {
+        "transcript_ref": null,
+        "speaker_ref": null,
+        "audio_event_ref": null,
+        "bgm_ref": "BGM_intro"
+      },
+      "confidence": {
+        "score": 0.66,
+        "source": "bgm_analysis",
+        "status": "ready"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "ASGEDGE_AST_DIALOGUE_1",
+      "from_node_id": "UTTREF_intro_001",
+      "to_node_id": "AEREF_hit_001",
+      "type": "precedes"
+    }
+  ],
+  "coverage": {
+    "status": "ready",
+    "dialogue_lane": "ready",
+    "audio_event_lane": "ready",
+    "music_lane": "ready",
+    "missing_inputs": []
+  },
+  "provenance": {
+    "producer": "analysis-pipeline",
+    "inputs": [
+      {
+        "path": "02_media/source_media_manifest.json",
+        "hash": "sha256:b934955ddcf4fb507fec5aa85ffd3580ace9533b0ae347c8ce20f8287b409951"
+      },
+      {
+        "path": "03_analysis/analysis_coverage_report.json",
+        "hash": "sha256:4fc331d34067286099e281c5162ef3b758466c48fe711a8800f4435ed9abed65"
+      }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": [
+        "created_at"
+      ]
+    }
+  }
+}

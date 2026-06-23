@@ -1,0 +1,9 @@
+{
+  "version": "appraiser-frame-v1",
+  "segment_id": "SEG_AST_84A3D0F8_0001",
+  "frame_us": 7478959,
+  "source_path": "/Users/mocchalera/Dev/video-os-v2-spec/projects/ena-promo-ai/02_media/Blackmagic Pocket Cinema Camera_1_2015-07-25_0623_C0011.mov",
+  "cache_hash": "fb2cb8d0f8fed84f",
+  "frame_path": "appraiser_frames/SEG_AST_84A3D0F8_0001.jpg",
+  "extracted_at": "2026-06-17T22:37:36.611Z"
+}

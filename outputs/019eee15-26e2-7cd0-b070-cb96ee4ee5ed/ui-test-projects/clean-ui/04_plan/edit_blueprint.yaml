@@ -1,0 +1,78 @@
+version: "1"
+project_id: sample-mountain-reset
+created_at: "2026-03-21T03:35:00Z"
+
+sequence_goals:
+  - open on tactile ritual before naming the idea directly
+  - widen into breath and trail movement without turning heroic
+  - resolve with warmth and carryover rather than victory
+
+beats:
+  - id: b01
+    label: hook
+    purpose: establish intimate morning detail and a felt sense of quiet before dialogue enters
+    target_duration_frames: 96
+    required_roles: [hero, texture]
+    preferred_roles: [transition]
+    notes: favor short tactile shots and keep the reveal of the face restrained
+
+  - id: b02
+    label: settle
+    purpose: connect interior ritual to the first spoken articulation of why the subject came here
+    target_duration_frames: 216
+    required_roles: [support, dialogue, texture]
+    preferred_roles: [transition]
+    notes: leave room around the first dialogue line so it feels overheard rather than announced
+
+  - id: b03
+    label: climb
+    purpose: widen the world and maintain forward motion while protecting against triumphal framing
+    target_duration_frames: 240
+    required_roles: [hero, support, transition]
+    preferred_roles: [dialogue, texture]
+    notes: use scale carefully and keep transitions organic
+
+  - id: b04
+    label: release
+    purpose: land the message with a calm emotional release and an open ending
+    target_duration_frames: 168
+    required_roles: [hero, dialogue, transition]
+    preferred_roles: [texture]
+    notes: allow the final beat to breathe; one clear spoken line is enough
+
+pacing:
+  opening_cadence: brisk
+  middle_cadence: spacious
+  ending_cadence: warm
+  max_shot_length_frames: 120
+
+music_policy:
+  start_sparse: true
+  allow_release_late: true
+  entry_beat: b03
+  avoid_anthemic_lift: true
+  permitted_energy_curve: restrained_to_warm
+
+dialogue_policy:
+  preserve_natural_breath: true
+  avoid_wall_to_wall_voiceover: true
+  prioritize_lines:
+    - I came up here to get quiet again.
+    - When I head back down, I carry that pace with me.
+
+transition_policy:
+  prefer_match_texture_over_flashy_fx: true
+  allow_hard_cuts: true
+  avoid_speed_ramps: true
+
+ending_policy:
+  should_feel: restorative
+  final_line_strategy: use a single reflective line followed by a held breath or open trail image
+  avoid_cta: true
+  final_hold_min_frames: 18
+
+rejection_rules:
+  - reject repeated hero shots that make the mountain feel conquering rather than restorative
+  - reject dialogue stacks that explain the theme more than once in the same beat
+  - reject segments whose wind or highlight issues are more noticeable than the intended emotion
+  - reject back-to-back clips from the same asset when a texture cutaway could create space

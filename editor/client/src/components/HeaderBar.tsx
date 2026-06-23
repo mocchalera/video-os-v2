@@ -40,8 +40,8 @@ export default function HeaderBar({
 
   return (
     <header className="shrink-0 border-b border-white/[0.06] px-4 py-2.5">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
           <div className="min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-[color:var(--text-subtle)]">
               Video OS v2
@@ -55,7 +55,8 @@ export default function HeaderBar({
 
           <div className="flex items-center gap-2">
             <select
-              className="min-w-[240px] border border-white/[0.06] bg-transparent px-3 py-1.5 text-[13px] font-medium text-neutral-100 outline-none transition focus:border-[var(--accent)]"
+              className="min-w-[180px] max-w-full border border-white/[0.06] bg-transparent px-3 py-1.5 text-[13px] font-medium text-neutral-100 outline-none transition focus:border-[var(--accent)]"
+              aria-label="Project"
               value={ts.projectId}
               onChange={(e) => ts.setProjectId(e.target.value)}
             >
@@ -74,6 +75,7 @@ export default function HeaderBar({
           <div className="flex items-center gap-1 rounded border border-white/[0.06] p-0.5">
             <button
               type="button"
+              aria-pressed={editorMode === 'nle'}
               className={`px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] transition ${
                 editorMode === 'nle'
                   ? 'bg-white/[0.1] text-white'
@@ -85,6 +87,7 @@ export default function HeaderBar({
             </button>
             <button
               type="button"
+              aria-pressed={editorMode === 'ai'}
               className={`px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] transition ${
                 editorMode === 'ai'
                   ? 'bg-[var(--accent-strong)]/30 text-[var(--accent)]'
@@ -97,7 +100,7 @@ export default function HeaderBar({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-4">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           <div className="hidden text-right md:block">
             <div className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-subtle)]">
               Program TC
@@ -107,7 +110,7 @@ export default function HeaderBar({
             </div>
           </div>
 
-          <div className="h-8 w-px bg-white/[0.08]" />
+          <div className="hidden h-8 w-px bg-white/[0.08] sm:block" />
 
           <CommandBar
             jobStatus={aiJob.status}
@@ -124,7 +127,7 @@ export default function HeaderBar({
             onDismissError={() => aiJob.reset()}
           />
 
-          <div className="h-8 w-px bg-white/[0.08]" />
+          <div className="hidden h-8 w-px bg-white/[0.08] sm:block" />
 
           <div className="flex items-center gap-2">
             <button

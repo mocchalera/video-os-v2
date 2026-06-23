@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assemble } from "../runtime/compiler/assemble.js";
+import { compactGuideSingleTrackGaps } from "../runtime/compiler/index.js";
 import { compactTrimmedClipsWithinBeats } from "../runtime/compiler/trim.js";
 import type {
   DurationPolicy,
@@ -48,6 +49,48 @@ describe("V1-first track layout", () => {
     ]);
 
     expect(clips.map((item) => item.timeline_in_frame)).toEqual([0, 30, 50, 100]);
+  });
+
+  it("compacts final guide single-track gaps across beat boundaries and syncs mirrors", () => {
+    const beats = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 100 },
+      { beat_id: "b02", target_duration_frames: 80 },
+      { beat_id: "b03", target_duration_frames: 60 },
+    ]).beats;
+    const v1Clips = [
+      { ...clip("C1", "b01", 0, 30), candidate_ref: "ref_1" },
+      { ...clip("C2", "b02", 100, 20), candidate_ref: "ref_2" },
+      { ...clip("C3", "b03", 180, 10), candidate_ref: "ref_3" },
+    ];
+    const a1Clips = v1Clips.map((videoClip, index) => ({
+      ...videoClip,
+      clip_id: `A${index + 1}`,
+      role: "nat_sound" as const,
+      motivation: "original clip audio",
+    }));
+    const assembled = {
+      tracks: {
+        video: [
+          { track_id: "V1", kind: "video" as const, clips: v1Clips },
+          { track_id: "V2", kind: "video" as const, clips: [] },
+        ],
+        audio: [
+          { track_id: "A1", kind: "audio" as const, clips: a1Clips },
+          { track_id: "A2", kind: "audio" as const, clips: [] },
+        ],
+      },
+      markers: [
+        { frame: 0, kind: "beat" as const, label: "b01: Hook" },
+        { frame: 100, kind: "beat" as const, label: "b02: Body" },
+        { frame: 180, kind: "beat" as const, label: "b03: Close" },
+      ],
+    };
+
+    compactGuideSingleTrackGaps(assembled, beats);
+
+    expect(v1Clips.map((item) => item.timeline_in_frame)).toEqual([0, 30, 50]);
+    expect(a1Clips.map((item) => item.timeline_in_frame)).toEqual([0, 30, 50]);
+    expect(assembled.markers.map((item) => item.frame)).toEqual([0, 30, 50]);
   });
 
   it("single mode places hero/support/texture sequentially on V1 and leaves V2 empty", () => {

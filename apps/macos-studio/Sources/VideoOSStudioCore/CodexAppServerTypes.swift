@@ -17,6 +17,17 @@ public enum CodexAppServerTransport: String, CaseIterable, Sendable {
     }
 }
 
+public struct CodexAppServerTransportSettingsOption: Equatable, Identifiable, Sendable {
+    public var id: String { rawValue }
+    public let rawValue: String
+    public let label: String
+
+    public init(transport: CodexAppServerTransport) {
+        rawValue = transport.rawValue
+        label = transport.rawValue
+    }
+}
+
 public struct CodexAppServerLaunchPlan: Equatable, Sendable {
     public var executable: String
     public var transport: CodexAppServerTransport
@@ -81,6 +92,34 @@ public struct CodexAppServerLaunchPlan: Equatable, Sendable {
 
     public var environmentDescription: String {
         "cwd=\(workspace.path) \(([executable] + arguments).joined(separator: " "))"
+    }
+}
+
+public enum CodexAppServerTransportPreferences {
+    public static let storageKey = "videoOSStudioPreferredTransport"
+    public static let settingsDescription = "Initial builds use stdio. WebSocket and Unix socket modes are reserved for embedded runtime and packaged app flows."
+    public static var settingsOptions: [CodexAppServerTransportSettingsOption] {
+        CodexAppServerTransport.allCases.map(CodexAppServerTransportSettingsOption.init)
+    }
+
+    public static func preferredTransport(defaults: UserDefaults = .standard) -> CodexAppServerTransport {
+        guard
+            let rawValue = defaults.string(forKey: storageKey),
+            let transport = CodexAppServerTransport(rawValue: rawValue)
+        else {
+            return .stdio
+        }
+        return transport
+    }
+
+    public static func launchPlan(
+        workspace: URL,
+        defaults: UserDefaults = .standard
+    ) -> CodexAppServerLaunchPlan {
+        CodexAppServerLaunchPlan(
+            transport: preferredTransport(defaults: defaults),
+            workspace: workspace
+        )
     }
 }
 

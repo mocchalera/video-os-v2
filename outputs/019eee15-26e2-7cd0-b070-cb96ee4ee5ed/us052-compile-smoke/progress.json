@@ -1,0 +1,17 @@
+{
+  "project_id": "us052-compile-smoke",
+  "phase": "compile",
+  "gate": 4,
+  "status": "completed",
+  "completed": 3,
+  "total": 3,
+  "eta_sec": 0,
+  "artifacts_created": [
+    "timeline.json",
+    "timeline.otio",
+    "preview-manifest.json"
+  ],
+  "errors": [],
+  "started_at": "2026-06-22T16:20:00.701Z",
+  "updated_at": "2026-06-22T16:20:00.855Z"
+}

@@ -108,6 +108,9 @@ export default function CommandPalette({ open, onClose, commands }: CommandPalet
         className="palette-glass relative w-full max-w-md overflow-hidden rounded-lg border border-white/[0.08] bg-[#1a1a1a]/90"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
       >
         {/* Search input */}
         <div className="flex items-center border-b border-white/[0.06] px-4 py-3">
@@ -117,6 +120,7 @@ export default function CommandPalette({ open, onClose, commands }: CommandPalet
           <input
             ref={inputRef}
             type="text"
+            aria-label="Search commands"
             className="flex-1 bg-transparent text-[14px] text-white outline-none placeholder:text-[color:var(--text-muted)]"
             placeholder="Type a command..."
             value={query}

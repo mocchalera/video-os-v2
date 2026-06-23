@@ -1,0 +1,219 @@
+version: "1"
+project_id: fumoto-growth
+candidates:
+  - segment_id: SEG_AST_9435E35C_0001
+    asset_id: AST_9435E35C
+    src_in_us: 0
+    src_out_us: 26066667
+    role: hero
+    why_it_matches: This segment shows the baby at the very beginning of the growth
+      journey, aligning with the 'tenderness' emotion and the 'first steps'
+      theme. The text overlay provides a clear chronological marker.
+    risks: []
+    confidence: 0.9
+    semantic_rank: 1
+    evidence:
+      - Baby lying down with text overlay indicating age (0 years, 0 days)
+      - Aligns with 'tenderness' emotion and 'first steps' theme in the brief.
+    eligible_beats:
+      - tenderness
+      - opening
+    story_role: setup
+    motif_tags:
+      - infant
+      - newborn
+    editorial_signals:
+      visual_tags:
+        - indoor
+        - close_up
+        - text_overlay
+      peak_type: emotional_peak
+      peak_strength_score: 0.7
+      peak_ref: SEG_AST_9435E35C_0001@10861111
+      semantic_cluster_id: indoor_baby
+    trim_hint:
+      preferred_duration_us: 5000000
+    peak_signals:
+      motion: 0.5
+      audio_rms: 0.5
+    candidate_id: cand_6r0RGtuuV5C7
+  - segment_id: SEG_AST_7F2E9F12_0001
+    asset_id: AST_7F2E9F12
+    src_in_us: 0
+    src_out_us: 30888333
+    role: hero
+    why_it_matches: This segment clearly shows the progression from walking to
+      running and then to a balance bike, directly addressing the 'walking' and
+      'running' aspects of the growth journey and the 'wonder' emotion.
+    risks: []
+    confidence: 0.9
+    semantic_rank: 2
+    evidence:
+      - Shows child transitioning from walking to running.
+      - Includes child riding a balance bike (strider).
+      - Directly addresses 'walking' and 'running' stages and 'wonder' emotion.
+    eligible_beats:
+      - wonder
+      - joy
+      - walking
+      - running
+      - strider
+    story_role: experience
+    motif_tags:
+      - toddler
+      - balance_bike
+    editorial_signals:
+      visual_tags:
+        - outdoor_scene
+        - daytime
+        - progression
+      peak_type: action_peak
+      peak_strength_score: 0.7
+      peak_ref: SEG_AST_7F2E9F12_0001@2574027
+      semantic_cluster_id: ast_motion
+    trim_hint:
+      preferred_duration_us: 10000000
+    peak_signals:
+      motion: 0.5
+      audio_rms: 0.5
+    candidate_id: cand__RX3QkKD9cHJ
+  - segment_id: SEG_AST_0C9FA88A_0001
+    asset_id: AST_0C9FA88A
+    src_in_us: 0
+    src_out_us: 3565011
+    role: hero
+    why_it_matches: This segment captures the transition from a balance bike to
+      pedaling a bicycle, a key moment of learning and achievement that aligns
+      with 'joy' and 'pride'. The emotional peak tag is also relevant.
+    risks: []
+    confidence: 0.9
+    semantic_rank: 3
+    evidence:
+      - Child on balance bike.
+      - Child attempting to pedal.
+      - Child successfully riding bicycle.
+      - Labeled with 'emotional_peak'.
+    eligible_beats:
+      - joy
+      - pride
+      - strider
+      - bicycle
+    story_role: experience
+    motif_tags:
+      - child_learning
+      - first_bike_ride
+    editorial_signals:
+      visual_tags:
+        - child
+        - bicycle
+        - outdoor_scene
+        - grass
+        - road
+        - helmet
+        - balance_bike
+        - pedaling
+      peak_type: emotional_peak
+      peak_strength_score: 0.9
+      peak_ref: MFIND_AST_0C9FA88A_0002
+      semantic_cluster_id: ast_child
+    trim_hint:
+      preferred_duration_us: 8000000
+    peak_signals:
+      motion: 0.5
+      audio_rms: 0
+    candidate_id: cand_x5X0GnQe9flm
+  - segment_id: SEG_AST_DAD1F79C_0001
+    asset_id: AST_DAD1F79C
+    src_in_us: 0
+    src_out_us: 32681667
+    role: hero
+    why_it_matches: This segment captures the moment of success with clear
+      encouragement and applause, hitting the 'pride' and 'warmth' emotions. The
+      emotional peak tag and transcript confirm the celebratory nature.
+    risks: []
+    confidence: 0.9
+    semantic_rank: 5
+    evidence:
+      - Child on bicycle, wobbling, then successfully riding.
+      - Encouragement and applause from adults ('やったー').
+      - Labeled with 'emotional_peak'.
+    eligible_beats:
+      - pride
+      - warmth
+      - joy
+      - bicycle
+      - achievement
+    story_role: payoff
+    motif_tags:
+      - celebration
+      - family_moment
+    editorial_signals:
+      visual_tags:
+        - child
+        - bicycle
+        - outdoor_scene
+        - grass
+        - encouragement
+        - success
+        - family
+      peak_type: emotional_peak
+      peak_strength_score: 0.9
+      peak_ref: SEG_AST_DAD1F79C_0001@2723472
+      semantic_cluster_id: ast_child
+    trim_hint:
+      preferred_duration_us: 10000000
+    peak_signals:
+      motion: 0.5
+      audio_rms: 0.5
+    candidate_id: cand_Z4ldvMzPaLA0
+  - segment_id: SEG_AST_02DA7FDF_0001
+    asset_id: AST_02DA7FDF
+    src_in_us: 0
+    src_out_us: 23891882
+    role: hero
+    why_it_matches: This segment serves as a clear closing with a title card and
+      thank you message, fulfilling the 'fade out' requirement and providing a
+      sense of completion.
+    risks: []
+    confidence: 0.9
+    semantic_rank: 6
+    evidence:
+      - Title card with Japanese text.
+      - Thank you message displayed.
+      - Suitable for a closing sequence.
+    eligible_beats:
+      - closing
+      - nostalgia
+      - warmth
+    story_role: closing
+    motif_tags:
+      - end_screen
+      - japanese_text
+    editorial_signals:
+      visual_tags:
+        - text_overlay
+        - title_card
+        - japanese_text
+        - thank_you_message
+        - end_screen
+      peak_type: action_peak
+      peak_strength_score: 0.6
+      peak_ref: MFIND_AST_02DA7FDF_0001
+      semantic_cluster_id: ast_text_overlay
+    trim_hint:
+      preferred_duration_us: 5000000
+    peak_signals:
+      motion: 0.75
+      audio_rms: 0
+    candidate_id: cand_VxbG0jwDf3pO
+selection_notes:
+  - "The emotional progression aims to follow the brief's curve: tenderness
+    (baby), wonder (early steps), joy (running, strider), pride (first bike
+    rides), warmth (parental encouragement), and nostalgia (overall growth)."
+  - "Pacing approach: mixed, with faster montages for learning stages and slower
+    holds for key achievements."
+editorial_summary:
+  dominant_visual_mode: mixed
+  speaker_topology: unknown
+  motion_profile: medium
+  transcript_density: sparse

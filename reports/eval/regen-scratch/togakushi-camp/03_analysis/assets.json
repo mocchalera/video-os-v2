@@ -1,0 +1,2802 @@
+{
+  "project_id": "togakushi-camp",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "asset_id": "AST_00725A11",
+      "filename": "NINJAV_S001_S001_T084.MOV",
+      "duration_us": 15281938,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_00725A11",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_00725A11_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "00725a1132fb6ca553f25b9152bdf5ab9ebc6015",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_00725A11_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "f8d69e637a7668e5",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_00725A11.jpg",
+      "waveform_path": "waveforms/WF_AST_00725A11.png",
+      "role_guess": "hybrid",
+      "display_name": "36_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_038AB86F",
+      "filename": "NINJAV_S001_S001_T001.MOV",
+      "duration_us": 13138125,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_038AB86F",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_038AB86F_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "038ab86fea623fbce71b9bb213d9efd98e657cea",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_038AB86F_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "e3c24f0e2e4f661d",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_038AB86F.jpg",
+      "waveform_path": "waveforms/WF_AST_038AB86F.png",
+      "role_guess": "hybrid",
+      "display_name": "01_oct_a_person_with"
+    },
+    {
+      "asset_id": "AST_06D3223E",
+      "filename": "NINJAV_S001_S001_T056.MOV",
+      "duration_us": 12746067,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_06D3223E",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_06D3223E_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "06d3223e40533b829afc7e36b27ae4c1c52d7ab8",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_06D3223E_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "dcf477456389ac1e",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_06D3223E.jpg",
+      "waveform_path": "waveforms/WF_AST_06D3223E.png",
+      "role_guess": "hybrid",
+      "display_name": "29_oct_a_person"
+    },
+    {
+      "asset_id": "AST_08BC00DF",
+      "filename": "NINJAV_S001_S001_T071.MOV",
+      "duration_us": 5455450,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_08BC00DF",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_08BC00DF_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "08bc00df72a1d628aa9d0b8fbb6aa4e1d365cc13",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_08BC00DF_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "9b1062a6cb9db6a9",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_08BC00DF.jpg",
+      "waveform_path": "waveforms/WF_AST_08BC00DF.png",
+      "role_guess": "unknown",
+      "display_name": "33_oct_a_young_child"
+    },
+    {
+      "asset_id": "AST_0AD9FD1C",
+      "filename": "NINJAV_S001_S001_T035.MOV",
+      "duration_us": 16057708,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_0AD9FD1C",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_0AD9FD1C_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "0ad9fd1cfb77e18186b009a61eae054fab9459db",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_0AD9FD1C_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "29ffeeb1eac380b6",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_0AD9FD1C.jpg",
+      "waveform_path": "waveforms/WF_AST_0AD9FD1C.png",
+      "role_guess": "hybrid",
+      "display_name": "23_oct_a_person"
+    },
+    {
+      "asset_id": "AST_0C10D8D8",
+      "filename": "NINJAV_S001_S001_T039.MOV",
+      "duration_us": 10093417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_0C10D8D8",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_0C10D8D8_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "0c10d8d8d60c1007d1675650bd587bd7c5b4e4de",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_0C10D8D8_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "dc0efa9928585d90",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_0C10D8D8.jpg",
+      "waveform_path": "waveforms/WF_AST_0C10D8D8.png",
+      "role_guess": "hybrid",
+      "display_name": "26_oct_a_young_boy_in"
+    },
+    {
+      "asset_id": "AST_1AA38FF9",
+      "filename": "NINJAV_S001_S001_T243.MOV",
+      "duration_us": 7590917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_1AA38FF9",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_1AA38FF9_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "1aa38ff94b4f654dec52ceef0c08021bed32014b",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_1AA38FF9_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "cd44c97f5c1f15a2",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_1AA38FF9.jpg",
+      "waveform_path": "waveforms/WF_AST_1AA38FF9.png",
+      "role_guess": "unknown",
+      "display_name": "52_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_1FD2260C",
+      "filename": "NINJAV_S001_S001_T177.MOV",
+      "duration_us": 12579250,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_1FD2260C",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_1FD2260C_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "1fd2260ca4a1880e2d79b26208e380438f4ea0ea",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_1FD2260C_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "53ffc0fca1d6cee5",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_1FD2260C.jpg",
+      "waveform_path": "waveforms/WF_AST_1FD2260C.png",
+      "role_guess": "hybrid",
+      "display_name": "46_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_2373D82B",
+      "filename": "NINJAV_S001_S001_T074.MOV",
+      "duration_us": 5422083,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_2373D82B",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_2373D82B_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "2373d82bfbd5a079ac310f3e475f707c1f7d69da",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_2373D82B_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "65eb6e7270f4ff28",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_2373D82B.jpg",
+      "waveform_path": "waveforms/WF_AST_2373D82B.png",
+      "role_guess": "unknown",
+      "display_name": "34_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_2759B31C",
+      "filename": "NINJAV_S001_S001_T010.MOV",
+      "duration_us": 7048708,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_2759B31C",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_2759B31C_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "2759b31ce2b24a2c88b238b4cb1970d0e5f7d77c",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_2759B31C_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "8bf7ec35a7247466",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_2759B31C.jpg",
+      "waveform_path": "waveforms/WF_AST_2759B31C.png",
+      "role_guess": "hybrid",
+      "display_name": "07_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_287B7B3F",
+      "filename": "NINJAV_S001_S001_T003.MOV",
+      "duration_us": 7590917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_287B7B3F",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_287B7B3F_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "287b7b3f12c98c9763d6bacca53095a5ac9d37e2",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_287B7B3F_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "e174487831639d61",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_287B7B3F.jpg",
+      "waveform_path": "waveforms/WF_AST_287B7B3F.png",
+      "role_guess": "unknown",
+      "display_name": "02_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_29C1662F",
+      "filename": "NINJAV_S001_S001_T221.MOV",
+      "duration_us": 7132125,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_29C1662F",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_29C1662F_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "29c1662fe89ae9ff2652ec3789d2328ecc935095",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_29C1662F_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "e33ed706a906c6bc",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_29C1662F.jpg",
+      "waveform_path": "waveforms/WF_AST_29C1662F.png",
+      "role_guess": "hybrid",
+      "display_name": "48_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_330996D5",
+      "filename": "NINJAV_S001_S001_T098.MOV",
+      "duration_us": 13329983,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_330996D5",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_330996D5_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "330996d5f486f52a6a67461f67d5aeb014995cd7",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_330996D5_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "4905703b88be1404",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_330996D5.jpg",
+      "waveform_path": "waveforms/WF_AST_330996D5.png",
+      "role_guess": "unknown",
+      "display_name": "37_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_34237612",
+      "filename": "NINJAV_S001_S001_T241.MOV",
+      "duration_us": 11094417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_34237612",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_34237612_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "34237612987f36f4c216547c146dd5e4866c14e9",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_34237612_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "5b0e32ce9d398d7a",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_34237612.jpg",
+      "waveform_path": "waveforms/WF_AST_34237612.png",
+      "role_guess": "unknown",
+      "display_name": "51_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_343F59BE",
+      "filename": "DJI_0075.MOV",
+      "duration_us": 16766750,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_343F59BE_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "343f59bed7bacb96bb6ecd72954167e0a639e4de",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "hevc"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_343F59BE_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "f4f133627546fddf",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_343F59BE.jpg",
+      "role_guess": "b-roll",
+      "display_name": "57_oct_a_person"
+    },
+    {
+      "asset_id": "AST_34FEC43F",
+      "filename": "NINJAV_S001_S001_T249.MOV",
+      "duration_us": 19644625,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_34FEC43F",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_34FEC43F_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "34fec43f3f76ea41243d9c0cea099ea59ba4668f",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_34FEC43F_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "cfad59caadd9044b",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_34FEC43F.jpg",
+      "waveform_path": "waveforms/WF_AST_34FEC43F.png",
+      "role_guess": "hybrid",
+      "display_name": "53_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_38AC5E78",
+      "filename": "NINJAV_S001_S001_T167.MOV",
+      "duration_us": 10610604,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_38AC5E78",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_38AC5E78_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "38ac5e7812626145a6dc32fe11c3d817fdc44c47",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_38AC5E78_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "9b6a0057550cf515",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_38AC5E78.jpg",
+      "waveform_path": "waveforms/WF_AST_38AC5E78.png",
+      "role_guess": "hybrid",
+      "display_name": "45_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_399510B7",
+      "filename": "NINJAV_S001_S001_T018.MOV",
+      "duration_us": 10635625,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_399510B7",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_399510B7_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "399510b75a6a2c60a0d46f6ec85f9ef45bf02b6d",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_399510B7_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "21b0eff91d2a02a2",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_399510B7.jpg",
+      "waveform_path": "waveforms/WF_AST_399510B7.png",
+      "role_guess": "hybrid",
+      "display_name": "11_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_43E0E46A",
+      "filename": "NINJAV_S001_S001_T042.MOV",
+      "duration_us": 7090417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_43E0E46A",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_43E0E46A_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "43e0e46ae987dc4deabbc03a0871f6b1ec02a6f4",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_43E0E46A_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "23e828f2a9744eac",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_43E0E46A.jpg",
+      "waveform_path": "waveforms/WF_AST_43E0E46A.png",
+      "role_guess": "hybrid",
+      "display_name": "27_oct_a_person"
+    },
+    {
+      "asset_id": "AST_44EFC7B2",
+      "filename": "NINJAV_S001_S001_T030.MOV",
+      "duration_us": 4621283,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_44EFC7B2",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_44EFC7B2_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "44efc7b2347f22ca7d4783759741369d17b36f30",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_44EFC7B2_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "2e812ab24504e3e6",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_44EFC7B2.jpg",
+      "waveform_path": "waveforms/WF_AST_44EFC7B2.png",
+      "role_guess": "unknown",
+      "display_name": "19_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_4E3BBB2A",
+      "filename": "NINJAV_S001_S001_T029.MOV",
+      "duration_us": 5188521,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_4E3BBB2A",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_4E3BBB2A_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "4e3bbb2a1a06b0cdb698adbffa709f452f2b487c",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_4E3BBB2A_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "486045ca923ca9b5",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_4E3BBB2A.jpg",
+      "waveform_path": "waveforms/WF_AST_4E3BBB2A.png",
+      "role_guess": "unknown",
+      "display_name": "18_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_50CC5A4E",
+      "filename": "NINJAV_S001_S001_T067.MOV",
+      "duration_us": 8792117,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_50CC5A4E",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_50CC5A4E_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "50cc5a4edf191b15bf9ff8ea2cd8a9fc19a683f5",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_50CC5A4E_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "424366021d8437db",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_50CC5A4E.jpg",
+      "waveform_path": "waveforms/WF_AST_50CC5A4E.png",
+      "role_guess": "hybrid",
+      "display_name": "32_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_54FA9ED0",
+      "filename": "NINJAV_S001_S001_T058.MOV",
+      "duration_us": 13313300,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_54FA9ED0",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_54FA9ED0_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "54fa9ed0149cde931791b0c0c3458a6f4ae00c1a",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_54FA9ED0_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "8d83895b373937d3",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_54FA9ED0.jpg",
+      "waveform_path": "waveforms/WF_AST_54FA9ED0.png",
+      "role_guess": "hybrid",
+      "display_name": "30_oct_a_young_child"
+    },
+    {
+      "asset_id": "AST_5D2B5B35",
+      "filename": "NINJAV_S001_S001_T050.MOV",
+      "duration_us": 12595917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_5D2B5B35",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_5D2B5B35_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "5d2b5b35cf6f5339df4b54aa3805eebc44ea945c",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_5D2B5B35_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "41a44119d1fa5503",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_5D2B5B35.jpg",
+      "waveform_path": "waveforms/WF_AST_5D2B5B35.png",
+      "role_guess": "unknown",
+      "display_name": "28_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_5DFD06CE",
+      "filename": "NINJAV_S001_S001_T020.MOV",
+      "duration_us": 11094417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_5DFD06CE",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_5DFD06CE_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "5dfd06ce5ac87ea822d9e86429e545d2ce559c16",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_5DFD06CE_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "52d220e79127598a",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_5DFD06CE.jpg",
+      "waveform_path": "waveforms/WF_AST_5DFD06CE.png",
+      "role_guess": "hybrid",
+      "display_name": "13_oct_a_person"
+    },
+    {
+      "asset_id": "AST_6793F326",
+      "filename": "NINJAV_S001_S001_T037.MOV",
+      "duration_us": 17100417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_6793F326",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_6793F326_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "6793f3266502b7385fa2b402573de9d0b58c7a7c",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_6793F326_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "bf8988815961f518",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_6793F326.jpg",
+      "waveform_path": "waveforms/WF_AST_6793F326.png",
+      "role_guess": "hybrid",
+      "display_name": "25_oct_a_person"
+    },
+    {
+      "asset_id": "AST_6E4BB9B4",
+      "filename": "NINJAV_S001_S001_T016.MOV",
+      "duration_us": 9134125,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_6E4BB9B4",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_6E4BB9B4_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "6e4bb9b40d997f3f3cede22a8623848e5c51c3a9",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_6E4BB9B4_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "d2e0d9cbcb27054f",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_6E4BB9B4.jpg",
+      "waveform_path": "waveforms/WF_AST_6E4BB9B4.png",
+      "role_guess": "unknown",
+      "display_name": "10_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_7647C815",
+      "filename": "NINJAV_S001_S001_T026.MOV",
+      "duration_us": 16641625,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_7647C815",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_7647C815_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "7647c8151353a6d00e2434e2f8d2b2ceb771edb2",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_7647C815_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "f6a5d80d88b968c0",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_7647C815.jpg",
+      "waveform_path": "waveforms/WF_AST_7647C815.png",
+      "role_guess": "unknown",
+      "display_name": "15_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_79DA5F7C",
+      "filename": "NINJAV_S001_S001_T012.MOV",
+      "duration_us": 12595917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_79DA5F7C",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_79DA5F7C_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "79da5f7c3056f834e5f1d9f208f75d001feed78c",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_79DA5F7C_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "dbf7cb37eac075de",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_79DA5F7C.jpg",
+      "waveform_path": "waveforms/WF_AST_79DA5F7C.png",
+      "role_guess": "hybrid",
+      "display_name": "08_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_7A0CC62D",
+      "filename": "NINJAV_S001_S001_T023.MOV",
+      "duration_us": 8049708,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_7A0CC62D",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_7A0CC62D_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "7a0cc62d7ea2dbf4b17e9e9467ec34bfd5ab992d",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_7A0CC62D_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "801db0242f4f6f98",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_7A0CC62D.jpg",
+      "waveform_path": "waveforms/WF_AST_7A0CC62D.png",
+      "role_guess": "unknown",
+      "display_name": "14_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_83763628",
+      "filename": "DJI_0077.MOV",
+      "duration_us": 105730625,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_83763628_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "8376362844b55419d2e2eb8d9d3af8f281eab8c1",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "hevc"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_83763628_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "a6cefda65e39a4fc",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_83763628.jpg",
+      "role_guess": "b-roll",
+      "display_name": "59_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_8855E384",
+      "filename": "NINJAV_S001_S001_T128.MOV",
+      "duration_us": 3586917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_8855E384",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_8855E384_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "8855e3845f140f7fa383a87461ad014940127737",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_8855E384_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "3d09013a21d8006e",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_8855E384.jpg",
+      "waveform_path": "waveforms/WF_AST_8855E384.png",
+      "role_guess": "unknown",
+      "display_name": "38_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_8A0FFB9A",
+      "filename": "NINJAV_S001_S001_T005.MOV",
+      "duration_us": 12053708,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_8A0FFB9A",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_8A0FFB9A_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "8a0ffb9ab0aa4fe64033e4bc31a1f9b7a1d88794",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_8A0FFB9A_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "d37f56c5f64b3a80",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_8A0FFB9A.jpg",
+      "waveform_path": "waveforms/WF_AST_8A0FFB9A.png",
+      "role_guess": "hybrid",
+      "display_name": "04_oct_a_person"
+    },
+    {
+      "asset_id": "AST_8E953316",
+      "filename": "NINJAV_S001_S001_T139.MOV",
+      "duration_us": 7090417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_8E953316",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_8E953316_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "8e953316126b70a1a3377c12497dc6aa840ad36b",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_8E953316_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "fe33f062096e4737",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_8E953316.jpg",
+      "waveform_path": "waveforms/WF_AST_8E953316.png",
+      "role_guess": "hybrid",
+      "display_name": "41_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_8F24F2A0",
+      "filename": "NINJAV_S001_S001_T234.MOV",
+      "duration_us": 12595917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_8F24F2A0",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_8F24F2A0_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "8f24f2a0f9cda0812cd3edc5a6a0896b0cd3fbe7",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_8F24F2A0_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "571c6dba77d3a41e",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_8F24F2A0.jpg",
+      "waveform_path": "waveforms/WF_AST_8F24F2A0.png",
+      "role_guess": "hybrid",
+      "display_name": "50_oct_a_person"
+    },
+    {
+      "asset_id": "AST_97B20168",
+      "filename": "NINJAV_S001_S001_T295.MOV",
+      "duration_us": 10593917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_97B20168",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_97B20168_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "97b20168f4482e47d0f16aa5ab773fda56b6f957",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_97B20168_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "355e8a98b6886291",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_97B20168.jpg",
+      "waveform_path": "waveforms/WF_AST_97B20168.png",
+      "role_guess": "unknown",
+      "display_name": "55_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_99161EEB",
+      "filename": "NINJAV_S001_S001_T062.MOV",
+      "duration_us": 10727383,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_99161EEB",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_99161EEB_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "99161eebc5749434f229d61a13861829f409e207",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_99161EEB_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "2c79b23835d92ea5",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_99161EEB.jpg",
+      "waveform_path": "waveforms/WF_AST_99161EEB.png",
+      "role_guess": "unknown",
+      "display_name": "31_oct_a_person"
+    },
+    {
+      "asset_id": "AST_A52773F3",
+      "filename": "NINJAV_S001_S001_T296.MOV",
+      "duration_us": 12595917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_A52773F3",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_A52773F3_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "a52773f3796bc3a8ea9aaf6f6d8d45cd3b45f563",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_A52773F3_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "6e5281d87796b59a",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_A52773F3.jpg",
+      "waveform_path": "waveforms/WF_AST_A52773F3.png",
+      "role_guess": "hybrid",
+      "display_name": "56_oct_a_person_s"
+    },
+    {
+      "asset_id": "AST_AB1AD3B9",
+      "filename": "NINJAV_S001_S001_T015.MOV",
+      "duration_us": 7090417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_AB1AD3B9",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_AB1AD3B9_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "ab1ad3b90d50ec4f76af5144b8fd931af148de97",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_AB1AD3B9_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "e2887be73ae0cc95",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_AB1AD3B9.jpg",
+      "waveform_path": "waveforms/WF_AST_AB1AD3B9.png",
+      "role_guess": "unknown",
+      "display_name": "09_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_B2342E8C",
+      "filename": "NINJAV_S001_S001_T028.MOV",
+      "duration_us": 5472133,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_B2342E8C",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_B2342E8C_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "b2342e8cc8c31b4476a8520baa86dada77eba0c2",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_B2342E8C_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "28a5996a75cf76c7",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_B2342E8C.jpg",
+      "waveform_path": "waveforms/WF_AST_B2342E8C.png",
+      "role_guess": "unknown",
+      "display_name": "17_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_B254ED8B",
+      "filename": "NINJAV_S001_S001_T009.MOV",
+      "duration_us": 8091417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_B254ED8B",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_B254ED8B_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "b254ed8b8268f97604fce55f04a868a4cbd328bf",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_B254ED8B_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "6d0ab287b07e9218",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_B254ED8B.jpg",
+      "waveform_path": "waveforms/WF_AST_B254ED8B.png",
+      "role_guess": "unknown",
+      "display_name": "06_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_B314D9EC",
+      "filename": "NINJAV_S001_S001_T033.MOV",
+      "duration_us": 13096417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_B314D9EC",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_B314D9EC_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "b314d9ec470eda7f537efd6fdf5a1a2aeb34113f",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_B314D9EC_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "29bf799a4bc7da08",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_B314D9EC.jpg",
+      "waveform_path": "waveforms/WF_AST_B314D9EC.png",
+      "role_guess": "hybrid",
+      "display_name": "21_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_B32B0A34",
+      "filename": "NINJAV_S001_S001_T285.MOV",
+      "duration_us": 9592917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_B32B0A34",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_B32B0A34_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "b32b0a3474a9c47054e40a018ce73b6ee090efda",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_B32B0A34_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "bd16deaf959844ee",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_B32B0A34.jpg",
+      "waveform_path": "waveforms/WF_AST_B32B0A34.png",
+      "role_guess": "hybrid",
+      "display_name": "54_oct_a_young_child"
+    },
+    {
+      "asset_id": "AST_B39BAEE6",
+      "filename": "NINJAV_S001_S001_T027.MOV",
+      "duration_us": 5588917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_B39BAEE6",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_B39BAEE6_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "b39baee665893682a25d039b5bcf1cd8e6e539b7",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_B39BAEE6_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "1942f2348200efc8",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_B39BAEE6.jpg",
+      "waveform_path": "waveforms/WF_AST_B39BAEE6.png",
+      "role_guess": "unknown",
+      "display_name": "16_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_B8612888",
+      "filename": "DJI_0078.MOV",
+      "duration_us": 101392958,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_B8612888_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "b8612888606c8cff26f2aface4264d385ebc8dfb",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "hevc"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_B8612888_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "8109ddf39e61f9e5",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_B8612888.jpg",
+      "role_guess": "b-roll",
+      "display_name": "60_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_BE79D064",
+      "filename": "NINJAV_S001_S001_T233.MOV",
+      "duration_us": 8591917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_BE79D064",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_BE79D064_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "be79d0643d06cc9b3d20020ec9ae803d24dbce80",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_BE79D064_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "bfb672fe31602d26",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_BE79D064.jpg",
+      "waveform_path": "waveforms/WF_AST_BE79D064.png",
+      "role_guess": "hybrid",
+      "display_name": "49_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_C05C0DCE",
+      "filename": "NINJAV_S001_S001_T205.MOV",
+      "duration_us": 15098417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_C05C0DCE",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_C05C0DCE_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "c05c0dce692812dc51307e721505bcbd2c4d88f0",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_C05C0DCE_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "34c7c1b18a34b9cf",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_C05C0DCE.jpg",
+      "waveform_path": "waveforms/WF_AST_C05C0DCE.png",
+      "role_guess": "hybrid",
+      "display_name": "47_oct_a_person"
+    },
+    {
+      "asset_id": "AST_C216ACFE",
+      "filename": "NINJAV_S001_S001_T004.MOV",
+      "duration_us": 6089417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_C216ACFE",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_C216ACFE_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "c216acfef5b5238e68cf86e35b16453cd817898f",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_C216ACFE_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "87d30dc8544dd9cd",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_C216ACFE.jpg",
+      "waveform_path": "waveforms/WF_AST_C216ACFE.png",
+      "role_guess": "unknown",
+      "display_name": "03_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_C7D644B1",
+      "filename": "NINJAV_S001_S001_T036.MOV",
+      "duration_us": 11553208,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_C7D644B1",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_C7D644B1_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "c7d644b1b42bc67a080dba768e95df1d454ed463",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_C7D644B1_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "370077802938b93b",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_C7D644B1.jpg",
+      "waveform_path": "waveforms/WF_AST_C7D644B1.png",
+      "role_guess": "hybrid",
+      "display_name": "24_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_CBCA942F",
+      "filename": "NINJAV_S001_S001_T079.MOV",
+      "duration_us": 6740067,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_CBCA942F",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_CBCA942F_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "cbca942fc1d94dc2be6fc3fa85dfc06edff4890d",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_CBCA942F_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "3f1d3376bd02fff0",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_CBCA942F.jpg",
+      "waveform_path": "waveforms/WF_AST_CBCA942F.png",
+      "role_guess": "texture",
+      "display_name": "35_oct_clip"
+    },
+    {
+      "asset_id": "AST_D0AC82AF",
+      "filename": "NINJAV_S001_S001_T138.MOV",
+      "duration_us": 20103417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_D0AC82AF",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_D0AC82AF_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "d0ac82af60f59b859f21c7ac426f77d106604e31",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_D0AC82AF_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "4d87e13b2a67e9dd",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_D0AC82AF.jpg",
+      "waveform_path": "waveforms/WF_AST_D0AC82AF.png",
+      "role_guess": "hybrid",
+      "display_name": "40_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_D16E3D7A",
+      "filename": "NINJAV_S001_S001_T019.MOV",
+      "duration_us": 5630625,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_D16E3D7A",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_D16E3D7A_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "d16e3d7ac72cf9e846302f4956cfd7f630395134",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_D16E3D7A_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "f2d73369b8654107",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_D16E3D7A.jpg",
+      "waveform_path": "waveforms/WF_AST_D16E3D7A.png",
+      "role_guess": "unknown",
+      "display_name": "12_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_DFE104F9",
+      "filename": "NINJAV_S001_S001_T146.MOV",
+      "duration_us": 4337667,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_DFE104F9",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_DFE104F9_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "dfe104f93d68cf491b1c0a536ffbce510c1920f8",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_DFE104F9_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "c6c5cee7c9822bf7",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_DFE104F9.jpg",
+      "waveform_path": "waveforms/WF_AST_DFE104F9.png",
+      "role_guess": "unknown",
+      "display_name": "43_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_E2CEF3DB",
+      "filename": "NINJAV_S001_S001_T152.MOV",
+      "duration_us": 5522188,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_E2CEF3DB",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_E2CEF3DB_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "e2cef3dbcbe92d10ea48338d6eeb5646c2383f5f",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_E2CEF3DB_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "361b945ce71ba840",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_E2CEF3DB.jpg",
+      "waveform_path": "waveforms/WF_AST_E2CEF3DB.png",
+      "role_guess": "unknown",
+      "display_name": "44_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_ECA4E6B4",
+      "filename": "DJI_0076.MOV",
+      "duration_us": 22188833,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_ECA4E6B4_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "eca4e6b414a33c476a51f099666be4ac265a5417",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "hevc"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_ECA4E6B4_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "f9242a58c5c9ac85",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_ECA4E6B4.jpg",
+      "role_guess": "b-roll",
+      "display_name": "58_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_F010BF35",
+      "filename": "NINJAV_S001_S001_T031.MOV",
+      "duration_us": 12162167,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_F010BF35",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_F010BF35_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "f010bf356ea6f9349be1647f942835a14a2b97c9",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_F010BF35_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "519af5fad34e03e6",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_F010BF35.jpg",
+      "waveform_path": "waveforms/WF_AST_F010BF35.png",
+      "role_guess": "unknown",
+      "display_name": "20_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_F11D204E",
+      "filename": "NINJAV_S001_S001_T034.MOV",
+      "duration_us": 13555208,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_F11D204E",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_F11D204E_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "f11d204ea9ca6eb0dca85a757b5bff7d3554b4fa",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_F11D204E_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "35ee07cb65ddcad2",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_F11D204E.jpg",
+      "waveform_path": "waveforms/WF_AST_F11D204E.png",
+      "role_guess": "hybrid",
+      "display_name": "22_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_F45A9E48",
+      "filename": "NINJAV_S001_S001_T008.MOV",
+      "duration_us": 9092417,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_F45A9E48",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_F45A9E48_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "f45a9e48f51113b74a223c8c96a94d8e91201fb6",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_F45A9E48_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "2f32f1fb428a6618",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_F45A9E48.jpg",
+      "waveform_path": "waveforms/WF_AST_F45A9E48.png",
+      "role_guess": "hybrid",
+      "display_name": "05_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_F465D53F",
+      "filename": "NINJAV_S001_S001_T135.MOV",
+      "duration_us": 23606917,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_F465D53F",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_F465D53F_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "f465d53fb69aaa9e3f6c04b8c09ff90bbb457898",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 24000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_F465D53F_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "e2936493fddbc46e",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_F465D53F.jpg",
+      "waveform_path": "waveforms/WF_AST_F465D53F.png",
+      "role_guess": "hybrid",
+      "display_name": "39_oct_a_person_is"
+    },
+    {
+      "asset_id": "AST_F4D174A3",
+      "filename": "NINJAV_S001_S001_T141.MOV",
+      "duration_us": 8108104,
+      "has_transcript": true,
+      "transcript_ref": "TR_AST_F4D174A3",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_F4D174A3_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "f4d174a313bbd0ce6745a62000442e7a45f5bdbd",
+      "video_stream": {
+        "width": 3840,
+        "height": 2160,
+        "fps_num": 60000,
+        "fps_den": 1001,
+        "codec": "prores"
+      },
+      "audio_stream": {
+        "sample_rate": 48000,
+        "channels": 4,
+        "codec": "pcm_s24le"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_F4D174A3_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "14383a79e232dd6c",
+        "request_hash": "fbdf561c87670198",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_F4D174A3.jpg",
+      "waveform_path": "waveforms/WF_AST_F4D174A3.png",
+      "role_guess": "unknown",
+      "display_name": "42_oct_a_person_is"
+    }
+  ]
+}

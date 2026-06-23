@@ -1,0 +1,3970 @@
+{
+  "project_id": "rokutaro-namae-no-nai-saka-20260425",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "segment_id": "SEG_AST_01C251D3_0001",
+      "asset_id": "AST_01C251D3",
+      "src_in_us": 0,
+      "src_out_us": 8471678,
+      "duration_us": 8471678,
+      "rep_frame_us": 4235839,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_01C251D3",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "db342a8e8d0b0d00",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_01C251D3_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_02DA7FDF_0001",
+      "asset_id": "AST_02DA7FDF",
+      "src_in_us": 0,
+      "src_out_us": 23891882,
+      "duration_us": 23891882,
+      "rep_frame_us": 11945941,
+      "summary": "The video segment shows a black screen with text in Japanese, likely indicating the end of the video.",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "near_silent",
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "end_screen",
+        "text_overlay",
+        "black_screen",
+        "japanese_text"
+      ],
+      "segment_type": "static",
+      "transcript_ref": "TR_AST_02DA7FDF",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a859c419336d91d3",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "2cf97d0e79b92620",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "2cf97d0e79b92620",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "2cf97d0e79b92620",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_02DA7FDF_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 0,
+          "label": "Japanese text appears",
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_03273779_0001",
+      "asset_id": "AST_03273779",
+      "src_in_us": 0,
+      "src_out_us": 272325011,
+      "duration_us": 272325011,
+      "rep_frame_us": 136162506,
+      "summary": "A young Japanese boy participates in a strider race, with commentary and encouragement from the sidelines.",
+      "transcript_excerpt": "ぉ sel merchant ike e a krich 国感じ Methode この奥川へと向かって行っています さあ、次はこのシェイトがしっかりとして行きたい となぜは、太鼓橋の方へと向かって行きます さあ、ヒロウッととっても行きますから、時は変わったか? にょ ブーバー 見たかったぜください ni やはりを さあ2名の選手があって 勝って4名の選手6名の選手ですね さあまだまだもう さあ頑張れ あと1Cあと1C最終周回ですあと1C ダスダス ии ni yeah ni ni yeah ん ああああああああ 大速ババッグ これからラットバーを賛成しておりましたけれども 今回第2位これまでのあたれは一番 戦争 第2位ね近い順位になっておりますねババッグレー さあトップは変わらず浮山優子 タイム差としてはご覧の通り太鼓橋吹き手はちょっと差出てるんですけれどもそれも来ましょう ダッシュダッシュ ババスグル こいでこいで そして3番手 こいでこいで これでかいでーすねー さあ本当らしいような声でかいでかいでかいでかいでかいでかいでかいでかい 3番2番ですね高島ゆうてる高島ゆうちが2番3番手3番手でブルーザーでおいております 高島ゆうちもこれまでもなんとも mo co ねえ直者んだ nein うーん いいいいいい, banker a 持いかけら前なませ最強でつば 後方以内にだーすごい tan ラストスパート 高島祐希、ここはフィニッシュになります。 ダブルエントリーを確認、何を待ってもっていました。 高島祐希が今回、自身の中身が3投目となる。 第3位、東京の中身を勝つ。 ロクちゃん、ラストスパートだよ。 後藤、内、ソータ、内、鈴木が、 フィルピ pense defeated 前にです さあ、そして",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "strider_race",
+        "japanese_boy",
+        "outdoor_activity",
+        "race",
+        "child",
+        "sports",
+        "competition",
+        "family_event",
+        "daytime",
+        "public_park",
+        "audio_commentary"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_03273779",
+      "confidence": {
+        "boundary": {
+          "score": 0.31,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.85,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "83886ed35079324d",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "2842b1822b02ab17",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "2842b1822b02ab17",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "2842b1822b02ab17",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_03273779_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 500000,
+          "label": "Boy on strider bike",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 10000000,
+          "label": "Racers approaching finish line",
+          "confidence": 0.85
+        },
+        {
+          "frame_us": 18000000,
+          "label": "Close-up of boy racing",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 25000000,
+          "label": "Commentary about race positions",
+          "confidence": 0.75
+        },
+        {
+          "frame_us": 33000000,
+          "label": "Encouragement for 'Roku-chan' (boy's nickname)",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_0ADDAA84_0001",
+      "asset_id": "AST_0ADDAA84",
+      "src_in_us": 0,
+      "src_out_us": 26110000,
+      "duration_us": 26110000,
+      "rep_frame_us": 13055000,
+      "summary": "A young Japanese boy is shown riding a strider bike outdoors, transitioning from walking to balancing on the bike.",
+      "transcript_excerpt": "イタウトクタウトクタウト。 キャラゲア 4個 . ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "learning",
+        "movement",
+        "daytime",
+        "grass",
+        "home_video",
+        "japanese_boy"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_0ADDAA84",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "84c1f08c34142150",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "69544e7ce6df3230",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "69544e7ce6df3230",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "69544e7ce6df3230",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_0ADDAA84_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy walking with strider bike",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 1200000,
+          "label": "Boy balancing on strider bike",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 2500000,
+          "label": "Boy riding strider bike",
+          "confidence": 0.85
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_0C9FA88A_0001",
+      "asset_id": "AST_0C9FA88A",
+      "src_in_us": 0,
+      "src_out_us": 3565011,
+      "duration_us": 3565011,
+      "rep_frame_us": 1782506,
+      "summary": "The video segment shows a black screen with white text that reads \"ご視聴ありがとうございました\" (Thank you for watching).",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "end_screen",
+        "text_overlay",
+        "japanese_text",
+        "black_background",
+        "thank_you_message"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_0C9FA88A",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "18fe07d14ec06f05",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "791007a0616c991d",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "791007a0616c991d",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "791007a0616c991d",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_0C9FA88A_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 0,
+          "label": "Text appears on screen",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_0DA6AE45_0001",
+      "asset_id": "AST_0DA6AE45",
+      "src_in_us": 0,
+      "src_out_us": 11671667,
+      "duration_us": 11671667,
+      "rep_frame_us": 5835834,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_0DA6AE45",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "b4f79a8c9c618993",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_0DA6AE45_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_15427158_0001",
+      "asset_id": "AST_15427158",
+      "src_in_us": 0,
+      "src_out_us": 38350000,
+      "duration_us": 38350000,
+      "rep_frame_us": 19175000,
+      "summary": "A young Japanese boy is riding a bicycle and being cheered on by his family.",
+      "transcript_excerpt": "こいでこいで すごいすごいすごい 乗れてる乗れてるドクちゃん 乗れてる すごい すごい乗れてる乗れてるぞー すごいぞロクちゃん すごいすごいすごいすごいすごいすごい乗れた",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "child",
+        "bicycle",
+        "outdoor_scene",
+        "family",
+        "home_video",
+        "riding",
+        "cheering",
+        "daytime",
+        "japan",
+        "sakura"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_15427158",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.85,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "ed70cb74c95be6d1",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "de463463ddf1e3e8",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "de463463ddf1e3e8",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "de463463ddf1e3e8",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_15427158_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy starts riding bicycle",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 1500000,
+          "label": "Family cheering loudly",
+          "confidence": 0.7
+        },
+        {
+          "frame_us": 3000000,
+          "label": "Boy successfully rides bicycle",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_19B25163_0001",
+      "asset_id": "AST_19B25163",
+      "src_in_us": 0,
+      "src_out_us": 25611667,
+      "duration_us": 25611667,
+      "rep_frame_us": 12805834,
+      "summary": "A young Japanese boy is shown riding a strider bike outdoors, with family voices in the background.",
+      "transcript_excerpt": "最高だ最高だ最高だ最高だ 今 sadly神の間us",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "daytime",
+        "family",
+        "home_video",
+        "japanese_boy",
+        "moving",
+        "audio"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_19B25163",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "07db60dba5bf53a6",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a3c4e462a48b111a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a3c4e462a48b111a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a3c4e462a48b111a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_19B25163_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy on strider bike",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Family voices cheering",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_261E6D3D_0001",
+      "asset_id": "AST_261E6D3D",
+      "src_in_us": 0,
+      "src_out_us": 59526667,
+      "duration_us": 59526667,
+      "rep_frame_us": 29763334,
+      "summary": "A young Japanese boy is seen riding a bicycle on a paved surface, likely a road or path.",
+      "transcript_excerpt": "ご視聴ありがとうございました 2 2 2 2 2 2 2 2 2 2 ん ん ん ん ん ん ん ん ん ん ん",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "boy",
+        "bicycle",
+        "riding",
+        "outdoor_scene",
+        "road",
+        "daytime",
+        "child",
+        "japanese",
+        "home_video"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_261E6D3D",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "23cdcd78486ab604",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "31b6bb28de29cc3a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "31b6bb28de29cc3a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "31b6bb28de29cc3a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_261E6D3D_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 200000,
+          "label": "Boy riding bicycle",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_31A9CDC2_0001",
+      "asset_id": "AST_31A9CDC2",
+      "src_in_us": 0,
+      "src_out_us": 40951667,
+      "duration_us": 40951667,
+      "rep_frame_us": 20475834,
+      "summary": "",
+      "transcript_excerpt": "感謝しましょう おなぎ お現地",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_31A9CDC2",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "678738d86a4f463d",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_31A9CDC2_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_34EA5E88_0001",
+      "asset_id": "AST_34EA5E88",
+      "src_in_us": 0,
+      "src_out_us": 18746667,
+      "duration_us": 18746667,
+      "rep_frame_us": 9373334,
+      "summary": "The video segment shows a black screen with white text \"ご視聴ありがとうございました\" (Thank you for watching).",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "text_overlay",
+        "black_screen",
+        "ending_screen",
+        "japanese_text"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_34EA5E88",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "9c51a8b13af0a428",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "65de12c8985d8b78",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "65de12c8985d8b78",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "65de12c8985d8b78",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_34EA5E88_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 0,
+          "label": "Text appears: ご視聴ありがとうございました",
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_3D474C76_0001",
+      "asset_id": "AST_3D474C76",
+      "src_in_us": 0,
+      "src_out_us": 12866667,
+      "duration_us": 12866667,
+      "rep_frame_us": 6433334,
+      "summary": "A young Japanese boy is seen riding a strider bike outdoors, filmed in a home video style.",
+      "transcript_excerpt": "ん ん ん ん ん ん ん",
+      "quality_flags": [
+        "near_silent",
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "home_video",
+        "daytime",
+        "japanese_boy",
+        "motion"
+      ],
+      "segment_type": "static",
+      "transcript_ref": "TR_AST_3D474C76",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6251e78e1079d805",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "8fcbed030ce13f60",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "8fcbed030ce13f60",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "8fcbed030ce13f60",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_3D474C76_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy on strider bike",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_411F7A75_0001",
+      "asset_id": "AST_411F7A75",
+      "src_in_us": 0,
+      "src_out_us": 37293333,
+      "duration_us": 37293333,
+      "rep_frame_us": 18646667,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_411F7A75",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "c4669422f9f243dd",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_411F7A75_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_45310186_0001",
+      "asset_id": "AST_45310186",
+      "src_in_us": 0,
+      "src_out_us": 4866667,
+      "duration_us": 4866667,
+      "rep_frame_us": 2433334,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "near_silent",
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "static",
+      "transcript_ref": "TR_AST_45310186",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "11da6c95917ae35b",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_45310186_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_500A492B_0001",
+      "asset_id": "AST_500A492B",
+      "src_in_us": 0,
+      "src_out_us": 35025000,
+      "duration_us": 35025000,
+      "rep_frame_us": 17512500,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました ご視聴ありがとうございました",
+      "quality_flags": [
+        "near_silent",
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "static",
+      "transcript_ref": "TR_AST_500A492B",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "d4aa567c173e1959",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_500A492B_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_50EBFBBE_0001",
+      "asset_id": "AST_50EBFBBE",
+      "src_in_us": 0,
+      "src_out_us": 8071667,
+      "duration_us": 8071667,
+      "rep_frame_us": 4035834,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_50EBFBBE",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6adcd5c22dc3392e",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_50EBFBBE_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_5275474A_0001",
+      "asset_id": "AST_5275474A",
+      "src_in_us": 0,
+      "src_out_us": 57508333,
+      "duration_us": 57508333,
+      "rep_frame_us": 28754167,
+      "summary": "",
+      "transcript_excerpt": "レディー、ゴー! 行け行け! 行け行け! はい、いいね! いいね! いけいけ こらけいけもいけいけ こげこげ カーブ内側 コゲコゲ!コゲコゲ! いけいけ! いけいけ!ダンスダンス! やった!",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_5275474A",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "e5f1503470049223",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_5275474A_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_5395FFCE_0001",
+      "asset_id": "AST_5395FFCE",
+      "src_in_us": 0,
+      "src_out_us": 12271667,
+      "duration_us": 12271667,
+      "rep_frame_us": 6135834,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_5395FFCE",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "80ef32f0db5232e8",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_5395FFCE_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_567028AD_0001",
+      "asset_id": "AST_567028AD",
+      "src_in_us": 0,
+      "src_out_us": 17378333,
+      "duration_us": 17378333,
+      "rep_frame_us": 8689167,
+      "summary": "A young Japanese boy successfully rides a bicycle for the first time, cheered on by his family.",
+      "transcript_excerpt": "スタートしてる いいよ おー いけたね イエーイ できたー",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "child",
+        "bicycle",
+        "learning_to_ride",
+        "outdoor_activity",
+        "family",
+        "home_video",
+        "success",
+        "celebration",
+        "daytime",
+        "japan"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_567028AD",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.85,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "52987b0286fbd266",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "09cf4976ef0dd7de",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "09cf4976ef0dd7de",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "09cf4976ef0dd7de",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_567028AD_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy starts riding bicycle",
+          "confidence": 0.85
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Boy successfully rides",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 2500000,
+          "label": "Family cheers",
+          "confidence": 0.75
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_56C25409_0001",
+      "asset_id": "AST_56C25409",
+      "src_in_us": 0,
+      "src_out_us": 57991700,
+      "duration_us": 57991700,
+      "rep_frame_us": 28995850,
+      "summary": "",
+      "transcript_excerpt": "ん 座ったままでもペダル回せんじゃねもしかして軽いかそんなことない いやない奴だったら登れないもんね押さないとここは 左端、左端。 スゴイスゴイ",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_56C25409",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "dab74124d82b4a10",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_56C25409_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_571C5D6B_0001",
+      "asset_id": "AST_571C5D6B",
+      "src_in_us": 0,
+      "src_out_us": 16178333,
+      "duration_us": 16178333,
+      "rep_frame_us": 8089167,
+      "summary": "A young Japanese boy is eating something outdoors, possibly with family present.",
+      "transcript_excerpt": "rad 吃",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "child",
+        "eating",
+        "outdoor_scene",
+        "daytime",
+        "family",
+        "japanese_boy",
+        "close_up"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_571C5D6B",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.85,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "148b08d9cffaf417",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "c50bf77d6b4a355a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "c50bf77d6b4a355a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "c50bf77d6b4a355a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_571C5D6B_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy eating",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_57DD39CB_0001",
+      "asset_id": "AST_57DD39CB",
+      "src_in_us": 0,
+      "src_out_us": 10941667,
+      "duration_us": 10941667,
+      "rep_frame_us": 5470834,
+      "summary": "A young Japanese boy is seen riding a strider bike outdoors, filmed as part of a home video documenting his growth.",
+      "transcript_excerpt": "動画だよ",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "strider_bike",
+        "child",
+        "home_video",
+        "daytime",
+        "japanese_boy",
+        "moving",
+        "family_activity"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_57DD39CB",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5dc289996f260dd2",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "4b907e50376df1b3",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "4b907e50376df1b3",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "4b907e50376df1b3",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_57DD39CB_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy on strider bike starts moving",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 500000,
+          "label": "Boy gains speed on strider",
+          "confidence": 0.7
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_66F572EB_0001",
+      "asset_id": "AST_66F572EB",
+      "src_in_us": 0,
+      "src_out_us": 74553333,
+      "duration_us": 74553333,
+      "rep_frame_us": 37276667,
+      "summary": "A young Japanese boy is seen riding a strider bike outdoors, followed by a shot of him drinking from a bottle.",
+      "transcript_excerpt": "ご視聴ありがとうございました 陰 Agency È エイチッ relational おやすみなさい。 気持ちいいです 美味しい",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "drinking",
+        "daytime",
+        "home_video",
+        "japanese_boy",
+        "sakamoto_rokutaro"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_66F572EB",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "93e53f195772732b",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "93629be5b61423cc",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "93629be5b61423cc",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "93629be5b61423cc",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_66F572EB_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy riding strider bike",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Boy drinking from bottle",
+          "confidence": 0.85
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_6A478DEC_0001",
+      "asset_id": "AST_6A478DEC",
+      "src_in_us": 0,
+      "src_out_us": 11000000,
+      "duration_us": 11000000,
+      "rep_frame_us": 5500000,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "near_silent",
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "static",
+      "transcript_ref": "TR_AST_6A478DEC",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "fc94cf7d5047b069",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_6A478DEC_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_75D600FA_0001",
+      "asset_id": "AST_75D600FA",
+      "src_in_us": 0,
+      "src_out_us": 22408345,
+      "duration_us": 22408345,
+      "rep_frame_us": 11204173,
+      "summary": "",
+      "transcript_excerpt": "アーーン",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_75D600FA",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "abf59d67411b7370",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_75D600FA_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_7B8AE793_0001",
+      "asset_id": "AST_7B8AE793",
+      "src_in_us": 0,
+      "src_out_us": 21081667,
+      "duration_us": 21081667,
+      "rep_frame_us": 10540834,
+      "summary": "",
+      "transcript_excerpt": "うただ結局3日 雨が降りたので lain年",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_7B8AE793",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "840c4c5902fbdfb9",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_7B8AE793_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_7E54B334_0001",
+      "asset_id": "AST_7E54B334",
+      "src_in_us": 0,
+      "src_out_us": 22916667,
+      "duration_us": 22916667,
+      "rep_frame_us": 11458334,
+      "summary": "",
+      "transcript_excerpt": "ヒ internet 物凄走 ゴリ ゴリ グラニバス ゴリ",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_7E54B334",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6bc43ff71c219887",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_7E54B334_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_7E5C9A8A_0001",
+      "asset_id": "AST_7E5C9A8A",
+      "src_in_us": 0,
+      "src_out_us": 25343333,
+      "duration_us": 25343333,
+      "rep_frame_us": 12671667,
+      "summary": "A young Japanese boy is seen riding a bicycle outdoors, followed by a shot of him walking with his family.",
+      "transcript_excerpt": "中田スワハングイス บัchem ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "bicycle",
+        "family",
+        "daytime",
+        "home_video",
+        "walking",
+        "japanese_boy"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_7E5C9A8A",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "671ad3ccf7ada3e0",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "7944bd28747ea492",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "7944bd28747ea492",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "7944bd28747ea492",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_7E5C9A8A_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy riding bicycle",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 3000000,
+          "label": "Boy walking with family",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_7EC7D225_0001",
+      "asset_id": "AST_7EC7D225",
+      "src_in_us": 0,
+      "src_out_us": 31221667,
+      "duration_us": 31221667,
+      "rep_frame_us": 15610834,
+      "summary": "A young Japanese boy is seen in various outdoor settings, including riding a strider bike and playing, likely part of a home video documenting his growth.",
+      "transcript_excerpt": "フリーこれ n ん おやすみなさい。",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "japanese_boy",
+        "strider_bike",
+        "playing",
+        "home_video",
+        "daytime",
+        "family"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_7EC7D225",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "7fcde90237d84fd6",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a57a86c2fa6c13e6",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a57a86c2fa6c13e6",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a57a86c2fa6c13e6",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_7EC7D225_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy on strider bike",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 1000000,
+          "label": "Boy running",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_7F2E9F12_0001",
+      "asset_id": "AST_7F2E9F12",
+      "src_in_us": 0,
+      "src_out_us": 30888333,
+      "duration_us": 30888333,
+      "rep_frame_us": 15444167,
+      "summary": "A title card appears with Japanese text, followed by \"ご視聴ありがとうございました\" (Thank you for watching).",
+      "transcript_excerpt": "ご視聴ありがとうございました ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "title_card",
+        "japanese_text",
+        "text_overlay",
+        "ending_screen",
+        "home_video"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_7F2E9F12",
+      "confidence": {
+        "boundary": {
+          "score": 0.31,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "3bf81d4f55da8b00",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6fc0c26a2442d644",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6fc0c26a2442d644",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6fc0c26a2442d644",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_7F2E9F12_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 0,
+          "label": "Title card appears",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 1000000,
+          "label": "\"ご視聴ありがとうございました\" appears",
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_87841CCA_0001",
+      "asset_id": "AST_87841CCA",
+      "src_in_us": 0,
+      "src_out_us": 27178345,
+      "duration_us": 27178345,
+      "rep_frame_us": 13589173,
+      "summary": "A young Japanese boy plays with mud and water outdoors, creating a muddy mixture.",
+      "transcript_excerpt": "..\" 泥水を使って、",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "playing",
+        "mud",
+        "water",
+        "daytime",
+        "home_video",
+        "japanese_boy",
+        "messy",
+        "close_up"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_87841CCA",
+      "confidence": {
+        "boundary": {
+          "score": 0.31,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.85,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "bcfd88501f9ec7e1",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "aeb1ec8eb73e0687",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "aeb1ec8eb73e0687",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "aeb1ec8eb73e0687",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_87841CCA_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy reaching for mud",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 500000,
+          "label": "Mixing mud and water",
+          "confidence": 0.7
+        },
+        {
+          "frame_us": 900000,
+          "label": "Boy's hands covered in mud",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_87FCAC7B_0001",
+      "asset_id": "AST_87FCAC7B",
+      "src_in_us": 0,
+      "src_out_us": 37126700,
+      "duration_us": 37126700,
+      "rep_frame_us": 18563350,
+      "summary": "",
+      "transcript_excerpt": "ん そうそうそうそうそううまいはいブレーキブレーキブレーキ そうそんぐらいそんぐらいそう ナイス! 今のコントロールは完璧! 2度も自分でコントロールできるスピードだったし めっちゃ上手だった! 合格です! すごい!マジ1回目です!",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_87FCAC7B",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "d39bc4ffc80ad7f3",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_87FCAC7B_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_8BDBBA9F_0001",
+      "asset_id": "AST_8BDBBA9F",
+      "src_in_us": 0,
+      "src_out_us": 65996667,
+      "duration_us": 65996667,
+      "rep_frame_us": 32998334,
+      "summary": "A young Japanese boy is riding a bicycle with training wheels on a paved surface, being filmed by someone nearby.",
+      "transcript_excerpt": "ご視聴ありがとうございました f る ユ ワックは すぐ ちょっと おっとっと",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "child",
+        "bicycle",
+        "training_wheels",
+        "outdoor_scene",
+        "paved_surface",
+        "daytime",
+        "home_video",
+        "japanese_boy",
+        "sakamoto_rokutaro"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_8BDBBA9F",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "96a1860a46ca2823",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "059c046fede97870",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "059c046fede97870",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "059c046fede97870",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_8BDBBA9F_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy starts riding bicycle",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 1000000,
+          "label": "Boy pedals and moves forward",
+          "confidence": 0.7
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Boy continues riding",
+          "confidence": 0.6
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_8BED5B08_0001",
+      "asset_id": "AST_8BED5B08",
+      "src_in_us": 0,
+      "src_out_us": 22416667,
+      "duration_us": 22416667,
+      "rep_frame_us": 11208334,
+      "summary": "",
+      "transcript_excerpt": "2 2 2 2 2 2 2 2 2 2 2",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_8BED5B08",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "593f8958d71ac980",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_8BED5B08_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_9435E35C_0001",
+      "asset_id": "AST_9435E35C",
+      "src_in_us": 0,
+      "src_out_us": 26066667,
+      "duration_us": 26066667,
+      "rep_frame_us": 13033334,
+      "summary": "A baby, Sakamoto Rokutaro, is shown sleeping in a crib, with a timestamp indicating he is 0 years old and less than a day old.",
+      "transcript_excerpt": "坂本六太郎 0歳 0日 21時間 23時間くらい です はい 寝てるのかな",
+      "quality_flags": [
+        "near_silent",
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "baby",
+        "sleeping",
+        "crib",
+        "indoor",
+        "infant",
+        "newborn",
+        "sakamoto_rokutaro",
+        "0_years_old",
+        "home_video"
+      ],
+      "segment_type": "static",
+      "transcript_ref": "TR_AST_9435E35C",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "4d596af3747a32c0",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "34bae11f7cf8da4a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "34bae11f7cf8da4a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "34bae11f7cf8da4a",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_9435E35C_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Baby sleeping in crib",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Timestamp showing 0 years old",
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_9DFCE350_0001",
+      "asset_id": "AST_9DFCE350",
+      "src_in_us": 0,
+      "src_out_us": 26451667,
+      "duration_us": 26451667,
+      "rep_frame_us": 13225834,
+      "summary": "A young Japanese boy rides a strider bike on a paved path, with a blurred background suggesting movement.",
+      "transcript_excerpt": "気をつけてね ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip",
+        "blurry"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "paved_path",
+        "motion_blur",
+        "daytime",
+        "japanese_boy",
+        "home_video"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_9DFCE350",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 0.8,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "bd948b6038c63644",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "92c25b292e5b99e1",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "92c25b292e5b99e1",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "92c25b292e5b99e1",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_9DFCE350_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy on strider bike starts moving",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 1500000,
+          "label": "Boy gains speed on strider",
+          "confidence": 0.7
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_9E5795ED_0001",
+      "asset_id": "AST_9E5795ED",
+      "src_in_us": 0,
+      "src_out_us": 33881667,
+      "duration_us": 33881667,
+      "rep_frame_us": 16940834,
+      "summary": "A young Japanese boy falls while riding a strider bike and is comforted by an adult.",
+      "transcript_excerpt": "western pull おー うわっ 大丈夫か? 大丈夫ですか? 大丈夫 大丈夫ですか? ただここが痛い 痛い",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "fall",
+        "comfort",
+        "daytime",
+        "home_video",
+        "japanese_boy",
+        "sakamoto_rokutaro"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_9E5795ED",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "c01085f744ed208a",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "4a8b9328389db11c",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "4a8b9328389db11c",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "4a8b9328389db11c",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_9E5795ED_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy riding strider bike",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 1200000,
+          "label": "Boy falls off strider bike",
+          "confidence": 0.95
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Adult asks if boy is okay",
+          "confidence": 0.85
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_A4EEE8E2_0001",
+      "asset_id": "AST_A4EEE8E2",
+      "src_in_us": 0,
+      "src_out_us": 13676667,
+      "duration_us": 13676667,
+      "rep_frame_us": 6838334,
+      "summary": "The video segment shows a black screen with white text saying \"Thank you for watching\".",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "end_screen",
+        "text_overlay",
+        "black_background",
+        "japanese_text",
+        "closing_credits"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_A4EEE8E2",
+      "confidence": {
+        "boundary": {
+          "score": 0.31,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "61e647675145a872",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "ef2b47b450d76dad",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "ef2b47b450d76dad",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "ef2b47b450d76dad",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_A4EEE8E2_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 0,
+          "label": "End screen with text appears",
+          "confidence": 0.95
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_A4EEE8E2_0002",
+      "asset_id": "AST_A4EEE8E2",
+      "src_in_us": 13676667,
+      "src_out_us": 43565000,
+      "duration_us": 29888333,
+      "rep_frame_us": 28620834,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました おやすみなさい",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_A4EEE8E2",
+      "confidence": {
+        "boundary": {
+          "score": 0.31,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "180989d0b62e41b9",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_A4EEE8E2_0002.png"
+    },
+    {
+      "segment_id": "SEG_AST_ABBF0124_0001",
+      "asset_id": "AST_ABBF0124",
+      "src_in_us": 0,
+      "src_out_us": 20708345,
+      "duration_us": 20708345,
+      "rep_frame_us": 10354173,
+      "summary": "The video segment shows a black screen with white text saying \"Thank you for watching\".",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "near_silent",
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "text_overlay",
+        "black_screen",
+        "end_screen",
+        "japanese_text",
+        "thank_you"
+      ],
+      "segment_type": "static",
+      "transcript_ref": "TR_AST_ABBF0124",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "532c03481926ecfb",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "8c915cf99816024e",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "8c915cf99816024e",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "8c915cf99816024e",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_ABBF0124_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 0,
+          "label": "Text appears on screen",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_B9A9E38D_0001",
+      "asset_id": "AST_B9A9E38D",
+      "src_in_us": 0,
+      "src_out_us": 24316667,
+      "duration_us": 24316667,
+      "rep_frame_us": 12158334,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_B9A9E38D",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "19fde64db31ecff1",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_B9A9E38D_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_BE87AF55_0001",
+      "asset_id": "AST_BE87AF55",
+      "src_in_us": 0,
+      "src_out_us": 34115011,
+      "duration_us": 34115011,
+      "rep_frame_us": 17057506,
+      "summary": "",
+      "transcript_excerpt": "やったね! 一周してこれたね すごいね、ロクちゃん もうマスターだ あとはブレーキの練習だね 前見て前見て そっちじゃなくな こっちだよこっち",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_BE87AF55",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "90a4be05529ed451",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_BE87AF55_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_C592C0AF_0001",
+      "asset_id": "AST_C592C0AF",
+      "src_in_us": 0,
+      "src_out_us": 36491667,
+      "duration_us": 36491667,
+      "rep_frame_us": 18245834,
+      "summary": "",
+      "transcript_excerpt": "ここもあります said それプライドのインクリーン 5分",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_C592C0AF",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6a9edab19447eb3f",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_C592C0AF_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_C5B4FC88_0001",
+      "asset_id": "AST_C5B4FC88",
+      "src_in_us": 0,
+      "src_out_us": 22743333,
+      "duration_us": 22743333,
+      "rep_frame_us": 11371667,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_C5B4FC88",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "01da91d745978efc",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_C5B4FC88_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_CE4B4C6F_0001",
+      "asset_id": "AST_CE4B4C6F",
+      "src_in_us": 0,
+      "src_out_us": 20015000,
+      "duration_us": 20015000,
+      "rep_frame_us": 10007500,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_CE4B4C6F",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "3088624b4958ca8c",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_CE4B4C6F_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_CFD7BB2D_0001",
+      "asset_id": "AST_CFD7BB2D",
+      "src_in_us": 0,
+      "src_out_us": 15706667,
+      "duration_us": 15706667,
+      "rep_frame_us": 7853334,
+      "summary": "",
+      "transcript_excerpt": "ん ん ん ん ん ん ん ん ん",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_CFD7BB2D",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "8cd0044acd185ffd",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_CFD7BB2D_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_D0EB3FF3_0001",
+      "asset_id": "AST_D0EB3FF3",
+      "src_in_us": 0,
+      "src_out_us": 18578345,
+      "duration_us": 18578345,
+      "rep_frame_us": 9289173,
+      "summary": "A young Japanese boy is standing still, likely after some activity.",
+      "transcript_excerpt": "止まった",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "boy",
+        "standing",
+        "child",
+        "daytime",
+        "home_video",
+        "japan",
+        "outdoor_scene"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_D0EB3FF3",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.8,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "b81a1b966a01006e",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5c00a97c3feae9f9",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5c00a97c3feae9f9",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5c00a97c3feae9f9",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_D0EB3FF3_0001.png",
+      "interest_points": []
+    },
+    {
+      "segment_id": "SEG_AST_D3155EAD_0001",
+      "asset_id": "AST_D3155EAD",
+      "src_in_us": 0,
+      "src_out_us": 67313333,
+      "duration_us": 67313333,
+      "rep_frame_us": 33656667,
+      "summary": "",
+      "transcript_excerpt": "はい、行きます レディー、ゴー 行け 行け、前出ろ 追いかけろ 回せ!回せ!回せ! 回せ!回せ! がんばれ!がんばれ!いにく! いけいけー! 上手くるよー! よし!内側! あ!後ろ側来てるよ! いけいけいけ! ダッシュダッシュ! いけいけ! ダッシュダッシュ! ダッシュダッシュ! いけ!前!前!抜かせ! ダッシュ!いける! よーし! あー へー",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_D3155EAD",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "b9dd78e3ae080c00",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_D3155EAD_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_D60A0C89_0001",
+      "asset_id": "AST_D60A0C89",
+      "src_in_us": 0,
+      "src_out_us": 37591678,
+      "duration_us": 37591678,
+      "rep_frame_us": 18795839,
+      "summary": "A young Japanese boy is seen riding a strider bike outdoors, with family members present.",
+      "transcript_excerpt": "きれいで ペイト ゴメ Emmett れいこん はい",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "family",
+        "daytime",
+        "home_video",
+        "japanese_boy",
+        "park"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_D60A0C89",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "c8d7c97454b9bc01",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "254ac92dcf5fe727",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "254ac92dcf5fe727",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "254ac92dcf5fe727",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_D60A0C89_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy on strider bike starts moving",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 500000,
+          "label": "Boy gains speed on strider",
+          "confidence": 0.7
+        },
+        {
+          "frame_us": 900000,
+          "label": "Family member's voice heard",
+          "confidence": 0.6
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_D6238973_0001",
+      "asset_id": "AST_D6238973",
+      "src_in_us": 0,
+      "src_out_us": 12471700,
+      "duration_us": 12471700,
+      "rep_frame_us": 6235850,
+      "summary": "The video segment shows a black screen with white text that reads \"ご視聴ありがとうございました\" (Thank you for watching).",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "text_overlay",
+        "black_screen",
+        "end_screen",
+        "japanese_text"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_D6238973",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "9858c7ffc72280d5",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "d678fa4dde70c326",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "d678fa4dde70c326",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "d678fa4dde70c326",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_D6238973_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 0,
+          "label": "Text appears on screen",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_DA4D2912_0001",
+      "asset_id": "AST_DA4D2912",
+      "src_in_us": 0,
+      "src_out_us": 6938333,
+      "duration_us": 6938333,
+      "rep_frame_us": 3469167,
+      "summary": "A young Japanese boy is seen outdoors, looking upwards and possibly interacting with someone off-screen.",
+      "transcript_excerpt": "What's up there?",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "daytime",
+        "looking_up",
+        "home_video",
+        "japanese_boy",
+        "sakomoto_rokutaro"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_DA4D2912",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "e79ad8c3068c92f5",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a882e565df50420b",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a882e565df50420b",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "a882e565df50420b",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_DA4D2912_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy looking up",
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_DAD1F79C_0001",
+      "asset_id": "AST_DAD1F79C",
+      "src_in_us": 0,
+      "src_out_us": 32681667,
+      "duration_us": 32681667,
+      "rep_frame_us": 16340834,
+      "summary": "",
+      "transcript_excerpt": "頑張れ よいしょ 今覚えきれん すごい あ、ちょっとだ パチパチ やったー",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_DAD1F79C",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "ade0505ae556129a",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_DAD1F79C_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_DF524E7F_0001",
+      "asset_id": "AST_DF524E7F",
+      "src_in_us": 0,
+      "src_out_us": 67496700,
+      "duration_us": 67496700,
+      "rep_frame_us": 33748350,
+      "summary": "A young Japanese boy is seen riding a strider bike outdoors, followed by a shot of him in a stroller.",
+      "transcript_excerpt": "寝 brain 本来の jagが 声音 put うーん 太 côté おやすみなさい ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "stroller",
+        "daytime",
+        "home_video",
+        "japanese_boy",
+        "family"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_DF524E7F",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "16c508fdbc499bf2",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5a7917af36e43c0e",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5a7917af36e43c0e",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5a7917af36e43c0e",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_DF524E7F_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy riding strider bike",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Boy in stroller",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_EF7B9E5B_0001",
+      "asset_id": "AST_EF7B9E5B",
+      "src_in_us": 0,
+      "src_out_us": 11908345,
+      "duration_us": 11908345,
+      "rep_frame_us": 5954173,
+      "summary": "",
+      "transcript_excerpt": "ご視聴ありがとうございました",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_EF7B9E5B",
+      "confidence": {
+        "boundary": {
+          "score": 0.31,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "62b6c34fce3d362b",
+          "ffmpeg_version": "8.0.1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_EF7B9E5B_0001.png"
+    },
+    {
+      "segment_id": "SEG_AST_F734F145_0001",
+      "asset_id": "AST_F734F145",
+      "src_in_us": 0,
+      "src_out_us": 4536667,
+      "duration_us": 4536667,
+      "rep_frame_us": 2268334,
+      "summary": "A young Japanese boy rides a strider bike outdoors, with someone off-screen expressing excitement.",
+      "transcript_excerpt": "おーすごい かっこいい",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "outdoor_scene",
+        "child",
+        "strider_bike",
+        "daytime",
+        "motion",
+        "japanese_boy",
+        "home_video"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_F734F145",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "5d39aa8ed5f6c3fc",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "00b23946bb0963b5",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "00b23946bb0963b5",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "00b23946bb0963b5",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_F734F145_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy starts riding strider",
+          "confidence": 0.8
+        },
+        {
+          "frame_us": 1500000,
+          "label": "Boy gains speed",
+          "confidence": 0.7
+        }
+      ]
+    },
+    {
+      "segment_id": "SEG_AST_FB322087_0001",
+      "asset_id": "AST_FB322087",
+      "src_in_us": 0,
+      "src_out_us": 49755011,
+      "duration_us": 49755011,
+      "rep_frame_us": 24877506,
+      "summary": "A young Japanese boy is seen riding a bicycle with training wheels, then without, and finally riding a strider bike, showcasing his development.",
+      "transcript_excerpt": "ご視聴ありがとうございました ご視聴ありがとうございました ん ん ん ん ん ん",
+      "quality_flags": [
+        "minor_highlight_clip"
+      ],
+      "tags": [
+        "japanese_boy",
+        "child",
+        "bicycle",
+        "strider_bike",
+        "outdoor_activity",
+        "home_video",
+        "learning",
+        "development",
+        "training_wheels",
+        "family"
+      ],
+      "segment_type": "general",
+      "transcript_ref": "TR_AST_FB322087",
+      "confidence": {
+        "boundary": {
+          "score": 1,
+          "source": "ffmpeg_scene_detect",
+          "status": "ready"
+        },
+        "summary": {
+          "score": 0.9,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "tags": {
+          "score": 0.95,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        },
+        "quality_flags": {
+          "score": 1,
+          "source": "gemini-2.0-flash",
+          "status": "ready"
+        }
+      },
+      "provenance": {
+        "boundary": {
+          "stage": "segment",
+          "method": "ffmpeg_scene_detect",
+          "connector_version": "ffprobe-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "6a01765f4cce1b79",
+          "ffmpeg_version": "8.0.1"
+        },
+        "summary": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "92ba3b4a81051291",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "tags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "92ba3b4a81051291",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        },
+        "quality_flags": {
+          "stage": "vlm",
+          "method": "gemini_frame_bundle",
+          "connector_version": "gemini-vlm-v2.0.0",
+          "policy_hash": "6e75f176d34ab89c",
+          "request_hash": "92ba3b4a81051291",
+          "model_alias": "gemini-2.0-flash",
+          "model_snapshot": "required_for_canonical_runs",
+          "prompt_hash": "8f1a9aa4dd9148d6",
+          "response_format": "json_schema_v1"
+        }
+      },
+      "filmstrip_path": "filmstrips/SEG_AST_FB322087_0001.png",
+      "interest_points": [
+        {
+          "frame_us": 100000,
+          "label": "Boy on bicycle with training wheels",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 2000000,
+          "label": "Boy riding bicycle without training wheels",
+          "confidence": 0.9
+        },
+        {
+          "frame_us": 4000000,
+          "label": "Boy riding strider bike",
+          "confidence": 0.85
+        }
+      ]
+    }
+  ]
+}

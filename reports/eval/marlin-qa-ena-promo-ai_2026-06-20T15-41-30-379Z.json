@@ -1,0 +1,112 @@
+{
+  "version": "1",
+  "project_id": "ena-promo-ai",
+  "video_path": "/Users/mocchalera/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_duration_sec": 69.875,
+  "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 2 warnings.",
+  "scene_descriptions": [
+    {
+      "start_sec": 2,
+      "end_sec": 8.5,
+      "description": "A person rakes the ground in a field."
+    },
+    {
+      "start_sec": 9.5,
+      "end_sec": 11.5,
+      "description": "A hand reaches out to pluck olives."
+    },
+    {
+      "start_sec": 12.5,
+      "end_sec": 15,
+      "description": "A woman carries a bag of olives."
+    },
+    {
+      "start_sec": 15.5,
+      "end_sec": 19,
+      "description": "A woman looks out of a window."
+    },
+    {
+      "start_sec": 20.5,
+      "end_sec": 24,
+      "description": "A woman walks away from the camera."
+    },
+    {
+      "start_sec": 24.5,
+      "end_sec": 30,
+      "description": "Two men talk in a market."
+    },
+    {
+      "start_sec": 27,
+      "end_sec": 29.5,
+      "description": "Two men talk in a rustic indoor setting."
+    },
+    {
+      "start_sec": 30,
+      "end_sec": 42.5,
+      "description": "An elderly man in a cap speaks and gestures."
+    },
+    {
+      "start_sec": 43,
+      "end_sec": 46.5,
+      "description": "A woman in a headscarf smiles and looks out."
+    },
+    {
+      "start_sec": 47,
+      "end_sec": 50.5,
+      "description": "A woman in a kimono stands in a doorway."
+    },
+    {
+      "start_sec": 54,
+      "end_sec": 55,
+      "description": "Hands pluck red tomatoes from a vine."
+    },
+    {
+      "start_sec": 55,
+      "end_sec": 59.5,
+      "description": "A woman stands still on a train platform."
+    },
+    {
+      "start_sec": 55.5,
+      "end_sec": 57,
+      "description": "A woman watches a train and car on tracks."
+    },
+    {
+      "start_sec": 64.5,
+      "end_sec": 68.5,
+      "description": "A woman stands still in profile."
+    },
+    {
+      "start_sec": 68.5,
+      "end_sec": 69.875,
+      "description": "A person wearing a headscarf smiles."
+    }
+  ],
+  "issues": [
+    {
+      "timestamp_sec": 55,
+      "duration_sec": 4.5,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 47s: A woman stands still on a train platform.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 68.5,
+      "duration_sec": 1.375,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 43s: A person wearing a headscarf smiles.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    }
+  ],
+  "pacing_assessment": {
+    "too_fast": false,
+    "too_slow": false,
+    "notes": "Average Marlin event duration is 3.9s across 15 events over 69.9s; pacing reads as within expected range."
+  },
+  "emotion_arc_assessment": {
+    "follows_brief": true,
+    "notes": "Marlin detected 15 distinct scene types, so the emotion arc is treated as partial without exact term matching."
+  },
+  "score": 84
+}

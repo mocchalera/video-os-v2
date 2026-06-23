@@ -178,7 +178,9 @@ export default memo(function ClipBlock({
   }, []);
 
   const left = clip.timeline_in_frame * pxPerFrame;
-  const width = Math.max(24, clip.timeline_duration_frames * pxPerFrame);
+  const rawWidth = clip.timeline_duration_frames * pxPerFrame;
+  const isWidthExpanded = rawWidth < 24;
+  const width = Math.max(24, rawWidth);
   const topPad = 4;
   const bottomPad = 4;
   const clipHeight = laneHeight - topPad - bottomPad;
@@ -324,6 +326,7 @@ export default memo(function ClipBlock({
             : `inset 0 1px 0 rgba(255,255,255,0.12)`,
         opacity: isDimmed ? 0.3 : trimSide ? 0.88 : locked ? 0.55 : 1,
         cursor: locked ? 'not-allowed' : TRIM_CURSORS[trimMode].body,
+        zIndex: selected ? 10 : isWidthExpanded ? 4 : 1,
         transition: 'opacity 100ms ease-out, border-color 120ms ease-out',
       }}
       title={`${clip.clip_id}\n${isCaption ? captionText || '(empty caption)' : clip.motivation}\nSource ${formatMicroseconds(clip.src_in_us, fps)} → ${formatMicroseconds(clip.src_out_us, fps)}${clip.confidence != null ? `\nConfidence: ${(clip.confidence * 100).toFixed(0)}%` : ''}`}

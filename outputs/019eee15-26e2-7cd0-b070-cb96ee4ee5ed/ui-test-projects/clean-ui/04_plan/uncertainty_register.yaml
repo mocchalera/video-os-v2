@@ -1,0 +1,52 @@
+version: "1"
+project_id: sample-mountain-reset
+created_at: "2026-03-21T03:40:00Z"
+
+uncertainties:
+  - id: U001
+    type: ending
+    question: should the ending land on the spoken carryover line or on a silent exhale after that line?
+    status: monitoring
+    evidence:
+      - SEG_0027 gives the clearest articulation of the message
+      - SEG_0028 provides a strong emotional landing without extra explanation
+      - the brief prioritizes warmth and restraint over explicit closure
+    alternatives:
+      - label: spoken_then_breath
+        description: place SEG_0027 first, then hold briefly on SEG_0028 or SEG_0036
+        impact: clearer message, slightly less ambiguity
+      - label: breath_only_end
+        description: use SEG_0027 earlier and let the film end on SEG_0028 followed by SEG_0036
+        impact: more poetic ending, slightly weaker explicit thesis
+    escalation_required: false
+
+  - id: U002
+    type: audio
+    question: how much trail wind is acceptable before the exterior section starts to feel technically rough?
+    status: monitoring
+    evidence:
+      - AST_004 carries slight_wind on the wider trail coverage
+      - the brief wants audible breathing, so removing all natural texture would flatten the mood
+      - dialogue-heavy moments can be covered with interior lines if the exterior audio is distracting
+    alternatives:
+      - label: preserve_nat_sound
+        description: keep low-level wind where it supports scale and breath
+        impact: more tactile realism, higher technical risk
+      - label: duck_under_music
+        description: let music and texture beds mask the roughest trail wind moments
+        impact: cleaner finish, slightly less documentary feel
+    escalation_required: false
+
+  - id: U003
+    type: coverage
+    question: do we need an earlier exterior threshold shot before the main trail hero material?
+    status: resolved
+    evidence:
+      - SEG_0012 already provides a clean doorway threshold
+      - b02 and b03 both have transition coverage in the selects set
+    alternatives:
+      - label: use_doorway
+        description: transition through SEG_0012 before the first trail hero shot
+        impact: clear spatial progression
+    escalation_required: false
+    resolution_note: doorway coverage is sufficient; no new exterior establishing asset is required

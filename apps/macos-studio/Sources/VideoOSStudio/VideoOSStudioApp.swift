@@ -1,11 +1,21 @@
 import AppKit
 import SwiftUI
+import VideoOSStudioCore
+
+final class StudioMenuCommandAvailabilityStore {
+    static let shared = StudioMenuCommandAvailabilityStore()
+
+    var context = StudioCommandAvailabilityContext()
+
+    private init() {}
+}
 
 @main
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     private static var retainedDelegate: AppDelegate?
     private var mainWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var commandPaletteKeyMonitor: Any?
 
     static func main() {
         let app = NSApplication.shared
@@ -21,8 +31,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installCommandPaletteKeyboardMonitor()
         showMainWindow()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    deinit {
+        if let commandPaletteKeyMonitor {
+            NSEvent.removeMonitor(commandPaletteKeyMonitor)
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -57,33 +74,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func showMainWindow() {
+        presentMainWindow(scheduleFocusRetries: true)
+    }
+
+    private func presentMainWindow(scheduleFocusRetries: Bool) {
         let window = existingOrNewMainWindow()
-        ensureUsableMainWindowFrame(window)
+        ensureUsableMainWindowFrame(window, requireMainDisplayVisibility: true)
         window.deminiaturize(nil)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
+        guard scheduleFocusRetries else { return }
         DispatchQueue.main.async { [weak self, weak window] in
             guard let self, let window else { return }
-            self.ensureUsableMainWindowFrame(window)
+            self.ensureUsableMainWindowFrame(window, requireMainDisplayVisibility: true)
+            guard self.shouldReassertMainWindow(window) else { return }
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self, weak window] in
             guard let self, let window else { return }
-            self.ensureUsableMainWindowFrame(window)
+            self.ensureUsableMainWindowFrame(window, requireMainDisplayVisibility: true)
+            guard self.shouldReassertMainWindow(window) else { return }
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self, weak window] in
             guard let self, let window else { return }
-            self.ensureUsableMainWindowFrame(window)
+            self.ensureUsableMainWindowFrame(window, requireMainDisplayVisibility: true)
+            guard self.shouldReassertMainWindow(window) else { return }
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
         }
+    }
+
+    private func shouldReassertMainWindow(_ window: NSWindow) -> Bool {
+        if !window.isVisible || window.isMiniaturized { return true }
+        guard let keyWindow = NSApp.keyWindow else { return true }
+        return keyWindow === window
     }
 
     @objc private func showSettingsWindow() {
@@ -100,7 +131,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func openCommandPalette() {
-        NotificationCenter.default.post(name: .openStudioCommandPalette, object: nil)
+        presentMainWindow(scheduleFocusRetries: false)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .openStudioCommandPalette, object: nil)
+        }
+    }
+
+    @objc private func closeCommandPalette() {
+        NotificationCenter.default.post(name: .closeStudioCommandPalette, object: nil)
+    }
+
+    private func installCommandPaletteKeyboardMonitor() {
+        guard commandPaletteKeyMonitor == nil else { return }
+        commandPaletteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if self.isCommandK(event) {
+                self.openCommandPalette()
+                return nil
+            }
+            if self.isEscape(event), self.isCommandPaletteWindow(NSApp.keyWindow) {
+                self.closeCommandPalette()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func isCommandK(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return flags == [.command]
+            && event.charactersIgnoringModifiers?.lowercased() == "k"
+    }
+
+    private func isEscape(_ event: NSEvent) -> Bool {
+        event.keyCode == 53
+    }
+
+    private func isCommandPaletteWindow(_ window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        return window.identifier?.rawValue == "CommandPalettePanel" || window.title == "Command Palette"
     }
 
     @objc private func runAnalysis() {
@@ -203,6 +272,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NotificationCenter.default.post(name: .stepStudioPlaybackForward, object: nil)
     }
 
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard let action = menuItem.action else { return true }
+        let context = StudioMenuCommandAvailabilityStore.shared.context
+        switch action {
+        case #selector(checkAppServer):
+            return context.isEnabled(.checkCodexAppServer)
+        case #selector(startAgentSession):
+            return context.isEnabled(.startAgentSession)
+        case #selector(stopAgentSession):
+            return context.isEnabled(.stopAgentSession)
+        case #selector(runSelectedAgentJob):
+            return context.isEnabled(.runSelectedAgentJob)
+        case #selector(runReadOnlyAgentTurn):
+            return context.isEnabled(.runReadOnlyAgentTurn)
+        case #selector(approvePendingAgentJob):
+            return context.isEnabled(.approvePendingAgentJob)
+        case #selector(cancelPendingAgentJob):
+            return context.hasPendingApproval
+        default:
+            return true
+        }
+    }
+
     private func existingOrNewMainWindow() -> NSWindow {
         if let mainWindow {
             return mainWindow
@@ -228,22 +320,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return window
     }
 
-    private func ensureUsableMainWindowFrame(_ window: NSWindow) {
+    private func ensureUsableMainWindowFrame(_ window: NSWindow, requireMainDisplayVisibility: Bool = false) {
         let frame = window.frame
         let visibleFrames = NSScreen.screens.map(\.visibleFrame)
+        let launchVisibleFrame = NSScreen.screens.first {
+            $0.frame.origin.x == 0 && $0.frame.origin.y == 0
+        }?.visibleFrame ?? NSScreen.main?.visibleFrame
         let hasUsableVisibleArea = visibleFrames.contains { visibleFrame in
             let intersection = frame.intersection(visibleFrame)
             return intersection.width >= 800 && intersection.height >= 600
         }
+        let hasUsableLaunchDisplayArea = launchVisibleFrame.map { visibleFrame in
+            let intersection = frame.intersection(visibleFrame)
+            return intersection.width >= 800 && intersection.height >= 600
+        } ?? false
 
-        guard frame.width < 1000 || frame.height < 700 || !hasUsableVisibleArea else {
+        let needsLaunchDisplayReset = requireMainDisplayVisibility && !hasUsableLaunchDisplayArea
+        guard frame.width < 1000 || frame.height < 700 || !hasUsableVisibleArea || needsLaunchDisplayReset else {
             return
         }
 
-        let screenFrame = visibleFrames.first { frame in
-            frame.origin.x >= 0 && frame.origin.y >= 0
-        }
-            ?? NSScreen.main?.visibleFrame
+        let screenFrame = (requireMainDisplayVisibility ? launchVisibleFrame : nil)
+            ?? visibleFrames.first { frame in
+                frame.origin.x >= 0 && frame.origin.y >= 0
+            }
             ?? visibleFrames.first
             ?? NSRect(x: 0, y: 0, width: 1280, height: 820)
         let targetSize = NSSize(
@@ -489,6 +589,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
 extension Notification.Name {
     static let openStudioCommandPalette = Notification.Name("VideoOSStudioOpenCommandPalette")
+    static let closeStudioCommandPalette = Notification.Name("VideoOSStudioCloseCommandPalette")
     static let initializeStudioProject = Notification.Name("VideoOSStudioInitializeProject")
     static let refreshStudioProjects = Notification.Name("VideoOSStudioRefreshProjects")
     static let runStudioAnalysis = Notification.Name("VideoOSStudioRunAnalysis")

@@ -1,0 +1,12 @@
+version: 1
+project_id: ax1-participant-voices-20260401
+current_state: intent_pending
+last_updated: ''
+last_agent: editor-server
+history: []
+artifact_hashes:
+  brief: 67f759e2287b976a
+  selects: b42430f41cf9fe22
+  blueprint: 7cc1999a635d13d6
+  timeline: 617dcedb384f0f26
+updated_at: '2026-04-24T23:52:21.145Z'

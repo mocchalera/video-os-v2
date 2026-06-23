@@ -1,0 +1,24 @@
+{
+  "generated_at" : "2026-05-22T01:27:29Z",
+  "items" : [
+    {
+      "asset_id" : "AST_610FB4A0",
+      "display_name" : "D4892.MP4",
+      "kind" : "asset",
+      "link_path" : "02_media\/synthetic\/D4892.MP4",
+      "local_source_path" : "\/Users\/mocchalera\/Dev\/video-os-v2-spec\/projects\/ax1-participant-voices-20260401\/02_media\/synthetic\/D4892.MP4",
+      "source_locator" : "02_media\/synthetic\/D4892.MP4"
+    },
+    {
+      "asset_id" : "AST_76B05D86",
+      "display_name" : "D4887.MP4",
+      "kind" : "asset",
+      "link_path" : "02_media\/synthetic\/D4887.MP4",
+      "local_source_path" : "\/Users\/mocchalera\/Dev\/video-os-v2-spec\/projects\/ax1-participant-voices-20260401\/02_media\/synthetic\/D4887.MP4",
+      "source_locator" : "02_media\/synthetic\/D4887.MP4"
+    }
+  ],
+  "media_dir" : "02_media",
+  "project_id" : "ax1-participant-voices-20260401",
+  "version" : "1"
+}

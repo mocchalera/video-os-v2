@@ -1,0 +1,53 @@
+{
+  "project_id": "us051-analysis-smoke",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "asset_id": "AST_5B827A4C",
+      "filename": "us051-smoke.mp4",
+      "duration_us": 1000000,
+      "has_transcript": false,
+      "transcript_ref": "TR_AST_5B827A4C",
+      "segments": 1,
+      "segment_ids": [
+        "SEG_AST_5B827A4C_0001"
+      ],
+      "quality_flags": [],
+      "tags": [],
+      "source_fingerprint": "5b827a4cc29ce82443d7bc8c00bf2b44b83a744a",
+      "source_locator": "02_media/source/us051-smoke.mp4",
+      "video_stream": {
+        "width": 320,
+        "height": 180,
+        "fps_num": 12,
+        "fps_den": 1,
+        "codec": "h264"
+      },
+      "audio_stream": {
+        "sample_rate": 44100,
+        "channels": 1,
+        "codec": "aac"
+      },
+      "contact_sheet_ids": [
+        "CS_AST_5B827A4C_01"
+      ],
+      "analysis_status": "pending",
+      "confidence": {
+        "score": 1,
+        "source": "ffprobe",
+        "status": "ready"
+      },
+      "provenance": {
+        "stage": "ingest",
+        "method": "ffprobe",
+        "connector_version": "ffprobe-v2.0.0",
+        "policy_hash": "3bf92ae6fc0d6673",
+        "request_hash": "6c03c5c74d7d73a1",
+        "ffmpeg_version": "8.0.1"
+      },
+      "poster_path": "posters/AST_5B827A4C.jpg",
+      "waveform_path": "waveforms/WF_AST_5B827A4C.png",
+      "display_name": "01_jun_clip"
+    }
+  ]
+}

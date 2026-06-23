@@ -1,0 +1,23 @@
+version: "1"
+project_id: ""
+timeline_version: "1"
+created_at: 2026-06-22T07:23:53.793Z
+summary_judgment:
+  status: needs_revision
+  rationale: Editor-initiated review — stub agent. Replace with LLM-backed
+    ReviewAgent for production reviews.
+  confidence: 0.5
+strengths:
+  - summary: Timeline structure is valid and compilable.
+weaknesses: []
+fatal_issues: []
+warnings:
+  - summary: Stub review agent — no deep analysis performed
+    severity: warning
+mismatches_to_brief: []
+mismatches_to_blueprint: []
+recommended_next_pass:
+  goal: Replace stub agent with LLM-backed review for meaningful analysis
+  actions:
+    - Configure REVIEW_AGENT_PROVIDER environment variable
+preview_path: 05_timeline/preview-first30s.mp4

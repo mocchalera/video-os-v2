@@ -1,0 +1,17 @@
+{
+  "version": "1",
+  "project_id": "us061-marlin-runtime-smoke",
+  "media_dir": "02_media",
+  "generated_at": "2026-06-23T00:00:00+09:00",
+  "items": [
+    {
+      "asset_id": "AST_US061_SMOKE",
+      "source_locator": "02_media/source/smoke.mp4",
+      "local_source_path": "02_media/source/smoke.mp4",
+      "link_path": "02_media/source/smoke.mp4",
+      "display_name": "US-061 smoke clip",
+      "kind": "asset",
+      "link_type": "project-local"
+    }
+  ]
+}

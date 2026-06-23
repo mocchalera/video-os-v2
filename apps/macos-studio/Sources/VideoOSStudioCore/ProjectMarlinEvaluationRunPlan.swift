@@ -25,7 +25,7 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         return "ready"
     }
 
-    public func processArguments(mock: Bool = false) -> [String] {
+    public func processArguments(mock: Bool = false, requestTimeoutMs: Int? = nil) -> [String] {
         var args = [
             "npx",
             "tsx",
@@ -38,12 +38,16 @@ public struct ProjectMarlinEvaluationRunPlan: Equatable, Sendable {
         if mock {
             args.append("--mock")
         }
+        if let requestTimeoutMs {
+            args.append("--request-timeout-ms")
+            args.append(String(requestTimeoutMs))
+        }
         args.append(contentsOf: sourceURLs.map(\.path))
         return args
     }
 
-    public func commandLine(mock: Bool = false) -> String {
-        processArguments(mock: mock)
+    public func commandLine(mock: Bool = false, requestTimeoutMs: Int? = nil) -> String {
+        processArguments(mock: mock, requestTimeoutMs: requestTimeoutMs)
             .map(shellQuote)
             .joined(separator: " ")
     }
@@ -144,6 +148,7 @@ public enum ProjectMarlinEvaluationRunner {
     public static func run(
         plan: ProjectMarlinEvaluationRunPlan,
         mock: Bool = false,
+        requestTimeoutMs: Int? = nil,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -169,12 +174,16 @@ public enum ProjectMarlinEvaluationRunner {
                 )
             }
         }
-        return try (runner ?? runProcess)(plan.repositoryRoot, plan.processArguments(mock: mock))
+        return try (runner ?? runProcess)(plan.repositoryRoot, plan.processArguments(
+            mock: mock,
+            requestTimeoutMs: requestTimeoutMs
+        ))
     }
 
     public static func runAndRefreshIndex(
         plan: ProjectMarlinEvaluationRunPlan,
         mock: Bool = false,
+        requestTimeoutMs: Int? = nil,
         runtimeStatus: ProjectMarlinRuntimeStatus? = nil,
         modelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
         runner: Runner? = nil
@@ -182,6 +191,7 @@ public enum ProjectMarlinEvaluationRunner {
         let runResult = try run(
             plan: plan,
             mock: mock,
+            requestTimeoutMs: requestTimeoutMs,
             runtimeStatus: runtimeStatus,
             modelAccessStatus: modelAccessStatus,
             runner: runner

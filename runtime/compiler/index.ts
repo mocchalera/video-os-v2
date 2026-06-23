@@ -34,6 +34,7 @@ import {
 import type { BgmScoringContext } from "./score.js";
 import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
 import type { SegmentItem } from "../connectors/ffmpeg-segmenter.js";
+import type { TimelineTransition } from "./transition-types.js";
 import type {
   Candidate,
   CompileOptions,
@@ -242,6 +243,121 @@ function candidatesForAssembledClips(candidates: Candidate[], clips: TimelineCli
 
 function sourceRangeKey(item: { segment_id: string; src_in_us: number; src_out_us: number }): string {
   return `${item.segment_id}:${item.src_in_us}:${item.src_out_us}`;
+}
+
+export function compactGuideSingleTrackGaps(
+  assembled: AssembledTimeline,
+  beats: NormalizedBeat[] = [],
+): void {
+  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
+  if (!v1Track || v1Track.clips.length <= 1) {
+    syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
+    alignBeatMarkersToPrimaryTrack(assembled, beats);
+    return;
+  }
+
+  const ordered = [...v1Track.clips].sort(compareTimelineClips);
+  let cursor = 0;
+  for (const clip of ordered) {
+    clip.timeline_in_frame = cursor;
+    cursor += Math.max(0, clip.timeline_duration_frames);
+  }
+  v1Track.clips.splice(0, v1Track.clips.length, ...ordered);
+
+  syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
+  alignBeatMarkersToPrimaryTrack(assembled, beats);
+}
+
+function compareTimelineClips(left: TimelineClip, right: TimelineClip): number {
+  return left.timeline_in_frame - right.timeline_in_frame ||
+    left.clip_id.localeCompare(right.clip_id);
+}
+
+function syncGeneratedAudioMirrorsWithPrimaryVideo(assembled: AssembledTimeline): void {
+  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
+  if (!v1Track) return;
+
+  const videoQueues = new Map<string, TimelineClip[]>();
+  for (const clip of v1Track.clips) {
+    for (const key of audioMirrorMatchKeys(clip)) {
+      const queue = videoQueues.get(key) ?? [];
+      queue.push(clip);
+      videoQueues.set(key, queue);
+    }
+  }
+
+  for (const track of assembled.tracks.audio) {
+    for (const clip of track.clips) {
+      if (!isGeneratedAudioMirror(clip)) continue;
+      const videoClip = audioMirrorMatchKeys(clip)
+        .map((key) => videoQueues.get(key))
+        .find((queue): queue is TimelineClip[] => Boolean(queue?.length))
+        ?.shift();
+      if (!videoClip) continue;
+      clip.timeline_in_frame = videoClip.timeline_in_frame;
+      clip.timeline_duration_frames = videoClip.timeline_duration_frames;
+      clip.src_in_us = videoClip.src_in_us;
+      clip.src_out_us = videoClip.src_out_us;
+      clip.beat_id = videoClip.beat_id;
+    }
+  }
+}
+
+function alignBeatMarkersToPrimaryTrack(
+  assembled: AssembledTimeline,
+  beats: NormalizedBeat[] = [],
+): void {
+  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
+  if (!v1Track) return;
+
+  const beatIds = new Set(beats.map((beat) => beat.beat_id));
+  const firstFrameByBeat = new Map<string, number>();
+  for (const clip of [...v1Track.clips].sort(compareTimelineClips)) {
+    if (!firstFrameByBeat.has(clip.beat_id)) {
+      firstFrameByBeat.set(clip.beat_id, clip.timeline_in_frame);
+    }
+  }
+
+  for (const marker of assembled.markers) {
+    if (marker.kind !== "beat") continue;
+    const beatId = marker.label.split(":")[0]?.trim();
+    if (!beatId || (beatIds.size > 0 && !beatIds.has(beatId))) continue;
+    const frame = firstFrameByBeat.get(beatId);
+    if (frame !== undefined) marker.frame = frame;
+  }
+}
+
+function audioMirrorMatchKeys(clip: TimelineClip): string[] {
+  const keys: string[] = [];
+  if (clip.candidate_ref) keys.push(`candidate:${clip.candidate_ref}`);
+  keys.push(`beat:${clip.beat_id}:${clip.segment_id}:${clip.asset_id}`);
+  keys.push(`source:${clip.segment_id}:${clip.asset_id}:${clip.src_in_us}:${clip.src_out_us}`);
+  return keys;
+}
+
+function refreshTransitionCutFrames(
+  transitions: TimelineTransition[],
+  assembled: AssembledTimeline,
+): void {
+  if (transitions.length === 0) return;
+
+  const clipsById = new Map<string, TimelineClip>();
+  for (const track of assembled.tracks.video) {
+    for (const clip of track.clips) {
+      clipsById.set(clip.clip_id, clip);
+    }
+  }
+
+  for (const transition of transitions) {
+    const leftClip = clipsById.get(transition.from_clip_id);
+    const rightClip = clipsById.get(transition.to_clip_id);
+    if (!leftClip || !rightClip) continue;
+    const actualCutFrame = leftClip.timeline_in_frame + leftClip.timeline_duration_frames;
+    transition.transition_params ??= {};
+    const snapDelta = Number(transition.transition_params.snap_delta_frames ?? 0);
+    transition.transition_params.cut_frame_after_snap = actualCutFrame;
+    transition.transition_params.cut_frame_before_snap = actualCutFrame - snapDelta;
+  }
 }
 
 function applyClipTrimPlansToCandidates(candidates: Candidate[], plans: ClipTrimPlan[]): void {
@@ -753,6 +869,9 @@ export function compile(opts: CompileOptions): CompileResult {
     beats: normalized.beats,
     log: opts.log,
   });
+  if (durationPolicy.mode === "guide" && trackLayout === "single") {
+    compactGuideSingleTrackGaps(assembled, normalized.beats);
+  }
 
   // ── Phase 4: Resolve constraints ──────────────────────────────────
 
@@ -825,6 +944,12 @@ export function compile(opts: CompileOptions): CompileResult {
             !droppedClipIds.has(transition.to_clip_id),
         );
       }
+      if (durationPolicy.mode === "guide" && trackLayout === "single") {
+        compactGuideSingleTrackGaps(assembled, normalized.beats);
+      } else {
+        syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
+      }
+      refreshTransitionCutFrames(adjacencyTransitions, assembled);
 
       // Set project_id on analysis
       adjResult.analysis.project_id = normalized.project_id;

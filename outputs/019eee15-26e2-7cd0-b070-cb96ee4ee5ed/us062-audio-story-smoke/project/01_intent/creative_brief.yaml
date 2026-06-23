@@ -1,0 +1,16 @@
+version: "1"
+project:
+  title: US-062 Audio Story Smoke
+  strategy: Verify audio story graph runtime build and index refresh
+  format: runtime-smoke
+message:
+  primary: Audio story graph should connect transcript, audio events, and music evidence.
+audience:
+  primary: studio operator
+emotion_curve:
+  - setup
+  - impact
+must_have:
+  - dialogue node
+  - audio event node
+  - music section node

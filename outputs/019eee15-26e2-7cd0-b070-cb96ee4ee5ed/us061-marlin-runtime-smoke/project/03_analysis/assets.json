@@ -1,0 +1,24 @@
+{
+  "project_id": "us061-marlin-runtime-smoke",
+  "artifact_version": "2.0.0",
+  "items": [
+    {
+      "asset_id": "AST_US061_SMOKE",
+      "filename": "smoke.mp4",
+      "duration_us": 1000000,
+      "has_transcript": false,
+      "transcript_ref": null,
+      "segment_ids": [
+        "SEG_US061_SMOKE_0001"
+      ],
+      "quality_flags": [],
+      "tags": [
+        "marlin",
+        "runtime",
+        "smoke"
+      ],
+      "role_guess": "runtime-smoke",
+      "source_locator": "02_media/source/smoke.mp4"
+    }
+  ]
+}

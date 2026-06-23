@@ -27,6 +27,52 @@ final class CodexAppServerProtocolTests: XCTestCase {
         ])
     }
 
+    func testTransportPreferencesDefaultToStdio() throws {
+        let defaults = try makeIsolatedDefaults()
+
+        XCTAssertEqual(
+            CodexAppServerTransportPreferences.preferredTransport(defaults: defaults),
+            .stdio
+        )
+    }
+
+    func testTransportPreferencesBuildLaunchPlanFromStoredValue() throws {
+        let root = URL(fileURLWithPath: "/tmp/video-os")
+        let defaults = try makeIsolatedDefaults()
+        defaults.set(CodexAppServerTransport.websocket.rawValue, forKey: CodexAppServerTransportPreferences.storageKey)
+
+        let plan = CodexAppServerTransportPreferences.launchPlan(workspace: root, defaults: defaults)
+
+        XCTAssertEqual(plan.transport, .websocket)
+        XCTAssertEqual(plan.listenURL, "ws://127.0.0.1:8765")
+        XCTAssertEqual(plan.arguments, ["app-server", "--listen", "ws://127.0.0.1:8765"])
+    }
+
+    func testTransportPreferencesIgnoreInvalidStoredValue() throws {
+        let root = URL(fileURLWithPath: "/tmp/video-os")
+        let defaults = try makeIsolatedDefaults()
+        defaults.set("bogus", forKey: CodexAppServerTransportPreferences.storageKey)
+
+        let plan = CodexAppServerTransportPreferences.launchPlan(workspace: root, defaults: defaults)
+
+        XCTAssertEqual(plan.transport, .stdio)
+        XCTAssertEqual(plan.arguments, ["app-server", "--listen", "stdio://"])
+    }
+
+    func testTransportSettingsOptionsExposeEverySupportedTransport() {
+        XCTAssertEqual(
+            CodexAppServerTransportPreferences.settingsOptions.map(\.rawValue),
+            CodexAppServerTransport.allCases.map(\.rawValue)
+        )
+        XCTAssertEqual(
+            CodexAppServerTransportPreferences.settingsOptions.map(\.label),
+            ["stdio", "websocket", "unixSocket"]
+        )
+        XCTAssertTrue(CodexAppServerTransportPreferences.settingsDescription.contains("stdio"))
+        XCTAssertTrue(CodexAppServerTransportPreferences.settingsDescription.contains("WebSocket"))
+        XCTAssertTrue(CodexAppServerTransportPreferences.settingsDescription.contains("Unix socket"))
+    }
+
     func testThreadStartRequestUsesCodexNativeSafetyDefaults() throws {
         let root = URL(fileURLWithPath: "/tmp/video-os")
         let factory = CodexAppServerRequestFactory(workspace: root)
@@ -95,5 +141,12 @@ final class CodexAppServerProtocolTests: XCTestCase {
     private func parseJSONObject(_ line: String) throws -> [String: Any]? {
         let data = Data(line.utf8)
         return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    private func makeIsolatedDefaults() throws -> UserDefaults {
+        let suiteName = "VideoOSStudioCoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }

@@ -4,7 +4,7 @@ import SwiftUI
 import VideoOSStudioCore
 
 struct SettingsView: View {
-    @AppStorage("videoOSStudioPreferredTransport") private var preferredTransport = CodexAppServerTransport.stdio.rawValue
+    @AppStorage(CodexAppServerTransportPreferences.storageKey) private var preferredTransport = CodexAppServerTransport.stdio.rawValue
     private let policyStatus = ProjectAnalysisPolicyStatusReader.status(repositoryRoot: ProjectScanner.locateRepositoryRoot())
     private let marlinRuntimeStatus = ProjectMarlinRuntimeStatusReader.status(repositoryRoot: ProjectScanner.locateRepositoryRoot())
 
@@ -12,11 +12,11 @@ struct SettingsView: View {
         Form {
             Section("Codex App Server") {
                 Picker("Transport", selection: $preferredTransport) {
-                    ForEach(CodexAppServerTransport.allCases, id: \.rawValue) { transport in
-                        Text(transport.rawValue).tag(transport.rawValue)
+                    ForEach(CodexAppServerTransportPreferences.settingsOptions) { option in
+                        Text(option.label).tag(option.rawValue)
                     }
                 }
-                Text("Initial builds use stdio. WebSocket and Unix socket modes are reserved for embedded runtime and packaged app flows.")
+                Text(CodexAppServerTransportPreferences.settingsDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
