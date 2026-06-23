@@ -56,6 +56,22 @@ final class ProjectMarlinEvaluationStatusTests: XCTestCase {
         XCTAssertEqual(status.readinessLabel, "needs segment materialization")
         XCTAssertFalse(status.canPreferMarlin)
         XCTAssertEqual(status.segmentsWithMarlinPeakCount, 0)
+        XCTAssertEqual(status.materializableSegmentCount, 3)
+    }
+
+    func testStatusRoutesPartialUnmaterializedCoverageToMaterialization() throws {
+        let project = try makeProjectFixture(name: "videoos-marlin-partial-materialization")
+        try writeMarlinEvents(project: project, eventCount: 2, findCount: 1)
+        try writeSegmentsWithPeakFlags(project: project, marlinPeaks: [true, false, false, false])
+
+        let status = ProjectMarlinEvaluationStatusReader.status(projectURL: project)
+
+        XCTAssertEqual(status.readinessLabel, "needs segment materialization")
+        XCTAssertFalse(status.canPreferMarlin)
+        XCTAssertEqual(status.segmentCount, 4)
+        XCTAssertEqual(status.segmentsWithMarlinPeakCount, 1)
+        XCTAssertEqual(status.materializableSegmentCount, 3)
+        XCTAssertEqual(status.coverageRatio, 0.25, accuracy: 0.001)
     }
 }
 
@@ -179,6 +195,53 @@ private func writeSegments(project: URL, includeMarlinPeak: Bool) throws {
           "tags": [],
           "interest_points": []
         }
+      ]
+    }
+    """.write(
+        to: project.appendingPathComponent("03_analysis/segments.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+}
+
+private func writeSegmentsWithPeakFlags(project: URL, marlinPeaks: [Bool]) throws {
+    let items = marlinPeaks.enumerated().map { index, includeMarlinPeak in
+        let sourceInUS = index * 3_000_000
+        let sourceOutUS = sourceInUS + 3_000_000
+        let peakAnalysis = includeMarlinPeak
+            ? """
+              ,
+              "peak_analysis": {
+                "selected_peak_us": \(sourceInUS + 1_500_000),
+                "confidence": 0.82,
+                "provenance": {
+                  "precision_mode": "marlin_temporal_semantics",
+                  "fusion_version": "marlin-segment-peak-v1"
+                }
+              }
+            """
+            : ""
+        return """
+            {
+              "segment_id": "S\(String(format: "%03d", index + 1))",
+              "asset_id": "A001",
+              "src_in_us": \(sourceInUS),
+              "src_out_us": \(sourceOutUS),
+              "summary": "segment \(index + 1)",
+              "transcript_excerpt": "",
+              "quality_flags": [],
+              "tags": [],
+              "interest_points": []\(peakAnalysis)
+            }
+        """
+    }.joined(separator: ",")
+
+    try """
+    {
+      "project_id": "fixture",
+      "artifact_version": "1",
+      "items": [
+    \(items)
       ]
     }
     """.write(

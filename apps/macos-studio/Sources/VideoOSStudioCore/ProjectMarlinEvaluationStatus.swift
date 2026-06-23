@@ -22,6 +22,7 @@ public struct ProjectMarlinEvaluationStatus: Equatable, Sendable {
     public let findResultCount: Int
     public let segmentCount: Int
     public let segmentsWithMarlinPeakCount: Int
+    public let materializableSegmentCount: Int
     public let marlinInterestPointCount: Int
 
     public var readinessLabel: String {
@@ -30,7 +31,9 @@ public struct ProjectMarlinEvaluationStatus: Equatable, Sendable {
         if isMockArtifact { return "mock evaluation" }
         if eventCount == 0, findResultCount == 0 { return "no temporal events" }
         if segmentsExists, !segmentsReadable { return "segments unreadable" }
-        if segmentCount > 0, segmentsWithMarlinPeakCount == 0, marlinInterestPointCount == 0 {
+        if segmentCount > 0,
+           coverageRatio < 0.3,
+           materializableSegmentCount > 0 {
             return "needs segment materialization"
         }
         if canPreferMarlin {
@@ -104,6 +107,9 @@ public enum ProjectMarlinEvaluationStatusReader {
             }.count
         }
 
+        let segmentsWithMarlinPeak = segmentItems.filter { isMarlinPeak($0.peakAnalysis) }.count
+        let materializableSegments = materializableSegmentCount(segments: segmentItems, artifactItems: items)
+
         return ProjectMarlinEvaluationStatus(
             projectURL: projectURL,
             analysisDefaultsURL: defaultsURL,
@@ -125,7 +131,8 @@ public enum ProjectMarlinEvaluationStatusReader {
             eventCount: items.reduce(0) { $0 + $1.events.count },
             findResultCount: items.reduce(0) { $0 + $1.findResults.count },
             segmentCount: segmentItems.count,
-            segmentsWithMarlinPeakCount: segmentItems.filter { isMarlinPeak($0.peakAnalysis) }.count,
+            segmentsWithMarlinPeakCount: segmentsWithMarlinPeak,
+            materializableSegmentCount: materializableSegments,
             marlinInterestPointCount: marlinInterestPoints
         )
     }
@@ -142,6 +149,21 @@ public enum ProjectMarlinEvaluationStatusReader {
         guard let provenance = peak?.provenance else { return false }
         if provenance.precisionMode == "marlin_temporal_semantics" { return true }
         return provenance.fusionVersion?.hasPrefix("marlin") == true
+    }
+
+    private static func materializableSegmentCount(
+        segments: [AnalysisSegment],
+        artifactItems: [MarlinAssetEvents]
+    ) -> Int {
+        let materializableAssetIDs = Set(
+            artifactItems
+                .filter { !$0.scene.isEmpty || !$0.events.isEmpty || !$0.findResults.isEmpty }
+                .map(\.assetID)
+        )
+        return segments.filter { segment in
+            !isMarlinPeak(segment.peakAnalysis)
+                && materializableAssetIDs.contains(segment.assetID)
+        }.count
     }
 }
 
