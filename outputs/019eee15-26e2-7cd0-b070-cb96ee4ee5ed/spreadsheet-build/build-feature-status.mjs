@@ -512,6 +512,7 @@ const summary = [
   ["Latest US-045 root cause", "The latest preview failures had two separate causes. AX-1 could select a short Web-era preview-editor MP4 at the end of the timeline, masking a longer rendered fallback. ena-promo-ai had an exact preview generation bug where the segment renderer extracted source trim duration instead of timeline clip duration, so the MP4 became longer than the compiled timeline."],
   ["Latest US-045 fix/verification", "ProjectMediaResolver still skips known-short timeline-preview candidates beyond their duration, runtime/preview/segment-renderer.ts clamps generated extracts to timeline_duration_frames/fps, and Viewer diagnostics now have native visual evidence for missing media. Verification: ProjectMediaResolverTests 25/0, preview.test.ts 29/0, npm run build, build_and_run --verify, ffprobe 75.914714s for ena-promo-ai preview-full.mp4, ena playback-contract exact hash f3bc3e6fef222e1a, AX-1 playback-contract exact hash 171378fe2bfe3a7c, fresh computer-use Viewer evidence for ena-promo-ai with near_black_pct=0.0000, fresh AX-1 Viewer evidence with viewer_person_actual near_black_pct=0.0004, and demo missing-media diagnostic screenshot /tmp/videoos-debug/us049-viewer-diagnostic-missing-media-20260624.png."],
   ["Open gates", "One open external dependency is tracked in the Open Gates sheet: GATE-001 / ISS-050 / US-061. The missing rokutaro-graduation-20260319 original MOV root prevents repo-level Marlin-first preference promotion; current relink planning finds no local matches."],
+  ["Completion audit", "The Completion Audit sheet maps the original goal requirements to current evidence. It records current progress as not complete until GATE-001 is resolved and the Marlin preference gate is retested."],
   ["Remaining caveat", "US-045 is promoted for native exact-preview playback, missing-media diagnostic display, and pixel evidence on ena-promo-ai, AX-1, and demo. US-046 is promoted for native New Project alert, NSOpenPanel source-folder selection, project shelf selection, Project creation status, source symlink, and project_state verification on a disposable project. US-047 Command Palette is promoted for top-bar open/close, Cmd-K open, filtered Return execution, and Esc dismiss. US-048 Agent panel is promoted for Check/Start/Stop lifecycle. US-049 is promoted for native read-only Status job execution, stable AgentPanel identifiers, and workspace-write approval-cancel gate behavior; live approved write execution remains intentionally pending operator approval. US-050 is promoted for Project readiness/action queue visibility, Copy behavior, stable action-scoped AX identifiers, and rough-cut-review Start & Run stopping at the Codex approval gate; approved workspace-write review execution and Final render Open remain intentionally pending. US-051 is promoted for native local Source Analysis on a disposable project, but full external STT/VLM/Appraiser analysis remains a deliberate CLI/operator path. US-052 is promoted for native rough-cut compile and review_patch compile on a disposable project. US-053 is promoted for native timeline marker/audio/waveform inspection plus right-click approve/reject/swap/search actions. US-054 is promoted for native disposable apply/undo and promote-button enablement, while live promotion of a real editorial decision remains an operator-approved action. US-055 is promoted for native selection/evidence inspection, Save/Clear persistence and cleanup, and live read-only Ask Codex proposal drafting without pressing Save. US-065 is promoted for native SQLite/RAG Search/Add, cited Agent prompt insertion, and InspectorTab.* Agent/Media switching without AX hangs. US-061 is promoted for runtime/model/mock/native AX, live non-mock representative chunks, source-map-aware chunk controls, resumable checkpointed evaluation, caption-only CLI support, bounded skip-existing routing, and media-relink fallback commands; repo-level Marlin-first preference promotion remains pending until the missing rokutaro-graduation-20260319 media root is mounted or relinked. US-057 is promoted for native text search, preview, beat targeting, replacement staging, and Discard cleanup. US-059 is promoted for native Media Relink status/buttons, NSOpenPanel open/cancel, source-map-root relink, source_map/symlink verification, and cleanup on a disposable project. US-060 is promoted for native synthetic demo media build, proxy build, and Studio synthetic smoke execution with CLI/ffprobe verification and cleanup on disposable projects; acceptance smoke remains covered by CLI/test gates. US-062 is promoted for native MediaPanel Build Audio Story Graph button execution, command-line visibility, graph/index/library verification, and cleanup on a disposable project. US-063 is promoted for native MediaPanel Render Final Package button execution, supplied_final_path command visibility, render-status/QA/manifest/final-media verification, and cleanup on a disposable project. US-064 is promoted for native MediaPanel Export Premiere XML, Export Editor Packet, Reveal Packet, Finder selection, manifest/final-media/final-audio verification, and cleanup on disposable projects. US-066 is promoted for Settings window inspection, transport picker mutation, defaults persistence, and defaults cleanup. US-056 Candidate Swap and US-058 radar/issues/jump remain promoted with native AX/pixel/file evidence. Visual/manual gaps for other native stories are unchanged unless specifically promoted in their story rows and Test Log entries."],
 ];
 
@@ -525,6 +526,65 @@ const openGates = [
     "Mount or relink the original source root containing IMG_2894.MOV, IMG_2896.MOV, IMG_2897.MOV, IMG_2898.MOV, IMG_2899.MOV, IMG_2900.MOV, IMG_2901.MOV, IMG_2902.MOV, and IMG_2908.MOV under /Volumes/Extreme 500/動画/麓太朗卒園式 or provide an equivalent search root.",
     "Run media-relink-plan first; if matched=9, run media-relink-apply, then marlin-eval-next --execute --request-timeout-ms=900000 --max-sources=2 --skip-existing --caption-only --chunk-seconds=30 --chunk-overlap-seconds=3 --max-chunks=2 and marlin-preference-status.",
     "Open external dependency",
+  ],
+];
+
+const completionAudit = [
+  [
+    "REQ-001",
+    "Review every feature one by one",
+    "Covered by tracker",
+    "Stories sheet contains 66 user-story rows, including web editor stories US-001 through US-044 and native macOS Studio stories US-045 through US-066. Code Map lists the corresponding implementation areas.",
+    "Stories sheet; Code Map sheet; Summary Stories tracked=66.",
+    "Keep adding rows if new app surfaces are introduced.",
+  ],
+  [
+    "REQ-002",
+    "Create code-grounded user stories",
+    "Covered by tracker",
+    "Each story row includes Expected Behavior, Code Evidence, Test Procedure, Current Status, and Notes. macOS rows cite SwiftUI/Core/CLI files and focused tests or native AX/pixel evidence.",
+    "Stories sheet columns C-H; Code Map sheet.",
+    "No current gap outside the open external media gate.",
+  ],
+  [
+    "REQ-003",
+    "Keep one canonical spreadsheet for feature status",
+    "Covered by tracker",
+    "The canonical workbook is outputs/019eee15-26e2-7cd0-b070-cb96ee4ee5ed/video-os-v2-feature-status.xlsx. It is generated from build-feature-status.mjs and inspected/rendered by verify-feature-status.mjs.",
+    "Workbook, inspect NDJSON, rendered Summary/Stories/Issues/Test Log/Open Gates/Completion Audit/Code Map PNGs.",
+    "Continue updating the generator first, then regenerate the workbook.",
+  ],
+  [
+    "REQ-004",
+    "Test all user stories and document errors",
+    "Substantially covered; one external gate remains",
+    "Test Log records 263 evidence rows. Issues sheet records 82 issue rows; all non-external product/logistics issues are Fixed. Latest full npm test passed 138 files / 2419 tests.",
+    "Test Log sheet; Issues sheet; Summary Final test; npm test output recorded in TL-044.",
+    "Resolve GATE-001 to finish US-061 repo-level Marlin preference promotion.",
+  ],
+  [
+    "REQ-005",
+    "Fix logistical and UX errors",
+    "Substantially covered; one external gate remains",
+    "Issues scan shows only ISS-050 remains non-Fixed. ISS-050 is mitigated by bounded skip-existing routing and media-relink fallback commands, but cannot be fully closed without missing original MOV files.",
+    "Issues sheet non-Fixed scan; Open Gates GATE-001.",
+    "Mount/relink the missing Rokutaro graduation source media root, then rerun the Marlin preference gate.",
+  ],
+  [
+    "REQ-006",
+    "Retest after fixes",
+    "Covered for fixed items",
+    "Latest regression pass includes npm test, npm run build, tracker verify, focused Swift tests, native AX/pixel checks, CLI smoke tests, and workbook render verification.",
+    "Summary Final test; Test Log; rendered workbook sheets.",
+    "After GATE-001 is resolved, rerun media-relink, marlin-eval-next, marlin-preference-status, tracker verify, and relevant Swift/TS checks.",
+  ],
+  [
+    "REQ-007",
+    "Declare completion only when all requirements are proven",
+    "Not complete",
+    "Completion is intentionally not claimed because GATE-001 is still open and canPreferMarlinAsDefault remains false due to mediaBlockedEvaluatedProjects=1.",
+    "Open Gates sheet; marlin-preference-status evidence; media-status and media-relink-plan evidence.",
+    "Do not mark the goal complete until GATE-001 is closed and the completion audit is updated to complete.",
   ],
 ];
 
@@ -545,6 +605,7 @@ const defaultColumnWidths = {
   Issues: [12, 12, 12, 22, 64, 74, 74, 74, 16],
   "Test Log": [12, 16, 22, 54, 84, 18],
   "Open Gates": [12, 18, 28, 58, 82, 82, 82, 24],
+  "Completion Audit": [12, 42, 24, 84, 74, 74],
   "Code Map": [34, 64, 92],
 };
 
@@ -585,8 +646,8 @@ writeTable(
   ["Metric", "Value"],
   summary,
 );
-summarySheet.getRange("A9:B16").format.rowHeight = 220;
-summarySheet.getRange("A9:B16").format.verticalAlignment = "top";
+summarySheet.getRange("A9:B17").format.rowHeight = 220;
+summarySheet.getRange("A9:B17").format.verticalAlignment = "top";
 
 writeTable(
   workbook.worksheets.add("Stories"),
@@ -612,6 +673,13 @@ writeTable(
   ["Gate ID", "Related", "Gate Type", "Current Gate", "Current Evidence", "Required External Action", "Verification After Action", "Status"],
   openGates,
   { rowHeight: 120 },
+);
+
+writeTable(
+  workbook.worksheets.add("Completion Audit"),
+  ["Requirement ID", "Goal Requirement", "Current Verdict", "Evidence", "Evidence Surface", "Remaining Action"],
+  completionAudit,
+  { rowHeight: 96 },
 );
 
 writeTable(
