@@ -16,9 +16,11 @@ struct SettingsView: View {
                         Text(option.label).tag(option.rawValue)
                     }
                 }
+                .accessibilityIdentifier("Settings.TransportPicker")
                 Text(CodexAppServerTransportPreferences.settingsDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("Settings.TransportDescription")
             }
 
             Section("Analysis Policy") {
