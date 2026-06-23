@@ -212,19 +212,39 @@ public enum ProjectMarlinRuntimeStatusReader {
         return """
         import importlib
         import importlib.metadata
+        import subprocess
+        import sys
         modules = [\(modules)]
+        module_probe = r'''
+        import importlib
+        import importlib.metadata
+        import sys
+        name = sys.argv[1]
+        dist_name = sys.argv[2]
+        try:
+            module = importlib.import_module(name)
+            version = getattr(module, '__version__', '')
+            if not version:
+                try:
+                    version = importlib.metadata.version(dist_name)
+                except Exception:
+                    version = ''
+            print(f"{name}\\tok\\t{version}")
+        except Exception as exc:
+            print(f"{name}\\tmissing\\t{type(exc).__name__}: {exc}")
+        '''
         for name, dist_name in modules:
-            try:
-                module = importlib.import_module(name)
-                version = getattr(module, '__version__', '')
-                if not version:
-                    try:
-                        version = importlib.metadata.version(dist_name)
-                    except Exception:
-                        version = ''
-                print(f"{name}\\tok\\t{version}")
-            except Exception as exc:
-                print(f"{name}\\tmissing\\t{type(exc).__name__}: {exc}")
+            result = subprocess.run(
+                [sys.executable, "-c", module_probe, name, dist_name],
+                text=True,
+                capture_output=True,
+            )
+            if result.stdout.strip():
+                print(result.stdout.strip())
+            elif result.returncode != 0:
+                print(f"{name}\\tmissing\\tprocess exited {result.returncode}")
+            if result.stderr:
+                print(result.stderr, file=sys.stderr, end="")
         try:
             import torch
             cuda = bool(torch.cuda.is_available()) if hasattr(torch, "cuda") else False
