@@ -121,7 +121,7 @@ function verifyTrackerSemantics(tables) {
   assert(summaryValue("Issues tracked") === issues.length, "Summary Issues tracked does not match Issues rows");
   assertContinuousIDs(stories, "Story ID", "US", 66);
   assertContinuousIDs(issues, "Issue ID", "ISS", 85);
-  assertContinuousIDs(testLog, "Log ID", "TL", 272);
+  assertContinuousIDs(testLog, "Log ID", "TL", 273);
 
   const storyIDs = new Set(stories.map((row) => row["Story ID"]));
   for (const issue of issues) {
@@ -168,25 +168,36 @@ function verifyTrackerSemantics(tables) {
   );
 
   const auditByID = new Map(completionAudit.map((row) => [row["Requirement ID"], row]));
-  assert(auditByID.get("REQ-007")?.["Current Verdict"] === "Not complete", "REQ-007 must remain Not complete");
+  assert(auditByID.get("REQ-007")?.["Current Verdict"] === "Complete", "REQ-007 must be Complete after native US-060 pass");
   assert(
-    String(auditByID.get("REQ-004")?.["Current Verdict"]).includes("native click proof remains"),
-    "REQ-004 must describe the remaining native click proof",
+    String(auditByID.get("REQ-004")?.Evidence).includes("TL-273")
+      && String(auditByID.get("REQ-004")?.["Current Verdict"]).includes("Covered"),
+    "REQ-004 must include the native TL-273 button proof",
   );
   assert(
     String(auditByID.get("REQ-005")?.Evidence).includes("no non-Fixed issue rows"),
     "REQ-005 must identify zero non-Fixed issues",
   );
 
-  assert(testLog.length === 272, `Expected 272 Test Log rows, got ${testLog.length}`);
-  const latestLog = testLog.find((row) => row["Log ID"] === "TL-272");
-  assert(latestLog, "Missing TL-272 test log entry");
+  assert(testLog.length === 273, `Expected 273 Test Log rows, got ${testLog.length}`);
+  const latestLog = testLog.find((row) => row["Log ID"] === "TL-273");
+  assert(latestLog, "Missing TL-273 test log entry");
   assert(
-    String(latestLog.Result).includes("US-060 button click pending")
-      && String(latestLog.Evidence).includes("near_black_pct=1.0")
-      && String(latestLog.Evidence).includes("0 windows")
-      && String(latestLog.Evidence).includes("PID 48881"),
-    "TL-272 result must preserve the native UI accessibility blocker",
+    String(latestLog.Result).includes("Native Acceptance Smoke button pass")
+      && String(latestLog.Evidence).includes("MediaPanel.RunAcceptanceSmokeButton")
+      && String(latestLog.Evidence).includes("Acceptance smoke passed")
+      && String(latestLog.Evidence).includes("score=9/9")
+      && String(latestLog.Evidence).includes("us060-native-acceptance-smoke-after-unlock.png"),
+    "TL-273 result must preserve the native Acceptance Smoke button pass",
+  );
+  const inaccessibleLog = testLog.find((row) => row["Log ID"] === "TL-272");
+  assert(inaccessibleLog, "Missing TL-272 test log entry");
+  assert(
+    String(inaccessibleLog.Result).includes("US-060 button click pending")
+      && String(inaccessibleLog.Evidence).includes("near_black_pct=1.0")
+      && String(inaccessibleLog.Evidence).includes("0 windows")
+      && String(inaccessibleLog.Evidence).includes("PID 48881"),
+    "TL-272 result must preserve the prior native UI accessibility blocker",
   );
   const gateClosureLog = testLog.find((row) => row["Log ID"] === "TL-271");
   assert(gateClosureLog, "Missing TL-271 GATE-001 closure test log entry");
@@ -239,8 +250,8 @@ function verifyTrackerSemantics(tables) {
     "US-010 must document the waveform resolution compatibility fix",
   );
   assert(
-    String(storyByID.get("US-060")?.["Current Status"]).includes("acceptance smoke CLI hang fixed"),
-    "US-060 status must mention the acceptance smoke CLI hang fix",
+    String(storyByID.get("US-060")?.["Current Status"]).includes("Native synthetic/proxy/studio/acceptance smoke button pass"),
+    "US-060 status must record the native acceptance smoke button pass",
   );
   assert(
     String(storyByID.get("US-061")?.["Current Status"]).includes("Marlin-first preference gate pass"),
