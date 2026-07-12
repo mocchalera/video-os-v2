@@ -6,8 +6,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { compile, applyPatch } from "../runtime/compiler/index.js";
+import { compile, applyPatch, detectProjectBgm } from "../runtime/compiler/index.js";
 import { writePreviewManifest } from "../runtime/compiler/export.js";
 import type { ReviewPatch } from "../runtime/compiler/patch.js";
 import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
@@ -15,22 +16,29 @@ import { loadSourceMap } from "../runtime/media/source-map.js";
 import { validateProject } from "./validate-schemas.js";
 import { ProgressTracker } from "../runtime/progress.js";
 import { generateTimelineOverview } from "../runtime/preview/timeline-overview.js";
+import { confirmBriefDefaults } from "../runtime/brief-confirmation.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
-function parseArgs(): {
+export interface CompileTimelineArgs {
   projectPath: string;
   patchPath?: string;
   fpsNum?: number;
   sourceMapPath?: string;
   skipPreview?: boolean;
-} {
-  const args = process.argv.slice(2);
+  skipConfirmations?: boolean;
+  forceConfirmations?: boolean;
+}
+
+export function parseArgs(argv: string[] = process.argv): CompileTimelineArgs {
+  const args = argv.slice(2);
   let projectPath: string | undefined;
   let patchPath: string | undefined;
   let fpsNum: number | undefined;
   let sourceMapPath: string | undefined;
   let skipPreview = false;
+  let skipConfirmations: boolean | undefined;
+  let forceConfirmations = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--patch" && i + 1 < args.length) {
@@ -41,29 +49,37 @@ function parseArgs(): {
       sourceMapPath = args[++i];
     } else if (args[i] === "--skip-preview") {
       skipPreview = true;
+    } else if (args[i] === "--skip-confirmations" && i + 1 < args.length) {
+      const value = args[++i];
+      skipConfirmations = value === "true";
+      forceConfirmations = value === "false";
+    } else if (args[i] === "--skip-confirmations") {
+      skipConfirmations = true;
     } else if (!projectPath) {
       projectPath = args[i];
     }
   }
 
   if (!projectPath) {
-    console.error(
-      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>] [--skip-preview]",
+    throw new Error(
+      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>] [--skip-preview] [--skip-confirmations true|false]",
     );
-    process.exit(1);
   }
 
-  return { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview };
+  return { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations };
 }
 
 // ── Compile mode ────────────────────────────────────────────────────
 
-async function runCompile(
-  projectPath: string,
-  fpsNum?: number,
-  sourceMapPath?: string,
-  skipPreview?: boolean,
-): Promise<void> {
+export async function runCompileTimeline(options: CompileTimelineArgs): Promise<void> {
+  const {
+    projectPath,
+    fpsNum,
+    sourceMapPath,
+    skipPreview,
+    skipConfirmations,
+    forceConfirmations,
+  } = options;
   const pt = new ProgressTracker(projectPath, "compile", skipPreview ? 3 : 4);
 
   // Pre-compile validation: check Gate 1
@@ -76,7 +92,7 @@ async function runCompile(
         console.error(`  - ${v.message}`);
       }
     }
-    process.exit(1);
+    throw new Error("Compile gate BLOCKED. Unresolved blockers exist.");
   }
   pt.advance();
 
@@ -85,6 +101,23 @@ async function runCompile(
   const briefRaw = fs.readFileSync(briefPath, "utf-8");
   const brief = parseYaml(briefRaw) as { created_at?: string };
   const createdAt = brief.created_at ?? "1970-01-01T00:00:00Z";
+  const confirmation = await confirmBriefDefaults(path.resolve(projectPath), {
+    skipConfirmations,
+    force: forceConfirmations,
+  });
+  if (confirmation.wrote) {
+    console.log(`Brief confirmation: caption_policy=${confirmation.captionPolicy}, audio_policy=${confirmation.audioPolicy}, source=${confirmation.source}`);
+  } else if (confirmation.skipped) {
+    console.log("Brief confirmation: skipped");
+  }
+
+  const bgm = await detectProjectBgm(projectPath);
+  if (bgm) {
+    const durationSec = bgm.durationUs / 1_000_000;
+    console.log(
+      `BGM detected: ${bgm.filename} (${durationSec.toFixed(1)}s) — capping timeline at ${Math.floor(durationSec)}s`,
+    );
+  }
 
   // Compile
   const result = compile({
@@ -92,6 +125,7 @@ async function runCompile(
     createdAt,
     fpsNum,
     sourceMapPath,
+    bgm_duration_us: bgm?.durationUs,
   });
   pt.advance("timeline.json");
 
@@ -99,6 +133,21 @@ async function runCompile(
   console.log(`  Tracks: ${result.timeline.tracks.video.length} video, ${result.timeline.tracks.audio.length} audio`);
   console.log(`  Markers: ${result.timeline.markers.length}`);
   console.log(`  Resolution: ${JSON.stringify(result.resolution)}`);
+  console.log(
+    `  Continuity: ${result.continuity.reorders.length} reorder(s), ` +
+      `${result.continuity.warnings.length} warning(s), ${result.continuity.errors.length} error(s)`,
+  );
+  if (result.beat_sync) {
+    const beatSync = result.beat_sync;
+    console.log(
+      `  Beat sync: ${beatSync.enabled ? "enabled" : "disabled"} ` +
+        `mode=${beatSync.cut_quantize} source=${beatSync.source ?? beatSync.disabled_reason ?? "none"} ` +
+        `quantized=${beatSync.counts.quantized} skipped=${beatSync.counts.skipped}`,
+    );
+  }
+  for (const warning of result.continuity.warnings) {
+    console.warn(`  Continuity warning: ${warning.message} ${warning.suggested_fix}`);
+  }
 
   // Post-compile validation: check Gate 2
   const postCheck = validateProject(projectPath);
@@ -110,7 +159,7 @@ async function runCompile(
         console.error(`  - [${v.rule}] ${v.message}`);
       }
     }
-    process.exit(1);
+    throw new Error("Generated timeline.json has validation issues");
   }
 
   // Generate timeline overview image (unless skipped)
@@ -150,7 +199,7 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
   if (!fs.existsSync(timelinePath)) {
     console.error(`Timeline not found: ${timelinePath}`);
     console.error("Run compile first before applying a patch.");
-    process.exit(1);
+    throw new Error(`Timeline not found: ${timelinePath}`);
   }
 
   const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
@@ -159,7 +208,7 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
   const absPatch = path.resolve(patchPath);
   if (!fs.existsSync(absPatch)) {
     console.error(`Patch file not found: ${absPatch}`);
-    process.exit(1);
+    throw new Error(`Patch file not found: ${absPatch}`);
   }
   const patch: ReviewPatch = JSON.parse(fs.readFileSync(absPatch, "utf-8"));
 
@@ -185,7 +234,7 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
       console.error(`  [op ${err.op_index}] ${err.op}: ${err.message}`);
     }
     if (result.appliedOps === 0) {
-      process.exit(1);
+      throw new Error("Patch failed: no operations were applied");
     }
   }
 
@@ -221,7 +270,7 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
         console.error(`  - [${v.rule}] ${v.message}`);
       }
     }
-    process.exit(1);
+    throw new Error("Patched timeline.json has validation issues");
   }
 
   console.log("Schema validation: PASSED");
@@ -229,17 +278,38 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
 
 // ── Main ────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
-  const { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview } = parseArgs();
+export async function main(argv: string[] = process.argv): Promise<number> {
+  try {
+    const { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations } = parseArgs(argv);
 
-  if (patchPath) {
-    runPatch(projectPath, patchPath, sourceMapPath);
-  } else {
-    await runCompile(projectPath, fpsNum, sourceMapPath, skipPreview);
+    if (patchPath) {
+      runPatch(projectPath, patchPath, sourceMapPath);
+    } else {
+      await runCompileTimeline({
+        projectPath,
+        fpsNum,
+        sourceMapPath,
+        skipPreview,
+        skipConfirmations,
+        forceConfirmations,
+      });
+    }
+    return 0;
+  } catch (err) {
+    console.error(`Compile failed: ${String(err)}`);
+    return 1;
   }
 }
 
-main().catch((err) => {
-  console.error(`Compile failed: ${String(err)}`);
-  process.exit(1);
-});
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().then((code) => {
+    process.exitCode = code;
+  }).catch((err) => {
+    console.error(`Compile failed: ${String(err)}`);
+    process.exitCode = 1;
+  });
+}

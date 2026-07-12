@@ -7,6 +7,10 @@
  */
 
 import type { AutonomyMode } from "../autonomy.js";
+import {
+  reviewVisualQAGateReason,
+  type ReviewVisualQAGateReport,
+} from "../review/visual-qa.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -28,6 +32,10 @@ export interface Gate10Check {
   auto_defaulted_handoff: boolean;
 }
 
+export interface Gate10ReviewReport extends ReviewVisualQAGateReport {
+  fatal_issues?: unknown[];
+}
+
 export interface Gate10Options {
   autonomyMode?: AutonomyMode;
   decidedAt?: string;
@@ -46,6 +54,7 @@ export interface Gate10Options {
   musicCues?: {
     base_timeline_version?: string;
   } | null;
+  reviewReport?: Gate10ReviewReport | null;
 }
 
 function buildAutoHandoffResolution(
@@ -92,12 +101,15 @@ function isMusicCuesStale(
  * Check Gate 10 preconditions for packaging.
  *
  * Rules:
- * - current_state must be "approved"
+ * - current_state must be "approved" (or "packaged" for re-renders)
  * - approval_record.status must be "clean" or "creative_override"
  * - handoff_resolution.status must be "decided"
  * - handoff_resolution.source_of_truth_decision must be
  *   "engine_render" or "nle_finishing"
  * - gates.review_gate must be "open"
+ * - latest review_report must not carry unresolved fatal issues
+ * - latest review_report visual_qa must be verified, or carry an explicit
+ *   visual_qa waiver with a reason
  */
 export function checkGate10(projectState: {
   current_state: string;
@@ -112,10 +124,16 @@ export function checkGate10(projectState: {
 }, options?: Gate10Options): Gate10Check {
   const errors: string[] = [];
 
-  // current_state must be "approved"
-  if (projectState.current_state !== "approved") {
+  // current_state must be "approved", or "packaged" for a re-render of an
+  // already-packaged project (macos-studio-architecture.md: the render worker
+  // runs "against approved or already packaged projects while keeping Gate 10").
+  // Re-edits demote the state, so "packaged" always implies a prior clean pass.
+  if (
+    projectState.current_state !== "approved" &&
+    projectState.current_state !== "packaged"
+  ) {
     errors.push(
-      `current_state must be "approved", got "${projectState.current_state}"`,
+      `current_state must be "approved" or "packaged", got "${projectState.current_state}"`,
     );
   }
 
@@ -174,6 +192,28 @@ export function checkGate10(projectState: {
     errors.push(
       `gates.review_gate must be "open", got "${projectState.gates.review_gate}"`,
     );
+  }
+
+  if (!options?.reviewReport) {
+    errors.push("review_report.visual_qa is missing");
+  } else {
+    const fatalIssues = Array.isArray(options.reviewReport.fatal_issues)
+      ? options.reviewReport.fatal_issues
+      : [];
+    if (
+      fatalIssues.length > 0 &&
+      projectState.approval_record?.status !== "creative_override"
+    ) {
+      errors.push(
+        `review_report contains ${fatalIssues.length} fatal issue(s); ` +
+        `final package is blocked until they are resolved or explicitly approved with creative_override`,
+      );
+    }
+
+    const visualReason = reviewVisualQAGateReason(options.reviewReport);
+    if (visualReason) {
+      errors.push(visualReason);
+    }
   }
 
   // Caption approval is optional unless an existing approval is stale.

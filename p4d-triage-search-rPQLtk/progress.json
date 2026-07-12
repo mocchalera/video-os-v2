@@ -1,0 +1,20 @@
+{
+  "project_id": "p4d-triage-search-rPQLtk",
+  "phase": "triage",
+  "gate": 2,
+  "status": "failed",
+  "completed": 2,
+  "total": 4,
+  "eta_sec": 2,
+  "artifacts_created": [],
+  "errors": [
+    {
+      "stage": "promote",
+      "message": "Artifact promote aborted due to concurrent edits: brief_hash changed from \"5d914bcf49e103bd\" to \"null\"; analysis_artifact_version changed from \"analysis-v1\" to \"null\"; selects_hash changed from \"89995888b5cc7e32\" to \"null\"",
+      "timestamp": "2026-06-22T09:16:03.787Z",
+      "retriable": false
+    }
+  ],
+  "started_at": "2026-06-22T09:15:44.972Z",
+  "updated_at": "2026-06-22T09:16:03.787Z"
+}

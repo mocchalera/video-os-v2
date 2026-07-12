@@ -19,14 +19,24 @@ import { computeRequestHash } from "./ffprobe.js";
 export const VLM_CONNECTOR_VERSION = "gemini-vlm-v2.0.0";
 
 /** Canonical prompt template for M2 segment enrichment. */
-export const PROMPT_TEMPLATE_ID = "m2-segment-v1";
+export const PROMPT_TEMPLATE_ID = "m2-segment-v2";
 
 const PROMPT_TEMPLATE = `Analyze the following video segment frames. Return a JSON object with:
-- "summary": one short descriptive sentence about what is visually happening
-- "tags": array of descriptive tags (lowercase_snake_case, e.g. "outdoor_scene", "close_up")
+- "summary": a specific sentence about the visible action. Name the subject's posture/motion, objects held, and background features. Be concrete, not generic.
+- "tags": array of descriptive tags (lowercase_snake_case, e.g. "outdoor_scene", "close_up", "campfire", "child_running", "tent_setup")
 - "interest_points": array of notable moments, each with "frame_us" (microsecond timestamp), "label" (short description), "confidence" (0-1)
 - "quality_flags": array of quality issues detected (from vocabulary: "underexposed", "overexposed", "blurry", "shaky", "noisy", "interlaced", "letterboxed", "pillarboxed")
 - "confidence": object with "summary" (0-1), "tags" (0-1), "quality_flags" (0-1)
+- "visual_quality": object with:
+  - "scores": object with 0-1 numbers for "light_quality", "subject_prominence", "emotional_expression", "composition_score", "motion_quality"
+  - "labels": object with string arrays for "lighting_style", "composition_tags", "expression_tags", "motion_tags"
+
+visual_quality score rubric anchors:
+- light_quality: 0.9=golden hour/expressive lighting, 0.5=flat even light, 0.1=severely under/overexposed
+- subject_prominence: 0.9=subject sharp and dominant, 0.5=visible but not prominent, 0.1=absent/lost in background
+- emotional_expression: 0.9=clear strong emotion visible, 0.5=neutral expression, 0.1=no face/no readable expression
+- composition_score: 0.9=strong balance/geometry/framing, 0.5=functional framing, 0.1=chaotic/unintentional
+- motion_quality: 0.9=decisive beautiful motion, 0.5=ordinary movement, 0.1=static or shaky
 
 Respond ONLY with valid JSON, no markdown fences or explanation.`;
 
@@ -90,6 +100,23 @@ export interface VlmRawResponse {
     tags?: number;
     quality_flags?: number;
   };
+  visual_quality?: unknown;
+}
+
+export interface VlmVisualQuality {
+  scores: {
+    light_quality: number;
+    subject_prominence: number;
+    emotional_expression: number;
+    composition_score: number;
+    motion_quality: number;
+  };
+  labels: {
+    lighting_style: string[];
+    composition_tags: string[];
+    expression_tags: string[];
+    motion_tags: string[];
+  };
 }
 
 /** Normalized VLM output after cleaning. */
@@ -107,6 +134,7 @@ export interface VlmNormalizedOutput {
     tags: number;
     quality_flags: number;
   };
+  visual_quality?: VlmVisualQuality;
 }
 
 /** Result of a VLM enrichment call for one segment. */
@@ -342,6 +370,42 @@ export function normalizeInterestPoints(
   return result;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function clampScore(value: unknown, fallback = 0.5): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeLabelArray(value: unknown): string[] {
+  return Array.isArray(value) ? normalizeTags(value) : [];
+}
+
+function normalizeVisualQuality(raw: unknown): VlmVisualQuality | undefined {
+  if (!isRecord(raw)) return undefined;
+
+  const scoresRaw = isRecord(raw.scores) ? raw.scores : {};
+  const labelsRaw = isRecord(raw.labels) ? raw.labels : {};
+
+  return {
+    scores: {
+      light_quality: clampScore(scoresRaw.light_quality),
+      subject_prominence: clampScore(scoresRaw.subject_prominence),
+      emotional_expression: clampScore(scoresRaw.emotional_expression),
+      composition_score: clampScore(scoresRaw.composition_score),
+      motion_quality: clampScore(scoresRaw.motion_quality),
+    },
+    labels: {
+      lighting_style: normalizeLabelArray(labelsRaw.lighting_style),
+      composition_tags: normalizeLabelArray(labelsRaw.composition_tags),
+      expression_tags: normalizeLabelArray(labelsRaw.expression_tags),
+      motion_tags: normalizeLabelArray(labelsRaw.motion_tags),
+    },
+  };
+}
+
 /**
  * Normalize the full VLM response into a clean output.
  */
@@ -378,7 +442,16 @@ export function normalizeVlmOutput(
       : 0.5,
   };
 
-  return { summary, tags, interest_points: interestPoints, quality_flags: qualityFlags, confidence };
+  const visualQuality = normalizeVisualQuality(raw.visual_quality);
+
+  return {
+    summary,
+    tags,
+    interest_points: interestPoints,
+    quality_flags: qualityFlags,
+    confidence,
+    ...(visualQuality ? { visual_quality: visualQuality } : {}),
+  };
 }
 
 // ── Parse Retry ────────────────────────────────────────────────────
@@ -576,7 +649,9 @@ export function createGeminiVlmFn(): VlmFn {
     // Add text prompt
     parts.push({ text: prompt });
 
-    const model = options.model || "gemini-2.0-flash";
+    // gemini-2.0-flash was sunset (404 as of 2026-06). Default to the
+    // cost-effective vision tier; analysis-defaults.yaml model_alias overrides.
+    const model = options.model || "gemini-2.5-flash-lite";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
@@ -587,6 +662,7 @@ export function createGeminiVlmFn(): VlmFn {
         generationConfig: {
           maxOutputTokens: options.maxOutputTokens,
           temperature: 0.1,
+          responseMimeType: "application/json",
         },
       }),
     });

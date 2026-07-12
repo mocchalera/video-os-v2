@@ -12,10 +12,24 @@ import {
 } from "./shared.js";
 import { runPipeline } from "../pipeline/ingest.js";
 import { createGeminiVlmFn } from "../connectors/gemini-vlm.js";
+import type { MarlinFn } from "../connectors/marlin-types.js";
 import { DEFAULT_VLM_CONCURRENCY } from "../pipeline/vlm-analysis.js";
 import type { ProjectState } from "../state/reconcile.js";
-import { ProgressTracker } from "../progress.js";
+import { ProgressTracker, type PipelineStageProgress } from "../progress.js";
 import { runPreflight } from "../preflight.js";
+import {
+  buildAnalysisCoverageReport,
+  isP1ManifestCoverageEnabled,
+  writeAnalysisCoverageReport,
+  writeSourceMediaManifest,
+} from "../artifacts/p1-manifest-coverage.js";
+import {
+  createMarlinFnFromEnvironment,
+  marlinModelFromEnvironment,
+  marlinQueriesFromEnvironment,
+  MARLIN_EVENTS_RELATIVE_PATH,
+  shouldRunMarlinAnalysis,
+} from "../pipeline/stages/marlin.js";
 
 export interface AnalyzeCommandOptions {
   sourceFiles: string[];
@@ -23,6 +37,7 @@ export interface AnalyzeCommandOptions {
   skipVlm?: boolean;
   skipDiarize?: boolean;
   skipPeak?: boolean;
+  skipMarlin?: boolean;
   skipMediaLink?: boolean;
   skipPreflight?: boolean;
   skipBgmAnalysis?: boolean;
@@ -32,6 +47,7 @@ export interface AnalyzeCommandOptions {
   concurrency?: number;
   noCache?: boolean;
   clearCache?: boolean;
+  stageProgress?: PipelineStageProgress;
 }
 
 export interface AnalyzeRunnerContext extends AnalyzeCommandOptions {
@@ -62,6 +78,7 @@ const ANALYZE_ARTIFACT_CANDIDATES = [
   "03_analysis/segments.json",
   "03_analysis/gap_report.yaml",
   "03_analysis/bgm_analysis.json",
+  MARLIN_EVENTS_RELATIVE_PATH,
 ];
 
 export async function runAnalyze(
@@ -109,6 +126,25 @@ export async function runAnalyze(
       currentState: previousState,
       concurrency: options.concurrency ?? DEFAULT_VLM_CONCURRENCY,
     });
+    const p1Artifacts: string[] = [];
+    if (isP1ManifestCoverageEnabled()) {
+      const projectId = ctx.doc.project_id || path.basename(ctx.projectDir);
+      const manifest = writeSourceMediaManifest({
+        projectDir: ctx.projectDir,
+        projectId,
+        sourceFiles: options.sourceFiles,
+        producer: "analysis-ingest",
+      });
+      const coverage = buildAnalysisCoverageReport({
+        projectId,
+        manifest,
+      });
+      writeAnalysisCoverageReport(ctx.projectDir, coverage);
+      p1Artifacts.push(
+        "02_media/source_media_manifest.json",
+        "03_analysis/analysis_coverage_report.json",
+      );
+    }
     pt.advance("03_analysis/assets.json");
 
     const reconcileResult = reconcileAndPersist(
@@ -117,8 +153,10 @@ export async function runAnalyze(
       "/analyze",
     );
     pt.advance("03_analysis/segments.json");
-    const artifactsCreated = runnerResult?.artifactsCreated
-      ?? collectExistingAnalyzeArtifacts(ctx.projectDir);
+    const artifactsCreated = [
+      ...(runnerResult?.artifactsCreated ?? collectExistingAnalyzeArtifacts(ctx.projectDir)),
+      ...p1Artifacts,
+    ];
     pt.complete(artifactsCreated);
 
     return {
@@ -149,23 +187,37 @@ class DefaultAnalyzeRunner implements AnalyzeRunner {
       vlmFn = createGeminiVlmFn();
     }
 
-    await runPipeline({
-      sourceFiles: ctx.sourceFiles,
-      projectDir: ctx.projectDir,
-      skipStt: ctx.skipStt,
-      skipVlm: ctx.skipVlm,
-      skipDiarize: ctx.skipDiarize,
-      skipPeak: ctx.skipPeak,
-      vlmFn,
-      sttLanguageOverride: ctx.language,
-      sttProvider: ctx.sttProvider,
-      contentHint: ctx.contentHint,
-      skipMediaLink: ctx.skipMediaLink,
-      skipBgmAnalysis: ctx.skipBgmAnalysis,
-      vlmConcurrency: ctx.concurrency ?? DEFAULT_VLM_CONCURRENCY,
-      noCache: ctx.noCache,
-      clearCache: ctx.clearCache,
-    });
+    let marlinFn: MarlinFn | undefined;
+    if (!ctx.skipMarlin && shouldRunMarlinAnalysis(ctx.projectDir)) {
+      marlinFn = createMarlinFnFromEnvironment(ctx.projectDir);
+    }
+
+    try {
+      await runPipeline({
+        sourceFiles: ctx.sourceFiles,
+        projectDir: ctx.projectDir,
+        skipStt: ctx.skipStt,
+        skipVlm: ctx.skipVlm,
+        skipDiarize: ctx.skipDiarize,
+        skipPeak: ctx.skipPeak,
+        skipMarlin: ctx.skipMarlin,
+        vlmFn,
+        marlinFn,
+        marlinModel: marlinFn ? marlinModelFromEnvironment(ctx.projectDir) : undefined,
+        marlinQueries: marlinFn ? marlinQueriesFromEnvironment(ctx.projectDir) : undefined,
+        sttLanguageOverride: ctx.language,
+        sttProvider: ctx.sttProvider,
+        contentHint: ctx.contentHint,
+        skipMediaLink: ctx.skipMediaLink,
+        skipBgmAnalysis: ctx.skipBgmAnalysis,
+        vlmConcurrency: ctx.concurrency ?? DEFAULT_VLM_CONCURRENCY,
+        noCache: ctx.noCache,
+        clearCache: ctx.clearCache,
+        stageProgress: ctx.stageProgress,
+      });
+    } finally {
+      await marlinFn?.close?.();
+    }
 
     return {
       artifactsCreated: collectExistingAnalyzeArtifacts(ctx.projectDir),

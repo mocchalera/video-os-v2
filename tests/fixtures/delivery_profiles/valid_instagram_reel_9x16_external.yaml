@@ -1,0 +1,53 @@
+version: "1.0.0"
+project_id: "delivery-fixture"
+artifact_version: "delivery-profile-v1"
+created_at: "2026-04-27T00:00:00Z"
+profile_id: "DPROF_instagram_reel_external"
+profile_name: "Instagram Reel 9:16 External"
+platform: "instagram_reel"
+release_mode: "external"
+video_constraints:
+  aspect_ratio: "9:16"
+  resolution:
+    width: 1080
+    height: 1920
+  frame_rate_mode: "cfr_30"
+  color_space: "sRGB"
+audio_constraints:
+  loudness_lufs: -14
+  true_peak_dbtp: -1
+  sample_rate_hz: 48000
+  channel_layout: "stereo"
+caption_constraints:
+  mode: "burned_in"
+  sidecar_format: null
+  language_required:
+    - "ja"
+duration_constraints:
+  min_seconds: 3
+  max_seconds: 90
+file_naming:
+  pattern: "{project_id}_{profile_id}_{date}.mp4"
+  allowed_extensions:
+    - ".mp4"
+metadata_requirements:
+  title_required: true
+  description_required: false
+  tags_required: true
+  thumbnail_required: false
+  custom_fields:
+    - field_id: "campaign"
+      label: "Campaign"
+      required: false
+      type: "string"
+privacy_strictness: "external"
+rights_strictness: "external"
+requires_calibrated_confidence: false
+provenance:
+  producer: "operator-command"
+  inputs: []
+  hash_policy:
+    algorithm: "sha256"
+    canonicalization: "yaml-to-normalized-json-v1"
+    excluded_fields:
+      - "created_at"

@@ -5,6 +5,8 @@ import * as path from "node:path";
 import {
   assembleTimelineToMp4,
   buildAudioAssemblyPlan,
+  buildBgmAudioRenderArgs,
+  buildFinalAssemblyMuxArgs,
   buildVideoAssemblyPlan,
   type ExecFileLike,
   formatFfmpegTimestamp,
@@ -78,8 +80,8 @@ describe("ffmpeg assembler", () => {
       asset_id: "AST_005",
       start_frame: 0,
       end_frame: 92,
-      source_in_sec: 1.4,
-      source_out_sec: 5.808333333333334,
+      source_in_sec: 2,
+      source_out_sec: 5.354166666666667,
     });
     expect(videoPlans.some((plan) => plan.kind === "gap")).toBe(true);
 
@@ -141,10 +143,45 @@ describe("ffmpeg assembler", () => {
     expect(audioMixCall).toBeDefined();
     const filter = audioMixCall!.args[audioMixCall!.args.indexOf("-filter_complex") + 1];
     expect(filter).toContain("adelay=4000|4000");
-    expect(filter).toContain("amix=inputs=5:duration=longest:dropout_transition=0[aout]");
+    expect(filter).toContain("amix=inputs=5:duration=longest:dropout_transition=0:normalize=0[aout]");
 
     expect(result.outputPath).toBe(path.join(projectDir, "05_timeline", "assembly.mp4"));
     expect(fs.existsSync(result.outputPath)).toBe(true);
+  });
+
+  it("renders BGM clips with loop-to-picture duration and an ending fade", () => {
+    const args = buildBgmAudioRenderArgs(
+      "/music/theme.mp3",
+      "/tmp/bgm.wav",
+      0,
+      42,
+      48_000,
+      2,
+      24,
+      { bgm_fade_out_frames: 48 },
+    );
+
+    expect(args).toContain("-stream_loop");
+    expect(args).toContain("-1");
+    expect(args).toContain("-t");
+    expect(args).toContain("42");
+    const filter = args[args.indexOf("-af") + 1];
+    expect(filter).toContain("afade=t=out:st=40.0000:d=2.0000");
+  });
+
+  it("masters final audio with loudnorm during mux", () => {
+    const args = buildFinalAssemblyMuxArgs(
+      "/tmp/video.mp4",
+      "/tmp/audio.m4a",
+      "/tmp/final.mp4",
+    );
+
+    expect(args).toContain("-af");
+    expect(args[args.indexOf("-af") + 1]).toBe("loudnorm=I=-16:LRA=11:TP=-1.5");
+    expect(args).toContain("-ar");
+    expect(args[args.indexOf("-ar") + 1]).toBe("48000");
+    expect(args).toContain("-c:a");
+    expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
   });
 
   it("throws a clear error when ffmpeg is not available", async () => {

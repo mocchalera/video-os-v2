@@ -108,8 +108,19 @@ export function parseGroqResponse(
   let utterances: SttUtterance[];
 
   if (data.segments && data.segments.length > 0) {
-    // Primary path: use segments
-    utterances = parseGroqSegments(data.segments);
+    // Groq currently returns requested word timestamps at the top level rather
+    // than embedded in each segment. Attach overlapping words before parsing
+    // so canonical transcript items retain the word timing needed by captions.
+    const topLevelWords = data.words ?? [];
+    const segmentsWithWords = data.segments.map((segment) => {
+      if (segment.words && segment.words.length > 0) return segment;
+      const words = topLevelWords.filter((word) => {
+        const midpoint = (word.start + word.end) / 2;
+        return midpoint >= segment.start && midpoint <= segment.end;
+      });
+      return words.length > 0 ? { ...segment, words } : segment;
+    });
+    utterances = parseGroqSegments(segmentsWithWords);
   } else if (data.words && data.words.length > 0) {
     // Fallback: build a single utterance from top-level words
     const words = parseGroqWords(data.words);

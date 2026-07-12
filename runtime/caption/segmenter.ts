@@ -95,6 +95,10 @@ interface MinimalTimelineIR {
   project_id?: string;
   timeline_version?: string;
   fps?: number;
+  sequence?: {
+    fps_num?: number;
+    fps_den?: number;
+  };
   tracks: {
     video?: MinimalTrack[];
     audio?: MinimalTrack[];
@@ -215,6 +219,7 @@ function startsWithParticle(text: string): boolean {
 
 interface PendingItem {
   item: TranscriptItem;
+  clip: MinimalClip;
   timelineInFrame: number;
   timelineDurationFrames: number;
 }
@@ -233,7 +238,8 @@ function segmentItems(
   for (let i = 1; i < pending.length; i++) {
     const prev = pending[i - 1];
     const cur = pending[i];
-    let shouldSplit = false;
+    const clipBoundary = prev.clip.clip_id !== cur.clip.clip_id;
+    let shouldSplit = clipBoundary;
 
     // Rule 1: Gap >= 500ms → hard split
     const prevEndUs = prev.item.end_us;
@@ -267,7 +273,7 @@ function segmentItems(
       shouldSplit &&
       (language === "ja" || language.startsWith("ja-"))
     ) {
-      if (startsWithParticle(cur.item.text.trim())) {
+      if (!clipBoundary && startsWithParticle(cur.item.text.trim())) {
         // Don't split here - absorb particle into current segment
         shouldSplit = false;
       }
@@ -325,23 +331,34 @@ export function generateCaptionSource(
     };
   }
 
-  const fps = timeline.fps ?? DEFAULT_FPS;
+  const sequenceFps = timeline.sequence?.fps_num && timeline.sequence?.fps_den
+    ? timeline.sequence.fps_num / timeline.sequence.fps_den
+    : undefined;
+  const fps = timeline.fps ?? sequenceFps ?? DEFAULT_FPS;
   const language = policy.language;
   const maxCps = getMaxCps(language);
 
-  // Step 1: Collect A1 dialogue clips from all video + audio tracks, sorted
-  // by timeline position. "A1" role = dialogue audio.
+  // Step 1: Prefer canonical A1 audio clips. Compiler timelines mirror the
+  // same editorial clip on V1 and A1, so collecting both creates duplicate
+  // captions. Fall back to role-based video/audio discovery only when A1 is
+  // absent (legacy or hand-authored timelines).
   const dialogueClips: MinimalClip[] = [];
 
-  const allTracks = [
-    ...(timeline.tracks.video ?? []),
-    ...(timeline.tracks.audio ?? []),
-  ];
-
-  for (const track of allTracks) {
-    for (const clip of track.clips) {
-      if (clip.role === "A1" || clip.role === "dialogue") {
-        dialogueClips.push(clip);
+  const a1Tracks = (timeline.tracks.audio ?? []).filter(
+    (track) => track.track_id === "A1" && track.clips.length > 0,
+  );
+  if (a1Tracks.length > 0) {
+    dialogueClips.push(...a1Tracks.flatMap((track) => track.clips));
+  } else {
+    const allTracks = [
+      ...(timeline.tracks.video ?? []),
+      ...(timeline.tracks.audio ?? []),
+    ];
+    for (const track of allTracks) {
+      for (const clip of track.clips) {
+        if (clip.role === "A1" || clip.role === "dialogue") {
+          dialogueClips.push(clip);
+        }
       }
     }
   }
@@ -358,9 +375,12 @@ export function generateCaptionSource(
 
     // Find items that overlap with the clip's source range
     let matchingItems = transcript.items.filter((item) => {
-      return (
-        item.start_us < clip.src_out_us && item.end_us > clip.src_in_us
+      const overlapUs = Math.max(
+        0,
+        Math.min(item.end_us, clip.src_out_us) - Math.max(item.start_us, clip.src_in_us),
       );
+      const itemDurationUs = Math.max(1, item.end_us - item.start_us);
+      return overlapUs > 0 && overlapUs / itemDurationUs >= 0.25;
     });
 
     // Filter out excluded speakers (e.g. interviewer)
@@ -393,6 +413,7 @@ export function generateCaptionSource(
 
       allPending.push({
         item,
+        clip,
         timelineInFrame: timelineInFrame,
         timelineDurationFrames: durationFrames,
       });
@@ -457,17 +478,8 @@ export function generateCaptionSource(
 
     // Determine asset_id and segment_id from first item's clip context
     const firstPending = seg[0];
-    const matchingClip = dialogueClips.find(
-      (c) =>
-        c.asset_id ===
-          findAssetForItem(firstPending.item, dialogueClips, transcripts) &&
-        firstPending.timelineInFrame >= c.timeline_in_frame &&
-        firstPending.timelineInFrame <
-          c.timeline_in_frame + c.timeline_duration_frames,
-    );
-
-    const assetId = matchingClip?.asset_id ?? "";
-    const segmentId = matchingClip?.segment_id ?? "";
+    const assetId = firstPending.clip.asset_id;
+    const segmentId = firstPending.clip.segment_id;
     const transcriptRef = transcripts.get(assetId)?.transcript_ref ?? "";
 
     speechCaptions.push({
@@ -504,17 +516,4 @@ export function generateCaptionSource(
 
 function usToFrames(us: number, fps: number): number {
   return Math.round((us / 1_000_000) * fps);
-}
-
-function findAssetForItem(
-  item: TranscriptItem,
-  clips: MinimalClip[],
-  transcripts: Map<string, TranscriptArtifact>,
-): string {
-  for (const [assetId, transcript] of transcripts) {
-    if (transcript.items.some((ti) => ti.item_id === item.item_id)) {
-      return assetId;
-    }
-  }
-  return "";
 }

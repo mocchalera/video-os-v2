@@ -232,6 +232,7 @@ beforeAll(async () => {
     repoRoot: REPO_ROOT,
     skipStt: true,
     skipVlm: true,
+    skipAppraiser: true,
   });
 
   // Generate bridge artifacts for M1 compiler
@@ -425,6 +426,7 @@ describe("SC2: Determinism — same input produces same output", () => {
         repoRoot: REPO_ROOT,
         skipStt: true,
         skipVlm: true,
+        skipAppraiser: true,
       });
 
       const resultB = await runPipeline({
@@ -433,6 +435,7 @@ describe("SC2: Determinism — same input produces same output", () => {
         repoRoot: REPO_ROOT,
         skipStt: true,
         skipVlm: true,
+        skipAppraiser: true,
       });
 
       // Asset IDs are stable
@@ -553,6 +556,7 @@ describe("Full E2E: ingest → segment → derivatives → STT → VLM (mock pro
       repoRoot: REPO_ROOT,
       transcribeFn: mockTranscribeFn,
       vlmFn: mockVlmFn,
+      skipAppraiser: true,
     });
 
     generateBridgeArtifacts(fullResult, TMP_FULL);
@@ -676,6 +680,7 @@ describe("Full E2E: ingest → segment → derivatives → STT → VLM (mock pro
         repoRoot: REPO_ROOT,
         transcribeFn: mockTranscribeFn,
         vlmFn: mockVlmFn,
+        skipAppraiser: true,
       });
 
       // Asset IDs stable

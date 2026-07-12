@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/review-metrics.schema.json",
+  "title": "Video OS Review Metrics",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "timeline_version",
+    "summary",
+    "checks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "timeline_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    }
+  },
+  "$defs": {
+    "tier": {
+      "type": "string",
+      "enum": [
+        "emotion",
+        "story",
+        "rhythm",
+        "eye_trace",
+        "plane_2d",
+        "audio"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "skipped"
+      ]
+    },
+    "statusCounts": {
+      "type": "object",
+      "required": [
+        "pass",
+        "warn",
+        "fail",
+        "skipped"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pass": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warn": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "total_checks",
+        "by_status",
+        "by_tier"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "total_checks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_status": {
+          "$ref": "#/$defs/statusCounts"
+        },
+        "by_tier": {
+          "type": "object",
+          "required": [
+            "emotion",
+            "story",
+            "rhythm",
+            "eye_trace",
+            "plane_2d",
+            "audio"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "emotion": {
+              "$ref": "#/$defs/statusCounts"
+            },
+            "story": {
+              "$ref": "#/$defs/statusCounts"
+            },
+            "rhythm": {
+              "$ref": "#/$defs/statusCounts"
+            },
+            "eye_trace": {
+              "$ref": "#/$defs/statusCounts"
+            },
+            "plane_2d": {
+              "$ref": "#/$defs/statusCounts"
+            },
+            "audio": {
+              "$ref": "#/$defs/statusCounts"
+            }
+          }
+        }
+      }
+    },
+    "jsonValue": {
+      "description": "Deterministic measured/threshold payload for the check.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      ]
+    },
+    "check": {
+      "type": "object",
+      "required": [
+        "id",
+        "tier",
+        "status",
+        "measured",
+        "threshold",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "enum": [
+            "rhythm.beat_duration_deviation",
+            "rhythm.max_shot_length",
+            "rhythm.cadence_distribution",
+            "story.required_roles",
+            "story.chronology",
+            "emotion.peak_retention",
+            "emotion.hook_density",
+            "eye_trace.same_asset_adjacency",
+            "plane_2d.motif_overuse",
+            "audio.speech_cut"
+          ]
+        },
+        "tier": {
+          "$ref": "#/$defs/tier"
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "measured": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "threshold": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

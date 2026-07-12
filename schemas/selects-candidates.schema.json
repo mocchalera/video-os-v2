@@ -19,6 +19,9 @@
       "type": "string",
       "format": "date-time"
     },
+    "decision_runtime": {
+      "$ref": "#/$defs/decisionRuntime"
+    },
     "analysis_artifact_version": {
       "type": "string"
     },
@@ -73,9 +76,54 @@
           "minLength": 1
         }
       ]
+    },
+    "quality_gate": {
+      "$ref": "#/$defs/selectsQualityGate"
+    },
+    "coverage": {
+      "$ref": "#/$defs/selectsCoverage"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "search_index_manifest_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": true
     }
   },
   "$defs": {
+    "decisionRuntime": {
+      "type": "object",
+      "required": ["runtime"],
+      "properties": {
+        "runtime": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "attempted_runtimes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtime", "status"],
+            "properties": {
+              "runtime": { "type": "string", "minLength": 1 },
+              "status": {
+                "type": "string",
+                "enum": ["success", "failed", "skipped"]
+              },
+              "message": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "fallback_warnings": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
     "candidate": {
       "type": "object",
       "$comment": "JSON Schema enforces non-negative source times. The validator runner must also enforce src_in_us < src_out_us for every candidate.",
@@ -133,6 +181,18 @@
           "minimum": 0,
           "maximum": 1
         },
+        "audio_story_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/audioStoryRef"
+          }
+        },
+        "continuity_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/continuityRef"
+          }
+        },
         "semantic_rank": {
           "type": "integer",
           "minimum": 1
@@ -157,6 +217,11 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "story_role": {
+          "type": "string",
+          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing"],
+          "description": "Primary narrative function of this candidate in the edit"
         },
         "transcript_excerpt": {
           "type": "string"
@@ -197,16 +262,32 @@
             "surprise_signal": { "type": "number", "minimum": 0, "maximum": 1 },
             "hope_signal": { "type": "number", "minimum": 0, "maximum": 1 },
             "peak_strength_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "motion_energy_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "audio_energy_score": { "type": "number", "minimum": 0, "maximum": 1 },
+            "peak_ref": { "type": "string" },
             "peak_type": {
               "type": "string",
               "enum": ["action_peak", "emotional_peak", "visual_peak"]
             },
+            "peak_source_pass": { "type": "string" },
             "face_detected": { "type": "boolean" },
             "visual_tags": {
               "type": "array",
               "items": { "type": "string", "minLength": 1 }
             },
             "semantic_cluster_id": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "peak_signals": {
+          "type": "object",
+          "properties": {
+            "motion": { "type": "number", "minimum": 0, "maximum": 1 },
+            "audio_rms": { "type": "number", "minimum": 0, "maximum": 1 },
+            "speech_keyword": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
           },
           "additionalProperties": false
         },
@@ -220,9 +301,28 @@
             "window_start_us": { "type": "integer", "minimum": 0 },
             "window_end_us": { "type": "integer", "minimum": 0 },
             "interest_point_label": { "type": "string" },
-            "interest_point_confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            "interest_point_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "peak_ref": { "type": "string" },
+            "peak_type": {
+              "type": "string",
+              "enum": ["action_peak", "emotional_peak", "visual_peak"]
+            },
+            "center_source": {
+              "type": "string",
+              "enum": ["refine_filmstrip", "precision_dense_frames", "precision_proxy_clip", "interest_point_fallback", "midpoint_fallback"]
+            },
+            "rationale": { "type": "string" },
+            "recommended_in_us": { "type": "integer", "minimum": 0 },
+            "recommended_out_us": { "type": "integer", "minimum": 0 }
           },
           "additionalProperties": false
+        },
+        "quality_confidence": {
+          "type": "string",
+          "enum": ["measured", "partial", "appraiser", "low"]
+        },
+        "quality_gate": {
+          "$ref": "#/$defs/qualityGateRecord"
         }
       },
       "allOf": [
@@ -244,6 +344,290 @@
           }
         }
       ],
+      "additionalProperties": false
+    },
+    "selectsQualityGate": {
+      "type": "object",
+      "required": ["version", "policy", "counts", "decisions"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "policy": { "type": "string", "minLength": 1 },
+        "counts": {
+          "type": "object",
+          "required": ["reject", "warn", "pass", "unmeasured"],
+          "properties": {
+            "reject": { "type": "integer", "minimum": 0 },
+            "warn": { "type": "integer", "minimum": 0 },
+            "pass": { "type": "integer", "minimum": 0 },
+            "unmeasured": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "decisions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/qualityGateRecord" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "selectsCoverage": {
+      "type": "object",
+      "required": ["version", "policy", "status", "config", "clusters", "must_have", "unmet"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "policy": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["met", "failed"]
+        },
+        "config": {
+          "$ref": "#/$defs/selectsCoverageConfig"
+        },
+        "clusters": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/selectsCoverageCluster" }
+        },
+        "must_have": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/selectsCoverageMustHave" }
+        },
+        "unmet": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/selectsCoverageUnmetItem" }
+        },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "selectsCoverageConfig": {
+      "type": "object",
+      "required": ["min_candidates_per_cluster", "cluster_sampling_scale", "max_candidates_per_cluster"],
+      "properties": {
+        "min_candidates_per_cluster": { "type": "integer", "minimum": 1 },
+        "cluster_sampling_scale": {
+          "type": "string",
+          "enum": ["none", "sqrt"]
+        },
+        "max_candidates_per_cluster": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "selectsCoverageCluster": {
+      "type": "object",
+      "required": [
+        "cluster_id",
+        "cluster_size",
+        "required_count",
+        "selected_count",
+        "status",
+        "segment_ids",
+        "selected_segment_ids",
+        "unused_segment_ids",
+        "quality_rejected_segment_ids"
+      ],
+      "properties": {
+        "cluster_id": { "type": "string", "minLength": 1 },
+        "cluster_size": { "type": "integer", "minimum": 1 },
+        "required_count": { "type": "integer", "minimum": 1 },
+        "selected_count": { "type": "integer", "minimum": 0 },
+        "status": {
+          "type": "string",
+          "enum": ["met", "unmet", "exempt_all_rejected"]
+        },
+        "segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "selected_segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "unused_segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "quality_rejected_segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "exempt_reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "selectsCoverageMustHave": {
+      "type": "object",
+      "required": ["item", "status", "matched_segment_ids"],
+      "properties": {
+        "item": { "type": "string", "minLength": 1 },
+        "status": {
+          "type": "string",
+          "enum": ["met", "unmet"]
+        },
+        "matched_segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "selectsCoverageUnmetItem": {
+      "type": "object",
+      "required": ["type", "id", "message"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["cluster_minimum", "must_have"]
+        },
+        "id": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "cluster_id": { "type": "string", "minLength": 1 },
+        "must_have": { "type": "string", "minLength": 1 },
+        "required_count": { "type": "integer", "minimum": 1 },
+        "selected_count": { "type": "integer", "minimum": 0 },
+        "unused_segment_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "qualityGateRecord": {
+      "type": "object",
+      "required": ["segment_id", "decision", "confidence", "reasons", "measurements", "thresholds"],
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "segment_id": { "type": "string", "minLength": 1 },
+        "decision": {
+          "type": "string",
+          "enum": ["reject", "warn", "pass", "unmeasured"]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["measured", "partial", "appraiser", "low"]
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "measurements": {
+          "$ref": "#/$defs/qualityGateMeasurements"
+        },
+        "thresholds": {
+          "$ref": "#/$defs/qualityGateThresholds"
+        },
+        "protected_by": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "qualityGateMeasurements": {
+      "type": "object",
+      "properties": {
+        "shake_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sharpness_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "black_clip_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "white_clip_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "composition_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "subject_prominence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "qualityGateThresholds": {
+      "type": "object",
+      "required": [
+        "shake_reject_above",
+        "shake_warn_above",
+        "sharpness_reject_below",
+        "sharpness_warn_below",
+        "exposure_crush_reject_above",
+        "exposure_crush_warn_above",
+        "exposure_clip_reject_above",
+        "exposure_clip_warn_above",
+        "appraiser_composition_reject_below",
+        "appraiser_subject_prominence_reject_below",
+        "appraiser_composition_warn_below",
+        "appraiser_subject_prominence_warn_below"
+      ],
+      "properties": {
+        "shake_reject_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "shake_warn_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sharpness_reject_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sharpness_warn_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_crush_reject_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_crush_warn_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_clip_reject_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "exposure_clip_warn_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_composition_reject_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_subject_prominence_reject_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_composition_warn_below": { "type": "number", "minimum": 0, "maximum": 1 },
+        "appraiser_subject_prominence_warn_below": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "audioStoryRef": {
+      "type": "object",
+      "required": [
+        "node_id"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string",
+          "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing"]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidenceRecord"
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "continuityRef": {
+      "type": "object",
+      "required": [
+        "entity_id"
+      ],
+      "properties": {
+        "entity_id": {
+          "type": "string",
+          "pattern": "^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_[A-Za-z0-9_-]+$"
+        },
+        "risk_id": {
+          "type": "string",
+          "pattern": "^CONRISK_[A-Za-z0-9_-]+$"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "blocker"]
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "confidenceRecord": {
+      "type": "object",
+      "required": ["score", "source", "status"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" }
+      },
       "additionalProperties": false
     }
   },

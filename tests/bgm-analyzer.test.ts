@@ -503,3 +503,47 @@ describe("loadBgmAnalysisFromProject", () => {
     ]);
   });
 });
+
+// ── C-01: Verify no shell-string execSync remains in bgm-analyzer ──
+
+describe("C-01: command injection prevention", () => {
+  it("bgm-analyzer.ts does not import execSync", async () => {
+    const source = fs.readFileSync(
+      path.resolve("runtime/media/bgm-analyzer.ts"),
+      "utf-8",
+    );
+    // Should not contain execSync (the import or any calls)
+    expect(source).not.toMatch(/\bexecSync\b/);
+    // Should use execFileSync instead
+    expect(source).toMatch(/\bexecFileSync\b/);
+  });
+
+  it("bgm-beat-detector.ts does not import execSync", async () => {
+    const source = fs.readFileSync(
+      path.resolve("runtime/connectors/bgm-beat-detector.ts"),
+      "utf-8",
+    );
+    expect(source).not.toMatch(/\bexecSync\b/);
+    expect(source).toMatch(/\bexecFileSync\b/);
+  });
+});
+
+// ── W-09: computeSourceHash fd safety ──────────────────────────────
+
+describe("W-09: computeSourceHash file descriptor safety", () => {
+  it("computeSourceHash uses try/finally pattern", () => {
+    const source = fs.readFileSync(
+      path.resolve("runtime/media/bgm-analyzer.ts"),
+      "utf-8",
+    );
+    // The function should contain try/finally to guard closeSync
+    const fnMatch = source.match(
+      /function computeSourceHash[\s\S]*?^}/m,
+    );
+    expect(fnMatch).not.toBeNull();
+    const fnBody = fnMatch![0];
+    expect(fnBody).toContain("try {");
+    expect(fnBody).toContain("finally {");
+    expect(fnBody).toContain("closeSync");
+  });
+});

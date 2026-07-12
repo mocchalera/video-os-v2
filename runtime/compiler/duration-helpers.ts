@@ -303,6 +303,7 @@ export function resolveOutputDimensions(
 
 const PROFILE_TIMELINE_ORDER: Record<string, "chronological" | "editorial"> = {
   "keepsake": "chronological",
+  "family-growth-recap": "chronological",
   "event-recap": "chronological",
   "interview-highlight": "editorial",
   "interview-pro-highlight": "editorial",
@@ -319,14 +320,33 @@ const PROFILE_TIMELINE_ORDER: Record<string, "chronological" | "editorial"> = {
 export function resolveTimelineOrder(
   blueprint: EditBlueprint,
   resolvedProfileId?: string,
+  brief?: { order_policy?: "chronological" | "editorial"; project?: { strategy?: string; format?: string } },
 ): "chronological" | "editorial" {
   // 1. Explicit in blueprint
   if (blueprint.timeline_order) return blueprint.timeline_order;
 
-  // 2. Infer from story_arc strategy
+  // 2. Explicit in creative brief
+  if (brief?.order_policy) return brief.order_policy;
+
+  // 3. Infer from story_arc strategy
   if (blueprint.story_arc?.strategy === "chronological") return "chronological";
 
-  // 3. Profile default
+  // 4. Family keepsake defaults from brief/template wording
+  const briefSignals = [
+    brief?.project?.strategy,
+    brief?.project?.format,
+  ].filter((value): value is string => typeof value === "string").join(" ").toLowerCase();
+  if (
+    briefSignals.includes("keepsake") ||
+    briefSignals.includes("family-growth") ||
+    briefSignals.includes("family growth") ||
+    briefSignals.includes("growth recap") ||
+    briefSignals.includes("成長記録")
+  ) {
+    return "chronological";
+  }
+
+  // 5. Profile default
   if (resolvedProfileId) {
     return PROFILE_TIMELINE_ORDER[resolvedProfileId] ?? "editorial";
   }

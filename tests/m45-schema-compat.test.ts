@@ -430,6 +430,28 @@ describe("Schema Backward Compatibility", () => {
     const valid = validate(brief);
     expect(valid).toBe(true);
   });
+
+  it("M6 review-patch split_segment validates", () => {
+    const ajv = createValidator();
+    const schema = loadSchema("review-patch.schema.json");
+    const validate = ajv.compile(schema);
+
+    const m6Patch = {
+      timeline_version: "1",
+      operations: [
+        {
+          op: "split_segment",
+          target_clip_id: "CLP_0001",
+          new_timeline_in_frame: 48,
+          reason: "Split at playhead",
+        },
+      ],
+    };
+
+    const valid = validate(m6Patch);
+    if (!valid) console.error(validate.errors);
+    expect(valid).toBe(true);
+  });
 });
 
 describe("Operational Schemas", () => {

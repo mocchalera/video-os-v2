@@ -2,9 +2,12 @@
 node_modules/
 dist/
 build/
+.venv/
+python/.venv-marlin/
 .tsbuildinfo
 
 # Temporary files
+tmp/
 tmp-*/
 tests/tmp_*/
 coverage/
@@ -41,11 +44,27 @@ Thumbs.db
 # Tool-specific directories
 .claude/
 .codex/
+.build/
+.playwright-cli/
+.playwright-mcp/
 
 # Project-specific results
+outputs/
+reports/generated/
+*.inspect.ndjson
+*.render.json
+*.qa.json
 projects/*
 !projects/_template/
 !projects/demo/
+projects/demo/project_state.yaml
+projects/*/03_analysis/search/
+projects/*/09_output/
+reports/eval/regen-scratch/
+reports/eval/*/_scratch/
+
+# Local screenshots and visual debugging captures
+/editor-*.png
 
 # Large binary media files (even in tracked projects)
 *.mp4
@@ -56,3 +75,17 @@ projects/*
 *.mxf
 *.avi
 *.mkv
+
+# Project Loop Harness local state
+.project-loop/project.db
+.project-loop/project.db-*
+.project-loop/events.jsonl
+.project-loop/evidence/
+.project-loop/worktrees/
+.project-loop/tmp/
+.project-loop/cache/
+
+# Generated Project Loop Harness review surfaces.
+.project-loop/dashboard/
+.project-loop/reports/
+.project-loop/exports/

@@ -7,10 +7,19 @@ import * as path from "node:path";
 import type {
   Candidate,
   CaptionPolicySource,
+  ContinuityCompileMetadata,
+  ContinuityExemption,
+  ContinuityIssue,
+  ContinuityPolicy,
+  ContinuityReorderEvent,
+  ContinuityRepeatPolicy,
+  ContinuityRun,
+  CraftTransition,
   NormalizedBeat,
   TimelineClip,
   Track,
 } from "./types.js";
+import { getCandidateRef } from "./candidate-ref.js";
 import type {
   TransitionSkillCard,
   PairEvidence,
@@ -18,6 +27,7 @@ import type {
   AdjacencyAnalysis,
   TimelineTransition,
   TransitionType,
+  TransitionEffects,
   BgmAnalysis,
   AdjacencyFeatures,
   PeakType,
@@ -37,6 +47,10 @@ import {
   resolveShotScaleContinuity,
   resolveCadenceFit,
 } from "./transition-skill-loader.js";
+import { cosineSimilarity } from "./visual-cache.js";
+
+const SAME_ASSET_PUNCH_IN_SCALE = 1.08;
+const SAME_ASSET_PUNCH_IN_MIN_GAP_US = 500_000;
 
 // ── PairEvidence construction ───────────────────────────────────────
 
@@ -322,7 +336,91 @@ export interface AdjacencyDecideOptions {
   candidates: Candidate[];
   beats: NormalizedBeat[];
   segmentEvidenceIndex?: Map<string, SegmentEvidence>;
+  visualEmbeddings?: Map<string, Float32Array>;
   transitionSkillsDir?: string;
+}
+
+const CRAFT_TRANSITION_SCORE_BONUS = 0.2;
+const VISUAL_DISSOLVE_THRESHOLD = 0.85;
+const VISUAL_HARD_CUT_THRESHOLD = 0.95;
+
+export function visualCoherenceScore(
+  clipA: TimelineClip,
+  clipB: TimelineClip,
+  embeddings: Map<string, Float32Array>,
+): number {
+  const vecA = embeddings.get(clipA.segment_id);
+  const vecB = embeddings.get(clipB.segment_id);
+  if (!vecA || !vecB) return 0.5;
+  return cosineSimilarity(vecA, vecB);
+}
+
+export function visualTransitionHint(
+  score: number,
+): "dissolve" | "hard_cut" | undefined {
+  if (score < VISUAL_DISSOLVE_THRESHOLD) return "dissolve";
+  if (score > VISUAL_HARD_CUT_THRESHOLD) return "hard_cut";
+  return undefined;
+}
+
+export function craftTransitionToSkillId(transition: CraftTransition | undefined): string | undefined {
+  switch (transition) {
+    case "dissolve":
+      return "crossfade_bridge";
+    case "dip_to_black":
+      return "silence_beat";
+    default:
+      return undefined;
+  }
+}
+
+export function hasCraftTransitions(beats: NormalizedBeat[]): boolean {
+  return beats.some((beat) => !!beat.craft?.transition_in || !!beat.craft?.transition_out);
+}
+
+function activeSkillsWithCraftTransitionBias(
+  activeEditingSkills: string[],
+  beats: NormalizedBeat[],
+): string[] {
+  const ids = new Set(activeEditingSkills);
+  for (const beat of beats) {
+    const transitionIds = [
+      craftTransitionToSkillId(beat.craft?.transition_in),
+      craftTransitionToSkillId(beat.craft?.transition_out),
+    ];
+    for (const id of transitionIds) {
+      if (id) ids.add(id);
+    }
+  }
+  return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+function resolvePairCraftTransition(
+  leftBeat: NormalizedBeat | undefined,
+  rightBeat: NormalizedBeat | undefined,
+): { transition: CraftTransition; source: "transition_out" | "transition_in" } | undefined {
+  if (leftBeat?.craft?.transition_out) {
+    return { transition: leftBeat.craft.transition_out, source: "transition_out" };
+  }
+  if (rightBeat?.craft?.transition_in) {
+    return { transition: rightBeat.craft.transition_in, source: "transition_in" };
+  }
+  return undefined;
+}
+
+function metadataOnlyCraftTransition(transition: CraftTransition | undefined): boolean {
+  return transition === "j_cut" || transition === "l_cut" || transition === "match_cut";
+}
+
+function defaultCraftTransitionType(transition: CraftTransition | undefined): TransitionType | undefined {
+  switch (transition) {
+    case "dissolve":
+      return "crossfade";
+    case "dip_to_black":
+      return "fade_to_black";
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -425,7 +523,7 @@ export function adjacencyDecide(
   opts: AdjacencyDecideOptions,
 ): { transitions: TimelineTransition[]; analysis: AdjacencyAnalysis } {
   const cards = getActiveTransitionCards(
-    opts.activeEditingSkills,
+    activeSkillsWithCraftTransitionBias(opts.activeEditingSkills, opts.beats),
     "p0",
     opts.transitionSkillsDir,
   );
@@ -462,6 +560,11 @@ export function adjacencyDecide(
 
     const leftBeat = beatMap.get(leftClip.beat_id);
     const rightBeat = beatMap.get(rightClip.beat_id);
+    const craftTransition = resolvePairCraftTransition(leftBeat, rightBeat);
+    const preferredCraftSkillId = craftTransitionToSkillId(craftTransition?.transition);
+    const preferredCraftCard = preferredCraftSkillId
+      ? cards.find((card) => card.id === preferredCraftSkillId)
+      : undefined;
 
     const leftSegEvidence = opts.segmentEvidenceIndex?.get(leftClip.segment_id);
     const rightSegEvidence = opts.segmentEvidenceIndex?.get(rightClip.segment_id);
@@ -486,6 +589,16 @@ export function adjacencyDecide(
         totalBeats: opts.beats.length,
       },
     );
+    const visualScore = opts.visualEmbeddings
+      ? visualCoherenceScore(leftClip, rightClip, opts.visualEmbeddings)
+      : undefined;
+    const visualHint = visualScore == null ? undefined : visualTransitionHint(visualScore);
+    if (visualScore != null) {
+      evidence.visual_coherence_score = roundScore(visualScore);
+    }
+    if (visualHint) {
+      evidence.visual_transition_hint = visualHint;
+    }
 
     // Resolve axis scores
     const axisScores = resolveAxisScores(evidence);
@@ -525,6 +638,9 @@ export function adjacencyDecide(
       if (card.id === "build_to_peak" && prevSelectedSkillId === "build_to_peak") {
         score = Math.min(1, score + 0.08);
       }
+      if (preferredCraftSkillId && card.id === preferredCraftSkillId) {
+        score = Math.min(1, score + CRAFT_TRANSITION_SCORE_BONUS);
+      }
 
       scoredCards.push({ card, score, threshold, passesWhen, passesAvoidWhen, passesViability });
     }
@@ -561,6 +677,7 @@ export function adjacencyDecide(
     let minScoreThreshold = 0.3;
     let selectedSkillScore = 0;
     let selectedSkillId: string | null = null;
+    let activeTransitionEffects: TransitionEffects | undefined;
 
     // Fallback resolution: walk fallback_order[] when below threshold or viability failed
     const resolveFallback = (
@@ -615,6 +732,7 @@ export function adjacencyDecide(
       selectedSkillId = selectedCard.card.id;
       selectedSkillScore = selectedCard.score;
       minScoreThreshold = selectedCard.threshold;
+      activeTransitionEffects = selectedCard.card.pipeline_effects;
     } else if (selectedCard && belowThreshold) {
       // Below threshold — try fallback chain
       const fb = resolveFallback(selectedCard.card, selectedCard.card.id);
@@ -647,10 +765,77 @@ export function adjacencyDecide(
       belowThreshold = true;
     }
 
+    const forcedCraftTransitionType = defaultCraftTransitionType(craftTransition?.transition);
+    if (craftTransition && forcedCraftTransitionType) {
+      const craftEffects = preferredCraftCard?.pipeline_effects;
+      transitionType = craftEffects?.transition_type ?? forcedCraftTransitionType;
+      appliedSkillId = preferredCraftCard?.id ?? `craft.${craftTransition.transition}`;
+      confidence = Math.max(confidence, 0.8);
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = preferredCraftCard ? resolveSkillThreshold(preferredCraftCard) : 0;
+      degradedFromSkillId = null;
+      belowThreshold = false;
+      fallbackParams = {};
+      activeTransitionEffects = craftEffects ?? {
+        transition_type: forcedCraftTransitionType,
+        crossfade_sec: forcedCraftTransitionType === "crossfade" || forcedCraftTransitionType === "fade_to_black"
+          ? 0.5
+          : undefined,
+      };
+    }
+
+    const craftForcesCut = craftTransition?.transition === "hard_cut" ||
+      metadataOnlyCraftTransition(craftTransition?.transition);
+    if (craftForcesCut && craftTransition) {
+      transitionType = "cut";
+      appliedSkillId = craftTransition.transition === "hard_cut"
+        ? "craft.hard_cut"
+        : `craft.${craftTransition.transition}.metadata_only`;
+      confidence = Math.max(confidence, 0.5);
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = 0;
+      degradedFromSkillId = null;
+      belowThreshold = false;
+      fallbackParams = {};
+      activeTransitionEffects = undefined;
+    }
+
+    if (!craftTransition && visualHint === "dissolve" && transitionType === "cut") {
+      transitionType = "crossfade";
+      appliedSkillId = "visual.dissolve";
+      confidence = Math.max(confidence, 1 - (visualScore ?? VISUAL_DISSOLVE_THRESHOLD));
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = 0;
+      degradedFromSkillId = null;
+      belowThreshold = false;
+      fallbackParams = {};
+      activeTransitionEffects = {
+        transition_type: "crossfade",
+        crossfade_sec: 0.5,
+      };
+    } else if (!craftTransition && visualHint === "hard_cut" && transitionType === "cut" && !appliedSkillId) {
+      appliedSkillId = "visual.hard_cut";
+      confidence = Math.max(confidence, visualScore ?? VISUAL_HARD_CUT_THRESHOLD);
+      selectedSkillId = appliedSkillId;
+      selectedSkillScore = Math.max(selectedSkillScore, confidence);
+      minScoreThreshold = 0;
+    }
+
+    applySameAssetPunchInTreatment({
+      activeEditingSkills: opts.activeEditingSkills,
+      transitionType,
+      evidence,
+      rightClip,
+      rightCandidate,
+    });
+
     // BGM beat snap — respect snap_anchor for windowed transitions
     let snapResult: ReturnType<typeof findBeatSnapTarget> | undefined;
-    if (selectedCard && !belowThreshold) {
-      const effects = selectedCard.card.pipeline_effects;
+    if (activeTransitionEffects && !belowThreshold && !craftForcesCut) {
+      const effects = activeTransitionEffects;
       const preferDownbeat = effects.beat_snap === "downbeat";
       const snapAnchor = effects.snap_anchor ?? "cut_frame";
 
@@ -711,8 +896,8 @@ export function adjacencyDecide(
     const params: Record<string, unknown> = {};
     let hasParams = false;
 
-    if (selectedCard && !belowThreshold && selectedCard.card.pipeline_effects.crossfade_sec) {
-      params.crossfade_sec = selectedCard.card.pipeline_effects.crossfade_sec;
+    if (!belowThreshold && activeTransitionEffects?.crossfade_sec) {
+      params.crossfade_sec = activeTransitionEffects.crossfade_sec;
       hasParams = true;
     }
 
@@ -768,6 +953,8 @@ export function adjacencyDecide(
         semantic_cluster_change: evidence.semantic_cluster_change,
         outgoing_afterglow_score: evidence.outgoing_afterglow_score,
         outgoing_silence_ratio: evidence.outgoing_silence_ratio,
+        visual_coherence_score: evidence.visual_coherence_score,
+        visual_transition_hint: evidence.visual_transition_hint,
       },
       degraded_from_skill_id: degradedFromSkillId,
     };
@@ -786,6 +973,340 @@ export function adjacencyDecide(
   return { transitions, analysis };
 }
 
+function applySameAssetPunchInTreatment(input: {
+  activeEditingSkills: string[];
+  transitionType: TransitionType;
+  evidence: PairEvidence;
+  rightClip: TimelineClip;
+  rightCandidate?: Candidate;
+}): boolean {
+  if (!input.activeEditingSkills.includes("punch_in_emphasis")) return false;
+  if (input.transitionType !== "cut" || !input.evidence.same_asset) return false;
+  if ((input.evidence.same_asset_gap_us ?? 0) < SAME_ASSET_PUNCH_IN_MIN_GAP_US) return false;
+
+  const signals = input.rightCandidate?.editorial_signals;
+  if ((signals?.speech_intensity_score ?? 0) < 0.7 || signals?.face_detected !== true) return false;
+  if (signals.visual_tags?.includes("screen_demo")) return false;
+  if (typeof input.rightClip.metadata?.zoom === "number") return false;
+
+  const metadata = input.rightClip.metadata ?? {};
+  const existingEditorial = metadata.editorial && typeof metadata.editorial === "object"
+    ? metadata.editorial as Record<string, unknown>
+    : {};
+  input.rightClip.metadata = {
+    ...metadata,
+    zoom: SAME_ASSET_PUNCH_IN_SCALE,
+    editorial: {
+      ...existingEditorial,
+      camera_move: {
+        type: "punch_in",
+        scale: SAME_ASSET_PUNCH_IN_SCALE,
+        reason: "same_asset_jump_cut",
+      },
+    },
+  };
+  return true;
+}
+
+// ── Timeline continuity hard constraints ────────────────────────────
+
+export const DEFAULT_CONTINUITY_POLICY: ContinuityPolicy = {
+  same_asset_repeat: "reorder_or_fail",
+  same_cluster_repeat: "warn",
+};
+
+export interface TimelineContinuityOptions {
+  candidates: Candidate[];
+  beats: NormalizedBeat[];
+  policy?: Partial<ContinuityPolicy>;
+  reorders?: ContinuityReorderEvent[];
+}
+
+interface CandidateIndex {
+  byRef: Map<string, Candidate>;
+  bySegmentRange: Map<string, Candidate>;
+  bySegment: Map<string, Candidate>;
+}
+
+interface OrderedClip {
+  trackId: string;
+  clip: TimelineClip;
+}
+
+interface RepeatRun {
+  key: string;
+  clips: OrderedClip[];
+}
+
+interface ExemptionState {
+  exemptions: ContinuityExemption[];
+  semanticClusters: Set<string>;
+  assets: Set<string>;
+}
+
+export function resolveContinuityPolicy(
+  policy?: Partial<ContinuityPolicy>,
+): ContinuityPolicy {
+  return {
+    same_asset_repeat: policy?.same_asset_repeat ?? DEFAULT_CONTINUITY_POLICY.same_asset_repeat,
+    same_cluster_repeat: policy?.same_cluster_repeat ?? DEFAULT_CONTINUITY_POLICY.same_cluster_repeat,
+  };
+}
+
+export function evaluateTimelineContinuity(
+  videoTracks: Track[],
+  opts: TimelineContinuityOptions,
+): ContinuityCompileMetadata {
+  const policy = resolveContinuityPolicy(opts.policy);
+  const ordered = orderedVideoClips(videoTracks);
+  const candidateIndex = buildContinuityCandidateIndex(opts.candidates);
+  const exemptionState = collectAllowRevisitExemptions(ordered, opts.beats, candidateIndex);
+  const warnings: ContinuityIssue[] = [];
+  const errors: ContinuityIssue[] = [];
+
+  const assetIssues = detectNonAdjacentRepeatIssues({
+    ordered,
+    code: "same_asset_non_adjacent",
+    severityPolicy: policy.same_asset_repeat,
+    ignoredKeys: exemptionState.assets,
+    keyFor: (item) => item.clip.asset_id,
+    issueFieldsFor: (key) => ({ asset_id: key }),
+    messageFor: (key, runs) =>
+      `Continuity constraint failed: source asset ${key} appears in ${runs.length} non-adjacent timeline blocks.`,
+    suggestedFix:
+      "Move the repeated source asset into one contiguous beat block, choose alternate candidates upstream, or mark an intentional callback with beat.allow_revisit.",
+  });
+  partitionIssues(assetIssues, warnings, errors);
+
+  const clusterIssues = detectNonAdjacentRepeatIssues({
+    ordered,
+    code: "same_cluster_non_adjacent",
+    severityPolicy: policy.same_cluster_repeat,
+    ignoredKeys: exemptionState.semanticClusters,
+    keyFor: (item) => semanticClusterForClip(item.clip, candidateIndex),
+    issueFieldsFor: (key) => ({ semantic_cluster_id: key }),
+    messageFor: (key, runs) =>
+      `Continuity warning: semantic_cluster_id ${key} appears in ${runs.length} non-adjacent timeline blocks.`,
+    suggestedFix:
+      "Keep each semantic cluster contiguous, choose alternate candidates upstream, or declare an intentional callback with beat.allow_revisit.",
+  });
+  partitionIssues(clusterIssues, warnings, errors);
+
+  warnings.sort(compareContinuityIssues);
+  errors.sort(compareContinuityIssues);
+
+  return {
+    policy,
+    scope: "video_tracks",
+    reorders: [...(opts.reorders ?? [])].sort(compareReorderEvents),
+    exemptions: exemptionState.exemptions,
+    warnings,
+    errors,
+  };
+}
+
+function orderedVideoClips(videoTracks: Track[]): OrderedClip[] {
+  return videoTracks
+    .flatMap((track) => track.clips.map((clip) => ({ trackId: track.track_id, clip })))
+    .sort((a, b) =>
+      a.clip.timeline_in_frame - b.clip.timeline_in_frame ||
+      a.trackId.localeCompare(b.trackId) ||
+      a.clip.clip_id.localeCompare(b.clip.clip_id)
+    );
+}
+
+function buildContinuityCandidateIndex(candidates: Candidate[]): CandidateIndex {
+  const byRef = new Map<string, Candidate>();
+  const bySegmentRange = new Map<string, Candidate>();
+  const bySegment = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    const ref = getCandidateRef(candidate);
+    byRef.set(ref, candidate);
+    if (candidate.candidate_id) byRef.set(candidate.candidate_id, candidate);
+    byRef.set(candidate.segment_id, candidate);
+    bySegmentRange.set(candidateRangeKey(candidate), candidate);
+    if (!bySegment.has(candidate.segment_id)) {
+      bySegment.set(candidate.segment_id, candidate);
+    }
+  }
+  return { byRef, bySegmentRange, bySegment };
+}
+
+function candidateForContinuityClip(
+  clip: TimelineClip,
+  index: CandidateIndex,
+): Candidate | undefined {
+  if (clip.candidate_ref) {
+    const byRef = index.byRef.get(clip.candidate_ref);
+    if (byRef) return byRef;
+  }
+  return index.bySegmentRange.get(clipRangeKey(clip)) ?? index.bySegment.get(clip.segment_id);
+}
+
+function semanticClusterForClip(
+  clip: TimelineClip,
+  index: CandidateIndex,
+): string | undefined {
+  const cluster = candidateForContinuityClip(clip, index)?.editorial_signals?.semantic_cluster_id?.trim();
+  return cluster || undefined;
+}
+
+function collectAllowRevisitExemptions(
+  ordered: OrderedClip[],
+  beats: NormalizedBeat[],
+  candidateIndex: CandidateIndex,
+): ExemptionState {
+  const byBeat = new Map<string, OrderedClip[]>();
+  for (const item of ordered) {
+    const items = byBeat.get(item.clip.beat_id) ?? [];
+    items.push(item);
+    byBeat.set(item.clip.beat_id, items);
+  }
+
+  const exemptions: ContinuityExemption[] = [];
+  const semanticClusters = new Set<string>();
+  const assets = new Set<string>();
+
+  for (const beat of beats) {
+    if (!beat.allow_revisit) continue;
+    const beatClips = byBeat.get(beat.beat_id) ?? [];
+    const explicit = typeof beat.allow_revisit === "object" ? beat.allow_revisit : undefined;
+    const semanticIds = explicit?.semantic_cluster_ids
+      ? [...new Set(explicit.semantic_cluster_ids.map((id) => id.trim()).filter(Boolean))]
+      : uniqueSorted(beatClips
+          .map((item) => semanticClusterForClip(item.clip, candidateIndex))
+          .filter((id): id is string => Boolean(id)));
+    const assetIds = explicit?.asset_ids
+      ? [...new Set(explicit.asset_ids.map((id) => id.trim()).filter(Boolean))]
+      : uniqueSorted(beatClips.map((item) => item.clip.asset_id));
+
+    for (const id of semanticIds) semanticClusters.add(id);
+    for (const id of assetIds) assets.add(id);
+
+    exemptions.push({
+      code: "allow_revisit",
+      beat_id: beat.beat_id,
+      clip_ids: beatClips.map((item) => item.clip.clip_id).sort((a, b) => a.localeCompare(b)),
+      ...(semanticIds.length > 0 ? { semantic_cluster_ids: semanticIds } : {}),
+      ...(assetIds.length > 0 ? { asset_ids: assetIds } : {}),
+      ...(explicit?.reason ? { reason: explicit.reason } : {}),
+    });
+  }
+
+  exemptions.sort((a, b) => a.beat_id.localeCompare(b.beat_id));
+  return { exemptions, semanticClusters, assets };
+}
+
+function detectNonAdjacentRepeatIssues(input: {
+  ordered: OrderedClip[];
+  code: ContinuityIssue["code"];
+  severityPolicy: ContinuityRepeatPolicy;
+  ignoredKeys: Set<string>;
+  keyFor: (item: OrderedClip) => string | undefined;
+  issueFieldsFor: (key: string) => Partial<Pick<ContinuityIssue, "asset_id" | "semantic_cluster_id">>;
+  messageFor: (key: string, runs: ContinuityRun[]) => string;
+  suggestedFix: string;
+}): ContinuityIssue[] {
+  if (input.severityPolicy === "off") return [];
+
+  const runsByKey = new Map<string, RepeatRun[]>();
+  let current: RepeatRun | undefined;
+  const closeCurrent = () => {
+    if (!current) return;
+    const runs = runsByKey.get(current.key) ?? [];
+    runs.push(current);
+    runsByKey.set(current.key, runs);
+    current = undefined;
+  };
+
+  for (const item of input.ordered) {
+    const key = input.keyFor(item);
+    if (!key || input.ignoredKeys.has(key)) {
+      closeCurrent();
+      continue;
+    }
+    if (current?.key === key) {
+      current.clips.push(item);
+    } else {
+      closeCurrent();
+      current = { key, clips: [item] };
+    }
+  }
+  closeCurrent();
+
+  const severity: ContinuityIssue["severity"] =
+    input.severityPolicy === "reorder_or_fail" ? "error" : "warning";
+
+  return [...runsByKey.entries()]
+    .filter(([, runs]) => runs.length > 1)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, repeatRuns]) => {
+      const runs = repeatRuns.map((run) => toContinuityRun(run.clips));
+      return {
+        code: input.code,
+        severity,
+        key,
+        ...input.issueFieldsFor(key),
+        runs,
+        message: input.messageFor(key, runs),
+        suggested_fix: input.suggestedFix,
+      };
+    });
+}
+
+function toContinuityRun(items: OrderedClip[]): ContinuityRun {
+  const clips = items.map((item) => item.clip);
+  return {
+    track_ids: uniqueSorted(items.map((item) => item.trackId)),
+    beat_ids: uniqueSorted(clips.map((clip) => clip.beat_id)),
+    clip_ids: clips.map((clip) => clip.clip_id).sort((a, b) => a.localeCompare(b)),
+    segment_ids: uniqueSorted(clips.map((clip) => clip.segment_id)),
+    asset_ids: uniqueSorted(clips.map((clip) => clip.asset_id)),
+    start_frame: Math.min(...clips.map((clip) => clip.timeline_in_frame)),
+    end_frame: Math.max(...clips.map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames)),
+  };
+}
+
+function partitionIssues(
+  issues: ContinuityIssue[],
+  warnings: ContinuityIssue[],
+  errors: ContinuityIssue[],
+): void {
+  for (const issue of issues) {
+    if (issue.severity === "error") {
+      errors.push(issue);
+    } else {
+      warnings.push(issue);
+    }
+  }
+}
+
+function compareContinuityIssues(a: ContinuityIssue, b: ContinuityIssue): number {
+  return a.code.localeCompare(b.code) || a.key.localeCompare(b.key);
+}
+
+function compareReorderEvents(a: ContinuityReorderEvent, b: ContinuityReorderEvent): number {
+  return a.track_id.localeCompare(b.track_id) ||
+    a.beat_id.localeCompare(b.beat_id) ||
+    a.code.localeCompare(b.code);
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+}
+
+function candidateRangeKey(candidate: Candidate): string {
+  return `${candidate.segment_id}:${candidate.src_in_us}:${candidate.src_out_us}`;
+}
+
+function clipRangeKey(clip: TimelineClip): string {
+  return `${clip.segment_id}:${clip.src_in_us}:${clip.src_out_us}`;
+}
+
+function roundScore(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
 /**
  * Apply beat snap to clip geometry (pair-preserving reallocation).
  * Modifies clips in-place. Returns true if snap was committed.
@@ -795,17 +1316,19 @@ export function applyBeatSnap(
   rightClip: TimelineClip,
   snapDeltaFrames: number,
   fpsNum: number,
+  minDurationFrames = 1,
 ): boolean {
   if (snapDeltaFrames === 0) return true;
 
   const usPerFrame = 1_000_000 / fpsNum;
   const absDelta = Math.abs(snapDeltaFrames);
+  const minFrames = Math.max(1, Math.floor(minDurationFrames));
 
-  // Guard: both clips must remain at least 1 frame
+  // Guard: both clips must remain renderable after pair-preserving reallocation.
   if (snapDeltaFrames > 0) {
-    if (rightClip.timeline_duration_frames - absDelta < 1) return false;
+    if (rightClip.timeline_duration_frames - absDelta < minFrames) return false;
   } else {
-    if (leftClip.timeline_duration_frames - absDelta < 1) return false;
+    if (leftClip.timeline_duration_frames - absDelta < minFrames) return false;
   }
 
   if (snapDeltaFrames > 0) {

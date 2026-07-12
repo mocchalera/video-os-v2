@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "project_id": "p3-fixture",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "entities": [
+    { "entity_id": "ENT_SUBJECT_child_cluster", "entity_type": "subject_cluster", "status": "hypothesis", "label": null, "evidence_segment_ids": ["SEG_a_intro"], "confidence": { "score": 0.64, "source": "vlm_tags", "status": "partial" } },
+    { "entity_id": "ENT_PROP_bicycle", "entity_type": "prop", "status": "confirmed_editing_continuity", "label": "bicycle", "evidence_segment_ids": ["SEG_a_intro"], "confidence": { "score": 0.82, "source": "vlm_tags", "status": "ready" } }
+  ],
+  "segments": [
+    { "segment_id": "SEG_a_intro", "asset_id": "AST_a", "src_in_us": 0, "src_out_us": 2000000, "capture_basis": "file_metadata", "entity_ids": ["ENT_SUBJECT_child_cluster", "ENT_PROP_bicycle"] }
+  ],
+  "edges": [
+    { "edge_id": "CONEDGE_prop_001", "from_ref": "ENT_PROP_bicycle", "to_ref": "SEG_a_intro", "type": "visual_match", "confidence": { "score": 0.82, "source": "vlm_tags", "status": "ready" } }
+  ],
+  "risks": [
+    { "risk_id": "CONRISK_identity_001", "severity": "warning", "type": "identity_uncertain", "refs": ["ENT_SUBJECT_child_cluster"], "message": "Anonymous subject cluster is usable for editing continuity only." }
+  ],
+  "provenance": { "producer": "analysis-pipeline", "inputs": [], "hash_policy": { "algorithm": "sha256", "canonicalization": "normalized-json-v1", "excluded_fields": ["created_at"] } }
+}

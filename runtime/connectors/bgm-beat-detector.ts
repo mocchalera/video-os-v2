@@ -7,7 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { BgmAnalysis, BgmSection } from "../compiler/transition-types.js";
 
@@ -26,10 +26,21 @@ function detectOnsetsViaFfmpeg(audioPath: string, sampleRate: number = 48000): O
   // Use ffmpeg to detect onsets via the 'silencedetect' filter as a proxy.
   // For P0, this provides a reasonable approximation of beat positions.
   try {
-    const result = execSync(
-      `ffmpeg -i "${audioPath}" -af "silencedetect=noise=-30dB:d=0.1" -f null - 2>&1`,
-      { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, timeout: 60000 },
-    );
+    let result: string;
+    try {
+      result = execFileSync(
+        "ffmpeg",
+        ["-i", audioPath, "-af", "silencedetect=noise=-30dB:d=0.1", "-f", "null", "-"],
+        { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, timeout: 60000, stdio: ["pipe", "pipe", "pipe"] },
+      );
+    } catch (e: unknown) {
+      // ffmpeg exits non-zero for -f null; read stderr from the error
+      if (e && typeof e === "object" && "stderr" in e && typeof (e as any).stderr === "string") {
+        result = (e as any).stderr;
+      } else {
+        return [];
+      }
+    }
 
     const events: OnsetEvent[] = [];
     const lines = result.split("\n");
@@ -51,8 +62,9 @@ function detectOnsetsViaFfmpeg(audioPath: string, sampleRate: number = 48000): O
  */
 function getAudioDuration(audioPath: string): number {
   try {
-    const result = execSync(
-      `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioPath}"`,
+    const result = execFileSync(
+      "ffprobe",
+      ["-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", audioPath],
       { encoding: "utf-8", timeout: 30000 },
     );
     return parseFloat(result.trim()) || 0;

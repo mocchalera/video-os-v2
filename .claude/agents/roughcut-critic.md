@@ -53,3 +53,6 @@ Rules:
 - If multiple valid alternatives exist, express them as alternatives, not as a false
   single truth.
 - Do not overwrite timeline.json yourself.
+- If human_notes.yaml exists, incorporate human reviewer observations into the
+  review. Human notes take priority over AI-only taste judgments.
+- If STYLE.md exists, validate craft adherence against its directives.

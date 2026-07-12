@@ -748,6 +748,38 @@ describe("Timeline IR Schema with Transitions", () => {
     validate = ajv.compile(schema);
   });
 
+  const timelineWithClip = (clipOverrides: Record<string, unknown> = {}) => ({
+    version: "1",
+    project_id: "test",
+    created_at: "2025-01-01T00:00:00Z",
+    sequence: { name: "test", fps_num: 24, fps_den: 1, width: 1920, height: 1080, start_frame: 0 },
+    tracks: {
+      video: [{
+        track_id: "V1",
+        kind: "video",
+        clips: [{
+          clip_id: "c1",
+          segment_id: "s1",
+          asset_id: "a1",
+          src_in_us: 0,
+          src_out_us: 1000000,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 24,
+          role: "hero",
+          motivation: "test",
+          ...clipOverrides,
+        }],
+      }],
+      audio: [],
+    },
+    markers: [],
+    provenance: {
+      brief_path: "brief.yaml",
+      blueprint_path: "blueprint.yaml",
+      selects_path: "selects.yaml",
+    },
+  });
+
   it("validates timeline with transitions array", () => {
     const timeline = {
       version: "1",
@@ -773,6 +805,8 @@ describe("Timeline IR Schema with Transitions", () => {
           to_clip_id: "c2",
           track_id: "V1",
           transition_type: "crossfade",
+          start_frame: 24,
+          duration_frames: 12,
           transition_params: {
             crossfade_sec: 0.5,
             cut_frame_before_snap: 24,
@@ -781,6 +815,14 @@ describe("Timeline IR Schema with Transitions", () => {
           },
           applied_skill_id: "crossfade_bridge",
           confidence: 0.75,
+          fallback: {
+            type: "cut",
+            reason: "renderer does not support crossfade",
+          },
+          metadata: {
+            degraded_reason: "preview renderer fallback",
+            remotion_ready: true,
+          },
         },
       ],
       provenance: {
@@ -792,6 +834,51 @@ describe("Timeline IR Schema with Transitions", () => {
 
     const valid = validate(timeline);
     expect(valid, JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it("rejects unknown fields at the clip root", () => {
+    const timeline = timelineWithClip({
+      agent_reasoning: "must live outside the canonical clip root",
+    });
+
+    expect(validate(timeline)).toBe(false);
+    expect(validate.errors?.some((error) => error.instancePath.endsWith("/clips/0"))).toBe(true);
+  });
+
+  it("allows unknown fields inside clip metadata", () => {
+    const timeline = timelineWithClip({
+      metadata: {
+        agent_reasoning: "metadata remains the intentional extension point",
+        nested: { source: "test" },
+      },
+    });
+
+    expect(validate(timeline), JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it("rejects unknown fields at the marker root but allows marker metadata extensions", () => {
+    const markerExtensionTimeline = {
+      ...timelineWithClip(),
+      markers: [{
+        frame: 12,
+        kind: "note",
+        label: "review note",
+        metadata: { reviewer_tag: "ok" },
+      }],
+    };
+    expect(validate(markerExtensionTimeline), JSON.stringify(validate.errors)).toBe(true);
+
+    const markerRootUnknownTimeline = {
+      ...timelineWithClip(),
+      markers: [{
+        frame: 12,
+        kind: "note",
+        label: "review note",
+        extra_reasoning: "must not live at marker root",
+      }],
+    };
+    expect(validate(markerRootUnknownTimeline)).toBe(false);
+    expect(validate.errors?.some((error) => error.instancePath.endsWith("/markers/0"))).toBe(true);
   });
 
   it("validates timeline without transitions (backwards compatible)", () => {
@@ -1052,6 +1139,103 @@ describe("buildPairEvidence", () => {
     expect(ev.composition_match_score).toBeLessThan(0.5);
     // They should NOT be the same value
     expect(ev.shot_scale_continuity_score).not.toBe(ev.composition_match_score);
+  });
+});
+
+describe("same-asset punch-in treatment", () => {
+  it("adds a deterministic punch-in to a qualifying incoming clip", () => {
+    const left = makeClip("01", {
+      asset_id: "AST_SHARED",
+      src_in_us: 0,
+      src_out_us: 3_000_000,
+      candidate_ref: "cand_left",
+    });
+    const right = makeClip("02", {
+      asset_id: "AST_SHARED",
+      src_in_us: 12_000_000,
+      src_out_us: 15_000_000,
+      timeline_in_frame: 72,
+      candidate_ref: "cand_right",
+    });
+    const v1: Track = { track_id: "V1", kind: "video", clips: [left, right] };
+
+    adjacencyDecide(v1, {
+      activeEditingSkills: ["punch_in_emphasis"],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({ candidate_id: "cand_left", segment_id: left.segment_id, asset_id: "AST_SHARED" }),
+        makeCandidate({
+          candidate_id: "cand_right",
+          segment_id: right.segment_id,
+          asset_id: "AST_SHARED",
+          editorial_signals: {
+            speech_intensity_score: 0.91,
+            face_detected: true,
+            visual_tags: ["talking_head", "testimonial"],
+          },
+        }),
+      ],
+      beats: [makeBeat(left.beat_id), makeBeat(right.beat_id)],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(right.metadata).toMatchObject({
+      zoom: 1.08,
+      editorial: {
+        camera_move: {
+          type: "punch_in",
+          scale: 1.08,
+          reason: "same_asset_jump_cut",
+        },
+      },
+    });
+  });
+
+  it.each([
+    { label: "inactive skill", activeEditingSkills: [], rightSrcInUs: 12_000_000, metadata: undefined, visualTags: ["talking_head"] },
+    { label: "continuous source", activeEditingSkills: ["punch_in_emphasis"], rightSrcInUs: 3_100_000, metadata: undefined, visualTags: ["talking_head"] },
+    { label: "existing zoom", activeEditingSkills: ["punch_in_emphasis"], rightSrcInUs: 12_000_000, metadata: { zoom: 1.2 }, visualTags: ["talking_head"] },
+    { label: "screen demo", activeEditingSkills: ["punch_in_emphasis"], rightSrcInUs: 12_000_000, metadata: undefined, visualTags: ["screen_demo"] },
+  ])("does not alter the incoming clip for $label", ({ activeEditingSkills, rightSrcInUs, metadata, visualTags }) => {
+    const left = makeClip("01", {
+      asset_id: "AST_SHARED",
+      src_in_us: 0,
+      src_out_us: 3_000_000,
+      candidate_ref: "cand_left",
+    });
+    const right = makeClip("02", {
+      asset_id: "AST_SHARED",
+      src_in_us: rightSrcInUs,
+      src_out_us: rightSrcInUs + 3_000_000,
+      timeline_in_frame: 72,
+      candidate_ref: "cand_right",
+      metadata,
+    });
+    const v1: Track = { track_id: "V1", kind: "video", clips: [left, right] };
+
+    adjacencyDecide(v1, {
+      activeEditingSkills,
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({ candidate_id: "cand_left", segment_id: left.segment_id, asset_id: "AST_SHARED" }),
+        makeCandidate({
+          candidate_id: "cand_right",
+          segment_id: right.segment_id,
+          asset_id: "AST_SHARED",
+          editorial_signals: {
+            speech_intensity_score: 0.91,
+            face_detected: true,
+            visual_tags: visualTags,
+          },
+        }),
+      ],
+      beats: [makeBeat(left.beat_id), makeBeat(right.beat_id)],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(right.metadata).toEqual(metadata);
   });
 });
 

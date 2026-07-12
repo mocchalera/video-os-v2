@@ -1,0 +1,200 @@
+{
+  "version": "1",
+  "project_id": "ena-promo",
+  "video_path": "/Users/mocchalera/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_duration_sec": 201.372,
+  "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 8 warnings.",
+  "scene_descriptions": [
+    {
+      "start_sec": 14.5,
+      "end_sec": 19,
+      "description": "A person walks forward while carrying a wicker basket."
+    },
+    {
+      "start_sec": 23.5,
+      "end_sec": 30,
+      "description": "Grape leaves and fruit sway on a vine."
+    },
+    {
+      "start_sec": 27,
+      "end_sec": 57,
+      "description": "subjects hold a static pose"
+    },
+    {
+      "start_sec": 59.5,
+      "end_sec": 62,
+      "description": "An elderly man smiles while looking down."
+    },
+    {
+      "start_sec": 62.5,
+      "end_sec": 65.5,
+      "description": "A man reaches up to touch plant leaves."
+    },
+    {
+      "start_sec": 66.5,
+      "end_sec": 68.5,
+      "description": "A woman gestures with her hands while talking."
+    },
+    {
+      "start_sec": 71.5,
+      "end_sec": 74,
+      "description": "The woman raises her hands to her face."
+    },
+    {
+      "start_sec": 81,
+      "end_sec": 90,
+      "description": "The camera pans across the bakery's bread racks."
+    },
+    {
+      "start_sec": 90.5,
+      "end_sec": 91.5,
+      "description": "A round loaf of bread sits on a plate."
+    },
+    {
+      "start_sec": 91.5,
+      "end_sec": 109.5,
+      "description": "The camera moves erratically, creating a blurred view."
+    },
+    {
+      "start_sec": 109.5,
+      "end_sec": 111,
+      "description": "The bread loaf is visible on the plate again."
+    },
+    {
+      "start_sec": 130.5,
+      "end_sec": 132.5,
+      "description": "The man reaches for a large rectangular dough block."
+    },
+    {
+      "start_sec": 132.5,
+      "end_sec": 134.5,
+      "description": "The man lifts the dough block from the table."
+    },
+    {
+      "start_sec": 134.5,
+      "end_sec": 136.5,
+      "description": "The man places the dough block into the mold."
+    },
+    {
+      "start_sec": 135,
+      "end_sec": 136.5,
+      "description": "The man smooths the matcha paste with a wooden board."
+    },
+    {
+      "start_sec": 136.5,
+      "end_sec": 138,
+      "description": "The man presses the dough block into the mold."
+    },
+    {
+      "start_sec": 137.5,
+      "end_sec": 141.5,
+      "description": "The man presses the wooden board onto the matcha paste."
+    },
+    {
+      "start_sec": 146.5,
+      "end_sec": 150.5,
+      "description": "The man lifts a large block of matcha from the container."
+    },
+    {
+      "start_sec": 156,
+      "end_sec": 161.5,
+      "description": "A woman in a kimono enters the room carrying a tray."
+    },
+    {
+      "start_sec": 162,
+      "end_sec": 192,
+      "description": "subjects hold a static pose"
+    },
+    {
+      "start_sec": 189,
+      "end_sec": 192,
+      "description": "The camera shows a static view of a Japanese street."
+    },
+    {
+      "start_sec": 192,
+      "end_sec": 199,
+      "description": "A woman sits by a train window looking out."
+    },
+    {
+      "start_sec": 199,
+      "end_sec": 201.372,
+      "description": "The camera pans across the window showing passing trees."
+    }
+  ],
+  "issues": [
+    {
+      "timestamp_sec": 62.5,
+      "duration_sec": 3,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 23.5s: A man reaches up to touch plant leaves.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 91.5,
+      "duration_sec": 18,
+      "category": "camera_shake",
+      "severity": "warning",
+      "description": "Possible camera stability issue: The camera moves erratically, creating a blurred view.",
+      "suggestion": "Replace with a steadier source moment, shorten the hold, or stabilize this section before the next render."
+    },
+    {
+      "timestamp_sec": 130.5,
+      "duration_sec": 2,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 62.5s: The man reaches for a large rectangular dough block.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 137.5,
+      "duration_sec": 4,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 135s: The man presses the wooden board onto the matcha paste.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 156,
+      "duration_sec": 5.5,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 14.5s: A woman in a kimono enters the room carrying a tray.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 162,
+      "duration_sec": 30,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 27s: subjects hold a static pose",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 192,
+      "duration_sec": 7,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 59.5s: A woman sits by a train window looking out.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 199,
+      "duration_sec": 2.372,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 81s: The camera pans across the window showing passing trees.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    }
+  ],
+  "pacing_assessment": {
+    "too_fast": false,
+    "too_slow": false,
+    "notes": "Average Marlin event duration is 6.3s across 23 events over 201.4s; pacing reads as within expected range."
+  },
+  "emotion_arc_assessment": {
+    "follows_brief": false,
+    "notes": "Missing or out-of-order emotion curve points: wonder, discovery, immersion, warmth, serenity. Matched in order: none."
+  },
+  "score": 12
+}

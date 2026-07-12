@@ -4,7 +4,7 @@ dotenvConfig();
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 export interface CheckResult {
   name: string;
@@ -121,7 +121,7 @@ export function checkDiskSpace(sourceFolderPath: string): CheckResult {
   try {
     const folderSize = getDirSize(sourceFolderPath);
     const requiredBytes = folderSize * 2;
-    const dfOut = execSync(`df -k "${sourceFolderPath}"`, {
+    const dfOut = execFileSync("df", ["-k", sourceFolderPath], {
       encoding: "utf-8",
       timeout: 5000,
     });

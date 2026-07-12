@@ -154,6 +154,8 @@ export interface PairEvidence {
   effective_peak_type?: PeakType;
   has_b_roll_candidate: boolean;
   same_asset_gap_us?: number;
+  visual_coherence_score?: number;
+  visual_transition_hint?: "dissolve" | "hard_cut";
   bgm_snap_distance_frames?: number;
   duration_mode: "strict" | "guide";
 }

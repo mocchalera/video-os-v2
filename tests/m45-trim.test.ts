@@ -56,6 +56,28 @@ describe("Adaptive Trim", () => {
     expect(result.src_out_us).toBe(6_000_000);
   });
 
+  it("uses clip-level trim plan ranges directly", () => {
+    const c = makeCandidate();
+    const result = resolveTrim(c, {
+      ...defaultCtx,
+      trimPolicy: { mode: "adaptive" },
+      clipTrimPlan: {
+        segment_id: "SEG_001",
+        best_in_us: 2_000_000,
+        best_out_us: 4_500_000,
+        rationale: "using event: speaker smiles (2-4.5s) - matches warmth in brief",
+        technique: "peak_hold",
+        source: "marlin_event",
+        event_id: "MEV_AST_001_0001",
+      },
+    });
+
+    expect(result.mode).toBe("clip_trim_plan");
+    expect(result.src_in_us).toBe(2_000_000);
+    expect(result.src_out_us).toBe(4_500_000);
+    expect(result.clip_trim_rationale).toContain("speaker smiles");
+  });
+
   it("falls back to midpoint when no center hint", () => {
     const c = makeCandidate({
       trim_hint: { preferred_duration_us: 2_000_000 },
@@ -148,5 +170,38 @@ describe("Adaptive Trim", () => {
     });
     expect(result.src_in_us).toBeGreaterThanOrEqual(2_000_000);
     expect(result.src_out_us).toBeLessThanOrEqual(6_000_000);
+  });
+
+  it("applies out_point peak_hold to extend the exit past the center", () => {
+    const c = makeCandidate({
+      trim_hint: { source_center_us: 5_000_000, preferred_duration_us: 1_000_000 },
+    });
+    const result = resolveTrim(c, {
+      ...defaultCtx,
+      trimPolicy: { mode: "adaptive" },
+      craftOutPoint: "peak_hold",
+    });
+
+    expect(result.craft_out_point).toBe("peak_hold");
+    expect(result.src_in_us).toBe(4_500_000);
+    expect(result.src_out_us).toBe(5_750_000);
+  });
+
+  it("applies out_point cut_on_action by ending at the action center", () => {
+    const c = makeCandidate({
+      trim_hint: {
+        source_center_us: 5_000_000,
+        preferred_duration_us: 2_000_000,
+        peak_type: "action_peak",
+      },
+    });
+    const result = resolveTrim(c, {
+      ...defaultCtx,
+      trimPolicy: { mode: "adaptive" },
+      craftOutPoint: "cut_on_action",
+    });
+
+    expect(result.craft_out_point).toBe("cut_on_action");
+    expect(result.src_out_us).toBe(5_000_000);
   });
 });

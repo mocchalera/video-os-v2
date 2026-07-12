@@ -74,6 +74,7 @@ describe("init-project CLI", () => {
     expect(fs.existsSync(path.join(result.projectDir, "03_analysis"))).toBe(true);
     expect(fs.existsSync(path.join(result.projectDir, "07_export"))).toBe(true);
     expect(fs.existsSync(path.join(result.projectDir, "07_package"))).toBe(true);
+    expect(fs.existsSync(path.join(result.projectDir, "09_output"))).toBe(true);
     expect(result.nextStepCommand).toContain("scripts/analyze.ts");
     expect(result.nextStepCommand).toContain("projects/onboarding-smoke/02_media/source/*");
 

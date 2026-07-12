@@ -1,0 +1,824 @@
+import { useEffect, useRef, useMemo, useState } from 'react';
+import ErrorBoundary from './ErrorBoundary';
+import type { EditorMode } from './HeaderBar';
+import type {
+  AudioPolicy,
+  Clip,
+  EditorLane,
+  ReviewPatchResponse,
+  ReviewReportResponse,
+  SelectionState,
+  SnapTarget,
+  TimelineIR,
+  TrackHeaderState,
+  TrimMode,
+  TrimTarget,
+} from '../types';
+import type { ClipOverlay } from './ClipBlock';
+import type { AlternativeCandidate } from '../hooks/useAlternatives';
+import type { BlueprintResponse } from '../hooks/useReview';
+import type { ClipDiff } from '../hooks/useDiff';
+import type { SourceAsset } from '../hooks/useSourcePlayback';
+import AiDecisionPanel from './AiDecisionPanel';
+import AlternativesPanel from './AlternativesPanel';
+import DiffPanel from './DiffPanel';
+import PatchPanel from './PatchPanel';
+import PropertyPanel from './PropertyPanel';
+import ReviewOverlay from './ReviewOverlay';
+import SourceMonitor from './SourceMonitor';
+import ProgramMonitor from './ProgramMonitor';
+import TrimModeToolbar from './TrimModeToolbar';
+import TrimPreviewOverlay from './TrimPreviewOverlay';
+import Timeline, { type TimelineHandle } from './Timeline';
+import { MIN_ZOOM, MAX_ZOOM, getCaptionText } from '../utils/editor-helpers';
+import { DEFAULT_CAPTION_STYLE_PRESET, buildCssCaptionStyle } from '@shared/caption-style-tokens';
+import type { CaptionStylePreset } from '@shared/caption-style-tokens';
+
+/** Minimal cue type matching RenderTextCue for CSS fallback caption parity. */
+export interface CaptionCue {
+  id: string;
+  text: string;
+  startFrame: number;
+  endFrame: number;
+}
+
+export type BottomTab = 'timeline' | 'patches' | 'alternatives' | 'diff';
+
+function useCompactEditorGrid(): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 760px)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(max-width: 760px)');
+    const onChange = () => setMatches(media.matches);
+    onChange();
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+
+  return matches;
+}
+
+interface EditorLayoutProps {
+  mode: EditorMode;
+  // Active monitor (lifted to App.tsx)
+  activeMonitor: 'source' | 'program';
+  onSetActiveMonitor: (monitor: 'source' | 'program') => void;
+  // Playback
+  playback: {
+    videoRef: React.RefObject<HTMLVideoElement | null>;
+    exactVideoRef: React.RefObject<HTMLVideoElement | null>;
+    previewMode: import('../types').PreviewMode;
+    previewArtifact: { previewUrl: string | null };
+    renderStatus: 'idle' | 'rendering' | 'ready' | 'error';
+    isPlaying: boolean;
+    isBuffering: boolean;
+    isGap: boolean;
+    error: string | null;
+    playheadFrame: number;
+    previewStale: boolean;
+    playbackContract: import('../types').PlaybackContractStatusResponse | null;
+    seekToFrame: (frame: number) => void;
+    handleVideoLoadedMetadata: () => void;
+    handleVideoCanPlayThrough: () => void;
+    handleVideoTimeUpdate: () => void;
+    handleVideoWaiting: () => void;
+    handleVideoPlaying: () => void;
+    handleVideoStalled: () => void;
+    handleVideoEnded: () => void;
+    handleVideoError: () => void;
+    handleExactVideoTimeUpdate: () => void;
+    handleExactVideoLoadedMetadata: () => void;
+    handleExactVideoEnded: () => void;
+    handleExactVideoError: () => void;
+    togglePlayback: () => Promise<void>;
+    shuttleSpeed: number;
+    markIn: number | null;
+    markOut: number | null;
+  };
+  // Source playback
+  sourcePlayback: {
+    videoRef: React.RefObject<HTMLVideoElement | null>;
+    currentAsset: SourceAsset | null;
+    positionFrame: number;
+    durationFrames: number;
+    isPlaying: boolean;
+    isBuffering: boolean;
+    markInFrame: number | null;
+    markOutFrame: number | null;
+    shuttleSpeed: number;
+    error: string | null;
+    handleVideoLoadedMetadata: () => void;
+    handleVideoCanPlayThrough: () => void;
+    handleVideoTimeUpdate: () => void;
+    handleVideoWaiting: () => void;
+    handleVideoPlaying: () => void;
+    handleVideoEnded: () => void;
+    handleVideoError: () => void;
+    togglePlayback: () => void;
+  };
+  transportTimecode: string;
+  // Timeline
+  timeline: TimelineIR | null;
+  fps: number;
+  lanes: EditorLane[];
+  totalFrames: number;
+  zoom: number;
+  onZoomChange: (z: number) => void;
+  projectId: string | null;
+  // Selection (multi-select)
+  selectedClipId: string | null;
+  selectedClipIds: Set<string>;
+  selectedClip: Clip | null;
+  selectedTrackKind: SelectionState['trackKind'] | null;
+  onSelectClip: (
+    trackKind: SelectionState['trackKind'],
+    trackId: string,
+    clip: Clip,
+    event: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },
+  ) => void;
+  onClearSelection: () => void;
+  onMarqueeSelect: (items: SelectionState[]) => void;
+  // Trim
+  trimMode: TrimMode;
+  activeTrimTarget: TrimTarget | null;
+  isDragging: boolean;
+  trimDelta: number;
+  onSetTrimMode: (mode: TrimMode) => void;
+  onTrimBegin: (target: TrimTarget, opts?: { altKey?: boolean }) => void;
+  onTrimUpdate: (deltaFrames: number, opts?: { skipSnap?: boolean }) => void;
+  onTrimCommit: () => void;
+  // Track header state
+  trackStates: Record<string, TrackHeaderState>;
+  onToggleLock: (trackId: string) => void;
+  onToggleMute: (trackId: string) => void;
+  onToggleSolo: (trackId: string) => void;
+  onToggleSyncLock: (trackId: string) => void;
+  onCycleHeight: (trackId: string) => void;
+  // Snap
+  snapEnabled: boolean;
+  activeSnapGuide: SnapTarget | null;
+  // Inspector
+  onUpdateAudioNumber: (field: keyof AudioPolicy, value: number) => void;
+  onUpdateAudioBoolean: (field: keyof AudioPolicy, value: boolean) => void;
+  onUpdateCaptionText: (value: string) => void;
+  // Review
+  reviewReport: ReviewReportResponse | null;
+  reviewPatch: ReviewPatchResponse | null;
+  reviewBlueprint: BlueprintResponse | null;
+  // AI panels
+  dirty: boolean;
+  timelineRevision: string | null;
+  sessionBaselineRevision: string | null;
+  onApplyPatch: (indexes: number[]) => Promise<void>;
+  alternatives: AlternativeCandidate[];
+  alternativesLoading: boolean;
+  onSwapClip: (candidate: AlternativeCandidate) => void;
+  clipDiffs: ClipDiff[];
+  remoteDiffs?: ClipDiff[] | null;
+  remoteCompareRevision?: string | null;
+  aiJobIsRunning: boolean;
+  // Export
+  onExportRender: () => void;
+  // Track targets for patch matrix display (clickable)
+  videoTarget: string;
+  audioTargets: Set<string>;
+  videoTrackIds?: string[];
+  audioTrackIds?: string[];
+  onToggleVideoTarget?: (trackId: string) => void;
+  onToggleAudioTarget?: (trackId: string) => void;
+  // Alternatives preview
+  onPreviewAlternative?: (candidate: AlternativeCandidate) => void;
+  // Bottom tab control (for Compare First in MergeDialog)
+  bottomTab: BottomTab;
+  onBottomTabChange: (tab: BottomTab) => void;
+  /** Jump to a clip on the timeline (select + scroll) */
+  onJumpToClip?: (clipId: string) => void;
+  /** Confidence filter for overlays */
+  confidenceFilter?: 'all' | 'low' | 'warnings';
+  onConfidenceFilterChange?: (filter: 'all' | 'low' | 'warnings') => void;
+  /** Patch preview */
+  onPreviewPatch?: (filteredIndex: number) => void;
+  previewingPatchIndex?: number | null;
+  /**
+   * MAJOR-2: Resolved caption cues from RenderSpec.text.speechCaptions.
+   * When provided, CSS fallback uses these instead of timeline.tracks.caption
+   * to ensure SRT and CSS caption text come from the same source.
+   */
+  captionCues?: CaptionCue[];
+  /** Resolved caption style preset from RenderSpec (MINOR-1) */
+  captionStylePreset?: CaptionStylePreset;
+}
+
+export default function EditorLayout({
+  mode,
+  activeMonitor,
+  onSetActiveMonitor,
+  playback,
+  sourcePlayback,
+  transportTimecode,
+  timeline,
+  fps,
+  lanes,
+  totalFrames,
+  zoom,
+  onZoomChange,
+  projectId,
+  selectedClipId,
+  selectedClipIds,
+  selectedClip,
+  selectedTrackKind,
+  onSelectClip,
+  onClearSelection,
+  onMarqueeSelect,
+  trimMode,
+  activeTrimTarget,
+  isDragging,
+  trimDelta,
+  onSetTrimMode,
+  onTrimBegin,
+  onTrimUpdate,
+  onTrimCommit,
+  trackStates,
+  onToggleLock,
+  onToggleMute,
+  onToggleSolo,
+  onToggleSyncLock,
+  onCycleHeight,
+  snapEnabled,
+  activeSnapGuide,
+  onUpdateAudioNumber,
+  onUpdateAudioBoolean,
+  onUpdateCaptionText,
+  reviewReport,
+  reviewPatch,
+  reviewBlueprint,
+  dirty,
+  timelineRevision,
+  sessionBaselineRevision,
+  onApplyPatch,
+  alternatives,
+  alternativesLoading,
+  onSwapClip,
+  clipDiffs,
+  remoteDiffs,
+  remoteCompareRevision,
+  aiJobIsRunning,
+  onExportRender,
+  videoTarget,
+  audioTargets,
+  videoTrackIds,
+  audioTrackIds,
+  onToggleVideoTarget,
+  onToggleAudioTarget,
+  onPreviewAlternative,
+  bottomTab,
+  onBottomTabChange,
+  onJumpToClip,
+  confidenceFilter = 'all',
+  onConfidenceFilterChange,
+  onPreviewPatch,
+  previewingPatchIndex,
+  captionCues,
+  captionStylePreset,
+}: EditorLayoutProps) {
+
+  const timelineRef = useRef<TimelineHandle>(null);
+
+  // Compute clip overlays from review data
+  const clipOverlays = useMemo(() => {
+    const map = new Map<string, ClipOverlay>();
+
+    function ensure(clipId: string): ClipOverlay {
+      let entry = map.get(clipId);
+      if (!entry) {
+        entry = { weaknesses: [], warnings: [], patchOps: [] };
+        map.set(clipId, entry);
+      }
+      return entry;
+    }
+
+    const weaknesses = reviewReport?.data?.weaknesses ?? [];
+    for (const w of weaknesses) {
+      if (w.clip_id) ensure(w.clip_id).weaknesses.push(w);
+    }
+
+    const warnings = reviewReport?.data?.warnings ?? [];
+    for (const w of warnings) {
+      if (w.clip_id) ensure(w.clip_id).warnings.push(w);
+    }
+
+    const patchOps = reviewPatch?.safety?.filtered_patch?.operations
+      ?? reviewPatch?.data?.operations
+      ?? [];
+    for (const op of patchOps) {
+      if (op.target_clip_id) ensure(op.target_clip_id).patchOps.push(op);
+    }
+
+    return map;
+  }, [reviewReport, reviewPatch]);
+
+  // Wrap onJumpToClip to also scroll the timeline viewport
+  const handleJumpToClip = useMemo(() => {
+    if (!onJumpToClip) return undefined;
+    return (clipId: string) => {
+      onJumpToClip(clipId);
+      // Find the clip's frame to scroll to
+      if (timeline) {
+        for (const kind of ['video', 'audio', 'caption'] as const) {
+          for (const track of timeline.tracks[kind] ?? []) {
+            const clip = track.clips.find(c => c.clip_id === clipId);
+            if (clip) {
+              timelineRef.current?.scrollToFrame(clip.timeline_in_frame);
+              return;
+            }
+          }
+        }
+      }
+    };
+  }, [onJumpToClip, timeline]);
+
+  const totalTrackCount = timeline
+    ? timeline.tracks.video.length +
+      timeline.tracks.audio.length +
+      (timeline.tracks.caption?.length ?? 0)
+    : 0;
+  // Phase 2: Compute current video clip's zoom for CSS approximation in source_approx mode.
+  // Respects mute/solo state so the zoom matches the clip actually playing (same logic as usePlayback).
+  const activeClipZoom = useMemo(() => {
+    if (!timeline) return 1;
+    const hasVideoSolo = timeline.tracks.video.some(
+      (track) => trackStates[track.track_id]?.solo,
+    );
+    for (const track of timeline.tracks.video) {
+      const state = trackStates[track.track_id];
+      if (state) {
+        if (hasVideoSolo && !state.solo) continue;
+        if (!hasVideoSolo && state.muted) continue;
+      }
+      for (const clip of track.clips) {
+        const clipStart = clip.timeline_in_frame;
+        const clipEnd = clipStart + clip.timeline_duration_frames;
+        if (clipStart <= playback.playheadFrame && playback.playheadFrame < clipEnd) {
+          return typeof clip.metadata?.zoom === 'number' ? clip.metadata.zoom : 1;
+        }
+      }
+    }
+    return 1;
+  }, [timeline, playback.playheadFrame, trackStates]);
+
+  // MAJOR-2: Use RenderSpec-resolved captionCues when available so CSS
+  // fallback shows the same text as the SRT burn-in preview.
+  const activeCaptionText = useMemo(() => {
+    // Always use captionCues (RenderSpec-resolved) to match SRT burn-in.
+    // No fallback to timeline.tracks.caption — cues must be provided via props.
+    if (!captionCues) return null;
+    for (const cue of captionCues) {
+      if (cue.startFrame <= playback.playheadFrame && playback.playheadFrame < cue.endFrame) {
+        return cue.text.length > 0 ? cue.text : null;
+      }
+    }
+    return null;
+  }, [captionCues, timeline, playback.playheadFrame]);
+  // MAJOR 5 + MINOR-1: Compute CSS caption style from resolved CaptionStylePreset
+  const resolvedPreset = captionStylePreset ?? DEFAULT_CAPTION_STYLE_PRESET;
+  const captionStyle = useMemo(() => {
+    if (!timeline) return null;
+    const seq = timeline.sequence;
+    return buildCssCaptionStyle(resolvedPreset, {
+      width: seq.width,
+      height: seq.height,
+      fps: seq.fps_num / (seq.fps_den || 1),
+    });
+  }, [timeline?.sequence?.width, timeline?.sequence?.height, timeline?.sequence?.fps_num, timeline?.sequence?.fps_den, resolvedPreset]);
+
+  const hiddenTrackCount = Math.max(0, totalTrackCount - lanes.length);
+  const zoomLabel = zoom >= 2 ? `${zoom.toFixed(1)} px/f` : `${zoom.toFixed(2)} px/f`;
+
+  const bottomTabs: { key: BottomTab; label: string; badge?: number }[] = [
+    { key: 'timeline', label: 'Assembly Dock' },
+    { key: 'patches', label: 'Patches', badge: reviewPatch?.data?.operations?.length },
+    { key: 'alternatives', label: 'Alternatives', badge: alternatives.length || undefined },
+    { key: 'diff', label: 'Diff', badge: clipDiffs.length || undefined },
+  ];
+
+  // Grid layout changes based on mode
+  const compactEditorGrid = useCompactEditorGrid();
+  const gridStyle = compactEditorGrid
+    ? mode === 'nle'
+      ? { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(150px, 0.75fr) minmax(190px, 1fr) minmax(150px, 0.75fr) minmax(260px, 1.3fr)' }
+      : { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(190px, 1fr) minmax(180px, 0.85fr) minmax(260px, 1.3fr)' }
+    : mode === 'nle'
+      ? { gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(260px, 320px)', gridTemplateRows: 'minmax(0, 2fr) minmax(0, 3fr)' }
+      : { gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 320px)', gridTemplateRows: 'minmax(0, 2fr) minmax(0, 3fr)' };
+
+  return (
+    <main className="min-h-0 flex-1 overflow-hidden">
+      <div className="grid h-full min-h-0 overflow-hidden panel-transition" style={gridStyle}>
+        {/* ── Row 1: Monitors + Right Panel ── */}
+
+        {/* Source Monitor (NLE Mode only) */}
+        {mode === 'nle' && (
+          <ErrorBoundary label="Source Monitor"><SourceMonitor
+            isActive={activeMonitor === 'source'}
+            onClick={() => onSetActiveMonitor('source')}
+            fps={fps}
+            videoRef={sourcePlayback.videoRef}
+            currentAsset={sourcePlayback.currentAsset}
+            positionFrame={sourcePlayback.positionFrame}
+            durationFrames={sourcePlayback.durationFrames}
+            isPlaying={sourcePlayback.isPlaying}
+            isBuffering={sourcePlayback.isBuffering}
+            markInFrame={sourcePlayback.markInFrame}
+            markOutFrame={sourcePlayback.markOutFrame}
+            shuttleSpeed={sourcePlayback.shuttleSpeed}
+            error={sourcePlayback.error}
+            onLoadedMetadata={sourcePlayback.handleVideoLoadedMetadata}
+            onCanPlayThrough={sourcePlayback.handleVideoCanPlayThrough}
+            onTimeUpdate={sourcePlayback.handleVideoTimeUpdate}
+            onWaiting={sourcePlayback.handleVideoWaiting}
+            onPlaying={sourcePlayback.handleVideoPlaying}
+            onEnded={sourcePlayback.handleVideoEnded}
+            onVideoError={sourcePlayback.handleVideoError}
+            onTogglePlayback={sourcePlayback.togglePlayback}
+            videoTarget={videoTarget}
+            audioTargets={audioTargets}
+            videoTrackIds={videoTrackIds}
+            audioTrackIds={audioTrackIds}
+            onToggleVideoTarget={onToggleVideoTarget}
+            onToggleAudioTarget={onToggleAudioTarget}
+          /></ErrorBoundary>
+        )}
+
+        {/* Program Monitor + Trim Preview Overlay */}
+        <ErrorBoundary label="Program Monitor"><div className="relative h-full min-h-0 overflow-hidden">
+          <ProgramMonitor
+            isActive={mode === 'ai' || activeMonitor === 'program'}
+            onClick={() => onSetActiveMonitor('program')}
+            playback={playback}
+            fps={fps}
+            markIn={playback.markIn}
+            markOut={playback.markOut}
+            transportTimecode={transportTimecode}
+            currentFrame={playback.playheadFrame}
+            captionText={activeCaptionText}
+            captionStyle={captionStyle}
+            clipZoom={activeClipZoom}
+            onExportRender={onExportRender}
+          />
+          <TrimPreviewOverlay
+            trimMode={trimMode}
+            activeTrimTarget={activeTrimTarget}
+            isDragging={isDragging}
+            trimDelta={trimDelta}
+            currentFrame={playback.playheadFrame}
+            snapTargetLabel={activeSnapGuide?.label ?? null}
+          />
+        </div></ErrorBoundary>
+
+        {/* Right Panel: Inspector (NLE) or AI Workspace (AI) */}
+        <ErrorBoundary label={mode === 'nle' ? 'Inspector' : 'AI Workspace'}><section className="min-h-0 overflow-hidden">
+          {mode === 'nle' ? (
+            <PropertyPanel
+              clip={selectedClip}
+              trackKind={selectedTrackKind}
+              fps={fps}
+              reviewReport={reviewReport}
+              blueprint={reviewBlueprint}
+              onUpdateAudioNumber={onUpdateAudioNumber}
+              onUpdateAudioBoolean={onUpdateAudioBoolean}
+              onUpdateCaptionText={onUpdateCaptionText}
+              captionStylePreset={resolvedPreset}
+            />
+          ) : (
+            <AiWorkspace
+              selectedClip={selectedClip}
+              selectedTrackKind={selectedTrackKind}
+              fps={fps}
+              reviewReport={reviewReport}
+              reviewPatch={reviewPatch}
+              reviewBlueprint={reviewBlueprint}
+              dirty={dirty}
+              timelineRevision={timelineRevision}
+              onApplyPatch={onApplyPatch}
+              alternatives={alternatives}
+              alternativesLoading={alternativesLoading}
+              selectedClipId={selectedClipId}
+              onSwapClip={onSwapClip}
+              clipDiffs={clipDiffs}
+              remoteDiffs={remoteDiffs}
+              remoteCompareRevision={remoteCompareRevision}
+              sessionBaselineRevision={sessionBaselineRevision}
+              onUpdateAudioNumber={onUpdateAudioNumber}
+              onUpdateAudioBoolean={onUpdateAudioBoolean}
+              onUpdateCaptionText={onUpdateCaptionText}
+              onPreviewAlternative={onPreviewAlternative}
+              onJumpToClip={handleJumpToClip}
+              onPreviewPatch={onPreviewPatch}
+              previewingPatchIndex={previewingPatchIndex}
+              captionStylePreset={resolvedPreset}
+            />
+          )}
+        </section></ErrorBoundary>
+
+        {/* ── Row 2: Bottom Dock (full width) ── */}
+        <section
+          className="flex min-h-0 flex-col overflow-hidden border-t border-white/[0.06]"
+          style={{ gridColumn: '1 / -1' }}
+        >
+          {/* Tab bar */}
+          <div className="flex shrink-0 items-center gap-3 border-b border-white/[0.06] px-3 py-1.5">
+            <div className="flex items-center gap-1">
+              {bottomTabs.map(({ key, label, badge }, i) => (
+                <span key={key} className="flex items-center">
+                  {i > 0 && <span className="text-[color:var(--text-subtle)]">/</span>}
+                  <button
+                    type="button"
+                    className={`px-2 py-0.5 text-[13px] font-semibold transition ${
+                      bottomTab === key
+                        ? 'text-white'
+                        : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
+                    }`}
+                    onClick={() => onBottomTabChange(key)}
+                  >
+                    {label}
+                    {badge ? (
+                      <span className="ml-1.5 rounded-sm bg-[var(--accent)]/20 px-1 py-px font-mono text-[9px] text-[var(--accent)]">
+                        {badge}
+                      </span>
+                    ) : null}
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            <span className="font-mono text-[10px] text-[color:var(--text-subtle)]">
+              {lanes.length}T{hiddenTrackCount > 0 ? ` +${hiddenTrackCount}h` : ''} · {timeline?.markers?.length ?? 0}M
+            </span>
+
+            <div className="flex-1" />
+
+            <label className="flex items-center gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[color:var(--text-subtle)]">
+                Zoom
+              </span>
+              <input
+                className="range-input w-24"
+                type="range"
+                min={MIN_ZOOM}
+                max={MAX_ZOOM}
+                step={0.25}
+                value={zoom}
+                onChange={(e) => onZoomChange(Number(e.target.value))}
+              />
+              <span className="font-mono text-[10px] tabular-nums text-neutral-300">
+                {zoomLabel}
+              </span>
+            </label>
+          </div>
+
+          {/* Confidence filter (visible when timeline tab is active) */}
+          {bottomTab === 'timeline' && onConfidenceFilterChange && (
+            <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.04] px-3 py-1">
+              <span className="mr-1 font-mono text-[9px] uppercase tracking-[0.15em] text-[color:var(--text-subtle)]">
+                Filter
+              </span>
+              {(['all', 'low', 'warnings'] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`px-2 py-0.5 text-[10px] font-medium transition ${
+                    confidenceFilter === f
+                      ? 'text-[var(--accent)]'
+                      : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
+                  }`}
+                  onClick={() => onConfidenceFilterChange(f)}
+                >
+                  {f === 'all' ? 'All' : f === 'low' ? 'Low Confidence' : 'Warnings'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Tab content */}
+          <ErrorBoundary label="Bottom Dock">
+          <div key={bottomTab} className={bottomTab !== 'timeline' ? 'min-h-0 flex-1 overflow-hidden tab-fade-enter' : 'min-h-0 flex-1 overflow-hidden'}>
+          {bottomTab === 'timeline' ? (
+            <div className="min-h-0 h-full flex flex-col">
+              <TrimModeToolbar trimMode={trimMode} onSetTrimMode={onSetTrimMode} />
+              <ReviewOverlay
+                reviewReport={reviewReport}
+                pxPerFrame={zoom}
+                totalFrames={totalFrames}
+                viewportWidth={800}
+              />
+              <div className="min-h-0 flex-1">
+                <Timeline
+                  ref={timelineRef}
+                  lanes={lanes}
+                  markers={timeline?.markers ?? []}
+                  fps={fps}
+                  totalFrames={totalFrames}
+                  zoom={zoom}
+                  playheadFrame={playback.playheadFrame}
+                  selectedClipIds={selectedClipIds}
+                  clipOverlays={clipOverlays}
+                  dropFrame={timeline?.sequence?.timecode_format === 'DF'}
+                  projectId={projectId}
+                  trimMode={trimMode}
+                  trackStates={trackStates}
+                  onToggleLock={onToggleLock}
+                  onToggleMute={onToggleMute}
+                  onToggleSolo={onToggleSolo}
+                  onToggleSyncLock={onToggleSyncLock}
+                  onCycleHeight={onCycleHeight}
+                  snapEnabled={snapEnabled}
+                  activeSnapGuide={activeSnapGuide}
+                  onZoomChange={onZoomChange}
+                  onSeek={playback.seekToFrame}
+                  onClearSelection={onClearSelection}
+                  onSelectClip={onSelectClip}
+                  onTrimBegin={onTrimBegin}
+                  onTrimUpdate={onTrimUpdate}
+                  onTrimCommit={onTrimCommit}
+                  onMarqueeSelect={onMarqueeSelect}
+                  markIn={playback.markIn}
+                  markOut={playback.markOut}
+                  confidenceFilter={confidenceFilter}
+                  editorMode={mode}
+                />
+              </div>
+            </div>
+          ) : bottomTab === 'patches' ? (
+            <PatchPanel
+              patchData={reviewPatch}
+              dirty={dirty}
+              timelineRevision={timelineRevision}
+              onApply={onApplyPatch}
+              onPreview={onPreviewPatch}
+              previewingIndex={previewingPatchIndex}
+            />
+          ) : bottomTab === 'alternatives' ? (
+            <AlternativesPanel
+              clipId={selectedClipId}
+              alternatives={alternatives}
+              loading={alternativesLoading}
+              onSwap={onSwapClip}
+              onPreview={onPreviewAlternative}
+            />
+          ) : (
+            <DiffPanel
+              diffs={clipDiffs}
+              baselineRevision={sessionBaselineRevision}
+              remoteDiffs={remoteDiffs}
+              remoteRevision={remoteCompareRevision}
+              onJumpToClip={handleJumpToClip}
+            />
+          )}
+          </div>
+          </ErrorBoundary>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+// ── AI Workspace (right dock in AI mode) ─────────────────────────────
+
+interface AiWorkspaceProps {
+  selectedClip: Clip | null;
+  selectedTrackKind: SelectionState['trackKind'] | null;
+  fps: number;
+  reviewReport: ReviewReportResponse | null;
+  reviewPatch: ReviewPatchResponse | null;
+  reviewBlueprint: BlueprintResponse | null;
+  dirty: boolean;
+  timelineRevision: string | null;
+  onApplyPatch: (indexes: number[]) => Promise<void>;
+  alternatives: AlternativeCandidate[];
+  alternativesLoading: boolean;
+  selectedClipId: string | null;
+  onSwapClip: (candidate: AlternativeCandidate) => void;
+  clipDiffs: ClipDiff[];
+  remoteDiffs?: ClipDiff[] | null;
+  remoteCompareRevision?: string | null;
+  sessionBaselineRevision: string | null;
+  onUpdateAudioNumber: (field: keyof AudioPolicy, value: number) => void;
+  onUpdateAudioBoolean: (field: keyof AudioPolicy, value: boolean) => void;
+  onUpdateCaptionText: (value: string) => void;
+  onPreviewAlternative?: (candidate: AlternativeCandidate) => void;
+  onJumpToClip?: (clipId: string) => void;
+  onPreviewPatch?: (filteredIndex: number) => void;
+  previewingPatchIndex?: number | null;
+  captionStylePreset?: CaptionStylePreset;
+}
+
+function AiWorkspace({
+  selectedClip,
+  selectedTrackKind,
+  fps,
+  reviewReport,
+  reviewPatch,
+  reviewBlueprint,
+  dirty,
+  timelineRevision,
+  onApplyPatch,
+  alternatives,
+  alternativesLoading,
+  selectedClipId,
+  onSwapClip,
+  clipDiffs,
+  remoteDiffs,
+  remoteCompareRevision,
+  sessionBaselineRevision,
+  onUpdateAudioNumber,
+  onUpdateAudioBoolean,
+  onUpdateCaptionText,
+  onPreviewAlternative,
+  onJumpToClip,
+  onPreviewPatch,
+  previewingPatchIndex,
+  captionStylePreset,
+}: AiWorkspaceProps) {
+  const [aiTab, setAiTab] = useState<'decision' | 'patches' | 'alternatives' | 'diff' | 'inspector'>('decision');
+
+  const tabs: { key: typeof aiTab; label: string }[] = [
+    { key: 'decision', label: 'Decision' },
+    { key: 'patches', label: 'Patches' },
+    { key: 'alternatives', label: 'Alts' },
+    { key: 'diff', label: 'Diff' },
+    { key: 'inspector', label: 'Inspector' },
+  ];
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center gap-0.5 border-b border-white/[0.06] px-2 py-1">
+        {tabs.map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            className={`px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.1em] transition ${
+              aiTab === key
+                ? 'text-[var(--accent)] ai-tab-active'
+                : 'text-[color:var(--text-subtle)] hover:text-neutral-300'
+            }`}
+            onClick={() => setAiTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div key={aiTab} className="min-h-0 flex-1 overflow-hidden tab-fade-enter">
+        {aiTab === 'decision' ? (
+          <AiDecisionPanel
+            clip={selectedClip}
+            reviewReport={reviewReport}
+            blueprint={reviewBlueprint}
+          />
+        ) : aiTab === 'patches' ? (
+          <PatchPanel
+            patchData={reviewPatch}
+            dirty={dirty}
+            timelineRevision={timelineRevision}
+            onApply={onApplyPatch}
+            onPreview={onPreviewPatch}
+            previewingIndex={previewingPatchIndex}
+          />
+        ) : aiTab === 'alternatives' ? (
+          <AlternativesPanel
+            clipId={selectedClipId}
+            alternatives={alternatives}
+            loading={alternativesLoading}
+            onSwap={onSwapClip}
+            onPreview={onPreviewAlternative}
+            enableStagedReplace
+            currentClip={selectedClip}
+          />
+        ) : aiTab === 'diff' ? (
+          <DiffPanel
+            diffs={clipDiffs}
+            baselineRevision={sessionBaselineRevision}
+            remoteDiffs={remoteDiffs}
+            remoteRevision={remoteCompareRevision}
+            onJumpToClip={onJumpToClip}
+          />
+        ) : (
+          <PropertyPanel
+            clip={selectedClip}
+            trackKind={selectedTrackKind}
+            fps={fps}
+            reviewReport={reviewReport}
+            blueprint={reviewBlueprint}
+            onUpdateAudioNumber={onUpdateAudioNumber}
+            onUpdateAudioBoolean={onUpdateAudioBoolean}
+            onUpdateCaptionText={onUpdateCaptionText}
+            captionStylePreset={captionStylePreset}
+          />
+        )}
+      </div>
+    </div>
+  );
+}

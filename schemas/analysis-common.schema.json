@@ -10,8 +10,25 @@
       "properties": {
         "score": { "type": "number", "minimum": 0, "maximum": 1 },
         "source": { "type": "string", "minLength": 1 },
-        "status": { "type": "string", "minLength": 1 },
-        "label": { "type": "string" }
+        "status": {
+          "type": "string",
+          "enum": ["raw", "calibrated", "human_verified", "low_signal", "unsupported", "ready", "partial", "confirmed", "provisional", "skipped"]
+        },
+        "label": { "type": "string" },
+        "calibration_model_id": {
+          "type": ["string", "null"],
+          "pattern": "^CALMOD_[A-Za-z0-9_-]+$"
+        },
+        "calibrated_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "confidence_bucket": {
+          "type": ["string", "null"],
+          "enum": ["very_low", "low", "medium", "high", "very_high", null]
+        },
+        "expected_error_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "eval_set_id": {
+          "type": ["string", "null"],
+          "pattern": "^EVALSET_[A-Za-z0-9_-]+$"
+        }
       },
       "additionalProperties": false
     },
@@ -26,8 +43,11 @@
         "request_hash": { "type": "string", "minLength": 1 },
         "model_alias": { "type": "string" },
         "model_snapshot": { "type": "string" },
+        "prompt_template_id": { "type": "string" },
         "prompt_hash": { "type": "string" },
         "response_format": { "type": "string" },
+        "runtime": { "type": "string" },
+        "skipped_reason": { "type": "string" },
         "chunking_strategy": { "type": "string" },
         "ffmpeg_version": { "type": "string" },
         "provider_request_id": { "type": "string" }

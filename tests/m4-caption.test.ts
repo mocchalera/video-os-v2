@@ -656,7 +656,7 @@ describe("Caption Approval", () => {
     expect(clip.clip_id).toBe("SC_0001");
     expect(clip.segment_id).toBe("SG_001");
     expect(clip.asset_id).toBe("A_001");
-    expect(clip.kind).toBe("caption");
+    expect(clip.kind).toBeUndefined();
     expect(clip.role).toBe("dialogue");
     expect(clip.motivation).toBe("caption");
     expect(clip.timeline_in_frame).toBe(0);
@@ -686,7 +686,7 @@ describe("Caption Approval", () => {
     expect(clip.clip_id).toBe("OVL_001");
     expect(clip.segment_id).toBe("TXT_OVL_001");
     expect(clip.asset_id).toBe("__overlay__");
-    expect(clip.kind).toBe("overlay");
+    expect(clip.kind).toBeUndefined();
     expect(clip.role).toBe("title");
     expect(clip.motivation).toBe("overlay");
     expect(clip.timeline_in_frame).toBe(72);
@@ -711,6 +711,17 @@ describe("Caption Approval", () => {
     // Specifically, no caption or overlay tracks should have been added
     expect((timeline as any).tracks.caption).toBeUndefined();
     expect((timeline as any).tracks.overlay).toBeUndefined();
+  });
+
+  it("replaces existing C1 and O1 tracks when captions are projected again", () => {
+    const source = mockCaptionSourceWithOverlays();
+    const approval = createDraftApproval(source, "editor@test.com");
+    const once = projectCaptionsToTimeline(mockTimeline(), approval, 24);
+
+    const twice = projectCaptionsToTimeline(once, approval, 24);
+
+    expect(twice.tracks.caption.filter((track: { track_id: string }) => track.track_id === "C1")).toHaveLength(1);
+    expect(twice.tracks.overlay.filter((track: { track_id: string }) => track.track_id === "O1")).toHaveLength(1);
   });
 
   it("produces empty tracks when there are no captions or overlays", () => {

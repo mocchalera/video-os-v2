@@ -11,6 +11,17 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { resolvePolicy } from "../policy-resolver.js";
 import { buildSchemaVariant, finalizeViolations } from "./profiles.js";
+import {
+  computeNormalizedJsonHash,
+  validateAnalysisCoverageReport,
+  validateSourceMediaManifest,
+} from "../artifacts/p1-manifest-coverage.js";
+import {
+  validateAudioStoryGraph,
+} from "../artifacts/p2-audio-story-graph.js";
+import {
+  validateContinuityGraph,
+} from "../artifacts/p3-continuity-graph.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -105,7 +116,7 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     schemaFile: "timeline-ir.schema.json",
     format: "json",
     optional: true,
-    runnerChecks: ["timeline_clip_times"],
+    runnerChecks: ["timeline_semantics"],
   },
   {
     artifactPath: "06_review/review_report.yaml",
@@ -122,8 +133,113 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "06_review/review_metrics.json",
+    schemaFile: "review-metrics.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "06_review/editorial_pipeline_status.json",
+    schemaFile: "editorial-pipeline-status.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["editorial_pipeline_status_blockers"],
+  },
+  {
+    artifactPath: "07_handoff/editor_annotations.json",
+    schemaFile: "editor-annotations.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/release_safety_report.yaml",
+    schemaFile: "release-safety-report.schema.json",
+    format: "yaml",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/qa-report.json",
+    schemaFile: "package-qa-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["package_qa_report_passed"],
+  },
+  {
+    artifactPath: "07_package/delivery_profiles/default.yaml",
+    schemaFile: "delivery-profile.schema.json",
+    format: "yaml",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "08_eval/confidence_calibration_report.json",
+    schemaFile: "confidence-calibration-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "08_eval/product_outcome_metrics.json",
+    schemaFile: "product-outcome-metrics.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "03_analysis/search/segment_search_index_manifest.json",
+    schemaFile: "segment-search-index-manifest.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "03_analysis/search/segment_text_index.json",
+    schemaFile: "segment-text-index.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "03_analysis/assets.json",
     schemaFile: "assets.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "02_media/source_media_manifest.json",
+    schemaFile: "source-media-manifest.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["source_manifest_fingerprint"],
+  },
+  {
+    artifactPath: "03_analysis/analysis_coverage_report.json",
+    schemaFile: "analysis-coverage-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["analysis_coverage_status"],
+  },
+  {
+    artifactPath: "03_analysis/audio_story_graph.json",
+    schemaFile: "audio-story-graph.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["audio_story_graph_integrity"],
+  },
+  {
+    artifactPath: "03_analysis/continuity_graph.json",
+    schemaFile: "continuity-graph.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["continuity_graph_integrity"],
+  },
+  {
+    artifactPath: "03_analysis/marlin_events.json",
+    schemaFile: "marlin-events.schema.json",
     format: "json",
     optional: true,
     runnerChecks: [],
@@ -288,14 +404,32 @@ export function validateProject(
         case "uncertainty_blocker_warning":
           runUncertaintyBlockerWarning(parsed.data, entry.artifactPath, violations);
           break;
-        case "timeline_clip_times":
-          checkTimelineClipTimes(parsed.data, entry.artifactPath, violations);
+        case "timeline_semantics":
+          runTimelineSemanticChecks(parsed.data, absProject, entry.artifactPath, violations);
           break;
         case "gate3_fatal_issues":
           runGate3FatalIssues(parsed.data, entry.artifactPath, violations);
           break;
+        case "editorial_pipeline_status_blockers":
+          runEditorialPipelineStatusBlockers(parsed.data, entry.artifactPath, violations);
+          break;
+        case "package_qa_report_passed":
+          runPackageQaReportPassed(parsed.data, entry.artifactPath, violations);
+          break;
         case "segment_src_time_check":
           runSegmentSrcTimeCheck(parsed.data, entry.artifactPath, violations);
+          break;
+        case "source_manifest_fingerprint":
+          runSourceManifestFingerprintCheck(parsed.data, entry.artifactPath, violations);
+          break;
+        case "analysis_coverage_status":
+          runAnalysisCoverageStatusCheck(parsed.data, entry.artifactPath, violations);
+          break;
+        case "audio_story_graph_integrity":
+          runAudioStoryGraphIntegrityCheck(parsed.data, absProject, entry.artifactPath, violations);
+          break;
+        case "continuity_graph_integrity":
+          runContinuityGraphIntegrityCheck(parsed.data, absProject, entry.artifactPath, violations);
           break;
       }
     }
@@ -340,7 +474,7 @@ export function validateProject(
           }
         }
 
-        checkTimelineClipTimes(parsed.data, relPath, violations);
+        runTimelineSemanticChecks(parsed.data, absProject, relPath, violations);
       }
     }
   }
@@ -370,6 +504,34 @@ export function validateProject(
         }
 
         runTranscriptPathInvariants(parsed.data, file, relPath, violations);
+      }
+    }
+  }
+
+  const deliveryProfilesDir = path.join(absProject, "07_package/delivery_profiles");
+  if (fs.existsSync(deliveryProfilesDir)) {
+    const validate = getValidator("delivery-profile.schema.json");
+    if (validate) {
+      for (const file of fs.readdirSync(deliveryProfilesDir).sort()) {
+        if (!/\.ya?ml$/i.test(file)) continue;
+        const relPath = `07_package/delivery_profiles/${file}`;
+        if (relPath === "07_package/delivery_profiles/default.yaml") continue;
+        const filePath = path.join(deliveryProfilesDir, file);
+        const parsed = safeParse(filePath, "yaml", violations, relPath);
+        if (!parsed.ok) continue;
+
+        const valid = validate(parsed.data);
+        artifactsChecked += 1;
+        if (!valid && validate.errors) {
+          for (const err of validate.errors) {
+            violations.push({
+              artifact: relPath,
+              rule: "schema",
+              message: `${err.instancePath || "/"} ${err.message}`,
+              details: err,
+            });
+          }
+        }
       }
     }
   }
@@ -579,6 +741,235 @@ function runGate3FatalIssues(
   });
 }
 
+interface TimelineClipRef {
+  trackType: string;
+  trackId: string;
+  clip: Record<string, unknown>;
+}
+
+function collectTimelineClips(timeline: Record<string, unknown>): TimelineClipRef[] {
+  const tracks = timeline?.tracks;
+  if (typeof tracks !== "object" || tracks === null) return [];
+
+  const refs: TimelineClipRef[] = [];
+  for (const [trackType, trackList] of Object.entries(tracks as Record<string, unknown>)) {
+    if (!Array.isArray(trackList)) continue;
+    for (const track of trackList) {
+      const trackDoc = track as Record<string, unknown>;
+      const trackId = typeof trackDoc.track_id === "string" ? trackDoc.track_id : "";
+      const clips = trackDoc?.clips;
+      if (!Array.isArray(clips)) continue;
+      for (const clip of clips) {
+        refs.push({ trackType, trackId, clip: clip as Record<string, unknown> });
+      }
+    }
+  }
+  return refs;
+}
+
+function runTimelineSemanticChecks(
+  data: unknown,
+  absProject: string,
+  relPath: string,
+  violations: Violation[],
+): void {
+  checkTimelineClipTimes(data, relPath, violations);
+
+  const timeline = data as Record<string, unknown>;
+  const tracks = timeline?.tracks;
+  if (typeof tracks !== "object" || tracks === null) return;
+
+  const seenTrackIds = new Set<string>();
+  for (const trackList of Object.values(tracks as Record<string, unknown>)) {
+    if (!Array.isArray(trackList)) continue;
+    for (const track of trackList) {
+      const trackDoc = track as Record<string, unknown>;
+      const trackId = trackDoc.track_id;
+      if (typeof trackId !== "string") continue;
+      if (seenTrackIds.has(trackId)) {
+        violations.push({
+          artifact: relPath,
+          rule: "timeline_track_id_unique",
+          message: `Duplicate track_id "${trackId}" in timeline`,
+        });
+      }
+      seenTrackIds.add(trackId);
+    }
+  }
+
+  const clipRefs = collectTimelineClips(timeline);
+  const seenClipIds = new Set<string>();
+  const sourceMapAssetIds = readSourceMapAssetIds(absProject);
+  let inferredDurationFrames = 0;
+
+  for (const { trackType, trackId, clip } of clipRefs) {
+    const clipId = clip.clip_id;
+    if (typeof clipId === "string") {
+      if (seenClipIds.has(clipId)) {
+        violations.push({
+          artifact: relPath,
+          rule: "timeline_clip_id_unique",
+          message: `Duplicate clip_id "${clipId}" in timeline`,
+        });
+      }
+      seenClipIds.add(clipId);
+    }
+
+    const assetId = clip.asset_id;
+    if (
+      sourceMapAssetIds.size > 0 &&
+      typeof assetId === "string" &&
+      !sourceMapAssetIds.has(assetId)
+    ) {
+      violations.push({
+        artifact: relPath,
+        rule: "timeline_asset_id_in_source_map",
+        message: `Track ${trackType}/${trackId} clip ${clipId}: asset_id "${assetId}" is not present in source_map.json`,
+      });
+    }
+
+    const timelineInFrame = clip.timeline_in_frame;
+    const timelineDurationFrames = clip.timeline_duration_frames;
+    if (typeof timelineInFrame === "number" && typeof timelineDurationFrames === "number") {
+      inferredDurationFrames = Math.max(inferredDurationFrames, timelineInFrame + timelineDurationFrames);
+    }
+
+    const captions = clip.captions;
+    if (Array.isArray(captions)) {
+      for (const caption of captions) {
+        const captionDoc = caption as Record<string, unknown>;
+        const inFrame = captionDoc.in_frame;
+        const outFrame = captionDoc.out_frame;
+        if (typeof inFrame === "number" && typeof outFrame === "number" && inFrame >= outFrame) {
+          violations.push({
+            artifact: relPath,
+            rule: "caption_bounds_valid",
+            message: `Clip ${clipId}: caption in_frame (${inFrame}) must be < out_frame (${outFrame})`,
+          });
+        }
+        if (
+          typeof inFrame === "number" &&
+          typeof outFrame === "number" &&
+          typeof timelineInFrame === "number" &&
+          typeof timelineDurationFrames === "number" &&
+          (
+            inFrame < timelineInFrame ||
+            outFrame > timelineInFrame + timelineDurationFrames
+          )
+        ) {
+          violations.push({
+            artifact: relPath,
+            rule: "caption_bounds_valid",
+            message: `Clip ${clipId}: caption range (${inFrame}-${outFrame}) must stay within clip timeline range (${timelineInFrame}-${timelineInFrame + timelineDurationFrames})`,
+          });
+        }
+      }
+    }
+  }
+
+  const transitions = timeline.transitions;
+  if (Array.isArray(transitions)) {
+    const seenTransitionIds = new Set<string>();
+    for (const transition of transitions) {
+      const transitionDoc = transition as Record<string, unknown>;
+      const transitionId = transitionDoc.transition_id;
+      if (typeof transitionId === "string") {
+        if (seenTransitionIds.has(transitionId)) {
+          violations.push({
+            artifact: relPath,
+            rule: "timeline_transition_id_unique",
+            message: `Duplicate transition_id "${transitionId}" in timeline`,
+          });
+        }
+        seenTransitionIds.add(transitionId);
+      }
+
+      for (const key of ["from_clip_id", "to_clip_id"] as const) {
+        const ref = transitionDoc[key];
+        if (typeof ref === "string" && !seenClipIds.has(ref)) {
+          violations.push({
+            artifact: relPath,
+            rule: "timeline_transition_clip_ref_exists",
+            message: `Transition ${transitionId}: ${key} "${ref}" does not reference an existing clip_id`,
+          });
+        }
+      }
+    }
+  }
+
+  const markers = timeline.markers;
+  if (Array.isArray(markers) && inferredDurationFrames > 0) {
+    for (const marker of markers) {
+      const markerDoc = marker as Record<string, unknown>;
+      const frame = markerDoc.frame;
+      if (typeof frame === "number" && frame > inferredDurationFrames) {
+        violations.push({
+          artifact: relPath,
+          rule: "marker_bounds_valid",
+          message: `Marker "${markerDoc.label ?? ""}" at frame ${frame} exceeds inferred timeline duration ${inferredDurationFrames}`,
+        });
+      }
+    }
+  }
+}
+
+function readSourceMapAssetIds(absProject: string): Set<string> {
+  const assetIds = new Set<string>();
+  for (const relPath of ["02_media/source_map.json", "03_analysis/source_map.json"]) {
+    const sourceMapPath = path.join(absProject, relPath);
+    if (!fs.existsSync(sourceMapPath)) continue;
+    const parsed = safeParse(sourceMapPath, "json", [], relPath);
+    if (!parsed.ok) continue;
+    const doc = parsed.data as Record<string, unknown>;
+    const items = doc.items;
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      const assetId = (item as Record<string, unknown>).asset_id;
+      if (typeof assetId === "string") assetIds.add(assetId);
+    }
+  }
+  return assetIds;
+}
+
+function runEditorialPipelineStatusBlockers(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const doc = data as Record<string, unknown>;
+  const blockingIssues = Array.isArray(doc.blocking_issues) ? doc.blocking_issues : [];
+  const finalRender = doc.final_render as Record<string, unknown> | undefined;
+  const packageState = doc.package as Record<string, unknown> | undefined;
+  if (
+    blockingIssues.length === 0 &&
+    finalRender?.status !== "blocked" &&
+    packageState?.status !== "blocked"
+  ) {
+    return;
+  }
+
+  violations.push({
+    artifact: artifactPath,
+    rule: "editorial_pipeline_status_blocked",
+    message: `Editorial pipeline status blocks final/package output (${blockingIssues.length} blocking issue(s))`,
+  });
+}
+
+function runPackageQaReportPassed(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const doc = data as Record<string, unknown>;
+  if (doc.passed !== false) return;
+
+  violations.push({
+    artifact: artifactPath,
+    rule: "package_qa_report_failed",
+    message: "Package QA report failed; final package must not be treated as approved",
+  });
+}
+
 function checkTimelineClipTimes(
   data: unknown,
   relPath: string,
@@ -666,3 +1057,94 @@ function runTranscriptPathInvariants(
   }
 }
 
+function runSourceManifestFingerprintCheck(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const result = validateSourceMediaManifest(data);
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "source_manifest_fingerprint",
+      message,
+    });
+  }
+}
+
+function runAnalysisCoverageStatusCheck(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const result = validateAnalysisCoverageReport(data);
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "analysis_coverage_status",
+      message,
+    });
+  }
+}
+
+function runAudioStoryGraphIntegrityCheck(
+  data: unknown,
+  absProject: string,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const manifestPath = path.join(absProject, "02_media/source_media_manifest.json");
+  let manifestAssetIds: string[] | undefined;
+  let sourceMediaManifestHash: string | undefined;
+  if (fs.existsSync(manifestPath)) {
+    const parsed = safeParse(manifestPath, "json", [], "02_media/source_media_manifest.json");
+    if (parsed.ok) {
+      const manifest = parsed.data as { items?: Array<{ asset_id?: string }>; provenance?: { hash_policy?: { excluded_fields?: string[] } } };
+      manifestAssetIds = (manifest.items ?? [])
+        .map((item) => item.asset_id)
+        .filter((assetId): assetId is string => typeof assetId === "string");
+      const excludedFields = manifest.provenance?.hash_policy?.excluded_fields ?? [];
+      sourceMediaManifestHash = computeNormalizedJsonHash(manifest, excludedFields);
+    }
+  }
+
+  const result = validateAudioStoryGraph(data, { manifestAssetIds, sourceMediaManifestHash });
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "audio_story_graph_integrity",
+      message,
+    });
+  }
+}
+
+function runContinuityGraphIntegrityCheck(
+  data: unknown,
+  absProject: string,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const manifestPath = path.join(absProject, "02_media/source_media_manifest.json");
+  let manifestAssetIds: string[] | undefined;
+  let sourceMediaManifestHash: string | undefined;
+  if (fs.existsSync(manifestPath)) {
+    const parsed = safeParse(manifestPath, "json", [], "02_media/source_media_manifest.json");
+    if (parsed.ok) {
+      const manifest = parsed.data as { items?: Array<{ asset_id?: string }>; provenance?: { hash_policy?: { excluded_fields?: string[] } } };
+      manifestAssetIds = (manifest.items ?? [])
+        .map((item) => item.asset_id)
+        .filter((assetId): assetId is string => typeof assetId === "string");
+      const excludedFields = manifest.provenance?.hash_policy?.excluded_fields ?? [];
+      sourceMediaManifestHash = computeNormalizedJsonHash(manifest, excludedFields);
+    }
+  }
+
+  const result = validateContinuityGraph(data, { manifestAssetIds, sourceMediaManifestHash });
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "continuity_graph_integrity",
+      message,
+    });
+  }
+}

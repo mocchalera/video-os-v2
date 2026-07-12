@@ -45,6 +45,13 @@ function createValidator(schemaFile: string) {
   return ajv.compile(schema);
 }
 
+function visualQAWaiverOptions() {
+  return {
+    allowUnverifiedVisual: true,
+    visualQaWaiverReason: "E2E fixture approves without local rendered visual QA.",
+  };
+}
+
 // ── Temp dir management ──────────────────────────────────────────
 
 const tempDirs: string[] = [];
@@ -82,6 +89,7 @@ function createE2EProject(name: string): string {
     path.resolve(SAMPLE_PROJECT, "03_analysis"),
     path.join(tmpDir, "03_analysis"),
   );
+  collapseAnalysisToSingleCoverageCluster(tmpDir);
 
   // Initialize project_state.yaml at intent_pending
   // (reconcile will self-heal to media_analyzed because analysis exists)
@@ -95,6 +103,18 @@ function createE2EProject(name: string): string {
 
   tempDirs.push(tmpDir);
   return tmpDir;
+}
+
+function collapseAnalysisToSingleCoverageCluster(projectDir: string): void {
+  const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+  const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+    items?: Array<Record<string, unknown>>;
+  };
+  segments.items = (segments.items ?? []).map((segment) => ({
+    ...segment,
+    tags: ["outdoor", "landscape", "e2e_shared_cluster"],
+  }));
+  fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
 }
 
 // ── Mock Agent Factories ─────────────────────────────────────────
@@ -149,60 +169,35 @@ function createE2EIntentAgent(): IntentAgent {
 function createE2ETriageAgent(): TriageAgent {
   return {
     async run(ctx) {
+      const segments = JSON.parse(
+        fs.readFileSync(path.join(ctx.projectDir, "03_analysis/segments.json"), "utf-8"),
+      ) as {
+        items?: Array<{
+          segment_id: string;
+          asset_id: string;
+          src_in_us: number;
+          src_out_us: number;
+          summary?: string;
+          tags?: string[];
+        }>;
+      };
+      const candidates = (segments.items ?? []).slice(0, 4);
       return {
         selects: {
           version: "1",
           project_id: ctx.projectId,
-          candidates: [
-            {
-              segment_id: "SEG_0001",
-              asset_id: "AST_001",
-              src_in_us: 0,
-              src_out_us: 5000000,
-              role: "hero" as const,
-              why_it_matches: "Morning hands detail — establishes intimate ritual",
-              risks: [],
-              confidence: 0.92,
-              evidence: ["visual_tag: hands"],
-              eligible_beats: ["B01"],
-            },
-            {
-              segment_id: "SEG_0002",
-              asset_id: "AST_001",
-              src_in_us: 5000000,
-              src_out_us: 10000000,
-              role: "dialogue" as const,
-              why_it_matches: "Spoken thesis about stillness",
-              risks: [],
-              confidence: 0.95,
-              evidence: ["transcript"],
-              eligible_beats: ["B02"],
-            },
-            {
-              segment_id: "SEG_0003",
-              asset_id: "AST_001",
-              src_in_us: 10000000,
-              src_out_us: 15000000,
-              role: "support" as const,
-              why_it_matches: "Trail movement builds forward motion",
-              risks: ["slight wind"],
-              confidence: 0.85,
-              evidence: ["contact_sheet"],
-              eligible_beats: ["B02", "B03"],
-            },
-            {
-              segment_id: "SEG_0004",
-              asset_id: "AST_001",
-              src_in_us: 15000000,
-              src_out_us: 20000000,
-              role: "texture" as const,
-              why_it_matches: "Breath and release for ending",
-              risks: [],
-              confidence: 0.88,
-              evidence: ["visual_tag: breath"],
-              eligible_beats: ["B03"],
-            },
-          ],
+          candidates: candidates.map((segment, index) => ({
+            segment_id: segment.segment_id,
+            asset_id: segment.asset_id,
+            src_in_us: segment.src_in_us,
+            src_out_us: segment.src_out_us,
+            role: index === 0 ? "hero" as const : index === 1 ? "texture" as const : index === 2 ? "dialogue" as const : "support" as const,
+            why_it_matches: `${segment.summary ?? segment.segment_id}; morning light; hands detail`,
+            risks: [],
+            confidence: 0.88,
+            evidence: ["morning light", "hands detail", ...(segment.tags ?? [])],
+            eligible_beats: ["B01", "B02", "B03"],
+          })),
         },
         confirmed: true,
       };
@@ -304,10 +299,10 @@ function createE2EReviewAgent(opts?: { withFatal?: boolean }): ReviewAgent {
         project_id: ctx.projectId,
         timeline_version: ctx.timelineVersion,
         summary_judgment: {
-          status: opts?.withFatal ? "blocked" : "needs_revision",
+          status: opts?.withFatal ? "blocked" : "approved",
           rationale: opts?.withFatal
             ? "Critical brief requirement missing."
-            : "Solid structure; minor trim and wind issues.",
+            : "Professional baseline checks passed.",
           confidence: 0.82,
         },
         strengths: [
@@ -450,6 +445,7 @@ describe("M3 E2E: full command flow", () => {
       createE2EReviewAgent({ withFatal: false }),
       {
         createdAt: "2026-03-21T12:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -598,6 +594,7 @@ describe("M3 E2E: creative override path", () => {
         creativeOverride: true,
         approvedBy: "operator@e2e",
         overrideReason: "Client signed off on missing morning light",
+        ...visualQAWaiverOptions(),
       },
     );
     expect(reviewResult.success).toBe(true);
@@ -727,6 +724,7 @@ describe("/export command", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -756,6 +754,7 @@ describe("/export command", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -789,6 +788,7 @@ describe("export manifest content", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -820,6 +820,7 @@ describe("export manifest content", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );

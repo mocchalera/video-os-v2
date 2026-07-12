@@ -15,6 +15,38 @@ export interface QaCheckResult {
   details: string;
 }
 
+export type ResolutionCheckStatus = "passed" | "failed" | "skipped" | "blocked";
+
+export interface VideoFrameMetrics {
+  width: number;
+  height: number;
+  sar: string | null;
+  dar: string | null;
+  fps_num: number | null;
+  fps_den: number | null;
+  fps: number | null;
+}
+
+export interface ExpectedVideoFrameSpec {
+  source: "package_settings" | "timeline" | "creative_brief";
+  source_detail?: string;
+  width?: number;
+  height?: number;
+  sar?: string | null;
+  dar?: string | null;
+  fps_num?: number | null;
+  fps_den?: number | null;
+  fps?: number | null;
+  aspect_ratio?: string;
+}
+
+export interface ResolutionCheckMetrics {
+  resolution_check: ResolutionCheckStatus;
+  actual_video_frame?: VideoFrameMetrics;
+  expected_video_frame?: ExpectedVideoFrameSpec;
+  resolution_mismatches?: string[];
+}
+
 export interface QaReport {
   version: string;
   project_id: string;
@@ -28,6 +60,10 @@ export interface QaReport {
     av_drift_ms?: number;
     integrated_lufs?: number;
     true_peak_dbtp?: number;
+    resolution_check?: ResolutionCheckStatus;
+    actual_video_frame?: VideoFrameMetrics;
+    expected_video_frame?: ExpectedVideoFrameSpec;
+    resolution_mismatches?: string[];
   };
   artifacts: {
     final_video?: string;
@@ -233,6 +269,145 @@ export function checkLoudnessTarget(
   };
 }
 
+// ── Output Resolution / Frame Metadata ────────────────────────────
+
+const FPS_TOLERANCE = 0.02;
+const ASPECT_RATIO_TOLERANCE = 0.002;
+
+function ratioValue(rawValue: string | null | undefined): number | null {
+  if (!rawValue) return null;
+  const match = rawValue.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+  const width = Number.parseFloat(match[1]);
+  const height = Number.parseFloat(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || height === 0) return null;
+  return width / height;
+}
+
+function ratioFromDimensions(width: number, height: number): string {
+  const divisor = gcd(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : gcd(b, a % b);
+}
+
+function formatFps(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toFixed(3)
+    : "unknown";
+}
+
+function actualDisplayAspectValue(actual: VideoFrameMetrics): number | null {
+  const dar = ratioValue(actual.dar);
+  if (dar != null) return dar;
+
+  if (actual.width <= 0 || actual.height <= 0) return null;
+  const sar = ratioValue(actual.sar) ?? 1;
+  return (actual.width / actual.height) * sar;
+}
+
+function expectedDisplayAspectValue(expected: ExpectedVideoFrameSpec): number | null {
+  const dar = ratioValue(expected.dar);
+  if (dar != null) return dar;
+  const aspect = ratioValue(expected.aspect_ratio);
+  if (aspect != null) return aspect;
+  if (
+    typeof expected.width === "number" &&
+    typeof expected.height === "number" &&
+    expected.width > 0 &&
+    expected.height > 0
+  ) {
+    return expected.width / expected.height;
+  }
+  return null;
+}
+
+function displayAspectLabel(spec: ExpectedVideoFrameSpec | VideoFrameMetrics): string {
+  if ("aspect_ratio" in spec && spec.aspect_ratio) return spec.aspect_ratio;
+  if (spec.dar) return spec.dar;
+  if (typeof spec.width === "number" && typeof spec.height === "number") {
+    return ratioFromDimensions(spec.width, spec.height);
+  }
+  return "unknown";
+}
+
+export function checkResolutionSpec(
+  actual: VideoFrameMetrics | null | undefined,
+  expected: ExpectedVideoFrameSpec | null | undefined,
+  probeError?: string,
+): QaCheckResult & { metrics: ResolutionCheckMetrics } {
+  if (!expected) {
+    return {
+      name: "resolution_valid",
+      passed: true,
+      details: "resolution_check=skipped reason=no_expected_spec",
+      metrics: {
+        resolution_check: "skipped",
+        ...(actual ? { actual_video_frame: actual } : {}),
+      },
+    };
+  }
+
+  if (!actual) {
+    return {
+      name: "resolution_valid",
+      passed: false,
+      details: `resolution_check=blocked reason=${probeError || "video_frame_probe_unavailable"}`,
+      metrics: {
+        resolution_check: "blocked",
+        expected_video_frame: expected,
+      },
+    };
+  }
+
+  const mismatches: string[] = [];
+  if (typeof expected.width === "number" && actual.width !== expected.width) {
+    mismatches.push(`width expected=${expected.width} actual=${actual.width}`);
+  }
+  if (typeof expected.height === "number" && actual.height !== expected.height) {
+    mismatches.push(`height expected=${expected.height} actual=${actual.height}`);
+  }
+  if (expected.sar && actual.sar && actual.sar !== expected.sar) {
+    mismatches.push(`sar expected=${expected.sar} actual=${actual.sar}`);
+  }
+
+  const expectedDar = expectedDisplayAspectValue(expected);
+  const actualDar = actualDisplayAspectValue(actual);
+  if (
+    expectedDar != null &&
+    (actualDar == null || Math.abs(actualDar - expectedDar) > ASPECT_RATIO_TOLERANCE)
+  ) {
+    mismatches.push(
+      `dar expected=${displayAspectLabel(expected)} actual=${actual.dar ?? displayAspectLabel(actual)}`,
+    );
+  }
+
+  if (typeof expected.fps === "number" && Number.isFinite(expected.fps)) {
+    if (typeof actual.fps !== "number" || !Number.isFinite(actual.fps)) {
+      mismatches.push(`fps expected=${formatFps(expected.fps)} actual=unknown`);
+    } else if (Math.abs(actual.fps - expected.fps) > FPS_TOLERANCE) {
+      mismatches.push(`fps expected=${formatFps(expected.fps)} actual=${formatFps(actual.fps)}`);
+    }
+  }
+
+  const passed = mismatches.length === 0;
+  return {
+    name: "resolution_valid",
+    passed,
+    details: passed
+      ? `resolution_check=passed source=${expected.source} width=${actual.width} height=${actual.height} dar=${actual.dar ?? displayAspectLabel(actual)} fps=${formatFps(actual.fps)}`
+      : `resolution_check=failed source=${expected.source} ${mismatches.join("; ")}`,
+    metrics: {
+      resolution_check: passed ? "passed" : "failed",
+      actual_video_frame: actual,
+      expected_video_frame: expected,
+      ...(mismatches.length > 0 ? { resolution_mismatches: mismatches } : {}),
+    },
+  };
+}
+
 // ── Package Completeness ───────────────────────────────────────────
 
 /**
@@ -403,6 +578,7 @@ export function getRequiredChecks(
       "caption_policy_valid",
       "caption_density_valid",
       "caption_alignment_valid",
+      "resolution_valid",
       "dialogue_occupancy_valid",
       "av_drift_valid",
       "loudness_target_valid",
@@ -414,6 +590,7 @@ export function getRequiredChecks(
       "timeline_schema_valid",
       "caption_policy_valid",
       "supplied_export_probe_valid",
+      "resolution_valid",
       "caption_delivery_valid",
       "supplied_av_sync_valid",
       "loudness_target_valid",

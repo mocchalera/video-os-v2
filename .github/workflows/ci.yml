@@ -1,0 +1,233 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - Dev
+
+jobs:
+  node-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install media toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate schemas
+        run: npm run validate
+
+      - name: Typecheck
+        run: npm run build
+
+      - name: Run tests
+        run: >-
+          npm test --
+          --exclude tests/editor-server-project-health-redaction.test.ts
+          --exclude tests/editor-server-source-map-route-redaction.test.ts
+
+  schema-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run schema contract tests
+        run: npm run test:schema-contract
+
+  speech-led-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run speech-led artifact contract gate
+        run: npm run test:speech-led-contract
+
+  event-recap-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run event-recap shared-pipeline contract gate
+        run: npm run test:event-recap-contract
+
+  repo-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check repository hygiene
+        run: npm run verify:repo
+
+  editor-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            editor/package-lock.json
+
+      - name: Install root test tooling
+        run: npm ci
+
+      - name: Install editor dependencies
+        run: npm --prefix editor ci
+
+      # editor/client is retired; editor/tsconfig.json intentionally owns only
+      # the supported preview server and shared render/parity contracts.
+      - name: Typecheck supported preview server and shared contracts
+        run: npm --prefix editor run typecheck
+
+      - name: Run editor-server integration tests
+        run: npm run test:editor-server-integration
+
+  agent-definitions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install agent generator dependencies
+        run: python -m pip install pyyaml
+
+      - name: Check generated agent definitions
+        run: npm run verify:agents
+
+  macos-studio:
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Run SwiftPM tests
+        run: swift test
+
+      - name: Run Studio CLI smoke
+        run: swift run videoos-studio-cli doctor
+
+  product-gate:
+    if: ${{ always() }}
+    needs:
+      - node-runtime
+      - schema-contract
+      - speech-led-contract
+      - event-recap-contract
+      - repo-hygiene
+      - editor-server
+      - agent-definitions
+      - macos-studio
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Require every product boundary
+        env:
+          NODE_RUNTIME: ${{ needs.node-runtime.result }}
+          SCHEMA_CONTRACT: ${{ needs.schema-contract.result }}
+          SPEECH_LED_CONTRACT: ${{ needs.speech-led-contract.result }}
+          EVENT_RECAP_CONTRACT: ${{ needs.event-recap-contract.result }}
+          REPO_HYGIENE: ${{ needs.repo-hygiene.result }}
+          EDITOR_SERVER: ${{ needs.editor-server.result }}
+          AGENT_DEFINITIONS: ${{ needs.agent-definitions.result }}
+          MACOS_STUDIO: ${{ needs.macos-studio.result }}
+        run: |
+          failed=0
+          for result in "$NODE_RUNTIME" "$SCHEMA_CONTRACT" "$SPEECH_LED_CONTRACT" "$EVENT_RECAP_CONTRACT" "$REPO_HYGIENE" "$EDITOR_SERVER" "$AGENT_DEFINITIONS" "$MACOS_STUDIO"; do
+            if [ "$result" != "success" ]; then
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "Product gate blocked: one or more required boundaries did not succeed."
+            exit 1
+          fi
+          echo "Product gate passed: Node, Swift, schema, preview-server, agent, hygiene, speech-led, and event-recap contract boundaries are green."

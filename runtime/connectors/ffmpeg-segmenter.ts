@@ -11,6 +11,7 @@ import {
   computeRequestHash,
   type AssetItem,
 } from "./ffprobe.js";
+import type { VisualQualityMeasurements } from "./ffmpeg-motion.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -61,6 +62,7 @@ export interface SegmentItem {
     summary?: { score: number; source: string; status: string };
     tags?: { score: number; source: string; status: string };
     quality_flags?: { score: number; source: string; status: string };
+    visual_quality_measurements?: { score: number; source: string; status: string };
   };
   provenance: {
     boundary: {
@@ -74,7 +76,10 @@ export interface SegmentItem {
     summary?: Record<string, string>;
     tags?: Record<string, string>;
     quality_flags?: Record<string, string>;
+    visual_quality_measurements?: Record<string, string>;
   };
+  /** Deterministic ffmpeg-derived shake/sharpness/exposure measurements. */
+  visual_quality_measurements?: VisualQualityMeasurements;
   // Peak analysis extension (vlm-peak-detection-design.md §7.1)
   peak_analysis?: {
     coarse_locator?: {
@@ -105,6 +110,8 @@ export interface SegmentItem {
     }>;
     support_signals?: {
       motion_support_score: number;
+      motion_support_measured?: boolean;
+      motion_support_fallback_reason?: string;
       audio_support_score: number;
       fused_peak_score: number;
     };

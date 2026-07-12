@@ -125,6 +125,9 @@
         "$ref": "#/$defs/transition"
       }
     },
+    "metadata": {
+      "type": "object"
+    },
     "audio_mix": {
       "$ref": "#/$defs/audioMix"
     },
@@ -157,6 +160,13 @@
         "editorial_registry_hash": {
           "type": "string"
         },
+        "editor_version": {
+          "type": "string"
+        },
+        "last_editor_save": {
+          "type": "string",
+          "format": "date-time"
+        },
         "duration_policy": {
           "type": "object",
           "properties": {
@@ -168,11 +178,31 @@
             "max_duration_sec": { "type": ["number", "null"], "minimum": 0 }
           },
           "additionalProperties": false
+        },
+        "audio_policy": {
+          "type": "object",
+          "required": ["mode", "source"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["ducking", "bgm_only", "original_only"] },
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+            "a1_loudnorm": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "caption_policy": {
+          "type": "object",
+          "required": ["mode", "source"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["auto", "manual", "off"] },
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
     }
   },
+  "additionalProperties": false,
   "$defs": {
     "track": {
       "type": "object",
@@ -261,7 +291,8 @@
             "nat_sound",
             "ambient",
             "bgm",
-            "title"
+            "title",
+            "caption"
           ]
         },
         "motivation": {
@@ -291,6 +322,10 @@
         "audio_policy": {
           "type": "object",
           "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["ducking", "bgm_only", "original_only"]
+            },
             "duck_music_db": {
               "type": "number"
             },
@@ -302,6 +337,9 @@
             },
             "bgm_gain": {
               "type": "number"
+            },
+            "a1_loudnorm": {
+              "type": "boolean"
             },
             "preserve_nat_sound": {
               "type": "boolean"
@@ -332,6 +370,20 @@
             }
           },
           "additionalProperties": false
+        },
+        "captions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["text", "in_frame", "out_frame", "style"],
+            "properties": {
+              "text": { "type": "string", "minLength": 1 },
+              "in_frame": { "type": "integer", "minimum": 0 },
+              "out_frame": { "type": "integer", "minimum": 0 },
+              "style": { "type": "string", "enum": ["gentle-lower-third", "simple-shadow"] }
+            },
+            "additionalProperties": false
+          }
         },
         "candidate_ref": {
           "type": "string"
@@ -439,7 +491,19 @@
         "track_id": { "type": "string" },
         "transition_type": {
           "type": "string",
-          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+          "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black", "dip_to_white", "match_cut_soft"]
+        },
+        "transition_frames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_frames": {
+          "type": "integer",
+          "minimum": 1
         },
         "transition_params": {
           "type": "object",
@@ -459,7 +523,26 @@
         },
         "applied_skill_id": { "type": "string" },
         "degraded_from_skill_id": { "type": ["string", "null"] },
-        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fallback": {
+          "type": "object",
+          "required": ["type", "reason"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["cut", "crossfade", "j_cut", "l_cut", "match_cut", "fade_to_black"]
+            },
+            "reason": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "degraded_reason": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
       },
       "additionalProperties": false
     },
@@ -495,6 +578,5 @@
       },
       "additionalProperties": false
     }
-  },
-  "additionalProperties": false
+  }
 }

@@ -38,6 +38,7 @@ import {
   type EditBlueprint,
   type UncertaintyRegister,
 } from "../runtime/commands/blueprint.js";
+import type { MarlinQAReport } from "../runtime/eval/marlin-qa-types.js";
 
 // ── AJV setup for schema validation in tests ─────────────────────
 
@@ -223,33 +224,88 @@ function makeMockBlockers(projectId: string) {
 }
 
 function makeMockSelects(projectId: string) {
+  const segmentsPath = path.resolve(SAMPLE_PROJECT, "03_analysis/segments.json");
+  const parsed = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+    items?: Array<{
+      segment_id: string;
+      asset_id: string;
+      src_in_us: number;
+      src_out_us: number;
+      summary?: string;
+      tags?: string[];
+    }>;
+  };
   return {
     version: "1",
     project_id: projectId,
-    candidates: [
-      {
-        segment_id: "SEG_0001",
-        asset_id: "ASSET_001",
-        src_in_us: 0,
-        src_out_us: 5000000,
-        role: "hero" as const,
-        why_it_matches: "Summit approach — matches primary message about courage",
-        risks: ["wind noise may require treatment"],
-        confidence: 0.9,
-        evidence: ["visual motif: mountain summit", "segment QC: pass"],
-        quality_flags: ["4k", "stabilized"],
-      },
-      {
-        segment_id: "SEG_0002",
-        asset_id: "ASSET_001",
-        src_in_us: 5000000,
-        src_out_us: 8000000,
-        role: "support" as const,
-        why_it_matches: "Team preparation scene — builds tension",
-        risks: [],
-        confidence: 0.85,
-      },
-    ],
+    candidates: (parsed.items ?? []).map((segment, index) => ({
+      segment_id: segment.segment_id,
+      asset_id: segment.asset_id,
+      src_in_us: segment.src_in_us,
+      src_out_us: segment.src_out_us,
+      role: index === 0 ? "hero" as const : "support" as const,
+      why_it_matches: index === 0
+        ? `${segment.summary ?? segment.segment_id}; summit rescue sequence coverage`
+        : `${segment.summary ?? segment.segment_id}; coverage candidate`,
+      risks: [],
+      confidence: 0.85,
+      evidence: [
+        ...(index === 0 ? ["summit rescue sequence"] : []),
+        ...(index === 0
+          ? [
+              "morning light",
+              "hands detail",
+              "audible breathing",
+              "at least one spoken line about slowing down",
+            ]
+          : ["cluster coverage support"]),
+        ...(segment.tags ?? []),
+      ],
+      quality_flags: [],
+    })),
+  };
+}
+
+function makeQualityMeasurement(overrides: {
+  shake?: number;
+  sharpness?: number;
+  black?: number;
+  white?: number;
+}) {
+  return {
+    measured: true,
+    connector_version: "ffmpeg-motion-test",
+    method: "ffmpeg_sampled_signals",
+    sample_fps: 4,
+    max_width: 160,
+    duration_us: 1_500_000,
+    metrics_measured: { shake: true, sharpness: true, exposure: true },
+    shake: {
+      measured: true,
+      score: overrides.shake ?? 0.1,
+      sample_count: 4,
+      bins: [{ start_us: 0, end_us: 1_500_000, energy: overrides.shake ?? 0.1 }],
+      average_energy: overrides.shake ?? 0.1,
+      peak_energy: overrides.shake ?? 0.1,
+      peak_timestamp_us: 750_000,
+    },
+    sharpness: {
+      measured: true,
+      sharpness_score: overrides.sharpness ?? 0.8,
+      blur_score: 1 - (overrides.sharpness ?? 0.8),
+      method: "blurdetect",
+      sample_count: 4,
+    },
+    exposure: {
+      measured: true,
+      exposure_score: 0.9,
+      black_clip_ratio: overrides.black ?? 0.02,
+      white_clip_ratio: overrides.white ?? 0.01,
+      avg_luma: 120,
+      underexposed: false,
+      overexposed: false,
+      sample_count: 4,
+    },
   };
 }
 
@@ -855,6 +911,63 @@ describe("/triage command", () => {
     const selects = parseYaml(selectsRaw);
     const validate = createValidator("selects-candidates.schema.json");
     expect(validate(selects)).toBe(true);
+  });
+
+  it("applies the shared quality gate to command triage output", async () => {
+    const tmpDir = createMinimalProject("triage-quality-gate", {
+      withBrief: true,
+      withAnalysis: true,
+      state: "intent_locked",
+    });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segmentsJson = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+      items: Array<Record<string, unknown>>;
+    };
+    for (const segment of segmentsJson.items) {
+      if (segment.segment_id === "SEG_0001") {
+        segment.tags = ["shared_quality_cluster"];
+        segment.visual_quality_measurements = makeQualityMeasurement({});
+      }
+      if (segment.segment_id === "SEG_0002") {
+        segment.tags = ["shared_quality_cluster"];
+        segment.visual_quality_measurements = makeQualityMeasurement({ sharpness: 0.1 });
+      }
+      if (segment.segment_id === "SEG_0003" || segment.segment_id === "SEG_0004") {
+        segment.tags = ["shared_quality_cluster"];
+        segment.visual_quality_measurements = makeQualityMeasurement({});
+      }
+    }
+    fs.writeFileSync(segmentsPath, JSON.stringify(segmentsJson, null, 2), "utf-8");
+
+    const result = await runTriage(tmpDir, createMockTriageAgent());
+    expect(result.success).toBe(true);
+
+    const selects = parseYaml(fs.readFileSync(
+      path.join(tmpDir, "04_plan/selects_candidates.yaml"),
+      "utf-8",
+    )) as {
+      quality_gate?: {
+        counts?: { reject?: number };
+      };
+      candidates?: Array<Record<string, unknown>>;
+    };
+    const rejected = selects.candidates?.find((candidate) => candidate.segment_id === "SEG_0002");
+
+    expect(selects.quality_gate?.counts?.reject).toBe(1);
+    expect(rejected).toMatchObject({
+      role: "reject",
+      quality_confidence: "measured",
+      quality_gate: {
+        decision: "reject",
+        measurements: {
+          sharpness_score: 0.1,
+        },
+        thresholds: {
+          sharpness_reject_below: 0.2,
+        },
+      },
+    });
+    expect(rejected?.candidate_id).toBeTruthy();
   });
 
   it("fails when state is intent_pending (state check)", async () => {
@@ -1890,6 +2003,18 @@ function makeMockFatalReport(projectId: string): ReviewReport {
   });
 }
 
+function makeMockApprovedReport(projectId: string): ReviewReport {
+  return makeMockReviewReport(projectId, {
+    summary_judgment: {
+      status: "approved",
+      rationale: "Professional baseline checks passed.",
+      confidence: 0.9,
+    },
+    weaknesses: [],
+    warnings: [],
+  });
+}
+
 function createMockReviewAgent(overrides?: Partial<ReviewAgentResult>): ReviewAgent {
   return {
     async run(ctx) {
@@ -1899,6 +2024,56 @@ function createMockReviewAgent(overrides?: Partial<ReviewAgentResult>): ReviewAg
         ...overrides,
       };
     },
+  };
+}
+
+function makeMockMarlinQAReport(
+  projectDir: string,
+  score: number,
+  visualQA: MarlinQAReport["visual_qa"] = "verified",
+): MarlinQAReport {
+  return {
+    version: "1",
+    project_id: "sample-mountain-reset",
+    video_path: path.join(projectDir, "09_output/rough-cut.mp4"),
+    video_duration_sec: 12,
+    overall_assessment: "Mock visual QA report",
+    scene_descriptions: [
+      { start_sec: 0, end_sec: 12, description: "Mock rough cut plays through." },
+    ],
+    issues: [],
+    pacing_assessment: { too_fast: false, too_slow: false, notes: "ok" },
+    emotion_arc_assessment: { follows_brief: true, notes: "ok" },
+    score,
+    visual_qa: visualQA,
+  };
+}
+
+function writeFreshReviewRender(projectDir: string): void {
+  const outputPath = path.join(projectDir, "09_output/rough-cut.mp4");
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, "mock-render", "utf-8");
+}
+
+function visualQATestOptions(
+  score = 90,
+  visualQA: MarlinQAReport["visual_qa"] = "verified",
+): NonNullable<Parameters<typeof runReview>[2]> {
+  return {
+    requireCompiledTimeline: true,
+    skipPreview: true,
+    visualQA: {
+      runMarlinQAImpl: async (projectDir) => makeMockMarlinQAReport(projectDir, score, visualQA),
+    },
+  };
+}
+
+function visualQAWaiverOptions(
+  reason = "Test fixture approves without running local visual model.",
+): Pick<NonNullable<Parameters<typeof runReview>[2]>, "allowUnverifiedVisual" | "visualQaWaiverReason"> {
+  return {
+    allowUnverifiedVisual: true,
+    visualQaWaiverReason: reason,
   };
 }
 
@@ -1936,7 +2111,7 @@ describe("/review command", () => {
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/timeline.json"))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/review-qc-summary.json"))).toBe(true);
       // Preview steps: compile, preview (skipped due to no source files), qc
-      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc"]);
+      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics", "visual_qa"]);
       // No source files in test fixture → preview degrades gracefully
       expect(result.preflight!.steps[1].status).toBe("skipped");
       // Gap report contains overview and/or preview degradation messages
@@ -1946,7 +2121,9 @@ describe("/review command", () => {
 
     it("skips preview with skipPreview option", async () => {
       const tmpDir = createReviewReadyProject("compile-skip-preview");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -1955,7 +2132,7 @@ describe("/review command", () => {
 
       expect(result.success).toBe(true);
       expect(result.preflight).toBeDefined();
-      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc"]);
+      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics", "visual_qa"]);
       expect(result.preflight!.steps[1].status).toBe("skipped");
       expect(result.preflight!.steps[1].detail).toContain("--skip-preview");
       expect(result.preflight!.gapReport[0]).toContain("skipped via --skip-preview");
@@ -2095,10 +2272,14 @@ describe("/review command", () => {
 
     it("transitions to approved only after explicit operator acceptance", async () => {
       const tmpDir = createReviewReadyProject("clean-accepted");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
+      writeFreshReviewRender(tmpDir);
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
+        ...visualQATestOptions(90),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 
@@ -2109,9 +2290,135 @@ describe("/review command", () => {
       expect(doc.current_state).toBe("approved");
       expect(doc.approval_record?.status).toBe("clean");
       expect(doc.approval_record?.approved_by).toBe("operator");
+      expect(result.report?.visual_qa?.status).toBe("verified");
+      expect(result.report?.visual_qa?.score).toBe(90);
+
+      const statusAfterApproval = runStatus(tmpDir);
+      expect(statusAfterApproval.currentState).toBe("approved");
+      expect(statusAfterApproval.selfHealed).toBe(false);
+      expect(readProjectState(tmpDir)!.approval_record?.status).toBe("clean");
     });
 
-    it("autonomy:full auto-approves clean review without operator acceptance", async () => {
+    it("does not approve when verified visual QA score is below threshold", async () => {
+      const tmpDir = createReviewReadyProject("visual-low-score");
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
+      let operatorAcceptCalled = false;
+
+      writeFreshReviewRender(tmpDir);
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+        ...visualQATestOptions(69),
+        operatorAccept: async () => {
+          operatorAcceptCalled = true;
+          return { accepted: true, approvedBy: "operator" };
+        },
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.newState).toBe("critique_ready");
+      expect(result.report?.summary_judgment.status).toBe("needs_revision");
+      expect(result.report?.visual_qa?.status).toBe("verified");
+      expect(result.report?.visual_qa?.score).toBe(69);
+      expect(operatorAcceptCalled).toBe(false);
+      expect(readProjectState(tmpDir)!.approval_record).toBeUndefined();
+    });
+
+    it("does not approve when visual QA is blocked", async () => {
+      const tmpDir = createReviewReadyProject("visual-blocked");
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
+
+      writeFreshReviewRender(tmpDir);
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+        ...visualQATestOptions(100, "blocked"),
+        operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.newState).toBe("critique_ready");
+      expect(result.report?.summary_judgment.status).toBe("blocked");
+      expect(result.report?.visual_qa?.status).toBe("blocked");
+      expect(readProjectState(tmpDir)!.approval_record).toBeUndefined();
+    });
+
+    it("does not approve when rendered video is stale against timeline", async () => {
+      const tmpDir = createReviewReadyProject("visual-stale");
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
+      writeFreshReviewRender(tmpDir);
+      const timelinePath = path.join(tmpDir, "05_timeline/timeline.json");
+      const future = new Date(Date.now() + 10_000);
+      fs.utimesSync(timelinePath, future, future);
+
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+        requireCompiledTimeline: true,
+        skipPreview: true,
+        visualQA: {
+          runMarlinQAImpl: async () => {
+            throw new Error("stale render must not invoke Marlin QA");
+          },
+        },
+        operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.newState).toBe("critique_ready");
+      expect(result.report?.summary_judgment.status).toBe("blocked");
+      expect(result.report?.visual_qa?.status).toBe("stale");
+      expect(result.report?.visual_qa?.reason).toBe("render_older_than_timeline");
+    });
+
+    it("allows approved review with explicit unverified visual QA waiver", async () => {
+      const tmpDir = createReviewReadyProject("visual-waiver");
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
+
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+        ...visualQAWaiverOptions("Operator reviewed external playback."),
+        operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.newState).toBe("approved");
+      expect(result.report?.visual_qa?.status).toBe("blocked");
+      expect(result.report?.visual_qa_waiver).toBe(true);
+      expect(result.report?.visual_qa_waiver_reason).toBe("Operator reviewed external playback.");
+    });
+
+    it("autonomy:full does not auto-approve needs_revision even when fatal_issues is empty", async () => {
+      const tmpDir = createReviewReadyProject("needs-revision-auto-full");
+      const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
+      const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
+        autonomy?: { mode?: "full" | "collaborative" };
+      };
+      brief.autonomy = {
+        ...(brief.autonomy ?? {}),
+        mode: "full",
+      };
+      fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
+
+      const agent = createMockReviewAgent();
+      const result = await runReview(tmpDir, agent, {
+        createdAt: "2026-03-21T05:00:00Z",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.newState).toBe("critique_ready");
+
+      const doc = readProjectState(tmpDir)!;
+      expect(doc.current_state).toBe("critique_ready");
+      expect(doc.approval_record).toBeUndefined();
+    });
+
+    it("autonomy:full auto-approves approved clean review without operator acceptance", async () => {
       const tmpDir = createReviewReadyProject("clean-auto-full");
       const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
       const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as {
@@ -2124,9 +2431,12 @@ describe("/review command", () => {
       fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
 
       let operatorAcceptCalled = false;
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => {
           operatorAcceptCalled = true;
           return { accepted: false };
@@ -2183,6 +2493,7 @@ describe("/review command", () => {
         creativeOverride: true,
         approvedBy: "director",
         overrideReason: "Artistic choice — summit sequence not needed for this cut.",
+        ...visualQAWaiverOptions(),
       });
 
       expect(result.success).toBe(true);
@@ -2221,10 +2532,13 @@ describe("/review command", () => {
 
     it("records approval_record.artifact_versions on clean approval", async () => {
       const tmpDir = createReviewReadyProject("approval-versions");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 
@@ -2628,10 +2942,13 @@ describe("/review command", () => {
   describe("history and metadata", () => {
     it("records history entry on transition to approved", async () => {
       const tmpDir = createReviewReadyProject("history-approved");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 
@@ -2664,7 +2981,9 @@ describe("/review command", () => {
 
     it("sets last_agent and last_command", async () => {
       const tmpDir = createReviewReadyProject("meta");
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
 
       await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -2697,9 +3016,12 @@ describe("/review command", () => {
       expect(first.newState).toBe("critique_ready");
 
       // Second review from critique_ready → approved (no fatal + operator accept)
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
       const second = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T06:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
       expect(second.success).toBe(true);
@@ -2718,9 +3040,12 @@ describe("/review command", () => {
         history: [],
       });
 
-      const agent = createMockReviewAgent();
+      const agent = createMockReviewAgent({
+        report: makeMockApprovedReport("sample-mountain-reset"),
+      });
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
+        ...visualQAWaiverOptions(),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 

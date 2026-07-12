@@ -217,6 +217,26 @@ describe("Groq STT: parseGroqSegments", () => {
 // ── Unit Tests: parseGroqResponse ───────────────────────────────────
 
 describe("Groq STT: parseGroqResponse", () => {
+  it("attaches top-level Groq words to their overlapping segments", () => {
+    const response: GroqVerboseJsonResponse = {
+      text: "前半後半",
+      language: "ja",
+      segments: [
+        { id: 0, start: 0, end: 1, text: "前半" },
+        { id: 1, start: 1, end: 2, text: "後半" },
+      ],
+      words: [
+        { word: "前半", start: 0.1, end: 0.8 },
+        { word: "後半", start: 1.2, end: 1.9 },
+      ],
+    };
+
+    const result = parseGroqResponse(response);
+
+    expect(result.utterances[0].words?.map((word) => word.word)).toEqual(["前半"]);
+    expect(result.utterances[1].words?.map((word) => word.word)).toEqual(["後半"]);
+  });
+
   it("parses full verbose_json response with segments and words", () => {
     const result = parseGroqResponse(MOCK_GROQ_RESPONSE);
 

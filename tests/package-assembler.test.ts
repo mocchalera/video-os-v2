@@ -3,12 +3,21 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { computeFileHash } from "../runtime/state/reconcile.js";
+import { computeFileHash, reconcile } from "../runtime/state/reconcile.js";
 
-const { assembleMock, renderMock, measureQaMediaMock } = vi.hoisted(() => ({
+const { assembleMock, renderMock, measureQaMediaMock, matchingVideoFrame } = vi.hoisted(() => ({
   assembleMock: vi.fn(),
   renderMock: vi.fn(),
   measureQaMediaMock: vi.fn(),
+  matchingVideoFrame: {
+    width: 1920,
+    height: 1080,
+    sar: "1:1",
+    dar: "16:9",
+    fps_num: 24,
+    fps_den: 1,
+    fps: 24,
+  },
 }));
 
 vi.mock("../runtime/render/assembler.js", () => ({
@@ -28,6 +37,7 @@ vi.mock("../runtime/packaging/qa-measure.js", () => ({
     audioDurationMs?: number;
     dialogueWindowMs?: number;
     observedNonSilentMs?: number;
+    videoFrame?: typeof matchingVideoFrame;
   }) => ({
     version: "1.0.0",
     measured_at: "2026-03-21T12:00:00.000Z",
@@ -45,6 +55,7 @@ vi.mock("../runtime/packaging/qa-measure.js", () => ({
     silence_total_ms: metrics.dialogueWindowMs && metrics.observedNonSilentMs != null
       ? Math.max(0, metrics.dialogueWindowMs - metrics.observedNonSilentMs)
       : 0,
+    video_frame: metrics.videoFrame,
   })),
   writeQaMeasurements: vi.fn(),
   collectQaMeasurementWarnings: vi.fn(() => []),
@@ -73,6 +84,7 @@ beforeEach(() => {
     dialogue_occupancy: 0.85,
     observed_non_silent_ms: 8500,
     silence_total_ms: 1500,
+    video_frame: matchingVideoFrame,
   });
 });
 
@@ -102,6 +114,15 @@ function createTempProject(): string {
   const timelinePath = path.join(tmpDir, "05_timeline/timeline.json");
   const reviewReportPath = path.join(tmpDir, "06_review/review_report.yaml");
   const reviewPatchPath = path.join(tmpDir, "06_review/review_patch.json");
+  const reviewReport = parseYaml(fs.readFileSync(reviewReportPath, "utf-8")) as Record<string, unknown>;
+  reviewReport.visual_qa = {
+    status: "verified",
+    score: 90,
+    min_score: 70,
+    issues: { total: 0, critical: 0, warning: 0, info: 0 },
+    issue_summaries: [],
+  };
+  fs.writeFileSync(reviewReportPath, stringifyYaml(reviewReport), "utf-8");
 
   const projectState = {
     version: 1,
@@ -167,6 +188,33 @@ function stubRenderOutputs(projectDir: string, assemblyPath: string) {
 }
 
 describe("package command assembler wiring", () => {
+  it("refreshes outputs when the project is already packaged", async () => {
+    const projectDir = createTempProject();
+    const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
+    fs.writeFileSync(assemblyPath, "existing-assembly", "utf-8");
+
+    renderMock.mockImplementation(async ({ assemblyPath: renderAssemblyPath }: { assemblyPath: string }) =>
+      stubRenderOutputs(projectDir, renderAssemblyPath)
+    );
+    const metrics = {
+      integratedLufs: -16.0,
+      truePeakDbtp: -1.8,
+      videoDurationMs: 28000,
+      audioDurationMs: 28000,
+      dialogueWindowMs: 10000,
+      observedNonSilentMs: 8500,
+      videoFrame: matchingVideoFrame,
+    };
+
+    const first = await packageCommand(projectDir, { precomputedMetrics: metrics });
+    const second = await packageCommand(projectDir, { precomputedMetrics: metrics });
+
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(renderMock).toHaveBeenCalledTimes(2);
+    expect(reconcile(projectDir).reconciled_state).toBe("packaged");
+  });
+
   it("auto-builds 05_timeline/assembly.mp4 when missing", async () => {
     const projectDir = createTempProject();
     const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
@@ -194,6 +242,7 @@ describe("package command assembler wiring", () => {
         audioDurationMs: 28000,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: matchingVideoFrame,
       },
     });
 
@@ -207,6 +256,8 @@ describe("package command assembler wiring", () => {
     expect(renderMock).toHaveBeenCalledWith(expect.objectContaining({
       assemblyPath,
     }));
+    expect(result.deliverablePath).toBe(path.join(projectDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projectDir, "09_output", "final.mp4"))).toBe(true);
   });
 
   it("reuses an existing 05_timeline/assembly.mp4", async () => {
@@ -226,6 +277,7 @@ describe("package command assembler wiring", () => {
         audioDurationMs: 28000,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: matchingVideoFrame,
       },
     });
 
@@ -234,5 +286,7 @@ describe("package command assembler wiring", () => {
     expect(renderMock).toHaveBeenCalledWith(expect.objectContaining({
       assemblyPath,
     }));
+    expect(result.deliverablePath).toBe(path.join(projectDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projectDir, "09_output", "final.mp4"))).toBe(true);
   });
 });

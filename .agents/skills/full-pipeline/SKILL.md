@@ -1,6 +1,6 @@
 ---
 name: full-pipeline
-description: Use when the user wants an end-to-end run from source footage to a rough cut or final packaged video, or asks "素材から動画を作って", "全自動で", "編集して", or "粗編集を作って", and you need to chain the existing stage Skills without inventing a nonexistent one-shot CLI.
+description: Use when the user wants an end-to-end run from source footage to a rough cut or final packaged video, or asks "素材から動画を作って", "全自動で", "編集して", or "粗編集を作って". Prefer the official full-pipeline entrypoint, then fall back to individual stage Skills for recovery.
 metadata:
   filePattern:
     - '**/03_analysis/assets.json'
@@ -17,11 +17,13 @@ metadata:
 - rough cut まで、または final package までを途中 stage を跨いで進めたいとき
 - 既存 project に artifact はあるが、「途中から再開して」「続きから直して」と言われたとき
 
-**このスキルは orchestration 専用。** analyze から package までを一発で回す架空の CLI を作らず、既存 stage Skill を Gate 付きでつなぐ。
+**このスキルは orchestration 専用。** 通常は repo 公式の単一エントリ `npm run full-pipeline -- --project <id> --source-dir <dir>` を使う。失敗時や部分再実行だけ、既存 stage Skill を Gate 付きでつなぐ。
 
 ## 前提条件
 
-- この repo には analyze から package までを一発で回す単独 CLI はない
+- この repo の正式デフォルトは `npm run full-pipeline`。内部では既存の `analyze -> build-footage-db -> editorial-pipeline` の意味論を保ったまま連結する
+- 実行中は staged progress / ETA を表示し、実測時間を `03_analysis/pipeline-timings.json` に追記する
+- 次回実行では `pipeline-timings.json` を優先して ETA を出し、履歴が無い stage は `segments.json` のセグメント数から粗く見積もる。どちらも無ければ `計測中` と表示する
 - 開始前に `references/gate-conditions.md` を読むこと
 - 失敗時や再実行時は `references/recovery-playbook.md` を読むこと
 - Gate 番号は full-pipeline 用の orchestration 定義であり、runtime の内部 gate 名とは 1 対 1 ではない
@@ -37,6 +39,9 @@ metadata:
 ### Step 0: ゴールと再開地点を決める
 
 - まず user が rough cut (`06_review/*` まで) を欲しいのか、final package (`07_package/*` まで) を欲しいのかを切り分ける
+- fresh run で source dir があるなら、既定では次を使う:
+  - `npm run full-pipeline -- --project <project-id> --source-dir <source-dir> --content-hint "<hint>"`
+- 既存 project の途中再開なら、失敗 stage に応じて `--from <stage>`、または下記 Gate に対応する個別 skill / CLI を使う
 - つぎに Gate 10 から Gate 0 へ逆順で artifact を点検し、**最初に失敗する Gate** を再開地点にする
 - 既存 artifact があっても upstream が変わっていれば stale とみなす。`runtime/state/reconcile.ts` の invalidation matrix に従い、以下のように巻き戻す
   - brief または analysis が変わったら `select-clips` からやり直す
@@ -105,6 +110,14 @@ metadata:
 - Gate 9 が通ったら `render-video` を使う
 - `qa-report.json` が fail なら packaged に進めない。失敗した QA 項目を直して Gate 9 からやり直す
 - `package_manifest.json` と `qa-report.json` が揃い、QA が pass して初めて完了扱いにする
+
+## 進捗 / ETA
+
+- 表示形式は `[3/10] triage 実行中... 経過 1m32s / 推定残り ~4m (全体 ~7m)` を基準にする
+- TTY では同じ行を更新し、非 TTY ではログ行として追記される
+- stage は `ingest`, `stt`, `marlin`, `visual-quality`, `peak`, `embeddings`, `triage`, `blueprint`, `compile`, `render`, `QA`
+- `03_analysis/pipeline-timings.json` は履歴 artifact。削除せず、次回 ETA の材料として扱う
+- エラー時は失敗 stage 名、次に試す再実行コマンド、`troubleshoot-error` skill への誘導を表示する
 
 ## 出力 artifact
 - `01_intent/*`

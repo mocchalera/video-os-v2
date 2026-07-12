@@ -16,6 +16,8 @@ import {
   type VlmEnrichmentResult,
   type VlmFn,
   type VlmPolicy,
+  type VlmVisualQuality,
+  PROMPT_TEMPLATE_ID,
   VLM_CONNECTOR_VERSION,
   adjustFpsForBudget,
   computeFrameCount,
@@ -33,6 +35,8 @@ import type { AssetsJson, SegmentsJson } from "../pipeline-types.js";
 // ── Constants ──────────────────────────────────────────────────────
 
 export const DEFAULT_VLM_CONCURRENCY = 3;
+const MARLIN_REPORTER_METHOD = "marlin_reporter";
+const MARLIN_SUMMARY_PROMPT_TEMPLATE_ID = "marlin-caption-v1";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -108,6 +112,13 @@ interface VlmAssetPlan {
   liveSegments: SegmentItem[];
 }
 
+type SegmentWithVisualQuality = SegmentItem & {
+  visual_quality?: VlmVisualQuality;
+  provenance: SegmentItem["provenance"] & {
+    visual_quality?: Record<string, string>;
+  };
+};
+
 // ── Concurrency Helpers ────────────────────────────────────────────
 
 const sleep = (ms: number): Promise<void> =>
@@ -175,7 +186,14 @@ export function hydrateCachedVlmSegments(
     const cached = cachedById.get(segment.segment_id);
     if (!cached) continue;
 
-    if (!hasReusableProvenance(cached.provenance?.summary, options, expectedPromptHash)) {
+    const currentHasMarlinSummary = hasMarlinOwnedSummary(segment);
+    const cachedSummaryReusable = hasReusableProvenance(
+      cached.provenance?.summary,
+      options,
+      expectedPromptHash,
+    );
+
+    if (!currentHasMarlinSummary && !cachedSummaryReusable) {
       continue;
     }
     if (!hasReusableProvenance(cached.provenance?.tags, options, expectedPromptHash)) {
@@ -185,13 +203,26 @@ export function hydrateCachedVlmSegments(
       continue;
     }
 
-    segment.summary = cached.summary;
-    segment.tags = [...cached.tags];
+    const cachedVisualQuality = (cached as SegmentWithVisualQuality).visual_quality;
+    const cachedVisualQualityProvenance =
+      (cached.provenance as Record<string, Record<string, string> | undefined>).visual_quality;
+    const canReuseVisualQuality = cachedVisualQuality !== undefined &&
+      hasReusableProvenance(cachedVisualQualityProvenance, options, expectedPromptHash);
+
+    if (!currentHasMarlinSummary) {
+      segment.summary = cached.summary;
+    }
+    segment.tags = mergeTags(segment.tags, cached.tags);
     segment.quality_flags = [...new Set([...segment.quality_flags, ...cached.quality_flags])];
-    segment.interest_points = (cached.interest_points ?? []).map((point) => ({ ...point }));
+    segment.interest_points = mergeInterestPoints(segment.interest_points, cached.interest_points);
+    if (canReuseVisualQuality) {
+      (segment as SegmentWithVisualQuality).visual_quality = cloneVisualQuality(cachedVisualQuality);
+    }
     segment.confidence = {
       ...segment.confidence,
-      ...(cached.confidence.summary ? { summary: { ...cached.confidence.summary } } : {}),
+      ...(!currentHasMarlinSummary && cached.confidence.summary
+        ? { summary: { ...cached.confidence.summary } }
+        : {}),
       ...(cached.confidence.tags ? { tags: { ...cached.confidence.tags } } : {}),
       ...(cached.confidence.quality_flags
         ? { quality_flags: { ...cached.confidence.quality_flags } }
@@ -199,10 +230,15 @@ export function hydrateCachedVlmSegments(
     };
     segment.provenance = {
       ...segment.provenance,
-      ...(cached.provenance.summary ? { summary: { ...cached.provenance.summary } } : {}),
+      ...(!currentHasMarlinSummary && cached.provenance.summary
+        ? { summary: { ...cached.provenance.summary } }
+        : {}),
       ...(cached.provenance.tags ? { tags: { ...cached.provenance.tags } } : {}),
       ...(cached.provenance.quality_flags
         ? { quality_flags: { ...cached.provenance.quality_flags } }
+        : {}),
+      ...(canReuseVisualQuality && cachedVisualQualityProvenance
+        ? { visual_quality: { ...cachedVisualQualityProvenance } }
         : {}),
     };
     cachedSegmentIds.add(segment.segment_id);
@@ -360,24 +396,32 @@ export function vlmReduce(
     if (!shard || !shard.result.success || !shard.result.output) continue;
 
     const out = shard.result.output;
+    const summaryOwnedByMarlin = hasMarlinOwnedSummary(seg);
 
     // Update enrichment fields
-    seg.summary = out.summary || seg.summary;
-    seg.tags = out.tags.length > 0 ? out.tags : seg.tags;
+    if (!summaryOwnedByMarlin) {
+      seg.summary = out.summary || seg.summary;
+    }
+    seg.tags = out.tags.length > 0 ? mergeTags(seg.tags, out.tags) : seg.tags;
     seg.quality_flags = out.quality_flags.length > 0
       ? [...new Set([...seg.quality_flags, ...out.quality_flags])]
       : seg.quality_flags;
-    seg.interest_points = out.interest_points;
+    seg.interest_points = mergeInterestPoints(seg.interest_points, out.interest_points);
+    if (out.visual_quality) {
+      (seg as SegmentWithVisualQuality).visual_quality = out.visual_quality;
+    }
 
     // Confidence records
     if (!seg.confidence) {
       seg.confidence = {} as SegmentItem["confidence"];
     }
-    (seg.confidence as Record<string, unknown>).summary = {
-      score: out.confidence.summary,
-      source: `${shard.result.model_alias}`,
-      status: "ready",
-    };
+    if (!summaryOwnedByMarlin) {
+      (seg.confidence as Record<string, unknown>).summary = {
+        score: out.confidence.summary,
+        source: `${shard.result.model_alias}`,
+        status: "ready",
+      };
+    }
     (seg.confidence as Record<string, unknown>).tags = {
       score: out.confidence.tags,
       source: `${shard.result.model_alias}`,
@@ -406,12 +450,18 @@ export function vlmReduce(
       }),
       model_alias: shard.result.model_alias,
       model_snapshot: shard.result.model_snapshot,
+      prompt_template_id: PROMPT_TEMPLATE_ID,
       prompt_hash: shard.result.prompt_hash,
       response_format: responseFormat,
     };
-    (seg.provenance as Record<string, unknown>).summary = vlmProvenance;
+    if (!summaryOwnedByMarlin) {
+      (seg.provenance as Record<string, unknown>).summary = vlmProvenance;
+    }
     (seg.provenance as Record<string, unknown>).tags = vlmProvenance;
     (seg.provenance as Record<string, unknown>).quality_flags = vlmProvenance;
+    if (out.visual_quality) {
+      (seg.provenance as Record<string, unknown>).visual_quality = vlmProvenance;
+    }
   }
 
   // Update asset role_guess based on combined STT + VLM evidence
@@ -525,6 +575,9 @@ function hasReusableProvenance(
   if (provenance.stage !== "vlm") return false;
   if (provenance.connector_version !== VLM_CONNECTOR_VERSION) return false;
   if (provenance.model_snapshot !== options.vlmPolicy.model_snapshot) return false;
+  if (provenance.prompt_template_id && provenance.prompt_template_id !== PROMPT_TEMPLATE_ID) {
+    return false;
+  }
   if (provenance.prompt_hash !== expectedPromptHash) return false;
   if (provenance.policy_hash && provenance.policy_hash !== options.policyHash) return false;
   if (
@@ -534,4 +587,57 @@ function hasReusableProvenance(
     return false;
   }
   return true;
+}
+
+function hasMarlinOwnedSummary(segment: SegmentItem): boolean {
+  const provenance = segment.provenance?.summary as Record<string, string> | undefined;
+  if (!provenance) return false;
+  return provenance.method === MARLIN_REPORTER_METHOD ||
+    provenance.source_pass === MARLIN_REPORTER_METHOD ||
+    (
+      provenance.stage === "marlin" &&
+      provenance.prompt_template_id === MARLIN_SUMMARY_PROMPT_TEMPLATE_ID
+    );
+}
+
+function mergeTags(current: string[], additions: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of [...current, ...additions]) {
+    const tag = value.trim();
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    result.push(tag);
+  }
+  return result;
+}
+
+function mergeInterestPoints(
+  current: SegmentItem["interest_points"],
+  additions: SegmentItem["interest_points"] | undefined,
+): SegmentItem["interest_points"] {
+  const result = [...(current ?? [])].map((point) => ({ ...point }));
+  for (const point of additions ?? []) {
+    const exists = result.some((item) =>
+      Math.abs(item.frame_us - point.frame_us) <= 1 &&
+      item.label === point.label
+    );
+    if (!exists) {
+      result.push({ ...point });
+    }
+  }
+  result.sort((a, b) => a.frame_us - b.frame_us || a.label.localeCompare(b.label));
+  return result;
+}
+
+function cloneVisualQuality(visualQuality: VlmVisualQuality): VlmVisualQuality {
+  return {
+    scores: { ...visualQuality.scores },
+    labels: {
+      lighting_style: [...visualQuality.labels.lighting_style],
+      composition_tags: [...visualQuality.labels.composition_tags],
+      expression_tags: [...visualQuality.labels.expression_tags],
+      motion_tags: [...visualQuality.labels.motion_tags],
+    },
+  };
 }

@@ -617,6 +617,17 @@ describe("state reconcile", () => {
       expect(result.lowest_fallback).toBe("timeline_drafted");
     });
 
+    it("invalidates package outputs without staling editorial approval when QA changes", () => {
+      const oldHashes: ArtifactHashes = { qa_report_hash: "old" };
+      const newHashes: ArtifactHashes = { qa_report_hash: "new" };
+
+      const result = detectInvalidation(oldHashes, newHashes);
+
+      expect(result.stale_artifacts).toContain("package_manifest");
+      expect(result.lowest_fallback).toBe("approved");
+      expect(result.approval_stale).toBe(false);
+    });
+
     it("uses lowest fallback when multiple artifacts changed", () => {
       const oldHashes: ArtifactHashes = {
         brief_hash: "old_brief",
@@ -808,6 +819,87 @@ describe("state reconcile", () => {
       const result = reconcile(tmpDir);
       expect(result.doc.approval_record?.status).toBe("stale");
     });
+
+    it("does not promote stale package files while packaging_gate is blocked", () => {
+      const tmpDir = createTempProject("package-gate-blocked");
+      const packageDir = path.join(tmpDir, "07_package");
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, "qa-report.json"), "{}\n", "utf-8");
+      fs.writeFileSync(path.join(packageDir, "package_manifest.json"), "{}\n", "utf-8");
+
+      const snapshot = snapshotArtifacts(tmpDir);
+      writeProjectState(tmpDir, {
+        version: 1,
+        project_id: "sample-mountain-reset",
+        current_state: "approved",
+        artifact_hashes: snapshot.hashes,
+        approval_record: {
+          status: "clean",
+          approved_by: "operator",
+          approved_at: "2026-07-10T00:00:00Z",
+          artifact_versions: {
+            timeline_version: snapshot.hashes.timeline_version,
+            review_report_version: snapshot.hashes.review_report_version,
+            review_patch_hash: snapshot.hashes.review_patch_hash,
+          },
+        },
+        handoff_resolution: {
+          handoff_id: "HND_TEST_PENDING",
+          status: "pending",
+        },
+        history: [],
+      });
+
+      const result = reconcile(tmpDir);
+      expect(result.gates.packaging_gate).toBe("blocked");
+      expect(result.reconciled_state).toBe("approved");
+      expect(result.stale_artifacts).toContain("qa_report");
+      expect(result.stale_artifacts).toContain("package_manifest");
+    });
+
+    it("does not promote a failed QA report to packaged", () => {
+      const tmpDir = createTempProject("package-qa-failed");
+      const packageDir = path.join(tmpDir, "07_package");
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(packageDir, "qa-report.json"),
+        JSON.stringify({ passed: false }),
+        "utf-8",
+      );
+      fs.writeFileSync(path.join(packageDir, "package_manifest.json"), "{}\n", "utf-8");
+
+      const snapshot = snapshotArtifacts(tmpDir);
+      writeProjectState(tmpDir, {
+        version: 1,
+        project_id: "sample-mountain-reset",
+        current_state: "packaged",
+        artifact_hashes: snapshot.hashes,
+        approval_record: {
+          status: "clean",
+          approved_by: "operator",
+          approved_at: "2026-07-10T00:00:00Z",
+          artifact_versions: {
+            timeline_version: snapshot.hashes.timeline_version,
+            review_report_version: snapshot.hashes.review_report_version,
+            review_patch_hash: snapshot.hashes.review_patch_hash,
+          },
+        },
+        handoff_resolution: {
+          handoff_id: "HND_TEST_DECIDED",
+          status: "decided",
+          source_of_truth_decision: "engine_render",
+          decided_by: "operator",
+          decided_at: "2026-07-10T00:00:00Z",
+        },
+        history: [],
+      });
+
+      const result = reconcile(tmpDir);
+      expect(result.gates.packaging_gate).toBe("open");
+      expect(result.reconciled_state).toBe("approved");
+      expect(result.doc.approval_record?.status).toBe("clean");
+      expect(result.stale_artifacts).toContain("package_manifest");
+    });
   });
 });
 
@@ -990,6 +1082,56 @@ describe("gate computation via reconcile", () => {
     const result = reconcile(tmpDir);
     expect(result.gates.analysis_gate).toBe("partial_override");
     expect(result.reconciled_state).toBe("media_analyzed");
+  });
+
+  it("allows active analysis_override when manually edited analysis fails validation", () => {
+    const tmpDir = createTempProject("analysis-override-invalid-analysis");
+    fs.rmSync(path.join(tmpDir, "04_plan"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "05_timeline"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "06_review"), { recursive: true });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+    segments.manual_edit_marker = true;
+    fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+
+    writeProjectState(tmpDir, {
+      version: 1,
+      project_id: "test",
+      current_state: "intent_locked",
+      analysis_override: {
+        status: "active",
+        approved_by: "operator",
+        approved_at: "2026-03-21T00:00:00Z",
+        artifact_version: "analysis-v1",
+      },
+      history: [],
+    });
+
+    const result = reconcile(tmpDir);
+    expect(result.gates.analysis_gate).toBe("partial_override");
+    expect(result.reconciled_state).toBe("media_analyzed");
+  });
+
+  it("blocks manually edited invalid analysis without analysis_override", () => {
+    const tmpDir = createTempProject("analysis-invalid-no-override");
+    fs.rmSync(path.join(tmpDir, "04_plan"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "05_timeline"), { recursive: true });
+    fs.rmSync(path.join(tmpDir, "06_review"), { recursive: true });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+    segments.manual_edit_marker = true;
+    fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+
+    writeProjectState(tmpDir, {
+      version: 1,
+      project_id: "test",
+      current_state: "intent_locked",
+      history: [],
+    });
+
+    const result = reconcile(tmpDir);
+    expect(result.gates.analysis_gate).toBe("blocked");
+    expect(result.reconciled_state).toBe("intent_locked");
   });
 
   it("computes review_gate from review_report", () => {

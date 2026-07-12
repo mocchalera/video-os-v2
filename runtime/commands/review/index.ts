@@ -21,7 +21,21 @@ import {
   writeProjectState,
 } from "../../state/reconcile.js";
 import type { CompileResult } from "../../compiler/index.js";
+import type { TimelineIR } from "../../compiler/types.js";
 import { readCreativeBriefAutonomyMode } from "../../autonomy.js";
+import {
+  runReviewMetrics,
+  type ReviewMetricsArtifact,
+} from "../../review/metrics.js";
+import {
+  evaluateReviewVisualQA,
+  isReviewVisualQAApprovalGrade,
+  reviewVisualQAGateReason,
+  reviewVisualQAMinScore,
+  summarizeReviewVisualQAGate,
+  type EvaluateReviewVisualQAOptions,
+  type ReviewVisualQA,
+} from "../../review/visual-qa.js";
 import {
   runReviewExistingTimelinePreflight,
   runReviewPreflight,
@@ -90,6 +104,10 @@ export interface ReviewReport {
     alternative_directions?: string[];
   };
   preview_path?: string;
+  visual_qa?: ReviewVisualQA;
+  visual_qa_waiver?: boolean;
+  visual_qa_waiver_reason?: string;
+  visual_qa_waiver_created_at?: string;
 }
 
 export interface PatchOperation {
@@ -183,6 +201,7 @@ export interface ReviewCommandResult {
   report?: ReviewReport;
   patch?: ReviewPatch;
   patchSafety?: PatchSafetyResult;
+  reviewMetrics?: ReviewMetricsArtifact;
   compileResult?: CompileResult;
   preflight?: ReviewPreflightResult;
   previousState?: ProjectState;
@@ -192,7 +211,7 @@ export interface ReviewCommandResult {
 }
 
 export interface ReviewPreflightStep {
-  step: "compile" | "preview" | "qc";
+  step: "compile" | "preview" | "qc" | "metrics" | "visual_qa";
   status: "completed" | "skipped";
   detail: string;
   artifactPath?: string;
@@ -204,6 +223,7 @@ export interface ReviewPreflightResult {
   previewPath?: string;
   overviewPath?: string;
   qcSummaryPath: string;
+  metricsPath?: string;
 }
 
 export interface ReviewOperatorDecision {
@@ -228,6 +248,45 @@ export interface ReviewCommandOptions {
   operatorAccept?: ReviewOperatorAccept;
   requireCompiledTimeline?: boolean;
   skipPreview?: boolean;
+  render?: boolean;
+  allowUnverifiedVisual?: boolean;
+  visualQaWaiverReason?: string;
+  visualQaMinScore?: number;
+  visualQA?: Omit<EvaluateReviewVisualQAOptions, "render" | "minScore" | "createdAt">;
+}
+
+function isReviewApprovalEligible(report: ReviewReport): boolean {
+  return report.fatal_issues.length === 0 &&
+    report.summary_judgment.status === "approved" &&
+    isReviewVisualQAApprovalGrade(report);
+}
+
+function enforceVisualQAVerdict(report: ReviewReport): void {
+  const visual = report.visual_qa;
+  const gateReason = reviewVisualQAGateReason(report);
+  const gateSummary = visual ? summarizeReviewVisualQAGate(visual) : gateReason;
+
+  if (gateReason && report.summary_judgment.status === "approved") {
+    report.summary_judgment.status = visual?.status === "verified" ? "needs_revision" : "blocked";
+  }
+
+  if (gateSummary) {
+    report.summary_judgment.rationale = appendRationale(
+      report.summary_judgment.rationale,
+      `Visual QA gate: ${gateSummary}.`,
+    );
+  }
+
+  if (report.visual_qa_waiver && report.visual_qa_waiver_reason) {
+    report.summary_judgment.rationale = appendRationale(
+      report.summary_judgment.rationale,
+      `Visual QA waiver: ${report.visual_qa_waiver_reason}.`,
+    );
+  }
+}
+
+function appendRationale(current: string, addition: string): string {
+  return current.includes(addition) ? current : `${current} ${addition}`.trim();
 }
 
 export function validatePatchSafety(
@@ -397,7 +456,7 @@ export async function runReview(
   agent: ReviewAgent,
   options?: ReviewCommandOptions,
 ): Promise<ReviewCommandResult> {
-  const pt = new ProgressTracker(projectDir, "review", 5);
+  const pt = new ProgressTracker(projectDir, "review", 6);
   const ctx = initCommand(projectDir, "/review", ALLOWED_STATES);
   if (isCommandError(ctx)) {
     pt.fail("init", ctx.message);
@@ -452,7 +511,15 @@ export async function runReview(
   let timelineJson: unknown;
   let timelineVersion = "unknown";
   let preflight: ReviewPreflightResult;
+  let reviewMetrics: ReviewMetricsArtifact | undefined;
   const skipPreview = options?.skipPreview ?? false;
+  const visualQaMinScore = options?.visualQaMinScore ?? reviewVisualQAMinScore(options?.visualQA?.repoRoot);
+  if (options?.allowUnverifiedVisual && !options.visualQaWaiverReason?.trim()) {
+    return fail("visual_qa", {
+      code: "VALIDATION_FAILED",
+      message: "--allow-unverified-visual requires visual_qa_waiver_reason",
+    });
+  }
 
   try {
     if (options?.requireCompiledTimeline) {
@@ -481,13 +548,50 @@ export async function runReview(
       message: `Deterministic preflight failed: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
-  pt.advance("timeline.json");
+
+  try {
+    const metricsResult = runReviewMetrics(absDir, {
+      timeline: compileResult.timeline as TimelineIR,
+    });
+    reviewMetrics = metricsResult.metrics;
+    preflight.metricsPath = metricsResult.outputPath;
+    preflight.steps.push({
+      step: "metrics",
+      status: "completed",
+      detail: "Generated deterministic review_metrics.json before critic review.",
+      artifactPath: metricsResult.outputPath,
+    });
+  } catch (err) {
+    return fail("metrics", {
+      code: "GATE_CHECK_FAILED",
+      message: `Deterministic review metrics failed: ${err instanceof Error ? err.message : String(err)}`,
+    }, {
+      compileResult,
+      preflight,
+    });
+  }
+  pt.advance("review_metrics.json");
+
+  const visualQA = await evaluateReviewVisualQA(absDir, {
+    ...options?.visualQA,
+    render: options?.render === true,
+    minScore: visualQaMinScore,
+    createdAt,
+  });
+  preflight.steps.push({
+    step: "visual_qa",
+    status: visualQA.status === "verified" ? "completed" : "skipped",
+    detail: `Visual QA ${summarizeReviewVisualQAGate(visualQA)}.`,
+    ...(visualQA.marlin_report_path ? { artifactPath: path.join(absDir, visualQA.marlin_report_path) } : {}),
+  });
+  pt.advance("visual_qa");
 
   const humanNotesResult = readHumanNotes(absDir);
   if (humanNotesResult.error) {
     return fail("human_notes", humanNotesResult.error, {
       compileResult,
       preflight,
+      reviewMetrics,
     });
   }
   const humanNotes = humanNotesResult.humanNotes;
@@ -514,6 +618,13 @@ export async function runReview(
   if (preflight.previewPath) {
     agentResult.report.preview_path = path.relative(absDir, preflight.previewPath);
   }
+  agentResult.report.visual_qa = visualQA;
+  if (options?.allowUnverifiedVisual) {
+    agentResult.report.visual_qa_waiver = true;
+    agentResult.report.visual_qa_waiver_reason = options.visualQaWaiverReason!.trim();
+    agentResult.report.visual_qa_waiver_created_at = createdAt;
+  }
+  enforceVisualQAVerdict(agentResult.report);
 
   const drafts: DraftFile[] = [
     {
@@ -562,10 +673,19 @@ export async function runReview(
     }, {
       compileResult,
       preflight,
+      reviewMetrics,
     });
   }
 
+  // The promoted review artifacts are part of the approval binding. Refresh
+  // the persisted snapshot before recording approval so the next reconcile
+  // does not mistake this command's own review update for an external edit
+  // and immediately mark the new approval stale.
+  doc.artifact_hashes = snapshotArtifacts(absDir).hashes;
+
   const hasFatal = agentResult.report.fatal_issues.length > 0;
+  const approvalEligible = isReviewApprovalEligible(agentResult.report);
+  const visualGateReason = reviewVisualQAGateReason(agentResult.report);
   let newState: ProjectState;
   let approvalRecord: ApprovalRecord | undefined;
 
@@ -578,13 +698,21 @@ export async function runReview(
         message: "Creative override requires approved_by and override_reason",
       });
     }
-    newState = "approved";
-    approvalRecord = buildApprovalRecord(
-      "creative_override",
-      absDir,
-      options.approvedBy,
-      options.overrideReason,
-    );
+    if (visualGateReason) {
+      newState = "critique_ready";
+    } else {
+      newState = "approved";
+      approvalRecord = buildApprovalRecord(
+        "creative_override",
+        absDir,
+        options.approvedBy,
+        options.overrideReason,
+      );
+    }
+  } else if (visualGateReason) {
+    newState = "critique_ready";
+  } else if (!approvalEligible) {
+    newState = "critique_ready";
   } else {
     const operatorDecision = autonomyMode === "full"
       ? (() => {
@@ -614,6 +742,7 @@ export async function runReview(
         }, {
           compileResult,
           preflight,
+          reviewMetrics,
         });
       }
       newState = "approved";
@@ -628,10 +757,16 @@ export async function runReview(
     writeProjectState(absDir, doc);
   }
 
-  const note = hasFatal && options?.creativeOverride
+  const note = hasFatal && options?.creativeOverride && visualGateReason
+    ? `critique ready — ${visualGateReason}`
+    : hasFatal && options?.creativeOverride
     ? `creative override: ${options.overrideReason}`
     : hasFatal
       ? "critique ready — fatal issues found"
+      : visualGateReason
+        ? `critique ready — ${visualGateReason}`
+      : !approvalEligible
+        ? `critique ready — review status is ${agentResult.report.summary_judgment.status}`
       : approvalRecord
         ? autonomyMode === "full"
           ? "approved — clean review auto-approved"
@@ -646,12 +781,13 @@ export async function runReview(
     note,
   );
 
-  pt.complete(["review_report.yaml", "review_patch.json"]);
+  pt.complete(["review_metrics.json", "review_report.yaml", "review_patch.json"]);
   return {
     success: true,
     report: agentResult.report,
     patch: safePatch,
     patchSafety,
+    reviewMetrics,
     compileResult,
     preflight,
     previousState,

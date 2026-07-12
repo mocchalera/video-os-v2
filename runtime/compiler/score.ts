@@ -15,6 +15,7 @@ import type {
 import { getSkillScoreAdjustment } from "../editorial/skill-registry.js";
 import type { BgmSection } from "./transition-types.js";
 import type { BeatEvent } from "../media/bgm-analyzer.js";
+import { getCandidateRef } from "./candidate-ref.js";
 
 // ── BGM-aware scoring context ───────────────────────────────────────
 
@@ -38,6 +39,12 @@ const BEAT_STORY_ROLE_WEIGHT: Record<string, number> = {
   closing: 0.70,
   setup: 0.45,
 };
+
+const PLAN_PRIMARY_BONUS = 2.5;
+const PLAN_FALLBACK_BONUS = 0.75;
+const EXACT_ELIGIBLE_BEAT_BONUS = 0.35;
+const TEXTUAL_ELIGIBLE_BEAT_BONUS = 0.15;
+const GENERIC_BEAT_PENALTY = 0.25;
 
 const PEAK_TYPE_MATCH: Record<string, Record<string, number>> = {
   action_peak: { hero: 1.00, support: 1.00, transition: 0.55, texture: 0.55, dialogue: 0.55 },
@@ -67,6 +74,26 @@ export function computePeakSalienceBonus(
   return peakStrength * storyRoleWeight * typeMatchWeight;
 }
 
+export function computePeakPriorityBonus(candidate: Candidate): number {
+  const signals = candidate.peak_signals;
+  if (!signals) return 0;
+
+  const motion = clamp01(signals.motion ?? 0);
+  const audio = clamp01(signals.audio_rms ?? 0);
+  const speech = Math.min(1, (signals.speech_keyword?.length ?? 0) / 3);
+  const strongestSignal = Math.max(motion, audio, speech);
+
+  if (strongestSignal <= 0) return 0;
+
+  const roleWeight = candidate.role === "hero"
+    ? 1
+    : candidate.role === "support" || candidate.role === "dialogue"
+    ? 0.8
+    : 0.45;
+
+  return Number((0.35 * strongestSignal * roleWeight).toFixed(3));
+}
+
 export function scoreCandidates(
   normalized: NormalizedData,
   candidates: Candidate[],
@@ -79,6 +106,25 @@ export function scoreCandidates(
 ): RankedCandidateTable {
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const nonReject = candidates.filter((c) => c.role !== "reject");
+
+  function candidateMatchesBeat(eligibleBeats: string[], beat: NormalizedBeat): boolean {
+    if (eligibleBeats.includes(beat.beat_id)) return true;
+    const beatText = [beat.label, beat.purpose].filter(Boolean).join(" ").toLowerCase();
+    return eligibleBeats.some((eb) => beatText.includes(eb.toLowerCase()));
+  }
+
+  function candidatePlanPriority(candidate: Candidate, beat: NormalizedBeat): "primary" | "fallback" | undefined {
+    const plan = beat.candidate_plan;
+    if (!plan) return undefined;
+    const candidateRefs = new Set([getCandidateRef(candidate), candidate.segment_id]);
+    if (plan.primary_candidate_ref && candidateRefs.has(plan.primary_candidate_ref)) {
+      return "primary";
+    }
+    if ((plan.fallback_candidate_refs ?? []).some((ref) => candidateRefs.has(ref))) {
+      return "fallback";
+    }
+    return undefined;
+  }
 
   // Pre-compute global motif usage counts for reuse penalty
   const motifCounts = new Map<string, number>();
@@ -95,10 +141,12 @@ export function scoreCandidates(
   for (const beat of normalized.beats) {
     const assets = new Set<string>();
     for (const c of nonReject) {
+      const isPlanned = candidatePlanPriority(c, beat) !== undefined;
       if (
+        !isPlanned &&
         c.eligible_beats &&
         c.eligible_beats.length > 0 &&
-        !c.eligible_beats.includes(beat.beat_id)
+        !candidateMatchesBeat(c.eligible_beats, beat)
       ) continue;
       assets.add(c.asset_id);
     }
@@ -114,11 +162,13 @@ export function scoreCandidates(
     const scored: ScoredCandidate[] = [];
 
     for (const candidate of nonReject) {
-      // Skip if candidate is not eligible for this beat
+      const planPriority = candidatePlanPriority(candidate, beat);
+      const isPlanned = planPriority !== undefined;
       if (
+        !isPlanned &&
         candidate.eligible_beats &&
         candidate.eligible_beats.length > 0 &&
-        !candidate.eligible_beats.includes(beat.beat_id)
+        !candidateMatchesBeat(candidate.eligible_beats, beat)
       ) {
         continue;
       }
@@ -126,7 +176,10 @@ export function scoreCandidates(
       // Skip if candidate's role is not required or preferred for this beat
       const isRequired = beat.required_roles.includes(candidate.role as typeof beat.required_roles[number]);
       const isPreferred = beat.preferred_roles.includes(candidate.role as typeof beat.preferred_roles[number]);
-      if (!isRequired && !isPreferred) {
+      // candidate_plan is an explicit authored placement decision. Keep it
+      // eligible even when the beat's broader role rubric would exclude that
+      // occurrence (for example, a support cutaway inside a hero-led hook).
+      if (!isPlanned && !isRequired && !isPreferred) {
         continue;
       }
 
@@ -154,6 +207,8 @@ export function scoreCandidates(
         activeSkills,
         durationPolicy,
         bgmContext,
+        planPriority,
+        computeBeatMatchAdjustment(candidate, beat),
       );
       scored.push(entry);
     }
@@ -181,6 +236,8 @@ function scoreCandidate(
   activeSkills?: string[],
   durationPolicy?: DurationPolicy,
   bgmContext?: BgmScoringContext,
+  planPriority?: "primary" | "fallback",
+  beatMatchAdjustment?: BeatMatchAdjustment,
 ): ScoredCandidate {
   // 1. Semantic rank score: higher rank (lower number) → higher score
   //    Normalize: 1.0 for rank 1, decaying. Use 1 / rank.
@@ -233,10 +290,26 @@ function scoreCandidate(
   // 7. Peak salience bonus: candidate-specific, per design doc §11.2
   const peakSalienceBonus = computePeakSalienceBonus(candidate, beat);
 
+  // 7.5. Peak priority bonus: explicit selects_candidates peak_signals
+  // must be strong enough to reorder candidates toward the top.
+  const peakPriorityBonus = computePeakPriorityBonus(candidate);
+
   // 8. BGM downbeat proximity bonus + chorus-peak priority
   const bgmBonus = bgmContext
     ? computeBgmBonus(candidate, beat, bgmContext, usPerFrame)
     : 0;
+
+  // 8.5. Beat plan and explicit eligible-beat matching.
+  // Candidate plans are authored downstream intent; exact eligible_beats are
+  // source-selection intent. Both should beat generic candidates, but neither
+  // is a hard filter.
+  const planPriorityBonus = planPriority === "primary"
+    ? PLAN_PRIMARY_BONUS
+    : planPriority === "fallback"
+    ? PLAN_FALLBACK_BONUS
+    : 0;
+  const beatMatchBonus = beatMatchAdjustment?.bonus ?? 0;
+  const genericBeatPenalty = beatMatchAdjustment?.genericPenalty ?? 0;
 
   // 9. Duration mode adjustments
   //    - guide: duration fit is soft bonus (weight 0.15 instead of 0.3)
@@ -267,7 +340,11 @@ function scoreCandidate(
     adjacencyPenalty +
     skillAdjustment +
     peakSalienceBonus +
-    bgmBonus;
+    peakPriorityBonus +
+    bgmBonus +
+    planPriorityBonus +
+    beatMatchBonus -
+    genericBeatPenalty;
 
   return {
     candidate,
@@ -280,9 +357,38 @@ function scoreCandidate(
       motif_reuse_penalty: motifReusePenalty,
       adjacency_penalty: adjacencyPenalty,
       peak_salience_bonus: peakSalienceBonus,
+      peak_priority_bonus: peakPriorityBonus,
       bgm_bonus: bgmBonus,
+      plan_priority_bonus: planPriorityBonus,
+      beat_match_bonus: beatMatchBonus,
+      generic_beat_penalty: genericBeatPenalty,
     },
   };
+}
+
+interface BeatMatchAdjustment {
+  bonus: number;
+  genericPenalty: number;
+}
+
+function computeBeatMatchAdjustment(candidate: Candidate, beat: NormalizedBeat): BeatMatchAdjustment {
+  const eligibleBeats = candidate.eligible_beats ?? [];
+  if (eligibleBeats.length === 0) {
+    return { bonus: 0, genericPenalty: GENERIC_BEAT_PENALTY };
+  }
+  if (eligibleBeats.includes(beat.beat_id)) {
+    return { bonus: EXACT_ELIGIBLE_BEAT_BONUS, genericPenalty: 0 };
+  }
+  const beatText = [beat.label, beat.purpose].filter(Boolean).join(" ").toLowerCase();
+  if (eligibleBeats.some((eligibleBeat) => beatText.includes(eligibleBeat.toLowerCase()))) {
+    return { bonus: TEXTUAL_ELIGIBLE_BEAT_BONUS, genericPenalty: 0 };
+  }
+  return { bonus: 0, genericPenalty: 0 };
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
 }
 
 // ── BGM Downbeat Proximity Bonus + Chorus-Peak Priority ─────────────

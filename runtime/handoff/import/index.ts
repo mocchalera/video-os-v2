@@ -16,6 +16,8 @@ import { mapClips } from "./mapping.js";
 import { normalizeOneToMany, type OneToManyResult } from "./normalization.js";
 import { normalizeOtioViaBridge } from "./parser.js";
 import { buildImportReport } from "./report.js";
+import { isP3ContinuityPreferenceEnabled } from "../../artifacts/p3-continuity-graph.js";
+import { appendPreferenceEntry } from "../../artifacts/p3-preference-memory.js";
 
 export interface HandoffImportInput {
   manifestPath: string;
@@ -25,6 +27,8 @@ export interface HandoffImportInput {
   outputDir: string;
   pythonPath?: string;
   nleSessionObserved?: NleSessionObserved;
+  confirmedPreferenceLesson?: string;
+  preferenceMemoryPath?: string;
 }
 
 export interface NleSessionObserved {
@@ -399,6 +403,7 @@ export function executeHandoffImport(
 
   const reportPath = path.join(input.outputDir, "roundtrip_import_report.yaml");
   fs.writeFileSync(reportPath, stringifyYaml(report), "utf-8");
+  appendConfirmedImportLesson(input, report);
 
   return {
     report,
@@ -406,6 +411,35 @@ export function executeHandoffImport(
     reviewRequired,
     bridgeFingerprint: importResult.fingerprint,
   };
+}
+
+function appendConfirmedImportLesson(input: HandoffImportInput, report: RoundtripImportReport): void {
+  if (!isP3ContinuityPreferenceEnabled()) return;
+  if (!input.confirmedPreferenceLesson || !input.preferenceMemoryPath) return;
+  appendPreferenceEntry(input.preferenceMemoryPath, {
+    version: "1.0.0",
+    project_id: report.project_id,
+    entry_id: `EPM_import_${safeId(report.handoff_id)}_${Date.now()}`,
+    created_at: report.imported_at,
+    actor: { type: "import_premiere", id: "runtime/handoff/import" },
+    source_event: { event_type: "premiere_import", event_ref: report.handoff_id },
+    preference_type: "override_rationale",
+    value: { kind: "string", data: input.confirmedPreferenceLesson },
+    scope: "project",
+    confidence: { score: 1, source: "human_confirmed_import_lesson", status: "ready" },
+    status: "active",
+    supersedes_entry_id: null,
+    expires_at: null,
+    provenance: {
+      producer: "import-premiere",
+      inputs: [{ path: "roundtrip_import_report.yaml", hash: report.base_timeline.hash }],
+      hash_policy: { algorithm: "sha256", canonicalization: "jsonl-records-v1", excluded_fields: [] },
+    },
+  });
+}
+
+function safeId(value: string): string {
+  return value.normalize("NFKD").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "handoff";
 }
 
 export function executeOfflineImport(opts: {

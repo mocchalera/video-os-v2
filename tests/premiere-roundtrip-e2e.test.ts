@@ -262,11 +262,11 @@ describe("E2E: diff detection — trim changes (demo project)", () => {
     let xml = exportedXml;
 
     // Modify CLP_0001's in/out (first clip in V1)
-    // Original: src_in_us=1400000 → Math.round(1.4*24)=34 frames, src_out_us=6000000 → 144 frames
-    // Change in from 34 to 48, out from 144 to 130
+    // Original: src_in_us=2000000 → Math.round(2.0*24)=48 frames, src_out_us=5500000 → 132 frames
+    // Change in from 48 to 60, out from 132 to 120
     xml = xml.replace(
-      /(<clipitem id="cv-CLP_0001">[\s\S]*?)<in>34<\/in>([\s\S]*?)<out>144<\/out>/,
-      "$1<in>48</in>$2<out>130</out>",
+      /(<clipitem id="cv-CLP_0001">[\s\S]*?)<in>48<\/in>([\s\S]*?)<out>132<\/out>/,
+      "$1<in>60</in>$2<out>120</out>",
     );
 
     const parsed = parseFcp7Sequence(xml);
@@ -366,10 +366,10 @@ describe("E2E: diff application (demo project)", () => {
   it("applies trim change and verifies patched timeline", () => {
     let xml = exportedXml;
 
-    // Trim CLP_0001: change in from 34→48, out from 144→130
+    // Trim CLP_0001: change in from 48→60, out from 132→120
     xml = xml.replace(
-      /(<clipitem id="cv-CLP_0001">[\s\S]*?)<in>34<\/in>([\s\S]*?)<out>144<\/out>/,
-      "$1<in>48</in>$2<out>130</out>",
+      /(<clipitem id="cv-CLP_0001">[\s\S]*?)<in>48<\/in>([\s\S]*?)<out>132<\/out>/,
+      "$1<in>60</in>$2<out>120</out>",
     );
 
     const parsed = parseFcp7Sequence(xml);
@@ -478,7 +478,7 @@ describe("E2E: multi-track roundtrip consistency", () => {
 
 describe("E2E: edge cases with demo data", () => {
   it("handles clips with non-zero src_in_us", () => {
-    // CLP_0001 has src_in_us=1400000 (not zero)
+    // CLP_0001 has src_in_us=2000000 (not zero)
     const parsed = parseFcp7Sequence(exportedXml);
     const clip = parsed.videoTracks[0].find(
       (c) => c.videoOsMeta?.clip_id === "CLP_0001",

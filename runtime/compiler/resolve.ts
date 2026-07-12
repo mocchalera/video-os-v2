@@ -5,7 +5,14 @@
 import type { AssembledTimeline, Candidate, DurationPolicy, Track } from "./types.js";
 import { computeFrameBounds, isWithinWindow } from "./duration-helpers.js";
 
-export type DurationStatus = "pass" | "advisory" | "fail";
+export type DurationStatus = "pass" | "short" | "over";
+
+export interface BeatFillDiagnostic {
+  beat_id: string;
+  target: number;
+  actual: number;
+  fill_ratio: number;
+}
 
 export interface ResolutionReport {
   resolved_overlaps: number;
@@ -22,7 +29,14 @@ export interface ResolutionReport {
   duration_status?: DurationStatus;
   duration_delta_frames?: number;
   duration_delta_pct?: number;
+  content_frames: number;
+  content_fill_ratio: number;
+  gap_frames: number;
+  gap_count: number;
+  beat_fill: BeatFillDiagnostic[];
 }
+
+const DEFAULT_CONTENT_FILL_THRESHOLD = 0.9;
 
 export function resolve(
   timeline: AssembledTimeline,
@@ -108,9 +122,10 @@ export function resolve(
     const segmentUsage = new Map<string, { trackId: string; clipId: string }[]>();
     for (const track of allTracks) {
       for (const clip of track.clips) {
-        const list = segmentUsage.get(clipUsageKey(clip)) ?? [];
+        const usageKey = `${track.kind}:${clipUsageKey(clip)}`;
+        const list = segmentUsage.get(usageKey) ?? [];
         list.push({ trackId: track.track_id, clipId: clip.clip_id });
-        segmentUsage.set(clipUsageKey(clip), list);
+        segmentUsage.set(usageKey, list);
       }
     }
 
@@ -186,21 +201,10 @@ export function resolve(
     min_target_frames = bounds.min_target_frames;
     max_target_frames = bounds.max_target_frames;
     resolved_target_frames = bounds.target_frames;
-    duration_delta_frames = maxFrame - bounds.target_frames;
+    duration_delta_frames = 0;
     duration_delta_pct = bounds.target_frames > 0
-      ? ((maxFrame - bounds.target_frames) / bounds.target_frames) * 100
+      ? (duration_delta_frames / bounds.target_frames) * 100
       : 0;
-
-    if (durationPolicy.mode === "strict") {
-      duration_status = isWithinWindow(maxFrame, bounds) ? "pass" : "fail";
-    } else {
-      // guide mode
-      if (maxFrame > 0) {
-        duration_status = isWithinWindow(maxFrame, bounds) ? "pass" : "advisory";
-      } else {
-        duration_status = "pass";
-      }
-    }
 
     // Guide mode: duration_fit uses policy max bounds (target is a floor).
     // Strict mode: use window check.
@@ -218,6 +222,40 @@ export function resolve(
     durationFit = maxFrame <= totalTargetFrames;
   }
 
+  const content_frames = sumVideoContentFrames(timeline);
+  const content_fill_ratio = resolved_target_frames > 0
+    ? content_frames / resolved_target_frames
+    : 1;
+  const gapSummary = computeGapSummary(timeline, resolved_target_frames);
+  const beat_fill = computeBeatFill(timeline, resolved_target_frames);
+
+  if (durationPolicy && fpsNum && fpsDen) {
+    duration_delta_frames = content_frames - resolved_target_frames;
+    duration_delta_pct = resolved_target_frames > 0
+      ? (duration_delta_frames / resolved_target_frames) * 100
+      : 0;
+
+    const isShort = content_fill_ratio < DEFAULT_CONTENT_FILL_THRESHOLD ||
+      (min_target_frames !== undefined && content_frames < min_target_frames);
+    const isOver = max_target_frames != null
+      ? maxFrame > max_target_frames || content_frames > max_target_frames
+      : durationPolicy.mode === "strict" && maxFrame > resolved_target_frames;
+
+    if (isShort) {
+      duration_status = "short";
+    } else if (isOver) {
+      duration_status = "over";
+    } else if (durationPolicy.mode === "strict" && !isWithinWindow(maxFrame, {
+      target_frames: resolved_target_frames,
+      min_target_frames: min_target_frames ?? resolved_target_frames,
+      max_target_frames: max_target_frames ?? resolved_target_frames,
+    })) {
+      duration_status = maxFrame < (min_target_frames ?? resolved_target_frames) ? "short" : "over";
+    } else {
+      duration_status = "pass";
+    }
+  }
+
   return {
     resolved_overlaps: resolvedOverlaps,
     resolved_duplicates: resolvedDuplicates,
@@ -232,7 +270,116 @@ export function resolve(
     duration_status,
     duration_delta_frames,
     duration_delta_pct,
+    content_frames,
+    content_fill_ratio,
+    gap_frames: gapSummary.gap_frames,
+    gap_count: gapSummary.gap_count,
+    beat_fill,
   };
+}
+
+function sumVideoContentFrames(timeline: AssembledTimeline): number {
+  return timeline.tracks.video.reduce(
+    (sum, track) => sum + track.clips.reduce(
+      (trackSum, clip) => trackSum + Math.max(0, clip.timeline_duration_frames),
+      0,
+    ),
+    0,
+  );
+}
+
+function computeGapSummary(
+  timeline: AssembledTimeline,
+  targetFrames: number,
+): { gap_frames: number; gap_count: number } {
+  if (targetFrames <= 0) return { gap_frames: 0, gap_count: 0 };
+  const intervals = timeline.tracks.video
+    .flatMap((track) => track.clips)
+    .map((clip) => ({
+      start: Math.max(0, Math.min(targetFrames, clip.timeline_in_frame)),
+      end: Math.max(0, Math.min(targetFrames, clip.timeline_in_frame + clip.timeline_duration_frames)),
+    }))
+    .filter((interval) => interval.end > interval.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+
+  let cursor = 0;
+  let gapFrames = 0;
+  let gapCount = 0;
+  for (const interval of intervals) {
+    if (interval.start > cursor) {
+      gapFrames += interval.start - cursor;
+      gapCount += 1;
+    }
+    cursor = Math.max(cursor, interval.end);
+  }
+  if (cursor < targetFrames) {
+    gapFrames += targetFrames - cursor;
+    gapCount += 1;
+  }
+
+  return { gap_frames: gapFrames, gap_count: gapCount };
+}
+
+function computeBeatFill(
+  timeline: AssembledTimeline,
+  targetFrames: number,
+): BeatFillDiagnostic[] {
+  const beatWindows = getBeatWindows(timeline, targetFrames);
+  const clips = timeline.tracks.video.flatMap((track) => track.clips);
+
+  return beatWindows.map((beat) => {
+    const actual = clips
+      .filter((clip) => clip.beat_id === beat.beat_id)
+      .reduce((sum, clip) => sum + Math.max(0, clip.timeline_duration_frames), 0);
+    return {
+      beat_id: beat.beat_id,
+      target: beat.target,
+      actual,
+      fill_ratio: beat.target > 0 ? actual / beat.target : 1,
+    };
+  });
+}
+
+function getBeatWindows(
+  timeline: AssembledTimeline,
+  targetFrames: number,
+): Array<{ beat_id: string; start: number; target: number }> {
+  const markers = timeline.markers
+    .filter((marker) => marker.kind === "beat")
+    .map((marker) => ({
+      beat_id: marker.label.split(":")[0]?.trim(),
+      start: marker.frame,
+    }))
+    .filter((marker): marker is { beat_id: string; start: number } =>
+      Boolean(marker.beat_id) && Number.isFinite(marker.start)
+    )
+    .sort((a, b) => a.start - b.start || a.beat_id.localeCompare(b.beat_id));
+
+  if (markers.length > 0) {
+    return markers.map((marker, index) => {
+      const nextStart = markers[index + 1]?.start ?? targetFrames;
+      return {
+        beat_id: marker.beat_id,
+        start: marker.start,
+        target: Math.max(0, nextStart - marker.start),
+      };
+    });
+  }
+
+  const beatIds = [...new Set(
+    timeline.tracks.video.flatMap((track) => track.clips.map((clip) => clip.beat_id)),
+  )].sort();
+  if (beatIds.length === 0) return [];
+  const fallbackTarget = Math.floor(targetFrames / beatIds.length);
+  let remainder = targetFrames - fallbackTarget * beatIds.length;
+  let cursor = 0;
+  return beatIds.map((beatId) => {
+    const target = fallbackTarget + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder -= 1;
+    const window = { beat_id: beatId, start: cursor, target };
+    cursor += target;
+    return window;
+  });
 }
 
 function clipUsageKey(clip: {

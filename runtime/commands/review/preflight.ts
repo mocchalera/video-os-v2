@@ -217,5 +217,16 @@ export function buildCompileResultFromExistingTimeline(
       total_frames: 0,
       target_frames: 0,
     },
+    continuity: {
+      policy: {
+        same_asset_repeat: "reorder_or_fail",
+        same_cluster_repeat: "warn",
+      },
+      scope: "video_tracks",
+      reorders: [],
+      exemptions: [],
+      warnings: [],
+      errors: [],
+    },
   };
 }

@@ -23,6 +23,8 @@ export const DEFAULT_MASTERING: MasteringDefaults = {
   true_peak_target_dbtp: -1.5,
 };
 
+export const MASTERING_SAMPLE_RATE_HZ = 48_000;
+
 export interface LoudnormMeasurement {
   input_i: string;
   input_tp: string;
@@ -114,6 +116,7 @@ export function buildLoudnormPass2Args(
     "-y",
     "-i", inputPath,
     "-af", filterStr,
+    "-ar", String(MASTERING_SAMPLE_RATE_HZ),
     outputPath,
   ];
 }

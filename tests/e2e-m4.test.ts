@@ -25,6 +25,15 @@ import {
 
 const SAMPLE_PROJECT = "projects/sample";
 const tempDirs: string[] = [];
+const MATCHING_VIDEO_FRAME = {
+  width: 1920,
+  height: 1080,
+  sar: "1:1",
+  dar: "16:9",
+  fps_num: 24,
+  fps_den: 1,
+  fps: 24,
+};
 
 afterAll(() => {
   for (const d of tempDirs) {
@@ -124,6 +133,51 @@ function stampApprovedState(
   );
 }
 
+function writeReviewVisualQA(
+  projectDir: string,
+  opts: {
+    status?: "verified" | "blocked" | "unverified" | "stale";
+    score?: number;
+    waiver?: boolean;
+  } = {},
+): void {
+  const reportPath = path.join(projectDir, "06_review/review_report.yaml");
+  const report = parseYaml(fs.readFileSync(reportPath, "utf-8")) as Record<string, unknown>;
+  const status = opts.status ?? "verified";
+  report.visual_qa = {
+    status,
+    ...(status === "verified" ? { score: opts.score ?? 90 } : { reason: "test_visual_qa" }),
+    min_score: 70,
+    issues: { total: 0, critical: 0, warning: 0, info: 0 },
+    issue_summaries: [],
+    video_path: "09_output/rough-cut.mp4",
+    video_hash: "test-video-hash",
+    timeline_path: "05_timeline/timeline.json",
+    timeline_hash: "test-timeline-hash",
+  };
+  if (opts.waiver) {
+    report.visual_qa_waiver = true;
+    report.visual_qa_waiver_reason = "Operator reviewed the visual export externally.";
+  } else {
+    delete report.visual_qa_waiver;
+    delete report.visual_qa_waiver_reason;
+  }
+  fs.writeFileSync(reportPath, stringifyYaml(report), "utf-8");
+}
+
+function writeReviewFatalIssues(projectDir: string): void {
+  const reportPath = path.join(projectDir, "06_review/review_report.yaml");
+  const report = parseYaml(fs.readFileSync(reportPath, "utf-8")) as Record<string, unknown>;
+  report.fatal_issues = [
+    {
+      summary: "Opening beat contradicts the approved brief",
+      severity: "fatal",
+      evidence: ["test fixture unresolved fatal issue"],
+    },
+  ];
+  fs.writeFileSync(reportPath, stringifyYaml(report), "utf-8");
+}
+
 // ── M4 Project Factory ──────────────────────────────────────────
 
 function createM4Project(
@@ -172,7 +226,10 @@ function createM4Project(
     fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
   }
 
-  // 2. Write project_state.yaml
+  // 2. Stamp review_report with visual QA gate evidence.
+  writeReviewVisualQA(tmpDir);
+
+  // 3. Write project_state.yaml
   stampApprovedState(tmpDir, {
     currentState,
     sourceOfTruth,
@@ -180,7 +237,7 @@ function createM4Project(
     includeApproval,
   });
 
-  // 3. Ensure transcripts directory exists
+  // 4. Ensure transcripts directory exists
   fs.mkdirSync(path.join(tmpDir, "03_analysis/transcripts"), {
     recursive: true,
   });
@@ -298,6 +355,7 @@ describe("M4 E2E: packageCommand", () => {
         audioDurationMs: 30005,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
       createdAt: "2026-03-21T12:00:00Z",
     });
@@ -310,6 +368,8 @@ describe("M4 E2E: packageCommand", () => {
     expect(result.qaReport!.source_of_truth).toBe("engine_render");
     expect(result.qaReport!.metrics.integrated_lufs).toBe(-16.0);
     expect(result.qaReport!.metrics.true_peak_dbtp).toBe(-1.8);
+    expect(result.qaReport!.checks.find((check) => check.name === "resolution_valid"))
+      .not.toHaveProperty("metrics");
     expect(result.stateTransitioned).toBe(true);
 
     // State transitioned to packaged
@@ -323,6 +383,8 @@ describe("M4 E2E: packageCommand", () => {
     // QA report and manifest written to disk
     expect(fs.existsSync(path.join(projDir, "07_package/qa-report.json"))).toBe(true);
     expect(fs.existsSync(path.join(projDir, "07_package/package_manifest.json"))).toBe(true);
+    expect(result.deliverablePath).toBe(path.join(projDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projDir, "09_output", "final.mp4"))).toBe(true);
   });
 
   it("nle_finishing path: QA passes, transitions to packaged", async () => {
@@ -357,6 +419,7 @@ describe("M4 E2E: packageCommand", () => {
         truePeakDbtp: -1.8,
         videoDurationMs: 30000,
         audioDurationMs: 30002,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
       createdAt: "2026-03-21T12:00:00Z",
     });
@@ -368,6 +431,8 @@ describe("M4 E2E: packageCommand", () => {
     expect(result.qaReport!.passed).toBe(true);
     expect(result.qaReport!.metrics.integrated_lufs).toBe(-16.0);
     expect(result.stateTransitioned).toBe(true);
+    expect(result.deliverablePath).toBe(path.join(projDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projDir, "09_output", "final.mp4"))).toBe(true);
 
     // State transitioned to packaged
     const stateRaw = fs.readFileSync(
@@ -402,6 +467,7 @@ describe("M4 E2E: packageCommand", () => {
         audioDurationMs: 30005,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
     });
 
@@ -454,6 +520,68 @@ describe("M4 E2E: packageCommand", () => {
     expect(result.error!.message).toContain("Gate 10");
   });
 
+  it("fails Gate 10 when review_report visual QA is not verified", async () => {
+    const projDir = createM4Project("pkg-visual-blocked", {
+      sourceOfTruth: "engine_render",
+      captionSource: "none",
+    });
+    writeReviewVisualQA(projDir, { status: "blocked" });
+    restampApproval(projDir, "engine_render");
+
+    const result = await packageCommand(projDir, { skipRender: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe("GATE_CHECK_FAILED");
+    expect(result.error?.message).toContain("review_report.visual_qa.status");
+    const stateRaw = fs.readFileSync(path.join(projDir, "project_state.yaml"), "utf-8");
+    const finalState = parseYaml(stateRaw) as { current_state: string };
+    expect(finalState.current_state).toBe("approved");
+  });
+
+  it("fails Gate 10 when review_report contains unresolved fatal issues", async () => {
+    const projDir = createM4Project("pkg-fatal-review", {
+      sourceOfTruth: "engine_render",
+      captionSource: "none",
+    });
+    writeReviewFatalIssues(projDir);
+    restampApproval(projDir, "engine_render");
+
+    const result = await packageCommand(projDir, { skipRender: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe("GATE_CHECK_FAILED");
+    expect(result.error?.message).toContain("review_report contains 1 fatal issue(s)");
+    const stateRaw = fs.readFileSync(path.join(projDir, "project_state.yaml"), "utf-8");
+    const finalState = parseYaml(stateRaw) as { current_state: string };
+    expect(finalState.current_state).toBe("approved");
+  });
+
+  it("allows Gate 10 when review_report visual QA has an explicit waiver", async () => {
+    const projDir = createM4Project("pkg-visual-waiver", {
+      sourceOfTruth: "engine_render",
+      captionSource: "none",
+    });
+    writeReviewVisualQA(projDir, { status: "blocked", waiver: true });
+    restampApproval(projDir, "engine_render");
+
+    const result = await packageCommand(projDir, {
+      skipRender: true,
+      precomputedMetrics: {
+        integratedLufs: -16.0,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 30000,
+        audioDurationMs: 30005,
+        dialogueWindowMs: 10000,
+        observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
+      },
+      createdAt: "2026-03-21T12:00:00Z",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.stateTransitioned).toBe(true);
+  });
+
   it("autonomy:full defaults handoff_resolution and skips missing caption/music inputs", async () => {
     const projDir = createM4Project("pkg-auto-handoff-full", {
       includeHandoff: false,
@@ -470,6 +598,7 @@ describe("M4 E2E: packageCommand", () => {
         audioDurationMs: 30008,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8200,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
       createdAt: "2026-03-22T12:00:00Z",
     });
@@ -539,6 +668,7 @@ describe("M4 E2E: full pipeline", () => {
         audioDurationMs: 30008,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8200,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
       createdAt: "2026-03-21T12:00:00Z",
     });
@@ -560,6 +690,8 @@ describe("M4 E2E: full pipeline", () => {
     expect(qaReport.source_of_truth).toBe("engine_render");
     expect(qaReport.metrics.integrated_lufs).toBe(-15.9);
     expect(qaReport.metrics.dialogue_occupancy_ratio).toBe(0.82);
+    expect(qaReport.metrics.resolution_check).toBe("passed");
+    expect(qaReport.metrics.actual_video_frame).toEqual(MATCHING_VIDEO_FRAME);
 
     // Human-readable QA report also written
     expect(
@@ -570,6 +702,8 @@ describe("M4 E2E: full pipeline", () => {
     expect(
       fs.existsSync(path.join(projDir, "07_package/package_manifest.json")),
     ).toBe(true);
+    expect(packageResult.deliverablePath).toBe(path.join(projDir, "09_output", "final.mp4"));
+    expect(fs.existsSync(path.join(projDir, "09_output", "final.mp4"))).toBe(true);
 
     // State is packaged
     const stateRaw = fs.readFileSync(
@@ -616,6 +750,7 @@ describe("M4 E2E: packaged state reconcile", () => {
         audioDurationMs: 30005,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
       createdAt: "2026-03-21T12:00:00Z",
     });
@@ -649,6 +784,7 @@ describe("M4 E2E: packaged state reconcile", () => {
         audioDurationMs: 30005,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
       createdAt: "2026-03-21T12:00:00Z",
     });
@@ -685,6 +821,7 @@ describe("M4 E2E: packaged state reconcile", () => {
         audioDurationMs: 30005,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
       createdAt: "2026-03-21T12:00:00Z",
     });
@@ -742,6 +879,7 @@ describe("M4 E2E: render pipeline wiring", () => {
         audioDurationMs: 30005,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
     });
 
@@ -777,6 +915,7 @@ describe("M4 E2E: render pipeline wiring", () => {
         audioDurationMs: 30005,
         dialogueWindowMs: 10000,
         observedNonSilentMs: 8500,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
     });
 

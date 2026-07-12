@@ -16,6 +16,26 @@ import {
   type CommandError,
 } from "./shared.js";
 import type { ProjectState, GateStatus, ReconcileResult } from "../state/reconcile.js";
+import {
+  isP1ManifestCoverageEnabled,
+  readCoverageSummary,
+} from "../artifacts/p1-manifest-coverage.js";
+import {
+  isP4aReleaseSafetyEnabled,
+  readReleaseSafetySummary,
+} from "../artifacts/p4a-release-safety.js";
+import {
+  isP4bDeliveryProfilesEnabled,
+  readDeliveryProfileStatus,
+} from "../artifacts/p4b-delivery-profile.js";
+import {
+  isP4cConfidenceCalibrationEnabled,
+  readCalibrationReportStatus,
+} from "../artifacts/p4c-confidence-calibration.js";
+import {
+  isP4dSearchIndexEnabled,
+  readSearchIndexStatus,
+} from "../artifacts/p4d-segment-search-index.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -24,11 +44,102 @@ export interface StatusResult {
   error?: CommandError;
   currentState?: ProjectState;
   gates?: GateStatus;
+  coverage?: {
+    status: string;
+    requiredLaneCount: number;
+    readyLaneCount: number;
+    blockedLaneCount: number;
+    partialLaneCount: number;
+    reportPath: string;
+  };
+  releaseSafety?: {
+    exists: boolean;
+    reportPath?: string;
+    mode?: string;
+    summary?: {
+      status: string;
+      fatal_count: number;
+      blocker_count: number;
+      warning_count: number;
+      waived_count: number;
+    };
+    valid?: boolean;
+    error?: string;
+  };
+  deliveryProfiles?: {
+    enabled: boolean;
+    directory: string;
+    count: number;
+    malformed_count: number;
+    profiles: Array<{
+      profile_id: string;
+      profile_name: string;
+      platform: string;
+      release_mode: string;
+      path: string;
+    }>;
+    malformed: Array<{ path: string; errors: string[] }>;
+  };
+  confidenceCalibration?: {
+    enabled: boolean;
+    exists: boolean;
+    path: string;
+    eval_set_id?: string;
+    calibration_model_id?: string;
+    valid?: boolean;
+    errors?: string[];
+  };
+  searchIndex?: {
+    enabled: boolean;
+    exists: boolean;
+    path: string;
+    index_id?: string;
+    hash?: string;
+    stale?: boolean;
+    stale_reasons?: string[];
+    valid?: boolean;
+    errors?: string[];
+  };
   staleArtifacts?: string[];
   selfHealed?: boolean;
   previousState?: ProjectState;
   nextCommand?: string;
   nextCommandReason?: string;
+}
+
+export interface PlanningGateInterpretation {
+  severity: "ok" | "warning" | "blocker";
+  blocksRuntime: boolean;
+  message: string;
+}
+
+export function interpretPlanningGate(planningGate: GateStatus["planning_gate"] | "partial_override" | string): PlanningGateInterpretation {
+  switch (planningGate) {
+    case "open":
+      return {
+        severity: "ok",
+        blocksRuntime: false,
+        message: "planning gate open",
+      };
+    case "partial_override":
+      return {
+        severity: "warning",
+        blocksRuntime: false,
+        message: "planning gate has partial operator override; continue with warning",
+      };
+    case "blocked":
+      return {
+        severity: "blocker",
+        blocksRuntime: true,
+        message: "planning gate blocked by unresolved uncertainty",
+      };
+    default:
+      return {
+        severity: "warning",
+        blocksRuntime: false,
+        message: `unknown planning gate '${planningGate}'; continue with warning`,
+      };
+  }
 }
 
 // ── Next Command Recommendation ──────────────────────────────────
@@ -64,7 +175,7 @@ function recommendNextCommand(
       if (gates.compile_gate === "blocked") {
         return { command: "resolve blockers", reason: "compile gate blocked — resolve unresolved_blockers" };
       }
-      if (gates.planning_gate === "blocked") {
+      if (interpretPlanningGate(gates.planning_gate).blocksRuntime) {
         return { command: "resolve uncertainties", reason: "planning gate blocked — resolve uncertainty_register" };
       }
       return { command: "resolve blockers", reason: "project is blocked" };
@@ -101,10 +212,38 @@ export function runStatus(projectDir: string): StatusResult {
     success: true,
     currentState: reconcileResult.reconciled_state,
     gates: reconcileResult.gates,
+    coverage: isP1ManifestCoverageEnabled()
+      ? readCoverageSummary(ctx.projectDir)
+      : undefined,
+    releaseSafety: isP4aReleaseSafetyEnabled()
+      ? formatReleaseSafetyStatus(ctx.projectDir)
+      : undefined,
+    deliveryProfiles: isP4bDeliveryProfilesEnabled()
+      ? readDeliveryProfileStatus(ctx.projectDir)
+      : undefined,
+    confidenceCalibration: isP4cConfidenceCalibrationEnabled()
+      ? readCalibrationReportStatus(ctx.projectDir)
+      : undefined,
+    searchIndex: isP4dSearchIndexEnabled()
+      ? readSearchIndexStatus(ctx.projectDir)
+      : undefined,
     staleArtifacts: reconcileResult.stale_artifacts,
     selfHealed: reconcileResult.self_healed,
     previousState: reconcileResult.persisted_state,
     nextCommand: command,
     nextCommandReason: reason,
+  };
+}
+
+function formatReleaseSafetyStatus(projectDir: string): NonNullable<StatusResult["releaseSafety"]> {
+  const summary = readReleaseSafetySummary(projectDir);
+  if (!summary) return { exists: false };
+  return {
+    exists: true,
+    reportPath: summary.path,
+    mode: summary.mode,
+    summary: summary.summary,
+    valid: summary.valid,
+    error: summary.error,
   };
 }

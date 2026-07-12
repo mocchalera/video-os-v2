@@ -11,6 +11,28 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+// FATAL-1 (Phase 5 review R1): both preview and final must serialize the
+// video filter graph through the same shared builder so the byte-identical
+// parity guarantee actually holds. The runtime previously had a bespoke
+// scale+pad helper which diverged from preview the moment any clip carried
+// a zoom/crop/effect. We now delegate every "fit" call to the shared
+// filtergraph builder via a synthetic no-transform RenderVideoClip.
+import {
+  buildVideoClipFilterString,
+} from "../../editor/shared/filtergraph.js";
+import type { RenderVideoClip } from "../../editor/shared/render-spec.js";
+import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
+import {
+  buildAssDocument,
+  parseSrtCues,
+  resolveCaptionStylePreset,
+} from "../../editor/shared/caption-style-tokens.js";
+import {
+  produceAssembly,
+  resolveAssemblyEngine,
+} from "./assembly-orchestrator.js";
+import type { AssemblyEngine } from "./assembly-orchestrator.js";
+
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface RenderPipelineOptions {
@@ -19,6 +41,14 @@ export interface RenderPipelineOptions {
   captionApprovalPath?: string;
   musicCuesPath?: string;
   assemblyPath?: string; // Pre-built assembly.mp4 (skip Remotion step)
+  /** Alternate engine if assemblyPath is not pre-built */
+  assemblyEngine?: AssemblyEngine;
+  /** Engine input: asset_id -> source file map */
+  sourceMap?: Record<string, string>;
+  /** Where Remotion should write assembly.mp4 */
+  assemblyOutputPath?: string;
+  /** Optional bundle cache dir (Remotion) */
+  bundleCacheDir?: string;
   captionPolicy: {
     language: string;
     delivery_mode: "burn_in" | "sidecar" | "both";
@@ -38,6 +68,8 @@ export interface RenderPipelineResult {
   sidecarPaths: string[];
   logs: Record<string, string>;
 }
+
+export const FINAL_AUDIO_SAMPLE_RATE_HZ = 48_000;
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -87,15 +119,139 @@ function readTimelineSequenceConfig(timelinePath: string): TimelineSequenceConfi
   };
 }
 
+export function readTimelineDurationSeconds(timelinePath: string): number | undefined {
+  const raw = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+    sequence?: { fps_num?: number; fps_den?: number };
+    tracks?: Record<string, Array<{
+      clips?: Array<{
+        timeline_in_frame?: number;
+        timeline_duration_frames?: number;
+      }>;
+    }>>;
+  };
+  const fpsNum = raw.sequence?.fps_num;
+  const fpsDen = raw.sequence?.fps_den ?? 1;
+  if (!fpsNum || !Number.isFinite(fpsNum) || !Number.isFinite(fpsDen) || fpsDen <= 0) {
+    return undefined;
+  }
+
+  let maxOutFrame = 0;
+  for (const tracks of Object.values(raw.tracks ?? {})) {
+    for (const track of tracks ?? []) {
+      for (const clip of track.clips ?? []) {
+        const inFrame = clip.timeline_in_frame ?? 0;
+        const durationFrames = clip.timeline_duration_frames ?? 0;
+        if (!Number.isFinite(inFrame) || !Number.isFinite(durationFrames)) continue;
+        maxOutFrame = Math.max(maxOutFrame, inFrame + durationFrames);
+      }
+    }
+  }
+
+  return maxOutFrame > 0 ? maxOutFrame / (fpsNum / fpsDen) : undefined;
+}
+
+/**
+ * Build the fit filter for a clip that has no per-clip transform or effects.
+ *
+ * Internally constructs a synthetic RenderVideoClip (zoom=1, no crop, no
+ * position, no effects) and runs it through the shared filtergraph builder,
+ * so the resulting string is byte-identical to what preview-job-service
+ * generates for the same case. Both preview and final render now go through
+ * `shared/filtergraph.buildVideoClipFilterString`.
+ *
+ * The legacy `padColor` parameter is preserved for source compatibility but
+ * is now ignored — the shared builder always relies on ffmpeg's default pad
+ * color (black). Pass-through callers in this repo all used the default.
+ */
 export function buildAspectRatioFitFilter(
   outputWidth: number,
   outputHeight: number,
-  padColor = "black",
+  // Deprecated — kept only so older call sites continue to type-check.
+  // The shared filter builder uses ffmpeg's default pad color (black).
+  _padColor: string = "black",
 ): string {
-  return (
-    `scale=${outputWidth}:${outputHeight}:force_original_aspect_ratio=decrease,` +
-    `pad=${outputWidth}:${outputHeight}:(ow-iw)/2:(oh-ih)/2:${padColor}`
+  void _padColor;
+  return buildVideoClipFilterString(
+    makeNoTransformClip(),
+    { width: outputWidth, height: outputHeight },
   );
+}
+
+/**
+ * Build the per-clip filter string from a transform descriptor sourced from
+ * timeline metadata. Used by the assembler so that final-render segments
+ * apply the same zoom/crop/position/effects as preview.
+ */
+export function buildVideoFitFilterFromTransform(
+  outputWidth: number,
+  outputHeight: number,
+  transform: ClipFilterTransform = {},
+): string {
+  const clip: RenderVideoClip = {
+    clipId: "fit",
+    assetId: "fit",
+    sourcePath: "",
+    timelineInFrame: 0,
+    durationFrames: 0,
+    sourceInSec: 0,
+    sourceOutSec: 0,
+    transform: {
+      mode: "cover",
+      anchor: "center",
+      zoom: typeof transform.zoom === "number" && transform.zoom > 0
+        ? transform.zoom
+        : 1,
+      ...(transform.crop ? { crop: transform.crop } : {}),
+      ...(transform.position ? { position: transform.position } : {}),
+    },
+    effects: transform.effects ?? [],
+  };
+  return buildVideoClipFilterString(clip, {
+    width: outputWidth,
+    height: outputHeight,
+  });
+}
+
+/** Subset of RenderVideoClip transform fields the assembler can pass through. */
+export interface ClipFilterTransform {
+  zoom?: number;
+  crop?: { x: number; y: number; width: number; height: number };
+  position?: { x: number; y: number };
+  effects?: RenderVideoClip["effects"];
+}
+
+function makeNoTransformClip(): RenderVideoClip {
+  return {
+    clipId: "fit",
+    assetId: "fit",
+    sourcePath: "",
+    timelineInFrame: 0,
+    durationFrames: 0,
+    sourceInSec: 0,
+    sourceOutSec: 0,
+    transform: { mode: "cover", zoom: 1, anchor: "center" },
+    effects: [],
+  };
+}
+
+/** Probe the video stream dimensions of a file. */
+async function probeVideoDimensions(
+  inputPath: string,
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const result = await execFilePromise("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height",
+      "-of", "csv=p=0",
+      inputPath,
+    ]);
+    const [w, h] = result.stdout.trim().split(",").map(Number);
+    if (Number.isFinite(w) && Number.isFinite(h)) return { width: w, height: h };
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function fitVideoToTimeline(
@@ -104,14 +260,24 @@ async function fitVideoToTimeline(
   timelinePath: string,
 ): Promise<string> {
   const sequence = readTimelineSequenceConfig(timelinePath);
-  const videoFilter = buildAspectRatioFitFilter(sequence.width, sequence.height);
 
+  // Parity: when the assembly is already at the sequence dimensions
+  // (always true for the shared-filtergraph assembler), re-encoding here
+  // would add a lossy generation the preview path does not have. Skip.
+  const dims = await probeVideoDimensions(inputPath);
+  if (dims && dims.width === sequence.width && dims.height === sequence.height) {
+    fs.copyFileSync(inputPath, outputPath);
+    return outputPath;
+  }
+
+  const videoFilter = buildAspectRatioFitFilter(sequence.width, sequence.height);
   await execFilePromise("ffmpeg", [
     "-y",
     "-i", inputPath,
     "-vf", videoFilter,
     "-an",
-    "-c:v", "libx264",
+    // Same near-lossless intermediate profile as the preview path.
+    ...x264Args(INTERMEDIATE_X264),
     "-pix_fmt", "yuv420p",
     outputPath,
   ]);
@@ -168,18 +334,40 @@ export async function burnCaptions(
   rawVideoPath: string,
   srtPath: string,
   outputPath: string,
+  sequence?: { width: number; height: number; fps: number },
+  stylingClass?: string,
 ): Promise<string> {
   ensureDir(path.dirname(outputPath));
 
-  // Escape path separators for the subtitles filter
-  const escapedSrtPath = srtPath
+  // Parity: the exact preview and the final burn share buildAssDocument, so
+  // captions render identically. burn-in converts the SRT to a styled ASS
+  // with an explicit PlayResX/Y header — SRT + force_style alone leaves
+  // libass on its 384x288 default PlayRes, which scaled MarginV up and
+  // floated a bottom lower-third into mid-frame. styling_class selects the
+  // per-project preset (position/width/wrap); unknown classes fall back to
+  // the default. When no sequence is given, fall back to plain SRT burn.
+  let subtitlePath = srtPath;
+  if (sequence) {
+    const preset = resolveCaptionStylePreset(stylingClass);
+    const srtContent = fs.readFileSync(srtPath, "utf-8");
+    const assContent = buildAssDocument(parseSrtCues(srtContent), preset, sequence);
+    subtitlePath = srtPath.replace(/\.srt$/i, "") + ".burn.ass";
+    fs.writeFileSync(subtitlePath, assContent, "utf-8");
+  }
+
+  const escapedSubtitlePath = subtitlePath
     .replace(/\\/g, "\\\\")
-    .replace(/:/g, "\\:");
+    .replace(/:/g, "\\:")
+    .replace(/'/g, "'\\''");
+
+  const vf = `subtitles='${escapedSubtitlePath}'`;
 
   await execFilePromise("ffmpeg", [
     "-y",
     "-i", rawVideoPath,
-    "-vf", `subtitles=${escapedSrtPath}`,
+    "-vf", vf,
+    ...x264Args(INTERMEDIATE_X264),
+    "-pix_fmt", "yuv420p",
     outputPath,
   ]);
 
@@ -295,22 +483,54 @@ export function generateVtt(
  * Mux video and audio into the final deliverable:
  *   video (copy) + audio (AAC 192k) -> final.mp4
  */
+export function buildFinalMuxArgs(
+  videoPath: string,
+  audioPath: string,
+  outputPath: string,
+  durationSec?: number,
+  durationFrames?: number,
+): string[] {
+  const args = [
+    "-y",
+    "-i", videoPath,
+    "-i", audioPath,
+  ];
+  if (durationSec !== undefined && Number.isFinite(durationSec) && durationSec > 0) {
+    args.push("-t", durationSec.toFixed(6));
+  }
+  if (
+    durationFrames !== undefined &&
+    Number.isFinite(durationFrames) &&
+    durationFrames > 0
+  ) {
+    args.push("-frames:v", String(Math.round(durationFrames)));
+  }
+  args.push(
+    "-c:v", "copy",
+    "-c:a", "aac",
+    "-b:a", "192k",
+    "-ar", String(FINAL_AUDIO_SAMPLE_RATE_HZ),
+  );
+  if (durationSec === undefined && durationFrames === undefined) {
+    args.push("-shortest");
+  }
+  args.push(outputPath);
+  return args;
+}
+
 export async function finalMux(
   videoPath: string,
   audioPath: string,
   outputPath: string,
+  durationSec?: number,
+  durationFrames?: number,
 ): Promise<string> {
   ensureDir(path.dirname(outputPath));
 
-  await execFilePromise("ffmpeg", [
-    "-y",
-    "-i", videoPath,
-    "-i", audioPath,
-    "-c:v", "copy",
-    "-c:a", "aac",
-    "-b:a", "192k",
-    outputPath,
-  ]);
+  await execFilePromise(
+    "ffmpeg",
+    buildFinalMuxArgs(videoPath, audioPath, outputPath, durationSec, durationFrames),
+  );
 
   return outputPath;
 }
@@ -345,18 +565,36 @@ export async function runRenderPipeline(
   const logs: Record<string, string> = {};
   const sidecarPaths: string[] = [];
 
-  // 2. Verify assembly path
-  if (!opts.assemblyPath) {
-    throw new Error(
-      "No assemblyPath provided. Remotion rendering is not available in M4 - " +
-      "provide a pre-built assembly.mp4",
-    );
+  // 2. Verify or produce assembly path
+  let assemblyPath: string;
+  if (opts.assemblyPath) {
+    if (!fs.existsSync(opts.assemblyPath)) {
+      throw new Error(`Assembly file not found: ${opts.assemblyPath}`);
+    }
+    assemblyPath = opts.assemblyPath;
+  } else {
+    const engine = resolveAssemblyEngine(opts.assemblyEngine);
+    if (!engine) {
+      throw new Error(
+        "No assemblyPath provided and no assembly engine selected. " +
+          "Either pass opts.assemblyPath, set opts.assemblyEngine, or set " +
+          "VOS_RENDER_ENGINE to 'remotion' or 'ffmpeg'.",
+      );
+    }
+    if (!opts.timelinePath || !opts.sourceMap || !opts.assemblyOutputPath) {
+      throw new Error(
+        "Alternate assembly engine requires timelinePath, sourceMap, and assemblyOutputPath options.",
+      );
+    }
+    const produced = await produceAssembly({
+      timelinePath: opts.timelinePath,
+      sourceMap: opts.sourceMap,
+      outputPath: opts.assemblyOutputPath,
+      engine: opts.assemblyEngine,
+      bundleCacheDir: opts.bundleCacheDir,
+    });
+    assemblyPath = produced.assemblyPath;
   }
-  if (!fs.existsSync(opts.assemblyPath)) {
-    throw new Error(`Assembly file not found: ${opts.assemblyPath}`);
-  }
-
-  const assemblyPath = opts.assemblyPath;
 
   // 3. Demux
   let rawVideoPath: string;
@@ -450,7 +688,14 @@ export async function runRenderPipeline(
 
     const captionedVideoPath = path.join(videoDir, "captioned_video.mp4");
     try {
-      await burnCaptions(rawVideoPath, srtForBurn, captionedVideoPath);
+      const seq = readTimelineSequenceConfig(opts.timelinePath);
+      await burnCaptions(
+        rawVideoPath,
+        srtForBurn,
+        captionedVideoPath,
+        { width: seq.width, height: seq.height, fps },
+        captionPolicy.styling_class,
+      );
       currentVideoPath = captionedVideoPath;
       logs["caption_burn"] = writeLog(
         logsDir,
@@ -502,23 +747,48 @@ export async function runRenderPipeline(
       );
     }
   } else {
-    // No music cues: raw dialogue is the final mix
-    fs.copyFileSync(rawDialoguePath, finalMixPath);
-    logs["audio_mix"] = writeLog(
-      logsDir,
-      "audio_mix",
-      "No music cues provided, raw dialogue used as final mix",
-    );
+    // No music cues: master the raw dialogue directly. Skipping loudnorm
+    // here broke the playback contract — the exact preview is always
+    // mastered to the shared targets (-16 LUFS / LRA 7 / TP -1.5), so an
+    // unmastered final would not sound like what the operator approved.
+    try {
+      const { masterAudio } = await import("../audio/mastering.js");
+      await masterAudio(rawDialoguePath, finalMixPath);
+      logs["audio_mix"] = writeLog(
+        logsDir,
+        "audio_mix",
+        "No music cues; raw dialogue mastered with shared loudnorm defaults",
+      );
+    } catch (err) {
+      fs.copyFileSync(rawDialoguePath, finalMixPath);
+      logs["audio_mix"] = writeLog(
+        logsDir,
+        "audio_mix",
+        `Mastering unavailable, using raw dialogue as final mix: ${String(err)}`,
+      );
+    }
   }
 
   // 7. Final mux
   const finalVideoPath = path.join(videoDir, "final.mp4");
   try {
-    await finalMux(currentVideoPath, finalMixPath, finalVideoPath);
+    const timelineDurationSec = readTimelineDurationSeconds(opts.timelinePath);
+    const timelineDurationFrames = timelineDurationSec === undefined
+      ? undefined
+      : Math.round(timelineDurationSec * fps);
+    await finalMux(
+      currentVideoPath,
+      finalMixPath,
+      finalVideoPath,
+      timelineDurationSec,
+      timelineDurationFrames,
+    );
     logs["final_mux"] = writeLog(
       logsDir,
       "final_mux",
-      "Final mux completed successfully",
+      timelineDurationSec === undefined
+        ? "Final mux completed successfully"
+        : `Final mux completed successfully at timeline duration ${timelineDurationSec.toFixed(6)}s`,
     );
   } catch (err) {
     const logPath = writeLog(

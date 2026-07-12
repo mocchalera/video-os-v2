@@ -1,0 +1,26 @@
+# talking_head_pacing — micro-level dialogue pacing for interview / talking-head edits.
+#
+# Increment 1 (active here): utterance-boundary snapping. When transcripts exist,
+# snap each clip's in/out to the nearest utterance edge so cuts land on phrase
+# boundaries instead of mid-word. This is what makes review metric
+# audio.speech_cut pass for dialogue-driven digests. Pure, deterministic trim
+# refinement — no within-beat IR required.
+#
+# Increment 2 (still deferred — needs within-beat multi-clip IR): excising filler
+# utterances ("えーと/あの/um") from the timeline and tightening long pauses.
+# Those split one clip into several sub-clips, which the current beat-linear IR
+# cannot express; tracked separately.
+id: talking_head_pacing
+category: trim
+primary_phase: resolve
+status: active
+required_signals: []
+when:
+  - "dominant_visual_mode == talking_head"
+avoid_when:
+  - "dominant_visual_mode == event_broll"
+effects:
+  utterance_boundary_snap: true
+  utterance_snap_tolerance_us: 700000
+  metadata_tags:
+    - utterance_boundary_snapped

@@ -16,7 +16,10 @@ import type {
   TrackOutput,
   ClipOutput,
   MarkerOutput,
+  AudioPolicy,
+  TimelineTransitionOutput,
 } from "../compiler/types.js";
+import { linearGainToDb } from "./fcp7-xml-export.js";
 
 // ── Public Types ─────────────────────────────────────────────────────
 
@@ -40,8 +43,23 @@ export interface ParsedFcp7Clip {
   fileId: string;
   /** pathurl from file definition, if available */
   pathurl: string;
-  /** Audio level from filter, if present */
+  /** Audio level from filter — raw dB (legacy format without valuemin/valuemax) */
   audioLevelDb?: number;
+  /** Audio gain — linear value (new format with valuemin/valuemax) */
+  audioGainLinear?: number;
+  /** Fade-in duration in frames (from keyframes) */
+  fadeInFrames?: number;
+  /** Fade-out duration in frames (from keyframes) */
+  fadeOutFrames?: number;
+  /** Human-readable editorial marker, if present */
+  editorialMarker?: ParsedEditorialMarker;
+}
+
+export interface ParsedEditorialMarker {
+  beat_id?: string;
+  motivation?: string;
+  role?: string;
+  confidence?: number;
 }
 
 /** Metadata extracted from video_os marker comment */
@@ -50,6 +68,19 @@ export interface VideoOsMarkerMeta {
   asset_id: string;
   beat_id: string;
   motivation: string;
+}
+
+export interface ParsedFcp7Transition {
+  startFrame: number;
+  endFrame: number;
+  alignment: string;
+  effectName: string;
+  effectId: string;
+  mediaType: string;
+  fromXmlClipId?: string;
+  toXmlClipId?: string;
+  fromClipId?: string;
+  toClipId?: string;
 }
 
 /** Parsed sequence from FCP7 XML */
@@ -62,7 +93,9 @@ export interface ParsedFcp7Sequence {
   duration: number;
   timecodeFormat: string;
   videoTracks: ParsedFcp7Clip[][];
+  videoTransitions: ParsedFcp7Transition[][];
   audioTracks: ParsedFcp7Clip[][];
+  audioTransitions: ParsedFcp7Transition[][];
   fileMap: Map<string, string>; // file-id → pathurl
 }
 
@@ -334,6 +367,212 @@ export function parseVideoOsMarker(comment: string): VideoOsMarkerMeta | null {
   };
 }
 
+function parseEditorialMarker(marker: XmlNode): ParsedEditorialMarker | null {
+  const comment = childText(marker, "comment");
+  if (parseVideoOsMarker(comment)) return null;
+
+  const name = childText(marker, "name");
+  const colonIndex = name.indexOf(":");
+  if (colonIndex === -1) return null;
+
+  const beat_id = name.slice(0, colonIndex).trim();
+  const motivation = name.slice(colonIndex + 1).trim();
+  if (!beat_id) return null;
+
+  const parsed: ParsedEditorialMarker = {
+    beat_id,
+    motivation,
+  };
+
+  const match = comment.match(/^(.*?)\s*\|\s*confidence:\s*([0-9]*\.?[0-9]+)\s*$/);
+  if (match) {
+    parsed.role = match[1].trim() || undefined;
+    const confidence = Number.parseFloat(match[2]);
+    if (!Number.isNaN(confidence)) {
+      parsed.confidence = confidence;
+    }
+  }
+
+  return parsed;
+}
+
+function deriveClipIdFromXmlId(xmlClipId: string): string | undefined {
+  if (xmlClipId.startsWith("cv-") || xmlClipId.startsWith("ca-")) {
+    return xmlClipId.slice(3);
+  }
+  return xmlClipId || undefined;
+}
+
+function parseClipItem(
+  clipitem: XmlNode,
+  fileMap: Map<string, string>,
+): ParsedFcp7Clip {
+  const xmlClipId = clipitem.attrs.id ?? "";
+  const clipName = childText(clipitem, "name");
+  const start = childInt(clipitem, "start");
+  const end = childInt(clipitem, "end");
+  const inPt = childInt(clipitem, "in");
+  const outPt = childInt(clipitem, "out");
+
+  // File reference
+  const fileNode = findChild(clipitem, "file");
+  let fileId = "";
+  let pathurl = "";
+  if (fileNode) {
+    fileId = fileNode.attrs.id ?? "";
+    if (fileNode.children.length > 0) {
+      pathurl = childText(fileNode, "pathurl");
+      if (pathurl) fileMap.set(fileId, pathurl);
+    } else {
+      pathurl = fileMap.get(fileId) ?? "";
+    }
+  }
+
+  let videoOsMeta: VideoOsMarkerMeta | null = null;
+  let editorialMarker: ParsedEditorialMarker | undefined;
+  for (const marker of findChildren(clipitem, "marker")) {
+    const comment = childText(marker, "comment");
+    const meta = parseVideoOsMarker(comment);
+    if (meta) {
+      videoOsMeta = meta;
+      continue;
+    }
+
+    const editorial = parseEditorialMarker(marker);
+    if (editorial && !editorialMarker) {
+      editorialMarker = editorial;
+    }
+  }
+
+  // Audio level from filter
+  let audioLevelDb: number | undefined;
+  let audioGainLinear: number | undefined;
+  let fadeInFrames: number | undefined;
+  let fadeOutFrames: number | undefined;
+
+  for (const filterNode of findChildren(clipitem, "filter")) {
+    const effect = findChild(filterNode, "effect");
+    if (effect && childText(effect, "effectid") === "audiolevels") {
+      const param = findChildren(effect, "parameter").find(
+        (p) => childText(p, "parameterid") === "level",
+      );
+      if (!param) continue;
+
+      const hasValueRange = findChild(param, "valuemin") !== undefined;
+      const keyframes = findChildren(param, "keyframe");
+
+      if (keyframes.length > 0) {
+        const kfs = keyframes
+          .map((kf) => ({
+            when: childInt(kf, "when"),
+            value: parseFloat(childText(kf, "value")),
+          }))
+          .sort((a, b) => a.when - b.when);
+
+        const bodyGain = Math.max(...kfs.map((kf) => kf.value));
+        if (bodyGain > 0) {
+          audioGainLinear = bodyGain;
+        }
+
+        if (kfs.length >= 2 && kfs[0].value === 0 && kfs[1].value > 0) {
+          fadeInFrames = kfs[1].when - kfs[0].when;
+        }
+
+        if (
+          kfs.length >= 2 &&
+          kfs[kfs.length - 1].value === 0 &&
+          kfs[kfs.length - 2].value > 0
+        ) {
+          fadeOutFrames =
+            kfs[kfs.length - 1].when - kfs[kfs.length - 2].when;
+        }
+      } else if (hasValueRange) {
+        const val = parseFloat(childText(param, "value"));
+        if (!isNaN(val)) {
+          audioGainLinear = val;
+        }
+      } else {
+        const val = parseFloat(childText(param, "value"));
+        if (!isNaN(val)) {
+          audioLevelDb = val;
+        }
+      }
+    }
+  }
+
+  return {
+    xmlClipId,
+    name: clipName,
+    timelineInFrame: start,
+    timelineEndFrame: end,
+    srcInFrame: inPt,
+    srcOutFrame: outPt,
+    videoOsMeta,
+    fileId,
+    pathurl,
+    audioLevelDb,
+    audioGainLinear,
+    fadeInFrames,
+    fadeOutFrames,
+    editorialMarker,
+  };
+}
+
+function parseTransitionItem(transitionitem: XmlNode): ParsedFcp7Transition {
+  const effect = findChild(transitionitem, "effect");
+  return {
+    startFrame: childInt(transitionitem, "start"),
+    endFrame: childInt(transitionitem, "end"),
+    alignment: childText(transitionitem, "alignment"),
+    effectName: effect ? childText(effect, "name") : "",
+    effectId: effect ? childText(effect, "effectid") : "",
+    mediaType: effect ? childText(effect, "mediatype") : "",
+  };
+}
+
+function parseTrackItems(
+  trackNode: XmlNode,
+  fileMap: Map<string, string>,
+): {
+  clips: ParsedFcp7Clip[];
+  transitions: ParsedFcp7Transition[];
+} {
+  const clips: ParsedFcp7Clip[] = [];
+  const transitions: ParsedFcp7Transition[] = [];
+  const pendingTransitions: ParsedFcp7Transition[] = [];
+  let previousClip: ParsedFcp7Clip | undefined;
+
+  for (const child of trackNode.children) {
+    if (child.tag === "clipitem") {
+      const clip = parseClipItem(child, fileMap);
+      clips.push(clip);
+
+      for (const transition of pendingTransitions) {
+        transition.toXmlClipId = clip.xmlClipId;
+        transition.toClipId =
+          clip.videoOsMeta?.clip_id ?? deriveClipIdFromXmlId(clip.xmlClipId);
+      }
+      pendingTransitions.length = 0;
+      previousClip = clip;
+      continue;
+    }
+
+    if (child.tag === "transitionitem") {
+      const transition = parseTransitionItem(child);
+      if (previousClip) {
+        transition.fromXmlClipId = previousClip.xmlClipId;
+        transition.fromClipId =
+          previousClip.videoOsMeta?.clip_id ??
+          deriveClipIdFromXmlId(previousClip.xmlClipId);
+      }
+      transitions.push(transition);
+      pendingTransitions.push(transition);
+    }
+  }
+
+  return { clips, transitions };
+}
+
 // ── Sequence parsing ─────────────────────────────────────────────────
 
 /**
@@ -398,19 +637,25 @@ export function parseFcp7Sequence(xmlString: string): ParsedFcp7Sequence {
 
   // Parse video tracks
   const videoTracks: ParsedFcp7Clip[][] = [];
+  const videoTransitions: ParsedFcp7Transition[][] = [];
   if (videoNode) {
     for (const trackNode of findChildren(videoNode, "track")) {
       collectFiles(trackNode);
-      videoTracks.push(parseTrackClips(trackNode, fileMap));
+      const parsedTrack = parseTrackItems(trackNode, fileMap);
+      videoTracks.push(parsedTrack.clips);
+      videoTransitions.push(parsedTrack.transitions);
     }
   }
 
   // Parse audio tracks
   const audioTracks: ParsedFcp7Clip[][] = [];
+  const audioTransitions: ParsedFcp7Transition[][] = [];
   if (audioNode) {
     for (const trackNode of findChildren(audioNode, "track")) {
       collectFiles(trackNode);
-      audioTracks.push(parseTrackClips(trackNode, fileMap));
+      const parsedTrack = parseTrackItems(trackNode, fileMap);
+      audioTracks.push(parsedTrack.clips);
+      audioTransitions.push(parsedTrack.transitions);
     }
   }
 
@@ -423,84 +668,51 @@ export function parseFcp7Sequence(xmlString: string): ParsedFcp7Sequence {
     duration,
     timecodeFormat,
     videoTracks,
+    videoTransitions,
     audioTracks,
+    audioTransitions,
     fileMap,
   };
-}
-
-function parseTrackClips(
-  trackNode: XmlNode,
-  fileMap: Map<string, string>,
-): ParsedFcp7Clip[] {
-  const clips: ParsedFcp7Clip[] = [];
-
-  for (const clipitem of findChildren(trackNode, "clipitem")) {
-    const xmlClipId = clipitem.attrs.id ?? "";
-    const clipName = childText(clipitem, "name");
-    const start = childInt(clipitem, "start");
-    const end = childInt(clipitem, "end");
-    const inPt = childInt(clipitem, "in");
-    const outPt = childInt(clipitem, "out");
-
-    // File reference
-    const fileNode = findChild(clipitem, "file");
-    let fileId = "";
-    let pathurl = "";
-    if (fileNode) {
-      fileId = fileNode.attrs.id ?? "";
-      // If this file node has children, it's a definition; otherwise a reference
-      if (fileNode.children.length > 0) {
-        pathurl = childText(fileNode, "pathurl");
-        if (pathurl) fileMap.set(fileId, pathurl);
-      } else {
-        pathurl = fileMap.get(fileId) ?? "";
-      }
-    }
-
-    // Parse markers for video_os metadata
-    let videoOsMeta: VideoOsMarkerMeta | null = null;
-    for (const marker of findChildren(clipitem, "marker")) {
-      const comment = childText(marker, "comment");
-      const meta = parseVideoOsMarker(comment);
-      if (meta) {
-        videoOsMeta = meta;
-        break;
-      }
-    }
-
-    // Audio level from filter
-    let audioLevelDb: number | undefined;
-    for (const filterNode of findChildren(clipitem, "filter")) {
-      const effect = findChild(filterNode, "effect");
-      if (effect && childText(effect, "effectid") === "audiolevels") {
-        const param = findChild(effect, "parameter");
-        if (param && childText(param, "parameterid") === "level") {
-          audioLevelDb = parseFloat(childText(param, "value"));
-        }
-      }
-    }
-
-    clips.push({
-      xmlClipId,
-      name: clipName,
-      timelineInFrame: start,
-      timelineEndFrame: end,
-      srcInFrame: inPt,
-      srcOutFrame: outPt,
-      videoOsMeta,
-      fileId,
-      pathurl,
-      audioLevelDb,
-    });
-  }
-
-  return clips;
 }
 
 // ── Frame / Microsecond conversion ───────────────────────────────────
 
 function framesToUs(frames: number, fps: number): number {
   return Math.round((frames / fps) * 1_000_000);
+}
+
+function inferTransitionType(
+  transition: ParsedFcp7Transition,
+): TimelineTransitionOutput["transition_type"] | undefined {
+  const normalizedName = transition.effectName.trim().toLowerCase();
+  const normalizedId = transition.effectId.trim().toLowerCase();
+
+  if (
+    normalizedName === "cross dissolve" ||
+    normalizedId === "crossdissolve"
+  ) {
+    return "crossfade";
+  }
+
+  if (normalizedName === "dip to color" || normalizedId === "diptocolor") {
+    return "match_cut";
+  }
+
+  return undefined;
+}
+
+function findOriginalTransition(
+  timeline: TimelineIR,
+  trackId: string,
+  fromClipId: string,
+  toClipId: string,
+): TimelineTransitionOutput | undefined {
+  return timeline.transitions?.find(
+    (transition) =>
+      transition.track_id === trackId &&
+      transition.from_clip_id === fromClipId &&
+      transition.to_clip_id === toClipId,
+  );
 }
 
 // ── Convert parsed FCP7 to TimelineIR ────────────────────────────────
@@ -522,6 +734,7 @@ export function parsedSequenceToTimelineIR(
     trackKind: "video" | "audio",
   ): ClipOutput {
     const meta = clip.videoOsMeta;
+    const marker = clip.editorialMarker;
     const srcInUs = framesToUs(clip.srcInFrame, fps);
     const srcOutUs = framesToUs(clip.srcOutFrame, fps);
     const timelineDuration = clip.timelineEndFrame - clip.timelineInFrame;
@@ -532,6 +745,14 @@ export function parsedSequenceToTimelineIR(
         ? findOriginalClip(referenceTimeline, meta.clip_id)
         : undefined;
 
+      const role =
+        origClip?.role ??
+        marker?.role ??
+        (trackKind === "audio" ? "music" : "hero");
+
+      // Build audio_policy from parsed audio data
+      const audioPolicy = buildAudioPolicy(clip, role, origClip?.audio_policy);
+
       return {
         clip_id: meta.clip_id,
         segment_id: origClip?.segment_id ?? meta.clip_id,
@@ -540,16 +761,17 @@ export function parsedSequenceToTimelineIR(
         src_out_us: srcOutUs,
         timeline_in_frame: clip.timelineInFrame,
         timeline_duration_frames: timelineDuration,
-        role: origClip?.role ?? (trackKind === "audio" ? "music" : "hero"),
-        motivation: meta.motivation || origClip?.motivation || clip.name,
-        beat_id: meta.beat_id,
+        role,
+        motivation:
+          marker?.motivation ??
+          meta.motivation ??
+          origClip?.motivation ??
+          clip.name,
+        beat_id: marker?.beat_id ?? meta.beat_id,
         fallback_segment_ids: origClip?.fallback_segment_ids ?? [],
-        confidence: origClip?.confidence ?? 1.0,
+        confidence: origClip?.confidence ?? marker?.confidence ?? 1.0,
         quality_flags: origClip?.quality_flags ?? [],
-        audio_policy:
-          clip.audioLevelDb !== undefined
-            ? { duck_music_db: clip.audioLevelDb }
-            : origClip?.audio_policy,
+        audio_policy: audioPolicy,
         candidate_ref: origClip?.candidate_ref,
         fallback_candidate_refs: origClip?.fallback_candidate_refs,
         metadata: origClip?.metadata,
@@ -566,11 +788,12 @@ export function parsedSequenceToTimelineIR(
       src_out_us: srcOutUs,
       timeline_in_frame: clip.timelineInFrame,
       timeline_duration_frames: timelineDuration,
-      role: trackKind === "audio" ? "music" : "hero",
-      motivation: clip.name || "Unmapped clip from Premiere",
-      beat_id: "unknown",
+      role: marker?.role ?? (trackKind === "audio" ? "music" : "hero"),
+      motivation:
+        marker?.motivation ?? clip.name ?? "Unmapped clip from Premiere",
+      beat_id: marker?.beat_id ?? "unknown",
       fallback_segment_ids: [],
-      confidence: 0,
+      confidence: marker?.confidence ?? 0,
       quality_flags: ["unmapped_premiere_clip"],
     };
   }
@@ -586,6 +809,71 @@ export function parsedSequenceToTimelineIR(
     kind: "audio" as const,
     clips: clips.map((c) => convertClip(c, "audio")),
   }));
+
+  const importedTransitions: TimelineTransitionOutput[] = parsed.videoTransitions
+    .flatMap((trackTransitions, i) => {
+      const trackId =
+        referenceTimeline?.tracks.video[i]?.track_id ?? `V${i + 1}`;
+      return trackTransitions.flatMap((transition, index) => {
+        const fromClipId =
+          transition.fromClipId ??
+          deriveClipIdFromXmlId(transition.fromXmlClipId ?? "");
+        const toClipId =
+          transition.toClipId ??
+          deriveClipIdFromXmlId(transition.toXmlClipId ?? "");
+        if (!fromClipId || !toClipId) return [];
+
+        const originalTransition = referenceTimeline
+          ? findOriginalTransition(
+              referenceTimeline,
+              trackId,
+              fromClipId,
+              toClipId,
+            )
+          : undefined;
+        const inferredType = inferTransitionType(transition);
+        const transitionFrames = Math.max(
+          1,
+          transition.endFrame - transition.startFrame,
+        );
+
+        const restored: TimelineTransitionOutput = {
+          transition_id:
+            originalTransition?.transition_id ?? `imported_tr_${i}_${index}`,
+          from_clip_id: fromClipId,
+          to_clip_id: toClipId,
+          track_id: trackId,
+          transition_type:
+            originalTransition?.transition_type ??
+            inferredType ??
+            "crossfade",
+          transition_frames: transitionFrames,
+        };
+
+        if (originalTransition?.transition_params) {
+          restored.transition_params = {
+            ...originalTransition.transition_params,
+          };
+        } else if (inferredType === "crossfade") {
+          restored.transition_params = {
+            crossfade_sec: transitionFrames / fps,
+          };
+        }
+
+        if (originalTransition?.applied_skill_id) {
+          restored.applied_skill_id = originalTransition.applied_skill_id;
+        }
+        if (originalTransition?.degraded_from_skill_id !== undefined) {
+          restored.degraded_from_skill_id =
+            originalTransition.degraded_from_skill_id;
+        }
+        if (originalTransition?.confidence !== undefined) {
+          restored.confidence = originalTransition.confidence;
+        }
+
+        return restored;
+      });
+    });
 
   const base = referenceTimeline ?? {
     version: "1.0.0",
@@ -609,7 +897,7 @@ export function parsedSequenceToTimelineIR(
     },
   };
 
-  return {
+  const restoredTimeline: TimelineIR = {
     ...base,
     sequence: {
       ...base.sequence,
@@ -625,6 +913,66 @@ export function parsedSequenceToTimelineIR(
       audio: audioTracks,
     },
   };
+
+  if (importedTransitions.length > 0) {
+    restoredTimeline.transitions = importedTransitions;
+  } else {
+    delete restoredTimeline.transitions;
+  }
+
+  return restoredTimeline;
+}
+
+/**
+ * Build an AudioPolicy from parsed FCP7 clip audio data.
+ * Maps linear gain back to dB and assigns to the correct field based on clip role.
+ */
+function buildAudioPolicy(
+  clip: ParsedFcp7Clip,
+  role: string,
+  origPolicy?: AudioPolicy,
+): AudioPolicy | undefined {
+  const isBgm = role === "bgm" || role === "music";
+  const hasNewGain = clip.audioGainLinear !== undefined;
+  const hasLegacyGain = clip.audioLevelDb !== undefined;
+  const hasFadeIn = clip.fadeInFrames !== undefined && clip.fadeInFrames > 0;
+  const hasFadeOut = clip.fadeOutFrames !== undefined && clip.fadeOutFrames > 0;
+
+  if (!hasNewGain && !hasLegacyGain && !hasFadeIn && !hasFadeOut) {
+    return origPolicy;
+  }
+
+  const policy: AudioPolicy = origPolicy ? { ...origPolicy } : {};
+
+  if (hasNewGain) {
+    const gainDb = Math.round(linearGainToDb(clip.audioGainLinear!) * 100) / 100;
+    if (isBgm) {
+      policy.bgm_gain = gainDb;
+    } else {
+      policy.nat_sound_gain = gainDb;
+    }
+  } else if (hasLegacyGain) {
+    // Legacy format: raw dB stored as duck_music_db
+    policy.duck_music_db = clip.audioLevelDb;
+  }
+
+  if (hasFadeIn) {
+    if (isBgm) {
+      policy.bgm_fade_in_frames = clip.fadeInFrames;
+    } else {
+      policy.nat_sound_fade_in_frames = clip.fadeInFrames;
+    }
+  }
+
+  if (hasFadeOut) {
+    if (isBgm) {
+      policy.bgm_fade_out_frames = clip.fadeOutFrames;
+    } else {
+      policy.nat_sound_fade_out_frames = clip.fadeOutFrames;
+    }
+  }
+
+  return policy;
 }
 
 function findOriginalClip(

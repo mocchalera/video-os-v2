@@ -230,7 +230,9 @@ describe("v5 Fix 2: Guide Mode Clip Fill", () => {
   let tmpDir: string;
 
   beforeAll(() => {
-    tmpDir = createTempProject();
+    tmpDir = createTempProject({
+      blueprintOverrides: { track_layout: "multi" },
+    });
   });
 
   afterAll(() => {
@@ -288,6 +290,21 @@ describe("v5 Fix 3: Chronological Ordering", () => {
     expect(resolveTimelineOrder(blueprint)).toBe("chronological");
   });
 
+  it("resolveTimelineOrder respects creative brief order_policy when blueprint is unspecified", () => {
+    const blueprint = {} as unknown as EditBlueprint;
+    expect(resolveTimelineOrder(blueprint, undefined, { order_policy: "chronological" })).toBe("chronological");
+  });
+
+  it("resolveTimelineOrder infers chronological from family-growth-recap profile", () => {
+    const blueprint = {} as unknown as EditBlueprint;
+    expect(resolveTimelineOrder(blueprint, "family-growth-recap")).toBe("chronological");
+  });
+
+  it("resolveTimelineOrder infers chronological from family growth brief strategy", () => {
+    const blueprint = {} as unknown as EditBlueprint;
+    expect(resolveTimelineOrder(blueprint, undefined, { project: { strategy: "family growth recap" } })).toBe("chronological");
+  });
+
   it("resolveTimelineOrder infers chronological from story_arc strategy", () => {
     const blueprint = {
       story_arc: { strategy: "chronological" },
@@ -321,15 +338,26 @@ describe("v5 Fix 3: Chronological Ordering", () => {
       const v1Clips = v1!.clips;
       expect(v1Clips.length).toBeGreaterThan(1);
 
-      // Verify V1 clips are sorted by asset_id then src_in_us
+      // Chronological order sorts by beat chronology first, then falls back to
+      // source timestamp (asset_id, src_in_us) within each beat.
+      const blueprint = parseYaml(
+        fs.readFileSync(path.join(tmpDir, "04_plan/edit_blueprint.yaml"), "utf-8"),
+      ) as { beats: Array<{ id: string }> };
+      const beatIndex = new Map(blueprint.beats.map((b, i) => [b.id, i]));
+
       for (let i = 1; i < v1Clips.length; i++) {
         const prev = v1Clips[i - 1];
         const curr = v1Clips[i];
-        const cmp = prev.asset_id.localeCompare(curr.asset_id);
-        if (cmp === 0) {
-          expect(prev.src_in_us).toBeLessThanOrEqual(curr.src_in_us);
-        } else {
-          expect(cmp).toBeLessThan(0);
+        const prevBeat = beatIndex.get(prev.beat_id) ?? Number.MAX_SAFE_INTEGER;
+        const currBeat = beatIndex.get(curr.beat_id) ?? Number.MAX_SAFE_INTEGER;
+        expect(prevBeat).toBeLessThanOrEqual(currBeat);
+        if (prevBeat === currBeat) {
+          const cmp = prev.asset_id.localeCompare(curr.asset_id);
+          if (cmp === 0) {
+            expect(prev.src_in_us).toBeLessThanOrEqual(curr.src_in_us);
+          } else {
+            expect(cmp).toBeLessThan(0);
+          }
         }
       }
     } finally {

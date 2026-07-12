@@ -1,0 +1,26 @@
+{
+  "version": "1",
+  "mode": "self",
+  "golden_project": "rokutaro-bicycle-growth-20260427",
+  "candidate_project": "rokutaro-bicycle-growth-20260427 (recompiled)",
+  "evaluated_at": "2026-06-19T00:24:58.004Z",
+  "golden_approved_by": "auto:full_autonomy",
+  "stages": {
+    "timeline": {
+      "golden_clip_count": 21,
+      "candidate_clip_count": 17,
+      "matched_clip_count": 17,
+      "clip_usage_f1": 0.8947368421052632,
+      "order_agreement": 0.47058823529411764,
+      "mean_cut_in_deviation_us": 88235.29411764706,
+      "mean_duration_deviation_frames": 52,
+      "total_duration_deviation_pct": 1.16,
+      "beat_structure_score": 0.8262593235397426,
+      "score": 0.6569987540521173
+    }
+  },
+  "llm_judge": null,
+  "overall_score": 65.7,
+  "min_score": 80,
+  "pass": false
+}

@@ -53,6 +53,55 @@ function removeDirSync(dir: string): void {
   if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function makeTimeline(
+  clips: Array<Record<string, unknown>>,
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    version: "1",
+    project_id: "sample-mountain-reset",
+    sequence: {
+      name: "main",
+      fps_num: 24,
+      fps_den: 1,
+      width: 1920,
+      height: 1080,
+      start_frame: 0,
+    },
+    tracks: {
+      video: [
+        {
+          track_id: "V1",
+          kind: "video",
+          clips,
+        },
+      ],
+      audio: [],
+    },
+    provenance: {
+      brief_path: "01_intent/creative_brief.yaml",
+      blueprint_path: "04_plan/edit_blueprint.yaml",
+      selects_path: "04_plan/selects_candidates.yaml",
+    },
+    ...overrides,
+  };
+}
+
+function makeClip(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    clip_id: "CLP_001",
+    segment_id: "SEG_0025",
+    asset_id: "AST_005",
+    src_in_us: 0,
+    src_out_us: 5_000_000,
+    timeline_in_frame: 0,
+    timeline_duration_frames: 120,
+    role: "hero",
+    motivation: "Opening shot",
+    ...overrides,
+  };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("validate-schemas", () => {
@@ -483,6 +532,163 @@ describe("validate-schemas", () => {
       expect(clipViolations[0].message).toContain("CLP_BAD");
     });
 
+    it("detects duplicate clip IDs and broken transition references", () => {
+      const timeline = makeTimeline(
+        [
+          makeClip({ clip_id: "CLP_DUP" }),
+          makeClip({
+            clip_id: "CLP_DUP",
+            timeline_in_frame: 120,
+          }),
+        ],
+        {
+          transitions: [
+            {
+              transition_id: "TR_001",
+              from_clip_id: "CLP_DUP",
+              to_clip_id: "CLP_MISSING",
+              track_id: "V1",
+              transition_type: "crossfade",
+              transition_frames: 12,
+            },
+          ],
+        },
+      );
+
+      const tmp = createTempProject("tl-semantic-ids", {
+        "05_timeline/timeline.json": timeline,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.rule === "timeline_clip_id_unique")).toBe(true);
+      expect(result.violations.some((v) => v.rule === "timeline_transition_clip_ref_exists")).toBe(true);
+    });
+
+    it("detects timeline asset IDs missing from source_map", () => {
+      const timeline = makeTimeline([
+        makeClip({ asset_id: "AST_MISSING" }),
+      ]);
+      const sourceMap = {
+        version: "1",
+        project_id: "sample-mountain-reset",
+        media_dir: "02_media",
+        generated_at: "2026-07-09T00:00:00.000Z",
+        items: [
+          {
+            asset_id: "AST_OTHER",
+            source_locator: "02_media/other.mov",
+            local_source_path: "other.mov",
+            link_path: "02_media/other.mov",
+          },
+        ],
+      };
+
+      const tmp = createTempProject("tl-source-map-missing", {
+        "05_timeline/timeline.json": timeline,
+        "02_media/source_map.json": sourceMap,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.valid).toBe(false);
+      const violations = result.violations.filter((v) => v.rule === "timeline_asset_id_in_source_map");
+      expect(violations).toHaveLength(1);
+      expect(violations[0].message).toContain("AST_MISSING");
+    });
+
+    it("detects caption and marker bounds outside the timeline", () => {
+      const timeline = makeTimeline(
+        [
+          makeClip({
+            captions: [
+              {
+                text: "Too long",
+                in_frame: 100,
+                out_frame: 121,
+                style: "gentle-lower-third",
+              },
+            ],
+          }),
+        ],
+        {
+          markers: [
+            {
+              frame: 240,
+              kind: "note",
+              label: "outside duration",
+            },
+          ],
+        },
+      );
+
+      const tmp = createTempProject("tl-bounds", {
+        "05_timeline/timeline.json": timeline,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.rule === "caption_bounds_valid")).toBe(true);
+      expect(result.violations.some((v) => v.rule === "marker_bounds_valid")).toBe(true);
+    });
+
+    it("accepts absolute caption frames inside a clip with a nonzero timeline start", () => {
+      const timeline = makeTimeline([
+        makeClip({
+          timeline_in_frame: 120,
+          timeline_duration_frames: 48,
+          captions: [
+            {
+              text: "Absolute sequence frames",
+              in_frame: 128,
+              out_frame: 160,
+              style: "gentle-lower-third",
+            },
+          ],
+        }),
+      ]);
+
+      const tmp = createTempProject("tl-caption-absolute", {
+        "05_timeline/timeline.json": timeline,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.violations.some((v) => v.rule === "caption_bounds_valid")).toBe(false);
+    });
+
+    it("rejects clip-relative caption frames on a clip with a nonzero timeline start", () => {
+      const timeline = makeTimeline([
+        makeClip({
+          timeline_in_frame: 120,
+          timeline_duration_frames: 48,
+          captions: [
+            {
+              text: "Clip-relative frames are ambiguous",
+              in_frame: 8,
+              out_frame: 40,
+              style: "gentle-lower-third",
+            },
+          ],
+        }),
+      ]);
+
+      const tmp = createTempProject("tl-caption-relative", {
+        "05_timeline/timeline.json": timeline,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.violations.some((v) => v.rule === "caption_bounds_valid")).toBe(true);
+    });
+
     it("gate2 defaults to true when timeline.json does not exist", () => {
       // Sample project has no 05_timeline/timeline.json
       const result = validateProject(SAMPLE_PROJECT);
@@ -619,6 +825,78 @@ describe("validate-schemas", () => {
     it("gate3 defaults to true when 06_review does not exist", () => {
       const result = validateProject(SAMPLE_PROJECT);
       expect(result.gate3_no_fatal_reviews).toBe(true);
+    });
+  });
+
+  // ── 8b. Semantic package blockers ────────────────────────────────
+
+  describe("semantic package blockers", () => {
+    it("blocks failed package QA reports", () => {
+      const tmp = createTempProject("pkg-qa-failed", {
+        "07_package/qa-report.json": {
+          version: "1",
+          project_id: "sample-mountain-reset",
+          source_of_truth: "engine_render",
+          qa_profile: "engine_render",
+          passed: false,
+          checks: [
+            {
+              name: "loudness_target_valid",
+              passed: false,
+              details: "too quiet",
+            },
+          ],
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.rule === "package_qa_report_failed")).toBe(true);
+    });
+
+    it("blocks editorial pipeline status with final/package blockers", () => {
+      const tmp = createTempProject("editorial-status-blocked", {
+        "06_review/editorial_pipeline_status.json": {
+          version: "1",
+          project_id: "sample-mountain-reset",
+          entrypoint: "editorial-pipeline",
+          created_at: "2026-07-09T00:00:00.000Z",
+          preview: {
+            status: "available",
+            artifact_path: "09_output/rough-cut.mp4",
+            render_skipped: false,
+          },
+          qa: {
+            status: "failed",
+            stage: "QA",
+            message: "QA loop failed",
+          },
+          final_render: {
+            status: "blocked",
+            reason: "QA_LOOP_FAILED",
+          },
+          package: {
+            status: "blocked",
+            reason: "QA_LOOP_FAILED",
+          },
+          blocking_issues: [
+            {
+              code: "QA_LOOP_FAILED",
+              severity: "fatal",
+              stage: "QA",
+              message: "QA loop failed",
+            },
+          ],
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.valid).toBe(false);
+      expect(result.violations.some((v) => v.rule === "editorial_pipeline_status_blocked")).toBe(true);
     });
   });
 
@@ -1000,12 +1278,22 @@ describe("validate-schemas", () => {
       expect(transcriptViolations).toHaveLength(0);
     });
 
-    it("validates rokutaro-growth-20260323 manual artifacts in standard profile", () => {
-      const result = validateProject("projects/rokutaro-growth-20260323");
+    // This is a compatibility check against a real, operator-local project
+    // that is gitignored (projects/* is ignored except demo/sample/_template),
+    // so it is absent in a fresh checkout / CI / worktree. Skip when missing
+    // rather than fail, so `npm run verify` is a trustworthy gate everywhere —
+    // it still runs wherever the operator actually has the project on disk.
+    const MANUAL_COMPAT_PROJECT = "projects/rokutaro-growth-20260323";
+    const manualCompatIt = fs.existsSync(MANUAL_COMPAT_PROJECT) ? it : it.skip;
+    manualCompatIt(
+      "validates rokutaro-growth-20260323 manual artifacts in standard profile",
+      () => {
+        const result = validateProject(MANUAL_COMPAT_PROJECT);
 
-      expect(result.valid).toBe(true);
-      expect(result.error_count).toBe(0);
-      expect(result.violations).toHaveLength(0);
-    });
+        expect(result.valid).toBe(true);
+        expect(result.error_count).toBe(0);
+        expect(result.violations).toHaveLength(0);
+      },
+    );
   });
 });

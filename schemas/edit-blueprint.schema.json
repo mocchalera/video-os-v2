@@ -24,6 +24,9 @@
       "type": "string",
       "format": "date-time"
     },
+    "decision_runtime": {
+      "$ref": "#/$defs/decisionRuntime"
+    },
     "sequence_goals": {
       "type": "array",
       "minItems": 1,
@@ -143,9 +146,44 @@
       "enum": ["chronological", "editorial"],
       "default": "editorial",
       "description": "Clip ordering strategy: chronological sorts by source timestamp, editorial uses score-based placement"
+    },
+    "track_layout": {
+      "type": "string",
+      "enum": ["single", "multi"],
+      "default": "single",
+      "description": "Video track layout: single keeps hero/support/texture on V1, multi preserves V2 inserts"
     }
   },
   "$defs": {
+    "decisionRuntime": {
+      "type": "object",
+      "required": ["runtime"],
+      "properties": {
+        "runtime": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "attempted_runtimes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["runtime", "status"],
+            "properties": {
+              "runtime": { "type": "string", "minLength": 1 },
+              "status": {
+                "type": "string",
+                "enum": ["success", "failed", "skipped"]
+              },
+              "message": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "fallback_warnings": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
     "beat": {
       "type": "object",
       "required": [
@@ -190,9 +228,24 @@
           "type": "string",
           "enum": ["hook", "setup", "experience", "closing"]
         },
+        "audio_story_role": {
+          "$ref": "#/$defs/audioStoryRole"
+        },
+        "continuity_constraint": {
+          "$ref": "#/$defs/continuityConstraint"
+        },
+        "applied_preferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/appliedPreference"
+          }
+        },
         "skill_hints": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "craft": {
+          "$ref": "#/$defs/craftDirective"
         },
         "candidate_plan": {
           "type": "object",
@@ -205,6 +258,26 @@
           },
           "additionalProperties": false
         },
+        "allow_revisit": {
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "object",
+              "properties": {
+                "semantic_cluster_ids": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "asset_ids": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "reason": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
         "candidate_constraints": {
           "type": "object",
           "properties": {
@@ -216,6 +289,47 @@
       },
       "additionalProperties": false
     },
+    "craftDirective": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "in_point": {
+          "type": "string",
+          "enum": ["cut_on_action", "peak_hold", "pre_roll_enter", "post_action_hold", "clean_in_clean_out"]
+        },
+        "out_point": {
+          "type": "string",
+          "enum": ["cut_on_action", "peak_hold", "post_action_hold", "clean_in_clean_out"]
+        },
+        "transition_in": {
+          "type": "string",
+          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut"]
+        },
+        "transition_out": {
+          "type": "string",
+          "enum": ["hard_cut", "dissolve", "dip_to_black", "j_cut", "l_cut", "match_cut"]
+        },
+        "rhythm": {
+          "type": "string",
+          "enum": ["accelerando", "ritardando", "steady", "syncopated", "breath"]
+        },
+        "shot_progression": {
+          "type": "string",
+          "enum": ["wide_to_close", "close_to_wide", "scale_match", "free"]
+        },
+        "beat_sync": {
+          "type": "boolean"
+        },
+        "hold_duration_bias": {
+          "type": "number",
+          "description": "Multiplier for clip duration: >1 = hold longer, <1 = cut shorter"
+        },
+        "flash_cut": {
+          "type": "boolean",
+          "description": "Marks an intentionally sub-0.5s flash cut that should survive micro-clip guards"
+        }
+      }
+    },
     "beatRole": {
       "type": "string",
       "enum": [
@@ -225,6 +339,88 @@
         "texture",
         "dialogue"
       ]
+    },
+    "audioStoryRole": {
+      "type": "object",
+      "required": [
+        "node_id",
+        "role"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "string",
+          "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing"]
+        },
+        "evidence_node_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$"
+          }
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "continuityConstraint": {
+      "type": "object",
+      "required": [
+        "chronology",
+        "enforced_entity_ids"
+      ],
+      "properties": {
+        "chronology": {
+          "type": "string",
+          "enum": ["chronological", "editorial_reorder", "deliberate_discontinuity"]
+        },
+        "enforced_entity_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^ENT_(SUBJECT|LOCATION|PROP|MOTIF|ACTION)_[A-Za-z0-9_-]+$"
+          }
+        },
+        "graph_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "appliedPreference": {
+      "type": "object",
+      "required": [
+        "entry_id",
+        "preference_type",
+        "consumed_offset",
+        "consumed_hash"
+      ],
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "pattern": "^EPM_[A-Za-z0-9_-]+$"
+        },
+        "preference_type": {
+          "type": "string",
+          "enum": ["pacing", "chronology", "transition_style", "repetition_tolerance", "bgm_loudness", "caption_density", "override_rationale", "delivery_preference", "redaction"]
+        },
+        "consumed_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "consumed_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      },
+      "additionalProperties": false
     },
     "pacing": {
       "type": "object",

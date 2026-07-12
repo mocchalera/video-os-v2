@@ -12,6 +12,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createHistoryEntry, type HistoryEntry } from "./history.js";
 import { validateProject } from "../validation/schema-validator.js";
 import { LiveAnalysisRepository } from "../mcp/repository.js";
+import {
+  isP1ManifestCoverageEnabled,
+  readCoverageSummary,
+} from "../artifacts/p1-manifest-coverage.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -100,6 +104,7 @@ export interface ProjectStateDoc {
   project_id: string;
   current_state: ProjectState;
   last_updated?: string;
+  updated_at?: string;
   last_agent?: string;
   last_command?: string;
   last_runtime?: string;
@@ -155,6 +160,7 @@ const ARTIFACT_PATHS: Record<string, { path: string; format: "yaml" | "json" | "
 interface InvalidationRule {
   stale_keys: string[];
   fallback_state: ProjectState;
+  invalidates_approval?: boolean;
 }
 
 const INVALIDATION_MATRIX: Record<string, InvalidationRule> = {
@@ -194,14 +200,17 @@ const INVALIDATION_MATRIX: Record<string, InvalidationRule> = {
   caption_approval: {
     stale_keys: ["qa_report", "package_manifest"],
     fallback_state: "approved",
+    invalidates_approval: false,
   },
   music_cues: {
     stale_keys: ["qa_report", "package_manifest"],
     fallback_state: "approved",
+    invalidates_approval: false,
   },
   qa_report: {
     stale_keys: ["package_manifest"],
     fallback_state: "approved",
+    invalidates_approval: false,
   },
 };
 
@@ -300,6 +309,19 @@ export function snapshotArtifacts(projectDir: string): ArtifactSnapshot {
   }
 
   return { exists, hashes };
+}
+
+function isQaReportPassed(projectDir: string): boolean {
+  const qaReportPath = path.join(projectDir, ARTIFACT_PATHS.qa_report.path);
+  if (!fs.existsSync(qaReportPath)) return false;
+  try {
+    const report = JSON.parse(fs.readFileSync(qaReportPath, "utf-8")) as {
+      passed?: unknown;
+    };
+    return report.passed === true;
+  } catch {
+    return false;
+  }
 }
 
 // ── State Reconstruction ───────────────────────────────────────────
@@ -435,7 +457,9 @@ export function detectInvalidation(
       for (const key of rule.stale_keys) {
         staleSet.add(key);
       }
-      approvalStale = true;
+      if (rule.invalidates_approval !== false) {
+        approvalStale = true;
+      }
 
       const idx = STATE_ORDER.indexOf(rule.fallback_state);
       if (idx >= 0 && idx < lowestIdx) {
@@ -633,6 +657,29 @@ export function reconcile(
     reconciledState = "blocked";
   }
 
+  // Package files alone cannot promote a project when the packaging contract
+  // is currently blocked (for example, after caption/package invalidation or
+  // while a new handoff decision is still pending). Keep the valid editorial
+  // approval, but require Gate 9/10 to regenerate package authority.
+  if (reconciledState === "packaged" && gates.packaging_gate !== "open") {
+    reconciledState = "approved";
+    for (const stale of ["qa_report", "package_manifest"]) {
+      if (!invalidation.stale_artifacts.includes(stale)) {
+        invalidation.stale_artifacts.push(stale);
+      }
+    }
+  }
+
+  // A package is authoritative only after QA passed. Artifact existence alone
+  // must not let a failed retry (or malformed qa-report.json) restore the
+  // packaged state while an older manifest is still on disk.
+  if (reconciledState === "packaged" && !isQaReportPassed(absProject)) {
+    reconciledState = "approved";
+    if (!invalidation.stale_artifacts.includes("package_manifest")) {
+      invalidation.stale_artifacts.push("package_manifest");
+    }
+  }
+
   // M4: source_of_truth_decision consistency check
   // If packaged but the manifest's source_of_truth doesn't match the current decision, fall back
   if (reconciledState === "packaged" && snapshot.exists.package_manifest && doc.handoff_resolution?.source_of_truth_decision) {
@@ -690,14 +737,23 @@ function computeGates(
 ): GateStatus {
   let analysisGate: GateStatus["analysis_gate"] = "blocked";
   const analysis = computeAnalysisStatus(projectDir, doc.project_id || "");
+  const analysisOverrideActive = isAnalysisOverrideActiveForSnapshot(doc, snapshot) &&
+    analysisArtifactsExist(projectDir);
   if (analysis.qcStatus === "ready") {
     analysisGate = "ready";
-  } else if (
-    analysis.qcStatus === "partial" &&
-    doc.analysis_override?.status === "active" &&
-    doc.analysis_override.artifact_version === snapshot.hashes.analysis_artifact_version
-  ) {
+  } else if (analysisOverrideActive) {
     analysisGate = "partial_override";
+  }
+  if (isP1ManifestCoverageEnabled()) {
+    const coverage = readCoverageSummary(projectDir);
+    if (coverage?.status === "ready") {
+      analysisGate = "ready";
+    } else if (
+      coverage?.status === "partial_override" &&
+      analysisOverrideActive
+    ) {
+      analysisGate = "partial_override";
+    }
   }
 
   // compile_gate: check unresolved_blockers for status:blocker
@@ -799,6 +855,21 @@ function computeGates(
     review_gate: reviewGate,
     packaging_gate: packagingGate,
   };
+}
+
+function isAnalysisOverrideActiveForSnapshot(doc: ProjectStateDoc, snapshot: ArtifactSnapshot): boolean {
+  return (
+    doc.analysis_override?.status === "active" &&
+    !!snapshot.hashes.analysis_artifact_version &&
+    doc.analysis_override.artifact_version === snapshot.hashes.analysis_artifact_version
+  );
+}
+
+function analysisArtifactsExist(projectDir: string): boolean {
+  return (
+    fs.existsSync(path.join(projectDir, "03_analysis/assets.json")) &&
+    fs.existsSync(path.join(projectDir, "03_analysis/segments.json"))
+  );
 }
 
 function computeAnalysisStatus(

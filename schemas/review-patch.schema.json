@@ -26,6 +26,8 @@
               "replace_segment",
               "trim_segment",
               "move_segment",
+              "split_segment",
+              "set_transition",
               "insert_segment",
               "remove_segment",
               "change_audio_policy",
@@ -54,6 +56,33 @@
           "new_duration_frames": {
             "type": "integer",
             "minimum": 1
+          },
+          "target_track_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "from_clip_id": {
+            "type": "string"
+          },
+          "to_clip_id": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "string"
+          },
+          "transition_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "transition_frames": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "transition_params": {
+            "type": "object"
+          },
+          "applied_skill_id": {
+            "type": "string"
           },
           "reason": {
             "type": "string",

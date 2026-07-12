@@ -13,6 +13,8 @@ vi.mock("node:child_process", () => ({
 
 import {
   buildAspectRatioFitFilter,
+  buildFinalMuxArgs,
+  readTimelineDurationSeconds,
   runRenderPipeline,
 } from "../runtime/render/pipeline.js";
 
@@ -41,10 +43,48 @@ describe("render pipeline aspect ratio fitting", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("buildAspectRatioFitFilter generates scale+pad filter", () => {
+  it("buildAspectRatioFitFilter delegates to the shared filtergraph builder", () => {
+    // FATAL-1 fix (Phase 5 review R1): preview and final must serialize the
+    // video filter chain through the same shared builder. The legacy bespoke
+    // string `scale=...,pad=...:black` has been replaced with the shared
+    // builder's no-transform output, which uses ffmpeg's default pad colour
+    // (black) and appends format/setsar to keep concat streams uniform.
     expect(buildAspectRatioFitFilter(1920, 1080)).toBe(
-      "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
+      "scale=1920:1080:force_original_aspect_ratio=decrease," +
+        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1",
     );
+  });
+
+  it("pins final mux to timeline duration, frame count, and 48 kHz delivery audio", () => {
+    expect(buildFinalMuxArgs("video.mp4", "audio.wav", "final.mp4", 91.333333, 2192)).toEqual([
+      "-y",
+      "-i", "video.mp4",
+      "-i", "audio.wav",
+      "-t", "91.333333",
+      "-frames:v", "2192",
+      "-c:v", "copy",
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-ar", "48000",
+      "final.mp4",
+    ]);
+  });
+
+  it("uses shortest-stream fallback when timeline duration is unavailable", () => {
+    expect(buildFinalMuxArgs("video.mp4", "audio.wav", "final.mp4")).toContain("-shortest");
+  });
+
+  it("derives sequence duration from the latest clip out point", () => {
+    const timelinePath = path.join(tmpDir, "timeline-duration.json");
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: { fps_num: 24, fps_den: 1 },
+      tracks: {
+        video: [{ clips: [{ timeline_in_frame: 0, timeline_duration_frames: 120 }] }],
+        audio: [{ clips: [{ timeline_in_frame: 120, timeline_duration_frames: 72 }] }],
+      },
+    }));
+
+    expect(readTimelineDurationSeconds(timelinePath)).toBe(8);
   });
 
   it("runRenderPipeline fits raw video to timeline dimensions before final mux", async () => {

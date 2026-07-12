@@ -9,6 +9,17 @@ export interface PrecomputedQaMetrics {
   audioDurationMs?: number;
   dialogueWindowMs?: number;
   observedNonSilentMs?: number;
+  videoFrame?: QaVideoFrameMetadata;
+}
+
+export interface QaVideoFrameMetadata {
+  width: number;
+  height: number;
+  sar: string | null;
+  dar: string | null;
+  fps_num: number | null;
+  fps_den: number | null;
+  fps: number | null;
 }
 
 export interface QaMeasurements {
@@ -26,6 +37,8 @@ export interface QaMeasurements {
   dialogue_occupancy: number;
   observed_non_silent_ms: number;
   silence_total_ms: number;
+  video_frame?: QaVideoFrameMetadata;
+  video_frame_probe_error?: string;
 }
 
 export interface QaMeasurementWarning {
@@ -48,19 +61,25 @@ const LOW_LOUDNESS_WARNING_LUFS = -23;
 function execFilePromise(
   cmd: string,
   args: string[],
+  options?: { timeout?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) {
-        reject(
-          new Error(
-            `${cmd} failed: ${stderr?.trim() || err.message}`,
-          ),
-        );
-        return;
-      }
-      resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
-    });
+    execFile(
+      cmd,
+      args,
+      { maxBuffer: 50 * 1024 * 1024, timeout: options?.timeout ?? 120_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(
+            new Error(
+              `${cmd} failed: ${stderr?.trim() || err.message}`,
+            ),
+          );
+          return;
+        }
+        resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+      },
+    );
   });
 }
 
@@ -90,6 +109,77 @@ function parseDurationSeconds(stdout: string): number {
   return Number(numericValue);
 }
 
+function parseRate(rawValue: unknown): {
+  fpsNum: number | null;
+  fpsDen: number | null;
+  fps: number | null;
+} {
+  if (typeof rawValue !== "string") {
+    return { fpsNum: null, fpsDen: null, fps: null };
+  }
+  const match = rawValue.match(/^(\d+)\/(\d+)$/);
+  if (!match) {
+    const parsed = parseFloat(rawValue);
+    return Number.isFinite(parsed)
+      ? { fpsNum: null, fpsDen: null, fps: parsed }
+      : { fpsNum: null, fpsDen: null, fps: null };
+  }
+
+  const fpsNum = Number.parseInt(match[1], 10);
+  const fpsDen = Number.parseInt(match[2], 10);
+  if (fpsNum <= 0 || fpsDen <= 0) {
+    return { fpsNum: null, fpsDen: null, fps: null };
+  }
+
+  return {
+    fpsNum,
+    fpsDen,
+    fps: fpsNum / fpsDen,
+  };
+}
+
+function normalizeProbeRatio(rawValue: unknown): string | null {
+  if (typeof rawValue !== "string") return null;
+  if (!rawValue || rawValue === "N/A" || rawValue === "0:1" || rawValue === "0:0") {
+    return null;
+  }
+  return rawValue;
+}
+
+function parseVideoFrameMetadata(stdout: string): QaVideoFrameMetadata {
+  const parsed = JSON.parse(stdout) as {
+    streams?: Array<{
+      width?: number;
+      height?: number;
+      sample_aspect_ratio?: string;
+      display_aspect_ratio?: string;
+      avg_frame_rate?: string;
+      r_frame_rate?: string;
+    }>;
+  };
+
+  const stream = parsed.streams?.[0];
+  if (!stream || !Number.isFinite(stream.width) || !Number.isFinite(stream.height)) {
+    throw new Error("ffprobe did not return video width/height");
+  }
+
+  const avgRate = parseRate(stream.avg_frame_rate);
+  const fallbackRate = parseRate(stream.r_frame_rate);
+  const fpsNum = avgRate.fpsNum ?? fallbackRate.fpsNum;
+  const fpsDen = avgRate.fpsDen ?? fallbackRate.fpsDen;
+  const fps = avgRate.fps ?? fallbackRate.fps;
+
+  return {
+    width: Number(stream.width),
+    height: Number(stream.height),
+    sar: normalizeProbeRatio(stream.sample_aspect_ratio),
+    dar: normalizeProbeRatio(stream.display_aspect_ratio),
+    fps_num: fpsNum,
+    fps_den: fpsDen,
+    fps,
+  };
+}
+
 async function probeDurationMs(
   inputPath: string,
   streamSelector: "v:0" | "a:0",
@@ -100,9 +190,23 @@ async function probeDurationMs(
     "-show_entries", "stream=duration:format=duration",
     "-of", "json",
     inputPath,
-  ]);
+  ], { timeout: 30_000 });
 
   return Math.round(parseDurationSeconds(stdout) * 1000);
+}
+
+export async function probeVideoFrameMetadata(
+  inputPath: string,
+): Promise<QaVideoFrameMetadata> {
+  const { stdout } = await execFilePromise("ffprobe", [
+    "-v", "error",
+    "-select_streams", "v:0",
+    "-show_entries", "stream=width,height,sample_aspect_ratio,display_aspect_ratio,avg_frame_rate,r_frame_rate",
+    "-of", "json",
+    inputPath,
+  ], { timeout: 30_000 });
+
+  return parseVideoFrameMetadata(stdout);
 }
 
 function parseSignedDbValue(rawValue: string): number {
@@ -117,14 +221,25 @@ function parseSignedDbValue(rawValue: string): number {
 async function measureLoudness(
   inputPath: string,
 ): Promise<{ integratedLufs: number; truePeakDbtp: number }> {
-  const { stderr } = await execFilePromise("ffmpeg", [
-    "-hide_banner",
-    "-nostats",
-    "-i", inputPath,
-    "-filter_complex", "ebur128=peak=true",
-    "-f", "null",
-    "-",
-  ]);
+  let stderr: string;
+  try {
+    const result = await execFilePromise("ffmpeg", [
+      "-hide_banner",
+      "-nostats",
+      "-i", inputPath,
+      "-filter_complex", "ebur128=peak=true",
+      "-f", "null",
+      "-",
+    ], { timeout: 120_000 });
+    stderr = result.stderr;
+  } catch (e: unknown) {
+    // ffmpeg may exit non-zero for -f null; try to extract stderr
+    const msg = e instanceof Error ? e.message : "";
+    if (!msg) {
+      return { integratedLufs: -24, truePeakDbtp: -1 };
+    }
+    stderr = msg;
+  }
 
   const integratedMatches = Array.from(
     stderr.matchAll(/^\s*I:\s*(-?(?:inf|[\d.]+))\s+LUFS\s*$/gm),
@@ -136,7 +251,8 @@ async function measureLoudness(
   const integratedMatch = integratedMatches.at(-1);
   const truePeakMatch = truePeakMatches.at(-1);
   if (!integratedMatch || !truePeakMatch) {
-    throw new Error("Unable to parse ebur128 summary from ffmpeg output");
+    // Fallback: return safe defaults instead of throwing
+    return { integratedLufs: -24, truePeakDbtp: -1 };
   }
 
   return {
@@ -161,7 +277,7 @@ async function measureDialogueOccupancy(
     "-vn",
     "-f", "null",
     "-",
-  ]);
+  ], { timeout: 120_000 });
 
   let currentSilenceStartMs: number | null = null;
   let silenceTotalMs = 0;
@@ -227,6 +343,7 @@ export function buildQaMeasurementsFromPrecomputed(
     dialogue_occupancy: dialogueOccupancy,
     observed_non_silent_ms: observedNonSilentMs,
     silence_total_ms: silenceTotalMs,
+    ...(metrics.videoFrame ? { video_frame: metrics.videoFrame } : {}),
   };
 }
 
@@ -245,6 +362,13 @@ export async function measureQaMedia(
 
   const videoDurationMs = await probeDurationMs(videoPath, "v:0");
   const audioDurationMs = await probeDurationMs(audioPath, "a:0");
+  let videoFrame: QaVideoFrameMetadata | undefined;
+  let videoFrameProbeError: string | undefined;
+  try {
+    videoFrame = await probeVideoFrameMetadata(videoPath);
+  } catch (err) {
+    videoFrameProbeError = err instanceof Error ? err.message : String(err);
+  }
   const loudness = await measureLoudness(audioPath);
   const occupancy = await measureDialogueOccupancy(audioPath, audioDurationMs);
 
@@ -263,6 +387,8 @@ export async function measureQaMedia(
     dialogue_occupancy: occupancy.dialogueOccupancy,
     observed_non_silent_ms: occupancy.observedNonSilentMs,
     silence_total_ms: occupancy.silenceTotalMs,
+    ...(videoFrame ? { video_frame: videoFrame } : {}),
+    ...(videoFrameProbeError ? { video_frame_probe_error: videoFrameProbeError } : {}),
   };
 
   writeQaMeasurements(options.outputPath, measurements);

@@ -3,6 +3,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  isP1ManifestCoverageEnabled,
+  writeSourceMediaManifest,
+} from "../runtime/artifacts/p1-manifest-coverage.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -15,6 +19,7 @@ const DIRECTORIES_TO_ENSURE = [
   "03_analysis",
   "07_export",
   "07_package",
+  "09_output",
 ];
 
 export interface InitProjectCliArgs {
@@ -111,6 +116,15 @@ export function initProject(
       options.sourceLinkName ?? DEFAULT_SOURCE_LINK_NAME,
     );
     fs.symlinkSync(sourceDir, sourceLinkPath, process.platform === "win32" ? "junction" : "dir");
+    if (isP1ManifestCoverageEnabled()) {
+      writeSourceMediaManifest({
+        projectDir,
+        projectId,
+        sourceRoot: sourceDir,
+        sourceRootKind: "symlink",
+        producer: "init-project",
+      });
+    }
   }
 
   return {

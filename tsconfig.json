@@ -12,6 +12,11 @@
     "resolveJsonModule": true,
     "declaration": true
   },
-  "include": ["scripts/**/*.ts", "tests/**/*.ts", "runtime/**/*.ts"],
+  "include": [
+    "scripts/**/*.ts",
+    "tests/**/*.ts",
+    "runtime/**/*.ts",
+    "editor/shared/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

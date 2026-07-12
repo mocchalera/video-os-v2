@@ -75,9 +75,137 @@
     "preview_path": {
       "type": "string",
       "description": "Relative path to the preview MP4 generated during review preflight (null/absent if skipped or failed)."
+    },
+    "visual_qa": {
+      "$ref": "#/$defs/visualQA"
+    },
+    "visual_qa_waiver": {
+      "type": "boolean",
+      "description": "True only when an operator explicitly waived the visual QA gate."
+    },
+    "visual_qa_waiver_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "visual_qa_waiver_created_at": {
+      "type": "string",
+      "format": "date-time"
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "visual_qa_waiver"
+        ],
+        "properties": {
+          "visual_qa_waiver": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "visual_qa_waiver_reason"
+        ]
+      }
+    }
+  ],
   "$defs": {
+    "visualQA": {
+      "type": "object",
+      "required": [
+        "status",
+        "min_score",
+        "issues",
+        "issue_summaries"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "blocked",
+            "unverified",
+            "stale"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "min_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "issues": {
+          "$ref": "#/$defs/visualQAIssues"
+        },
+        "issue_summaries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "video_path": {
+          "type": "string"
+        },
+        "video_hash": {
+          "type": "string"
+        },
+        "timeline_path": {
+          "type": "string"
+        },
+        "timeline_hash": {
+          "type": "string"
+        },
+        "timeline_version": {
+          "type": "string"
+        },
+        "render_meta_path": {
+          "type": "string"
+        },
+        "marlin_report_path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "visualQAIssues": {
+      "type": "object",
+      "required": [
+        "total",
+        "critical",
+        "warning",
+        "info"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "critical": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warning": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "info": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "summaryJudgment": {
       "type": "object",
       "required": [

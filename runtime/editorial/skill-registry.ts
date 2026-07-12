@@ -229,6 +229,38 @@ export function getSkillMetadataTags(
 }
 
 /**
+ * Resolve the utterance-boundary snap configuration for the active skills.
+ * Returns null when no active skill requests snapping (e.g. talking_head_pacing
+ * inactive) so the compiler can skip transcript loading entirely. When several
+ * snapping skills are active, the smallest tolerance wins (most conservative)
+ * and their metadata tags are merged.
+ */
+export function getUtteranceSnapConfig(
+  activeSkills: string[],
+  skillsDir?: string,
+): { toleranceUs: number; metadataTags: string[] } | null {
+  const registry = loadSkills(skillsDir);
+  let toleranceUs = Infinity;
+  const tags = new Set<string>();
+  let enabled = false;
+
+  for (const skillId of [...activeSkills].sort()) {
+    const skill = registry.get(skillId);
+    if (!skill?.effects.utterance_boundary_snap) continue;
+    enabled = true;
+    const t = skill.effects.utterance_snap_tolerance_us;
+    if (typeof t === "number" && t > 0) toleranceUs = Math.min(toleranceUs, t);
+    for (const tag of skill.effects.metadata_tags ?? []) tags.add(tag);
+  }
+
+  if (!enabled) return null;
+  return {
+    toleranceUs: Number.isFinite(toleranceUs) ? toleranceUs : 0,
+    metadataTags: [...tags].sort(),
+  };
+}
+
+/**
  * Compute a hash of the editorial registry for provenance tracking.
  */
 export function computeRegistryHash(skillsDir?: string): string {

@@ -702,6 +702,7 @@ describe("STT: mock integration with full pipeline", () => {
       projectDir: TMP_STT_PROJECT,
       repoRoot: REPO_ROOT,
       transcribeFn: createMockTranscribeFn(),
+      skipAppraiser: true,
     });
   }, 60_000);
 
@@ -847,6 +848,7 @@ describe("STT: skipStt option", () => {
         projectDir: tmpDir,
         repoRoot: REPO_ROOT,
         skipStt: true,
+        skipAppraiser: true,
       });
       // has_transcript should remain false when STT is skipped
       expect(result.assetsJson.items[0].has_transcript).toBe(false);
@@ -881,12 +883,14 @@ describe("STT: determinism with mock", () => {
         projectDir: tmpA,
         repoRoot: REPO_ROOT,
         transcribeFn: mockFn,
+        skipAppraiser: true,
       });
       const resultB = await runPipeline({
         sourceFiles: [TEST_CLIP],
         projectDir: tmpB,
         repoRoot: REPO_ROOT,
         transcribeFn: mockFn,
+        skipAppraiser: true,
       });
 
       // Compare transcript refs

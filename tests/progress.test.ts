@@ -7,6 +7,11 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import {
   ProgressTracker,
+  PipelineStageProgressTracker,
+  appendPipelineTimingRun,
+  estimatePipelineStages,
+  formatPipelineProgress,
+  readPipelineTimings,
   readProgress,
   type ProgressReport,
   type ProgressPhase,
@@ -239,5 +244,119 @@ describe("ProgressTracker", () => {
     pt.advance();
     const t1 = pt.snapshot().updated_at;
     expect(t1).not.toBe(t0);
+  });
+});
+
+describe("pipeline stage timings", () => {
+  let projectDir: string;
+
+  beforeEach(() => {
+    projectDir = path.join(TMP_DIR, `timings_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+    fs.mkdirSync(projectDir, { recursive: true });
+  });
+
+  it("appends pipeline timing runs under 03_analysis", () => {
+    appendPipelineTimingRun(projectDir, {
+      run_id: "run_a",
+      project_id: path.basename(projectDir),
+      entrypoint: "editorial-pipeline",
+      started_at: "2026-07-07T00:00:00.000Z",
+      completed_at: "2026-07-07T00:01:00.000Z",
+      status: "completed",
+      segment_count: 12,
+      stages: [
+        {
+          stage: "triage",
+          status: "completed",
+          started_at: "2026-07-07T00:00:00.000Z",
+          ended_at: "2026-07-07T00:01:00.000Z",
+          duration_ms: 60_000,
+        },
+      ],
+    });
+    appendPipelineTimingRun(projectDir, {
+      run_id: "run_b",
+      project_id: path.basename(projectDir),
+      entrypoint: "editorial-pipeline",
+      started_at: "2026-07-07T00:02:00.000Z",
+      completed_at: "2026-07-07T00:03:00.000Z",
+      status: "completed",
+      stages: [],
+    });
+
+    const doc = readPipelineTimings(projectDir);
+    expect(doc?.runs.map((run) => run.run_id)).toEqual(["run_a", "run_b"]);
+    expect(fs.existsSync(path.join(projectDir, "03_analysis", "pipeline-timings.json"))).toBe(true);
+  });
+
+  it("uses historical timings before segment-count fallback", () => {
+    appendPipelineTimingRun(projectDir, {
+      run_id: "run_history",
+      project_id: path.basename(projectDir),
+      entrypoint: "full-pipeline",
+      started_at: "2026-07-07T00:00:00.000Z",
+      completed_at: "2026-07-07T00:02:00.000Z",
+      status: "completed",
+      stages: [
+        {
+          stage: "triage",
+          status: "completed",
+          started_at: "2026-07-07T00:00:00.000Z",
+          ended_at: "2026-07-07T00:02:00.000Z",
+          duration_ms: 120_000,
+        },
+      ],
+    });
+
+    const estimates = estimatePipelineStages(readPipelineTimings(projectDir), ["triage", "compile"], {
+      segmentCount: 10,
+    });
+    expect(estimates.get("triage")).toEqual({ estimatedMs: 120_000, source: "history" });
+    expect(estimates.get("compile")?.source).toBe("segments");
+    expect(estimates.get("compile")?.estimatedMs).toBeGreaterThan(0);
+  });
+
+  it("formats running progress with ETA and total", () => {
+    expect(formatPipelineProgress({
+      stageIndex: 3,
+      totalStages: 9,
+      stage: "triage",
+      status: "running",
+      elapsedMs: 92_000,
+      estimatedRemainingMs: 240_000,
+      estimatedTotalMs: 420_000,
+    })).toBe("[3/9] triage 実行中... 経過 1m32s / 推定残り ~4m (全体 ~7m)");
+  });
+
+  it("tracks a stage, prints progress, and persists duration", () => {
+    let now = 0;
+    const chunks: string[] = [];
+    const tracker = new PipelineStageProgressTracker({
+      projectDir,
+      entrypoint: "editorial-pipeline",
+      stages: ["triage", "compile"],
+      segmentCount: 3,
+      now: () => now,
+      output: {
+        write(chunk: string) {
+          chunks.push(chunk);
+        },
+      },
+    });
+
+    const stage = tracker.beginStage("triage");
+    now = 92_000;
+    stage.complete();
+    tracker.finish("completed");
+
+    const doc = readPipelineTimings(projectDir);
+    expect(doc?.runs).toHaveLength(1);
+    expect(doc?.runs[0].stages[0]).toMatchObject({
+      stage: "triage",
+      status: "completed",
+      duration_ms: 92_000,
+    });
+    expect(chunks.join("")).toContain("[1/2] triage 実行中...");
+    expect(chunks.join("")).toContain("[1/2] triage 完了");
   });
 });

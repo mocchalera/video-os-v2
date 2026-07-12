@@ -45,6 +45,20 @@ describe("qa measurement", () => {
       _opts: unknown,
       cb: (err: Error | null, stdout?: string, stderr?: string) => void,
     ) => {
+      if (cmd === "ffprobe" && args.includes("stream=width,height,sample_aspect_ratio,display_aspect_ratio,avg_frame_rate,r_frame_rate")) {
+        cb(null, JSON.stringify({
+          streams: [{
+            width: 1920,
+            height: 1080,
+            sample_aspect_ratio: "1:1",
+            display_aspect_ratio: "16:9",
+            avg_frame_rate: "24/1",
+            r_frame_rate: "24/1",
+          }],
+        }), "");
+        return;
+      }
+
       if (cmd === "ffprobe" && args.includes("v:0")) {
         cb(null, JSON.stringify({
           streams: [{ duration: "12.345" }],
@@ -90,15 +104,22 @@ describe("qa measurement", () => {
     });
 
     const ffprobeCalls = execFileMock.mock.calls.filter(([cmd]) => cmd === "ffprobe");
-    expect(ffprobeCalls).toHaveLength(2);
-    expect(ffprobeCalls[0][1]).toEqual([
+    const durationProbeCalls = ffprobeCalls.filter(([, args]) =>
+      (args as string[]).includes("stream=duration:format=duration")
+    );
+    const frameProbeCalls = ffprobeCalls.filter(([, args]) =>
+      (args as string[]).includes("stream=width,height,sample_aspect_ratio,display_aspect_ratio,avg_frame_rate,r_frame_rate")
+    );
+    expect(durationProbeCalls).toHaveLength(2);
+    expect(frameProbeCalls).toHaveLength(1);
+    expect(durationProbeCalls[0][1]).toEqual([
       "-v", "error",
       "-select_streams", "v:0",
       "-show_entries", "stream=duration:format=duration",
       "-of", "json",
       path.resolve(videoPath),
     ]);
-    expect(ffprobeCalls[1][1]).toEqual([
+    expect(durationProbeCalls[1][1]).toEqual([
       "-v", "error",
       "-select_streams", "a:0",
       "-show_entries", "stream=duration:format=duration",
@@ -112,17 +133,34 @@ describe("qa measurement", () => {
     expect(result.loudness_integrated).toBe(-16.2);
     expect(result.loudness_true_peak).toBe(-1.1);
     expect(result.dialogue_occupancy).toBeCloseTo(11300 / 12300, 6);
+    expect(result.video_frame).toEqual({
+      width: 1920,
+      height: 1080,
+      sar: "1:1",
+      dar: "16:9",
+      fps_num: 24,
+      fps_den: 1,
+      fps: 24,
+    });
 
     const persisted = JSON.parse(fs.readFileSync(outputPath, "utf-8")) as {
       video_duration_ms: number;
       audio_duration_ms: number;
       av_drift_ms: number;
       loudness_integrated: number;
+      video_frame: {
+        width: number;
+        height: number;
+        dar: string | null;
+      };
     };
     expect(persisted.video_duration_ms).toBe(12345);
     expect(persisted.audio_duration_ms).toBe(12300);
     expect(persisted.av_drift_ms).toBe(45);
     expect(persisted.loudness_integrated).toBe(-16.2);
+    expect(persisted.video_frame.width).toBe(1920);
+    expect(persisted.video_frame.height).toBe(1080);
+    expect(persisted.video_frame.dar).toBe("16:9");
   });
 
   it("emits an A/V drift warning at 100ms or more", () => {
@@ -149,5 +187,89 @@ describe("qa measurement", () => {
         code: "LOW_LOUDNESS_WARNING",
       }),
     ]);
+  });
+
+  // ── C-03 edge case: ebur128 stderr parse failure returns fallback ──
+
+  it("returns fallback loudness when ffmpeg ebur128 output is unparseable", async () => {
+    execFileMock.mockImplementation((
+      cmd: string,
+      args: string[],
+      _opts: unknown,
+      cb: (err: Error | null, stdout?: string, stderr?: string) => void,
+    ) => {
+      if (cmd === "ffprobe") {
+        cb(null, JSON.stringify({
+          streams: [{ duration: "10.0" }],
+          format: { duration: "10.0" },
+        }), "");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-filter_complex")) {
+        // Simulate unparseable ebur128 output (no I: or Peak: lines)
+        cb(null, "", "some random ffmpeg output without ebur128 summary");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-af")) {
+        cb(null, "", "");
+        return;
+      }
+
+      cb(new Error(`Unexpected command: ${cmd} ${args.join(" ")}`));
+    });
+
+    const result = await measureQaMedia({
+      videoPath,
+      audioPath,
+      outputPath,
+      createdAt: "2026-03-24T00:00:00.000Z",
+    });
+
+    // Should use fallback values instead of throwing
+    expect(result.loudness_integrated).toBe(-24);
+    expect(result.loudness_true_peak).toBe(-1);
+  });
+
+  it("returns fallback loudness when ffmpeg exits with error and no stderr", async () => {
+    execFileMock.mockImplementation((
+      cmd: string,
+      args: string[],
+      _opts: unknown,
+      cb: (err: Error | null, stdout?: string, stderr?: string) => void,
+    ) => {
+      if (cmd === "ffprobe") {
+        cb(null, JSON.stringify({
+          streams: [{ duration: "5.0" }],
+          format: { duration: "5.0" },
+        }), "");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-filter_complex")) {
+        // Simulate complete failure with no output
+        cb(new Error("ffmpeg crashed"), "", "");
+        return;
+      }
+
+      if (cmd === "ffmpeg" && args.includes("-af")) {
+        cb(null, "", "");
+        return;
+      }
+
+      cb(new Error(`Unexpected command: ${cmd} ${args.join(" ")}`));
+    });
+
+    const result = await measureQaMedia({
+      videoPath,
+      audioPath,
+      outputPath,
+      createdAt: "2026-03-24T00:00:00.000Z",
+    });
+
+    // Should use fallback values
+    expect(result.loudness_integrated).toBe(-24);
+    expect(result.loudness_true_peak).toBe(-1);
   });
 });

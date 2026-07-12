@@ -21,6 +21,7 @@ import {
   checkDialogueOccupancy,
   checkAvDrift,
   checkLoudnessTarget,
+  checkResolutionSpec,
   checkPackageCompleteness,
   buildQaReport,
   getRequiredChecks,
@@ -46,11 +47,30 @@ function validProjectState() {
   };
 }
 
+function validReviewReport() {
+  return {
+    visual_qa: {
+      status: "verified" as const,
+      score: 90,
+      min_score: 70,
+      issues: { total: 0, critical: 0, warning: 0, info: 0 },
+      issue_summaries: [],
+    },
+  };
+}
+
+function validGate10Options(overrides: Parameters<typeof checkGate10>[1] = {}) {
+  return {
+    reviewReport: validReviewReport(),
+    ...overrides,
+  };
+}
+
 // ── Gate 10 Tests ─────────────────────────────────────────────────
 
 describe("Gate 10", () => {
   it("passes with valid state", () => {
-    const result = checkGate10(validProjectState());
+    const result = checkGate10(validProjectState(), validGate10Options());
     expect(result.passed).toBe(true);
     expect(result.source_of_truth).toBe("engine_render");
     expect(result.errors).toHaveLength(0);
@@ -59,15 +79,23 @@ describe("Gate 10", () => {
   it("fails if not approved state", () => {
     const state = validProjectState();
     state.current_state = "blueprint_ready";
-    const result = checkGate10(state);
+    const result = checkGate10(state, validGate10Options());
     expect(result.passed).toBe(false);
     expect(result.errors.some((e) => e.includes("approved"))).toBe(true);
+  });
+
+  it("passes for re-render of an already-packaged project", () => {
+    const state = validProjectState();
+    state.current_state = "packaged";
+    const result = checkGate10(state, validGate10Options());
+    expect(result.passed).toBe(true);
+    expect(result.errors).toHaveLength(0);
   });
 
   it("fails if handoff not decided", () => {
     const state = validProjectState();
     state.handoff_resolution.status = "pending";
-    const result = checkGate10(state);
+    const result = checkGate10(state, validGate10Options());
     expect(result.passed).toBe(false);
     expect(result.errors.some((e) => e.includes("decided"))).toBe(true);
   });
@@ -75,7 +103,7 @@ describe("Gate 10", () => {
   it("fails if review_gate blocked", () => {
     const state = validProjectState();
     state.gates.review_gate = "blocked";
-    const result = checkGate10(state);
+    const result = checkGate10(state, validGate10Options());
     expect(result.passed).toBe(false);
     expect(result.errors.some((e) => e.includes("review_gate"))).toBe(true);
   });
@@ -83,7 +111,7 @@ describe("Gate 10", () => {
   it("returns correct source_of_truth for nle_finishing", () => {
     const state = validProjectState();
     state.handoff_resolution.source_of_truth_decision = "nle_finishing";
-    const result = checkGate10(state);
+    const result = checkGate10(state, validGate10Options());
     expect(result.passed).toBe(true);
     expect(result.source_of_truth).toBe("nle_finishing");
   });
@@ -92,10 +120,10 @@ describe("Gate 10", () => {
     const state = validProjectState();
     delete (state as { handoff_resolution?: unknown }).handoff_resolution;
 
-    const result = checkGate10(state, {
+    const result = checkGate10(state, validGate10Options({
       autonomyMode: "full",
       decidedAt: "2026-03-22T01:02:03Z",
-    });
+    }));
 
     expect(result.passed).toBe(true);
     expect(result.source_of_truth).toBe("engine_render");
@@ -106,7 +134,7 @@ describe("Gate 10", () => {
   });
 
   it("skips missing caption_approval and music_cues checks", () => {
-    const result = checkGate10(validProjectState(), {
+    const result = checkGate10(validProjectState(), validGate10Options({
       currentTimelineVersion: "timeline-v2",
       blueprint: {
         caption_policy: {
@@ -115,14 +143,14 @@ describe("Gate 10", () => {
       },
       captionApproval: null,
       musicCues: null,
-    });
+    }));
 
     expect(result.passed).toBe(true);
     expect(result.errors).toHaveLength(0);
   });
 
   it("fails if caption_approval is stale", () => {
-    const result = checkGate10(validProjectState(), {
+    const result = checkGate10(validProjectState(), validGate10Options({
       currentTimelineVersion: "timeline-v2",
       blueprint: {
         caption_policy: {
@@ -135,22 +163,94 @@ describe("Gate 10", () => {
           status: "approved",
         },
       },
-    });
+    }));
 
     expect(result.passed).toBe(false);
     expect(result.errors).toContain("caption_approval is stale");
   });
 
   it("fails if music_cues is stale", () => {
-    const result = checkGate10(validProjectState(), {
+    const result = checkGate10(validProjectState(), validGate10Options({
       currentTimelineVersion: "timeline-v2",
       musicCues: {
         base_timeline_version: "timeline-v1",
       },
-    });
+    }));
 
     expect(result.passed).toBe(false);
     expect(result.errors).toContain("music_cues is stale");
+  });
+
+  it("fails when review_report visual QA is not verified", () => {
+    const result = checkGate10(validProjectState(), {
+      reviewReport: {
+        visual_qa: {
+          status: "blocked",
+          reason: "render_missing",
+          min_score: 70,
+          issues: { total: 0, critical: 0, warning: 0, info: 0 },
+          issue_summaries: [],
+        },
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain('review_report.visual_qa.status must be "verified", got "blocked"');
+  });
+
+  it("fails when review_report contains unresolved fatal issues", () => {
+    const result = checkGate10(validProjectState(), validGate10Options({
+      reviewReport: {
+        ...validReviewReport(),
+        fatal_issues: [
+          {
+            summary: "Opening beat contradicts the brief",
+            severity: "fatal",
+          },
+        ],
+      },
+    }));
+
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain(
+      "review_report contains 1 fatal issue(s); final package is blocked until they are resolved or explicitly approved with creative_override",
+    );
+  });
+
+  it("allows review_report fatal issues only with creative_override approval", () => {
+    const state = validProjectState();
+    state.approval_record.status = "creative_override";
+    const result = checkGate10(state, validGate10Options({
+      reviewReport: {
+        ...validReviewReport(),
+        fatal_issues: [
+          {
+            summary: "Operator accepts this fatal issue as intentional",
+            severity: "fatal",
+          },
+        ],
+      },
+    }));
+
+    expect(result.passed).toBe(true);
+  });
+
+  it("passes when review_report carries an explicit visual QA waiver", () => {
+    const result = checkGate10(validProjectState(), {
+      reviewReport: {
+        visual_qa: {
+          status: "blocked",
+          reason: "render_missing",
+          min_score: 70,
+          issues: { total: 0, critical: 0, warning: 0, info: 0 },
+          issue_summaries: [],
+        },
+        visual_qa_waiver: true,
+        visual_qa_waiver_reason: "Operator reviewed the final MP4 externally.",
+      },
+    });
+
+    expect(result.passed).toBe(true);
   });
 });
 
@@ -300,6 +400,67 @@ describe("checkLoudnessTarget", () => {
     expect(result.passed).toBe(false);
     expect(result.details).toContain("-1.0");
     expect(result.details).toContain("exceeds -1.5");
+  });
+});
+
+// ── Resolution / Frame Size Tests ────────────────────────────────
+
+describe("checkResolutionSpec", () => {
+  const actual = {
+    width: 1920,
+    height: 1080,
+    sar: "1:1",
+    dar: "16:9",
+    fps_num: 24,
+    fps_den: 1,
+    fps: 24,
+  };
+  const expected = {
+    source: "timeline" as const,
+    source_detail: "05_timeline/timeline.json#sequence",
+    width: 1920,
+    height: 1080,
+    dar: "16:9",
+    fps_num: 24,
+    fps_den: 1,
+    fps: 24,
+    aspect_ratio: "16:9",
+  };
+
+  it("passes when measured frame metadata matches expected spec", () => {
+    const result = checkResolutionSpec(actual, expected);
+    expect(result.passed).toBe(true);
+    expect(result.name).toBe("resolution_valid");
+    expect(result.metrics.resolution_check).toBe("passed");
+    expect(result.metrics.actual_video_frame).toEqual(actual);
+    expect(result.metrics.expected_video_frame).toEqual(expected);
+  });
+
+  it("fails when measured frame size or display aspect ratio differs", () => {
+    const result = checkResolutionSpec(
+      { ...actual, width: 960, height: 540, dar: "16:9" },
+      expected,
+    );
+    expect(result.passed).toBe(false);
+    expect(result.metrics.resolution_check).toBe("failed");
+    expect(result.metrics.resolution_mismatches).toEqual([
+      "width expected=1920 actual=960",
+      "height expected=1080 actual=540",
+    ]);
+  });
+
+  it("records skipped only when no expected spec exists", () => {
+    const result = checkResolutionSpec(actual, null);
+    expect(result.passed).toBe(true);
+    expect(result.metrics.resolution_check).toBe("skipped");
+    expect(result.details).toContain("reason=no_expected_spec");
+  });
+
+  it("records blocked and fails when ffprobe cannot provide frame metadata", () => {
+    const result = checkResolutionSpec(null, expected, "ffprobe failed: not found");
+    expect(result.passed).toBe(false);
+    expect(result.metrics.resolution_check).toBe("blocked");
+    expect(result.details).toContain("ffprobe failed");
   });
 });
 

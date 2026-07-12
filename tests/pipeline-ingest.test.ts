@@ -69,6 +69,7 @@ describe("Pipeline: full ingest → segment → derivatives", () => {
       projectDir: TMP_PROJECT,
       repoRoot: REPO_ROOT,
       skipStt: true,
+      skipAppraiser: true,
     });
   }, 60_000);
 
@@ -119,6 +120,17 @@ describe("Pipeline: full ingest → segment → derivatives", () => {
   it("segments have filmstrip_path", () => {
     for (const seg of result.segmentsJson.items) {
       expect(seg.filmstrip_path).toMatch(/^filmstrips\//);
+    }
+  });
+
+  it("segments have deterministic visual quality measurements", () => {
+    for (const seg of result.segmentsJson.items) {
+      expect(seg.visual_quality_measurements).toBeDefined();
+      expect(seg.visual_quality_measurements?.metrics_measured).toEqual({
+        shake: true,
+        sharpness: true,
+        exposure: true,
+      });
     }
   });
 
@@ -232,12 +244,14 @@ describe("Pipeline determinism", () => {
         projectDir: tmpA,
         repoRoot: REPO_ROOT,
         skipStt: true,
+        skipAppraiser: true,
       });
       const resultB = await runPipeline({
         sourceFiles: [TEST_CLIP],
         projectDir: tmpB,
         repoRoot: REPO_ROOT,
         skipStt: true,
+        skipAppraiser: true,
       });
 
       // Compare assets
@@ -288,6 +302,7 @@ describe("Pipeline: multi-asset order independence", () => {
         projectDir: tmpFwd,
         repoRoot: REPO_ROOT,
         skipStt: true,
+        skipAppraiser: true,
       });
 
       // Run with [B, A] order (reversed)
@@ -296,6 +311,7 @@ describe("Pipeline: multi-asset order independence", () => {
         projectDir: tmpRev,
         repoRoot: REPO_ROOT,
         skipStt: true,
+        skipAppraiser: true,
       });
 
       // Both should have 2 assets
@@ -352,6 +368,7 @@ describe("Pipeline: media-link controls", () => {
         repoRoot: REPO_ROOT,
         skipStt: true,
         skipMediaLink: true,
+        skipAppraiser: true,
       });
 
       expect(fs.existsSync(path.join(tmpDir, "02_media", "source_map.json"))).toBe(false);
@@ -455,6 +472,7 @@ describe("Pipeline: VLM peak detection writes peak_analysis to segments", () => 
         repoRoot: REPO_ROOT,
         skipStt: true,
         vlmFn: mockVlmFn,
+        skipAppraiser: true,
       });
 
       // Verify segments.json has peak_analysis on at least one segment
@@ -510,6 +528,7 @@ describe("Pipeline: VLM peak detection writes peak_analysis to segments", () => 
         skipStt: true,
         skipPeak: true,
         vlmFn: mockVlmFn,
+        skipAppraiser: true,
       });
 
       const anyPeak = result.segmentsJson.items.some(
@@ -538,6 +557,7 @@ describe("Pipeline: gap report surfaces detector failures", () => {
         projectDir: tmpDir,
         repoRoot: REPO_ROOT,
         skipStt: true,
+        skipAppraiser: true,
       });
 
       // With a valid file, gap report should have no error-severity entries

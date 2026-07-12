@@ -28,6 +28,7 @@ function makeTimeline(clips: Array<{
   src_out_us: number;
   timeline_in_frame: number;
   timeline_duration_frames: number;
+  role?: string;
 }>) {
   return {
     project_id: "test-filler",
@@ -41,7 +42,7 @@ function makeTimeline(clips: Array<{
           clips: clips.map((c) => ({
             ...c,
             segment_id: "SEG_001",
-            role: "dialogue",
+            role: c.role ?? "dialogue",
           })),
         },
       ],
@@ -625,6 +626,208 @@ describe("generateCaptionSource with combined filtering", () => {
 // ── Timeline remapping correctness ───────────────────────────────────
 
 describe("caption timeline remapping", () => {
+  it("does not duplicate captions when compiler mirrors dialogue on V1 and A1", () => {
+    const clip = {
+      clip_id: "c1",
+      segment_id: "SEG_001",
+      asset_id: "A_001",
+      src_in_us: 0,
+      src_out_us: 2_000_000,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 48,
+      role: "dialogue",
+    };
+    const timeline = {
+      project_id: "test-filler",
+      timeline_version: "1",
+      fps: 24,
+      tracks: {
+        video: [{ track_id: "V1", clips: [clip] }],
+        audio: [{ track_id: "A1", clips: [{ ...clip, clip_id: "a1", role: "nat_sound" }] }],
+      },
+    };
+    const transcript = makeTranscript("A_001", [{
+      item_id: "TRI_001",
+      speaker: "S1",
+      speaker_key: "A_001:S1",
+      start_us: 0,
+      end_us: 2_000_000,
+      text: "重複しない字幕",
+    }]);
+
+    const result = generateCaptionSource(
+      timeline,
+      new Map([["A_001", transcript]]),
+      defaultPolicy,
+      "test",
+      "1",
+    );
+
+    expect(result.speech_captions.map((caption) => caption.text)).toEqual(["重複しない字幕"]);
+  });
+
+  it("treats compiler nat_sound clips on A1 as dialogue caption sources", () => {
+    const timeline = makeTimeline([
+      {
+        clip_id: "c1",
+        asset_id: "A_001",
+        src_in_us: 8_000_000,
+        src_out_us: 12_000_000,
+        timeline_in_frame: 0,
+        timeline_duration_frames: 96,
+        role: "nat_sound",
+      },
+    ]);
+    const transcript = makeTranscript("A_001", [
+      {
+        item_id: "TRI_001",
+        speaker: "S1",
+        speaker_key: "A_001:speaker_1",
+        start_us: 9_000_000,
+        end_us: 11_000_000,
+        text: "A1の発話字幕",
+      },
+    ]);
+
+    const result = generateCaptionSource(
+      timeline,
+      new Map([["A_001", transcript]]),
+      defaultPolicy,
+      "test",
+      "1",
+    );
+
+    expect(result.speech_captions.map((caption) => caption.text)).toEqual(["A1の発話字幕"]);
+  });
+
+  it("uses sequence fps when the canonical timeline has no top-level fps", () => {
+    const timeline = makeTimeline([
+      {
+        clip_id: "c1",
+        asset_id: "A_001",
+        src_in_us: 8_000_000,
+        src_out_us: 12_000_000,
+        timeline_in_frame: 0,
+        timeline_duration_frames: 96,
+      },
+    ]) as ReturnType<typeof makeTimeline> & {
+      fps?: number;
+      sequence?: { fps_num: number; fps_den: number };
+    };
+    (timeline as unknown as { fps?: number }).fps = undefined;
+    timeline.sequence = { fps_num: 24, fps_den: 1 };
+    const transcript = makeTranscript("A_001", [
+      {
+        item_id: "TRI_001",
+        speaker: "S1",
+        speaker_key: "A_001:speaker_1",
+        start_us: 9_000_000,
+        end_us: 11_000_000,
+        text: "24fps字幕",
+      },
+    ]);
+
+    const result = generateCaptionSource(
+      timeline,
+      new Map([["A_001", transcript]]),
+      defaultPolicy,
+      "test",
+      "1",
+    );
+
+    expect(result.speech_captions[0]).toMatchObject({
+      timeline_in_frame: 24,
+      timeline_duration_frames: 48,
+    });
+  });
+
+  it("keeps adjacent speakers in separate caption units", () => {
+    const timeline = makeTimeline([
+      {
+        clip_id: "c1",
+        asset_id: "A_001",
+        src_in_us: 0,
+        src_out_us: 2_000_000,
+        timeline_in_frame: 0,
+        timeline_duration_frames: 48,
+      },
+      {
+        clip_id: "c2",
+        asset_id: "A_002",
+        src_in_us: 0,
+        src_out_us: 2_000_000,
+        timeline_in_frame: 48,
+        timeline_duration_frames: 48,
+      },
+    ]);
+    const transcripts = new Map([
+      ["A_001", makeTranscript("A_001", [{
+        item_id: "TRI_001",
+        speaker: "S1",
+        speaker_key: "A_001:S1",
+        start_us: 0,
+        end_us: 2_000_000,
+        text: "一人目",
+      }])],
+      ["A_002", makeTranscript("A_002", [{
+        item_id: "TRI_002",
+        speaker: "S1",
+        speaker_key: "A_002:S1",
+        start_us: 0,
+        end_us: 2_000_000,
+        text: "できる二人目",
+      }])],
+    ]);
+
+    const result = generateCaptionSource(timeline, transcripts, defaultPolicy, "test", "1");
+
+    expect(result.speech_captions.map((caption) => [caption.asset_id, caption.text])).toEqual([
+      ["A_001", "一人目"],
+      ["A_002", "できる二人目"],
+    ]);
+  });
+
+  it("ignores transcript items with only a negligible clip overlap", () => {
+    const timeline = makeTimeline([
+      {
+        clip_id: "c1",
+        asset_id: "A_001",
+        src_in_us: 10_000_000,
+        src_out_us: 15_000_000,
+        timeline_in_frame: 0,
+        timeline_duration_frames: 120,
+      },
+    ]);
+    const transcript = makeTranscript("A_001", [
+      {
+        item_id: "TRI_PREVIOUS",
+        speaker: "S1",
+        speaker_key: "A_001:S1",
+        start_us: 0,
+        end_us: 10_100_000,
+        text: "前の長い発話",
+      },
+      {
+        item_id: "TRI_SELECTED",
+        speaker: "S1",
+        speaker_key: "A_001:S1",
+        start_us: 10_000_000,
+        end_us: 15_000_000,
+        text: "選択した発話",
+      },
+    ]);
+
+    const result = generateCaptionSource(
+      timeline,
+      new Map([["A_001", transcript]]),
+      defaultPolicy,
+      "test",
+      "1",
+    );
+
+    expect(result.speech_captions.map((caption) => caption.text)).toEqual(["選択した発話"]);
+  });
+
   it("maps source times to correct timeline positions across multiple clips", () => {
     // Two clips at different timeline positions
     const timeline = makeTimeline([

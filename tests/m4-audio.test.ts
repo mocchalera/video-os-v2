@@ -509,6 +509,12 @@ describe("buildLoudnormPass2Args", () => {
     expect(args[0]).toBe("-y");
   });
 
+  it("pins mastered PCM output to the delivery sample rate", () => {
+    const args = buildLoudnormPass2Args("in.wav", "out.wav", measurement);
+    expect(args).toContain("-ar");
+    expect(args).toContain("48000");
+  });
+
   it("uses default mastering targets", () => {
     const args = buildLoudnormPass2Args("in.wav", "out.wav", measurement);
     const filterArg = args.find((a) => a.includes("loudnorm"))!;

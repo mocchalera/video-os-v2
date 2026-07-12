@@ -1,0 +1,42 @@
+version: "1.0.0"
+project_id: "p4a-fixture"
+artifact_version: "release-safety-v1"
+created_at: "2026-04-26T00:00:00Z"
+base_timeline_version: "tl_fixture_001"
+source_of_truth: "nle_finishing"
+mode: "enforce"
+summary:
+  status: "pass_with_waiver"
+  fatal_count: 0
+  blocker_count: 0
+  warning_count: 0
+  waived_count: 1
+checks:
+  - check_id: "RSCHK_review_blocker_waived"
+    category: "editorial_review"
+    severity: "blocker"
+    status: "waived"
+    message: "review blocker accepted for client delivery"
+    artifact_refs:
+      - path: "projects/p4a-fixture/06_review/review_report.yaml"
+        hash: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+        required: true
+waivers:
+  - waiver_id: "RSWVR_review_blocker"
+    approved_by: "operator"
+    approved_at: "2026-04-26T00:05:00Z"
+    scope: "editorial_review:RSCHK_review_blocker_waived"
+    reason: "Known creative decision accepted for this package."
+    expires_at: null
+    applies_to_artifact_hash: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+provenance:
+  producer: "/package"
+  inputs:
+    - path: "projects/p4a-fixture/06_review/review_report.yaml"
+      hash: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+      required: true
+  hash_policy:
+    algorithm: "sha256"
+    canonicalization: "yaml-to-normalized-json-v1"
+    excluded_fields:
+      - "created_at"

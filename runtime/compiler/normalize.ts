@@ -26,7 +26,25 @@ export function normalize(
     preferred_roles: b.preferred_roles ? [...b.preferred_roles] : [],
     purpose: b.purpose ?? "",
     story_role: b.story_role,
+    craft: b.craft ? { ...b.craft } : undefined,
     skill_hints: b.skill_hints ? [...b.skill_hints] : undefined,
+    candidate_plan: b.candidate_plan
+      ? {
+          primary_candidate_ref: b.candidate_plan.primary_candidate_ref,
+          fallback_candidate_refs: b.candidate_plan.fallback_candidate_refs
+            ? [...b.candidate_plan.fallback_candidate_refs]
+            : undefined,
+        }
+      : undefined,
+    allow_revisit: typeof b.allow_revisit === "object" && b.allow_revisit !== null
+      ? {
+          semantic_cluster_ids: b.allow_revisit.semantic_cluster_ids
+            ? [...b.allow_revisit.semantic_cluster_ids]
+            : undefined,
+          asset_ids: b.allow_revisit.asset_ids ? [...b.allow_revisit.asset_ids] : undefined,
+          reason: b.allow_revisit.reason,
+        }
+      : b.allow_revisit,
   }));
 
   const roleQuotas = computeRoleQuotas(beats);

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM"],
+    "outDir": "dist-remotion",
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": [
+    "runtime/render/remotion/**/*.ts",
+    "runtime/render/remotion/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "dist", "dist-remotion"]
+}

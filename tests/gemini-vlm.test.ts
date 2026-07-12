@@ -70,7 +70,7 @@ const MOCK_VLM_POLICY: VlmPolicy = {
   model_snapshot: "test-snapshot-vlm",
   input_mode: "frame_bundle_plus_text_context",
   response_format: "json_schema_v1",
-  prompt_template_id: "m2-segment-v1",
+  prompt_template_id: "m2-segment-v2",
   max_frame_width_px: 1024,
   segment_visual_token_budget_max: 8192,
   segment_visual_output_tokens_max: 512,
@@ -559,7 +559,7 @@ describe("Constants", () => {
   });
 
   it("has prompt template ID", () => {
-    expect(PROMPT_TEMPLATE_ID).toBe("m2-segment-v1");
+    expect(PROMPT_TEMPLATE_ID).toBe("m2-segment-v2");
   });
 });
 
@@ -583,6 +583,7 @@ describe("Pipeline: VLM enrichment integration", () => {
       repoRoot: REPO_ROOT,
       skipStt: true,
       vlmFn: mockVlmFn,
+      skipAppraiser: true,
     });
   }, 60_000);
 
@@ -642,7 +643,7 @@ describe("Pipeline: VLM enrichment integration", () => {
       const conf = seg.confidence as Record<string, { score: number; source: string; status: string }>;
       expect(conf.summary.score).toBeGreaterThanOrEqual(0);
       expect(conf.summary.score).toBeLessThanOrEqual(1);
-      expect(conf.summary.source).toBe("gemini-2.0-flash");
+      expect(conf.summary.source).toBe("gemini-2.5-flash-lite");
       expect(conf.summary.status).toBe("ready");
     }
   });
@@ -658,7 +659,7 @@ describe("Pipeline: VLM enrichment integration", () => {
       expect(prov.summary.method).toBe("gemini_frame_bundle");
       expect(prov.summary.connector_version).toBe(VLM_CONNECTOR_VERSION);
       expect(prov.summary.prompt_hash).toMatch(/^[0-9a-f]{16}$/);
-      expect(prov.summary.model_alias).toBe("gemini-2.0-flash");
+      expect(prov.summary.model_alias).toBe("gemini-2.5-flash-lite");
     }
   });
 
@@ -693,6 +694,7 @@ describe("Pipeline: VLM failure produces gap entries", () => {
       repoRoot: REPO_ROOT,
       skipStt: true,
       vlmFn: failingVlmFn,
+      skipAppraiser: true,
     });
 
     // Cleanup scheduled
@@ -745,6 +747,7 @@ describe("Pipeline: skipVlm flag", () => {
         skipStt: true,
         skipVlm: true,
         vlmFn: spyVlmFn,
+        skipAppraiser: true,
       });
 
       expect(vlmCalled).toBe(false);

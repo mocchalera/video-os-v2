@@ -131,7 +131,6 @@ export function projectCaptionsToTimeline(
       timeline_in_frame: sc.timeline_in_frame,
       timeline_duration_frames: sc.timeline_duration_frames,
       role: "dialogue",
-      kind: "caption",
       motivation: "caption",
       confidence: 1.0,
       quality_flags: [],
@@ -165,7 +164,6 @@ export function projectCaptionsToTimeline(
       timeline_in_frame: to.timeline_in_frame,
       timeline_duration_frames: to.timeline_duration_frames,
       role: "title",
-      kind: "overlay",
       motivation: "overlay",
       confidence: 1.0,
       quality_flags: [],
@@ -188,6 +186,9 @@ export function projectCaptionsToTimeline(
   if (!result.tracks.caption) {
     result.tracks.caption = [];
   }
+  result.tracks.caption = result.tracks.caption.filter(
+    (track: { track_id?: string }) => track.track_id !== "C1",
+  );
   result.tracks.caption.push({
     track_id: "C1",
     kind: "caption",
@@ -198,6 +199,9 @@ export function projectCaptionsToTimeline(
   if (!result.tracks.overlay) {
     result.tracks.overlay = [];
   }
+  result.tracks.overlay = result.tracks.overlay.filter(
+    (track: { track_id?: string }) => track.track_id !== "O1",
+  );
   result.tracks.overlay.push({
     track_id: "O1",
     kind: "overlay",

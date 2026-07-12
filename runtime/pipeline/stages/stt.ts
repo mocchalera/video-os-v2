@@ -119,6 +119,12 @@ export async function sttMap(
       transcribeFn,
     });
 
+    if (!result.success) {
+      console.error(
+        `[stt.map] ${asset.asset_id}: transcription failed: ${result.error ?? "unknown error"}`,
+      );
+    }
+
     // Diarization sub-stage: merge pyannote speaker turns with Groq STT output
     if (
       result.success &&

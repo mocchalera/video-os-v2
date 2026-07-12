@@ -34,6 +34,11 @@ export interface BeatSync {
   enabled?: boolean;
   analysis_ref?: string;
   align?: "entry" | "exit" | "both";
+  bpm?: number;
+  meter?: string;
+  beats_sec?: number[];
+  downbeats_sec?: number[];
+  grid_source?: string;
 }
 
 export interface MusicCue {
@@ -54,6 +59,49 @@ export interface MusicCuesDoc {
   base_timeline_version: string;
   music_asset: MusicAsset;
   cues: MusicCue[];
+}
+
+export interface BeatGridAnalysis {
+  bpm?: number;
+  meter?: string;
+  beats_sec?: number[];
+  downbeats_sec?: number[];
+  provenance?: { detector?: string };
+}
+
+export function enrichMusicCuesWithBeatGrid(
+  doc: MusicCuesDoc,
+  analysis: BeatGridAnalysis,
+): MusicCuesDoc {
+  const beatsSec = sanitizeSeconds(analysis.beats_sec);
+  const downbeatsSec = sanitizeSeconds(analysis.downbeats_sec);
+  if (beatsSec.length === 0 && downbeatsSec.length === 0) return doc;
+
+  return {
+    ...doc,
+    cues: doc.cues.map((cue) => ({
+      ...cue,
+      beat_sync: {
+        ...(cue.beat_sync ?? {}),
+        enabled: cue.beat_sync?.enabled ?? true,
+        align: cue.beat_sync?.align ?? "both",
+        ...(typeof analysis.bpm === "number" && Number.isFinite(analysis.bpm) ? { bpm: analysis.bpm } : {}),
+        ...(analysis.meter ? { meter: analysis.meter } : {}),
+        ...(beatsSec.length > 0 ? { beats_sec: beatsSec } : {}),
+        ...(downbeatsSec.length > 0 ? { downbeats_sec: downbeatsSec } : {}),
+        grid_source: analysis.provenance?.detector ?? "bgm_analysis",
+      },
+    })),
+  };
+}
+
+function sanitizeSeconds(values: number[] | undefined): number[] {
+  if (!Array.isArray(values)) return [];
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .map((value) => Math.round(value * 1000) / 1000)
+    .sort((a, b) => a - b);
+  return sorted.filter((value, index) => index === 0 || value !== sorted[index - 1]);
 }
 
 // ── Validation ─────────────────────────────────────────────────────

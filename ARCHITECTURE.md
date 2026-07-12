@@ -1,5 +1,15 @@
 # Video OS v2 architecture
 
+> Current-truth index: start with
+> [`docs/CURRENT_ARCHITECTURE.md`](docs/CURRENT_ARCHITECTURE.md), then consult
+> [`docs/DECISIONS.md`](docs/DECISIONS.md),
+> [`docs/PIPELINE_STATES.md`](docs/PIPELINE_STATES.md),
+> [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md),
+> [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md), and
+> [`docs/DEPRECATED.md`](docs/DEPRECATED.md). This file retains detailed
+> architectural rationale; executable paths and the current-truth set take
+> precedence over historical sections when they differ.
+
 ## Core decision
 
 Remove `providers/reasoning/*`.
@@ -51,6 +61,17 @@ artifacts (truth)
   - timeline.json
   - review_report.yaml
 ```
+
+## Current product and editor ownership
+
+| Path | Status | Ownership and executable boundary | Required CI boundary |
+| --- | --- | --- | --- |
+| `apps/macos-studio` | Current canonical product | Native operator GUI (`VideoOSStudio`) and CLI (`videoos-studio-cli`). Reads canonical project artifacts and invokes repository `runtime/` / `scripts/` entrypoints directly. | `macos-studio`: SwiftPM tests and `videoos-studio-cli doctor` |
+| `editor/server` | Current supported infrastructure | Independently started local preview/API server. Owns exact preview jobs, media delivery, timeline/review endpoints, and project WebSocket notifications. It is not the canonical operator UI and is not a runtime dependency of macOS Studio. | `editor-server`: TypeScript coverage through `editor/tsconfig.json`; server/parity/security regressions also run in the Node test job |
+| `editor/shared` | Current supported shared code | RenderSpec, filtergraph, encode, caption, and validation contracts shared by preview and final-render paths. | Covered with `editor/server` typecheck and Node tests |
+| `editor/client` | Retired / legacy | Historical React/Vite Web UI retained for reference. Do not add product features or routine fixes; `apps/macos-studio` owns current UI work. | Intentionally excluded from required CI |
+
+The supported server is started explicitly with `npm --prefix editor run server -- --project ../projects/<project-id>`. The `..` is required because npm runs the script from `editor/`. Starting `VideoOSStudio` does not start that service, and the native app does not call its HTTP or WebSocket endpoints. Historical `docs/editor-*.md` files describe the retired Web UI unless a document explicitly says otherwise; use `docs/macos-studio-architecture.md` and the current Swift sources for operator-product design.
 
 ## Repository structure
 

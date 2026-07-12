@@ -7,9 +7,9 @@
  * 3. Render pipeline (engine_render) or validation (nle_finishing)
  * 4. QA validation
  * 5. Package manifest generation
- * 6. State transition: approved → packaged
+ * 6. State transition: approved → packaged, or refresh packaged outputs
  *
- * Allowed start states: approved.
+ * Allowed start states: approved, packaged.
  */
 
 import * as fs from "node:fs";
@@ -22,8 +22,17 @@ import {
   validateAgainstSchema,
   type CommandError,
 } from "./shared.js";
-import { writeProjectState, computeFileHash, type ProjectState } from "../state/reconcile.js";
-import { checkGate10, type SourceOfTruth } from "../packaging/gate10.js";
+import {
+  writeProjectState,
+  computeFileHash,
+  snapshotArtifacts,
+  type ProjectState,
+} from "../state/reconcile.js";
+import {
+  checkGate10,
+  type Gate10ReviewReport,
+  type SourceOfTruth,
+} from "../packaging/gate10.js";
 import {
   buildQaReport,
   checkCaptionDensity,
@@ -32,7 +41,9 @@ import {
   checkLoudnessTarget,
   checkPackageCompleteness,
   checkDialogueOccupancy,
+  checkResolutionSpec,
   getRequiredChecks,
+  type ExpectedVideoFrameSpec,
   type QaReport,
   type QaCheckResult,
 } from "../packaging/qa.js";
@@ -52,6 +63,14 @@ import {
 import { assembleTimelineToMp4 } from "../render/assembler.js";
 import { runRenderPipeline } from "../render/pipeline.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
+import { publishFinalVideo } from "../packaging/deliverable.js";
+import {
+  getReleaseSafetyMode,
+  isP4aReleaseSafetyEnabled,
+  runReleaseSafetyPreflight,
+  writeReleaseSafetyReport,
+  type ReleaseSafetyReport,
+} from "../artifacts/p4a-release-safety.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -60,6 +79,8 @@ export interface PackageCommandResult {
   error?: CommandError;
   qaReport?: QaReport;
   packageManifest?: PackageManifest;
+  releaseSafetyReport?: ReleaseSafetyReport;
+  deliverablePath?: string;
   sourceOfTruth?: SourceOfTruth;
   stateTransitioned?: boolean;
 }
@@ -89,7 +110,7 @@ export async function packageCommand(
   projectDir: string,
   options?: PackageCommandOptions,
 ): Promise<PackageCommandResult> {
-  const allowedStates: ProjectState[] = options?.allowedStates ?? ["approved"];
+  const allowedStates: ProjectState[] = options?.allowedStates ?? ["approved", "packaged"];
   const commandName = options?.commandName ?? "package";
   const actorName = options?.actorName ?? "package_command";
   const ctx = initCommand(projectDir, commandName, allowedStates);
@@ -130,6 +151,13 @@ export async function packageCommand(
   const musicCues = fs.existsSync(musicCuesPath)
     ? JSON.parse(fs.readFileSync(musicCuesPath, "utf-8"))
     : null;
+  const reviewReportResult = readReviewReportForGate10(absDir);
+  if (reviewReportResult.error) {
+    return {
+      success: false,
+      error: reviewReportResult.error,
+    };
+  }
 
   // 1. Gate 10 check
   const gate10 = checkGate10(doc, {
@@ -139,6 +167,7 @@ export async function packageCommand(
     blueprint,
     captionApproval,
     musicCues,
+    reviewReport: reviewReportResult.reviewReport,
   });
   if (!gate10.passed) {
     return {
@@ -161,6 +190,30 @@ export async function packageCommand(
   fs.mkdirSync(path.join(packageDir, "captions"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "logs"), { recursive: true });
 
+  let releaseSafetyReport: ReleaseSafetyReport | undefined;
+  if (isP4aReleaseSafetyEnabled()) {
+    try {
+      const releaseSafetyResult = runReleaseSafetyPreflight({
+        projectDir: absDir,
+        producer: commandName === "/render" ? "/render" : "/package",
+        mode: getReleaseSafetyMode(),
+        createdAt,
+        sourceOfTruth,
+      });
+      releaseSafetyReport = releaseSafetyResult.report;
+      writeReleaseSafetyReport(absDir, releaseSafetyReport);
+    } catch (err) {
+      return {
+        success: false,
+        sourceOfTruth,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: `Release safety preflight failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      };
+    }
+  }
+
   // 2. Read timeline and caption_policy
   const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
   const frameDurationMs = 1000 / fps;
@@ -177,6 +230,7 @@ export async function packageCommand(
   let qaMeasurementVideoPath: string | undefined;
   let qaMeasurementAudioPath: string | undefined;
   let qaMeasurementAssemblyPath: string | undefined = options?.assemblyPath;
+  let finalVideoSourcePath: string | undefined;
   const defaultAssemblyPath = path.join(absDir, "05_timeline/assembly.mp4");
   if (!qaMeasurementAssemblyPath && fs.existsSync(defaultAssemblyPath)) {
     qaMeasurementAssemblyPath = defaultAssemblyPath;
@@ -287,6 +341,7 @@ export async function packageCommand(
         });
         qaMeasurementAssemblyPath = assemblyPath;
         qaMeasurementVideoPath = renderResult.finalVideoPath;
+        finalVideoSourcePath = renderResult.finalVideoPath;
         qaMeasurementAudioPath = renderResult.finalMixPath;
 
         // Check which artifacts the render produced
@@ -318,6 +373,9 @@ export async function packageCommand(
     if (!qaMeasurementVideoPath) {
       qaMeasurementVideoPath = path.join(packageDir, "video/final.mp4");
     }
+    if (!finalVideoSourcePath) {
+      finalVideoSourcePath = qaMeasurementVideoPath;
+    }
     if (!qaMeasurementAudioPath) {
       qaMeasurementAudioPath = path.join(packageDir, "audio/final_mix.wav");
     }
@@ -326,6 +384,7 @@ export async function packageCommand(
     // supplied_export_probe_valid (simplified)
     qaMeasurementVideoPath = options?.suppliedFinalPath ||
       path.join(packageDir, "video/final.mp4");
+    finalVideoSourcePath = qaMeasurementVideoPath;
     const suppliedExists = options?.suppliedFinalPath
       ? fs.existsSync(options.suppliedFinalPath)
       : fs.existsSync(path.join(packageDir, "video/final.mp4"));
@@ -392,6 +451,18 @@ export async function packageCommand(
     };
   }
   logQaMeasurementWarnings(qaMeasurements);
+
+  const resolutionCheck = checkResolutionSpec(
+    qaMeasurements.video_frame,
+    resolveExpectedVideoFrameSpec(absDir, timeline),
+    qaMeasurements.video_frame_probe_error,
+  );
+  checks.push({
+    name: resolutionCheck.name,
+    passed: resolutionCheck.passed,
+    details: resolutionCheck.details,
+  });
+  Object.assign(metrics, resolutionCheck.metrics);
 
   if (sourceOfTruth === "engine_render") {
     const occupancyCheck = checkDialogueOccupancy(
@@ -488,6 +559,7 @@ export async function packageCommand(
     return {
       success: false,
       qaReport,
+      releaseSafetyReport,
       sourceOfTruth,
       error: {
         code: "VALIDATION_FAILED",
@@ -500,6 +572,7 @@ export async function packageCommand(
   // 8. Build package manifest
   const editorialTimelineHash = computeFileHash(timelinePath);
   let packageManifest: PackageManifest;
+  const publishedFinalVideo = publishFinalVideo(absDir, finalVideoSourcePath!);
 
   if (sourceOfTruth === "engine_render") {
     packageManifest = buildEngineRenderManifest({
@@ -510,6 +583,7 @@ export async function packageCommand(
       captionApprovalHash: doc.artifact_hashes?.caption_approval_hash,
       musicCuesHash: doc.artifact_hashes?.music_cues_hash,
       captionPolicy,
+      finalVideoPath: publishedFinalVideo.path,
       createdAt,
     });
   } else {
@@ -521,8 +595,7 @@ export async function packageCommand(
       handoffId: doc.handoff_resolution?.handoff_id || "unknown",
       captionApprovalHash: doc.artifact_hashes?.caption_approval_hash,
       captionPolicy,
-      finalVideoPath: options?.suppliedFinalPath ||
-        path.join(packageDir, "video/final.mp4"),
+      finalVideoPath: publishedFinalVideo.path,
       qaReportPath: path.join(packageDir, "qa-report.json"),
       createdAt,
     });
@@ -534,6 +607,11 @@ export async function packageCommand(
     JSON.stringify(packageManifest, null, 2),
     "utf-8",
   );
+
+  // QA and manifest are written by this command. Persist their current hashes
+  // before the state transition so the next reconcile does not interpret the
+  // package command's own outputs as an external invalidation.
+  doc.artifact_hashes = snapshotArtifacts(absDir).hashes;
 
   // 9. Transition state: approved → packaged
   transitionState(
@@ -549,12 +627,190 @@ export async function packageCommand(
     success: true,
     qaReport,
     packageManifest,
+    releaseSafetyReport,
+    deliverablePath: publishedFinalVideo.path,
     sourceOfTruth,
     stateTransitioned: true,
   };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
+
+function readReviewReportForGate10(projectDir: string): {
+  reviewReport: Gate10ReviewReport | null;
+  error?: CommandError;
+} {
+  const reportPath = path.join(projectDir, "06_review/review_report.yaml");
+  if (!fs.existsSync(reportPath)) {
+    return { reviewReport: null };
+  }
+
+  try {
+    return {
+      reviewReport: parseYaml(fs.readFileSync(reportPath, "utf-8")) as Gate10ReviewReport,
+    };
+  } catch (err) {
+    return {
+      reviewReport: null,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Failed to parse review_report.yaml: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
+}
+
+const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }> = {
+  "16:9": { width: 1920, height: 1080 },
+  "9:16": { width: 1080, height: 1920 },
+  "1:1": { width: 1080, height: 1080 },
+  "4:5": { width: 1080, height: 1350 },
+};
+
+function resolveExpectedVideoFrameSpec(
+  projectDir: string,
+  timeline: unknown,
+): ExpectedVideoFrameSpec | null {
+  return resolvePackageSettingsVideoFrameSpec(projectDir) ??
+    resolveTimelineVideoFrameSpec(timeline) ??
+    resolveBriefAspectVideoFrameSpec(projectDir);
+}
+
+function resolvePackageSettingsVideoFrameSpec(
+  projectDir: string,
+): ExpectedVideoFrameSpec | null {
+  const profilesDir = path.join(projectDir, "07_package/delivery_profiles");
+  if (!fs.existsSync(profilesDir)) return null;
+
+  const files = fs.readdirSync(profilesDir)
+    .filter((name) => /\.ya?ml$/i.test(name))
+    .sort((a, b) => a.localeCompare(b));
+  const candidates: Array<{ file: string; spec: ExpectedVideoFrameSpec }> = [];
+
+  for (const file of files) {
+    const parsed = safeParseYaml(path.join(profilesDir, file));
+    const profile = asRecord(parsed);
+    const constraints = asRecord(asRecord(profile?.video_constraints)?.resolution);
+    const videoConstraints = asRecord(profile?.video_constraints);
+    const width = readPositiveInteger(constraints?.width);
+    const height = readPositiveInteger(constraints?.height);
+    if (!width || !height) continue;
+
+    const aspectRatio = readString(videoConstraints?.aspect_ratio);
+    const frameRateMode = readString(videoConstraints?.frame_rate_mode);
+    const fps = fpsFromFrameRateMode(frameRateMode);
+    candidates.push({ file, spec: {
+      source: "package_settings",
+      source_detail: `delivery_profile:${readString(profile?.profile_id) ?? file}`,
+      width,
+      height,
+      dar: aspectRatio && aspectRatio !== "custom" ? aspectRatio : ratioFromDimensions(width, height),
+      ...(fps ? { fps_num: fps.num, fps_den: fps.den, fps: fps.value } : {}),
+      ...(aspectRatio && aspectRatio !== "custom" ? { aspect_ratio: aspectRatio } : {}),
+    } });
+  }
+
+  if (candidates.length === 0) return null;
+  const defaultCandidate = candidates.find((candidate) => /^default\.ya?ml$/i.test(candidate.file));
+  if (defaultCandidate) {
+    return defaultCandidate.spec;
+  }
+  return candidates.length === 1 ? candidates[0].spec : null;
+}
+
+function resolveTimelineVideoFrameSpec(timeline: unknown): ExpectedVideoFrameSpec | null {
+  const sequence = asRecord(asRecord(timeline)?.sequence);
+  if (!sequence) return null;
+
+  const width = readPositiveInteger(sequence.width);
+  const height = readPositiveInteger(sequence.height);
+  const fpsNum = readPositiveInteger(sequence.fps_num);
+  const fpsDen = readPositiveInteger(sequence.fps_den);
+  const aspectRatio = readString(sequence.output_aspect_ratio);
+
+  if (!width && !height && !aspectRatio && (!fpsNum || !fpsDen)) {
+    return null;
+  }
+
+  return {
+    source: "timeline",
+    source_detail: "05_timeline/timeline.json#sequence",
+    ...(width ? { width } : {}),
+    ...(height ? { height } : {}),
+    ...(aspectRatio ? { aspect_ratio: aspectRatio, dar: aspectRatio } : width && height ? { dar: ratioFromDimensions(width, height) } : {}),
+    ...(fpsNum && fpsDen ? { fps_num: fpsNum, fps_den: fpsDen, fps: fpsNum / fpsDen } : {}),
+  };
+}
+
+function resolveBriefAspectVideoFrameSpec(projectDir: string): ExpectedVideoFrameSpec | null {
+  const briefPath = path.join(projectDir, "01_intent/creative_brief.yaml");
+  const brief = asRecord(safeParseYaml(briefPath));
+  const aspectRatio = readString(asRecord(brief?.editorial)?.aspect_ratio);
+  if (!aspectRatio || aspectRatio === "unknown") return null;
+
+  const dims = ASPECT_RATIO_DIMENSIONS[aspectRatio];
+  if (!dims) return null;
+
+  return {
+    source: "creative_brief",
+    source_detail: "01_intent/creative_brief.yaml#editorial.aspect_ratio",
+    width: dims.width,
+    height: dims.height,
+    dar: aspectRatio,
+    aspect_ratio: aspectRatio,
+  };
+}
+
+function safeParseYaml(filePath: string): unknown {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return parseYaml(fs.readFileSync(filePath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function fpsFromFrameRateMode(mode: string | undefined): { num: number; den: number; value: number } | null {
+  switch (mode) {
+    case "cfr_24":
+      return { num: 24, den: 1, value: 24 };
+    case "cfr_25":
+      return { num: 25, den: 1, value: 25 };
+    case "cfr_29.97":
+      return { num: 30000, den: 1001, value: 30000 / 1001 };
+    case "cfr_30":
+      return { num: 30, den: 1, value: 30 };
+    case "cfr_60":
+      return { num: 60, den: 1, value: 60 };
+    default:
+      return null;
+  }
+}
+
+function ratioFromDimensions(width: number, height: number): string {
+  const divisor = gcd(width, height);
+  return `${width / divisor}:${height / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : gcd(b, a % b);
+}
 
 function parseDensityFromDetails(details: string): number | undefined {
   const match = details.match(/max_density=([\d.]+)/);

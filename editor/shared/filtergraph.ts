@@ -1,0 +1,826 @@
+/**
+ * Shared Video Filter Builder — Phase 2: Video Parity
+ *
+ * Generates ffmpeg -vf filter chains from RenderVideoClip transform specs.
+ * Used by both preview-job-service (preview) and final render pipeline
+ * to guarantee identical video composition.
+ *
+ * Transform order (fixed, per Section 9.1):
+ *   1. trim          (handled by caller via -ss / -t)
+ *   2. scale to cover / contain
+ *   3. crop
+ *   4. translate
+ *   5. color / effect (future)
+ *   6. format / setsar
+ */
+
+import type {
+  RenderVideoClip,
+  RenderTransition,
+  RenderEffectSpec,
+} from "./render-spec.js";
+
+interface SequenceDimensions {
+  width: number;
+  height: number;
+}
+
+/**
+ * Build an ffmpeg -vf filter string array for a single video clip.
+ *
+ * - zoom === 1.0: scale to fit within sequence dimensions, pad to fill
+ * - zoom > 1.0: scale to (width*zoom)x(height*zoom), crop to center
+ * - crop: applied after zoom (absolute pixel coords within sequence frame)
+ * - position: translate after crop
+ *
+ * Returns an array of filter expressions to be joined with commas for -vf.
+ */
+export function buildVideoClipFilter(
+  clip: RenderVideoClip,
+  sequence: SequenceDimensions,
+): string[] {
+  const { width, height } = sequence;
+  const { zoom, crop, position } = clip.transform;
+  const filters: string[] = [];
+
+  if (zoom <= 1.0) {
+    // Scale to fit, pad to fill (letterbox/pillarbox)
+    filters.push(
+      `scale=${width}:${height}:force_original_aspect_ratio=decrease`,
+      `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+    );
+  } else {
+    // Scale to cover: zoom into the frame, then crop to sequence dimensions
+    const scaledW = Math.round(width * zoom);
+    const scaledH = Math.round(height * zoom);
+    filters.push(
+      `scale=${scaledW}:${scaledH}:force_original_aspect_ratio=increase`,
+      `crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`,
+    );
+  }
+
+  // Optional explicit crop (absolute coords within the sequence frame)
+  // After crop, scale back to sequence dimensions so concat streams stay uniform.
+  if (crop) {
+    filters.push(
+      `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y}`,
+      `scale=${width}:${height}`,
+    );
+  }
+
+  // Optional translate (position offset)
+  if (position && (position.x !== 0 || position.y !== 0)) {
+    // Shift the image on a black canvas via pad→crop.
+    // Input is guaranteed WxH at this point (from zoom or crop+scale above).
+    const padW = width + Math.abs(position.x) * 2;
+    const padH = height + Math.abs(position.y) * 2;
+    const padX = Math.abs(position.x) + position.x;
+    const padY = Math.abs(position.y) + position.y;
+    filters.push(
+      `pad=${padW}:${padH}:${padX}:${padY}:black`,
+      `crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`,
+    );
+  }
+
+  // Phase 5: 5. color / effect
+  // Apply effect chain in declared order — preview and final use the same
+  // serialization (same builder, same input list).
+  for (const effect of clip.effects) {
+    const expr = buildEffectFilter(effect);
+    if (expr) filters.push(expr);
+  }
+
+  // Format / setsar (always last) — guarantees uniform pixel format for concat
+  filters.push("format=yuv420p", "setsar=1");
+
+  return filters;
+}
+
+// ── Effect filter builder (Phase 5) ──────────────────────────────────
+
+/**
+ * Quote a curves preset/value if it contains characters that ffmpeg
+ * filtergraph parsing dislikes (spaces, commas, colons, brackets).
+ */
+function quoteFilterValue(value: string): string {
+  if (/^[A-Za-z0-9_./+-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "\\'")}'`;
+}
+
+/**
+ * Render a numeric param with deterministic precision.
+ * Avoids locale-dependent formatting and trailing-zero noise.
+ */
+function fmtNum(n: number): string {
+  // 6 significant digits, then strip trailing zeros and a trailing dot.
+  if (!Number.isFinite(n)) return "0";
+  const s = n.toFixed(6);
+  return s.replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/**
+ * Build a single ffmpeg filter expression for one effect.
+ *
+ * Returns an empty string when the effect is a no-op or has no producible
+ * parameters. Both preview and final render call this so the serialized
+ * graph is byte-identical.
+ *
+ * Phase 5 supported types:
+ *   - eq:                 collapses any of brightness/contrast/saturation/gamma
+ *                         into a single eq=... node
+ *   - brightness:         eq=brightness=<v>
+ *   - contrast:           eq=contrast=<v>
+ *   - saturation:         eq=saturation=<v>
+ *   - curves:             curves=preset=<name>  OR
+ *                         curves=red='...':green='...':blue='...':all='...'
+ *   - none:               returns "" (skipped by caller)
+ *
+ * Unknown types return "" — the spec builder is responsible for emitting a
+ * warning before this point.
+ */
+export function buildEffectFilter(effect: RenderEffectSpec): string {
+  switch (effect.type) {
+    case "none":
+      return "";
+
+    case "eq": {
+      const allowed: ReadonlyArray<string> = [
+        "contrast",
+        "brightness",
+        "saturation",
+        "gamma",
+        "gamma_r",
+        "gamma_g",
+        "gamma_b",
+        "gamma_weight",
+      ];
+      const parts: string[] = [];
+      for (const key of allowed) {
+        const v = effect.params[key];
+        if (typeof v === "number") {
+          parts.push(`${key}=${fmtNum(v)}`);
+        }
+      }
+      if (parts.length === 0) return "";
+      return `eq=${parts.join(":")}`;
+    }
+
+    case "brightness": {
+      const v = effect.params.value ?? effect.params.brightness;
+      if (typeof v !== "number") return "";
+      return `eq=brightness=${fmtNum(v)}`;
+    }
+
+    case "contrast": {
+      const v = effect.params.value ?? effect.params.contrast;
+      if (typeof v !== "number") return "";
+      return `eq=contrast=${fmtNum(v)}`;
+    }
+
+    case "saturation": {
+      const v = effect.params.value ?? effect.params.saturation;
+      if (typeof v !== "number") return "";
+      return `eq=saturation=${fmtNum(v)}`;
+    }
+
+    case "curves": {
+      const preset = effect.params.preset;
+      if (typeof preset === "string" && preset.length > 0) {
+        return `curves=preset=${quoteFilterValue(preset)}`;
+      }
+      const channels: ReadonlyArray<string> = ["all", "red", "green", "blue"];
+      const parts: string[] = [];
+      for (const ch of channels) {
+        const v = effect.params[ch];
+        if (typeof v === "string" && v.length > 0) {
+          parts.push(`${ch}=${quoteFilterValue(v)}`);
+        }
+      }
+      if (parts.length === 0) return "";
+      return `curves=${parts.join(":")}`;
+    }
+
+    default:
+      // Unknown / degraded effect — caller already warned via spec builder.
+      return "";
+  }
+}
+
+/**
+ * Convenience: join filter array into a single -vf value string.
+ */
+export function buildVideoClipFilterString(
+  clip: RenderVideoClip,
+  sequence: SequenceDimensions,
+): string {
+  return buildVideoClipFilter(clip, sequence).join(",");
+}
+
+// ── Transition Video/Audio Specs (Phase 4) ─────────────────────────
+
+/** Video component of a transition. */
+export interface TransitionVideoSpec {
+  /** How to join the two video streams. */
+  method: "cut" | "xfade" | "fade_in_out";
+  /** xfade duration in seconds (for crossfade). */
+  xfadeDurationSec?: number;
+  /** xfade transition name (ffmpeg xfade filter). */
+  xfadeTransition?: string;
+  /** fade-out duration on outgoing clip in seconds (for fade_to_black). */
+  fadeOutDurationSec?: number;
+  /** fade-in duration on incoming clip in seconds (for fade_to_black). */
+  fadeInDurationSec?: number;
+}
+
+/** Audio component of a transition. */
+export interface TransitionAudioSpec {
+  method: "cut" | "acrossfade" | "audio_lead" | "audio_trail";
+  /** acrossfade duration in seconds (for crossfade). */
+  crossfadeDurationSec?: number;
+  /** Incoming audio starts this many seconds before the video cut (j_cut). */
+  audioLeadSec?: number;
+  /** Outgoing audio continues this many seconds after the video cut (l_cut). */
+  audioTrailSec?: number;
+}
+
+/** Combined transition spec for a single adjacency. */
+export interface TransitionSpec {
+  video: TransitionVideoSpec;
+  audio: TransitionAudioSpec;
+}
+
+/**
+ * Derive the video + audio spec for a single RenderTransition.
+ *
+ * Used by both preview-job-service and final render to ensure identical
+ * transition handling.
+ */
+export function buildTransitionSpec(
+  transition: RenderTransition,
+  fps: number,
+): TransitionSpec {
+  const durSec = transition.durationFrames / fps;
+
+  switch (transition.type) {
+    case "crossfade":
+      return {
+        video: {
+          method: "xfade",
+          xfadeDurationSec: durSec,
+          xfadeTransition: "fade",
+        },
+        audio: {
+          method: "acrossfade",
+          crossfadeDurationSec: durSec,
+        },
+      };
+
+    case "fade_to_black": {
+      const halfDur = durSec / 2;
+      return {
+        video: {
+          method: "fade_in_out",
+          fadeOutDurationSec: halfDur,
+          fadeInDurationSec: halfDur,
+        },
+        audio: {
+          method: "acrossfade",
+          crossfadeDurationSec: durSec,
+        },
+      };
+    }
+
+    case "j_cut":
+      return {
+        video: { method: "cut" },
+        audio: {
+          method: "audio_lead",
+          audioLeadSec: transition.audioLeadSec ?? durSec,
+        },
+      };
+
+    case "l_cut":
+      return {
+        video: { method: "cut" },
+        audio: {
+          method: "audio_trail",
+          audioTrailSec: transition.audioTrailSec ?? durSec,
+        },
+      };
+
+    case "cut":
+    default:
+      return {
+        video: { method: "cut" },
+        audio: { method: "cut" },
+      };
+  }
+}
+
+/**
+ * Build the video portion of a filter_complex for a sequence of clips
+ * with transitions.
+ *
+ * Input labels: [v0], [v1], ... for each clip's video stream.
+ * Returns the filter chain string and the final output label.
+ */
+export function buildVideoTransitionGraph(
+  clipCount: number,
+  clipDurationsSec: number[],
+  transitions: Array<{ spec: TransitionSpec; fromIndex: number; toIndex: number }>,
+): { filterChain: string; outputLabel: string } {
+  if (clipCount <= 1) {
+    return { filterChain: "", outputLabel: "[v0]" };
+  }
+
+  // Build a transition lookup: toIndex → spec
+  const transMap = new Map<number, TransitionSpec>();
+  for (const t of transitions) {
+    transMap.set(t.toIndex, t.spec);
+  }
+
+  const parts: string[] = [];
+  let prevLabel = "[v0]";
+  let accumulatedOffset = clipDurationsSec[0];
+
+  for (let i = 1; i < clipCount; i++) {
+    const spec = transMap.get(i);
+    const outLabel = i < clipCount - 1 ? `[vt${i}]` : "[vout]";
+
+    if (spec?.video.method === "xfade" && spec.video.xfadeDurationSec) {
+      const xfadeDur = spec.video.xfadeDurationSec;
+      const offset = accumulatedOffset - xfadeDur;
+      const transition = spec.video.xfadeTransition ?? "fade";
+      parts.push(
+        `${prevLabel}[v${i}]xfade=transition=${transition}:duration=${xfadeDur.toFixed(6)}:offset=${offset.toFixed(6)}${outLabel}`,
+      );
+      accumulatedOffset = offset + clipDurationsSec[i];
+    } else if (spec?.video.method === "fade_in_out") {
+      // fade_to_black: fade-out on previous, fade-in on current, then concat
+      // We use xfade=transition=fadeblack which handles this natively
+      const fadeOutDur = spec.video.fadeOutDurationSec ?? 0;
+      const fadeInDur = spec.video.fadeInDurationSec ?? 0;
+      const totalDur = fadeOutDur + fadeInDur;
+      const offset = accumulatedOffset - totalDur;
+      parts.push(
+        `${prevLabel}[v${i}]xfade=transition=fadeblack:duration=${totalDur.toFixed(6)}:offset=${offset.toFixed(6)}${outLabel}`,
+      );
+      accumulatedOffset = offset + clipDurationsSec[i];
+    } else {
+      // cut: simple concat (no overlap)
+      const concatLabel = outLabel;
+      parts.push(
+        `${prevLabel}[v${i}]concat=n=2:v=1:a=0${concatLabel}`,
+      );
+      accumulatedOffset += clipDurationsSec[i];
+    }
+    prevLabel = outLabel;
+  }
+
+  return {
+    filterChain: parts.join(";"),
+    outputLabel: prevLabel,
+  };
+}
+
+/**
+ * Build the audio portion of a filter_complex for a sequence of clips
+ * with transitions.
+ *
+ * Input labels: [a0], [a1], ... for each clip's audio stream.
+ * Returns the filter chain string and the final output label.
+ */
+export function buildAudioTransitionGraph(
+  clipCount: number,
+  clipDurationsSec: number[],
+  transitions: Array<{ spec: TransitionSpec; fromIndex: number; toIndex: number }>,
+): { filterChain: string; outputLabel: string } {
+  if (clipCount <= 1) {
+    return { filterChain: "", outputLabel: "[a0]" };
+  }
+
+  const transMap = new Map<number, TransitionSpec>();
+  for (const t of transitions) {
+    transMap.set(t.toIndex, t.spec);
+  }
+
+  const parts: string[] = [];
+  let prevLabel = "[a0]";
+  let accDurSec = clipDurationsSec[0];
+
+  for (let i = 1; i < clipCount; i++) {
+    const spec = transMap.get(i);
+    const outLabel = i < clipCount - 1 ? `[at${i}]` : "[aout]";
+
+    if (spec?.audio.method === "acrossfade" && spec.audio.crossfadeDurationSec) {
+      const dur = spec.audio.crossfadeDurationSec;
+      parts.push(
+        `${prevLabel}[a${i}]acrossfade=d=${dur.toFixed(6)}:c1=tri:c2=tri${outLabel}`,
+      );
+      accDurSec = accDurSec - dur + clipDurationsSec[i];
+    } else if (spec?.audio.method === "audio_lead" && spec.audio.audioLeadSec) {
+      // j_cut: incoming audio starts leadSec before the video cut.
+      // Use adelay + amix (both at full volume, no crossfade). Callers
+      // extend the incoming audio input by leadSec so the mixed output keeps
+      // the same duration as the hard-cut picture.
+      const leadSec = spec.audio.audioLeadSec;
+      const delayMs = Math.max(0, Math.round((accDurSec - leadSec) * 1000));
+      parts.push(
+        `[a${i}]adelay=${delayMs}|${delayMs}[a${i}d];` +
+        `${prevLabel}[a${i}d]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0${outLabel}`,
+      );
+      accDurSec += clipDurationsSec[i];
+    } else if (spec?.audio.method === "audio_trail" && spec.audio.audioTrailSec) {
+      // l_cut: outgoing audio continues trailSec after the video cut.
+      // Use apad (hold outgoing) + adelay + amix.
+      const trailSec = spec.audio.audioTrailSec;
+      const delayMs = Math.round(accDurSec * 1000);
+      parts.push(
+        `${prevLabel}apad=pad_dur=${trailSec.toFixed(6)}[a${i}p];` +
+        `[a${i}]adelay=${delayMs}|${delayMs}[a${i}d];` +
+        `[a${i}p][a${i}d]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0${outLabel}`,
+      );
+      accDurSec = accDurSec + clipDurationsSec[i];
+    } else {
+      // cut: simple concat
+      parts.push(
+        `${prevLabel}[a${i}]concat=n=2:v=0:a=1${outLabel}`,
+      );
+      accDurSec += clipDurationsSec[i];
+    }
+    prevLabel = outLabel;
+  }
+
+  return {
+    filterChain: parts.join(";"),
+    outputLabel: prevLabel,
+  };
+}
+
+// ── Single-generation transition chain (cross-path parity) ──────────
+
+export interface TransitionChainInput {
+  kind?: "source" | "gap";
+  sourcePath?: string;
+  sourceInSec?: number;
+  durationSec: number;
+  /** Per-clip video filter chain (from buildVideoClipFilterString). */
+  videoFilter: string;
+  /** Whether the source file carries an audio stream. */
+  hasAudio: boolean;
+  /** Optional nat-audio gain in dB. */
+  gainDb?: number | null;
+  /** Audio role/track metadata, used by callers to decide speech-cut fades. */
+  audioRole?: string;
+  audioTrackId?: string;
+  /** Optional per-input edge fades applied before transition graph joins. */
+  audioFadeInSec?: number;
+  audioFadeOutSec?: number;
+  /** Audio-only source trim start. Defaults to sourceInSec. */
+  audioSourceInSec?: number;
+  /** Audio-only source duration. Defaults to durationSec. */
+  audioDurationSec?: number;
+  /** Gap input config. Used only when kind === "gap". */
+  gap?: {
+    width: number;
+    height: number;
+    fps: number;
+  };
+}
+
+export interface TransitionChainOptions {
+  inputs: TransitionChainInput[];
+  clipDurationsSec: number[];
+  transitions: Array<{
+    spec: TransitionSpec;
+    fromIndex: number;
+    toIndex: number;
+  }>;
+  /** false → video-only output (-an); audio handled elsewhere. */
+  includeAudio: boolean;
+  /** Encoder args for the single video generation, e.g. x264Args(...). */
+  videoEncodeArgs: string[];
+  /** Audio codec args when includeAudio, e.g. ["-c:a","pcm_s16le",...]. */
+  audioCodecArgs?: string[];
+  outputPath: string;
+}
+
+export interface TransitionAudioExtensionInput {
+  sourceInSec: number;
+  durationSec: number;
+}
+
+export interface TransitionAudioExtension {
+  audioSourceInSec: number;
+  audioDurationSec: number;
+  timelineStartShiftSec: number;
+}
+
+export function computeTransitionAudioExtensions(
+  inputs: TransitionAudioExtensionInput[],
+  transitions: Array<{
+    spec: TransitionSpec;
+    fromIndex: number;
+    toIndex: number;
+  }>,
+): Map<number, TransitionAudioExtension> {
+  const extensions = new Map<number, TransitionAudioExtension>();
+
+  const getExtension = (index: number): TransitionAudioExtension => {
+    const existing = extensions.get(index);
+    if (existing) return existing;
+    const base = inputs[index];
+    const created: TransitionAudioExtension = {
+      audioSourceInSec: base.sourceInSec,
+      audioDurationSec: base.durationSec,
+      timelineStartShiftSec: 0,
+    };
+    extensions.set(index, created);
+    return created;
+  };
+
+  for (const transition of transitions) {
+    if (
+      transition.spec.audio.method === "audio_lead" &&
+      transition.spec.audio.audioLeadSec
+    ) {
+      const leadSec = Math.max(0, transition.spec.audio.audioLeadSec);
+      const input = inputs[transition.toIndex];
+      if (!input || leadSec <= 0) continue;
+      const ext = getExtension(transition.toIndex);
+      const nextSourceIn = Math.max(0, input.sourceInSec - leadSec);
+      const actualLeadSec = input.sourceInSec - nextSourceIn;
+      ext.audioSourceInSec = Math.min(ext.audioSourceInSec, nextSourceIn);
+      ext.audioDurationSec = Math.max(
+        ext.audioDurationSec,
+        input.durationSec + actualLeadSec,
+      );
+      ext.timelineStartShiftSec = Math.min(
+        ext.timelineStartShiftSec,
+        -leadSec,
+      );
+    } else if (
+      transition.spec.audio.method === "audio_trail" &&
+      transition.spec.audio.audioTrailSec
+    ) {
+      const trailSec = Math.max(0, transition.spec.audio.audioTrailSec);
+      const input = inputs[transition.fromIndex];
+      if (!input || trailSec <= 0) continue;
+      const ext = getExtension(transition.fromIndex);
+      ext.audioDurationSec = Math.max(
+        ext.audioDurationSec,
+        input.durationSec + trailSec,
+      );
+    }
+  }
+
+  return extensions;
+}
+
+export function applyTransitionAudioExtensions<T extends TransitionChainInput>(
+  inputs: T[],
+  transitions: Array<{
+    spec: TransitionSpec;
+    fromIndex: number;
+    toIndex: number;
+  }>,
+): T[] {
+  const extensions = computeTransitionAudioExtensions(
+    inputs.map((input) => ({
+      sourceInSec: input.sourceInSec ?? 0,
+      durationSec: input.durationSec,
+    })),
+    transitions,
+  );
+
+  return inputs.map((input, index) => {
+    const ext = extensions.get(index);
+    if (!ext) return input;
+    return {
+      ...input,
+      audioSourceInSec: ext.audioSourceInSec,
+      audioDurationSec: ext.audioDurationSec,
+    };
+  });
+}
+
+export interface TransitionChainTimelineInput extends TransitionChainInput {
+  clipId: string;
+  timelineInFrame: number;
+  durationFrames: number;
+}
+
+export interface GapAwareTransitionChainPlan {
+  inputs: TransitionChainInput[];
+  clipDurationsSec: number[];
+  clipIndexToChainIndex: Map<number, number>;
+  hasGaps: boolean;
+}
+
+export function buildGapAwareTransitionChainInputs(
+  clipInputs: TransitionChainTimelineInput[],
+  opts: {
+    fps: number;
+    width: number;
+    height: number;
+    startFrame?: number;
+    totalFrames?: number;
+  },
+): GapAwareTransitionChainPlan {
+  const ordered = clipInputs
+    .map((input, originalIndex) => ({ input, originalIndex }))
+    .sort((a, b) => {
+      const byStart = a.input.timelineInFrame - b.input.timelineInFrame;
+      return byStart !== 0 ? byStart : a.originalIndex - b.originalIndex;
+    });
+
+  const inputs: TransitionChainInput[] = [];
+  const clipIndexToChainIndex = new Map<number, number>();
+  let cursor = opts.startFrame ?? 0;
+  let hasGaps = false;
+
+  const pushGap = (durationFrames: number): void => {
+    if (durationFrames <= 0) return;
+    hasGaps = true;
+    inputs.push({
+      kind: "gap",
+      durationSec: durationFrames / opts.fps,
+      videoFilter: "format=yuv420p,setsar=1",
+      hasAudio: false,
+      gap: {
+        width: opts.width,
+        height: opts.height,
+        fps: opts.fps,
+      },
+    });
+  };
+
+  for (const { input, originalIndex } of ordered) {
+    const start = input.timelineInFrame;
+    if (start > cursor) {
+      pushGap(start - cursor);
+    }
+    clipIndexToChainIndex.set(originalIndex, inputs.length);
+    inputs.push({
+      ...input,
+      kind: input.kind ?? "source",
+    });
+    cursor = Math.max(cursor, input.timelineInFrame + input.durationFrames);
+  }
+
+  if (opts.totalFrames !== undefined && opts.totalFrames > cursor) {
+    pushGap(opts.totalFrames - cursor);
+  }
+
+  return {
+    inputs,
+    clipDurationsSec: inputs.map((input) => input.durationSec),
+    clipIndexToChainIndex,
+    hasGaps,
+  };
+}
+
+/**
+ * Build ONE ffmpeg invocation that trims every clip straight from its
+ * source, applies the per-clip filter chain, and joins the clips through
+ * the shared transition graphs — a single encode generation.
+ *
+ * Both the exact preview and the final assembler must render transitioned
+ * timelines through this builder: if either path pre-encodes clips and
+ * then re-encodes them through the graph, that extra lossy generation
+ * alone pushes cross-path SSIM below the 0.999 acceptance bar.
+ */
+export function buildTransitionChainArgs(opts: TransitionChainOptions): string[] {
+  const args: string[] = ["-y"];
+
+  // Source inputs, trimmed at the demuxer (-ss/-t before -i). Gap inputs are
+  // black lavfi sources with the same dimensions and fps as buildGapVideoArgs.
+  for (const input of opts.inputs) {
+    if (input.kind === "gap") {
+      if (!input.gap) {
+        throw new Error("Transition chain gap input is missing dimensions");
+      }
+      args.push(
+        "-f", "lavfi",
+        "-t", input.durationSec.toFixed(6),
+        "-i", `color=c=black:s=${input.gap.width}x${input.gap.height}:r=${input.gap.fps}`,
+      );
+    } else {
+      if (!input.sourcePath) {
+        throw new Error("Transition chain source input is missing sourcePath");
+      }
+      args.push(
+        "-ss", (input.sourceInSec ?? 0).toFixed(6),
+        "-t", input.durationSec.toFixed(6),
+        "-i", input.sourcePath,
+      );
+    }
+  }
+
+  // Silent stand-ins for sources without audio, appended after the real
+  // inputs so video stream indexes stay 0..N-1. When audio needs a different
+  // trim range from video (j_cut/l_cut), append an audio-only source input.
+  const audioInputIndex: number[] = [];
+  let nextExtraIndex = opts.inputs.length;
+  if (opts.includeAudio) {
+    for (const input of opts.inputs) {
+      const audioDurationSec = input.audioDurationSec ?? input.durationSec;
+      const needsSeparateAudioInput =
+        input.kind !== "gap" &&
+        input.hasAudio &&
+        (
+          input.audioSourceInSec !== undefined ||
+          input.audioDurationSec !== undefined
+        );
+
+      if (needsSeparateAudioInput && input.sourcePath) {
+        audioInputIndex.push(nextExtraIndex);
+        args.push(
+          "-ss", (input.audioSourceInSec ?? input.sourceInSec ?? 0).toFixed(6),
+          "-t", audioDurationSec.toFixed(6),
+          "-i", input.sourcePath,
+        );
+        nextExtraIndex += 1;
+      } else if (input.kind !== "gap" && input.hasAudio) {
+        audioInputIndex.push(-1); // own stream
+      } else {
+        audioInputIndex.push(nextExtraIndex);
+        args.push(
+          "-f", "lavfi",
+          "-t", audioDurationSec.toFixed(6),
+          "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+        );
+        nextExtraIndex += 1;
+      }
+    }
+  }
+
+  // Label bindings: [i:v] → per-clip filters → [vN]; audio → [aN].
+  const parts: string[] = [];
+  opts.inputs.forEach((input, i) => {
+    parts.push(`[${i}:v]${input.videoFilter},settb=AVTB,setpts=PTS-STARTPTS[v${i}]`);
+  });
+  if (opts.includeAudio) {
+    opts.inputs.forEach((input, i) => {
+      const srcIndex = audioInputIndex[i] === -1 ? i : audioInputIndex[i];
+      parts.push(`[${srcIndex}:a]${buildAudioInputFilter(input)}[a${i}]`);
+    });
+  }
+
+  const { filterChain: videoChain, outputLabel: videoOut } =
+    buildVideoTransitionGraph(
+      opts.inputs.length,
+      opts.clipDurationsSec,
+      opts.transitions,
+    );
+  if (videoChain) parts.push(videoChain);
+
+  let audioOut: string | null = null;
+  if (opts.includeAudio) {
+    const audio = buildAudioTransitionGraph(
+      opts.inputs.length,
+      opts.clipDurationsSec,
+      opts.transitions,
+    );
+    if (audio.filterChain) parts.push(audio.filterChain);
+    audioOut = audio.outputLabel;
+  }
+
+  args.push("-filter_complex", parts.join(";"));
+  args.push("-map", videoOut);
+  if (opts.includeAudio && audioOut) {
+    args.push("-map", audioOut);
+  } else {
+    args.push("-an");
+  }
+  args.push(...opts.videoEncodeArgs);
+  if (opts.includeAudio && opts.audioCodecArgs) {
+    args.push(...opts.audioCodecArgs);
+  }
+  args.push("-pix_fmt", "yuv420p", opts.outputPath);
+  return args;
+}
+
+function buildAudioInputFilter(input: TransitionChainInput): string {
+  const filters: string[] = [];
+  if (
+    input.gainDb !== null &&
+    input.gainDb !== undefined &&
+    input.gainDb !== 0
+  ) {
+    filters.push(`volume=${input.gainDb}dB`);
+  }
+
+  if (input.audioFadeInSec !== undefined && input.audioFadeInSec > 0) {
+    filters.push(`afade=t=in:st=0:d=${input.audioFadeInSec.toFixed(6)}`);
+  }
+  if (input.audioFadeOutSec !== undefined && input.audioFadeOutSec > 0) {
+    const durationSec = input.audioDurationSec ?? input.durationSec;
+    const fadeStart = Math.max(0, durationSec - input.audioFadeOutSec);
+    filters.push(
+      `afade=t=out:st=${fadeStart.toFixed(6)}:d=${input.audioFadeOutSec.toFixed(6)}`,
+    );
+  }
+
+  return filters.length > 0 ? filters.join(",") : "anull";
+}

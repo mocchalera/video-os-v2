@@ -14,45 +14,35 @@ metadata:
 - rough cut ではなく package 済み deliverable を作る段階のとき。
 
 ## 前提条件
-- 現 repo には `scripts/render-video.ts` のような専用 CLI はない。既存実装は `runtime/commands/package.ts` の `packageCommand()` を使う。
+- 最終 package/render は `scripts/package.ts` を使う。
+- `npm run package -- projects/<project> [options]` と
+  `npx tsx scripts/package.ts projects/<project> [options]` は同じ入口。
 - Gate 10 を満たしていること。
   `current_state: approved`
   `approval_record.status: clean` または `creative_override`
   `handoff_resolution.status: decided`
   `handoff_resolution.source_of_truth_decision: engine_render` または `nle_finishing`
   `gates.review_gate: open`
-- `engine_render` の場合は `05_timeline/assembly.mp4` が必要。
+- F-0023 の `review_report.visual_qa` が `verified` で min score 以上、または明示 waiver が必要。
+- `engine_render` の場合、CLI は `05_timeline/assembly.mp4` が無い/古いときに `timeline.json` から自動生成し、`05_timeline/render-report.json` に freshness metadata を書く。
 - caption が有効なら `07_package/caption_approval.json`、BGM が有効なら `07_package/music_cues.json` が必要。
 
 ## やること（ステップ）
-1. Gate 10 と package 前提を確認する。
-2. `engine_render` path なら `packageCommand()` を呼ぶ。
+1. Gate 10 と package 前提を確認する。CLI は実行前に不足と次アクションを表示する。
+2. `engine_render` path なら新 CLI を呼ぶ。
 
 ```bash
-npx tsx -e 'import { packageCommand } from "./runtime/commands/package.ts";
-const result = await packageCommand("projects/<project>", {
-  assemblyPath: "projects/<project>/05_timeline/assembly.mp4"
-});
-if (!result.success) {
-  console.error(result.error);
-  process.exit(1);
-}
-console.log(JSON.stringify(result, null, 2));'
+npm run package -- projects/<project> --source-of-truth engine_render
 ```
 
 3. `nle_finishing` path なら supplied final を検証用に渡す。
 
 ```bash
-npx tsx -e 'import { packageCommand } from "./runtime/commands/package.ts";
-const result = await packageCommand("projects/<project>", {
-  suppliedFinalPath: "projects/<project>/07_package/video/final.mp4"
-});
-if (!result.success) {
-  console.error(result.error);
-  process.exit(1);
-}
-console.log(JSON.stringify(result, null, 2));'
+npm run package -- projects/<project> --source-of-truth nle_finishing --supplied-final projects/<project>/07_package/video/final.mp4
 ```
+
+4. `assembly.mp4` を手動管理する場合だけ `--no-assembly` または `--assembly-path <path>` を使う。
+   通常は自動生成に任せる。
 
 ## 出力 artifact
 - `07_package/video/final.mp4`
@@ -62,8 +52,11 @@ console.log(JSON.stringify(result, null, 2));'
 - `07_package/captions/*.srt` / `*.vtt` 必要な場合のみ
 - `07_package/qa-report.json`
 - `07_package/package_manifest.json`
+- `09_output/final.mp4`
+- `05_timeline/assembly.mp4` と `05_timeline/render-report.json` (`engine_render` 自動生成時)
 
 ## 注意事項
-- 現在の render pipeline は `timeline.json` から直接 clip extraction / concat を行わない。前提は既に存在する `05_timeline/assembly.mp4`。
+- `--skip-render` は検証/テスト用途。通常の deliverable 作成では付けない。
+- `--no-assembly` は自動生成を止めるため、`05_timeline/assembly.mp4` が無い場合は packaging が失敗する。
 - `music_cues.json` がなくても `final_mix.wav` は生成される。no-BGM path では raw dialogue を pass-through する。
 - `caption_burn` と `audio_mix` の実行ログは `07_package/logs/*.log` に出る。

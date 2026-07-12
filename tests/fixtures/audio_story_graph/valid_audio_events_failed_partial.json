@@ -1,0 +1,73 @@
+{
+  "version": "1.0.0",
+  "project_id": "asg-fixtures",
+  "artifact_version": "analysis-v3",
+  "created_at": "2026-04-26T00:00:00Z",
+  "source_media_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "inputs": {
+    "transcript_hashes": ["sha256:2222222222222222222222222222222222222222222222222222222222222222"],
+    "audio_events_hash": null,
+    "bgm_analysis_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "coverage_report_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "nodes": [
+    {
+      "node_id": "UTTREF_partial_001",
+      "node_type": "utterance",
+      "asset_id": "AST_dialogue_001",
+      "start_us": 0,
+      "end_us": 3000000,
+      "text": "The audio event detector did not finish.",
+      "story_role": "setup",
+      "refs": {
+        "transcript_ref": "UTT_partial_001",
+        "speaker_ref": "SPK_host",
+        "audio_event_ref": null,
+        "bgm_ref": null
+      },
+      "confidence": { "score": 0.89, "source": "fixture", "status": "ready" }
+    },
+    {
+      "node_id": "BGMREF_partial_001",
+      "node_type": "music_section",
+      "asset_id": "AST_music_001",
+      "start_us": 0,
+      "end_us": 3000000,
+      "text": null,
+      "story_role": "setup",
+      "refs": {
+        "transcript_ref": null,
+        "speaker_ref": null,
+        "audio_event_ref": null,
+        "bgm_ref": "BGM_partial_001"
+      },
+      "confidence": { "score": 0.8, "source": "fixture", "status": "ready" }
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "ASGEDGE_partial_music_001",
+      "from_node_id": "BGMREF_partial_001",
+      "to_node_id": "UTTREF_partial_001",
+      "type": "music_under"
+    }
+  ],
+  "coverage": {
+    "status": "partial",
+    "dialogue_lane": "ready",
+    "audio_event_lane": "failed",
+    "music_lane": "ready",
+    "missing_inputs": ["audio_events"]
+  },
+  "provenance": {
+    "producer": "analysis-pipeline",
+    "inputs": [
+      { "path": "projects/demo/03_analysis/transcripts/TR_dialogue_001.json", "hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222" }
+    ],
+    "hash_policy": {
+      "algorithm": "sha256",
+      "canonicalization": "normalized-json-v1",
+      "excluded_fields": ["created_at"]
+    }
+  }
+}

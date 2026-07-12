@@ -56,7 +56,51 @@
         "dialogue_occupancy_ratio": { "type": "number" },
         "av_drift_ms": { "type": "number" },
         "integrated_lufs": { "type": "number" },
-        "true_peak_dbtp": { "type": "number" }
+        "true_peak_dbtp": { "type": "number" },
+        "resolution_check": {
+          "type": "string",
+          "enum": ["passed", "failed", "skipped", "blocked"]
+        },
+        "actual_video_frame": { "$ref": "#/$defs/videoFrame" },
+        "expected_video_frame": { "$ref": "#/$defs/expectedVideoFrame" },
+        "resolution_mismatches": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "videoFrame": {
+      "type": "object",
+      "required": ["width", "height", "sar", "dar", "fps_num", "fps_den", "fps"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "sar": { "type": ["string", "null"] },
+        "dar": { "type": ["string", "null"] },
+        "fps_num": { "type": ["integer", "null"], "minimum": 1 },
+        "fps_den": { "type": ["integer", "null"], "minimum": 1 },
+        "fps": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "expectedVideoFrame": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["package_settings", "timeline", "creative_brief"]
+        },
+        "source_detail": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "sar": { "type": ["string", "null"] },
+        "dar": { "type": ["string", "null"] },
+        "fps_num": { "type": ["integer", "null"], "minimum": 1 },
+        "fps_den": { "type": ["integer", "null"], "minimum": 1 },
+        "fps": { "type": ["number", "null"] },
+        "aspect_ratio": { "type": "string" }
       },
       "additionalProperties": false
     }

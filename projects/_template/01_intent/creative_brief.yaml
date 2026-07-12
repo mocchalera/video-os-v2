@@ -1,40 +1,51 @@
 project:
-  title: Example Project
+  title: Speech-Led Highlight
   strategy: message-first
 
 message:
-  primary: Mountain time is recovery, not competition
+  primary: Confirm the central source-grounded message before candidate selection
   secondary:
-    - quiet
-    - breath
-    - warmth
+    - preserve the speaker's meaning
+    - make the story easy to review
+    - return an editable rough cut
 
 audience:
-  primary: urban adults 30-45
+  primary: intended audience to confirm in Brief
 
 emotion_curve:
-  - intrigue
-  - breath
-  - release
-  - warmth
+  - hook
+  - context
+  - insight
+  - close
 
 must_have:
-  - morning light
-  - hands detail
-  - audible breathing
+  - one source-grounded hook
+  - one evidence-backed insight
+  - one clear close
 
 must_avoid:
-  - over-sportified framing
-  - hard-sell advertising feel
+  - invented claims
+  - unattributed generated footage
+  - music-led structure overriding speech
 
 autonomy:
   may_decide:
     - b-roll substitution within the same meaning
     - exact cut position within a beat
   must_ask:
-    - ending line
-    - music replacement
+    - central message change
+    - required speaker or statement removal
     - message inversion
 
 resolved_assumptions:
-  - subject is solitary but not lonely
+  - first-run profile is a Japanese interview, seminar, or event highlight
+
+editorial:
+  distribution_channel: unknown
+  aspect_ratio: unknown
+  embed_context: unknown
+  hook_priority: balanced
+  credibility_bias: high
+  profile_hint: interview-highlight
+  policy_hint: interview
+  allow_inference: false

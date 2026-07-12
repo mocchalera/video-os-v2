@@ -92,7 +92,18 @@
         "align": {
           "type": "string",
           "enum": ["entry", "exit", "both"]
-        }
+        },
+        "bpm": { "type": "number", "minimum": 0 },
+        "meter": { "type": "string" },
+        "beats_sec": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "downbeats_sec": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0 }
+        },
+        "grid_source": { "type": "string" }
       },
       "additionalProperties": false
     }

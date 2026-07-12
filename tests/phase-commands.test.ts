@@ -25,6 +25,15 @@ import {
 
 const SAMPLE_PROJECT = "projects/sample";
 const tempDirs: string[] = [];
+const MATCHING_VIDEO_FRAME = {
+  width: 1920,
+  height: 1080,
+  sar: "1:1",
+  dar: "16:9",
+  fps_num: 24,
+  fps_den: 1,
+  fps: 24,
+};
 
 afterAll(() => {
   for (const dir of tempDirs) {
@@ -218,22 +227,33 @@ function createIntentAgent() {
 function createTriageAgent(): TriageAgent {
   return {
     async run(ctx) {
+      const segments = JSON.parse(
+        fs.readFileSync(path.resolve(SAMPLE_PROJECT, "03_analysis/segments.json"), "utf-8"),
+      ) as {
+        items?: Array<{
+          segment_id: string;
+          asset_id: string;
+          src_in_us: number;
+          src_out_us: number;
+          summary?: string;
+          tags?: string[];
+        }>;
+      };
       return {
         selects: {
           version: "1",
           project_id: ctx.projectId,
-          candidates: [
-            {
-              segment_id: "SEG_0001",
-              asset_id: "AST_001",
-              src_in_us: 0,
-              src_out_us: 3_000_000,
-              role: "hero",
-              why_it_matches: "Strong opening image",
-              risks: [],
-              confidence: 0.9,
-            },
-          ],
+          candidates: (segments.items ?? []).map((segment, index) => ({
+            segment_id: segment.segment_id,
+            asset_id: segment.asset_id,
+            src_in_us: segment.src_in_us,
+            src_out_us: segment.src_out_us,
+            role: index === 0 ? "hero" as const : "support" as const,
+            why_it_matches: `${segment.summary ?? segment.segment_id}; opening detail`,
+            risks: [],
+            confidence: 0.9,
+            evidence: ["opening detail", ...(segment.tags ?? [])],
+          })),
         },
         confirmed: true,
       };
@@ -282,7 +302,16 @@ function stampApprovedState(projectDir: string): void {
 
   fs.writeFileSync(
     reviewReportPath,
-    stringifyYaml(makeReviewReport()),
+    stringifyYaml({
+      ...makeReviewReport(),
+      visual_qa: {
+        status: "verified",
+        score: 90,
+        min_score: 70,
+        issues: { total: 0, critical: 0, warning: 0, info: 0 },
+        issue_summaries: [],
+      },
+    }),
     "utf-8",
   );
   fs.writeFileSync(
@@ -373,7 +402,7 @@ describe("phase commands", () => {
     expect(result.error?.code).toBe("STATE_CHECK_FAILED");
   });
 
-  it("compile phase errors when upstream blockers are unresolved", () => {
+  it("compile phase errors when upstream blockers are unresolved", async () => {
     const tmpDir = createProject("compile-blocked", {
       state: "blocked",
       patches: {
@@ -393,7 +422,7 @@ describe("phase commands", () => {
       },
     });
 
-    const result = runCompilePhase(tmpDir);
+    const result = await runCompilePhase(tmpDir);
 
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe("GATE_CHECK_FAILED");
@@ -511,6 +540,7 @@ describe("phase commands", () => {
         audioDurationMs: 10_000,
         dialogueWindowMs: 10_000,
         observedNonSilentMs: 8_000,
+        videoFrame: MATCHING_VIDEO_FRAME,
       },
     });
 

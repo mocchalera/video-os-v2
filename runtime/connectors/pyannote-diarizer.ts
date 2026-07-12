@@ -35,7 +35,7 @@ export interface DiarizeOptions {
   model?: string;
   /** Device for inference (e.g. "cpu", "cuda", "mps") */
   device?: string;
-  /** Timeout in milliseconds (default: 300_000 = 5 minutes) */
+  /** Timeout in milliseconds (default: 900_000 = 15 minutes) */
   timeoutMs?: number;
 }
 
@@ -62,7 +62,9 @@ const BRIDGE_SCRIPT = path.join(
   "pyannote-bridge.py",
 );
 
-const DEFAULT_TIMEOUT_MS = 300_000; // 5 minutes
+// Long-form interviews can take longer than five minutes on Apple Silicon CPU.
+// Keep this bounded, but allow a full speech-led source to finish locally.
+const DEFAULT_TIMEOUT_MS = 900_000; // 15 minutes
 
 export const DIARIZER_CONNECTOR_VERSION = "pyannote-diarizer-v1.0.0";
 

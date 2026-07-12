@@ -16,6 +16,7 @@ import {
   type CaptionPolicy,
 } from "../runtime/caption/segmenter.js";
 import { generateSrt } from "../runtime/render/pipeline.js";
+import { buildAssForceStyle, DEFAULT_CAPTION_STYLE_PRESET } from "../editor/shared/caption-style-tokens.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +38,8 @@ const transcript = JSON.parse(
 );
 
 const fps = timeline.sequence?.fps_num ?? 24;
+const seqWidth = timeline.sequence?.width ?? 1920;
+const seqHeight = timeline.sequence?.height ?? 1080;
 
 console.log(`Timeline: ${timeline.tracks.audio[0].clips.length} A1 clips, fps=${fps}`);
 console.log(`Transcript: ${transcript.items.length} items`);
@@ -192,7 +195,7 @@ try {
   execFileSync("ffmpeg", [
     "-y",
     "-i", rawEditPath,
-    "-vf", `subtitles='${escapedSrt}':force_style='FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,MarginV=40'`,
+    "-vf", `subtitles='${escapedSrt}':force_style='${buildAssForceStyle(DEFAULT_CAPTION_STYLE_PRESET, { width: seqWidth, height: seqHeight, fps })}'`,
     "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
     "-c:v", "libx264", "-preset", "medium", "-crf", "18",
     "-c:a", "aac", "-b:a", "192k",

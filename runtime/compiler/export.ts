@@ -5,8 +5,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { LoadedSourceMap } from "../media/source-map.js";
+import { computeFileHash16 } from "../preview/playback-contract.js";
 import type {
   AssembledTimeline,
+  BriefCaptionPolicy,
+  BriefAudioPolicy,
   ClipOutput,
   DurationPolicy,
   MarkerOutput,
@@ -29,7 +32,17 @@ export interface ExportOptions {
   fpsNum?: number;
   fpsDen?: number;
   durationPolicy?: DurationPolicy;
+  audioPolicy?: {
+    mode: BriefAudioPolicy;
+    source: "explicit_brief" | "profile_default" | "global_default";
+    a1_loudnorm?: boolean;
+  };
+  captionPolicy?: {
+    mode: BriefCaptionPolicy;
+    source: "explicit_brief" | "profile_default" | "global_default";
+  };
   transitions?: TimelineTransition[];
+  metadata?: Record<string, unknown>;
   width?: number;
   height?: number;
   outputAspectRatio?: string;
@@ -68,6 +81,13 @@ export function buildTimelineIR(
           track_id: t.track_id,
           transition_type: t.transition_type,
         };
+        if (typeof t.transition_params?.crossfade_sec === "number") {
+          const fps = (opts.fpsNum ?? 24) / (opts.fpsDen ?? 1);
+          out.transition_frames = Math.max(
+            1,
+            Math.round(t.transition_params.crossfade_sec * fps),
+          );
+        }
         if (t.transition_params) out.transition_params = t.transition_params as Record<string, unknown>;
         if (t.applied_skill_id) out.applied_skill_id = t.applied_skill_id;
         if (t.degraded_from_skill_id !== undefined) out.degraded_from_skill_id = t.degraded_from_skill_id;
@@ -96,6 +116,7 @@ export function buildTimelineIR(
     },
     markers,
     ...(transitionOutputs && transitionOutputs.length > 0 ? { transitions: transitionOutputs } : {}),
+    ...(opts.metadata && Object.keys(opts.metadata).length > 0 ? { metadata: opts.metadata } : {}),
     provenance: {
       brief_path: opts.briefRelPath,
       blueprint_path: opts.blueprintRelPath,
@@ -113,6 +134,8 @@ export function buildTimelineIR(
             },
           }
         : {}),
+      ...(opts.audioPolicy ? { audio_policy: opts.audioPolicy } : {}),
+      ...(opts.captionPolicy ? { caption_policy: opts.captionPolicy } : {}),
     },
   };
 }
@@ -156,32 +179,58 @@ export function writePreviewManifest(
     fs.mkdirSync(outDir, { recursive: true });
   }
 
+  // Playback contract: record which timeline.json this manifest was
+  // derived from, so review surfaces can detect stale previews.
+  const timelinePath = path.join(outDir, "timeline.json");
+  const baseTimelineHash = fs.existsSync(timelinePath)
+    ? computeFileHash16(timelinePath)
+    : null;
+
+  const toPreviewClip = (track: TrackOutput, c: ClipOutput) => {
+    const sourceEntry = sourceMap?.entryMap.get(c.asset_id);
+    return {
+      track_id: track.track_id,
+      track_kind: track.kind,
+      clip_id: c.clip_id,
+      asset_id: c.asset_id,
+      src_in_us: c.src_in_us,
+      src_out_us: c.src_out_us,
+      timeline_in_frame: c.timeline_in_frame,
+      timeline_duration_frames: c.timeline_duration_frames,
+      ...(sourceEntry
+        ? {
+            source_locator: sourceEntry.source_locator,
+            local_source_path: sourceEntry.local_source_path,
+            media_link_path: sourceEntry.link_path,
+          }
+        : {}),
+    };
+  };
+  const previewTracks = {
+    video: timeline.tracks.video.map((track) => ({
+      track_id: track.track_id,
+      kind: track.kind,
+      clips: track.clips.map((clip) => toPreviewClip(track, clip)),
+    })),
+    audio: timeline.tracks.audio.map((track) => ({
+      track_id: track.track_id,
+      kind: track.kind,
+      clips: track.clips.map((clip) => toPreviewClip(track, clip)),
+    })),
+  };
+
   const manifest = {
     version: "1",
     project_id: timeline.project_id,
     created_at: timeline.created_at,
+    compiler_version: COMPILER_VERSION,
+    ...(baseTimelineHash ? { base_timeline_hash: baseTimelineHash } : {}),
     sequence: timeline.sequence,
-    clips: timeline.tracks.video
-      .flatMap((t) => t.clips)
-      .concat(timeline.tracks.audio.flatMap((t) => t.clips))
-      .map((c) => {
-        const sourceEntry = sourceMap?.entryMap.get(c.asset_id);
-        return {
-          clip_id: c.clip_id,
-          asset_id: c.asset_id,
-          src_in_us: c.src_in_us,
-          src_out_us: c.src_out_us,
-          timeline_in_frame: c.timeline_in_frame,
-          timeline_duration_frames: c.timeline_duration_frames,
-          ...(sourceEntry
-            ? {
-                source_locator: sourceEntry.source_locator,
-                local_source_path: sourceEntry.local_source_path,
-                media_link_path: sourceEntry.link_path,
-              }
-            : {}),
-        };
-      }),
+    tracks: previewTracks,
+    transitions: timeline.transitions ?? [],
+    clips: previewTracks.video
+      .flatMap((track) => track.clips)
+      .concat(previewTracks.audio.flatMap((track) => track.clips)),
   };
 
   const outPath = path.join(outDir, "preview-manifest.json");
@@ -203,6 +252,8 @@ function toClipOutput(clip: {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  captions?: ClipOutput["captions"];
+  audio_policy?: ClipOutput["audio_policy"];
   candidate_ref?: string;
   fallback_candidate_refs?: string[];
   metadata?: Record<string, unknown>;
@@ -227,6 +278,12 @@ function toClipOutput(clip: {
   }
   if (clip.fallback_candidate_refs && clip.fallback_candidate_refs.length > 0) {
     output.fallback_candidate_refs = clip.fallback_candidate_refs;
+  }
+  if (clip.audio_policy) {
+    output.audio_policy = clip.audio_policy;
+  }
+  if (clip.captions && clip.captions.length > 0) {
+    output.captions = clip.captions;
   }
   if (clip.metadata && Object.keys(clip.metadata).length > 0) {
     output.metadata = clip.metadata;

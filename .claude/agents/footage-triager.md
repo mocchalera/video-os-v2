@@ -69,4 +69,3 @@ Rules:
 - Penalize quality issues and repetition.
 - Prefer evidence from contact sheets, transcripts, QC, and search results over
   raw guesswork.
-

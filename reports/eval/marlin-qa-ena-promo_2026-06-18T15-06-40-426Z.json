@@ -1,0 +1,238 @@
+{
+  "version": "1",
+  "project_id": "ena-promo",
+  "video_path": "/Users/mocchalera/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_duration_sec": 181.288,
+  "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 9 warnings.",
+  "scene_descriptions": [
+    {
+      "start_sec": 0,
+      "end_sec": 2.5,
+      "description": "A black car drives across a city intersection."
+    },
+    {
+      "start_sec": 4,
+      "end_sec": 12,
+      "description": "A small bird walks along a paved alleyway."
+    },
+    {
+      "start_sec": 12.5,
+      "end_sec": 17.5,
+      "description": "A person rakes dry leaves on the ground."
+    },
+    {
+      "start_sec": 18,
+      "end_sec": 30,
+      "description": "An elderly man speaks while holding a small object."
+    },
+    {
+      "start_sec": 27,
+      "end_sec": 29.5,
+      "description": "The man speaks and gestures with his hands."
+    },
+    {
+      "start_sec": 30.5,
+      "end_sec": 31.5,
+      "description": "Chopsticks pick up food from the ground."
+    },
+    {
+      "start_sec": 46,
+      "end_sec": 57,
+      "description": "The camera moves through a quiet Japanese street."
+    },
+    {
+      "start_sec": 65.5,
+      "end_sec": 69.5,
+      "description": "A woman in a bucket hat smiles at the camera."
+    },
+    {
+      "start_sec": 78,
+      "end_sec": 80.5,
+      "description": "A person removes a baking pan from a stone oven."
+    },
+    {
+      "start_sec": 80.5,
+      "end_sec": 84,
+      "description": "A person in an olive grove uses a tool to gather leaves."
+    },
+    {
+      "start_sec": 81,
+      "end_sec": 87.5,
+      "description": "A worker clears debris from the ground with a tool."
+    },
+    {
+      "start_sec": 87.5,
+      "end_sec": 90.5,
+      "description": "The worker lifts a yellow crate from the ground."
+    },
+    {
+      "start_sec": 91.5,
+      "end_sec": 94.5,
+      "description": "A worker places a wooden spatula onto a soap block."
+    },
+    {
+      "start_sec": 94.5,
+      "end_sec": 99.5,
+      "description": "The worker presses the spatula into the soap base."
+    },
+    {
+      "start_sec": 99.5,
+      "end_sec": 102.5,
+      "description": "The worker lifts the spatula and moves to another container."
+    },
+    {
+      "start_sec": 102.5,
+      "end_sec": 107.5,
+      "description": "The worker presses the soap base in the second container."
+    },
+    {
+      "start_sec": 107.5,
+      "end_sec": 111,
+      "description": "The worker lifts the soap block and moves away."
+    },
+    {
+      "start_sec": 108,
+      "end_sec": 112.5,
+      "description": "A man scrapes a large soap block with a metal tool."
+    },
+    {
+      "start_sec": 116.5,
+      "end_sec": 123.5,
+      "description": "A woman looks out of a train window and then down."
+    },
+    {
+      "start_sec": 128.5,
+      "end_sec": 131,
+      "description": "A person wearing a headscarf smiles while looking down."
+    },
+    {
+      "start_sec": 131.5,
+      "end_sec": 138,
+      "description": "Two people stand at a train station platform."
+    },
+    {
+      "start_sec": 135,
+      "end_sec": 139.5,
+      "description": "Two people stand at a train ticket barrier."
+    },
+    {
+      "start_sec": 140,
+      "end_sec": 141.5,
+      "description": "A man in a red shirt stands outdoors."
+    },
+    {
+      "start_sec": 141.5,
+      "end_sec": 144,
+      "description": "A person stirs tea with a spoon."
+    },
+    {
+      "start_sec": 145.5,
+      "end_sec": 148.5,
+      "description": "A woman in a kimono enters the room."
+    },
+    {
+      "start_sec": 149,
+      "end_sec": 150,
+      "description": "A hand uses chopsticks to move food."
+    },
+    {
+      "start_sec": 162,
+      "end_sec": 168,
+      "description": "The camera moves forward past a train ticket machine."
+    },
+    {
+      "start_sec": 162.5,
+      "end_sec": 165,
+      "description": "A ticket machine processes a card."
+    },
+    {
+      "start_sec": 168.5,
+      "end_sec": 181.288,
+      "description": "The camera travels forward along a rural asphalt road."
+    }
+  ],
+  "issues": [
+    {
+      "timestamp_sec": 30.5,
+      "duration_sec": 1,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 12.5s: Chopsticks pick up food from the ground.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 46,
+      "duration_sec": 11,
+      "category": "camera_shake",
+      "severity": "warning",
+      "description": "Possible camera stability issue: The camera moves through a quiet Japanese street.",
+      "suggestion": "Replace with a steadier source moment, shorten the hold, or stabilize this section before the next render."
+    },
+    {
+      "timestamp_sec": 80.5,
+      "duration_sec": 3.5,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 12.5s: A person in an olive grove uses a tool to gather leaves.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 102.5,
+      "duration_sec": 5,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 94.5s: The worker presses the soap base in the second container.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 128.5,
+      "duration_sec": 2.5,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 65.5s: A person wearing a headscarf smiles while looking down.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 149,
+      "duration_sec": 1,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 30.5s: A hand uses chopsticks to move food.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 162,
+      "duration_sec": 6,
+      "category": "camera_shake",
+      "severity": "warning",
+      "description": "Possible camera stability issue: The camera moves forward past a train ticket machine.",
+      "suggestion": "Replace with a steadier source moment, shorten the hold, or stabilize this section before the next render."
+    },
+    {
+      "timestamp_sec": 162,
+      "duration_sec": 6,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 135s: The camera moves forward past a train ticket machine.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    },
+    {
+      "timestamp_sec": 168.5,
+      "duration_sec": 12.788,
+      "category": "continuity",
+      "severity": "warning",
+      "description": "Scene appears to repeat non-adjacently after 162s: The camera travels forward along a rural asphalt road.",
+      "suggestion": "Bridge the return with a clear progression beat, reorder the repeated shot next to its pair, or replace one instance."
+    }
+  ],
+  "pacing_assessment": {
+    "too_fast": false,
+    "too_slow": false,
+    "notes": "Average Marlin event duration is 4.7s across 29 events over 181.3s; pacing reads as within expected range."
+  },
+  "emotion_arc_assessment": {
+    "follows_brief": false,
+    "notes": "Missing or out-of-order emotion curve points: wonder, discovery, immersion, warmth, serenity. Matched in order: none."
+  },
+  "score": 2
+}

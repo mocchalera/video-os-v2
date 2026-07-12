@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import sys
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,8 +14,14 @@ CODEX_DIR.mkdir(parents=True, exist_ok=True)
 def to_codex_name(name: str) -> str:
     return name.replace("-", "_")
 
+generated = 0
+skipped = []
+
 for path in sorted(ROLE_DIR.glob("*.yaml")):
     spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(spec, dict) or not all(key in spec for key in ("claude", "codex", "prompt")):
+        skipped.append(path.name)
+        continue
 
     # Claude
     fm = {
@@ -47,5 +54,11 @@ for path in sorted(ROLE_DIR.glob("*.yaml")):
         nicks = ", ".join(f'"{n}"' for n in spec["codex"]["nickname_candidates"])
         lines.append(f"nickname_candidates = [{nicks}]")
     (CODEX_DIR / f"{codex_name}.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    generated += 1
 
-print("Generated Claude and Codex agent definitions.")
+print(f"Generated Claude and Codex agent definitions for {generated} role(s).")
+if skipped:
+    print(
+        "Skipped role specs without claude/codex/prompt sections: " + ", ".join(skipped),
+        file=sys.stderr,
+    )

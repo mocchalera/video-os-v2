@@ -89,7 +89,7 @@ export const DEFAULT_PEAK_POLICY: PeakDetectionPolicy = {
   coarse_max_candidates: 3,
   refine_max_segments_per_coarse: 2,
   max_energy_curve_points: 12,
-  model_alias: "gemini-2.0-flash",
+  model_alias: "gemini-2.5-flash",
   max_output_tokens: 2048,
 };
 
@@ -118,7 +118,7 @@ export interface PeakMoment {
   type: PeakType;
   confidence: number;
   description: string;
-  source_pass: "refine_filmstrip" | "precision_dense_frames" | "precision_proxy_clip";
+  source_pass: "refine_filmstrip" | "precision_dense_frames" | "precision_proxy_clip" | "degraded_ffmpeg_signals";
 }
 
 export interface RecommendedInOut {
@@ -172,6 +172,8 @@ export interface CoarseLocator {
 
 export interface SupportSignals {
   motion_support_score: number;
+  motion_support_measured?: boolean;
+  motion_support_fallback_reason?: string;
   audio_support_score: number;
   fused_peak_score: number;
 }

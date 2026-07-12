@@ -33,6 +33,11 @@
     "last_updated": {
       "type": "string"
     },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Compatibility timestamp written by the editor-server reconciliation surface."
+    },
     "last_agent": {
       "type": "string"
     },
@@ -148,7 +153,7 @@
         },
         "planning_gate": {
           "type": "string",
-          "enum": ["open", "blocked"]
+          "enum": ["open", "blocked", "partial_override"]
         },
         "timeline_gate": {
           "type": "string",
