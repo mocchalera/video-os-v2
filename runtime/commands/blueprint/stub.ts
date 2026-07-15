@@ -27,6 +27,8 @@ export function buildDefaultStubBlueprint(
     dialogue_policy: {
       preserve_natural_breath: true,
       avoid_wall_to_wall_voiceover: true,
+      cut_tail_hold_sec: 0.25,
+      cut_audio_fade_out_sec: 0.16,
     },
   };
 }

@@ -347,6 +347,7 @@ final class StudioViewModel: ObservableObject {
     }
     @Published var isSwapBrowserPresented = false
     @Published var isFootageSearchPresented = false
+    @Published var isCaptionFinishingPresented = false
     @Published var swapBrowserClip: TimelineClip?
     @Published var mediaPreviewSummary = ProjectMediaPreviewSummary(items: [])
     @Published var mediaSourceBinFilter: ProjectMediaSourceBinFilter = StudioViewModel.loadMediaSourceBinFilter() {

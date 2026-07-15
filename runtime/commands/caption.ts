@@ -55,6 +55,10 @@ import {
   type TimingRemapResult,
 } from "../caption/word-remap.js";
 import { getLayoutPolicy, checkCps } from "../caption/line-breaker.js";
+import {
+  loadProjectCaptionGlossary,
+  mergeGlossarySources,
+} from "../caption/project-glossary.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -183,6 +187,11 @@ export function captionCommand(
   // 4. Generate caption source (with cleanup + line-breaking)
   const projectId = doc.project_id || timeline.project_id || "unknown";
   const baseTimelineVersion = timeline.version || "1";
+  const projectGlossary = loadProjectCaptionGlossary(absDir);
+  const glossarySources = mergeGlossarySources(
+    projectGlossary.sources,
+    options?.glossarySources,
+  );
 
   const captionSource = generateCaptionSource(
     timeline,
@@ -194,6 +203,13 @@ export function captionCommand(
       excludeSpeakers: options?.excludeSpeakers,
       removeFillers: options?.removeFillers,
       autoLineBreak: true,
+      maxCharsPerCaption: captionPolicy.styling_class === "longform-event"
+        ? 30
+        : undefined,
+      maxCps: captionPolicy.styling_class === "longform-event" ? 15 : undefined,
+      minCaptionDurationMs: captionPolicy.styling_class === "longform-event" ? 400 : undefined,
+      operatorCorrections: glossarySources.operatorCorrections,
+      protectedTerms: buildGlossary(glossarySources),
     },
   );
 
@@ -218,7 +234,7 @@ export function captionCommand(
     // Async path: run editorial then finish draft
     return runEditorialAndFinishDraft(
       absDir, captionSource, captionPolicy, timeline, transcripts,
-      packageDir, projectId, options,
+      packageDir, projectId, { ...options, glossarySources },
     );
   }
 
@@ -508,7 +524,10 @@ function applyReadinessGate(
   captionPolicy: CaptionPolicy,
 ): void {
   const language = captionPolicy.language;
-  const layout = getLayoutPolicy(language);
+  const baseLayout = getLayoutPolicy(language);
+  const layout = captionPolicy.styling_class === "longform-event"
+    ? { ...baseLayout, maxCps: 15 }
+    : baseLayout;
 
   let hasFailure = false;
 

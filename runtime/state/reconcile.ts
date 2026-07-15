@@ -217,8 +217,19 @@ const INVALIDATION_MATRIX: Record<string, InvalidationRule> = {
 // ── Hash Computation ───────────────────────────────────────────────
 
 export function computeFileHash(filePath: string): string {
-  const content = fs.readFileSync(filePath);
-  return crypto.createHash("sha256").update(content).digest("hex").slice(0, 16);
+  const hash = crypto.createHash("sha256");
+  const fd = fs.openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex").slice(0, 16);
 }
 
 // ── Artifact Existence Snapshot ────────────────────────────────────

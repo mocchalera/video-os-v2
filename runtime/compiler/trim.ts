@@ -665,6 +665,8 @@ function buildBeatStartFrames(beats: NormalizedBeat[], markers: Marker[]): Map<s
 export interface UtteranceSpan {
   start_us: number;
   end_us: number;
+  text?: string;
+  speaker?: string;
 }
 
 type UtteranceBoundaryKind = "start" | "end";

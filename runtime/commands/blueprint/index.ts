@@ -37,6 +37,10 @@ import {
   recordAutonomousConfirmedPreferences,
   validateConfirmedPreferences,
 } from "./preferences.js";
+import {
+  buildLongformBlueprint,
+  isLongformEventBrief,
+} from "../../editorial/longform-event.js";
 
 export type { EditBlueprint, Beat, ConfirmedPreferences };
 
@@ -280,16 +284,71 @@ export async function runBlueprint(
     ? fs.readFileSync(stylePath, "utf-8")
     : null;
 
+  const longformMode = isLongformEventBrief(briefContent);
+
   const useLegacy = options?.iterativeEngine === false;
-  const effectivePhases = phases ?? (useLegacy ? undefined : buildDefaultPhases(
+  const effectivePhases = longformMode ? undefined : phases ?? (useLegacy ? undefined : buildDefaultPhases(
     absDir, projectId, selectsContent, briefContent, autonomyMode,
   ));
-  const useIterative = !useLegacy && !!effectivePhases;
+  const useIterative = !longformMode && !useLegacy && !!effectivePhases;
 
   let agentResult: BlueprintAgentResult;
   let loopSummary: LoopSummary | undefined;
 
-  if (useIterative && effectivePhases) {
+  if (longformMode) {
+    try {
+      agentResult = {
+        blueprint: buildLongformBlueprint(
+          projectId,
+          briefContent as CreativeBrief,
+          selectsContent as SelectsCandidates,
+        ),
+        uncertaintyRegister: {
+          version: "1",
+          project_id: projectId,
+          created_at: new Date().toISOString(),
+          uncertainties: [{
+            id: "U_LONGFORM_VISUAL_QA",
+            type: "technical",
+            question: "Do optional visual models reveal camera accidents inside retained transcript windows?",
+            status: "monitoring",
+            evidence: [
+              "Longform selection is transcript-first and fail-open when optional visual models are unavailable.",
+              "Final render QA must sample every chapter before packaging.",
+            ],
+            alternatives: [{
+              label: "chapter-sampled visual QA",
+              description: "Run Marlin or human samples per chapter without blocking deterministic planning.",
+            }],
+            escalation_required: false,
+          }],
+        },
+        confirmed: true,
+      };
+      loopSummary = {
+        totalIterations: 1,
+        evaluateRejectCount: 0,
+        humanDeclineCount: 0,
+        finalStatus: "accepted",
+      };
+      console.log(
+        `[blueprint:longform] chapters=${agentResult.blueprint.longform_plan?.chapters.length ?? 0} ` +
+          `beats=${agentResult.blueprint.beats.length} deterministic=true`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pt.fail("longform", `Longform blueprint planning failed: ${message}`);
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: `Longform blueprint planning failed: ${message}`,
+        },
+        previousState,
+        planningBlocked: true,
+      };
+    }
+  } else if (useIterative && effectivePhases) {
     const maxIter = options?.maxIterations ?? 3;
     const requireConfirm = options?.requireConfirmationInCollaborative !== false;
     const phaseCtx: NarrativePhaseContext = {
@@ -435,7 +494,7 @@ export async function runBlueprint(
 
   let craftDecision: CraftDecision | undefined;
   let appliedCraftRevisionCount = 0;
-  if (!options?.skipCraftReview) {
+  if (!options?.skipCraftReview && !longformMode) {
     const marlinEvents = readProjectMarlinEvents(absDir);
     let keyFrames: Map<string, KeyFrame[]> | undefined;
     try {
@@ -509,6 +568,8 @@ export async function runBlueprint(
       appliedCraftRevisionCount = craftDecision.revisions.length;
       console.log(`[craft-review] applied ${appliedCraftRevisionCount} blueprint revision(s)`);
     }
+  } else if (longformMode) {
+    console.log("[blueprint:longform] skipped per-candidate craft review; chapter-sampled visual QA remains monitoring.");
   }
 
   const drafts: DraftFile[] = [

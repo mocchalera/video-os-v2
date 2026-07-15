@@ -83,6 +83,10 @@ import {
   type SelectsCoverageSummary,
   type SelectionCoverageSegment as HardSelectionCoverageSegment,
 } from "../editorial/coverage.js";
+import {
+  buildLongformSelectsFromProject,
+  isLongformEventBrief,
+} from "../editorial/longform-event.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -192,6 +196,7 @@ export interface SelectsCandidates {
     search_index_manifest_hash?: string;
     [key: string]: unknown;
   };
+  longform_plan?: ArtifactSelectsCandidates["longform_plan"];
 }
 
 /** The agent function signature — injectable for testing */
@@ -616,29 +621,81 @@ export async function runTriage(
   const coverageSegments = loadSelectionCoverageSegments(absDir);
   const enrichmentAssets = loadClusterAssetMetadata(absDir);
 
-  // 4. Run agent (LLM or mock)
-  const selectionResult = await runHardCoverageSelection(
-    agent,
-    {
-      projectDir: absDir,
-      projectId,
-      currentState: previousState,
-      analysisGate: gates.analysis_gate,
-    },
-    {
-      projectId,
-      brief: coverageBrief,
-      projectDir: absDir,
-      enrichmentSegments,
-      coverageSegments,
-      clusterAssets: enrichmentAssets,
-      qualityGateConfig,
-      selectionCoverageConfig,
-      maxRetries: HARD_COVERAGE_MAX_RETRIES,
-      log: (message) => console.log(message),
-    },
-  );
-  const agentResult = selectionResult.result;
+  // 4. Run the shared triage stage. longform-event replaces the segment-level
+  // LLM board with deterministic transcript-window materialization because a
+  // fixed-camera event often arrives as one multi-hour analysis segment.
+  let agentResult: TriageAgentResult;
+  let selectionPassed: boolean;
+  let selectionFailureMessage: string | undefined;
+  let selectionFailureDetails: Record<string, unknown> | undefined;
+  if (coverageBrief && isLongformEventBrief(coverageBrief)) {
+    try {
+      const longform = buildLongformSelectsFromProject(absDir, coverageBrief);
+      agentResult = {
+        selects: longform.selects as unknown as SelectsCandidates,
+        confirmed: true,
+      };
+      selectionPassed = longform.plan.coverage_status === "ready";
+      selectionFailureMessage = selectionPassed
+        ? undefined
+        : `Longform coverage insufficient: selected ${(longform.plan.selected_duration_us / 1_000_000).toFixed(1)}s ` +
+          `for target ${(longform.plan.target_duration_us / 1_000_000).toFixed(1)}s`;
+      selectionFailureDetails = {
+        coverage_status: longform.plan.coverage_status,
+        selected_duration_us: longform.plan.selected_duration_us,
+        target_duration_us: longform.plan.target_duration_us,
+        chapter_count: longform.plan.chapters.length,
+      };
+      console.log(
+        `[triage:longform] assets=${longform.plan.selected_asset_ids.length} ` +
+          `chapters=${longform.plan.chapters.length} candidates=${longform.selects.candidates.length} ` +
+          `selected_sec=${(longform.plan.selected_duration_us / 1_000_000).toFixed(1)} ` +
+          `target_sec=${(longform.plan.target_duration_us / 1_000_000).toFixed(1)} ` +
+          `status=${longform.plan.coverage_status}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      pt.fail("longform", `Longform transcript planning failed: ${message}`);
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: `Longform transcript planning failed: ${message}`,
+        },
+      };
+    }
+  } else {
+    const selectionResult = await runHardCoverageSelection(
+      agent,
+      {
+        projectDir: absDir,
+        projectId,
+        currentState: previousState,
+        analysisGate: gates.analysis_gate,
+      },
+      {
+        projectId,
+        brief: coverageBrief,
+        projectDir: absDir,
+        enrichmentSegments,
+        coverageSegments,
+        clusterAssets: enrichmentAssets,
+        qualityGateConfig,
+        selectionCoverageConfig,
+        maxRetries: HARD_COVERAGE_MAX_RETRIES,
+        log: (message) => console.log(message),
+      },
+    );
+    agentResult = selectionResult.result;
+    selectionPassed = selectionResult.passed;
+    if (!selectionPassed) {
+      selectionFailureMessage = `Coverage gate failed: ${selectionResult.coverage.unmet.map((item) => item.message).join("; ")}`;
+      selectionFailureDetails = {
+        coverage: selectionResult.coverage,
+        rounds: selectionResult.rounds,
+      };
+    }
+  }
   pt.advance();
 
   // 5. Gate 4: candidate board approval
@@ -706,9 +763,8 @@ export async function runTriage(
   }
   pt.advance("04_plan/selects_candidates.yaml");
 
-  if (!selectionResult.passed) {
-    const unmet = selectionResult.coverage.unmet;
-    const message = `Coverage gate failed: ${unmet.map((item) => item.message).join("; ")}`;
+  if (!selectionPassed) {
+    const message = selectionFailureMessage ?? "Selection coverage gate failed";
     pt.block("coverage", message);
     return {
       success: false,
@@ -718,10 +774,7 @@ export async function runTriage(
       error: {
         code: "GATE_CHECK_FAILED",
         message,
-        details: {
-          coverage: selectionResult.coverage,
-          rounds: selectionResult.rounds,
-        },
+        details: selectionFailureDetails,
       },
     };
   }
@@ -733,7 +786,7 @@ export async function runTriage(
     "selects_ready",
     "/triage",
     "footage-triager",
-    "selects candidates finalized",
+    isLongformEventBrief(coverageBrief) ? "longform transcript selects finalized" : "selects candidates finalized",
   );
   pt.complete(["04_plan/selects_candidates.yaml"]);
 

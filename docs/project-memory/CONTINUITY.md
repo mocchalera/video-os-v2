@@ -2,6 +2,15 @@
 
 ## Now
 
+- 2026-07-13 longform event vertical slice is implemented. The canonical
+  `npm run full-pipeline` / `scripts/editorial-pipeline.ts` route and the legacy
+  `/triage` + `/blueprint` route recognize `profile_hint: longform-event`, build
+  transcript-bounded chronological chapters, persist cut exclusions and coverage
+  in canonical artifacts, fail closed outside the 85–115% duration gate, and
+  rejoin the existing compiler. A read-only Lively ALT smoke retained all nine
+  non-overlapping source files and reduced 168.2 minutes to 62.7 minutes /
+  136 clips / 29 chapters, compiling the timeline in 147 ms. A real one-hour render and chapter-sampled
+  visual QA are still outstanding, so the broader full-auto goal remains open.
 - 2026-07-10 productization audit: `Dev` is at `8dd88144`. GitHub Actions run
   `29063263116` passes repo-hygiene, agent-definitions, editor-server, and
   schema-contract, but fails macos-studio on Swift 5.10 source compatibility and

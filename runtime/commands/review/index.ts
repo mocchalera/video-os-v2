@@ -285,6 +285,59 @@ function enforceVisualQAVerdict(report: ReviewReport): void {
   }
 }
 
+export function enforceReviewMetricVerdict(
+  report: ReviewReport,
+  metrics: ReviewMetricsArtifact | undefined,
+): void {
+  const dialogue = metrics?.checks.find((check) => check.id === "story.dialogue_completeness");
+  if (!dialogue || dialogue.status === "pass" || dialogue.status === "skipped") return;
+
+  const summary = dialogue.status === "fail"
+    ? "Dialogue selection contains an incomplete assertion"
+    : "Dialogue selection may depend on missing context";
+  const evidence = dialogue.evidence.slice(0, 12);
+  const affectedClipIds = dialogueClipIds(dialogue.measured);
+
+  if (dialogue.status === "fail") {
+    if (!report.fatal_issues.some((item) => item.summary === summary)) {
+      report.fatal_issues.push({
+        summary,
+        severity: "fatal",
+        details: "Deterministic transcript review found a dependent opening or unfinished ending. Expand or replace the source window before approval.",
+        evidence,
+        ...(affectedClipIds.length > 0 ? { affected_clip_ids: affectedClipIds } : {}),
+      });
+    }
+    if (report.summary_judgment.status === "approved") {
+      report.summary_judgment.status = "needs_revision";
+    }
+  } else if (!report.warnings.some((item) => item.summary === summary)) {
+    report.warnings.push({
+      summary,
+      severity: "warning",
+      details: "The line may omit an antecedent or use a conversational continuation. Confirm it remains understandable in sequence.",
+      evidence,
+      ...(affectedClipIds.length > 0 ? { affected_clip_ids: affectedClipIds } : {}),
+    });
+  }
+
+  report.summary_judgment.rationale = appendRationale(
+    report.summary_judgment.rationale,
+    `Dialogue completeness gate: ${dialogue.status}.`,
+  );
+}
+
+function dialogueClipIds(measured: unknown): string[] {
+  if (!measured || typeof measured !== "object" || Array.isArray(measured)) return [];
+  const findings = (measured as Record<string, unknown>).findings;
+  if (!Array.isArray(findings)) return [];
+  return [...new Set(findings.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const clipId = (item as Record<string, unknown>).clip_id;
+    return typeof clipId === "string" && clipId ? [clipId] : [];
+  }))];
+}
+
 function appendRationale(current: string, addition: string): string {
   return current.includes(addition) ? current : `${current} ${addition}`.trim();
 }
@@ -624,6 +677,7 @@ export async function runReview(
     agentResult.report.visual_qa_waiver_reason = options.visualQaWaiverReason!.trim();
     agentResult.report.visual_qa_waiver_created_at = createdAt;
   }
+  enforceReviewMetricVerdict(agentResult.report, reviewMetrics);
   enforceVisualQAVerdict(agentResult.report);
 
   const drafts: DraftFile[] = [

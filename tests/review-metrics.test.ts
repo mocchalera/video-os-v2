@@ -25,13 +25,14 @@ describe("review metrics", () => {
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
     expect(metrics.project_id).toBe("sample-mountain-reset");
-    expect(metrics.summary.total_checks).toBe(10);
+    expect(metrics.summary.total_checks).toBe(11);
     expect(metrics.checks.map((item) => item.id)).toEqual([
       "rhythm.beat_duration_deviation",
       "rhythm.max_shot_length",
       "rhythm.cadence_distribution",
       "story.required_roles",
       "story.chronology",
+      "story.dialogue_completeness",
       "emotion.peak_retention",
       "emotion.hook_density",
       "eye_trace.same_asset_adjacency",
@@ -86,6 +87,12 @@ describe("review metrics", () => {
         clips[1].asset_id = "AST_CHRON";
         clips[1].src_in_us = 1_000_000;
         clips[1].src_out_us = 3_000_000;
+      },
+    },
+    {
+      id: "story.dialogue_completeness",
+      mutate: (inputs) => {
+        inputs.transcripts![0].items![0].text = "判断の質も";
       },
     },
     {
@@ -166,6 +173,37 @@ describe("review metrics", () => {
     const speechCut = metrics.checks.find((check) => check.id === "audio.speech_cut");
 
     expect(speechCut?.status).toBe("pass");
+  });
+
+  it("excludes declared ending tail frames from beat pacing deviation", () => {
+    const inputs = syntheticInputs();
+    const ending = inputs.timeline!.tracks.video[0].clips.at(-1)!;
+    ending.timeline_duration_frames += 24;
+    ending.metadata = {
+      ending_treatment: {
+        extended_frames: 24,
+        audio_fade_out_frames: 24,
+        video_fade_out_frames: 12,
+        video_fade_color: "black",
+      },
+    };
+
+    const metrics = computeReviewMetrics(inputs);
+    const pacing = metrics.checks.find((check) => check.id === "rhythm.beat_duration_deviation");
+
+    expect(pacing?.status).toBe("pass");
+    expect(pacing?.measured).toMatchObject({
+      max_deviation_pct: 0,
+      beats: expect.arrayContaining([
+        expect.objectContaining({
+          beat_id: "b03",
+          actual_frames: 72,
+          pacing_frames: 48,
+          ending_treatment_frames: 24,
+          deviation_pct: 0,
+        }),
+      ]),
+    });
   });
 
   it("does not treat visual-only transcript support clips as audible speech cuts", () => {
@@ -378,6 +416,27 @@ describe("review metrics", () => {
     expect(check?.status).toBe("fail");
     expect(check?.measured).toMatchObject({
       selected_candidate_asset_ids: ["AST_A", "AST_B", "AST_C", "AST_D"],
+    });
+  });
+
+  it("accepts intentional continuity repetition for longform reduction", () => {
+    const inputs = syntheticInputs();
+    inputs.brief!.longform = { mode: "reduction" };
+    inputs.timeline!.tracks.video[0].clips[1].asset_id = "AST_A";
+    for (const candidate of inputs.selects!.candidates!.slice(0, 3)) {
+      candidate.motif_tags = ["chapter_01"];
+    }
+
+    const metrics = computeReviewMetrics(inputs);
+    const adjacency = metrics.checks.find((item) => item.id === "eye_trace.same_asset_adjacency");
+    const motif = metrics.checks.find((item) => item.id === "plane_2d.motif_overuse");
+
+    expect(adjacency?.status).toBe("pass");
+    expect(adjacency?.threshold).toMatchObject({ longform_continuity_allowed: true });
+    expect(motif?.status).toBe("pass");
+    expect(motif?.threshold).toMatchObject({
+      allow_intentional_repetition: true,
+      longform_continuity_allowed: true,
     });
   });
 

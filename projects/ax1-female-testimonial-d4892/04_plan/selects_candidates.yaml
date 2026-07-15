@@ -1,0 +1,157 @@
+version: "1"
+project_id: ax1-female-testimonial-d4892
+created_at: 2026-07-11T14:14:39Z
+analysis_artifact_version: 2.0.0
+decision_runtime:
+  runtime: agent
+  role: transcript-led testimonial selection
+  attempted_runtimes:
+    - runtime: groq-whisper-plus-local-pyannote
+      status: success
+      message: 143 utterances aligned to four local speaker clusters; S3 and S4
+        selected by human-confirmed visual identity.
+  fallback_warnings: []
+selection_notes:
+  - 女性経営者だけを対象にした独立testimonial。
+  - S3とS4を別々の成果物にするため、candidate_idとeligible_beatsを話者別に分離した。
+  - S1の質問音声とS2の別参加者発言は明示的なrejectとし、対象者の体験が混ざらないようにした。
+  - 初回ラフは原音のみ。離れた時刻を接続する場合は、意味を変えないhard cutと字幕で構造を明確にする。
+  - 全字幕はGroq transcriptを下書きとし、固有名詞と誤認識語を映像・音声で再確認してから公開候補にする。
+editorial_summary:
+  dominant_visual_mode: talking_head
+  speaker_topology: multi_speaker
+  motion_profile: low
+  transcript_density: dense
+candidates:
+  - candidate_id: CAND_FEMALE_DISCOVERY
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 124000000
+    src_out_us: 144820125
+    role: hero
+    story_role: hook
+    speaker_role: primary
+    utterance_ids:
+      - TRI_AST_610FB4A0_0019
+      - TRI_AST_610FB4A0_0020
+      - TRI_AST_610FB4A0_0021
+    transcript_excerpt: 自走のツールまで作るところで、本当にこんなことまでできるんだとびっくりしました。これを知識だけで終わらせず、ちゃんと活用していきたい。
+    why_it_matches: 女性経営者が講座内で実際に手を動かし、驚きから活用意志へ変わったことを短く示す。具体的な受講体験をhookにできる。
+    risks:
+      - 冒頭の演習名はGroq誤認識の可能性が高く、字幕公開前に音声確認が必要。
+      - 直後の固有名詞を含む締めは採用範囲から外している。
+    confidence: 0.91
+    semantic_rank: 3
+    evidence:
+      - brief.must_have[1]
+      - brief.must_have[2]
+      - transcript:TRI_AST_610FB4A0_0019-0021
+      - human_confirmed_speaker:S3
+    eligible_beats:
+      - female_hook
+      - female_experience
+    semantic_dedupe_key: female_hands_on_discovery
+    editorial_signals:
+      speech_intensity_score: 0.86
+      authenticity_score: 0.91
+      surprise_signal: 0.92
+      hope_signal: 0.8
+      face_detected: true
+      visual_tags:
+        - female_executive
+        - talking_head
+        - direct_testimonial
+  - candidate_id: CAND_FEMALE_BREADTH
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 620500000
+    src_out_us: 672800000
+    role: dialogue
+    story_role: payoff
+    speaker_role: primary
+    utterance_ids:
+      - TRI_AST_610FB4A0_0125
+      - TRI_AST_610FB4A0_0126
+      - TRI_AST_610FB4A0_0127
+      - TRI_AST_610FB4A0_0128
+      - TRI_AST_610FB4A0_0129
+    transcript_excerpt: 実作業者も、指示を出す側も、意思決定をする経営層も、AIの力を使いながら描ける未来がある。トップから現場まで幅広く使っていけたらいい。
+    why_it_matches: フォルダ整理という具体例から、実作業者、指示者、経営層へ価値を広げる一続きの回答。AX-1が実務と経営をつなぐことを最も具体的に証明する。
+    risks:
+      - 中盤の個人名は字幕では役割表現へ置換せず、必要なら発言単位で除外する。
+      - 「トップから現場まで」に相当する原音を再確認し、Groq誤認識を修正する必要がある。
+    confidence: 0.96
+    semantic_rank: 2
+    evidence:
+      - brief.must_have[1]
+      - brief.must_have[2]
+      - transcript:TRI_AST_610FB4A0_0125-0129
+      - human_confirmed_speaker:S3
+    eligible_beats:
+      - female_experience
+      - female_payoff
+      - female_closing
+    semantic_dedupe_key: female_org_wide_value
+    editorial_signals:
+      speech_intensity_score: 0.92
+      authenticity_score: 0.95
+      hope_signal: 0.9
+      face_detected: true
+      visual_tags:
+        - female_executive
+        - operational_example
+        - executive_value
+  - candidate_id: REJECT_INTERVIEWER_QUESTIONS
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 388000000
+    src_out_us: 393600000
+    role: reject
+    story_role: setup
+    speaker_role: interviewer
+    utterance_ids:
+      - TRI_AST_610FB4A0_0072
+      - TRI_AST_610FB4A0_0073
+    transcript_excerpt: もともとAIってどのくらい使われてたんですか？
+    why_it_matches: 質問内容は文脈把握に有用だが、briefではインタビュアー音声を長く残さず、一人称testimonialとして成立させる。
+    risks:
+      - 採用すると主話者の冒頭到達が遅れる。
+    confidence: 0.99
+    semantic_rank: 6
+    evidence:
+      - brief.must_avoid[0]
+      - transcript:TRI_AST_610FB4A0_0072-0073
+      - diarization:S1
+    rejection_reason: 対象外のインタビュアー音声。質問は字幕や構成意図へ変換し、音声は初回ラフから除外する。
+  - candidate_id: REJECT_EXCLUDED_S2
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 4000000
+    src_out_us: 82600000
+    role: reject
+    story_role: experience
+    speaker_role: secondary
+    utterance_ids:
+      - TRI_AST_610FB4A0_0003
+      - TRI_AST_610FB4A0_0004
+      - TRI_AST_610FB4A0_0005
+      - TRI_AST_610FB4A0_0006
+      - TRI_AST_610FB4A0_0007
+      - TRI_AST_610FB4A0_0008
+      - TRI_AST_610FB4A0_0009
+      - TRI_AST_610FB4A0_0010
+      - TRI_AST_610FB4A0_0011
+      - TRI_AST_610FB4A0_0012
+      - TRI_AST_610FB4A0_0013
+      - TRI_AST_610FB4A0_0014
+    transcript_excerpt: 冒頭の短髪・ベージュ服の別参加者testimonial。
+    why_it_matches: 内容自体は前向きだが、ユーザーが対象をS3とS4に限定したため、人物混同を防ぐ目的で明示的に除外する。
+    risks:
+      - 画面上の女性を取り違えると別人のtestimonialになる。
+    confidence: 1
+    semantic_rank: 7
+    evidence:
+      - brief.must_avoid[0]
+      - human_confirmation:target_woman_is_S3_not_S2
+      - diarization:S2
+    rejection_reason: 今回の対象外人物。別企画でのみ再検討する。

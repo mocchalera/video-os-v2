@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   buildAudioDelaySecByClipId,
+  buildClipVideoFilters,
   buildHardCutGroupFfmpegArgs,
   buildRenderGroups,
   buildRenderAudioClips,
@@ -17,6 +18,7 @@ import {
   findTimelineAudioVideoSyncIssues,
   findBgmCandidates,
   generateSourceMapFromAssets,
+  parseArgs,
   selectBgmCandidate,
   validateRenderDurationAccounting,
   writeConcatList,
@@ -34,10 +36,54 @@ import { loadSourceMap } from "../runtime/media/source-map.js";
 
 const tempDirs: string[] = [];
 
+describe("parseArgs", () => {
+  it("accepts an existing video assembly for audio-mux resume", () => {
+    expect(parseArgs([
+      "node",
+      "render-rough-cut.ts",
+      "--project",
+      "projects/demo",
+      "--reuse-video",
+      "05_timeline/assembly.mp4",
+    ])).toMatchObject({
+      projectPath: "projects/demo",
+      reuseVideoPath: "05_timeline/assembly.mp4",
+      noAudio: false,
+    });
+  });
+});
+
 afterAll(() => {
   for (const dir of tempDirs) {
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe("clip video filters", () => {
+  it("normalizes clip timestamps before applying a relative ending fade", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_ending",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 120,
+      durationSec: 10,
+      timelineInFrame: 0,
+      timelineOutFrame: 240,
+      timelineDurationSec: 10,
+      sourceRangeDurationSec: 10,
+      metadata: {
+        ending_treatment: {
+          video_fade_color: "black",
+          video_fade_out_frames: 36,
+        },
+      },
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 24);
+
+    expect(filters).toMatch(/^setpts=PTS-STARTPTS,/);
+    expect(filters).toContain("fade=t=out:st=8.5:d=1.5:color=black");
+  });
 });
 
 function createTempProject(name: string): string {
@@ -437,6 +483,20 @@ describe("timeline audio mixing", () => {
     expect(filter?.filterComplex).toContain("adelay=1500|1500[a0]");
   });
 
+  it("applies the final clip audio fade from timeline policy", () => {
+    const filter = buildTimelineAudioMixFilter(
+      [{
+        ...renderClip("audio_end", 6, 0, 6, 6),
+        sourcePath: "/tmp/source-end.mov",
+        audioPolicy: { fade_out_frames: 48 },
+      }],
+      6,
+      24,
+    );
+
+    expect(filter?.filterComplex).toContain("afade=t=out:st=4:d=2");
+  });
+
   it("builds mux args that map rendered video and mixed timeline audio", () => {
     const args = buildTimelineAudioMuxArgs(
       "/tmp/video.mp4",
@@ -463,6 +523,16 @@ describe("timeline audio mixing", () => {
       "anullsrc=channel_layout=stereo:sample_rate=48000",
     ]);
     expect(args).toContain("/tmp/source-a.mov");
+    expect(args).toEqual(expect.arrayContaining([
+      "-ss",
+      "5",
+      "-t",
+      "2",
+      "-i",
+      "/tmp/source-a.mov",
+    ]));
+    const filterGraph = args[args.indexOf("-filter_complex") + 1];
+    expect(filterGraph).toContain("[2:a]atrim=start=0:duration=2");
     expect(args).toContain("-filter_complex");
     expect(args).toContain("-map");
     expect(args).toContain("0:v:0");
@@ -594,6 +664,53 @@ describe("crossfade render planning", () => {
     expect(delays.get("audio_clip_a")).toBe(0);
     expect(delays.get("audio_clip_b")).toBe(1.5);
     expect(delays.get("audio_clip_c")).toBe(4);
+  });
+
+  it("scales cumulative audio starts to the measured video assembly duration", () => {
+    const videoClips: RenderClip[] = [
+      renderClip("clip_a", 10),
+      renderClip("clip_b", 10, 240),
+      renderClip("clip_c", 10, 480),
+    ];
+    const audioClips = videoClips.map((clip) => ({
+      ...clip,
+      clipId: `audio_${clip.clipId}`,
+    }));
+
+    const delays = buildAudioDelaySecByClipId(audioClips, videoClips, new Map(), 0.99);
+
+    expect(delays.get("audio_clip_a")).toBe(0);
+    expect(delays.get("audio_clip_b")).toBeCloseTo(9.9);
+    expect(delays.get("audio_clip_c")).toBeCloseTo(19.8);
+  });
+
+  it("uses exact rendered clip durations when an assembly timing map is available", () => {
+    const videoClips: RenderClip[] = [
+      renderClip("clip_a", 10),
+      renderClip("clip_b", 10, 240),
+      renderClip("clip_c", 10, 480),
+    ];
+    const audioClips = videoClips.map((clip) => ({
+      ...clip,
+      clipId: `audio_${clip.clipId}`,
+    }));
+    const renderedDurations = new Map([
+      ["clip_a", 9.875],
+      ["clip_b", 9.75],
+      ["clip_c", 9.875],
+    ]);
+
+    const delays = buildAudioDelaySecByClipId(
+      audioClips,
+      videoClips,
+      new Map(),
+      1,
+      renderedDurations,
+    );
+
+    expect(delays.get("audio_clip_a")).toBe(0);
+    expect(delays.get("audio_clip_b")).toBe(9.875);
+    expect(delays.get("audio_clip_c")).toBe(19.625);
   });
 
   it("detects same-cut audio clips whose source in-point does not match visible video", () => {
@@ -732,6 +849,25 @@ describe("duration accounting", () => {
     expect(accounting.parity_pass).toBe(false);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain("render duration parity delta -1.300s exceeds 0.500s");
+  });
+
+  it("uses a proportional tolerance for hour-long renders", () => {
+    const accounting = validateRenderDurationAccounting(
+      {
+        timeline_span_sec: 3762.375,
+        timeline_content_sec: 3762.375,
+        gap_sec: 0,
+        gap_count: 0,
+        crossfade_overlap_sec: 0,
+        source_clamp_sec: 3.644,
+        expected_rendered_sec: 3758.731,
+      },
+      3757.625,
+    );
+
+    expect(accounting.parity_delta_sec).toBe(-1.106);
+    expect(accounting.parity_tolerance_sec).toBe(1.879);
+    expect(accounting.parity_pass).toBe(true);
   });
 });
 

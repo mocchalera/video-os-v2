@@ -376,12 +376,18 @@ export function buildDefaultPhases(
         dialogue_policy: existingBlueprint?.dialogue_policy ?? {
           preserve_natural_breath: true,
           avoid_wall_to_wall_voiceover: true,
+          cut_tail_hold_sec: 0.25,
+          cut_audio_fade_out_sec: 0.16,
         },
         transition_policy: existingBlueprint?.transition_policy ?? {
           prefer_match_texture_over_flashy_fx: true,
         },
         ending_policy: existingBlueprint?.ending_policy ?? {
           should_feel: "resolved",
+          tail_hold_sec: 1.5,
+          audio_fade_out_sec: 1,
+          video_fade_out_sec: 0,
+          video_fade_color: "none",
         },
         rejection_rules: existingBlueprint?.rejection_rules ?? [],
       };

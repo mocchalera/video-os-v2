@@ -183,6 +183,7 @@
             "rhythm.cadence_distribution",
             "story.required_roles",
             "story.chronology",
+            "story.dialogue_completeness",
             "emotion.peak_retention",
             "emotion.hook_density",
             "eye_trace.same_asset_adjacency",

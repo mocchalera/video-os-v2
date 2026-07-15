@@ -1,6 +1,6 @@
 // Rough-cut renderer CLI.
 // Usage:
-//   npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--no-audio]
+//   npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--reuse-video <path>] [--no-audio]
 
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
@@ -14,22 +14,25 @@ import {
   type MediaSourceMapEntry,
 } from "../runtime/media/source-map.js";
 import { writeRenderFreshnessMetadata } from "../runtime/review/visual-qa.js";
+import { computeFileHash } from "../runtime/state/reconcile.js";
 
 const execFileAsync = promisify(execFile);
 
 const USAGE =
-  "Usage: npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--no-audio]";
+  "Usage: npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--reuse-video <path>] [--no-audio]";
 
 const VIDEO_EXTENSIONS = new Set([".mov", ".mp4"]);
 const BGM_EXTENSIONS = new Set([".mp3", ".wav"]);
 const XFADE_DURATION_EPSILON_SEC = 0.001;
 const DURATION_PARITY_THRESHOLD_SEC = 0.5;
+const DURATION_PARITY_RELATIVE_THRESHOLD = 0.0005;
 const AUDIO_VIDEO_SYNC_TOLERANCE_SEC = 0.1;
 
 export interface RenderArgs {
   projectPath: string;
   outputPath?: string;
   bgmPath?: string;
+  reuseVideoPath?: string;
   noAudio: boolean;
 }
 
@@ -46,8 +49,13 @@ export interface TimelineClip {
     nat_gain?: number;
     nat_sound_gain?: number;
     bgm_gain?: number;
+    fade_in_frames?: number;
+    fade_out_frames?: number;
+    nat_sound_fade_in_frames?: number;
+    nat_sound_fade_out_frames?: number;
   };
   candidate_ref?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RenderClip {
@@ -64,6 +72,7 @@ export interface RenderClip {
   role?: string;
   audioPolicy?: TimelineClip["audio_policy"];
   candidateRef?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export type RenderAudioClip = RenderClip;
@@ -108,7 +117,19 @@ export interface RenderDurationAccounting {
   expected_rendered_sec: number;
   actual_rendered_sec?: number;
   parity_delta_sec?: number;
+  parity_tolerance_sec?: number;
   parity_pass?: boolean;
+}
+
+interface VideoAssemblyTimingManifest {
+  version: "1";
+  timeline_hash: string;
+  fps: number;
+  assembly_duration_sec: number;
+  clips: Array<{
+    clip_id: string;
+    rendered_duration_sec: number;
+  }>;
 }
 
 export interface TimelineAudioVideoSyncIssue {
@@ -167,6 +188,7 @@ export function parseArgs(argv: string[]): RenderArgs {
   let projectPath: string | undefined;
   let outputPath: string | undefined;
   let bgmPath: string | undefined;
+  let reuseVideoPath: string | undefined;
   let noAudio = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -180,6 +202,8 @@ export function parseArgs(argv: string[]): RenderArgs {
       outputPath = args[++i];
     } else if (arg === "--bgm" && i + 1 < args.length) {
       bgmPath = args[++i];
+    } else if (arg === "--reuse-video" && i + 1 < args.length) {
+      reuseVideoPath = args[++i];
     } else if (arg === "--no-audio") {
       noAudio = true;
     } else {
@@ -188,7 +212,7 @@ export function parseArgs(argv: string[]): RenderArgs {
   }
 
   if (!projectPath) throw new Error("--project is required");
-  return { projectPath, outputPath, bgmPath, noAudio };
+  return { projectPath, outputPath, bgmPath, reuseVideoPath, noAudio };
 }
 
 function readJson<T>(filePath: string): T {
@@ -215,6 +239,74 @@ function atomicWriteJson(filePath: string, data: unknown): void {
   const tmp = `${filePath}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), "utf-8");
   fs.renameSync(tmp, filePath);
+}
+
+function videoAssemblyTimingPath(projectPath: string): string {
+  return path.join(projectPath, "05_timeline", "video-assembly-timing.json");
+}
+
+export function writeVideoAssemblyTimingManifest(
+  projectPath: string,
+  timelinePath: string,
+  fps: number,
+  assemblyDurationSec: number,
+  clips: RenderClip[],
+  renderedDurationSecByClipId: Map<string, number>,
+): void {
+  const manifest: VideoAssemblyTimingManifest = {
+    version: "1",
+    timeline_hash: computeFileHash(timelinePath),
+    fps,
+    assembly_duration_sec: assemblyDurationSec,
+    clips: clips.map((clip) => {
+      const renderedDurationSec = renderedDurationSecByClipId.get(clip.clipId);
+      if (!renderedDurationSec || renderedDurationSec <= 0) {
+        throw new Error(`Missing rendered duration for ${clip.clipId}`);
+      }
+      return {
+        clip_id: clip.clipId,
+        rendered_duration_sec: renderedDurationSec,
+      };
+    }),
+  };
+  atomicWriteJson(videoAssemblyTimingPath(projectPath), manifest);
+}
+
+function loadVideoAssemblyTimingManifest(
+  projectPath: string,
+  timelinePath: string,
+  fps: number,
+  assemblyDurationSec: number,
+  clips: RenderClip[],
+): Map<string, number> | undefined {
+  const manifestPath = videoAssemblyTimingPath(projectPath);
+  if (!fs.existsSync(manifestPath)) return undefined;
+
+  try {
+    const manifest = readJson<VideoAssemblyTimingManifest>(manifestPath);
+    if (
+      manifest.version !== "1" ||
+      manifest.timeline_hash !== computeFileHash(timelinePath) ||
+      Math.abs(manifest.fps - fps) > 0.000001 ||
+      Math.abs(manifest.assembly_duration_sec - assemblyDurationSec) > DURATION_PARITY_THRESHOLD_SEC ||
+      manifest.clips.length !== clips.length
+    ) {
+      return undefined;
+    }
+
+    const durations = new Map(
+      manifest.clips.map((clip) => [clip.clip_id, clip.rendered_duration_sec]),
+    );
+    if (clips.some((clip) => !durations.has(clip.clipId))) return undefined;
+    if ([...durations.values()].some((duration) => !Number.isFinite(duration) || duration <= 0)) {
+      return undefined;
+    }
+    return durations;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`Warning: ignoring invalid video assembly timing manifest: ${message}`);
+    return undefined;
+  }
 }
 
 function toPosixRel(from: string, to: string): string {
@@ -471,6 +563,7 @@ export function buildRenderGroups(
 export function computeVideoRenderStartSecByClipId(
   clips: RenderClip[],
   transitionsByToClipId: Map<string, RenderTransition>,
+  renderedDurationSecByClipId?: Map<string, number>,
 ): Map<string, number> {
   const starts = new Map<string, number>();
   if (clips.length === 0) return starts;
@@ -478,21 +571,28 @@ export function computeVideoRenderStartSecByClipId(
   let cursorSec = 0;
   for (let index = 0; index < clips.length; index += 1) {
     const clip = clips[index];
+    const clipDurationSec = renderedDurationSecByClipId?.get(clip.clipId) ?? clip.durationSec;
     let startSec = cursorSec;
 
     if (index > 0) {
       const previousClip = clips[index - 1];
+      const previousDurationSec = renderedDurationSecByClipId?.get(previousClip.clipId) ??
+        previousClip.durationSec;
       const transition = transitionForBoundary(previousClip, clip, transitionsByToClipId);
       if (transition) {
         startSec = Math.max(
           0,
-          cursorSec - effectiveXfadeDuration(transition.durationSec, cursorSec, clip.durationSec),
+          cursorSec - effectiveXfadeDuration(
+            transition.durationSec,
+            previousDurationSec,
+            clipDurationSec,
+          ),
         );
       }
     }
 
     starts.set(clip.clipId, startSec);
-    cursorSec = startSec + clip.durationSec;
+    cursorSec = startSec + clipDurationSec;
   }
 
   return starts;
@@ -534,6 +634,7 @@ export function buildRenderClips(
       role: clip.role,
       audioPolicy: clip.audio_policy,
       ...(clip.candidate_ref ? { candidateRef: clip.candidate_ref } : {}),
+      ...(clip.metadata ? { metadata: clip.metadata } : {}),
     });
   }
 
@@ -563,6 +664,45 @@ function ffmpegAudioDelay(valueMs: number): string {
 function audioGainFilter(clip: RenderAudioClip): string | undefined {
   const gain = clip.audioPolicy?.nat_gain ?? clip.audioPolicy?.nat_sound_gain ?? 1;
   return gain > 0 && gain !== 1 ? `volume=${gain.toFixed(4)}` : undefined;
+}
+
+function audioFadeFilters(clip: RenderAudioClip, fps: number): string[] {
+  const fadeInFrames = clip.audioPolicy?.nat_sound_fade_in_frames ??
+    clip.audioPolicy?.fade_in_frames ?? 0;
+  const fadeOutFrames = clip.audioPolicy?.nat_sound_fade_out_frames ??
+    clip.audioPolicy?.fade_out_frames ?? 0;
+  const filters: string[] = [];
+  if (fadeInFrames > 0) {
+    filters.push(`afade=t=in:st=0:d=${ffmpegNumber(Math.min(clip.durationSec, fadeInFrames / fps))}`);
+  }
+  if (fadeOutFrames > 0) {
+    const durationSec = Math.min(clip.durationSec, fadeOutFrames / fps);
+    filters.push(
+      `afade=t=out:st=${ffmpegNumber(Math.max(0, clip.durationSec - durationSec))}:d=${ffmpegNumber(durationSec)}`,
+    );
+  }
+  return filters;
+}
+
+function videoFadeFilter(clip: RenderClip, fps: number): string | undefined {
+  const ending = recordValue(clip.metadata?.ending_treatment);
+  const color = ending?.video_fade_color;
+  const frames = numberValue(ending?.video_fade_out_frames) ?? 0;
+  if ((color !== "black" && color !== "white") || frames <= 0) return undefined;
+  const durationSec = Math.min(clip.durationSec, frames / fps);
+  const startSec = Math.max(0, clip.durationSec - durationSec);
+  return `fade=t=out:st=${ffmpegNumber(startSec)}:d=${ffmpegNumber(durationSec)}:color=${color}`;
+}
+
+export function buildClipVideoFilters(clip: RenderClip, fps: number): string {
+  return [
+    "setpts=PTS-STARTPTS",
+    `fps=${fps}`,
+    "scale=1920:1080:force_original_aspect_ratio=decrease",
+    "pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
+    "setsar=1",
+    videoFadeFilter(clip, fps),
+  ].filter(Boolean).join(",");
 }
 
 function sameTimelinePlacement(a: RenderClip, b: RenderClip): boolean {
@@ -667,15 +807,24 @@ export function buildAudioDelaySecByClipId(
   audioClips: RenderAudioClip[],
   videoClips: RenderClip[],
   transitionsByToClipId: Map<string, RenderTransition>,
+  renderDurationScale = 1,
+  renderedDurationSecByVideoClipId?: Map<string, number>,
 ): Map<string, number> {
-  const videoStarts = computeVideoRenderStartSecByClipId(videoClips, transitionsByToClipId);
+  if (!Number.isFinite(renderDurationScale) || renderDurationScale <= 0) {
+    throw new Error(`Invalid audio render duration scale: ${renderDurationScale}`);
+  }
+  const videoStarts = computeVideoRenderStartSecByClipId(
+    videoClips,
+    transitionsByToClipId,
+    renderedDurationSecByVideoClipId,
+  );
   const audioDelays = new Map<string, number>();
 
   for (const audioClip of audioClips) {
     const mirroredVideoClip = findMirroredVideoClip(audioClip, videoClips);
     const delaySec = mirroredVideoClip ? videoStarts.get(mirroredVideoClip.clipId) : undefined;
     if (delaySec !== undefined) {
-      audioDelays.set(audioClip.clipId, delaySec);
+      audioDelays.set(audioClip.clipId, delaySec * renderDurationScale);
     }
   }
 
@@ -690,6 +839,7 @@ export function buildTimelineAudioMixFilter(
     includeBgm?: boolean;
     bgmGain?: number;
     audioDelaySecByClipId?: Map<string, number>;
+    sourceInputsPretrimmed?: boolean;
   } = {},
 ): { filterComplex: string; outputLabel: string } | undefined {
   if (audioClips.length === 0 && !options.includeBgm) return undefined;
@@ -705,9 +855,10 @@ export function buildTimelineAudioMixFilter(
     const label = `a${index}`;
     const delaySec = options.audioDelaySecByClipId?.get(clip.clipId) ?? (clip.timelineInFrame / fps);
     const filters = [
-      `atrim=start=${ffmpegNumber(clip.startSec)}:duration=${ffmpegNumber(clip.durationSec)}`,
+      `atrim=start=${options.sourceInputsPretrimmed ? "0" : ffmpegNumber(clip.startSec)}:duration=${ffmpegNumber(clip.durationSec)}`,
       "asetpts=PTS-STARTPTS",
       audioGainFilter(clip),
+      ...audioFadeFilters(clip, fps),
       "aresample=48000",
       "aformat=channel_layouts=stereo",
       `adelay=${ffmpegAudioDelay(delaySec * 1000)}`,
@@ -752,12 +903,20 @@ export function buildTimelineAudioMuxArgs(
   const audioGraph = buildTimelineAudioMixFilter(audioClips, totalDurationSec, fps, {
     includeBgm: !!bgmPath,
     audioDelaySecByClipId,
+    sourceInputsPretrimmed: true,
   });
   if (!audioGraph) {
     return ["-i", videoPath, "-c", "copy", outputPath];
   }
 
-  const audioInputs = audioClips.flatMap((clip) => ["-i", clip.sourcePath]);
+  const audioInputs = audioClips.flatMap((clip) => [
+    "-ss",
+    ffmpegNumber(clip.startSec),
+    "-t",
+    ffmpegNumber(clip.durationSec),
+    "-i",
+    clip.sourcePath,
+  ]);
   const bgmInput = bgmPath ? ["-stream_loop", "-1", "-i", bgmPath] : [];
   return [
     "-i",
@@ -880,17 +1039,22 @@ export function validateRenderDurationAccounting(
   thresholdSec: number = DURATION_PARITY_THRESHOLD_SEC,
 ): RenderDurationAccounting {
   const parityDeltaSec = actualRenderedSec - accounting.expected_rendered_sec;
-  const parityPass = Math.abs(parityDeltaSec) <= thresholdSec;
+  const effectiveThresholdSec = Math.max(
+    thresholdSec,
+    accounting.expected_rendered_sec * DURATION_PARITY_RELATIVE_THRESHOLD,
+  );
+  const parityPass = Math.abs(parityDeltaSec) <= effectiveThresholdSec;
   const validated = {
     ...accounting,
     actual_rendered_sec: roundSec(actualRenderedSec),
     parity_delta_sec: roundSec(parityDeltaSec),
+    parity_tolerance_sec: roundSec(effectiveThresholdSec),
     parity_pass: parityPass,
   };
 
   if (!parityPass) {
     warn(
-      `Warning: render duration parity delta ${validated.parity_delta_sec.toFixed(3)}s exceeds ${thresholdSec.toFixed(3)}s; expected ${accounting.expected_rendered_sec.toFixed(3)}s, actual ${validated.actual_rendered_sec.toFixed(3)}s`,
+      `Warning: render duration parity delta ${validated.parity_delta_sec.toFixed(3)}s exceeds ${validated.parity_tolerance_sec.toFixed(3)}s; expected ${accounting.expected_rendered_sec.toFixed(3)}s, actual ${validated.actual_rendered_sec.toFixed(3)}s`,
     );
   }
 
@@ -1247,35 +1411,68 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rough-cut-"));
   try {
-    const tmpClipPaths: string[] = [];
-    for (let index = 0; index < clips.length; index++) {
-      const clip = clips[index];
-      const tmpClip = path.join(tempDir, `clip-${String(index + 1).padStart(4, "0")}.mp4`);
-      await runFfmpeg([
-        "-ss",
-        String(clip.startSec),
-        "-i",
-        clip.sourcePath,
-        "-t",
-        String(clip.durationSec),
-        "-vf",
-        `fps=${fps},scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1`,
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-crf",
-        "18",
-        "-pix_fmt",
-        "yuv420p",
-        tmpClip,
-      ]);
-      tmpClipPaths.push(tmpClip);
-    }
+    let videoAssembly: { outputPath: string; durationSec: number; xfadeCount: number };
+    let renderedDurationSecByVideoClipId: Map<string, number> | undefined;
+    if (args.reuseVideoPath) {
+      const reuseVideoPath = resolveUserPath(projectPath, args.reuseVideoPath);
+      if (!fs.existsSync(reuseVideoPath)) {
+        throw new Error(`Reusable video not found: ${reuseVideoPath}`);
+      }
+      videoAssembly = {
+        outputPath: reuseVideoPath,
+        durationSec: await probeVideoDurationSec(reuseVideoPath),
+        xfadeCount: crossfades.size,
+      };
+      validateRenderDurationAccounting(initialDurationAccounting, videoAssembly.durationSec);
+      renderedDurationSecByVideoClipId = loadVideoAssemblyTimingManifest(
+        projectPath,
+        timelinePath,
+        fps,
+        videoAssembly.durationSec,
+        clips,
+      );
+    } else {
+      const tmpClipPaths: string[] = [];
+      renderedDurationSecByVideoClipId = new Map<string, number>();
+      for (let index = 0; index < clips.length; index++) {
+        const clip = clips[index];
+        const tmpClip = path.join(tempDir, `clip-${String(index + 1).padStart(4, "0")}.mp4`);
+        const videoFilters = buildClipVideoFilters(clip, fps);
+        await runFfmpeg([
+          "-ss",
+          String(clip.startSec),
+          "-i",
+          clip.sourcePath,
+          "-t",
+          String(clip.durationSec),
+          "-vf",
+          videoFilters,
+          "-an",
+          "-c:v",
+          "libx264",
+          "-preset",
+          "fast",
+          "-crf",
+          "18",
+          "-pix_fmt",
+          "yuv420p",
+          tmpClip,
+        ]);
+        tmpClipPaths.push(tmpClip);
+        renderedDurationSecByVideoClipId.set(clip.clipId, await probeVideoDurationSec(tmpClip));
+      }
 
-    const groups = buildRenderGroups(clips, tmpClipPaths, crossfades);
-    const videoAssembly = await assembleVideoFromGroups(groups, tempDir, fps);
+      const groups = buildRenderGroups(clips, tmpClipPaths, crossfades);
+      videoAssembly = await assembleVideoFromGroups(groups, tempDir, fps);
+      writeVideoAssemblyTimingManifest(
+        projectPath,
+        timelinePath,
+        fps,
+        videoAssembly.durationSec,
+        clips,
+        renderedDurationSecByVideoClipId,
+      );
+    }
 
     const audioClips: RenderAudioClip[] = [];
     for (const clip of timelineAudioClips) {
@@ -1303,7 +1500,18 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
       const metadataArgs = videoAssembly.xfadeCount > 0
         ? ["-metadata", `video_os_xfade_count=${videoAssembly.xfadeCount}`]
         : [];
-      const audioDelaySecByClipId = buildAudioDelaySecByClipId(audioClips, clips, crossfades);
+      const audioTimelineScale = renderedDurationSecByVideoClipId
+        ? 1
+        : initialDurationAccounting.expected_rendered_sec > 0
+        ? videoAssembly.durationSec / initialDurationAccounting.expected_rendered_sec
+        : 1;
+      const audioDelaySecByClipId = buildAudioDelaySecByClipId(
+        audioClips,
+        clips,
+        crossfades,
+        audioTimelineScale,
+        renderedDurationSecByVideoClipId,
+      );
       const muxArgs = buildTimelineAudioMuxArgs(
         videoAssembly.outputPath,
         outputPath,
@@ -1330,6 +1538,14 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
       audio_clip_count: audioClips.length,
       audio_rendered: !args.noAudio && (audioClips.length > 0 || !!bgmPath),
       bgm_rendered: !!bgmPath,
+      audio_timing_mode: renderedDurationSecByVideoClipId
+        ? "exact_clip_durations"
+        : "scaled_total_duration_fallback",
+      audio_timeline_scale: renderedDurationSecByVideoClipId
+        ? 1
+        : initialDurationAccounting.expected_rendered_sec > 0
+          ? Number((videoAssembly.durationSec / initialDurationAccounting.expected_rendered_sec).toFixed(6))
+          : 1,
     });
     writeRenderFreshnessMetadata(projectPath, outputPath);
 

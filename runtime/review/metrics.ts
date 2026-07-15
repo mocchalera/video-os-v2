@@ -10,6 +10,7 @@ import type {
   TimelineIR,
 } from "../compiler/types.js";
 import { validateAgainstSchema } from "../commands/shared.js";
+import { assessDialogueCompleteness } from "../editorial/dialogue-completeness.js";
 
 export type ReviewMetricTier =
   | "emotion"
@@ -27,6 +28,7 @@ export type ReviewMetricId =
   | "rhythm.cadence_distribution"
   | "story.required_roles"
   | "story.chronology"
+  | "story.dialogue_completeness"
   | "emotion.peak_retention"
   | "emotion.hook_density"
   | "eye_trace.same_asset_adjacency"
@@ -176,6 +178,7 @@ export function computeReviewMetrics(input: ReviewMetricsInputs): ReviewMetricsA
     checkCadenceDistribution(input),
     checkRequiredRoles(input),
     checkChronology(input),
+    checkDialogueCompleteness(input),
     checkPeakRetention(input),
     checkHookDensity(input),
     checkSameAssetAdjacency(input),
@@ -295,13 +298,18 @@ function checkBeatDurationDeviation(input: ReviewMetricsInputs): ReviewMetricChe
   }
 
   const measuredBeats = windows.map((window) => {
+    const endingTailFrames = endingTailFramesForBeat(input.timeline!, window.beatId);
+    const pacingFrames = Math.max(0, window.actualFrames - endingTailFrames);
     const deviationPct = window.targetFrames > 0
-      ? Math.abs(window.actualFrames - window.targetFrames) / window.targetFrames * 100
+      ? Math.abs(pacingFrames - window.targetFrames) / window.targetFrames * 100
       : 0;
     return {
       beat_id: window.beatId,
       target_frames: window.targetFrames,
       actual_frames: window.actualFrames,
+      ...(endingTailFrames > 0
+        ? { pacing_frames: pacingFrames, ending_treatment_frames: endingTailFrames }
+        : {}),
       deviation_pct: round(deviationPct),
     };
   });
@@ -325,6 +333,21 @@ function checkBeatDurationDeviation(input: ReviewMetricsInputs): ReviewMetricChe
     warn_pct: tolerance,
     fail_pct: round(tolerance * 2),
   }, evidence);
+}
+
+function endingTailFramesForBeat(timeline: TimelineIR, beatId: string): number {
+  return getVideoClips(timeline)
+    .filter((clip) => clip.beat_id === beatId)
+    .reduce((sum, clip) => {
+      const treatment = clip.metadata?.ending_treatment;
+      if (!treatment || typeof treatment !== "object") return sum;
+      const extendedFrames = (treatment as Record<string, unknown>).extended_frames;
+      return sum + (
+        typeof extendedFrames === "number" && Number.isFinite(extendedFrames)
+          ? Math.max(0, extendedFrames)
+          : 0
+      );
+    }, 0);
 }
 
 function checkMaxShotLength(input: ReviewMetricsInputs): ReviewMetricCheck {
@@ -710,7 +733,8 @@ function checkSameAssetAdjacency(input: ReviewMetricsInputs): ReviewMetricCheck 
     selectedCandidateAssetIds.length === 1 &&
     timelineAssetIds.length === 1 &&
     selectedCandidateAssetIds[0] === timelineAssetIds[0];
-  const status: ReviewMetricStatus = violations.length === 0
+  const longformReduction = input.brief?.longform?.mode === "reduction";
+  const status: ReviewMetricStatus = violations.length === 0 || longformReduction
     ? "pass"
     : singleAssetPool
       ? "warn"
@@ -726,7 +750,10 @@ function checkSameAssetAdjacency(input: ReviewMetricsInputs): ReviewMetricCheck 
   }, {
     max_same_asset_adjacent_pairs: 0,
     scope: "V1",
-  }, violations.length > 0
+    longform_continuity_allowed: longformReduction,
+  }, longformReduction && violations.length > 0
+    ? ["Same-asset adjacency is expected in chronological longform reduction; chronology and speech-boundary checks remain authoritative."]
+    : violations.length > 0
     ? [
         ...(singleAssetPool
           ? [`Selected candidates expose only 1 unique asset (${selectedCandidateAssetIds[0]}); same-asset adjacency is unavoidable and remains a review warning until broader visual candidates exist.`]
@@ -762,7 +789,10 @@ function checkMotifOveruse(input: ReviewMetricsInputs): ReviewMetricCheck {
 
   const candidateMap = buildCandidateMap(input.selects);
   const videoClips = getVideoClips(input.timeline);
-  const threshold = input.blueprint?.dedupe_rules?.allow_intentional_repetition
+  const longformReduction = input.brief?.longform?.mode === "reduction";
+  const intentionalRepetition = longformReduction ||
+    input.blueprint?.dedupe_rules?.allow_intentional_repetition === true;
+  const threshold = intentionalRepetition
     ? Number.POSITIVE_INFINITY
     : DEFAULT_MOTIF_REUSE_MAX;
   const motifCounts = new Map<string, number>();
@@ -796,7 +826,8 @@ function checkMotifOveruse(input: ReviewMetricsInputs): ReviewMetricCheck {
 
   return check(id, "plane_2d", overused.length > 0 ? "fail" : "pass", measured as JsonValue, {
     motif_reuse_max: finiteThreshold,
-    allow_intentional_repetition: input.blueprint?.dedupe_rules?.allow_intentional_repetition ?? false,
+    allow_intentional_repetition: intentionalRepetition,
+    longform_continuity_allowed: longformReduction,
   }, overused.length > 0
     ? overused.map((item) =>
         `motif "${item.motif}" appears ${item.count} times, above max ${finiteThreshold}`,
@@ -864,6 +895,56 @@ function checkSpeechCut(input: ReviewMetricsInputs): ReviewMetricCheck {
         `${item.clip_id}: ${item.cut_boundary} boundary cuts inside utterance ${item.asset_id}:${item.utterance_start_us}-${item.utterance_end_us}us`,
       )
     : [`No clip boundary cuts through transcript utterances (checked ${clipsToCheck.length} clips).`]);
+}
+
+function checkDialogueCompleteness(input: ReviewMetricsInputs): ReviewMetricCheck {
+  const id: ReviewMetricId = "story.dialogue_completeness";
+  if (!input.timeline) return skipped(id, "story", "timeline.json is missing.");
+  const transcriptMap = buildTranscriptMap(input.transcripts ?? []);
+  if (transcriptMap.size === 0) {
+    return skipped(id, "story", "No transcript artifacts found.");
+  }
+
+  const clipsToCheck = getAudibleSpeechClips(input.timeline, transcriptMap);
+  const findings = clipsToCheck.flatMap((clip) => {
+    const text = (transcriptMap.get(clip.asset_id) ?? [])
+      .filter((item) => rangesOverlapUs(clip.src_in_us, clip.src_out_us, item.start_us, item.end_us))
+      .map((item) => item.text?.trim() ?? "")
+      .filter(Boolean)
+      .join(" ");
+    if (!text) return [];
+    const assessment = assessDialogueCompleteness(text);
+    return assessment.issues.map((item) => ({
+      clip_id: clip.clip_id,
+      asset_id: clip.asset_id,
+      boundary: item.boundary,
+      code: item.code,
+      severity: item.severity,
+      excerpt: item.excerpt,
+    }));
+  });
+  const hardFindings = findings.filter((item) => item.severity === "hard");
+  const softFindings = findings.filter((item) => item.severity === "soft");
+  const status: ReviewMetricStatus = hardFindings.length > 0
+    ? "fail"
+    : softFindings.length > 0
+      ? "warn"
+      : "pass";
+
+  return check(id, "story", status, {
+    checked_clip_count: clipsToCheck.length,
+    hard_issue_count: hardFindings.length,
+    soft_issue_count: softFindings.length,
+    findings,
+  }, {
+    hard_issue_max: 0,
+    soft_issue_review_required: true,
+    scope: "audible transcript clips",
+  }, findings.length > 0
+    ? findings.map((item) =>
+        `${item.clip_id}: ${item.severity} ${item.boundary} ${item.code} — ${item.excerpt}`,
+      )
+    : [`All ${clipsToCheck.length} audible transcript clips form self-contained assertions.`]);
 }
 
 interface BeatWindow {

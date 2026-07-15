@@ -11,11 +11,14 @@ import { scoreCandidates } from "./score.js";
 import { assemble } from "./assemble.js";
 import { applyAdaptiveTrim, applyUtteranceSnap, compactTrimmedClipsWithinBeats, type UtteranceSpan } from "./trim.js";
 import { applyDurationAdjust } from "./duration-adjust.js";
-import { resolve } from "./resolve.js";
+import { resolve, type DurationStatus, type ResolutionReport } from "./resolve.js";
 import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
 import { reorderAssembledSceneContinuity } from "./scene-order.js";
 import { loadVisualCache, type CompileVisualCache } from "./visual-cache.js";
 import { applyPatch } from "./patch.js";
+import { applyEndingTreatment } from "./ending-treatment.js";
+import { applyCutBreathTreatment } from "./cut-breath-treatment.js";
+import { applyDialogueSemanticRepair } from "./dialogue-semantic-repair.js";
 import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
 import { activateSkills, computeRegistryHash, getSkillMetadataTags, getUtteranceSnapConfig } from "../editorial/skill-registry.js";
 import { loadProfiles } from "../editorial/policy-resolver.js";
@@ -169,7 +172,15 @@ function loadProjectUtterances(projectPath: string): Map<string, UtteranceSpan[]
     .filter((f) => f.endsWith(".json"))
     .sort((a, b) => a.localeCompare(b));
   for (const file of files) {
-    let parsed: { asset_id?: string; items?: Array<{ start_us?: number; end_us?: number }> };
+    let parsed: {
+      asset_id?: string;
+      items?: Array<{
+        start_us?: number;
+        end_us?: number;
+        text?: string;
+        speaker?: string;
+      }>;
+    };
     try {
       parsed = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
     } catch {
@@ -184,7 +195,16 @@ function loadProjectUtterances(projectPath: string): Map<string, UtteranceSpan[]
         typeof item.end_us === "number" &&
         item.end_us > item.start_us
       ) {
-        spans.push({ start_us: item.start_us, end_us: item.end_us });
+        spans.push({
+          start_us: item.start_us,
+          end_us: item.end_us,
+          ...(typeof item.text === "string" && item.text.trim()
+            ? { text: item.text.trim() }
+            : {}),
+          ...(typeof item.speaker === "string" && item.speaker.trim()
+            ? { speaker: item.speaker.trim() }
+            : {}),
+        });
       }
     }
     if (spans.length > 0) {
@@ -1012,7 +1032,9 @@ export function compile(opts: CompileOptions): CompileResult {
   const activeSkills = blueprint.active_editing_skills
     ? activateSkills(blueprint, selects.candidates, selects.editorial_summary)
     : [];
-  const exactCandidatePlanOrder = activeSkills.includes("human_golden_order");
+  const humanGoldenOrder = activeSkills.includes("human_golden_order");
+  const exactCandidatePlanOrder = humanGoldenOrder ||
+    activeSkills.includes("longform_reduction");
   if (exactCandidatePlanOrder) {
     applyExactCandidatePlanRevisitExemptions(normalized.beats, selects.candidates);
   }
@@ -1149,6 +1171,22 @@ export function compile(opts: CompileOptions): CompileResult {
         targetDurationUsByBeat,
         maxDurationUsByBeat,
       });
+      if (!humanGoldenOrder) {
+        const semanticRepair = applyDialogueSemanticRepair(
+          assembled,
+          utteranceMap,
+          loadProjectSegments(projectPath),
+          fpsNum / fpsDen,
+        );
+        if (semanticRepair.attemptedClips > 0) {
+          const emit = opts.log ?? console.warn;
+          emit(
+            `[dialogue-semantic-repair] attempted=${semanticRepair.attemptedClips} ` +
+            `repaired=${semanticRepair.repairedClips} unresolved=${semanticRepair.unresolvedClips} ` +
+            `added_frames=${semanticRepair.totalAddedFrames}`,
+          );
+        }
+      }
     }
   }
 
@@ -1413,6 +1451,34 @@ export function compile(opts: CompileOptions): CompileResult {
     finalResolution = patchResult.resolution;
   }
 
+  const cutBreathTreatment = applyCutBreathTreatment(
+    timelineIR,
+    blueprint.dialogue_policy,
+    loadProjectSegments(projectPath),
+    loadProjectUtterances(projectPath),
+    fpsNum / fpsDen,
+  );
+  if (cutBreathTreatment.totalExtendedFrames > 0) {
+    finalResolution = extendResolutionForEnding(
+      finalResolution,
+      cutBreathTreatment.totalExtendedFrames,
+    );
+  }
+
+  const endingTreatment = applyEndingTreatment(
+    timelineIR,
+    blueprint.ending_policy,
+    loadProjectSegments(projectPath),
+    fpsNum / fpsDen,
+    loadProjectUtterances(projectPath),
+  );
+  if (endingTreatment.extendedFrames > 0) {
+    finalResolution = extendResolutionForEnding(
+      finalResolution,
+      endingTreatment.extendedFrames,
+    );
+  }
+
   const outputPath = writeTimeline(timelineIR, projectPath);
   const otioPath = exportOtio(timelineIR, projectPath);
   const previewManifestPath = writePreviewManifest(
@@ -1430,6 +1496,41 @@ export function compile(opts: CompileOptions): CompileResult {
     duration_policy: durationPolicy,
     continuity,
     ...(beatSyncMetadata ? { beat_sync: beatSyncMetadata } : {}),
+  };
+}
+
+function extendResolutionForEnding(
+  resolution: ResolutionReport,
+  extendedFrames: number,
+): ResolutionReport {
+  const totalFrames = resolution.total_frames + extendedFrames;
+  const contentFrames = (resolution.content_frames ?? resolution.total_frames) + extendedFrames;
+  const minFrames = resolution.min_target_frames ?? resolution.target_frames;
+  const maxFrames = resolution.max_target_frames;
+  const isGuide = resolution.duration_mode === "guide";
+  const durationFit = isGuide
+    ? maxFrames == null || totalFrames <= maxFrames
+    : totalFrames >= minFrames && totalFrames <= (maxFrames ?? resolution.target_frames);
+  const isShort = contentFrames / Math.max(1, resolution.target_frames) < 0.8 ||
+    contentFrames < minFrames;
+  const isOver = maxFrames != null
+    ? totalFrames > maxFrames || contentFrames > maxFrames
+    : !isGuide && totalFrames > resolution.target_frames;
+  const durationStatus: DurationStatus = isShort ? "short" : isOver ? "over" : "pass";
+
+  return {
+    ...resolution,
+    duration_fit: durationFit,
+    total_frames: totalFrames,
+    ...(resolution.duration_status !== undefined ? { duration_status: durationStatus } : {}),
+    duration_delta_frames: contentFrames - resolution.target_frames,
+    duration_delta_pct: resolution.target_frames > 0
+      ? ((contentFrames - resolution.target_frames) / resolution.target_frames) * 100
+      : 0,
+    content_frames: contentFrames,
+    content_fill_ratio: resolution.target_frames > 0
+      ? contentFrames / resolution.target_frames
+      : 1,
   };
 }
 

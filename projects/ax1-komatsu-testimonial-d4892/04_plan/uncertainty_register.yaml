@@ -1,0 +1,52 @@
+version: "1"
+project_id: ax1-komatsu-testimonial-d4892
+created_at: "2026-07-11T14:14:39Z"
+
+uncertainties:
+  - id: KOMATSU-U1-caption-corrections
+    type: technical
+    question: Groqの誤認識候補を原音確認し、公開可能な日本語字幕へ校正できるか。
+    status: monitoring
+    evidence:
+      - 「半日も待たなかった」は文脈上「半日ももたなかった」の可能性が高い。
+      - 文字起こしは話者選定の根拠として有効だが、公開字幕は未承認である。
+    alternatives:
+      - label: audio_verified_caption
+        description: 原音を聞いて語句を校正し、意味を変えない字幕へ修正する。
+        impact: 信頼性が上がる。初回ラフで実施する。
+      - label: draft_marker
+        description: 不確実語を暫定表示のまま残す。
+        impact: 内部確認には使えるが、公開候補にはできない。
+    escalation_required: false
+
+  - id: KOMATSU-U2-time-jump
+    type: continuity
+    question: 524秒付近から674秒付近へのhard cutが、同一画角のjump cutとして不自然に見えないか。
+    status: monitoring
+    evidence:
+      - 2つの採用回答は同じ人物・同じ収録環境だが、約150秒離れている。
+      - 初回ラフはB-rollを加えず、発言の信頼性を優先する。
+    alternatives:
+      - label: clean_hard_cut
+        description: 字幕文脈を切り替え、正直なhard cutとして見せる。
+        impact: 最小加工で本人の声を保てる。
+      - label: shorten_to_single_answer
+        description: 推奨回答だけの約44秒版へ短縮する。
+        impact: jump cutは消えるが、AX-1の差別化説明が弱くなる。
+    escalation_required: false
+
+  - id: KOMATSU-U3-public-rights
+    type: legal
+    question: 小松社長の顔、氏名、字幕、発言内容を外部公開してよいか。
+    status: open
+    evidence:
+      - 今回の承認はローカルのラフ制作と最終レビューまでである。
+      - creative briefは公開用レンダーをhuman gateとしている。
+    alternatives:
+      - label: internal_only
+        description: ローカル内部レビューに限定する。
+        impact: 現在の作業を継続できる。
+      - label: obtain_release
+        description: 公開前に本人・関係者の使用許諾を確認する。
+        impact: 別途承認後に外部配布できる。
+    escalation_required: true

@@ -182,10 +182,18 @@ export function buildVideoTrimArgs(
   height: number,
   fps: number,
   transform?: ClipFilterTransform,
+  endingFade?: { color: "black" | "white"; durationSec: number },
 ): string[] {
-  const videoFilter = transform
+  const fitFilter = transform
     ? buildVideoFitFilterFromTransform(width, height, transform)
     : buildAspectRatioFitFilter(width, height);
+  const clipDurationSec = Math.max(0, endSec - startSec);
+  const fadeDurationSec = endingFade
+    ? Math.min(clipDurationSec, endingFade.durationSec)
+    : 0;
+  const videoFilter = fadeDurationSec > 0 && endingFade
+    ? `${fitFilter},fade=t=out:st=${formatFfmpegTimestamp(clipDurationSec - fadeDurationSec)}:d=${formatFfmpegTimestamp(fadeDurationSec)}:color=${endingFade.color}`
+    : fitFilter;
   return [
     "-y",
     "-ss", formatFfmpegTimestamp(startSec),
@@ -275,6 +283,28 @@ export function extractClipTransform(
   }
 
   return touched ? transform : undefined;
+}
+
+export function extractEndingVideoFade(
+  clip: ClipOutput,
+  fps: number,
+): { color: "black" | "white"; durationSec: number } | undefined {
+  const ending = clip.metadata?.ending_treatment;
+  if (!ending || typeof ending !== "object" || Array.isArray(ending)) return undefined;
+  const record = ending as Record<string, unknown>;
+  const color = record.video_fade_color;
+  const frames = record.video_fade_out_frames;
+  if (
+    (color !== "black" && color !== "white") ||
+    typeof frames !== "number" ||
+    !Number.isFinite(frames) ||
+    frames <= 0 ||
+    !Number.isFinite(fps) ||
+    fps <= 0
+  ) {
+    return undefined;
+  }
+  return { color, durationSec: frames / fps };
 }
 
 export function buildGapVideoArgs(
@@ -391,16 +421,19 @@ export function buildAudioTrimArgs(
   audioChannels: 1 | 2,
   audioPolicy?: ClipOutput["audio_policy"],
   fades?: AudioTransitionFades,
+  fps = 30,
 ): string[] {
   const gain = audioPolicy?.nat_gain ?? audioPolicy?.nat_sound_gain ?? 1;
   const filters = gain > 0 && gain !== 1 ? [`volume=${gain.toFixed(4)}`] : [];
   const fadeInSec = Math.max(
     fades?.fadeInSec ?? 0,
     fades?.dialogueCutFadeSec ?? 0,
+    (audioPolicy?.nat_sound_fade_in_frames ?? audioPolicy?.fade_in_frames ?? 0) / fps,
   );
   const fadeOutSec = Math.max(
     fades?.fadeOutSec ?? 0,
     fades?.dialogueCutFadeSec ?? 0,
+    (audioPolicy?.nat_sound_fade_out_frames ?? audioPolicy?.fade_out_frames ?? 0) / fps,
   );
   // Transition parity: linear afade in/out summed by amix reproduces the
   // preview path's acrossfade (both default to the "tri" curve). Dialogue cut
@@ -1023,6 +1056,7 @@ export async function assembleTimelineToMp4(
               height,
               fps,
               extractClipTransform(clip),
+              extractEndingVideoFade(clip, fps),
             ));
             halfPaths.push(half);
           }
@@ -1048,6 +1082,7 @@ export async function assembleTimelineToMp4(
             height,
             fps,
             transform,
+            extractEndingVideoFade(clip, fps),
           ));
         }
       }
@@ -1134,6 +1169,7 @@ export async function assembleTimelineToMp4(
           audioChannels,
           plan.audio_policy,
           mergeAudioFades(transitionFades, speechCutFadeSec),
+          fps,
         );
       await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);

@@ -77,6 +77,24 @@ public enum AudioWaveformExtractor {
         }
     }
 
+    public static func extractPeaks(
+        from url: URL,
+        startSeconds: Double,
+        endSeconds: Double,
+        sampleCount: Int = 96
+    ) throws -> [Double] {
+        guard startSeconds.isFinite, endSeconds.isFinite, endSeconds > startSeconds else { return [] }
+        let cappedSampleCount = max(1, min(sampleCount, 512))
+        let boundedStart = max(0, startSeconds)
+        let start = CMTime(seconds: boundedStart, preferredTimescale: 600)
+        let duration = CMTime(seconds: endSeconds - boundedStart, preferredTimescale: 600)
+        return try extractAssetReaderPeaks(
+            from: url,
+            sampleCount: cappedSampleCount,
+            timeRange: CMTimeRange(start: start, duration: duration)
+        )
+    }
+
     static func preferredBackend(for url: URL) -> AudioWaveformBackend {
         switch url.pathExtension.lowercased() {
         case "mov", "mp4", "m4v":
@@ -134,12 +152,16 @@ public enum AudioWaveformExtractor {
         return normalize(peaks: Array(peaks.prefix(cappedSampleCount)))
     }
 
-    private static func extractAssetReaderPeaks(from url: URL, sampleCount cappedSampleCount: Int) throws -> [Double] {
+    private static func extractAssetReaderPeaks(
+        from url: URL,
+        sampleCount cappedSampleCount: Int,
+        timeRange: CMTimeRange? = nil
+    ) throws -> [Double] {
         let asset = AVURLAsset(url: url)
         guard let track = asset.tracks(withMediaType: .audio).first else { return [] }
         let formatInfo = audioFormatInfo(for: track)
         let channelCount = formatInfo.channelCount
-        let durationSeconds = CMTimeGetSeconds(track.timeRange.duration)
+        let durationSeconds = CMTimeGetSeconds(timeRange?.duration ?? track.timeRange.duration)
         let estimatedTotalFrames = max(
             1,
             durationSeconds.isFinite && durationSeconds > 0
@@ -148,6 +170,9 @@ public enum AudioWaveformExtractor {
         )
 
         let reader = try AVAssetReader(asset: asset)
+        if let timeRange {
+            reader.timeRange = timeRange
+        }
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM,
             AVLinearPCMIsBigEndianKey: false,

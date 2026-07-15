@@ -1,0 +1,93 @@
+version: "1"
+project_id: ax1-komatsu-testimonial-d4892
+timeline_version: "1"
+created_at: "2026-07-11T14:14:39Z"
+
+summary_judgment:
+  status: approved
+  rationale: 78.0秒の原音ラフは2つのsource-grounded発言でAX-1の差別化から経営トップへの推奨までを構成し、render parity、speech boundary、required role、gap検査に合格した。60pxフル字幕を投影済みで、Marlin Visual QAは76点・critical 0でverified。2カット目冒頭の約1.5秒の女性reaction shotを含め、2026-07-11にoperatorが編集と字幕を承認した。
+  confidence: 0.98
+
+strengths:
+  - summary: AX-1の差別化と推奨が小松社長本人の言葉で完結する
+    details: ツールの羅列だけではないという率直な評価から、壁にぶつかる経営者とトップ自身の受講価値へ論理的に進む。
+    evidence:
+      - 04_plan/selects_candidates.yaml#CAND_KOMATSU_DIFFERENCE
+      - 04_plan/selects_candidates.yaml#CAND_KOMATSU_RECOMMENDATION
+      - 03_analysis/transcripts/TR_AST_610FB4A0.json
+    affected_beat_ids: [komatsu_hook, komatsu_closing]
+    affected_clip_ids: [CLP_0001, CLP_0002]
+  - summary: 技術的なラフカット整合性が高い
+    details: 2カット、gap 0、crossfade 0、parity delta 16msで、発話途中を切るspeech-cut violationもない。
+    evidence:
+      - 09_output/render-report.json
+      - 06_review/review_metrics.json
+
+weaknesses:
+  - summary: 2カット目冒頭が主話者単独の画ではない
+    details: source 674.6秒では女性経営者が中心で、小松社長は約677秒から2ショット内に明確に入る。音声の最初の意味単位を守るため、reaction shotとして暫定維持した。
+    evidence:
+      - 09_output/rough-cut.mp4@34.29s
+      - direct_frame_review:source_674.6-677.0s
+    affected_beat_ids: [komatsu_closing]
+    affected_clip_ids: [CLP_0002]
+  - summary: フル字幕は人間承認前のdraft
+    details: 60px日本語字幕を投影済みで、重複・見切れ・2行超過はない。「半日ももたなかった」等のGroq誤認識候補は修正済みだが、最終的な人間確認が必要。
+    evidence:
+      - 01_intent/creative_brief.yaml
+      - 07_package/caption_draft.json
+      - 09_output/rough-cut-caption-draft.mp4
+
+fatal_issues: []
+
+warnings:
+  - summary: speech-led編集に対してhook peak metricが偽陰性
+    severity: warning
+    details: hook_density failはVLM peak signal不在による。実際のhook根拠はtranscript-backed decisive lineであり、speech boundaryとrequired roleは合格している。
+    evidence:
+      - 06_review/review_metrics.json#emotion.hook_density
+      - 04_plan/selects_candidates.yaml#CAND_KOMATSU_DIFFERENCE
+  - summary: 単一素材のためsame-asset adjacencyは回避不能
+    severity: warning
+    details: 入力がD4892.MP4 1本のみなので自動metricはfailする。2カットは異なる時刻・構図・表情で、別発言として識別できる。
+    evidence:
+      - 06_review/review_metrics.json#eye_trace.same_asset_adjacency
+      - 09_output/rough-cut.mp4
+  - summary: 公開許諾は未確認
+    severity: warning
+    details: 現在のラフはローカル内部レビュー専用。顔、字幕、発言内容の外部公開には別承認が必要。
+    evidence:
+      - 01_intent/unresolved_blockers.yaml
+      - 04_plan/uncertainty_register.yaml#KOMATSU-U3-public-rights
+
+mismatches_to_brief: []
+
+mismatches_to_blueprint: []
+
+recommended_next_pass:
+  goal: 外部公開する場合のみ、出演者許諾と表記を確認して配信用パッケージへ進む。
+  actions:
+    - 外部公開前に顔・発言・字幕の利用許諾を確認する。
+  preserve:
+    - 小松社長本人の2つの発言
+    - 発話途中を切らない境界
+    - 原音のみ、BGMなし
+    - CTAなし
+
+preview_path: 09_output/rough-cut-caption-draft.mp4
+visual_qa:
+  status: verified
+  reason: 字幕付き77.958秒renderを実Marlinで評価し76点。固定インタビュー内の類似ジェスチャー反復を3件警告したが、critical issueはなく、reaction shot自体は問題判定されていない。
+  min_score: 70
+  issues:
+    total: 3
+    critical: 0
+    warning: 3
+    info: 0
+  issue_summaries:
+    - "14.5s: 右手ジェスチャーを類似反復として検出"
+    - "25.5s: 右手ジェスチャーを類似反復として検出"
+    - "54.0s: 正面向き発話を類似反復として検出"
+  video_path: 09_output/rough-cut-caption-draft.mp4
+  timeline_path: 05_timeline/timeline.json
+  timeline_version: "1"

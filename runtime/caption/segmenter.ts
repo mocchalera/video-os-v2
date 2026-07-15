@@ -310,6 +310,150 @@ export interface CaptionGenerationOptions {
   deterministicCleanup?: boolean;
   /** If true, apply auto line-breaking per layout policy. Default: false (opt-in). */
   autoLineBreak?: boolean;
+  /**
+   * Split caption units before layout so no unit exceeds this many characters.
+   * Timing for an oversized transcript item is distributed proportionally.
+   * Intended for long-form transcript captions where ASR items can span many
+   * sentences. Undefined preserves the legacy segmentation contract.
+   */
+  maxCharsPerCaption?: number;
+  /** Override the language CPS split threshold for a delivery profile. */
+  maxCps?: number;
+  /** Drop clipped edge fragments shorter than this duration. */
+  minCaptionDurationMs?: number;
+  /** Deterministic project-dictionary replacements applied before splitting. */
+  operatorCorrections?: Array<{ from: string; to: string }>;
+  /** Canonical names that must not be split across caption lines. */
+  protectedTerms?: string[];
+  /** Blank frames enforced between adjacent captions. Default: 1. */
+  interCaptionGapFrames?: number;
+}
+
+function applyOperatorCorrections(
+  text: string,
+  corrections: Array<{ from: string; to: string }> | undefined,
+): string {
+  let result = text;
+  for (const correction of corrections ?? []) {
+    if (!correction.from || correction.from === correction.to) continue;
+    result = result.split(correction.from).join(correction.to);
+  }
+  return result;
+}
+
+function preferredChunkEnd(
+  text: string,
+  start: number,
+  maxChars: number,
+  language: string,
+  protectedTerms: string[],
+): number {
+  const hardEnd = Math.min(text.length, start + maxChars);
+  if (hardEnd >= text.length) return text.length;
+  const softStart = start + Math.max(1, Math.floor(maxChars * 0.55));
+  const window = text.slice(start, hardEnd);
+  const punctuation = [...window.matchAll(/[。！？!?、,]/g)]
+    .map((match) => start + (match.index ?? 0) + 1)
+    .filter((index) => index >= softStart && !breaksProtectedTerm(text, index, protectedTerms));
+  if (punctuation.length > 0) return punctuation[punctuation.length - 1];
+
+  if (language.startsWith("ja") && typeof Intl.Segmenter === "function") {
+    const boundaries = [...new Intl.Segmenter("ja", { granularity: "word" }).segment(text)]
+      .map((segment) => segment.index)
+      .filter((index) => index >= softStart && index <= hardEnd &&
+        !breaksProtectedTerm(text, index, protectedTerms));
+    if (boundaries.length > 0) return boundaries[boundaries.length - 1];
+  }
+  return hardEnd;
+}
+
+function breaksProtectedTerm(text: string, index: number, protectedTerms: string[]): boolean {
+  for (const term of protectedTerms) {
+    if (!term) continue;
+    let start = text.indexOf(term);
+    while (start >= 0) {
+      if (index > start && index < start + term.length) return true;
+      start = text.indexOf(term, start + term.length);
+    }
+  }
+  return false;
+}
+
+function splitPendingItemByCharacters(
+  pending: PendingItem,
+  maxChars: number,
+  language: string,
+  protectedTerms: string[],
+): PendingItem[] {
+  const text = pending.item.text;
+  if (text.length <= maxChars) return [pending];
+
+  const chunks: PendingItem[] = [];
+  let charStart = 0;
+  while (charStart < text.length) {
+    const charEnd = preferredChunkEnd(
+      text,
+      charStart,
+      maxChars,
+      language,
+      protectedTerms,
+    );
+    const frameStart = Math.round(
+      pending.timelineDurationFrames * charStart / text.length,
+    );
+    const frameEnd = Math.round(
+      pending.timelineDurationFrames * charEnd / text.length,
+    );
+    chunks.push({
+      ...pending,
+      item: {
+        ...pending.item,
+        text: text.slice(charStart, charEnd),
+      },
+      timelineInFrame: pending.timelineInFrame + frameStart,
+      timelineDurationFrames: Math.max(1, frameEnd - frameStart),
+    });
+    charStart = charEnd;
+  }
+  return chunks;
+}
+
+function splitSegmentByCharacters(
+  segment: PendingItem[],
+  maxChars: number,
+  language: string,
+  protectedTerms: string[],
+): PendingItem[][] {
+  if (!Number.isFinite(maxChars) || maxChars < 1) return [segment];
+
+  const result: PendingItem[][] = [];
+  let current: PendingItem[] = [];
+  let currentLength = 0;
+
+  for (const pending of segment) {
+    if (pending.item.text.length > maxChars) {
+      if (current.length > 0) result.push(current);
+      current = [];
+      currentLength = 0;
+      result.push(...splitPendingItemByCharacters(
+        pending,
+        Math.floor(maxChars),
+        language,
+        protectedTerms,
+      ).map((chunk) => [chunk]));
+      continue;
+    }
+    const itemLength = pending.item.text.length;
+    if (current.length > 0 && currentLength + itemLength > maxChars) {
+      result.push(current);
+      current = [];
+      currentLength = 0;
+    }
+    current.push(pending);
+    currentLength += itemLength;
+  }
+  if (current.length > 0) result.push(current);
+  return result;
 }
 
 export function generateCaptionSource(
@@ -336,7 +480,7 @@ export function generateCaptionSource(
     : undefined;
   const fps = timeline.fps ?? sequenceFps ?? DEFAULT_FPS;
   const language = policy.language;
-  const maxCps = getMaxCps(language);
+  const maxCps = options?.maxCps ?? getMaxCps(language);
 
   // Step 1: Prefer canonical A1 audio clips. Compiler timelines mirror the
   // same editorial clip on V1 and A1, so collecting both creates duplicate
@@ -412,7 +556,13 @@ export function generateCaptionSource(
       const durationFrames = Math.max(1, timelineOutFrame - timelineInFrame);
 
       allPending.push({
-        item,
+        item: (() => {
+          const clipped = clipTranscriptItemToRange(item, clampedStartUs, clampedEndUs);
+          return {
+            ...clipped,
+            text: applyOperatorCorrections(clipped.text, options?.operatorCorrections),
+          };
+        })(),
         clip,
         timelineInFrame: timelineInFrame,
         timelineDurationFrames: durationFrames,
@@ -421,7 +571,17 @@ export function generateCaptionSource(
   }
 
   // Step 3: Segment into caption units
-  const segments = segmentItems(allPending, language, fps, maxCps);
+  const baseSegments = segmentItems(allPending, language, fps, maxCps);
+  const segments = options?.maxCharsPerCaption
+    ? baseSegments.flatMap((segment) =>
+        splitSegmentByCharacters(
+          segment,
+          options.maxCharsPerCaption!,
+          language,
+          options.protectedTerms ?? [],
+        )
+      )
+    : baseSegments;
 
   // Step 4: Build SpeechCaption entries
   const speechCaptions: SpeechCaption[] = [];
@@ -452,7 +612,7 @@ export function generateCaptionSource(
 
     // Apply auto line-breaking (opt-in to preserve backward compatibility)
     if (options?.autoLineBreak === true) {
-      const breakResult = formatCaption(text, language);
+      const breakResult = formatCaption(text, language, options?.protectedTerms);
       text = breakResult.lines.join("\n");
     }
 
@@ -471,6 +631,14 @@ export function generateCaptionSource(
         ? nextSeg[0].timelineInFrame - inFrame
         : durationFrames + minDwellFrames; // no limit if last
       durationFrames = Math.min(minDwellFrames, maxExtend);
+    }
+
+    if (
+      durationFrames <= 0 ||
+      (options?.minCaptionDurationMs !== undefined &&
+        framesToMs(durationFrames, fps) < options.minCaptionDurationMs)
+    ) {
+      continue;
     }
 
     const dwellMs = framesToMs(durationFrames, fps);
@@ -500,14 +668,48 @@ export function generateCaptionSource(
     });
   }
 
+  const separatedCaptions = enforceCaptionSeparation(
+    speechCaptions,
+    options?.interCaptionGapFrames ?? 1,
+    fps,
+    language,
+  );
+
   return {
     version: "1.0",
     project_id: projectId,
     base_timeline_version: baseTimelineVersion,
     caption_policy: policy,
-    speech_captions: speechCaptions,
+    speech_captions: separatedCaptions,
     text_overlays: [],
   };
+}
+
+export function enforceCaptionSeparation(
+  captions: SpeechCaption[],
+  gapFrames: number,
+  fps: number,
+  language: string,
+): SpeechCaption[] {
+  const gap = Math.max(0, Math.floor(gapFrames));
+  const result: SpeechCaption[] = [];
+  for (let index = 0; index < captions.length; index++) {
+    const caption = { ...captions[index], metrics: { ...captions[index].metrics } };
+    const next = captions[index + 1];
+    if (next) {
+      const latestOut = next.timeline_in_frame - gap;
+      const currentOut = caption.timeline_in_frame + caption.timeline_duration_frames;
+      if (currentOut > latestOut) {
+        caption.timeline_duration_frames = latestOut - caption.timeline_in_frame;
+      }
+    }
+    if (caption.timeline_duration_frames <= 0) continue;
+    const dwellMs = framesToMs(caption.timeline_duration_frames, fps);
+    caption.metrics.dwell_ms = Math.round(dwellMs);
+    caption.metrics.cps = Math.round(computeCps(caption.text, dwellMs, language) * 100) / 100;
+    result.push(caption);
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -516,4 +718,32 @@ export function generateCaptionSource(
 
 function usToFrames(us: number, fps: number): number {
   return Math.round((us / 1_000_000) * fps);
+}
+
+function clipTranscriptItemToRange(
+  item: TranscriptItem,
+  clampedStartUs: number,
+  clampedEndUs: number,
+): TranscriptItem {
+  const durationUs = Math.max(1, item.end_us - item.start_us);
+  if (clampedStartUs <= item.start_us && clampedEndUs >= item.end_us) {
+    return item;
+  }
+
+  const startRatio = Math.max(0, (clampedStartUs - item.start_us) / durationUs);
+  const endRatio = Math.min(1, (clampedEndUs - item.start_us) / durationUs);
+  const startIndex = Math.min(
+    item.text.length,
+    Math.floor(item.text.length * startRatio),
+  );
+  const endIndex = Math.max(
+    startIndex + 1,
+    Math.min(item.text.length, Math.ceil(item.text.length * endRatio)),
+  );
+  return {
+    ...item,
+    start_us: clampedStartUs,
+    end_us: clampedEndUs,
+    text: item.text.slice(startIndex, endIndex),
+  };
 }

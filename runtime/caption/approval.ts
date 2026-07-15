@@ -26,7 +26,16 @@ export interface CaptionApproval {
     status: "approved" | "stale";
     approved_by?: string;
     approved_at?: string;
+    base_caption_draft_hash?: string;
+    caption_review_patch_hash?: string;
+    validation_hash?: string;
   };
+}
+
+export interface CaptionApprovalProvenance {
+  base_caption_draft_hash: string;
+  caption_review_patch_hash: string;
+  validation_hash: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +50,7 @@ export function createDraftApproval(
   source: CaptionSource,
   approvedBy: string,
   approvedAt?: string,
+  provenance?: CaptionApprovalProvenance,
 ): CaptionApproval {
   return {
     version: source.version,
@@ -53,6 +63,7 @@ export function createDraftApproval(
       status: "approved",
       approved_by: approvedBy,
       approved_at: approvedAt ?? new Date().toISOString(),
+      ...(provenance ?? {}),
     },
   };
 }

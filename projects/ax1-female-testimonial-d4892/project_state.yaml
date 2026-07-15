@@ -1,0 +1,47 @@
+version: 1
+project_id: ax1-female-testimonial-d4892
+current_state: approved
+history:
+  - from_state: intent_pending
+    to_state: critique_ready
+    trigger: /status
+    actor: /status
+    timestamp: 2026-07-11T14:36:58.969Z
+    note: "self-heal: intent_pending -> critique_ready"
+  - from_state: critique_ready
+    to_state: approved
+    trigger: /review
+    actor: roughcut-critic
+    timestamp: 2026-07-11T15:05:28.239Z
+    note: approved — operator accepted review
+artifact_hashes:
+  brief_hash: 1ff092ff474a4b46
+  blockers_hash: b54c650e57478c92
+  selects_hash: b52e004fb28fb13b
+  blueprint_hash: af19372d283cae39
+  uncertainty_hash: 7b6d02aed5f5b701
+  timeline_version: 08296d77e5dbbb44
+  review_report_version: 0cbfce31a72112cd
+  review_patch_hash: c09d6c0a5f1028dd
+  caption_approval_hash: c17b9baf79675a67
+  analysis_artifact_version: 2.0.0
+  editorial_timeline_hash: 08296d77e5dbbb44
+  packaging_projection_hash: 35ff673801fc7ce5
+gates:
+  analysis_gate: ready
+  compile_gate: open
+  planning_gate: open
+  timeline_gate: open
+  review_gate: open
+  packaging_gate: blocked
+last_updated: 2026-07-11T15:39:25.793Z
+approval_record:
+  status: clean
+  approved_by: operator
+  approved_at: 2026-07-11T15:05:28.239Z
+  artifact_versions:
+    timeline_version: 08296d77e5dbbb44
+    review_report_version: 0cbfce31a72112cd
+    review_patch_hash: c09d6c0a5f1028dd
+last_agent: roughcut-critic
+last_command: /review

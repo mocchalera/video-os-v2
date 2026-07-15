@@ -12,6 +12,7 @@ const PROFILE_MODE_MAP: Record<string, DurationMode> = {
   "lp-testimonial": "strict",
   "vertical-short": "strict",
   "event-recap": "guide",
+  "longform-event": "strict",
   "product-demo": "guide",
   "lecture-highlight": "guide",
 };
@@ -305,6 +306,7 @@ const PROFILE_TIMELINE_ORDER: Record<string, "chronological" | "editorial"> = {
   "keepsake": "chronological",
   "family-growth-recap": "chronological",
   "event-recap": "chronological",
+  "longform-event": "chronological",
   "interview-highlight": "editorial",
   "interview-pro-highlight": "editorial",
   "lp-testimonial": "editorial",

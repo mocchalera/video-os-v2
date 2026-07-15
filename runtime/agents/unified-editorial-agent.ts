@@ -131,6 +131,7 @@ interface AssetRoughEvidence {
     src_in_us: number;
     src_out_us: number;
     summary: string;
+    transcript: string;
     tags: string[];
   }>;
   events: Array<{
@@ -151,6 +152,7 @@ interface FineClipEvidence {
   src_in_us: number;
   src_out_us: number;
   why_it_matches: string;
+  transcript_excerpt?: string;
   key_frames: KeyFrame[];
   marlin_scene?: string;
   marlin_events: Array<{
@@ -453,6 +455,7 @@ function buildRoughAssetEvidence(
         src_in_us: segment.src_in_us,
         src_out_us: segment.src_out_us,
         summary: segment.summary,
+        transcript: segment.transcript_excerpt ?? "",
         tags: segment.tags ?? [],
       })),
       events: (assetEvents?.events ?? []).slice(0, 8).map(eventToPrompt),
@@ -535,6 +538,10 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
     "- Choose rhythm per beat and explain why each clip was selected.",
     "- Cite Marlin event ids or representative frame paths as evidence.",
     "- Use context_knowledge to correct likely subject, food/product, person, terminology, or place misidentifications in Marlin text.",
+    "- For every dialogue candidate, select a semantically complete assertion: the subject or antecedent must be recoverable inside the selected line, and the speaker must reach the conclusion before src_out_us.",
+    "- An ASR item boundary is not proof of editorial completeness. Expand to neighboring transcript items when a line begins with a dependent continuation or ends on an unfinished clause; otherwise reject it.",
+    "- Never use an interviewer question card to repair a missing subject, and never rely on post-roll or fade-out to finish the selected assertion.",
+    "- Post-roll is presentation-only: it may retain breath or room tone after a complete assertion, but it must not introduce the next assertion.",
     "- Do not invent clips, visual facts, source ranges, or new schema fields.",
     "",
     "## CRITICAL: Beat duration rules",
@@ -568,6 +575,7 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
             confidence: 0.82,
             semantic_rank: 1,
             evidence: ["Marlin evt_001: visible action", "representative frame shows readable subject"],
+            transcript_excerpt: "exact complete transcript assertion for dialogue candidates",
             eligible_beats: ["b01_hook"],
             motif_tags: ["specific_visual_theme"],
           },
@@ -619,6 +627,8 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
         dialogue_policy: {
           preserve_natural_breath: true,
           avoid_wall_to_wall_voiceover: true,
+          cut_tail_hold_sec: 0.25,
+          cut_audio_fade_out_sec: 0.16,
         },
         transition_policy: {
           prefer_match_texture_over_flashy_fx: true,
@@ -670,6 +680,7 @@ function buildFineClipEvidence(
         src_in_us: candidate.src_in_us,
         src_out_us: candidate.src_out_us,
         why_it_matches: candidate.why_it_matches,
+        ...(candidate.transcript_excerpt ? { transcript_excerpt: candidate.transcript_excerpt } : {}),
         key_frames: keyFrames.get(candidate.segment_id) ?? [],
         marlin_scene: byAsset.get(candidate.asset_id)?.scene,
         marlin_events: events,
@@ -776,6 +787,8 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
     "",
     "## Task",
     "- For each selected clip, choose the best in/out point by referencing a specific Marlin event.",
+    "- For dialogue, verify semantic boundaries before visual craft: retain the subject or antecedent and the complete conclusion, even when that requires neighboring ASR items.",
+    "- Do not approve a line that only becomes understandable from a question card. Post-roll may preserve breath or room tone only after the assertion is complete and must stop before the next assertion.",
     "- Choose beat-level transition_in / transition_out, rhythm, and in_point / out_point craft.",
     "- Adjust pacing and duration policy for the BGM duration when needed.",
     "- If a selected clip is weak, repetitive, too short, technically poor, or mismatched to its beat, use search_footage or best_for_beat to find a replacement candidate and cite the query, result segment_id, evidence_refs, and key_frame_path in revision_notes.",
@@ -997,6 +1010,7 @@ function fallbackSelects(
       ],
       eligible_beats: [beatIdForStoryRole(storyRole)],
       motif_tags: uniqueStrings([...(segment.tags ?? []), storyRole]).slice(0, 8),
+      ...(segment.transcript_excerpt ? { transcript_excerpt: segment.transcript_excerpt } : {}),
       trim_hint: {
         preferred_duration_us: Math.min(
           Math.max(MIN_FINE_DURATION_US, segment.src_out_us - segment.src_in_us),
@@ -1139,6 +1153,8 @@ function fallbackBlueprint(
     dialogue_policy: {
       preserve_natural_breath: true,
       avoid_wall_to_wall_voiceover: true,
+      cut_tail_hold_sec: 0.25,
+      cut_audio_fade_out_sec: 0.16,
     },
     transition_policy: {
       prefer_match_texture_over_flashy_fx: true,

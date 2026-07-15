@@ -1,0 +1,15 @@
+id: longform_reduction
+category: linear_sequence
+primary_phase: assemble
+status: active
+required_signals: []
+when:
+  - "profile == longform-event"
+  - "candidate windows were materialized from transcript utterances"
+avoid_when:
+  - "the edit is a short highlight or montage"
+effects:
+  metadata_tags:
+    - longform_reduction
+    - chapter_coverage_protected
+    - transcript_window_materialized

@@ -100,6 +100,17 @@ export const CAPTION_STYLE_PRESETS: Record<string, CaptionStylePreset> = {
     maxWidthRatio: 0.8,
     wrapStyle: 2,
   },
+  "longform-event": {
+    ...DEFAULT_CAPTION_STYLE_PRESET,
+    presetId: "longform-event",
+    fontFamily: "Hiragino Sans",
+    fontSizePx1080: 56,
+    lineHeightPx1080: 70,
+    outlinePx1080: 4,
+    marginV1080: 48,
+    maxWidthRatio: 0.9,
+    wrapStyle: 2,
+  },
   "sns-vertical": {
     ...DEFAULT_CAPTION_STYLE_PRESET,
     presetId: "sns-vertical",

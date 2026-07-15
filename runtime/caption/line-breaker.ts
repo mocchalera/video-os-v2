@@ -44,6 +44,14 @@ export function getLayoutPolicy(language: string): LayoutPolicy {
 const JA_LINE_START_FORBIDDEN = new Set([
   "は", "が", "を", "に", "で", "と", "も", "の", "へ", "や", "か",
   "って", "った", "ます", "です", "ない", "する", "した", "って",
+  "すぎ", "して", "しま", "ため", "ので", "のに", "けれ", "という",
+  "こと", "もの", "区", "市", "県", "町", "村", "氏", "先生", "さん",
+  "て", "る", "ん",
+]);
+
+const JA_LINE_END_DISCOURAGED = new Set([
+  "は", "が", "を", "に", "で", "と", "も", "の", "へ", "や", "か",
+  "から", "まで", "より", "って",
 ]);
 
 /** English function words that should not be orphaned at line start */
@@ -78,6 +86,7 @@ export interface LineBreakResult {
 export function breakLines(
   text: string,
   policy: LayoutPolicy,
+  protectedTerms: string[] = [],
 ): LineBreakResult {
   // If already has manual line breaks, validate them
   if (text.includes("\n")) {
@@ -99,12 +108,12 @@ export function breakLines(
 
   // Needs 2 lines
   if (len <= policy.maxCharsPerLine * policy.maxLines) {
-    const lines = splitIntoTwoLines(text, policy);
+    const lines = splitIntoTwoLines(text, policy, protectedTerms);
     return { lines, needsSplit: false, layoutViolation: false };
   }
 
   // Too long for 2 lines — try best effort 2-line, mark for split
-  const lines = splitIntoTwoLines(text, policy);
+  const lines = splitIntoTwoLines(text, policy, protectedTerms);
   const violation = lines.some(
     (l) => lineLength(l, policy.language) > policy.maxCharsPerLine,
   );
@@ -115,9 +124,27 @@ export function breakLines(
 /**
  * Split text into two balanced lines using priority rules.
  */
-function splitIntoTwoLines(text: string, policy: LayoutPolicy): string[] {
+function splitIntoTwoLines(
+  text: string,
+  policy: LayoutPolicy,
+  protectedTerms: string[],
+): string[] {
   const isJa = policy.language.startsWith("ja");
-  const candidates = findBreakCandidates(text, policy);
+  const jaWordBoundaries = isJa ? findJapaneseWordBoundaries(text) : new Set<number>();
+  const allCandidates = findBreakCandidates(text, policy);
+  const fittingCandidates = allCandidates.filter((idx) => {
+    const line1 = text.slice(0, idx).trim();
+    const line2 = text.slice(idx).trim();
+    return lineLength(line1, policy.language) <= policy.maxCharsPerLine &&
+      lineLength(line2, policy.language) <= policy.maxCharsPerLine &&
+      !isInsideProtectedTerm(text, idx, protectedTerms);
+  });
+  // A two-line caption that fits the declared layout must never overflow just
+  // to avoid a less desirable grammatical break. Apply linguistic scoring
+  // only after enforcing the hard width constraint.
+  const candidates = fittingCandidates.length > 0
+    ? fittingCandidates
+    : allCandidates;
 
   if (candidates.length === 0) {
     // No good break point; split at midpoint
@@ -139,13 +166,31 @@ function splitIntoTwoLines(text: string, policy: LayoutPolicy): string[] {
     // Penalty: imbalance
     let score = Math.abs(line1Len - line2Len);
 
+    if (isJa) {
+      // Natural Japanese captions should break at punctuation or a lexical
+      // boundary before considering visual balance. Intl.Segmenter gives us
+      // deterministic word-like boundaries without a morphology dependency.
+      if (/[。、！？!?,.:;]$/.test(line1)) score -= 80;
+      if (jaWordBoundaries.has(idx)) score -= 30;
+      if (!jaWordBoundaries.has(idx) && isSameScriptContinuation(text[idx - 1], text[idx])) {
+        // A visually balanced midpoint is still a bad subtitle break when it
+        // tears one reading unit apart (e.g. こ|れ, 探そ|う, Gemini, 100).
+        // Prefer the nearest lexical boundary even when the two lines are a
+        // little less symmetrical.
+        score += 100;
+      }
+      if (endsWithJaDiscouragedToken(line1)) score += 35;
+      if (/^[。、！？!?,.:;）】」』]/.test(line2)) score += 80;
+      if (isKanjiToHiraganaContinuation(text[idx - 1], text[idx])) score += 120;
+    }
+
     // Penalty: line too long
     if (line1Len > policy.maxCharsPerLine) score += (line1Len - policy.maxCharsPerLine) * 5;
     if (line2Len > policy.maxCharsPerLine) score += (line2Len - policy.maxCharsPerLine) * 5;
 
     // Penalty: forbidden line start
     if (isJa && line2.length > 0 && isJaForbiddenLineStart(line2)) {
-      score += 20;
+      score += 120;
     }
     if (!isJa && line2.length > 0 && isEnOrphanStart(line2)) {
       score += 20;
@@ -198,6 +243,56 @@ function findBreakCandidates(text: string, policy: LayoutPolicy): number[] {
   }
 
   return positions;
+}
+
+function findJapaneseWordBoundaries(text: string): Set<number> {
+  if (typeof Intl.Segmenter !== "function") return new Set<number>();
+  return new Set(
+    [...new Intl.Segmenter("ja", { granularity: "word" }).segment(text)]
+      .map((segment) => segment.index)
+      .filter((index) => index > 0 && index < text.length),
+  );
+}
+
+function endsWithJaDiscouragedToken(line: string): boolean {
+  if (typeof Intl.Segmenter === "function") {
+    const segments = [...new Intl.Segmenter("ja", { granularity: "word" }).segment(line)];
+    const last = segments.at(-1)?.segment;
+    return last ? JA_LINE_END_DISCOURAGED.has(last) : false;
+  }
+  return [...JA_LINE_END_DISCOURAGED].some((token) => line === token);
+}
+
+function isKanjiToHiraganaContinuation(previous: string, next: string): boolean {
+  if (!/[一-龯々]/.test(previous) || !/[ぁ-ゖ]/.test(next)) return false;
+  // These single-character particles commonly form a valid bunsetsu break.
+  return !/[はがをにでとのへもやか]/.test(next);
+}
+
+function isSameScriptContinuation(previous: string, next: string): boolean {
+  if (!previous || !next) return false;
+  return (
+    (/[ぁ-ゖ]/.test(previous) && /[ぁ-ゖ]/.test(next)) ||
+    (/[ァ-ヺー]/.test(previous) && /[ァ-ヺー]/.test(next)) ||
+    (/[A-Za-z]/.test(previous) && /[A-Za-z]/.test(next)) ||
+    (/[0-9]/.test(previous) && /[0-9]/.test(next))
+  );
+}
+
+function isInsideProtectedTerm(
+  text: string,
+  index: number,
+  protectedTerms: string[],
+): boolean {
+  for (const term of protectedTerms) {
+    if (!term) continue;
+    let start = text.indexOf(term);
+    while (start >= 0) {
+      if (index > start && index < start + term.length) return true;
+      start = text.indexOf(term, start + term.length);
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +363,8 @@ export function checkCps(
 export function formatCaption(
   text: string,
   language: string,
+  protectedTerms: string[] = [],
 ): LineBreakResult {
   const policy = getLayoutPolicy(language);
-  return breakLines(text, policy);
+  return breakLines(text, policy, protectedTerms);
 }

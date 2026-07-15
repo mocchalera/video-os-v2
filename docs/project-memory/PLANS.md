@@ -588,3 +588,11 @@ Goal: make Studio feel dense, stable, and professional at real project scale.
 - Full verification can be slower and may expose environment blockers distinct from product regressions.
 - SwiftPM tests previously hit a local macOS code-signing policy blocker, but `swift test --package-path apps/macos-studio` passed 305 tests / 0 failures on 2026-06-25 after the timeline zoom/fit slice.
 - The next milestone should avoid broad schema churn; prefer using existing review/studio patch contracts unless a direct-edit operation cannot be represented safely.
+# 2026-07-13 Longform Event Editing
+
+- [x] Add the `longform-event` profile and `longform-documentary` policy without changing the short `event-recap` contract.
+- [x] Build deterministic transcript-window reduction with primary-lane selection, chapter coverage, exact trims, exclusion reasons, and a hard duration gate.
+- [x] Connect the mode to both the canonical `npm run full-pipeline` route and the command-based triage/blueprint route.
+- [x] Compile a 136-clip, 62.7-minute plan from 168.2 minutes of Lively ALT sources through the existing compiler without writing project artifacts.
+- [ ] Render and inspect a real one-hour rough cut, including A/V sync and output-size/runtime behavior.
+- [ ] Add chapter-sampled visual/audio QA and bounded automatic repairs for visual-only dead time, multicamera switches, applause, and music-only intervals.

@@ -742,6 +742,7 @@ export function selectsFromLlmResponse(
       risks: uniqueStrings([...stringArray(item.risks), ...(segment.quality_flags ?? [])]),
       confidence: clamp01(clamp01(item.confidence, 0.5) - (segment.confidence_penalty ?? 0), 0.5),
     };
+    if (segment.transcript) candidate.transcript_excerpt = segment.transcript;
     const semanticRank = sanitizeSemanticRank(item.semantic_rank);
     if (semanticRank !== undefined) candidate.semantic_rank = semanticRank;
     const evidence = stringArray(item.evidence);

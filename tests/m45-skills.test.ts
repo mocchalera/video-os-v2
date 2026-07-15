@@ -45,9 +45,9 @@ describe("Skill Registry", () => {
     clearSkillCache();
   });
 
-  it("loads all 14 supported skills", () => {
+  it("loads all 15 supported skills", () => {
     const skills = loadSkills(SKILLS_DIR);
-    expect(skills.size).toBe(14);
+    expect(skills.size).toBe(15);
     expect(skills.has("talking_head_pacing")).toBe(true); // graduated from _deferred
     expect(skills.has("build_to_peak")).toBe(true);
     expect(skills.has("silence_beat")).toBe(true);
@@ -62,6 +62,7 @@ describe("Skill Registry", () => {
     expect(skills.has("smash_cut_energy")).toBe(true);
     expect(skills.has("deliberate_axis_break")).toBe(true);
     expect(skills.has("human_golden_order")).toBe(true);
+    expect(skills.has("longform_reduction")).toBe(true);
   });
 
   it("excludes deferred skills", () => {

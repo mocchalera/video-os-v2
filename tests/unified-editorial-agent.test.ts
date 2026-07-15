@@ -537,6 +537,7 @@ describe("unified editorial agent", () => {
     expect(validateSelects(result.selects), JSON.stringify(validateSelects.errors, null, 2)).toBe(true);
     expect(validateBlueprint(result.blueprint), JSON.stringify(validateBlueprint.errors, null, 2)).toBe(true);
     expect(result.selects.candidates.length).toBeGreaterThan(0);
+    expect(result.selects.candidates.some((candidate) => candidate.transcript_excerpt)).toBe(true);
     expect(result.blueprint.beats.length).toBeGreaterThan(0);
   });
 
@@ -853,6 +854,9 @@ describe("unified editorial agent", () => {
       expect(task.mode).toBe("interactive");
       expect(task.pass).toBe("rough");
       expect(task.prompt).toContain("## Representative frames for rough pass");
+      expect(task.prompt).toContain("semantically complete assertion");
+      expect(task.prompt).toContain("Never use an interviewer question card to repair a missing subject");
+      expect(task.prompt).toContain("Post-roll is presentation-only");
       expect(task.prompt).toContain(path.resolve(projectDir, "03_analysis/representative_frames/AST_001.jpg"));
       expect(task.frame_refs.length).toBe(3);
       expect(task.frame_refs.every((ref) => path.isAbsolute(ref.path))).toBe(true);
@@ -892,6 +896,8 @@ describe("unified editorial agent", () => {
     expect(task.prompt).toContain("mode=visual and image_query_path");
     expect(task.prompt).toContain("best_for_beat(beat_purpose, emotion, exclude_segment_ids, limit)");
     expect(task.prompt).toContain("cite the query, result segment_id, evidence_refs, and key_frame_path");
+    expect(task.prompt).toContain("verify semantic boundaries before visual craft");
+    expect(task.prompt).toContain("Post-roll may preserve breath or room tone only after the assertion is complete");
     expect(task.tools?.map((tool) => tool.name)).toEqual([
       "analyze_clip_range",
       "find_moment",

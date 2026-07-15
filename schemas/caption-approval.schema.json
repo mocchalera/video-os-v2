@@ -136,7 +136,10 @@
           "enum": ["approved", "stale"]
         },
         "approved_by": { "type": "string" },
-        "approved_at": { "type": "string" }
+        "approved_at": { "type": "string" },
+        "base_caption_draft_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "caption_review_patch_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "validation_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
       },
       "additionalProperties": false
     }

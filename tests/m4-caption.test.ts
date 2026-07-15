@@ -126,6 +126,58 @@ function enPolicy(): CaptionPolicy {
 // ═════════════════════════════════════════════════════════════════════════
 
 describe("Caption Segmenter", () => {
+  it("splits oversized long-form transcript items into readable timed units", () => {
+    const timeline = mockTimeline({
+      tracks: {
+        video: [{ track_id: "V1", clips: [] }],
+        audio: [{
+          track_id: "A1",
+          clips: [{
+            clip_id: "c1",
+            segment_id: "SG_001",
+            asset_id: "A_001",
+            src_in_us: 0,
+            src_out_us: 10_000_000,
+            timeline_in_frame: 0,
+            timeline_duration_frames: 240,
+            role: "dialogue",
+          }],
+        }],
+      },
+    });
+    const transcript = mockTranscriptArtifact({}, [{
+      item_id: "TRI_A_001_0001",
+      speaker: "S1",
+      speaker_key: "A_001:speaker_1",
+      start_us: 0,
+      end_us: 10_000_000,
+      text: "あ".repeat(95),
+    }]);
+
+    const result = generateCaptionSource(
+      timeline as any,
+      new Map([["A_001", transcript]]) as any,
+      jaPolicy(),
+      "test",
+      "5",
+      { maxCharsPerCaption: 40, autoLineBreak: true },
+    );
+
+    expect(result.speech_captions).toHaveLength(3);
+    const captionLengths = result.speech_captions.map((caption) =>
+      caption.text.replace(/\n/g, "").length
+    );
+    expect(captionLengths.reduce((sum, length) => sum + length, 0)).toBe(95);
+    expect(captionLengths.every((length) => length <= 40)).toBe(true);
+    expect(result.speech_captions.map((caption) => caption.timeline_in_frame))
+      .toEqual([...result.speech_captions]
+        .map((caption) => caption.timeline_in_frame)
+        .sort((a, b) => a - b));
+    expect(result.speech_captions.every((caption) =>
+      caption.text.split("\n").every((line) => line.length <= 20)
+    )).toBe(true);
+  });
+
   it("generates captions from basic transcript + timeline", () => {
     const timeline = mockTimeline();
     const transcript = mockTranscriptArtifact();

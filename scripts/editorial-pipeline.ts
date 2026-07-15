@@ -19,6 +19,12 @@ import {
   roughCutPlanning,
 } from "../runtime/agents/unified-editorial-agent.js";
 import {
+  buildLongformBlueprint,
+  buildLongformSelectsFromProject,
+  isLongformEventBrief,
+  type LongformPlanningResult,
+} from "../runtime/editorial/longform-event.js";
+import {
   buildSelectedLinkage,
   buildVisualRetrievalTrace,
   extractAudioQueries,
@@ -336,6 +342,28 @@ function projectIdFromBrief(brief: CreativeBrief, projectDir: string): string {
   return brief.project_id || brief.project?.id || path.basename(projectDir);
 }
 
+export function buildLongformEditorialPass(
+  projectDir: string,
+  brief: CreativeBrief,
+): LongformPlanningResult & { blueprint: EditBlueprint } {
+  const planned = buildLongformSelectsFromProject(projectDir, brief);
+  if (planned.plan.coverage_status !== "ready") {
+    throw new Error(
+      `longform-event coverage cannot satisfy target duration: ` +
+      `${(planned.plan.selected_duration_us / 1_000_000).toFixed(1)}s selected for ` +
+      `${(planned.plan.target_duration_us / 1_000_000).toFixed(1)}s target`,
+    );
+  }
+  return {
+    ...planned,
+    blueprint: buildLongformBlueprint(
+      projectIdFromBrief(brief, projectDir),
+      brief,
+      planned.selects,
+    ),
+  };
+}
+
 async function runCompile(projectDir: string): Promise<void> {
   await runCompileTimeline({
     projectPath: projectDir,
@@ -379,6 +407,39 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
 
   try {
     const rough = await runStage("triage", async () => {
+      if (isLongformEventBrief(brief)) {
+        console.log("[editorial] longform transcript reduction");
+        const planned = buildLongformEditorialPass(projectDir, brief);
+        writeJsonArtifact(
+          projectDir,
+          "04_plan/visual_search_trace.json",
+          buildVisualRetrievalTrace(
+            projectIdFromBrief(brief, projectDir),
+            [],
+            new Date().toISOString(),
+            [],
+          ),
+        );
+        writeYamlArtifact(
+          projectDir,
+          "04_plan/selects_candidates.yaml",
+          planned.selects,
+          "selects-candidates.schema.json",
+        );
+        writeYamlArtifact(
+          projectDir,
+          "04_plan/edit_blueprint.yaml",
+          planned.blueprint,
+          "edit-blueprint.schema.json",
+        );
+        console.log(
+          `[editorial] longform ready: ${planned.selects.candidates.length} windows, ` +
+          `${planned.plan.chapters.length} chapters, ` +
+          `${(planned.plan.selected_duration_us / 60_000_000).toFixed(1)} min`,
+        );
+        return { selects: planned.selects, blueprint: planned.blueprint, bgmDurationSec: null };
+      }
+
       const bgm = await detectProjectBgm(projectDir, (message) => console.warn(message));
       const bgmDurationSec = bgm ? bgm.durationUs / 1_000_000 : null;
 
@@ -436,7 +497,7 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
 
     let selects: SelectsCandidates = rough.selects;
     let blueprint: EditBlueprint = rough.blueprint;
-    if (!args.skipFine) {
+    if (!args.skipFine && !isLongformEventBrief(brief)) {
       blueprint = await runStage("blueprint", async () => {
         console.log("[editorial] extracting fine-cut key frames");
         const keyFrames = await extractCraftKeyFrames(
@@ -471,7 +532,9 @@ export async function runEditorialPipeline(args: EditorialPipelineArgs): Promise
       });
     } else {
       await runStage("blueprint", async () => {
-        console.log("[editorial] fine pass skipped");
+        console.log(isLongformEventBrief(brief)
+          ? "[editorial] longform deterministic blueprint ready"
+          : "[editorial] fine pass skipped");
       });
     }
 

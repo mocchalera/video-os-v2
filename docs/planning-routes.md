@@ -18,9 +18,11 @@ npx tsx scripts/editorial-agent-task.ts --project <projectDir>
 
 `scripts/editorial-agent-task.ts` wraps the same rough/fine planning model used by `scripts/editorial-pipeline.ts`; it exists for headless or interactive agent handoff.
 
+`editorial.profile_hint: longform-event` is a canonical specialized branch inside `scripts/editorial-pipeline.ts` and therefore also inside `npm run full-pipeline`. It replaces the rough/fine LLM pass with deterministic transcript reduction and chapter allocation, then rejoins the shared compile/render/QA stages. See `docs/longform-event-mode.md`.
+
 ## Legacy Fallback
 
-Use `/triage` plus `/blueprint` only when the canonical route is not available, such as projects without Marlin artifacts or headless CI flows that must exercise the older command path. The command route uses the same clustering and quality-gate implementation, but it is no longer the preferred planning path.
+Use `/triage` plus `/blueprint` only when the canonical route is not available, such as projects without Marlin artifacts or headless CI flows that must exercise the older command path. The command route uses the same clustering and quality-gate implementation, and also supports `longform-event`, but it is no longer the preferred planning path.
 
 ## Diagnostic
 

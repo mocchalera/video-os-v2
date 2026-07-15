@@ -9,6 +9,11 @@ export type {
   DurationPolicy,
   // Creative Brief
   CreativeBriefEditorial,
+  LongformEditConfig,
+  LongformExclusionReason,
+  LongformExclusion,
+  LongformChapter,
+  LongformPlan,
   CreativeBrief,
   // Blueprint
   ConfirmedPreferences,

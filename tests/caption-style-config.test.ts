@@ -43,6 +43,12 @@ describe("caption style preset registry", () => {
     expect(cinematic).toBeLessThan(digest); // film captions stay restrained
     expect(sns).toBeGreaterThan(digest); // vertical short-form is oversized
     expect(resolveCaptionStylePreset("sns-vertical").fontWeight).toBe(700);
+    expect(resolveCaptionStylePreset("longform-event")).toMatchObject({
+      presetId: "longform-event",
+      fontSizePx1080: 56,
+      marginV1080: 48,
+      wrapStyle: 2,
+    });
   });
 
   it("falls back to default for unknown or undefined styling_class", () => {

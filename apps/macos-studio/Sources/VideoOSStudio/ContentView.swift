@@ -71,6 +71,21 @@ struct ContentView: View {
                     .frame(width: 360, height: 180)
             }
         }
+        .sheet(isPresented: $model.isCaptionFinishingPresented) {
+            if let project = model.selectedProject {
+                CaptionFinishingView(
+                    projectURL: project.path,
+                    repositoryRoot: model.repositoryRoot,
+                    onRevealInTimeline: { frame in
+                        model.isCaptionFinishingPresented = false
+                        model.scrubPlayhead(to: frame)
+                    }
+                )
+            } else {
+                ProgressView("プロジェクトを読み込んでいます...")
+                    .frame(width: 360, height: 180)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openStudioCommandPalette)) { _ in
             commandPaletteQuery = ""
             isCommandPalettePresented = true
@@ -321,6 +336,17 @@ private struct StudioTopBar: View {
             .accessibilityLabel("コマンドを検索")
             .accessibilityIdentifier("CommandPaletteButton")
             .help("コマンドを検索")
+
+            Button(action: { model.isCaptionFinishingPresented = true }) {
+                Label("字幕仕上げ", systemImage: "captions.bubble")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 30, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .disabled(model.selectedProject == nil)
+            .accessibilityLabel("字幕仕上げを開く")
+            .accessibilityIdentifier("CaptionFinishingButton")
+            .help("字幕の本文、改行、確認状態をリスク順に仕上げます")
 
             Button(action: { model.refresh() }) {
                 Label("プロジェクトを更新", systemImage: "arrow.clockwise")

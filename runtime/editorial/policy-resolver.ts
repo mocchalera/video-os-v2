@@ -153,6 +153,7 @@ const PROFILE_TO_POLICY: Record<string, string> = {
   "lecture-highlight": "tutorial",
   "product-demo": "tutorial",
   "event-recap": "highlight",
+  "longform-event": "longform-documentary",
   "family-growth-recap": "chronological-recap",
   "vertical-short": "highlight",
 };

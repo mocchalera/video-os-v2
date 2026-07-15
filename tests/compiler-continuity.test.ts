@@ -371,12 +371,101 @@ describe("compiler continuity constraints", () => {
 
     expect(secondBytes).toBe(firstBytes);
   });
+
+  it("repairs incomplete dialogue during compile and keeps original audio in sync", () => {
+    const projectDir = createProject({
+      activeEditingSkills: ["talking_head_pacing"],
+      audioPolicy: "original_only",
+      beats: [beat("b01", {
+        target_duration_frames: 144,
+        required_roles: ["dialogue"],
+        candidate_plan: { primary_candidate_ref: "SEG_DIALOGUE" },
+      })],
+      candidates: [candidate("SEG_DIALOGUE", "AST_INTERVIEW", "dialogue", ["b01"], {
+        src_in_us: 2_100_000,
+        duration_us: 1_900_000,
+      })],
+    });
+    fs.mkdirSync(path.join(projectDir, "03_analysis", "transcripts"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "03_analysis", "segments.json"), JSON.stringify({
+      items: [{
+        segment_id: "SEG_DIALOGUE",
+        asset_id: "AST_INTERVIEW",
+        src_in_us: 0,
+        src_out_us: 10_000_000,
+        duration_us: 10_000_000,
+        rep_frame_us: 5_000_000,
+      }],
+    }), "utf-8");
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis", "transcripts", "TR_AST_INTERVIEW.json"),
+      JSON.stringify({
+        asset_id: "AST_INTERVIEW",
+        items: [
+          {
+            start_us: 0,
+            end_us: 2_000_000,
+            speaker: "guest",
+            text: "受講前はAIを資料作成に使っていました",
+          },
+          {
+            start_us: 2_100_000,
+            end_us: 4_000_000,
+            speaker: "guest",
+            text: "ってことは僕も変わらなかったと思いますけど",
+          },
+          {
+            start_us: 4_100_000,
+            end_us: 6_000_000,
+            speaker: "guest",
+            text: "実際に受講して使い方が変わりました",
+          },
+        ],
+      }),
+      "utf-8",
+    );
+
+    const messages: string[] = [];
+    const result = compile({
+      projectPath: projectDir,
+      repoRoot,
+      createdAt,
+      log: (message) => messages.push(message),
+    });
+    const video = result.timeline.tracks.video
+      .find((track) => track.track_id === "V1")!.clips[0];
+    const audio = result.timeline.tracks.audio
+      .flatMap((track) => track.clips)
+      .find((clip) => clip.segment_id === "SEG_DIALOGUE");
+
+    expect(video).toMatchObject({
+      src_in_us: 0,
+      src_out_us: 6_000_000,
+      timeline_duration_frames: 144,
+      metadata: {
+        dialogue_semantic_repair: {
+          status: "repaired",
+          added_utterance_count: 2,
+          issues_after: [],
+        },
+      },
+    });
+    expect(audio).toMatchObject({
+      src_in_us: 0,
+      src_out_us: 6_000_000,
+      timeline_duration_frames: 144,
+    });
+    expect(messages).toContainEqual(expect.stringContaining(
+      "[dialogue-semantic-repair] attempted=1 repaired=1 unresolved=0",
+    ));
+  });
 });
 
 function createProject(input: {
   beats: EditBlueprint["beats"];
   candidates: Candidate[];
   activeEditingSkills?: string[];
+  audioPolicy?: "ducking" | "bgm_only" | "original_only";
   qualityTargets?: EditBlueprint["quality_targets"];
   runtimeTargetSec?: number;
 }): string {
@@ -399,7 +488,7 @@ function createProject(input: {
     message: { primary: "test" },
     emotion_curve: ["start", "end"],
     caption_policy: "off",
-    audio_policy: "bgm_only",
+    audio_policy: input.audioPolicy ?? "bgm_only",
   });
 
   writeYaml(path.join(projectDir, "04_plan", "edit_blueprint.yaml"), {

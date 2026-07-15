@@ -1,10 +1,12 @@
 # talking_head_pacing — micro-level dialogue pacing for interview / talking-head edits.
 #
-# Increment 1 (active here): utterance-boundary snapping. When transcripts exist,
-# snap each clip's in/out to the nearest utterance edge so cuts land on phrase
-# boundaries instead of mid-word. This is what makes review metric
-# audio.speech_cut pass for dialogue-driven digests. Pure, deterministic trim
-# refinement — no within-beat IR required.
+# Increment 1 (active here): utterance-boundary snapping plus semantic-boundary
+# QA and bounded repair. Transcript item edges prevent mid-word cuts; the
+# semantic repair loop then adds same-speaker neighboring utterances, rechecks
+# the text, and ripples the timeline only after a complete repair is proven.
+# story.dialogue_completeness blocks unresolved hard findings. Post-roll is
+# clamped before the next utterance so breathing room never imports a new
+# assertion.
 #
 # Increment 2 (still deferred — needs within-beat multi-clip IR): excising filler
 # utterances ("えーと/あの/um") from the timeline and tightening long pauses.
@@ -21,6 +23,12 @@ avoid_when:
   - "dominant_visual_mode == event_broll"
 effects:
   utterance_boundary_snap: true
+  semantic_completeness_gate: true
+  semantic_completeness_auto_repair: true
+  semantic_repair_max_iterations: 4
+  semantic_repair_max_extension_us: 15000000
+  semantic_repair_same_speaker_only: true
+  post_roll_must_stop_before_next_utterance: true
   utterance_snap_tolerance_us: 700000
   metadata_tags:
     - utterance_boundary_snapped

@@ -39,12 +39,14 @@ CI はこの境界に合わせ、`macos-studio` job で SwiftPM tests と CLI sm
 - Scene continuity ordering: timestamp clustering と Qwen visual coherence による greedy chain で、同一シーンや見た目のつながりを保つ
 - QA auto-improvement loop: `render -> Marlin QA -> brief alignment -> issue detection -> fix proposal -> apply -> recompile -> rerender` を最大 3 iteration で実行
 - Render duration accounting: expected / actual render duration、gap、xfade overlap、source clamp を `render-report.json` で検証
+- 汎用エンディング処理: 最終発話後の素材ハンドルを余韻として残し、音声フェードと任意の黒／白フェードを決定論的に適用
 - 編集技法の自動選択: Transition Skill Cards + Adjacency Analyzer + Walter Murch の Rule of Six
 - BGM ビートシンク: カットポイントを beat / downbeat にスナップ
 - Duration Mode: `strict` / `guide` を creative brief と profile から解決。`guide` は VLM peak 保護を優先
 - Premiere Pro ラウンドトリップ: FCP7 XML export / import、UXP Watcher、diff engine を実装
 - アスペクト比自動対応: 最頻アスペクト比を推定し、`letterbox` / `pillarbox` を判定
 - 時系列順コンパイル: `keepsake` / `event-recap` 系は chronological order を選択可能
+- 長尺イベント削減: `longform-event` は2時間級の固定カメラ素材を発話窓と章に分け、不要区間を記録しながら約1時間の時系列タイムラインへ決定論的に圧縮
 - Schema 駆動 + Gate 制御: canonical artifacts を validate しながら進行
 - Full Autonomy Mode: `autonomy.mode: full` で brief 確定後の確認ゲートを自動通過し、粗編集まで自走
 - ローカル推論 / 埋め込み実行: Qwen3-VL、CLAP、E5、Marlin はローカル実行を前提にし、外部 embedding API は不要
@@ -148,6 +150,8 @@ npm run full-pipeline -- \
 ```
 
 各実行後、stage 別の実測時間を `projects/my-project/03_analysis/pipeline-timings.json` に追記します。次回実行ではこの履歴を読んで ETA を推定し、初回は `segments.json` のセグメント数を使った粗い見積もりにフォールバックします。どちらも無い stage は `計測中` と表示します。
+
+長尺イベントでは `creative_brief.yaml` の `editorial.profile_hint` を `longform-event`、`project.runtime_target_sec` を希望尺（例: `3600`）に設定します。公式 `full-pipeline` は transcript-first の削減計画へ自動分岐し、章カバレッジや尺を満たせなければコンパイル前に停止します。設定と artifact 契約は [`docs/longform-event-mode.md`](docs/longform-event-mode.md) を参照してください。
 
 ### 5. パッケージまで進める
 

@@ -57,9 +57,20 @@ reports/generated/
 projects/*
 !projects/_template/
 !projects/demo/
+!projects/sample/
+!projects/sample/**
 projects/demo/project_state.yaml
 projects/*/03_analysis/search/
 projects/*/09_output/
+
+# Local runtime locks and interpreter caches
+.project-loop/*.lock
+**/__pycache__/
+
+# Generated evaluation runs are local evidence unless explicitly promoted.
+reports/eval/marlin-qa-*.json
+reports/eval/self-*_recompiled_-*.json
+reports/eval/self-*_recompiled_-*.md
 reports/eval/regen-scratch/
 reports/eval/*/_scratch/
 

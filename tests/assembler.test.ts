@@ -6,11 +6,14 @@ import {
   assembleTimelineToMp4,
   buildAudioAssemblyPlan,
   buildBgmAudioRenderArgs,
+  buildAudioTrimArgs,
   buildFinalAssemblyMuxArgs,
+  buildVideoTrimArgs,
   buildVideoAssemblyPlan,
   type ExecFileLike,
   formatFfmpegTimestamp,
   readTimeline,
+  extractEndingVideoFade,
 } from "../runtime/render/assembler.js";
 import { buildAspectRatioFitFilter } from "../runtime/render/pipeline.js";
 
@@ -167,6 +170,47 @@ describe("ffmpeg assembler", () => {
     expect(args).toContain("42");
     const filter = args[args.indexOf("-af") + 1];
     expect(filter).toContain("afade=t=out:st=40.0000:d=2.0000");
+  });
+
+  it("applies clip-level ending fades to source audio and video", () => {
+    const audioArgs = buildAudioTrimArgs(
+      "/tmp/source.mov",
+      "/tmp/audio.wav",
+      0,
+      6,
+      48_000,
+      2,
+      { fade_out_frames: 48 },
+      undefined,
+      24,
+    );
+    expect(audioArgs[audioArgs.indexOf("-af") + 1]).toContain(
+      "afade=t=out:st=4.000000:d=2.000000",
+    );
+
+    const clip = {
+      metadata: {
+        ending_treatment: {
+          video_fade_color: "white",
+          video_fade_out_frames: 36,
+        },
+      },
+    } as unknown as Parameters<typeof extractEndingVideoFade>[0];
+    const fade = extractEndingVideoFade(clip, 24);
+    const videoArgs = buildVideoTrimArgs(
+      "/tmp/source.mov",
+      "/tmp/video.mp4",
+      0,
+      6,
+      1920,
+      1080,
+      24,
+      undefined,
+      fade,
+    );
+    expect(videoArgs[videoArgs.indexOf("-vf") + 1]).toContain(
+      "fade=t=out:st=4.5:d=1.5:color=white",
+    );
   });
 
   it("masters final audio with loudnorm during mux", () => {

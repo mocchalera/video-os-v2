@@ -1,0 +1,272 @@
+{
+  "version": "1.0",
+  "project_id": "ax1-female-testimonial-d4892",
+  "base_timeline_version": "1",
+  "caption_policy": {
+    "language": "ja",
+    "delivery_mode": "both",
+    "source": "transcript",
+    "styling_class": "clean-lower-third"
+  },
+  "speech_captions": [
+    {
+      "caption_id": "SC_0001",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 0,
+      "timeline_duration_frames": 192,
+      "text": "『しらす茹でゲーム』から始まり\n自走のツールを作るところまで",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0019"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.63,
+        "dwell_ms": 8000
+      }
+    },
+    {
+      "caption_id": "SC_0002",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 192,
+      "timeline_duration_frames": 144,
+      "text": "本当に、こんなことまで\nできるんだとびっくりしました。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0020",
+        "TRI_AST_610FB4A0_0021"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.33,
+        "dwell_ms": 6000
+      }
+    },
+    {
+      "caption_id": "SC_0003",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 336,
+      "timeline_duration_frames": 148,
+      "text": "これを知識だけで終わらせず\nちゃんと活用していきたい。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0021"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.22,
+        "dwell_ms": 6167
+      }
+    },
+    {
+      "caption_id": "SC_0004",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 497,
+      "timeline_duration_frames": 116,
+      "text": "本当に幅広く\nいろんな価値があると思っていて",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0125"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.34,
+        "dwell_ms": 4833
+      }
+    },
+    {
+      "caption_id": "SC_0005",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 635,
+      "timeline_duration_frames": 173,
+      "text": "私も今日、フォルダ整理を\nあっという間にしてもらって",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0125"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.47,
+        "dwell_ms": 7208
+      }
+    },
+    {
+      "caption_id": "SC_0006",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 810,
+      "timeline_duration_frames": 79,
+      "text": "普段はスタッフに\n頼んでいる作業です。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0126"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5.47,
+        "dwell_ms": 3292
+      }
+    },
+    {
+      "caption_id": "SC_0007",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 889,
+      "timeline_duration_frames": 87,
+      "text": "スタッフが知っていれば\n人がやる必要もない。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0126"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5.79,
+        "dwell_ms": 3625
+      }
+    },
+    {
+      "caption_id": "SC_0008",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1007,
+      "timeline_duration_frames": 52,
+      "text": "実作業者も\n知った方がいいし",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0127"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 6,
+        "dwell_ms": 2167
+      }
+    },
+    {
+      "caption_id": "SC_0009",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1067,
+      "timeline_duration_frames": 48,
+      "text": "逆に、指示を出す側も",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0127"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5,
+        "dwell_ms": 2000
+      }
+    },
+    {
+      "caption_id": "SC_0010",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1115,
+      "timeline_duration_frames": 95,
+      "text": "ツールがある前提で\n仕事を頼んだ方がいい。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0127"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5.05,
+        "dwell_ms": 3958
+      }
+    },
+    {
+      "caption_id": "SC_0011",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1214,
+      "timeline_duration_frames": 130,
+      "text": "意思決定をする経営層も\n状況を踏まえた上で",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0128"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.69,
+        "dwell_ms": 5417
+      }
+    },
+    {
+      "caption_id": "SC_0012",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1356,
+      "timeline_duration_frames": 120,
+      "text": "AIの力も使いながら\n描ける未来があると思います。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0128"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.8,
+        "dwell_ms": 5000
+      }
+    },
+    {
+      "caption_id": "SC_0013",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1488,
+      "timeline_duration_frames": 94,
+      "text": "本当に、トップから末端まで\n幅広く",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0129"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.09,
+        "dwell_ms": 3917
+      }
+    },
+    {
+      "caption_id": "SC_0014",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1605,
+      "timeline_duration_frames": 115,
+      "text": "いろんな使い方で\nみんなが使っていけたらいい。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0129"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.59,
+        "dwell_ms": 4792
+      }
+    }
+  ],
+  "text_overlays": [],
+  "approval": {
+    "status": "approved",
+    "approved_by": "operator",
+    "approved_at": "2026-07-11T15:02:05.445Z"
+  }
+}

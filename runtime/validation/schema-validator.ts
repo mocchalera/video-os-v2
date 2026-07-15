@@ -140,6 +140,20 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_package/caption_review_patch.json",
+    schemaFile: "caption-review-patch.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/caption_review_preview.json",
+    schemaFile: "caption-review-preview.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "06_review/editorial_pipeline_status.json",
     schemaFile: "editorial-pipeline-status.schema.json",
     format: "json",
@@ -816,9 +830,16 @@ function runTimelineSemanticChecks(
     }
 
     const assetId = clip.asset_id;
+    const isAuthoredOverlay =
+      trackType === "overlay" &&
+      assetId === "__overlay__" &&
+      clip.role === "title" &&
+      typeof clip.segment_id === "string" &&
+      clip.segment_id.startsWith("TXT_");
     if (
       sourceMapAssetIds.size > 0 &&
       typeof assetId === "string" &&
+      !isAuthoredOverlay &&
       !sourceMapAssetIds.has(assetId)
     ) {
       violations.push({

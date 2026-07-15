@@ -92,9 +92,110 @@
         }
       },
       "additionalProperties": true
+    },
+    "longform_plan": {
+      "$ref": "#/$defs/longformPlan"
     }
   },
   "$defs": {
+    "longformPlan": {
+      "type": "object",
+      "required": [
+        "version", "mode", "source_selection", "selected_asset_ids", "excluded_asset_ids",
+        "source_duration_us", "speech_duration_us", "target_duration_us", "selected_duration_us",
+        "keep_ratio", "coverage_status", "chapters", "exclusions"
+      ],
+      "properties": {
+        "version": { "const": "1" },
+        "mode": { "const": "reduction" },
+        "source_selection": {
+          "type": "string",
+          "enum": ["auto_primary_lane", "all", "explicit"]
+        },
+        "selected_asset_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "excluded_asset_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "source_duration_us": { "type": "integer", "minimum": 1 },
+        "speech_duration_us": { "type": "integer", "minimum": 1 },
+        "target_duration_us": { "type": "integer", "minimum": 1 },
+        "selected_duration_us": { "type": "integer", "minimum": 1 },
+        "keep_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "coverage_status": { "type": "string", "enum": ["ready", "insufficient"] },
+        "chapters": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/longformChapter" }
+        },
+        "exclusions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/longformExclusion" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "longformChapter": {
+      "type": "object",
+      "required": [
+        "id", "label", "asset_ids", "source_in_us", "source_out_us",
+        "available_duration_us", "selected_duration_us", "candidate_refs"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "asset_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "source_in_us": { "type": "integer", "minimum": 0 },
+        "source_out_us": { "type": "integer", "minimum": 1 },
+        "available_duration_us": { "type": "integer", "minimum": 1 },
+        "selected_duration_us": { "type": "integer", "minimum": 1 },
+        "candidate_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "beat_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "longformExclusion": {
+      "type": "object",
+      "required": ["asset_id", "src_in_us", "src_out_us", "reason"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "src_in_us": { "type": "integer", "minimum": 0 },
+        "src_out_us": { "type": "integer", "minimum": 0 },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "alternate_angle_lane", "duplicate_utterance", "filler_only", "housekeeping",
+            "invalid_transcript", "silence_gap", "low_priority_for_target", "short_fragment"
+          ]
+        },
+        "utterance_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
     "decisionRuntime": {
       "type": "object",
       "required": ["runtime"],

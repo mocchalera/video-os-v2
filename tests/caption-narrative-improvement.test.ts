@@ -57,7 +57,41 @@ import {
   type EditorialDecision,
   type CaptionDraft,
 } from "../runtime/caption/editorial.js";
-import type { CaptionSource, SpeechCaption } from "../runtime/caption/segmenter.js";
+import {
+  enforceCaptionSeparation,
+  type CaptionSource,
+  type SpeechCaption,
+} from "../runtime/caption/segmenter.js";
+
+describe("Caption timing separation", () => {
+  it("leaves a one-frame blank between adjacent captions", () => {
+    const captions: SpeechCaption[] = [
+      makeTimedCaption("SC_1", 0, 30),
+      makeTimedCaption("SC_2", 30, 30),
+    ];
+    const separated = enforceCaptionSeparation(captions, 1, 30, "ja");
+    expect(separated[0].timeline_duration_frames).toBe(29);
+    expect(
+      separated[0].timeline_in_frame + separated[0].timeline_duration_frames,
+    ).toBeLessThan(separated[1].timeline_in_frame);
+  });
+});
+
+function makeTimedCaption(id: string, start: number, duration: number): SpeechCaption {
+  return {
+    caption_id: id,
+    asset_id: "AST_1",
+    segment_id: "SEG_1",
+    timeline_in_frame: start,
+    timeline_duration_frames: duration,
+    text: "字幕です",
+    transcript_ref: "TR_1",
+    transcript_item_ids: [id],
+    source: "transcript",
+    styling_class: "longform-event",
+    metrics: { cps: 4, dwell_ms: 1000 },
+  };
+}
 
 // ═════════════════════════════════════════════════════════════════════════
 // Phase A: Deterministic Cleanup Tests
@@ -191,6 +225,67 @@ describe("Line Breaker", () => {
       const text = "これがAI技術の素晴らしさです"; // 14 chars, fits 1 line
       const result = breakLines(text, jaPolicy);
       expect(result.lines).toHaveLength(1);
+    });
+
+    it("prefers Japanese lexical boundaries over a visually balanced mid-word break", () => {
+      const result = breakLines(
+        "自分を取り戻すヒント精神科医Tomyと語るイベントです",
+        jaPolicy,
+        ["精神科医Tomy"],
+      );
+      expect(result.lines).toEqual([
+        "自分を取り戻すヒント",
+        "精神科医Tomyと語るイベントです",
+      ]);
+    });
+
+    it("does not start a line with a dependent suffix or municipality suffix", () => {
+      const dependent = breakLines(
+        "本日は大丈夫が口癖のあなたへ頑張りすぎてしまう人のためです",
+        jaPolicy,
+      );
+      expect(dependent.lines[1]).not.toMatch(/^(すぎ|して|しま|ため)/);
+
+      const municipality = breakLines(
+        "本当に今日ちょっと渋谷区となっているんですけれども",
+        jaPolicy,
+      );
+      expect(municipality.lines[1]).not.toMatch(/^(区|市|県|町|村)/);
+    });
+
+    it("does not split a conjugated Japanese word between kanji and okurigana", () => {
+      const result = breakLines(
+        "そしてうつ未満の取説聴いてもらえると心は軽くなる",
+        jaPolicy,
+      );
+      expect(result.lines[0]).not.toMatch(/聴$/);
+      expect(result.lines[1]).not.toMatch(/^いて/);
+    });
+
+    it("does not split a hiragana reading unit for visual balance", () => {
+      const demonstrative = breakLines(
+        "いろいろGeminiはあるからこれでいいかみたいな",
+        jaPolicy,
+      );
+      expect(demonstrative.lines[0]).not.toMatch(/こ$/);
+      expect(demonstrative.lines[1]).not.toMatch(/^れ/);
+
+      const conjugation = breakLines(
+        "もともとその後任の方を探そうかなと思ってたんですよ",
+        jaPolicy,
+      );
+      expect(conjugation.lines[0]).not.toMatch(/そ$/);
+      expect(conjugation.lines[1]).not.toMatch(/^う/);
+    });
+
+    it("does not split a Japanese place-name kanji compound", () => {
+      const result = breakLines(
+        "本当に今日ちょっと渋谷区となっているんですけれども",
+        jaPolicy,
+        ["渋谷区"],
+      );
+      expect(result.lines[0]).not.toMatch(/渋$/);
+      expect(result.lines[1]).not.toMatch(/^谷区/);
     });
   });
 

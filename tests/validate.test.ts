@@ -600,6 +600,57 @@ describe("validate-schemas", () => {
       expect(violations[0].message).toContain("AST_MISSING");
     });
 
+    it("accepts authored synthetic assets on an overlay track", () => {
+      const timeline = makeTimeline([makeClip({ asset_id: "AST_OTHER" })]);
+      const tracks = timeline.tracks as Record<string, unknown>;
+      tracks.overlay = [
+        {
+          track_id: "O1",
+          kind: "overlay",
+          clips: [
+            {
+              ...makeClip({
+                clip_id: "SEC_01",
+                segment_id: "TXT_SEC_01",
+                asset_id: "__overlay__",
+                role: "title",
+              }),
+              metadata: {
+                overlay: {
+                  text: "SECTION 01\\nWhat changed?",
+                  source: "authored",
+                },
+              },
+            },
+          ],
+        },
+      ];
+      const sourceMap = {
+        version: "1",
+        project_id: "sample-mountain-reset",
+        media_dir: "02_media",
+        generated_at: "2026-07-09T00:00:00.000Z",
+        items: [
+          {
+            asset_id: "AST_OTHER",
+            source_locator: "02_media/other.mov",
+            local_source_path: "other.mov",
+            link_path: "02_media/other.mov",
+          },
+        ],
+      };
+
+      const tmp = createTempProject("tl-authored-overlay", {
+        "05_timeline/timeline.json": timeline,
+        "02_media/source_map.json": sourceMap,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+      const violations = result.violations.filter((v) => v.rule === "timeline_asset_id_in_source_map");
+      expect(violations).toHaveLength(0);
+    });
+
     it("detects caption and marker bounds outside the timeline", () => {
       const timeline = makeTimeline(
         [

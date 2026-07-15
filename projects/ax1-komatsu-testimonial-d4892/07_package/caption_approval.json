@@ -1,0 +1,311 @@
+{
+  "version": "1.0",
+  "project_id": "ax1-komatsu-testimonial-d4892",
+  "base_timeline_version": "1",
+  "caption_policy": {
+    "language": "ja",
+    "delivery_mode": "both",
+    "source": "transcript",
+    "styling_class": "clean-lower-third"
+  },
+  "speech_captions": [
+    {
+      "caption_id": "SC_0001",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 3,
+      "timeline_duration_frames": 55,
+      "text": "僕、そこが良かったと思う。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0091"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5.67,
+        "dwell_ms": 2292
+      }
+    },
+    {
+      "caption_id": "SC_0002",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 61,
+      "timeline_duration_frames": 92,
+      "text": "AIのやり方とか、\nいろんなツールを",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0092"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.43,
+        "dwell_ms": 3833
+      }
+    },
+    {
+      "caption_id": "SC_0003",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 153,
+      "timeline_duration_frames": 107,
+      "text": "バーッと羅列するだけの\n1日であれば",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0092"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.81,
+        "dwell_ms": 4458
+      }
+    },
+    {
+      "caption_id": "SC_0004",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 260,
+      "timeline_duration_frames": 67,
+      "text": "多分、半日も\nもたなかったと思う。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0093"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5.73,
+        "dwell_ms": 2792
+      }
+    },
+    {
+      "caption_id": "SC_0005",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 327,
+      "timeline_duration_frames": 138,
+      "text": "基本、やっぱり使う側とか\n今までやってきたこととか",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0094"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.17,
+        "dwell_ms": 5750
+      }
+    },
+    {
+      "caption_id": "SC_0006",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 465,
+      "timeline_duration_frames": 124,
+      "text": "そこに頼らない。\n100％頼ってはいけない",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0094"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.87,
+        "dwell_ms": 5167
+      }
+    },
+    {
+      "caption_id": "SC_0007",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 589,
+      "timeline_duration_frames": 86,
+      "text": "という落とし穴を\n全部理解しながら",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0094",
+        "TRI_AST_610FB4A0_0095"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.47,
+        "dwell_ms": 3583
+      }
+    },
+    {
+      "caption_id": "SC_0008",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 675,
+      "timeline_duration_frames": 136,
+      "text": "でも、絶対に必要な\nスキルだと感じました。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0095",
+        "TRI_AST_610FB4A0_0096"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.53,
+        "dwell_ms": 5667
+      }
+    },
+    {
+      "caption_id": "SC_0009",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 843,
+      "timeline_duration_frames": 138,
+      "text": "AIのセミナーや\n勉強会だと思っていたけど",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0131"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.48,
+        "dwell_ms": 5750
+      }
+    },
+    {
+      "caption_id": "SC_0010",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 981,
+      "timeline_duration_frames": 123,
+      "text": "全然そうじゃない。\n経営者として",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0131",
+        "TRI_AST_610FB4A0_0132"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 2.93,
+        "dwell_ms": 5125
+      }
+    },
+    {
+      "caption_id": "SC_0011",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1104,
+      "timeline_duration_frames": 232,
+      "text": "これから世の中を生きるには\n必ず必要な技術だと思うし",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0132"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 2.59,
+        "dwell_ms": 9667
+      }
+    },
+    {
+      "caption_id": "SC_0012",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1336,
+      "timeline_duration_frames": 64,
+      "text": "その中には\nあり方も入ってくる。",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0132"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5.63,
+        "dwell_ms": 2667
+      }
+    },
+    {
+      "caption_id": "SC_0013",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1426,
+      "timeline_duration_frames": 72,
+      "text": "自分がそう感じたので",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0132"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 3.33,
+        "dwell_ms": 3000
+      }
+    },
+    {
+      "caption_id": "SC_0014",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1498,
+      "timeline_duration_frames": 109,
+      "text": "最近、壁にぶつかっている\n経営者の方々には",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0133"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.4,
+        "dwell_ms": 4542
+      }
+    },
+    {
+      "caption_id": "SC_0015",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1610,
+      "timeline_duration_frames": 73,
+      "text": "ぜひトライして\nもらいたいと思うし",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0134"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 5.26,
+        "dwell_ms": 3042
+      }
+    },
+    {
+      "caption_id": "SC_0016",
+      "asset_id": "AST_610FB4A0",
+      "segment_id": "SEG_AST_610FB4A0_0001",
+      "timeline_in_frame": 1683,
+      "timeline_duration_frames": 142,
+      "text": "社員を送るだけじゃなく\nまずトップが感じることが大事",
+      "transcript_ref": "TR_AST_610FB4A0",
+      "transcript_item_ids": [
+        "TRI_AST_610FB4A0_0134",
+        "TRI_AST_610FB4A0_0135"
+      ],
+      "source": "transcript",
+      "styling_class": "clean-lower-third",
+      "metrics": {
+        "cps": 4.23,
+        "dwell_ms": 5917
+      }
+    }
+  ],
+  "text_overlays": [],
+  "approval": {
+    "status": "approved",
+    "approved_by": "operator",
+    "approved_at": "2026-07-11T15:02:05.245Z"
+  }
+}

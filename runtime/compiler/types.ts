@@ -34,6 +34,63 @@ export interface CreativeBriefEditorial {
   allow_inference?: boolean;
 }
 
+export interface LongformEditConfig {
+  mode?: "reduction";
+  source_selection?: "auto_primary_lane" | "all" | "explicit";
+  primary_asset_ids?: string[];
+  min_window_sec?: number;
+  max_window_sec?: number;
+  silence_gap_cut_sec?: number;
+  chapter_max_sec?: number;
+  coverage_interval_sec?: number;
+}
+
+export type LongformExclusionReason =
+  | "alternate_angle_lane"
+  | "duplicate_utterance"
+  | "filler_only"
+  | "housekeeping"
+  | "invalid_transcript"
+  | "silence_gap"
+  | "low_priority_for_target"
+  | "short_fragment";
+
+export interface LongformExclusion {
+  asset_id: string;
+  src_in_us: number;
+  src_out_us: number;
+  reason: LongformExclusionReason;
+  utterance_ids?: string[];
+}
+
+export interface LongformChapter {
+  id: string;
+  label: string;
+  asset_ids: string[];
+  source_in_us: number;
+  source_out_us: number;
+  available_duration_us: number;
+  selected_duration_us: number;
+  candidate_refs: string[];
+  beat_ids?: string[];
+}
+
+export interface LongformPlan {
+  version: "1";
+  mode: "reduction";
+  source_selection: "auto_primary_lane" | "all" | "explicit";
+  selected_asset_ids: string[];
+  excluded_asset_ids: string[];
+  source_duration_us: number;
+  speech_duration_us: number;
+  target_duration_us: number;
+  selected_duration_us: number;
+  keep_ratio: number;
+  coverage_status: "ready" | "insufficient";
+  chapters: LongformChapter[];
+  exclusions: LongformExclusion[];
+}
+
 export interface CreativeBrief {
   version: string;
   project_id: string;
@@ -46,6 +103,7 @@ export interface CreativeBrief {
   audio_policy?: BriefAudioPolicy;
   a1_loudnorm?: boolean;
   editorial?: CreativeBriefEditorial;
+  longform?: LongformEditConfig;
   [key: string]: unknown;
 }
 
@@ -191,6 +249,10 @@ export interface EndingPolicy {
   final_hold_min_frames?: number;
   final_visual_strategy?: string;
   final_audio_strategy?: string;
+  tail_hold_sec?: number;
+  audio_fade_out_sec?: number;
+  video_fade_out_sec?: number;
+  video_fade_color?: "none" | "black" | "white";
 }
 
 export interface EditBlueprint {
@@ -228,6 +290,10 @@ export interface EditBlueprint {
     preserve_natural_breath: boolean;
     avoid_wall_to_wall_voiceover: boolean;
     prioritize_lines?: string[];
+    /** Source post-roll retained after each dialogue cut. Opt-in for timing compatibility. */
+    cut_tail_hold_sec?: number;
+    /** Minimum fade used when retained post-roll reaches the next utterance. */
+    cut_audio_fade_out_sec?: number;
   };
   transition_policy?: TransitionPolicy;
   ending_policy?: EndingPolicy;
@@ -246,6 +312,7 @@ export interface EditBlueprint {
   timeline_order?: "chronological" | "editorial";
   // Track layout: single keeps visual story on V1; multi preserves overlay-style V2 inserts.
   track_layout?: TrackLayout;
+  longform_plan?: LongformPlan;
   [key: string]: unknown;
 }
 
@@ -449,6 +516,7 @@ export interface SelectsCandidates {
   editorial_summary?: EditorialSummary;
   quality_gate?: SelectsQualityGateSummary;
   coverage?: SelectsCoverageSummary;
+  longform_plan?: LongformPlan;
   [key: string]: unknown;
 }
 

@@ -326,6 +326,8 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
     dialogue_policy: {
       preserve_natural_breath: true,
       avoid_wall_to_wall_voiceover: true,
+      cut_tail_hold_sec: 0.25,
+      cut_audio_fade_out_sec: 0.16,
       prioritize_lines: ["short approved line"],
     },
     transition_policy: {
@@ -359,6 +361,9 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
     "brief と承認済み selects 候補だけを根拠に、編集設計として EditBlueprint JSON を作ってください。",
     "各 beat は story_arc と対応させ、candidate_plan.primary_candidate_ref は必ず下の selects の candidate_ref から選んでください。",
     "未知の候補や存在しない candidate_ref を作らないでください。迷う場合は fallback_candidate_refs に別の既存 candidate_ref を置いてください。",
+    "dialogue 候補は、質問テロップに頼らず主語または指示対象が選択範囲内で回収でき、話者が結論まで言い切っているものだけを採用してください。",
+    "ASR item の端は意味上の文境界とは限りません。冒頭が前文への従属形、または末尾が未完節の候補は primary/fallback に置かず、完全な隣接範囲を持つ候補を選んでください。",
+    "cut_tail_hold_sec は言い切った後の呼吸・ルームトーン専用です。欠けた文を補完したり次の発話を取り込んだりする目的では使わないでください。",
     "brief の emotion_curve と pacing intent に基づいて、必要な beat だけに craft directives を割り当ててください。craft は任意です。",
     "For each beat, choose an in_point technique: use 'cut_on_action' for energetic beats, 'peak_hold' for emotional moments, 'clean_in_clean_out' for opening/closing, 'pre_roll_enter' for anticipation.",
     "For exit craft, choose an out_point technique: use 'cut_on_action' to leave during motion, 'peak_hold' for emotional weight, 'post_action_hold' for breath after action, 'clean_in_clean_out' for static exits.",
@@ -707,6 +712,18 @@ function sanitizeDialoguePolicy(value: unknown): EditBlueprint["dialogue_policy"
   };
   const lines = stringArray(raw.prioritize_lines);
   if (lines.length > 0) policy.prioritize_lines = lines;
+  const cutTailHoldSec = numberValue(raw.cut_tail_hold_sec);
+  if (cutTailHoldSec !== undefined && cutTailHoldSec >= 0) {
+    policy.cut_tail_hold_sec = cutTailHoldSec;
+  } else if (policy.preserve_natural_breath) {
+    policy.cut_tail_hold_sec = 0.25;
+  }
+  const cutAudioFadeOutSec = numberValue(raw.cut_audio_fade_out_sec);
+  if (cutAudioFadeOutSec !== undefined && cutAudioFadeOutSec >= 0) {
+    policy.cut_audio_fade_out_sec = cutAudioFadeOutSec;
+  } else if (policy.preserve_natural_breath) {
+    policy.cut_audio_fade_out_sec = 0.16;
+  }
   return policy;
 }
 
@@ -1018,6 +1035,8 @@ function deterministicBlueprint(
     dialogue_policy: {
       preserve_natural_breath: true,
       avoid_wall_to_wall_voiceover: true,
+      cut_tail_hold_sec: 0.25,
+      cut_audio_fade_out_sec: 0.16,
     },
     transition_policy: {
       prefer_match_texture_over_flashy_fx: true,

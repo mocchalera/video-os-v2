@@ -1,0 +1,203 @@
+version: "1"
+project_id: ax1-komatsu-testimonial-d4892
+created_at: 2026-07-11T14:14:39Z
+analysis_artifact_version: 2.0.0
+decision_runtime:
+  runtime: agent
+  role: transcript-led testimonial selection
+  attempted_runtimes:
+    - runtime: groq-whisper-plus-local-pyannote
+      status: success
+      message: 143 utterances aligned to four local speaker clusters; S3 and S4
+        selected by human-confirmed visual identity.
+  fallback_warnings: []
+selection_notes:
+  - 小松社長だけを対象にした独立testimonial。
+  - S3とS4を別々の成果物にするため、candidate_idとeligible_beatsを話者別に分離した。
+  - S1の質問音声とS2の別参加者発言は明示的なrejectとし、対象者の体験が混ざらないようにした。
+  - 初回ラフは原音のみ。離れた時刻を接続する場合は、意味を変えないhard cutと字幕で構造を明確にする。
+  - 全字幕はGroq transcriptを下書きとし、固有名詞と誤認識語を映像・音声で再確認してから公開候補にする。
+editorial_summary:
+  dominant_visual_mode: talking_head
+  speaker_topology: multi_speaker
+  motion_profile: low
+  transcript_density: dense
+candidates:
+  - candidate_id: CAND_KOMATSU_DIFFERENCE
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 490000000
+    src_out_us: 524700000
+    role: hero
+    story_role: hook
+    speaker_role: primary
+    utterance_ids:
+      - TRI_AST_610FB4A0_0091
+      - TRI_AST_610FB4A0_0092
+      - TRI_AST_610FB4A0_0093
+      - TRI_AST_610FB4A0_0094
+      - TRI_AST_610FB4A0_0095
+      - TRI_AST_610FB4A0_0096
+    transcript_excerpt: AIのやり方やツールの羅列だけなら半日ももたなかった。使う側のことや、100%頼ってはいけない落とし穴まで理解しながら、それでも絶対に必要なスキルだと感じた。
+    why_it_matches: 小松社長が一般的なツール講習との差を率直に語り、AX-1の価値を「使う側のあり方」と「落とし穴」の両面で説明する最重要hook。
+    risks:
+      - Groqの「半日も待たなかった」は原音上「半日ももたなかった」と推定され、字幕校正が必要。
+      - 長い一文のため、意味を変えずに呼吸単位で字幕を分割する必要がある。
+    confidence: 0.97
+    semantic_rank: 1
+    evidence:
+      - brief.must_have[0]
+      - brief.must_have[2]
+      - transcript:TRI_AST_610FB4A0_0091-0096
+      - human_confirmed_speaker:S4
+    eligible_beats:
+      - komatsu_hook
+      - komatsu_thesis
+    semantic_dedupe_key: komatsu_beyond_tool_training
+    editorial_signals:
+      speech_intensity_score: 0.95
+      authenticity_score: 0.96
+      surprise_signal: 0.78
+      face_detected: true
+      visual_tags:
+        - komatsu
+        - talking_head
+        - differentiation
+  - candidate_id: CAND_KOMATSU_REFRAME
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 543500000
+    src_out_us: 602300000
+    role: support
+    story_role: experience
+    speaker_role: primary
+    utterance_ids:
+      - TRI_AST_610FB4A0_0105
+      - TRI_AST_610FB4A0_0106
+      - TRI_AST_610FB4A0_0107
+      - TRI_AST_610FB4A0_0108
+      - TRI_AST_610FB4A0_0109
+      - TRI_AST_610FB4A0_0110
+      - TRI_AST_610FB4A0_0111
+      - TRI_AST_610FB4A0_0112
+      - TRI_AST_610FB4A0_0113
+      - TRI_AST_610FB4A0_0114
+      - TRI_AST_610FB4A0_0115
+    transcript_excerpt: 自分の経験はもう古いのではと思っていたが、そうではない。生きてきたことを共有しながらテクノロジーを活用すれば、新たな光や見方を見出せる。
+    why_it_matches: AI時代に自身の経営経験をどう位置づけ直したかという個人的な認識変化があり、小松社長版を人間的に深める。
+    risks:
+      - 単独で約59秒あり、他候補と組み合わせる場合は意味単位で大幅に短縮する必要がある。
+      - 前半に自己否定的な言い回しが続くため、文脈不足の短い切り出しは避ける。
+    confidence: 0.88
+    semantic_rank: 5
+    evidence:
+      - brief.must_have[0]
+      - brief.must_have[2]
+      - transcript:TRI_AST_610FB4A0_0105-0115
+      - human_confirmed_speaker:S4
+    eligible_beats:
+      - komatsu_experience
+      - komatsu_payoff
+    semantic_dedupe_key: komatsu_experience_reframed
+    editorial_signals:
+      speech_intensity_score: 0.82
+      authenticity_score: 0.94
+      hope_signal: 0.86
+      face_detected: true
+      visual_tags:
+        - komatsu
+        - personal_reframe
+        - executive_experience
+  - candidate_id: CAND_KOMATSU_RECOMMENDATION
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 674200000
+    src_out_us: 718500000
+    role: dialogue
+    story_role: closing
+    speaker_role: primary
+    utterance_ids:
+      - TRI_AST_610FB4A0_0131
+      - TRI_AST_610FB4A0_0132
+      - TRI_AST_610FB4A0_0133
+      - TRI_AST_610FB4A0_0134
+      - TRI_AST_610FB4A0_0135
+    transcript_excerpt: AIのセミナー、勉強会だと思っていたけれど全然そうではない。壁にぶつかっている経営者にトライしてほしい。社員を送るだけでなく、まずトップが感じることが大事。
+    why_it_matches: AX-1への先入観が変わったことと、誰に勧めるかを本人の言葉で完結させる。信頼形成と自然なCTAを兼ねる最強のclosing。
+    risks:
+      - 冒頭の言い回しを短くしすぎると「AIセミナーではない」という誤解を招くため、転換まで残す。
+      - 「必ず必要な技術」など強い表現は本人発言として忠実に扱い、保証コピーへ転用しない。
+    confidence: 0.96
+    semantic_rank: 4
+    evidence:
+      - brief.must_have[0]
+      - brief.must_have[2]
+      - transcript:TRI_AST_610FB4A0_0131-0135
+      - human_confirmed_speaker:S4
+    eligible_beats:
+      - komatsu_payoff
+      - komatsu_closing
+    semantic_dedupe_key: komatsu_executive_recommendation
+    editorial_signals:
+      speech_intensity_score: 0.94
+      authenticity_score: 0.96
+      hope_signal: 0.9
+      face_detected: true
+      visual_tags:
+        - komatsu
+        - executive_recommendation
+        - credibility_close
+  - candidate_id: REJECT_INTERVIEWER_QUESTIONS
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 388000000
+    src_out_us: 393600000
+    role: reject
+    story_role: setup
+    speaker_role: interviewer
+    utterance_ids:
+      - TRI_AST_610FB4A0_0072
+      - TRI_AST_610FB4A0_0073
+    transcript_excerpt: もともとAIってどのくらい使われてたんですか？
+    why_it_matches: 質問内容は文脈把握に有用だが、briefではインタビュアー音声を長く残さず、一人称testimonialとして成立させる。
+    risks:
+      - 採用すると主話者の冒頭到達が遅れる。
+    confidence: 0.99
+    semantic_rank: 6
+    evidence:
+      - brief.must_avoid[0]
+      - transcript:TRI_AST_610FB4A0_0072-0073
+      - diarization:S1
+    rejection_reason: 対象外のインタビュアー音声。質問は字幕や構成意図へ変換し、音声は初回ラフから除外する。
+  - candidate_id: REJECT_EXCLUDED_S2
+    segment_id: SEG_AST_610FB4A0_0001
+    asset_id: AST_610FB4A0
+    src_in_us: 4000000
+    src_out_us: 82600000
+    role: reject
+    story_role: experience
+    speaker_role: secondary
+    utterance_ids:
+      - TRI_AST_610FB4A0_0003
+      - TRI_AST_610FB4A0_0004
+      - TRI_AST_610FB4A0_0005
+      - TRI_AST_610FB4A0_0006
+      - TRI_AST_610FB4A0_0007
+      - TRI_AST_610FB4A0_0008
+      - TRI_AST_610FB4A0_0009
+      - TRI_AST_610FB4A0_0010
+      - TRI_AST_610FB4A0_0011
+      - TRI_AST_610FB4A0_0012
+      - TRI_AST_610FB4A0_0013
+      - TRI_AST_610FB4A0_0014
+    transcript_excerpt: 冒頭の短髪・ベージュ服の別参加者testimonial。
+    why_it_matches: 内容自体は前向きだが、ユーザーが対象をS3とS4に限定したため、人物混同を防ぐ目的で明示的に除外する。
+    risks:
+      - 画面上の女性を取り違えると別人のtestimonialになる。
+    confidence: 1
+    semantic_rank: 7
+    evidence:
+      - brief.must_avoid[0]
+      - human_confirmation:target_woman_is_S3_not_S2
+      - diarization:S2
+    rejection_reason: 今回の対象外人物。別企画でのみ再検討する。

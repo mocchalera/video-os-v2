@@ -257,6 +257,9 @@ describe("createLlmBlueprintAgent", () => {
     expect(prompt).toContain("choose an out_point technique");
     expect(prompt).toContain('"out_point": "peak_hold"');
     expect(prompt).toContain('"transition_out": "dissolve"');
+    expect(prompt).toContain("質問テロップに頼らず主語または指示対象");
+    expect(prompt).toContain("ASR item の端は意味上の文境界とは限りません");
+    expect(prompt).toContain("cut_tail_hold_sec は言い切った後の呼吸・ルームトーン専用");
 
     const validate = createValidator("edit-blueprint.schema.json");
     expect(validate(result.blueprint), JSON.stringify(validate.errors, null, 2)).toBe(true);

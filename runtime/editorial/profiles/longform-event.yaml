@@ -1,0 +1,27 @@
+id: longform-event
+default_policy: longform-documentary
+defaults:
+  target_duration_sec: 3600
+  opening_cadence: "natural"
+  middle_cadence: "chaptered-longform"
+  ending_cadence: "resolved"
+  max_shot_length_frames: 1080
+  default_transition: "cut"
+  crossfade_frames: 0
+  audio_policy: original_only
+  a1_loudnorm: true
+  caption_policy: auto
+  active_editing_skills:
+    - longform_reduction
+    - talking_head_pacing
+  quality_target_overrides:
+    hook_density_min: 0.0
+    novelty_rate_min: 0.5
+    duration_pacing_tolerance_pct: 15
+    causal_connectivity_min: 0.5
+  trim_policy_overrides:
+    mode: fixed
+    default_preferred_duration_frames: 720
+    default_min_duration_frames: 144
+    default_max_duration_frames: 1080
+    action_cut_guard: true
