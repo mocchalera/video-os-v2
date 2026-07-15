@@ -47,6 +47,8 @@ CI はこの境界に合わせ、`macos-studio` job で SwiftPM tests と CLI sm
 - アスペクト比自動対応: 最頻アスペクト比を推定し、`letterbox` / `pillarbox` を判定
 - 時系列順コンパイル: `keepsake` / `event-recap` 系は chronological order を選択可能
 - 長尺イベント削減: `longform-event` は2時間級の固定カメラ素材を発話窓と章に分け、不要区間を記録しながら約1時間の時系列タイムラインへ決定論的に圧縮
+- macOS Studio: Viewer、Source Monitor、素材ビン、Timeline、Inspector、候補差し替え、マルチモーダル検索、QA、patch apply / undo、render / handoff を1つのネイティブUIで操作
+- 字幕ヒューマンレビュー: リスク順キュー、本文・分割・結合・IN/OUT編集、動画loopと波形、IME対応autosave、用語候補、stale競合検出を備え、明示的な人間承認だけで `caption_approval.json` を生成
 - Schema 駆動 + Gate 制御: canonical artifacts を validate しながら進行
 - Full Autonomy Mode: `autonomy.mode: full` で brief 確定後の確認ゲートを自動通過し、粗編集まで自走
 - ローカル推論 / 埋め込み実行: Qwen3-VL、CLAP、E5、Marlin はローカル実行を前提にし、外部 embedding API は不要
@@ -159,7 +161,17 @@ npm run full-pipeline -- \
 npm run package -- projects/my-project
 ```
 
-`npm run full-pipeline` は粗編集と QA loop までを主導します。final package / handoff artifact が必要な場合は、承認・caption/music 前提を満たしたあと F-0033 の `npm run package` を出口にしてください。
+`npm run full-pipeline` は粗編集と QA loop までを主導します。final package / handoff artifact が必要な場合は、承認・caption/music 前提を満たしたあと `npm run package` を出口にしてください。
+
+### 6. VideoOSStudioで確認・仕上げ
+
+```bash
+swift run VideoOSStudio
+```
+
+VideoOSStudio はこのリポジトリの正式なオペレーターUIです。canonical artifacts を直接読み、素材検索、タイムライン編集、Agent相談、QA、字幕仕上げ、render、Premiere / editor packet handoffを同じプロジェクト上で扱います。診断・自動化には `swift run videoos-studio-cli <command>` を使います。
+
+字幕の機械ドラフトを人間が仕上げる場合は、Studio上部の「字幕仕上げ」を開きます。headless運用では同じReview Coreを使う `scripts/caption-review.ts` を利用できます。字幕のartifact契約と操作手順は [`docs/design-caption-human-review-workflow.md`](docs/design-caption-human-review-workflow.md)、プロジェクト固有の表記ルールは [`docs/caption-glossary.md`](docs/caption-glossary.md) を参照してください。
 
 ## CLI EntryPoints
 
@@ -174,6 +186,7 @@ npm run package -- projects/my-project
 | `editorial-pipeline` | retrieval → planning → compile → render → QA の統合実行 | `npx tsx scripts/editorial-pipeline.ts --project projects/<project-id> [--skip-fine] [--skip-render] [--skip-qa]` |
 | `render-rough-cut` | `timeline.json` を BGM 付き MP4 にレンダーし duration parity を記録 | `npx tsx scripts/render-rough-cut.ts --project projects/<project-id> [--output path] [--bgm path]` |
 | `promo-finish` | transcript aligned 字幕、最後の余韻、音声/映像フェード付き宣材MP4を生成 | `npm run promo-finish -- --project projects/<project-id> [--output path]` |
+| `caption-review` | 字幕のrisk queue、編集、split / merge、timing、用語候補、検証、人間承認 | `npx tsx scripts/caption-review.ts <queue|init|edit|split|merge|glossary-propose|undo|apply|validate|approve> --project projects/<project-id> [options]` |
 | `package` | approved rough cut から final package / QA manifest を作成 | `npm run package -- projects/<project-id> [options]` |
 | `status` | Gate 状態と次アクション確認 | `npx tsx scripts/status.ts projects/<project-id>` |
 | `compile` | `timeline.json` と preview manifest 生成 | `npx tsx scripts/compile-timeline.ts projects/<project-id>` |
@@ -255,6 +268,10 @@ npx tsx scripts/editorial-pipeline.ts --project projects/my-project --qa
      -> Marlin QA / brief alignment
      -> issue detection / fix proposals
      -> apply / recompile / rerender (max 3 iterations)
+  -> Caption Review
+     -> caption_source.json / caption_draft.json
+     -> caption_review_patch.json / caption_review_preview.json
+     -> explicit human approval -> caption_approval.json
   -> 06_review/* / 07_package/* / 09_output/*
 ```
 
@@ -267,6 +284,7 @@ npx tsx scripts/editorial-pipeline.ts --project projects/my-project --qa
 - `scripts/build-footage-db.ts` は project-local の検索 DB を作り、Qwen3-VL / CLAP が無い場合も fail-open で進みます。
 - `scripts/editorial-pipeline.ts` は retrieval、rough/fine pass、compile、render、QA improvement loop を統合します。
 - `scripts/compile-timeline.ts` は deterministic compile の公開 CLI です。scene continuity ordering と visual coherence cache がある場合はコンパイル時に利用します。
+- `scripts/caption-review.ts` とVideoOSStudioの字幕仕上げUIは同じReview Coreを使います。機械ドラフトは直接上書きせず、人間の変更をpatchとして保持し、承認条件を満たした場合だけ `caption_approval.json` を生成します。
 - Premiere で詰めたい場合は、`timeline.json -> FCP7 XML -> Premiere -> FCP7 XML -> timeline.json` の往復が可能です。
 
 ## Premiere Pro 連携
@@ -315,6 +333,7 @@ Creative Brief
   -> Deterministic Compiler (scene continuity + visual coherence)
   -> Render (ffmpeg xfade + BGM)
   -> QA Loop (Marlin QA -> fix proposals -> apply -> recompile -> rerender)
+  -> Human Caption Review (draft -> patch -> approval)
   -> Final Output
 ```
 
@@ -323,6 +342,7 @@ Creative Brief
 - Deterministic Compiler: `normalize -> score -> assemble -> trim -> resolve -> export` を純関数的に進め、timestamp clustering と Qwen visual coherence cache がある場合は scene continuity ordering に使います。
 - QA Loop: Marlin QA と brief alignment から issue を検出し、bounded fixes を提案・適用・再コンパイル・再レンダーします。最大 3 iteration、score 低下、duration/fill/render parity regression で停止します。
 - Canonical Artifacts: 各ステージは YAML / JSON の canonical artifact を出力し、隠れた状態を持ちません。
+- Native Operator Surface: VideoOSStudio はcanonical artifactsと共有runtimeを使うクライアントであり、別のpipelineや独自timelineを持ちません。未保存のUI編集はpreviewで、明示保存時だけcompiler/runtime経由で反映します。
 - Transition Skill Cards: P0 の 5 スキル (`match_cut_bridge`, `build_to_peak`, `crossfade_bridge`, `smash_cut_energy`, `silence_beat`) を隣接クリップ単位で自動選択します。
 
 ## Agent Skills
@@ -351,9 +371,10 @@ Creative Brief
 npm run validate
 npm test
 npm run build
+swift test
 ```
 
-CI でも `validate -> test -> build` を実行します。現在は Vitest ベースで 2370+ 件のテストがあり、件数は開発中に変動します。正確な件数は `npm test` の出力を確認してください。
+CI でも Node / TypeScript とmacOS Studioの境界を分けて検証します。2026-07-15時点では Vitest 2733件、SwiftPM 533件が通過しています。件数は開発中に変動するため、正確な値は `npm test` と `swift test` の出力を確認してください。
 `npm run validate` は公開デモ `projects/demo` を検証します。checkout 内のローカル作業プロジェクトも含めて確認したい場合は `npm run validate:all-local` を使ってください。
 
 ## OSS と貢献
@@ -363,7 +384,7 @@ CI でも `validate -> test -> build` を実行します。現在は Vitest ベ�
 - セキュリティ報告: [SECURITY.md](SECURITY.md)
 - 公開前チェックリスト: [docs/oss-readiness.md](docs/oss-readiness.md)
 
-公開リポジトリに含める project data は `projects/_template/` と `projects/demo/` のみです。`projects/*`, `tmp/`, `.env.local`, 生成動画、contact sheet、ローカル解析結果は checkout 固有の作業データとして扱います。
+公開リポジトリには `projects/_template/`、`projects/demo/`、`projects/sample/` と、回帰評価用に明示的に選んだgolden fixtureだけを含めます。それ以外の `projects/*`、`tmp/`、`.env.local`、生成動画、contact sheet、ローカル解析結果はcheckout固有の作業データとして扱います。fixtureを追加するときは、秘密情報、個人絶対パス、元動画、不要な大容量artifactを含まないことを公開前に確認してください。
 
 ## 技術スタック
 
@@ -381,6 +402,7 @@ CI でも `validate -> test -> build` を実行します。現在は Vitest ベ�
 - OpenTimelineIO Python bridge
 - FCP7 XML exporter / importer
 - Premiere Pro UXP plugin
+- SwiftUI / AppKit / AVFoundation (`VideoOSStudio`)
 
 ## 制限事項
 
@@ -388,7 +410,8 @@ CI でも `validate -> test -> build` を実行します。現在は Vitest ベ�
 - Qwen3-VL mixed input、Qwen reranker、before/after 両側を使う visual bridge search は設計済みですが、公開 API としては段階的に拡張中です。
 - CLAP は音の質感・環境音・ムード検索に使います。発話内容そのものの検索は transcript / FTS5 / E5 / Qwen text channel が担当します。
 - QA improvement loop は bounded auto-fix です。創作判断を完全に置き換えるものではなく、score 低下や duration parity 失敗では停止します。
-- `/intent` などの slash command は `runtime/commands/` の command contract として実装されており、専用アプリ UI はまだありません。
+- `/intent` などのslash commandは `runtime/commands/` のcommand contractです。VideoOSStudioはそれらを含む共有runtime / scriptsを呼ぶオペレーターUIであり、別実装のpipelineではありません。
+- `caption_approval.json` は人間の明示操作でのみ生成します。LLMやfull autonomyは字幕の最終承認を代行せず、draftまたはtimelineが変わった古いapprovalは無効です。
 - 高精度 analysis には `ffmpeg` 系ツールと API key、場合によっては Python / `opentimelineio` / `pyannote` が必要です。
 - Premiere UXP plugin は手動インストールと Premiere 上での手動確認が前提です。
 
