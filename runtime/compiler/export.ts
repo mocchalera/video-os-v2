@@ -16,6 +16,7 @@ import type {
   TimelineIR,
   TimelineTransitionOutput,
   TrackOutput,
+  StillDurationPolicy,
 } from "./types.js";
 import type { TimelineTransition } from "./transition-types.js";
 
@@ -41,6 +42,7 @@ export interface ExportOptions {
     mode: BriefCaptionPolicy;
     source: "explicit_brief" | "profile_default" | "global_default";
   };
+  stillDurationPolicy?: StillDurationPolicy;
   transitions?: TimelineTransition[];
   metadata?: Record<string, unknown>;
   width?: number;
@@ -136,6 +138,7 @@ export function buildTimelineIR(
         : {}),
       ...(opts.audioPolicy ? { audio_policy: opts.audioPolicy } : {}),
       ...(opts.captionPolicy ? { caption_policy: opts.captionPolicy } : {}),
+      ...(opts.stillDurationPolicy ? { still_duration_policy: opts.stillDurationPolicy } : {}),
     },
   };
 }
@@ -252,8 +255,12 @@ function toClipOutput(clip: {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  media_kind?: ClipOutput["media_kind"];
+  source_capabilities?: ClipOutput["source_capabilities"];
+  audio_role?: ClipOutput["audio_role"];
   captions?: ClipOutput["captions"];
   audio_policy?: ClipOutput["audio_policy"];
+  still_image?: ClipOutput["still_image"];
   candidate_ref?: string;
   fallback_candidate_refs?: string[];
   metadata?: Record<string, unknown>;
@@ -272,6 +279,10 @@ function toClipOutput(clip: {
     fallback_segment_ids: clip.fallback_segment_ids,
     confidence: clip.confidence,
     quality_flags: clip.quality_flags,
+    ...(clip.media_kind ? { media_kind: clip.media_kind } : {}),
+    ...(clip.source_capabilities ? { source_capabilities: { ...clip.source_capabilities } } : {}),
+    ...(clip.audio_role ? { audio_role: clip.audio_role } : {}),
+    ...(clip.still_image ? { still_image: { ...clip.still_image } } : {}),
   };
   if (clip.candidate_ref) {
     output.candidate_ref = clip.candidate_ref;

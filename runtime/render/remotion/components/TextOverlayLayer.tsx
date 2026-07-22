@@ -1,56 +1,30 @@
 import { Sequence } from "remotion";
-import type { TrackOutput, ClipOutput } from "../../../compiler/types.js";
+import type { TrackOutput } from "../../../compiler/types.js";
+import { normalizeOverlayClipContent } from "../../../content/normalize.js";
 import {
-  getOverlayText,
   resolveOverlayPreset,
+  type OverlayPreset,
   type OverlayPresetProps,
 } from "../styles/overlay-presets.js";
+import { resolveRemotionOverlayClip } from "../overlay-clip-resolver.js";
 
 export interface TextOverlayLayerProps {
   tracks?: TrackOutput[];
   fps: number;
 }
 
-type OverlayMetadata = {
-  styling_class?: unknown;
-  writing_mode?: unknown;
-  anchor?: unknown;
-  safe_area?: unknown;
-};
-
-function overlayMetadata(clip: ClipOutput): OverlayMetadata | null {
-  const overlay = clip.metadata?.overlay;
-  if (!overlay || typeof overlay !== "object") {
-    return null;
-  }
-
-  return overlay as OverlayMetadata;
+interface OverlayPresetRendererProps extends OverlayPresetProps {
+  preset: OverlayPreset;
 }
 
-function overlayString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function overlayWritingMode(value: unknown): OverlayPresetProps["writing_mode"] | undefined {
-  if (value === "horizontal_tb" || value === "vertical_rl" || value === "vertical_lr") {
-    return value;
-  }
-
-  return undefined;
-}
-
-function overlaySafeArea(value: unknown): OverlayPresetProps["safe_area"] | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-
-  const input = value as Record<string, unknown>;
-  return {
-    top: typeof input.top === "number" ? input.top : undefined,
-    right: typeof input.right === "number" ? input.right : undefined,
-    bottom: typeof input.bottom === "number" ? input.bottom : undefined,
-    left: typeof input.left === "number" ? input.left : undefined,
-  };
+/**
+ * Keep preset hooks inside the clip Sequence context. Calling
+ * `preset.render()` while constructing the Sequence evaluates
+ * `useCurrentFrame()` against the composition frame, which made every
+ * non-zero-start overlay immediately reach its fade-out state.
+ */
+function OverlayPresetRenderer({ preset, ...props }: OverlayPresetRendererProps) {
+  return preset.render(props);
 }
 
 export function TextOverlayLayer({ tracks, fps }: TextOverlayLayerProps) {
@@ -62,22 +36,25 @@ export function TextOverlayLayer({ tracks, fps }: TextOverlayLayerProps) {
     <>
       {tracks.map((track) =>
         track.clips.map((clip) => {
-          const text = getOverlayText(clip.metadata);
-          if (text === null) {
-            console.warn(`Skipping overlay clip ${clip.clip_id}: missing overlay text`);
+          const normalized = normalizeOverlayClipContent(clip);
+          if (normalized.renderer_owner !== "remotion") {
+            if (normalized.issues.length > 0) {
+              console.warn(
+                `Skipping overlay clip ${clip.clip_id}: ${normalized.issues.map((issue) => issue.message).join("; ")}`,
+              );
+            }
             return null;
           }
 
-          const overlay = overlayMetadata(clip);
-          const stylingClass = overlayString(overlay?.styling_class);
-          if (!stylingClass) {
-            console.warn(`Skipping overlay clip ${clip.clip_id}: missing styling_class`);
+          const resolved = resolveRemotionOverlayClip(clip);
+          if (!resolved) {
+            console.warn(`Skipping overlay clip ${clip.clip_id}: unsupported Remotion template`);
             return null;
           }
 
-          const preset = resolveOverlayPreset(stylingClass);
+          const preset = resolveOverlayPreset(resolved.presetId);
           if (preset === null) {
-            console.warn(`Skipping overlay clip ${clip.clip_id}: unknown styling_class "${stylingClass}"`);
+            console.warn(`Skipping overlay clip ${clip.clip_id}: unknown preset "${resolved.presetId}"`);
             return null;
           }
 
@@ -88,14 +65,17 @@ export function TextOverlayLayer({ tracks, fps }: TextOverlayLayerProps) {
               durationInFrames={clip.timeline_duration_frames}
               name={clip.clip_id}
             >
-              {preset.render({
-                text,
-                writing_mode: overlayWritingMode(overlay?.writing_mode),
-                anchor: overlayString(overlay?.anchor),
-                safe_area: overlaySafeArea(overlay?.safe_area),
-                durationInFrames: clip.timeline_duration_frames,
-                fps,
-              })}
+              <OverlayPresetRenderer
+                preset={preset}
+                text={resolved.text}
+                action_text={resolved.actionText}
+                brand_text={resolved.brandText}
+                writing_mode={resolved.writingMode}
+                anchor={resolved.anchor}
+                safe_area={resolved.safeArea}
+                durationInFrames={clip.timeline_duration_frames}
+                fps={fps}
+              />
             </Sequence>
           );
         }),

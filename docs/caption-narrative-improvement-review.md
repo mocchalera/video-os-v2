@@ -34,9 +34,9 @@
 
 根拠:
 
-- 新 workflow 定義は `frame -> read -> draft -> evaluate -> reject? -> promote` で閉じており、human confirmation / preference interview の明示ステップが無い。([design:466](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L466), [design:671](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L671))
-- 現行 `/blueprint` は `pacing.confirmed_preferences` を autonomy mode と照合し、human decline も command error として扱う。([blueprint.ts:175](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L175), [blueprint.ts:279](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L279))
-- `ARCHITECTURE.md` でも `autonomy=collaborative` では pacing / structure / duration の human confirmation が必須。([ARCHITECTURE.md:442](/Users/mocchalera/Dev/video-os-v2-spec/ARCHITECTURE.md#L442))
+- 新 workflow 定義は `frame -> read -> draft -> evaluate -> reject? -> promote` で閉じており、human confirmation / preference interview の明示ステップが無い。([design:466](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L466), [design:671](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L671))
+- 現行 `/blueprint` は `pacing.confirmed_preferences` を autonomy mode と照合し、human decline も command error として扱う。([blueprint.ts:175](/Users/operator/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L175), [blueprint.ts:279](/Users/operator/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L279))
+- `ARCHITECTURE.md` でも `autonomy=collaborative` では pacing / structure / duration の human confirmation が必須。([ARCHITECTURE.md:442](/Users/operator/Dev/video-os-v2-spec/ARCHITECTURE.md#L442))
 
 影響:
 
@@ -53,9 +53,9 @@
 
 根拠:
 
-- 設計は品質閾値を満たした場合に `/caption` の auto approval を許可している。([design:452](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L452))
-- しかし M4 の caption workflow は `source generation -> operator editorial approval` の 2 段階で固定され、`caption_approval.json.approval.approved_by` は human editorial approval の証跡として定義されている。([milestone-4-design:661](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-4-design.md#L661), [milestone-4-design:671](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-4-design.md#L671))
-- 現 approval shape も `approved | stale` と `approved_by` / `approved_at` しか持たず、machine-approved と human-approved を区別できない。([approval.ts:18](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/approval.ts#L18), [caption-approval.schema.json:130](/Users/mocchalera/Dev/video-os-v2-spec/schemas/caption-approval.schema.json#L130))
+- 設計は品質閾値を満たした場合に `/caption` の auto approval を許可している。([design:452](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L452))
+- しかし M4 の caption workflow は `source generation -> operator editorial approval` の 2 段階で固定され、`caption_approval.json.approval.approved_by` は human editorial approval の証跡として定義されている。([milestone-4-design:661](/Users/operator/Dev/video-os-v2-spec/docs/milestone-4-design.md#L661), [milestone-4-design:671](/Users/operator/Dev/video-os-v2-spec/docs/milestone-4-design.md#L671))
+- 現 approval shape も `approved | stale` と `approved_by` / `approved_at` しか持たず、machine-approved と human-approved を区別できない。([approval.ts:18](/Users/operator/Dev/video-os-v2-spec/runtime/caption/approval.ts#L18), [caption-approval.schema.json:130](/Users/operator/Dev/video-os-v2-spec/schemas/caption-approval.schema.json#L130))
 
 影響:
 
@@ -71,9 +71,9 @@
 
 根拠:
 
-- 設計は Phase D に `continuity review + quality judgment` を入れ、`source_fidelity fail` と `audience_alignment fail` を reject 条件にしている。([design:582](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L582), [design:607](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L607))
-- M4.5 では `script_evaluation.yaml` は LLM を使わず、`tone_integrity` / `source_fidelity` は roughcut review 側 advisory に留めると明記されている。([milestone-4.5-design:388](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-4.5-design.md#L388), [milestone-4.5-design:423](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-4.5-design.md#L423))
-- 現 runtime の `evaluateScript()` も純 deterministic helper として実装・テストされている。([evaluate.ts:60](/Users/mocchalera/Dev/video-os-v2-spec/runtime/script/evaluate.ts#L60), [m45-script-engine.test.ts:205](/Users/mocchalera/Dev/video-os-v2-spec/tests/m45-script-engine.test.ts#L205))
+- 設計は Phase D に `continuity review + quality judgment` を入れ、`source_fidelity fail` と `audience_alignment fail` を reject 条件にしている。([design:582](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L582), [design:607](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L607))
+- M4.5 では `script_evaluation.yaml` は LLM を使わず、`tone_integrity` / `source_fidelity` は roughcut review 側 advisory に留めると明記されている。([milestone-4.5-design:388](/Users/operator/Dev/video-os-v2-spec/docs/milestone-4.5-design.md#L388), [milestone-4.5-design:423](/Users/operator/Dev/video-os-v2-spec/docs/milestone-4.5-design.md#L423))
+- 現 runtime の `evaluateScript()` も純 deterministic helper として実装・テストされている。([evaluate.ts:60](/Users/operator/Dev/video-os-v2-spec/runtime/script/evaluate.ts#L60), [m45-script-engine.test.ts:205](/Users/operator/Dev/video-os-v2-spec/tests/m45-script-engine.test.ts#L205))
 
 影響:
 
@@ -89,9 +89,9 @@
 
 根拠:
 
-- 設計は 2-pass fallback を「approved text の timing 付け直し」と定義し、re-transcribe は hint に留めるとしている。([design:378](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L378), [design:384](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L384))
+- 設計は 2-pass fallback を「approved text の timing 付け直し」と定義し、re-transcribe は hint に留めるとしている。([design:378](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L378), [design:384](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L384))
 - これは plain STT では足りず、text-constrained alignment か forced alignment の adapter が要る。
-- 旧 repo でも timing refinement は専用 module と dependency/failure status を持っていた。([timestamp_refiner.py:333](/Users/mocchalera/Dev/video-edit-agent/src/video_edit_agent/pipeline/timestamp_refiner.py#L333), [timestamp_refiner.py:382](/Users/mocchalera/Dev/video-edit-agent/src/video_edit_agent/pipeline/timestamp_refiner.py#L382))
+- 旧 repo でも timing refinement は専用 module と dependency/failure status を持っていた。([timestamp_refiner.py:333](/Users/operator/Dev/video-edit-agent/src/video_edit_agent/pipeline/timestamp_refiner.py#L333), [timestamp_refiner.py:382](/Users/operator/Dev/video-edit-agent/src/video_edit_agent/pipeline/timestamp_refiner.py#L382))
 
 影響:
 
@@ -107,9 +107,9 @@
 
 根拠:
 
-- 設計は transcript schema の `words[]` / `word_timing_mode` を主根拠にしている。([design:360](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L360), [design:370](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L370))
-- transcript schema 自体はその field を持つ。([transcript.schema.json:22](/Users/mocchalera/Dev/video-os-v2-spec/schemas/transcript.schema.json#L22), [transcript.schema.json:54](/Users/mocchalera/Dev/video-os-v2-spec/schemas/transcript.schema.json#L54))
-- ただし現 `generateCaptionSource()` は transcript item を clip に remap してから caption segmentation しており、word timing を使う path を持たない。([segmenter.ts:103](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/segmenter.ts#L103), [segmenter.ts:369](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/segmenter.ts#L369))
+- 設計は transcript schema の `words[]` / `word_timing_mode` を主根拠にしている。([design:360](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L360), [design:370](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L370))
+- transcript schema 自体はその field を持つ。([transcript.schema.json:22](/Users/operator/Dev/video-os-v2-spec/schemas/transcript.schema.json#L22), [transcript.schema.json:54](/Users/operator/Dev/video-os-v2-spec/schemas/transcript.schema.json#L54))
+- ただし現 `generateCaptionSource()` は transcript item を clip に remap してから caption segmentation しており、word timing を使う path を持たない。([segmenter.ts:103](/Users/operator/Dev/video-os-v2-spec/runtime/caption/segmenter.ts#L103), [segmenter.ts:369](/Users/operator/Dev/video-os-v2-spec/runtime/caption/segmenter.ts#L369))
 
 影響:
 
@@ -125,9 +125,9 @@
 
 根拠:
 
-- 設計は `/blueprint` と `/caption` の LLM を phase-aware injectable にする、としている。([design:110](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L110))
-- `/blueprint` は既に injectable agent interface を持つ。([blueprint.ts:116](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L116))
-- 一方 `captionCommand()` は file IO、source generation、approval 作成、timeline mutation を一体で持っており、editorial / timing / approval を個別に差し替える seam が無い。([caption.ts:58](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L58), [caption.ts:126](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L126), [caption.ts:156](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L156))
+- 設計は `/blueprint` と `/caption` の LLM を phase-aware injectable にする、としている。([design:110](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L110))
+- `/blueprint` は既に injectable agent interface を持つ。([blueprint.ts:116](/Users/operator/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L116))
+- 一方 `captionCommand()` は file IO、source generation、approval 作成、timeline mutation を一体で持っており、editorial / timing / approval を個別に差し替える seam が無い。([caption.ts:58](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L58), [caption.ts:126](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L126), [caption.ts:156](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L156))
 
 影響:
 
@@ -145,8 +145,8 @@
 
 確認内容:
 
-- 設計の `raw -> deterministic pre-clean -> LLM editorial -> validator` は、旧 repo の guarded editorial flow と整合している。([design:225](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L225), [design:268](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L268), [caption_editorial_llm.py:203](/Users/mocchalera/Dev/video-edit-agent/src/video_edit_agent/pipeline/caption_editorial_llm.py#L203), [caption_editorial_llm.py:271](/Users/mocchalera/Dev/video-edit-agent/src/video_edit_agent/pipeline/caption_editorial_llm.py#L271))
-- 現 runtime は `caption_source.json -> caption_approval.json` を直結しているので、今回の raw/source 分離は provenance 改善として妥当。([caption.ts:143](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L143), [caption.ts:156](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L156))
+- 設計の `raw -> deterministic pre-clean -> LLM editorial -> validator` は、旧 repo の guarded editorial flow と整合している。([design:225](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L225), [design:268](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L268), [caption_editorial_llm.py:203](/Users/operator/Dev/video-edit-agent/src/video_edit_agent/pipeline/caption_editorial_llm.py#L203), [caption_editorial_llm.py:271](/Users/operator/Dev/video-edit-agent/src/video_edit_agent/pipeline/caption_editorial_llm.py#L271))
+- 現 runtime は `caption_source.json -> caption_approval.json` を直結しているので、今回の raw/source 分離は provenance 改善として妥当。([caption.ts:143](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L143), [caption.ts:156](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L156))
 
 所見:
 
@@ -157,8 +157,8 @@
 
 確認内容:
 
-- Script Engine 4 phase helper と unit tests は既に存在する。([frame.ts:1](/Users/mocchalera/Dev/video-os-v2-spec/runtime/script/frame.ts#L1), [read.ts:1](/Users/mocchalera/Dev/video-os-v2-spec/runtime/script/read.ts#L1), [draft.ts:1](/Users/mocchalera/Dev/video-os-v2-spec/runtime/script/draft.ts#L1), [evaluate.ts:1](/Users/mocchalera/Dev/video-os-v2-spec/runtime/script/evaluate.ts#L1), [m45-script-engine.test.ts:55](/Users/mocchalera/Dev/video-os-v2-spec/tests/m45-script-engine.test.ts#L55))
-- M4.5 も operational artifact を `/blueprint` 配下に閉じ込める方針を採っている。([milestone-4.5-design:152](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-4.5-design.md#L152))
+- Script Engine 4 phase helper と unit tests は既に存在する。([frame.ts:1](/Users/operator/Dev/video-os-v2-spec/runtime/script/frame.ts#L1), [read.ts:1](/Users/operator/Dev/video-os-v2-spec/runtime/script/read.ts#L1), [draft.ts:1](/Users/operator/Dev/video-os-v2-spec/runtime/script/draft.ts#L1), [evaluate.ts:1](/Users/operator/Dev/video-os-v2-spec/runtime/script/evaluate.ts#L1), [m45-script-engine.test.ts:55](/Users/operator/Dev/video-os-v2-spec/tests/m45-script-engine.test.ts#L55))
+- M4.5 も operational artifact を `/blueprint` 配下に閉じ込める方針を採っている。([milestone-4.5-design:152](/Users/operator/Dev/video-os-v2-spec/docs/milestone-4.5-design.md#L152))
 
 所見:
 

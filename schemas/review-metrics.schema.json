@@ -14,7 +14,7 @@
   "properties": {
     "version": {
       "type": "string",
-      "const": "1"
+      "enum": ["1", "2"]
     },
     "project_id": {
       "type": "string",
@@ -35,6 +35,34 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "version": { "const": "2" } },
+        "required": ["version"]
+      },
+      "then": {
+        "properties": {
+          "summary": {
+            "properties": {
+              "by_tier": {
+                "required": [
+                  "emotion",
+                  "story",
+                  "rhythm",
+                  "eye_trace",
+                  "plane_2d",
+                  "space_3d",
+                  "audio"
+                ]
+              }
+            }
+          },
+          "checks": { "minItems": 16 }
+        }
+      }
+    }
+  ],
   "$defs": {
     "tier": {
       "type": "string",
@@ -44,6 +72,7 @@
         "rhythm",
         "eye_trace",
         "plane_2d",
+        "space_3d",
         "audio"
       ]
     },
@@ -127,6 +156,9 @@
             "plane_2d": {
               "$ref": "#/$defs/statusCounts"
             },
+            "space_3d": {
+              "$ref": "#/$defs/statusCounts"
+            },
             "audio": {
               "$ref": "#/$defs/statusCounts"
             }
@@ -187,7 +219,12 @@
             "emotion.peak_retention",
             "emotion.hook_density",
             "eye_trace.same_asset_adjacency",
+            "eye_trace.attention_jump",
+            "eye_trace.motion_flow",
             "plane_2d.motif_overuse",
+            "plane_2d.framing_jump",
+            "plane_2d.luma_color_jump",
+            "space_3d.direction_axis",
             "audio.speech_cut"
           ]
         },

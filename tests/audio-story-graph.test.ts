@@ -197,6 +197,38 @@ describe("P2 audio_story_graph", () => {
     expect(validate(graph), JSON.stringify(validate.errors, null, 2)).toBe(true);
   });
 
+  it("schema-validates legacy BGM nodes and restricts BGM asset IDs to music sections", () => {
+    const validate = schemaValidator();
+    const graph = buildAudioStoryGraph({
+      projectId: "asg-legacy-bgm",
+      manifest: {
+        source_media_manifest_hash: MANIFEST_HASH,
+        items: [{ asset_id: "AST_dialogue_001" }],
+      },
+      coverageReport: {
+        hash: "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        lanes: [{ lane_id: "bgm_analysis", status: "ready" }],
+      },
+      bgmAnalysis: {
+        music_asset: { asset_id: "BGM_legacy_theme" },
+        sections: [{ id: "intro", label: "intro", start_sec: 0, end_sec: 1, energy: 0.5 }],
+      },
+      createdAt: "2026-04-26T00:00:00Z",
+    });
+
+    expect(validate(graph), JSON.stringify(validate.errors, null, 2)).toBe(true);
+    expect(validateAudioStoryGraph(graph, {
+      manifestAssetIds: ["AST_dialogue_001", "BGM_legacy_theme"],
+    }).valid).toBe(true);
+
+    const invalid = structuredClone(graph);
+    invalid.nodes[0].node_type = "utterance";
+    expect(validate(invalid)).toBe(false);
+    expect(validateAudioStoryGraph(invalid, {
+      manifestAssetIds: ["AST_dialogue_001", "BGM_legacy_theme"],
+    }).valid).toBe(false);
+  });
+
   it("marks graph stale when source_media_manifest_hash differs", () => {
     const graph = readJson(path.join(FIXTURE_DIR, "valid_dialogue_heavy.json"));
 

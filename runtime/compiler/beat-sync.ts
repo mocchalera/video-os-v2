@@ -7,7 +7,7 @@ import type { BgmAnalysis } from "./transition-types.js";
 export type CutQuantizeMode = "auto" | "on" | "off";
 export type BeatSyncGridSource = "music_cues" | "music_cues_analysis_ref" | "bgm_analysis";
 export type BeatSyncBoundaryStatus = "quantized" | "unchanged" | "skipped";
-export type BeatSyncSkipReason = "speech_protected" | "max_shift_exceeded" | "min_duration";
+export type BeatSyncSkipReason = "speech_protected" | "max_shift_exceeded" | "min_duration" | "still_image_boundary";
 
 export interface BeatSyncGrid {
   frames: number[];
@@ -44,6 +44,7 @@ export interface BeatSyncCompileMetadata {
     speech_protected: number;
     max_shift_exceeded: number;
     min_duration: number;
+    still_image_boundary: number;
   };
 }
 
@@ -257,6 +258,16 @@ function quantizeTrackBoundaries(
       shift_frames: delta,
     };
 
+    if (left.media_kind === "image" || right.media_kind === "image") {
+      boundaries.push({
+        ...baseResult,
+        cut_frame_after: cutFrame,
+        status: "skipped",
+        skip_reason: "still_image_boundary",
+      });
+      continue;
+    }
+
     if (isSpeechProtectedBeatBoundary(left, right)) {
       boundaries.push({
         ...baseResult,
@@ -401,5 +412,6 @@ function emptyCounts(): BeatSyncCompileMetadata["counts"] {
     speech_protected: 0,
     max_shift_exceeded: 0,
     min_duration: 0,
+    still_image_boundary: 0,
   };
 }

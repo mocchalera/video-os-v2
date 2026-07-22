@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { stringify as stringifyYaml } from "yaml";
@@ -14,21 +15,29 @@ import { compile, type CompileResult } from "../compiler/index.js";
 import type { MarlinQAReport } from "./marlin-qa-types.js";
 import { isMarlinQAReportVerified } from "./marlin-qa-types.js";
 import type { BriefAlignmentReport } from "./brief-alignment-types.js";
-import {
-  defaultMarlinQAVideoPath,
-  runMarlinQA as runDefaultMarlinQA,
-} from "./marlin-qa.js";
+import { runMarlinQA as runDefaultMarlinQA } from "./marlin-qa.js";
 import { evaluateBriefAlignment } from "./brief-alignment.js";
-import { detectIssues, type QAIssue } from "./qa-issue-detector.js";
+import { detectIssues, isAudioOnlyTimeline, type QAIssue } from "./qa-issue-detector.js";
+import {
+  computeReviewMetrics,
+  loadReviewMetricsInputs,
+  type ReviewMetricsArtifact,
+  type ReviewMetricsInputs,
+} from "../review/metrics.js";
 import { proposeFixes, type QAFix } from "./qa-fix-proposer.js";
 import { applyFixes, type ApplyResult } from "./qa-fix-applier.js";
+import { defaultDiscoveryContract, type QADiscoveryContract } from "./qa-source-discovery.js";
 import {
   buildQAReport,
   writeQAImprovementReport,
+  type QAFixDisposition,
   type QAImprovementReport,
+  type QAReportedFix,
 } from "./qa-improvement-report.js";
 
 const execFileAsync = promisify(execFile);
+const SCORE_COMPARISON_EPSILON = 0.0001;
+const TRANSACTION_TEMP_PREFIX = "video-os-qa-transaction-";
 
 export interface QALoopResult {
   iterations: number;
@@ -40,6 +49,10 @@ export interface QALoopResult {
   converged: boolean;
   convergence_reason: "max_iterations" | "no_fixable_issues" | "quality_floor" | "no_improvement";
   warnings: string[];
+  visual_qa: {
+    status: "verified" | "blocked" | "not_applicable";
+    reason?: string;
+  };
 }
 
 export type QAImprovementIndexConvergenceReason =
@@ -62,6 +75,7 @@ export interface QALoopOptions {
   maxIterations?: number;
   qualityFloor?: number;
   maxFixesPerIteration?: number;
+  minSourceQualityScore?: number;
   skipRender?: boolean;
   now?: () => Date;
   runMarlinQA?: (projectDir: string, videoPath: string, brief: CreativeBrief) => Promise<MarlinQAReport>;
@@ -72,16 +86,54 @@ export interface QALoopOptions {
     selects: SelectsCandidates,
     projectDir: string,
     iteration: number,
+    discovery?: QADiscoveryContract,
   ) => Promise<QAFix[]>;
   compile?: (projectDir: string, selects: SelectsCandidates, blueprint: EditBlueprint, iteration: number) => Promise<TimelineIR> | TimelineIR;
   render?: (projectDir: string, timeline: TimelineIR, iteration: number) => Promise<string> | string;
+  evaluateReviewMetrics?: (
+    inputs: ReviewMetricsInputs,
+    iteration: number,
+  ) => Promise<ReviewMetricsArtifact> | ReviewMetricsArtifact;
 }
 
 interface Evaluation {
   marlin: MarlinQAReport;
-  marlinAvailable: boolean;
   alignment: BriefAlignmentReport;
+  available: boolean;
+  unavailableReason?: string;
   score: number;
+  reviewMetrics: ReviewMetricsArtifact;
+  visualQaApplicable: boolean;
+}
+
+interface ArtifactSnapshot {
+  path: string;
+  existed: boolean;
+  backupPath?: string;
+}
+
+interface TransactionSnapshot {
+  tempDir: string;
+  artifacts: ArtifactSnapshot[];
+  selects: SelectsCandidates;
+  blueprint: EditBlueprint;
+  timeline: TimelineIR;
+}
+
+export class QATransactionRestoreError extends Error {
+  readonly iteration: number;
+  readonly transactionError: unknown;
+  readonly restoreFailures: string[];
+
+  constructor(iteration: number, transactionError: unknown, restoreFailures: string[]) {
+    super(
+      `QA iteration ${iteration} rollback failed after ${errorMessage(transactionError)}: ${restoreFailures.join("; ")}`,
+    );
+    this.name = "QATransactionRestoreError";
+    this.iteration = iteration;
+    this.transactionError = transactionError;
+    this.restoreFailures = restoreFailures;
+  }
 }
 
 export async function runQALoop(
@@ -101,197 +153,314 @@ export async function runQALoop(
   const reports: QAImprovementReport[] = [];
   const reportRefs: QAImprovementIndex["iterations"] = [];
   const warnings: string[] = [];
+  const discoveredSegmentIds = new Set<string>();
 
   let workingTimeline = timeline;
-  let initialScore: number | null = null;
-  let finalScore = 0;
-  let qualityFloor = opts.qualityFloor;
-  let previousScore: number | null = null;
   let fixesAppliedTotal = 0;
   let iterations = 0;
   let convergenceReason: QALoopResult["convergence_reason"] = "max_iterations";
+  let reportSequence = 0;
+  let evaluationSequence = 1;
+
+  let currentEvaluation = await evaluateIteration(
+    absProjectDir,
+    brief,
+    workingTimeline,
+    evaluationSequence,
+    skipRender,
+    opts,
+    warnings,
+  );
+  evaluationSequence += 1;
+  const initialScore = currentEvaluation.score;
+  const qualityFloor = opts.qualityFloor ?? round3(initialScore - 0.05);
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
     iterations = iteration;
-    const evaluation = await evaluateIteration(absProjectDir, brief, workingTimeline, iteration, skipRender, opts, warnings);
-    finalScore = evaluation.score;
-    if (initialScore === null) {
-      initialScore = evaluation.score;
-      qualityFloor ??= round3(initialScore - 0.05);
-    }
+    const issues = detectIssues(
+      currentEvaluation.marlin,
+      currentEvaluation.alignment,
+      workingTimeline,
+      currentEvaluation.reviewMetrics,
+    );
 
-    const issues = detectIssues(evaluation.marlin, evaluation.alignment, workingTimeline);
-
-    if (evaluation.score < (qualityFloor ?? 0)) {
-      const report = writeIterationReport(absProjectDir, iteration, issues, [], evaluation, opts);
-      reports.push(report);
-      reportRefs.push(iterationReportRef(iteration));
-      convergenceReason = "quality_floor";
+    if (!currentEvaluation.available) {
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: [],
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
+      convergenceReason = "no_fixable_issues";
       break;
     }
 
-    if (previousScore !== null && evaluation.score <= previousScore + 0.0001) {
-      const report = writeIterationReport(absProjectDir, iteration, issues, [], evaluation, opts);
-      reports.push(report);
-      reportRefs.push(iterationReportRef(iteration));
-      convergenceReason = "no_improvement";
+    if (!meetsQualityFloor(currentEvaluation.score, qualityFloor)) {
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: [],
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
+      convergenceReason = "quality_floor";
       break;
     }
 
     const fixableIssues = issues.filter((issue) => issue.fixable);
     if (fixableIssues.length === 0) {
-      const report = writeIterationReport(absProjectDir, iteration, issues, [], evaluation, opts);
-      reports.push(report);
-      reportRefs.push(iterationReportRef(iteration));
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: [],
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
       convergenceReason = "no_fixable_issues";
       break;
     }
 
+    const discovery = {
+      ...defaultDiscoveryContract(
+        brief.project?.id ?? brief.project_id ?? selects.project_id,
+        opts.minSourceQualityScore ?? 0.5,
+      ),
+      iterationExcludedSegmentIds: [...discoveredSegmentIds].sort(),
+    };
     const proposedFixes = await (opts.proposeFixes ?? defaultProposeFixes)(
       fixableIssues,
       workingTimeline,
       selects,
       absProjectDir,
       iteration,
+      discovery,
     );
     const fixes = proposedFixes.slice(0, maxFixesPerIteration);
-    const report = writeIterationReport(absProjectDir, iteration, issues, fixes, evaluation, opts);
-    reports.push(report);
-    reportRefs.push(iterationReportRef(iteration));
 
     if (fixes.length === 0) {
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: proposedFixes.map((fix) => reportedFix(fix, "rejected", "iteration fix limit excluded this proposal")),
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
       convergenceReason = "no_improvement";
       break;
     }
 
-    const applyResult = await applyIterationFixes({
-      projectDir: absProjectDir,
-      iteration,
-      fixes,
-      selects,
-      blueprint,
-      timeline: workingTimeline,
+    backupIterationArtifacts(absProjectDir, iteration, { includeRender: !skipRender });
+    const snapshot = captureTransactionSnapshot(absProjectDir, selects, blueprint, timeline);
+    let applyResult: ApplyResult | undefined;
+    let nextTimeline: TimelineIR | undefined;
+
+    try {
+      applyResult = applyFixes(fixes, selects, blueprint, workingTimeline, {
+        projectDir: absProjectDir,
+        discovery,
+      });
+      warnings.push(...applyResult.warnings);
+      if (applyResult.selects_modified || applyResult.blueprint_modified) {
+        persistPlanningArtifacts(absProjectDir, selects, blueprint, applyResult);
+        nextTimeline = await (opts.compile ?? defaultCompile)(absProjectDir, selects, blueprint, iteration);
+        writeJson(canonicalArtifactPaths(absProjectDir).timeline, nextTimeline);
+        if (!skipRender) {
+          await (opts.render ?? defaultRender)(absProjectDir, nextTimeline, iteration);
+        }
+      }
+    } catch (error) {
+      rollbackTransactionOrThrow(iteration, error, snapshot, selects, blueprint, timeline);
+      workingTimeline = timeline;
+      const reason = `transaction failed and was rolled back: ${errorMessage(error)}`;
+      warnings.push(`Iteration ${iteration} ${reason}`);
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: dispositionFixes(proposedFixes, fixes, applyResult, "rolled_back", reason),
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
+      convergenceReason = "no_improvement";
+      break;
+    }
+
+    if (!applyResult.selects_modified && !applyResult.blueprint_modified) {
+      rollbackTransactionOrThrow(
+        iteration,
+        new Error("fix produced no canonical planning change"),
+        snapshot,
+        selects,
+        blueprint,
+        timeline,
+      );
+      workingTimeline = timeline;
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: dispositionFixes(
+          proposedFixes,
+          fixes,
+          applyResult,
+          "skipped",
+          "fix produced no canonical planning change",
+        ),
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
+      convergenceReason = "no_improvement";
+      break;
+    }
+
+    if (!nextTimeline) {
+      const error = new Error("compile did not produce a timeline");
+      rollbackTransactionOrThrow(iteration, error, snapshot, selects, blueprint, timeline);
+      workingTimeline = timeline;
+      warnings.push(`Iteration ${iteration} transaction produced no timeline and was rolled back`);
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: dispositionFixes(proposedFixes, fixes, applyResult, "rolled_back", error.message),
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
+      convergenceReason = "no_improvement";
+      break;
+    }
+
+    const candidateEvaluation = await evaluateIteration(
+      absProjectDir,
+      brief,
+      nextTimeline,
+      evaluationSequence,
       skipRender,
       opts,
       warnings,
-    });
-
-    warnings.push(...applyResult.result.warnings);
-    if (!applyResult.result.selects_modified && !applyResult.result.blueprint_modified) {
-      convergenceReason = "no_improvement";
+    );
+    evaluationSequence += 1;
+    const rejectionReason = mutationRejectionReason(currentEvaluation, candidateEvaluation, qualityFloor);
+    if (rejectionReason) {
+      rollbackTransactionOrThrow(iteration, new Error(rejectionReason.message), snapshot, selects, blueprint, timeline);
+      workingTimeline = timeline;
+      warnings.push(`Iteration ${iteration} ${rejectionReason.message}; canonical state was restored`);
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: dispositionFixes(proposedFixes, fixes, applyResult, "rolled_back", rejectionReason.message),
+        evaluation: currentEvaluation,
+        timeline: workingTimeline,
+        opts,
+        reports,
+        reportRefs,
+      });
+      convergenceReason = rejectionReason.convergenceReason;
       break;
     }
 
-    fixesAppliedTotal += applyResult.result.applied.length;
-    workingTimeline = applyResult.timeline;
-    previousScore = evaluation.score;
+    replaceObject(timeline, nextTimeline);
+    workingTimeline = timeline;
+    fixesAppliedTotal += applyResult.applied.length;
+    for (const appliedFix of applyResult.applied) {
+      if (appliedFix.replacement?.snapshot) discoveredSegmentIds.add(appliedFix.replacement.segment_id);
+    }
+    try {
+      reportSequence = recordIterationReport({
+        projectDir: absProjectDir,
+        reportSequence,
+        issues,
+        fixes: dispositionFixes(proposedFixes, fixes, applyResult, "applied", "measured improvement accepted"),
+        evaluation: currentEvaluation,
+        timeline: snapshot.timeline,
+        opts,
+        reports,
+        reportRefs,
+      });
+    } finally {
+      cleanupCommittedTransactionSnapshot(snapshot, iteration, warnings);
+    }
+    currentEvaluation = candidateEvaluation;
 
     if (iteration === maxIterations) {
-      const finalEvaluation = await evaluateIteration(absProjectDir, brief, workingTimeline, iteration + 1, skipRender, opts, warnings);
-      finalScore = finalEvaluation.score;
-      if (finalScore < (qualityFloor ?? 0)) {
-        convergenceReason = "quality_floor";
-      } else if (previousScore !== null && finalScore <= previousScore + 0.0001) {
-        convergenceReason = "no_improvement";
-      } else {
-        convergenceReason = "max_iterations";
-      }
+      convergenceReason = "max_iterations";
     }
   }
 
-  const initial = initialScore ?? finalScore;
+  const finalIssues = detectIssues(
+    currentEvaluation.marlin,
+    currentEvaluation.alignment,
+    workingTimeline,
+    currentEvaluation.reviewMetrics,
+  );
+  reportSequence = recordIterationReport({
+    projectDir: absProjectDir,
+    reportSequence,
+    issues: finalIssues,
+    fixes: [],
+    evaluation: currentEvaluation,
+    timeline: workingTimeline,
+    opts,
+    reports,
+    reportRefs,
+  });
+  const resultTimelineHash = hashTimeline(workingTimeline);
   writeQAImprovementIndex(absProjectDir, {
     version: "1",
     project_id: brief.project?.id ?? brief.project_id ?? path.basename(absProjectDir),
     run_id: runStartedAt,
     base_timeline_hash: baseTimelineHash,
-    result_timeline_hash: hashTimeline(workingTimeline),
+    result_timeline_hash: resultTimelineHash,
     convergence_reason: indexConvergenceReason(convergenceReason, reports.at(-1)),
     iterations: reportRefs,
   });
 
   return {
     iterations,
-    initial_score: round3(initial),
-    final_score: round3(finalScore),
-    improvement: round3(finalScore - initial),
+    initial_score: round3(initialScore),
+    final_score: round3(currentEvaluation.score),
+    improvement: round3(currentEvaluation.score - initialScore),
     fixes_applied_total: fixesAppliedTotal,
     reports,
     converged: convergenceReason !== "max_iterations",
     convergence_reason: convergenceReason,
-    warnings,
+    warnings: [...new Set(warnings)],
+    visual_qa: currentEvaluation.visualQaApplicable
+      ? {
+        status: isMarlinQAReportVerified(currentEvaluation.marlin) ? "verified" : "blocked",
+        ...(currentEvaluation.marlin.visual_qa_reason
+          ? { reason: currentEvaluation.marlin.visual_qa_reason }
+          : {}),
+      }
+      : { status: "not_applicable", reason: "audio_only_timeline" },
   };
-}
-
-async function applyIterationFixes(input: {
-  projectDir: string;
-  iteration: number;
-  fixes: QAFix[];
-  selects: SelectsCandidates;
-  blueprint: EditBlueprint;
-  timeline: TimelineIR;
-  skipRender: boolean;
-  opts: QALoopOptions;
-  warnings: string[];
-}): Promise<{ result: ApplyResult; timeline: TimelineIR }> {
-  const {
-    projectDir,
-    iteration,
-    fixes,
-    selects,
-    blueprint,
-    timeline,
-    skipRender,
-    opts,
-    warnings,
-  } = input;
-  const selectsPath = path.join(projectDir, "04_plan", "selects_candidates.yaml");
-  const blueprintPath = path.join(projectDir, "04_plan", "edit_blueprint.yaml");
-  const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
-  const renderPath = defaultRenderPath(projectDir);
-  const backups = backupIterationArtifacts(projectDir, iteration, { includeRender: !skipRender });
-  const selectsBefore = structuredClone(selects);
-  const blueprintBefore = structuredClone(blueprint);
-
-  try {
-    const result = applyFixes(fixes, selects, blueprint, timeline, { projectDir });
-    if (!result.selects_modified && !result.blueprint_modified) {
-      return { result, timeline };
-    }
-
-    if (result.selects_modified) writeYaml(selectsPath, selects);
-    if (result.blueprint_modified) writeYaml(blueprintPath, blueprint);
-
-    const nextTimeline = await (opts.compile ?? defaultCompile)(projectDir, selects, blueprint, iteration);
-    writeJson(timelinePath, nextTimeline);
-
-    if (!skipRender) {
-      await (opts.render ?? defaultRender)(projectDir, nextTimeline, iteration);
-    }
-
-    return { result, timeline: nextTimeline };
-  } catch (error) {
-    restoreBackups([
-      [backups.selects, selectsPath],
-      [backups.blueprint, blueprintPath],
-      [backups.timeline, timelinePath],
-      [backups.render, renderPath],
-    ]);
-    replaceObject(selects, selectsBefore);
-    replaceObject(blueprint, blueprintBefore);
-    warnings.push(`Iteration ${iteration} failed and artifacts were restored: ${error instanceof Error ? error.message : String(error)}`);
-    return {
-      result: {
-        applied: [],
-        skipped: fixes,
-        selects_modified: false,
-        blueprint_modified: false,
-        warnings: [`Iteration ${iteration} failed: ${error instanceof Error ? error.message : String(error)}`],
-        modified_beat_ids: [],
-      },
-      timeline,
-    };
-  }
 }
 
 function replaceObject<T extends object>(target: T, source: T): void {
@@ -311,8 +480,11 @@ async function evaluateIteration(
   warnings: string[],
 ): Promise<Evaluation> {
   const videoPath = defaultRenderPath(projectDir);
+  const visualQaApplicable = !isAudioOnlyTimeline(timeline);
   let marlin: MarlinQAReport;
-  if (skipRender) {
+  if (!visualQaApplicable) {
+    marlin = blockedMarlinReport(projectDir, videoPath, "audio_only_timeline");
+  } else if (skipRender) {
     marlin = blockedMarlinReport(projectDir, videoPath, "render_skipped");
   } else if (opts.runMarlinQA !== undefined || fs.existsSync(videoPath)) {
     try {
@@ -329,34 +501,310 @@ async function evaluateIteration(
     marlin = blockedMarlinReport(projectDir, videoPath, "render_missing");
     warnings.push(`Marlin QA skipped because rendered video was not found: ${videoPath}`);
   }
-  const marlinAvailable = isMarlinQAReportVerified(marlin);
-  const alignment = await (opts.runBriefAlignment ?? defaultRunBriefAlignment)(projectDir, brief, timeline, iteration);
+  const marlinAvailable = !visualQaApplicable || (
+    isMarlinQAReportVerified(marlin) && Number.isFinite(marlin.score)
+  );
+  let alignment: BriefAlignmentReport;
+  let alignmentAvailable = true;
+  try {
+    alignment = await (opts.runBriefAlignment ?? defaultRunBriefAlignment)(projectDir, brief, timeline, iteration);
+    alignmentAvailable = Number.isFinite(alignment.composite);
+    if (!alignmentAvailable) {
+      warnings.push("Brief alignment evaluation returned a non-finite composite score");
+    }
+  } catch (error) {
+    alignmentAvailable = false;
+    alignment = unavailableBriefAlignmentReport(projectDir, iteration, errorMessage(error), opts);
+    warnings.push(`Brief alignment evaluation was unavailable: ${errorMessage(error)}`);
+  }
+  const unavailableReasons = [
+    ...(!marlinAvailable ? [`visual QA is ${marlin.visual_qa ?? "unverified"}`] : []),
+    ...(!alignmentAvailable ? ["brief alignment evaluation is unavailable"] : []),
+  ];
+  let reviewMetrics: ReviewMetricsArtifact;
+  try {
+    const reviewInputs = loadReviewMetricsInputs(projectDir);
+    reviewInputs.timeline = timeline;
+    reviewMetrics = await (opts.evaluateReviewMetrics ?? ((inputs) => computeReviewMetrics(inputs)))(
+      reviewInputs,
+      iteration,
+    );
+  } catch (error) {
+    warnings.push(`Review metrics evaluation was unavailable: ${errorMessage(error)}`);
+    reviewMetrics = computeReviewMetrics({ timeline });
+  }
   return {
     marlin,
-    marlinAvailable,
     alignment,
-    score: computeOverallScore(marlin, alignment),
+    available: unavailableReasons.length === 0,
+    ...(unavailableReasons.length > 0 ? { unavailableReason: unavailableReasons.join("; ") } : {}),
+    score: computeOverallScore(marlin, alignment, visualQaApplicable),
+    reviewMetrics,
+    visualQaApplicable,
   };
 }
 
-function writeIterationReport(
-  projectDir: string,
-  iteration: number,
-  issues: QAIssue[],
-  fixes: QAFix[],
-  evaluation: Evaluation,
-  opts: QALoopOptions,
-): QAImprovementReport {
+function writeIterationReport(input: {
+  projectDir: string;
+  iteration: number;
+  issues: QAIssue[];
+  fixes: QAReportedFix[];
+  evaluation: Evaluation;
+  timeline: TimelineIR;
+  opts: QALoopOptions;
+}): QAImprovementReport {
+  const { projectDir, iteration, issues, fixes, evaluation, timeline, opts } = input;
   const report = buildQAReport(
     iteration,
     issues,
     fixes,
     evaluation.marlin,
     evaluation.alignment,
-    opts.now ? { now: opts.now } : {},
+    {
+      ...(opts.now ? { now: opts.now } : {}),
+      evaluationStatus: evaluation.available ? "available" : "unavailable",
+      ...(evaluation.unavailableReason ? { evaluationUnavailableReason: evaluation.unavailableReason } : {}),
+      timelineHash: hashTimeline(timeline),
+      visualQaApplicable: evaluation.visualQaApplicable,
+    },
   );
   writeQAImprovementReport(projectDir, report, iterationReportRef(iteration).path);
   return report;
+}
+
+function recordIterationReport(input: {
+  projectDir: string;
+  reportSequence: number;
+  issues: QAIssue[];
+  fixes: QAReportedFix[];
+  evaluation: Evaluation;
+  timeline: TimelineIR;
+  opts: QALoopOptions;
+  reports: QAImprovementReport[];
+  reportRefs: QAImprovementIndex["iterations"];
+}): number {
+  const iteration = input.reportSequence + 1;
+  const report = writeIterationReport({ ...input, iteration });
+  input.reports.push(report);
+  input.reportRefs.push(iterationReportRef(iteration));
+  return iteration;
+}
+
+function reportedFix(
+  fix: QAFix,
+  disposition: QAFixDisposition,
+  reason?: string,
+): QAReportedFix {
+  return {
+    ...fix,
+    disposition,
+    ...(reason ? { disposition_reason: reason } : {}),
+  };
+}
+
+function dispositionFixes(
+  proposedFixes: QAFix[],
+  selectedFixes: QAFix[],
+  applyResult: ApplyResult | undefined,
+  appliedDisposition: Extract<QAFixDisposition, "applied" | "rolled_back" | "skipped">,
+  reason: string,
+): QAReportedFix[] {
+  const selected = new Set(selectedFixes);
+  const skipped = new Set(applyResult?.skipped ?? []);
+  return proposedFixes.map((fix) => {
+    if (!selected.has(fix)) {
+      return reportedFix(fix, "rejected", "iteration fix limit excluded this proposal");
+    }
+    if (skipped.has(fix)) {
+      return reportedFix(fix, "skipped", applyResult?.warnings.join("; ") || "fix was not applicable");
+    }
+    return reportedFix(fix, appliedDisposition, reason);
+  });
+}
+
+function mutationRejectionReason(
+  previous: Evaluation,
+  candidate: Evaluation,
+  qualityFloor: number,
+): {
+  convergenceReason: Extract<QALoopResult["convergence_reason"], "quality_floor" | "no_improvement">;
+  message: string;
+} | null {
+  if (!candidate.available) {
+    return {
+      convergenceReason: "no_improvement",
+      message: `post-fix evaluation was unavailable: ${candidate.unavailableReason ?? "unknown reason"}`,
+    };
+  }
+  if (!meetsQualityFloor(candidate.score, qualityFloor)) {
+    return {
+      convergenceReason: "quality_floor",
+      message: `post-fix score ${candidate.score} was below quality floor ${qualityFloor}`,
+    };
+  }
+  if (!isMeasuredImprovement(previous.score, candidate.score)) {
+    return {
+      convergenceReason: "no_improvement",
+      message: `post-fix score ${candidate.score} did not improve on ${previous.score}`,
+    };
+  }
+  return null;
+}
+
+function meetsQualityFloor(score: number, qualityFloor: number): boolean {
+  return Number.isFinite(score) && score >= qualityFloor;
+}
+
+function isMeasuredImprovement(previousScore: number, candidateScore: number): boolean {
+  return Number.isFinite(candidateScore) && candidateScore > previousScore + SCORE_COMPARISON_EPSILON;
+}
+
+function persistPlanningArtifacts(
+  projectDir: string,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  result: ApplyResult,
+): void {
+  const paths = canonicalArtifactPaths(projectDir);
+  if (result.selects_modified) writeYaml(paths.selects, selects);
+  if (result.blueprint_modified) writeYaml(paths.blueprint, blueprint);
+}
+
+function canonicalArtifactPaths(projectDir: string): {
+  selects: string;
+  blueprint: string;
+  timeline: string;
+  adjacency: string;
+  render: string;
+  renderReport: string;
+} {
+  return {
+    selects: path.join(projectDir, "04_plan", "selects_candidates.yaml"),
+    blueprint: path.join(projectDir, "04_plan", "edit_blueprint.yaml"),
+    timeline: path.join(projectDir, "05_timeline", "timeline.json"),
+    adjacency: path.join(projectDir, "05_timeline", "adjacency_analysis.json"),
+    render: defaultRenderPath(projectDir),
+    renderReport: path.join(projectDir, "09_output", "render-report.json"),
+  };
+}
+
+function captureTransactionSnapshot(
+  projectDir: string,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  timeline: TimelineIR,
+): TransactionSnapshot {
+  const paths = canonicalArtifactPaths(projectDir);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), TRANSACTION_TEMP_PREFIX));
+  try {
+    return {
+      tempDir,
+      artifacts: Object.values(paths).map((filePath, index) => captureArtifactSnapshot(
+        filePath,
+        path.join(tempDir, `${index}-${path.basename(filePath)}`),
+      )),
+      selects: structuredClone(selects),
+      blueprint: structuredClone(blueprint),
+      timeline: structuredClone(timeline),
+    };
+  } catch (error) {
+    try {
+      cleanupTransactionSnapshot({ tempDir });
+    } catch (cleanupError) {
+      throw new Error(
+        `QA transaction snapshot failed (${errorMessage(error)}) and temp cleanup also failed: ${errorMessage(cleanupError)}`,
+      );
+    }
+    throw error;
+  }
+}
+
+function captureArtifactSnapshot(filePath: string, backupPath: string): ArtifactSnapshot {
+  if (!fs.existsSync(filePath)) return { path: filePath, existed: false };
+  fs.copyFileSync(filePath, backupPath);
+  return {
+    path: filePath,
+    existed: true,
+    backupPath,
+  };
+}
+
+function rollbackTransactionOrThrow(
+  iteration: number,
+  transactionError: unknown,
+  snapshot: TransactionSnapshot,
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  timeline: TimelineIR,
+): void {
+  const failures: string[] = [];
+  for (const artifact of snapshot.artifacts) {
+    try {
+      restoreArtifactSnapshot(artifact);
+    } catch (error) {
+      failures.push(`${artifact.path}: ${errorMessage(error)}`);
+    }
+  }
+  for (const [label, target, source] of [
+    ["selects", selects, snapshot.selects],
+    ["blueprint", blueprint, snapshot.blueprint],
+    ["timeline", timeline, snapshot.timeline],
+  ] as const) {
+    try {
+      replaceObject(target, source);
+    } catch (error) {
+      failures.push(`in-memory ${label}: ${errorMessage(error)}`);
+    }
+  }
+  try {
+    cleanupTransactionSnapshot(snapshot);
+  } catch (error) {
+    failures.push(`${snapshot.tempDir}: transaction temp cleanup failed: ${errorMessage(error)}`);
+  }
+  if (failures.length > 0) {
+    throw new QATransactionRestoreError(iteration, transactionError, failures);
+  }
+}
+
+function restoreArtifactSnapshot(snapshot: ArtifactSnapshot): void {
+  if (snapshot.existed) {
+    if (!snapshot.backupPath) throw new Error("disk-backed snapshot path is missing");
+    copyFileAtomically(snapshot.backupPath, snapshot.path);
+    return;
+  }
+  if (!fs.existsSync(snapshot.path)) return;
+  const stat = fs.lstatSync(snapshot.path);
+  if (stat.isDirectory()) {
+    throw new Error("cannot remove a directory created at a canonical artifact path");
+  }
+  fs.unlinkSync(snapshot.path);
+}
+
+function copyFileAtomically(sourcePath: string, destinationPath: string): void {
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+  const tmp = `${destinationPath}.restore.${process.pid}.${crypto.randomUUID()}`;
+  try {
+    fs.copyFileSync(sourcePath, tmp);
+    fs.renameSync(tmp, destinationPath);
+  } finally {
+    if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+  }
+}
+
+function cleanupCommittedTransactionSnapshot(
+  snapshot: TransactionSnapshot,
+  iteration: number,
+  warnings: string[],
+): void {
+  try {
+    cleanupTransactionSnapshot(snapshot);
+  } catch (error) {
+    warnings.push(`Iteration ${iteration} committed but transaction temp cleanup failed: ${errorMessage(error)}`);
+  }
+}
+
+function cleanupTransactionSnapshot(snapshot: Pick<TransactionSnapshot, "tempDir">): void {
+  fs.rmSync(snapshot.tempDir, { recursive: true, force: true, maxRetries: 3 });
 }
 
 function iterationReportRef(iteration: number): QAImprovementIndex["iterations"][number] {
@@ -381,6 +829,23 @@ function indexConvergenceReason(
     return lastReport?.total_issues === 0 ? "no_issues" : "no_fixable_issues";
   }
   return "score_plateau";
+}
+
+function unavailableBriefAlignmentReport(
+  projectDir: string,
+  iteration: number,
+  detail: string,
+  opts: QALoopOptions,
+): BriefAlignmentReport {
+  return {
+    version: "1",
+    project: path.basename(projectDir),
+    evaluated_at: (opts.now ?? (() => new Date()))().toISOString(),
+    brief_hash: "unavailable",
+    stages: {},
+    composite: 0,
+    notes: [`Brief alignment evaluation ${iteration} was unavailable: ${detail}`],
+  };
 }
 
 async function defaultRunMarlinQA(
@@ -408,8 +873,10 @@ async function defaultProposeFixes(
   timeline: TimelineIR,
   selects: SelectsCandidates,
   projectDir: string,
+  _iteration: number,
+  discovery?: QADiscoveryContract,
 ): Promise<QAFix[]> {
-  return proposeFixes(issues, timeline, selects, projectDir);
+  return proposeFixes(issues, timeline, selects, projectDir, { discovery });
 }
 
 function defaultCompile(
@@ -441,8 +908,10 @@ async function defaultRender(projectDir: string): Promise<string> {
 export function computeOverallScore(
   marlinQaResult: MarlinQAReport | undefined,
   briefAlignmentResult: BriefAlignmentReport,
+  visualQaApplicable = true,
 ): number {
   const alignmentScore = clamp01(briefAlignmentResult.composite);
+  if (!visualQaApplicable) return round3(alignmentScore);
   if (!marlinQaResult || !isMarlinQAReportVerified(marlinQaResult)) {
     return round3(0.45 * alignmentScore);
   }
@@ -455,35 +924,34 @@ function backupIterationArtifacts(
   projectDir: string,
   iteration: number,
   opts: { includeRender: boolean },
-): { selects?: string; blueprint?: string; timeline?: string; render?: string } {
+): { selects?: string; blueprint?: string; timeline?: string; render?: string; renderReport?: string } {
+  const paths = canonicalArtifactPaths(projectDir);
   return {
     selects: copyIfExists(
-      path.join(projectDir, "04_plan", "selects_candidates.yaml"),
+      paths.selects,
       path.join(projectDir, "04_plan", `selects_candidates-iter${iteration}.yaml`),
     ),
     blueprint: copyIfExists(
-      path.join(projectDir, "04_plan", "edit_blueprint.yaml"),
+      paths.blueprint,
       path.join(projectDir, "04_plan", `edit_blueprint-iter${iteration}.yaml`),
     ),
     timeline: copyIfExists(
-      path.join(projectDir, "05_timeline", "timeline.json"),
+      paths.timeline,
       path.join(projectDir, "05_timeline", `timeline-iter${iteration}.json`),
     ),
     render: opts.includeRender
       ? copyIfExists(
-          defaultRenderPath(projectDir),
+          paths.render,
           path.join(projectDir, "09_output", `rough-cut-iter${iteration}.mp4`),
         )
       : undefined,
+    renderReport: opts.includeRender
+      ? copyIfExists(
+          paths.renderReport,
+          path.join(projectDir, "09_output", `render-report-iter${iteration}.json`),
+        )
+      : undefined,
   };
-}
-
-function restoreBackups(pairs: Array<[string | undefined, string]>): void {
-  for (const [backup, destination] of pairs) {
-    if (!backup || !fs.existsSync(backup)) continue;
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.copyFileSync(backup, destination);
-  }
 }
 
 function copyIfExists(source: string, destination: string): string | undefined {
@@ -521,7 +989,7 @@ function defaultRenderPath(projectDir: string): string {
 function blockedMarlinReport(
   projectDir: string,
   videoPath: string,
-  reason: "render_missing" | "render_skipped" | "marlin_unavailable",
+  reason: "render_missing" | "render_skipped" | "marlin_unavailable" | "audio_only_timeline",
   detail?: string,
 ): MarlinQAReport {
   const reasonText = visualQABlockedReasonText(reason);
@@ -549,7 +1017,10 @@ function blockedMarlinReport(
   };
 }
 
-function visualQABlockedReasonText(reason: "render_missing" | "render_skipped" | "marlin_unavailable"): string {
+function visualQABlockedReasonText(
+  reason: "render_missing" | "render_skipped" | "marlin_unavailable" | "audio_only_timeline",
+): string {
+  if (reason === "audio_only_timeline") return "visual QA is not applicable to an audio-only timeline";
   if (reason === "render_missing") return "rendered video was not found";
   if (reason === "render_skipped") return "render was skipped";
   return "Marlin was unavailable";
@@ -571,4 +1042,8 @@ function clamp01(value: number): number {
 
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -64,25 +64,32 @@ export function applyEndingTreatment(
   }
   const videoClips = timeline.tracks.video.flatMap((track) => track.clips);
   const finalVideoClip = [...videoClips].sort(compareClipEnd).at(-1);
-  if (!finalVideoClip || !Number.isFinite(fps) || fps <= 0) {
+  const finalProgramClip = finalVideoClip ?? timeline.tracks.audio
+    .flatMap((track) => track.clips)
+    .filter((clip) => clip.motivation !== "original clip audio" && clip.role !== "bgm")
+    .sort(compareClipEnd).at(-1);
+  if (!finalProgramClip || !Number.isFinite(fps) || fps <= 0) {
     return { ...treatment, extendedFrames: 0, audioClipCount: 0 };
   }
+  if (finalProgramClip.media_kind === "image") {
+    return { ...treatment, extendedFrames: 0, audioClipCount: 0, finalVideoClipId: finalProgramClip.clip_id };
+  }
 
-  const segment = segments.find((item) => item.segment_id === finalVideoClip.segment_id);
+  const segment = segments.find((item) => item.segment_id === finalProgramClip.segment_id);
   let availableHandleUs = segment
-    ? Math.max(0, segment.src_out_us - finalVideoClip.src_out_us)
+    ? Math.max(0, segment.src_out_us - finalProgramClip.src_out_us)
     : 0;
   const desiredTailFrames = Math.max(0, Math.round(treatment.tailHoldSec * fps));
-  const requestedSrcOutUs = finalVideoClip.src_out_us + Math.round(desiredTailFrames * 1_000_000 / fps);
+  const requestedSrcOutUs = finalProgramClip.src_out_us + Math.round(desiredTailFrames * 1_000_000 / fps);
   const nextSpeechStartUs = findNextSpeechStart(
-    utteranceMap.get(finalVideoClip.asset_id) ?? [],
-    finalVideoClip.src_out_us,
+    utteranceMap.get(finalProgramClip.asset_id) ?? [],
+    finalProgramClip.src_out_us,
   );
   const clampedByNextSpeech = nextSpeechStartUs !== undefined && nextSpeechStartUs < requestedSrcOutUs;
   if (nextSpeechStartUs !== undefined) {
     availableHandleUs = Math.min(
       availableHandleUs,
-      Math.max(0, nextSpeechStartUs - finalVideoClip.src_out_us),
+      Math.max(0, nextSpeechStartUs - finalProgramClip.src_out_us),
     );
   }
   const availableTailFrames = Math.max(0, Math.floor(availableHandleUs * fps / 1_000_000));
@@ -90,37 +97,48 @@ export function applyEndingTreatment(
   const extensionUs = Math.round(extendedFrames * 1_000_000 / fps);
 
   if (extendedFrames > 0) {
-    finalVideoClip.src_out_us += extensionUs;
-    finalVideoClip.timeline_duration_frames += extendedFrames;
+    finalProgramClip.src_out_us += extensionUs;
+    finalProgramClip.timeline_duration_frames += extendedFrames;
   }
 
   const audioFadeOutFrames = Math.min(
-    finalVideoClip.timeline_duration_frames,
+    finalProgramClip.timeline_duration_frames,
     Math.max(0, Math.round(treatment.audioFadeOutSec * fps)),
   );
   const videoFadeOutFrames = treatment.videoFadeColor === "none"
     ? 0
     : Math.min(
-        finalVideoClip.timeline_duration_frames,
+        finalProgramClip.timeline_duration_frames,
         Math.max(0, Math.round(treatment.videoFadeOutSec * fps)),
       );
 
   attachEndingMetadata(
-    finalVideoClip,
+    finalProgramClip,
     extendedFrames,
     audioFadeOutFrames,
     videoFadeOutFrames,
     treatment.videoFadeColor,
     clampedByNextSpeech,
   );
+  if (!finalVideoClip) {
+    finalProgramClip.audio_policy = {
+      ...(finalProgramClip.audio_policy ?? {}),
+      fade_out_frames: Math.max(finalProgramClip.audio_policy?.fade_out_frames ?? 0, audioFadeOutFrames),
+      nat_sound_fade_out_frames: Math.max(
+        finalProgramClip.audio_policy?.nat_sound_fade_out_frames ?? 0,
+        audioFadeOutFrames,
+      ),
+    };
+  }
 
   const mirroredAudio = timeline.tracks.audio
     .flatMap((track) => track.clips)
     .filter((clip) =>
-      clip.asset_id === finalVideoClip.asset_id &&
-      clip.segment_id === finalVideoClip.segment_id &&
-      clip.timeline_in_frame === finalVideoClip.timeline_in_frame &&
-      clip.src_in_us === finalVideoClip.src_in_us
+      clip.clip_id !== finalProgramClip.clip_id &&
+      clip.asset_id === finalProgramClip.asset_id &&
+      clip.segment_id === finalProgramClip.segment_id &&
+      clip.timeline_in_frame === finalProgramClip.timeline_in_frame &&
+      clip.src_in_us === finalProgramClip.src_in_us
     );
 
   for (const clip of mirroredAudio) {
@@ -150,7 +168,7 @@ export function applyEndingTreatment(
     ...treatment,
     extendedFrames,
     audioClipCount: mirroredAudio.length,
-    finalVideoClipId: finalVideoClip.clip_id,
+    finalVideoClipId: finalVideoClip?.clip_id ?? finalProgramClip.clip_id,
   };
 }
 

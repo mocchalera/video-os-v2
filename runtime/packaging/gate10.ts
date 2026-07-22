@@ -55,6 +55,7 @@ export interface Gate10Options {
     base_timeline_version?: string;
   } | null;
   reviewReport?: Gate10ReviewReport | null;
+  visualQaApplicable?: boolean;
 }
 
 function buildAutoHandoffResolution(
@@ -210,7 +211,10 @@ export function checkGate10(projectState: {
       );
     }
 
-    const visualReason = reviewVisualQAGateReason(options.reviewReport);
+    const visualReason = reviewVisualQAGateReason(
+      options.reviewReport,
+      options.visualQaApplicable ?? true,
+    );
     if (visualReason) {
       errors.push(visualReason);
     }

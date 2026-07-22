@@ -4,6 +4,8 @@ import { remotionDesignTokens as tokens } from "./design-tokens.js";
 
 export interface OverlayPresetProps {
   text: string;
+  action_text?: string;
+  brand_text?: string;
   writing_mode?: "horizontal_tb" | "vertical_rl" | "vertical_lr";
   anchor?: string;
   safe_area?: { top?: number; bottom?: number; left?: number; right?: number };
@@ -151,9 +153,156 @@ function titleCardRender(props: OverlayPresetProps): JSX.Element {
       textAlign: "center",
       textShadow: `0 4px 28px ${tokens.colors.overlay.shadow}`,
       whiteSpace: "pre-wrap",
+      wordBreak: "normal",
+      overflowWrap: "anywhere",
     }),
     props.anchor ?? "center",
     safeArea,
+  );
+}
+
+/** Aggressive social cold-open treatment. Authored explicitly as hook-title. */
+function hookTitleRender(props: OverlayPresetProps): JSX.Element {
+  const frame = useCurrentFrame();
+  const safeArea = mergedSafeArea(props.safe_area);
+  const enterEnd = Math.min(9, Math.max(1, props.durationInFrames - 1));
+  const scale = interpolate(frame, [0, enterEnd], [1.22, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const rotate = interpolate(frame, [0, enterEnd], [-2.4, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const opacity = fadeOpacity(frame, props.durationInFrames, 5);
+  const flashOpacity = interpolate(frame, [0, 1, 4], [0.5, 0.18, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  const accentWidth = interpolate(frame, [2, enterEnd + 3], [0, 100], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  const title = createElement(
+    "div",
+    {
+      style: {
+        ...textWritingMode(props.writing_mode),
+        maxWidth: "86%",
+        opacity,
+        transform: `scale(${scale}) rotate(${rotate}deg)`,
+        transformOrigin: "left center",
+        color: tokens.colors.overlay.text,
+        fontFamily: tokens.fontFamilies.heading,
+        fontSize: Math.round(tokens.fontSizes.title * 1.18),
+        fontWeight: 900,
+        lineHeight: 1.02,
+        letterSpacing: "-0.035em",
+        WebkitTextStroke: `5px ${tokens.colors.overlay.shadow}`,
+        paintOrder: "stroke fill",
+        textShadow: `0 8px 28px ${tokens.colors.overlay.shadow}`,
+        whiteSpace: "pre-wrap",
+        wordBreak: "normal",
+        overflowWrap: "anywhere",
+      },
+    },
+    props.text,
+    createElement("div", {
+      style: {
+        width: `${accentWidth}%`,
+        maxWidth: 420,
+        height: 10,
+        marginTop: 18,
+        borderRadius: 999,
+        background: tokens.colors.overlay.accent,
+        boxShadow: `0 4px 16px ${tokens.colors.overlay.shadow}`,
+      },
+    }),
+  );
+
+  return createElement(
+    AbsoluteFill,
+    null,
+    createElement(AbsoluteFill, { style: { backgroundColor: `rgba(255,255,255,${flashOpacity})` } }),
+    overlayTextBox(title, props.anchor ?? "top-left", safeArea),
+  );
+}
+
+/** Full-frame CTA treatment that stays legible over arbitrary source footage. */
+function ctaCardRender(props: OverlayPresetProps): JSX.Element {
+  const frame = useCurrentFrame();
+  const safeArea = mergedSafeArea(props.safe_area);
+  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_medium);
+  const translateY = interpolate(frame, [0, tokens.durations.fade_medium], [28, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+
+  return createElement(
+    AbsoluteFill,
+    {
+      style: {
+        opacity,
+        padding: `${safeArea.top}px ${safeArea.right}px ${safeArea.bottom}px ${safeArea.left}px`,
+        alignItems: "center",
+        justifyContent: "center",
+        color: tokens.colors.overlay.text,
+        background: "linear-gradient(145deg, #07111f 0%, #0b2434 58%, #073044 100%)",
+        fontFamily: tokens.fontFamilies.heading,
+      },
+    },
+    createElement(
+      "div",
+      {
+        style: {
+          width: "100%",
+          maxWidth: 1_340,
+          transform: `translateY(${translateY}px)`,
+          textAlign: "center",
+        },
+      },
+      props.brand_text
+        ? createElement("div", {
+            style: {
+              marginBottom: 24,
+              color: tokens.colors.overlay.mutedText,
+              fontSize: tokens.fontSizes.label,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              overflowWrap: "anywhere",
+            },
+          }, props.brand_text)
+        : null,
+      createElement("div", {
+        style: {
+          color: tokens.colors.overlay.text,
+          fontSize: tokens.fontSizes.title,
+          fontWeight: 800,
+          lineHeight: 1.12,
+          whiteSpace: "pre-wrap",
+          wordBreak: "normal",
+          overflowWrap: "anywhere",
+          textShadow: `0 5px 30px ${tokens.colors.overlay.shadow}`,
+        },
+      }, props.text),
+      createElement("div", {
+        style: {
+          display: "inline-block",
+          maxWidth: "100%",
+          marginTop: 40,
+          padding: "18px 34px",
+          borderRadius: 999,
+          color: "#041018",
+          backgroundColor: tokens.colors.overlay.accent,
+          fontSize: tokens.fontSizes.kicker,
+          fontWeight: 800,
+          lineHeight: 1.18,
+          overflowWrap: "anywhere",
+          boxShadow: `0 10px 36px ${tokens.colors.overlay.shadow}`,
+        },
+      }, props.action_text ?? ""),
+    ),
   );
 }
 
@@ -263,16 +412,56 @@ function creditRender(props: OverlayPresetProps): JSX.Element {
   );
 }
 
+function emphasisWordRender(props: OverlayPresetProps): JSX.Element {
+  const frame = useCurrentFrame();
+  const safeArea = mergedSafeArea(props.safe_area);
+  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
+  const scale = interpolate(
+    frame,
+    [0, Math.min(8, Math.max(1, props.durationInFrames - 1))],
+    [0.72, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  );
+
+  return overlayTextBox(
+    textElement(props.text, {
+      ...textWritingMode(props.writing_mode),
+      opacity,
+      transform: `scale(${scale})`,
+      maxWidth: "76%",
+      color: tokens.colors.overlay.accent,
+      fontFamily: tokens.fontFamilies.heading,
+      fontSize: tokens.fontSizes.title,
+      fontWeight: 700,
+      lineHeight: 1,
+      textAlign: "center",
+      WebkitTextStroke: `5px ${tokens.colors.overlay.shadow}`,
+      paintOrder: "stroke fill",
+      textShadow: `0 6px 18px ${tokens.colors.overlay.shadow}`,
+      whiteSpace: "pre-wrap",
+      wordBreak: "keep-all",
+    }),
+    props.anchor ?? "center",
+    safeArea,
+  );
+}
+
 export const overlayPresets: ReadonlyMap<string, OverlayPreset> = new Map([
   ["vos:overlay.title-card", { id: "vos:overlay.title-card", render: titleCardRender }],
+  ["vos:overlay.hook-title", { id: "vos:overlay.hook-title", render: hookTitleRender }],
+  ["vos:overlay.cta-card", { id: "vos:overlay.cta-card", render: ctaCardRender }],
   ["vos:overlay.lower-third", { id: "vos:overlay.lower-third", render: lowerThirdRender }],
   ["vos:overlay.chapter-kicker", { id: "vos:overlay.chapter-kicker", render: chapterKickerRender }],
   ["vos:overlay.location-tag", { id: "vos:overlay.location-tag", render: locationTagRender }],
   ["vos:overlay.credit", { id: "vos:overlay.credit", render: creditRender }],
+  ["vos:overlay.emphasis-word", { id: "vos:overlay.emphasis-word", render: emphasisWordRender }],
 ]);
 
 export function resolveOverlayPreset(stylingClass: string): OverlayPreset | null {
-  return overlayPresets.get(stylingClass) ?? null;
+  const normalized = stylingClass.startsWith("vos:overlay.")
+    ? stylingClass
+    : `vos:overlay.${stylingClass}`;
+  return overlayPresets.get(normalized) ?? null;
 }
 
 export function getOverlayText(metadata: unknown): string | null {

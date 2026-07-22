@@ -78,7 +78,7 @@ describe("computeCacheHash", () => {
     expect(h1).not.toBe(h2);
   });
 
-  it("only reads first 1 MB — identical prefix produces identical hash", () => {
+  it("hashes full content — bytes after first 1 MB invalidate cache", () => {
     const f1 = path.join(tmpDir, "big1.bin");
     const f2 = path.join(tmpDir, "big2.bin");
 
@@ -92,7 +92,7 @@ describe("computeCacheHash", () => {
 
     const h1 = computeCacheHash(f1, buf1.length, 5_000_000);
     const h2 = computeCacheHash(f2, buf2.length, 5_000_000);
-    expect(h1).toBe(h2);
+    expect(h1).not.toBe(h2);
   });
 
   it("handles files smaller than 1 MB", () => {

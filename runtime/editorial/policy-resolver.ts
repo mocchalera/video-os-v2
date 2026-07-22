@@ -147,6 +147,7 @@ const INFERENCE_RULES: InferenceRule[] = [
 // ── Default Policy Mapping ────────────────────────────────────────
 
 const PROFILE_TO_POLICY: Record<string, string> = {
+  "generic-editorial": "generic",
   "interview-highlight": "interview",
   "interview-pro-highlight": "interview",
   "lp-testimonial": "interview",
@@ -171,6 +172,7 @@ export function resolveProfileAndPolicy(
   // Step 1: Resolve profile
   let resolvedProfile: ResolvedRef;
   let profileDef: ProfileDefinition | undefined;
+  let insufficientSignal = false;
 
   // 1a. Explicit hint takes priority
   if (input.briefEditorial?.profile_hint) {
@@ -195,42 +197,22 @@ export function resolveProfileAndPolicy(
     } else {
       // No rule matched — insufficient signal
       resolvedProfile = {
-        id: "interview-highlight",
+        id: "generic-editorial",
         source: "default",
-        rationale: "No matching inference rule; using default profile",
+        rationale: "Generic fallback: no matching inference rule; insufficient editorial signal",
       };
-      profileDef = profiles.get("interview-highlight");
-      return {
-        resolvedProfile,
-        resolvedPolicy: {
-          id: PROFILE_TO_POLICY["interview-highlight"] ?? "interview",
-          source: "default",
-          rationale: "Default policy for default profile",
-        },
-        profileDefaults: profileDef?.defaults,
-        policyDefinition: policies.get("interview"),
-        insufficientSignal: true,
-      };
+      profileDef = profiles.get("generic-editorial");
+      insufficientSignal = true;
     }
   } else {
     // Inference not allowed and no hint
     resolvedProfile = {
-      id: "interview-highlight",
+      id: "generic-editorial",
       source: "default",
-      rationale: "No profile_hint and allow_inference=false; using default",
+      rationale: "Generic fallback: no profile_hint and allow_inference=false; insufficient editorial signal",
     };
-    profileDef = profiles.get("interview-highlight");
-    return {
-      resolvedProfile,
-      resolvedPolicy: {
-        id: "interview",
-        source: "default",
-        rationale: "Default policy for default profile",
-      },
-      profileDefaults: profileDef?.defaults,
-      policyDefinition: policies.get("interview"),
-      insufficientSignal: true,
-    };
+    profileDef = profiles.get("generic-editorial");
+    insufficientSignal = true;
   }
 
   // Step 2: Resolve policy
@@ -254,7 +236,9 @@ export function resolveProfileAndPolicy(
     resolvedPolicy = {
       id: defaultPolicyId,
       source: resolvedProfile.source === "explicit_hint" ? "inferred" : "default",
-      rationale: `Default policy for profile "${resolvedProfile.id}"`,
+      rationale: insufficientSignal
+        ? "Generic fallback policy for insufficient editorial signal"
+        : `Default policy for profile "${resolvedProfile.id}"`,
     };
   }
 
@@ -263,5 +247,6 @@ export function resolveProfileAndPolicy(
     resolvedPolicy,
     profileDefaults: profileDef?.defaults,
     policyDefinition: policyDef,
+    ...(insufficientSignal ? { insufficientSignal: true } : {}),
   };
 }

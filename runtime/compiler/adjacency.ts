@@ -32,6 +32,11 @@ import type {
   AdjacencyFeatures,
   PeakType,
   StoryRole,
+  EvidenceCoverageStatus,
+  DerivedEvidenceSource,
+  DerivedFeatureEvidenceCoverage,
+  SkillSelectionOutcome,
+  ExplicitIntentEvidence,
 } from "./transition-types.js";
 import {
   getActiveTransitionCards,
@@ -48,26 +53,19 @@ import {
   resolveCadenceFit,
 } from "./transition-skill-loader.js";
 import { cosineSimilarity } from "./visual-cache.js";
+import type { SegmentEvidence } from "../artifacts/segment-editorial-evidence.js";
+import { classifyCutRelation } from "./cut-relation.js";
 
 const SAME_ASSET_PUNCH_IN_SCALE = 1.08;
 const SAME_ASSET_PUNCH_IN_MIN_GAP_US = 500_000;
 
 // ── PairEvidence construction ───────────────────────────────────────
 
-interface SegmentEvidence {
-  adjacency_features?: AdjacencyFeatures;
-  peak_moments?: Array<{ type?: string }>;
-  support_signals?: {
-    fused_peak_score?: number;
-    motion_support_score?: number;
-    audio_support_score?: number;
-  };
-}
-
 interface BuildPairEvidenceContext {
   captionPolicySource?: CaptionPolicySource;
   beatOrder?: Map<string, number>;
   totalBeats?: number;
+  segmentEvidenceCoverageEnabled?: boolean;
 }
 
 function jaccard(a: string[], b: string[]): number {
@@ -84,6 +82,7 @@ function jaccard(a: string[], b: string[]): number {
 
 function motionContinuity(leftMotion?: string, rightMotion?: string): number {
   if (!leftMotion || !rightMotion) return 0.5;
+  if (["unknown", "not_applicable"].includes(leftMotion) || ["unknown", "not_applicable"].includes(rightMotion)) return 0.5;
   if (leftMotion === rightMotion) return 0.9;
   // Similar motion families
   const similar = new Map<string, string[]>([
@@ -102,38 +101,189 @@ function motionContinuity(leftMotion?: string, rightMotion?: string): number {
   return 0.3;
 }
 
+function pairCoverageStatus(
+  left: EvidenceCoverageStatus,
+  right: EvidenceCoverageStatus,
+): EvidenceCoverageStatus {
+  if (left === "missing" || right === "missing") return "missing";
+  if (left === "not_applicable" || right === "not_applicable") return "not_applicable";
+  if (left === "unknown" || right === "unknown") return "unknown";
+  return "known";
+}
+
+function missingSegmentCoverage(): import("./transition-types.js").SegmentEvidenceCoverage {
+  return {
+    visual_tags: "missing",
+    motion_type: "missing",
+    shot_scale: "missing",
+    composition_anchor: "missing",
+    screen_side: "missing",
+    gaze_direction: "missing",
+    camera_axis: "missing",
+    camera_motion_direction: "missing",
+    subject_motion_direction: "missing",
+    dominant_subject_type: "missing",
+    avg_luma: "missing",
+    dominant_colors: "missing",
+    text_presence: "missing",
+  };
+}
+
+function buildEvidenceCoverage(
+  left: SegmentEvidence["coverage"],
+  right: SegmentEvidence["coverage"],
+): import("./transition-types.js").PairEvidenceCoverage {
+  const resolvedLeft = left ?? missingSegmentCoverage();
+  const resolvedRight = right ?? missingSegmentCoverage();
+  const fields = [
+    "visual_tags",
+    "motion_type",
+    "shot_scale",
+    "composition_anchor",
+    "screen_side",
+    "gaze_direction",
+    "camera_axis",
+    "camera_motion_direction",
+    "subject_motion_direction",
+    "dominant_subject_type",
+    "avg_luma",
+    "dominant_colors",
+    "text_presence",
+  ] as const;
+  return Object.fromEntries(fields.map((field) => [field, {
+    left: resolvedLeft[field] ?? "missing",
+    right: resolvedRight[field] ?? "missing",
+    pair: pairCoverageStatus(resolvedLeft[field] ?? "missing", resolvedRight[field] ?? "missing"),
+  }])) as import("./transition-types.js").PairEvidenceCoverage;
+}
+
+function knownFeature<T>(value: T | undefined, status: import("./transition-types.js").EvidenceCoverageStatus | undefined): T | undefined {
+  return status === undefined || status === "known" ? value : undefined;
+}
+
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+interface ResolvedSide<T> {
+  value: T;
+  status: EvidenceCoverageStatus;
+  source: DerivedEvidenceSource;
+}
+
+function derivedCoverage(
+  left: Pick<ResolvedSide<unknown>, "status" | "source">,
+  right: Pick<ResolvedSide<unknown>, "status" | "source">,
+): DerivedFeatureEvidenceCoverage {
+  return {
+    left: left.status,
+    right: right.status,
+    pair: pairCoverageStatus(left.status, right.status),
+    source: { left: left.source, right: right.source },
+  };
+}
+
+function resolveTags(
+  segEvidence: SegmentEvidence | undefined,
+  signals: Candidate["editorial_signals"] | undefined,
+): ResolvedSide<string[]> {
+  const canonicalStatus = segEvidence?.coverage?.visual_tags;
+  if (canonicalStatus === "known") {
+    const value = segEvidence?.adjacency_features.visual_tags ?? [];
+    return {
+      value,
+      status: value.length > 0 ? "known" : "not_applicable",
+      source: "canonical_metadata",
+    };
+  }
+  if (canonicalStatus === "unknown" || canonicalStatus === "not_applicable") {
+    return { value: [], status: canonicalStatus, source: "canonical_metadata" };
+  }
+  if (signals?.visual_tags !== undefined) {
+    return {
+      value: signals.visual_tags,
+      status: signals.visual_tags.length > 0 ? "known" : "not_applicable",
+      source: "candidate_metadata",
+    };
+  }
+  return { value: [], status: "missing", source: "none" };
+}
+
+function resolveCluster(value: string | undefined): ResolvedSide<string | undefined> {
+  const normalized = value?.trim();
+  if (!normalized) return { value: undefined, status: "missing", source: "none" };
+  if (normalized === "unknown") return { value: undefined, status: "unknown", source: "candidate_metadata" };
+  if (normalized === "not_applicable") return { value: undefined, status: "not_applicable", source: "candidate_metadata" };
+  return { value: normalized, status: "known", source: "candidate_metadata" };
+}
+
 function resolveSemanticClusterChange(
-  leftCluster: string | undefined,
-  rightCluster: string | undefined,
+  leftCluster: ResolvedSide<string | undefined>,
+  rightCluster: ResolvedSide<string | undefined>,
   sameAsset: boolean,
   visualTagOverlapScore: number,
-): boolean {
-  if (leftCluster && rightCluster) {
-    return leftCluster !== rightCluster;
+  visualTagCoverage: DerivedFeatureEvidenceCoverage,
+): { value: boolean; coverage: DerivedFeatureEvidenceCoverage } {
+  const fallbackSide = (
+    cluster: ResolvedSide<string | undefined>,
+    tagStatus: EvidenceCoverageStatus,
+    tagSource: DerivedEvidenceSource,
+  ): Pick<ResolvedSide<unknown>, "status" | "source"> => {
+    if (cluster.status !== "missing") return cluster;
+    if (tagStatus !== "missing") return { status: tagStatus, source: tagSource };
+    return cluster;
+  };
+  if (leftCluster.status === "known" && rightCluster.status === "known") {
+    return {
+      value: leftCluster.value !== rightCluster.value,
+      coverage: derivedCoverage(leftCluster, rightCluster),
+    };
   }
-  if (sameAsset) return false;
-  // Lightweight fallback for B-roll/tag-only candidates when semantic clusters are absent.
-  return visualTagOverlapScore < 0.7;
+  if (sameAsset) {
+    return {
+      value: false,
+      coverage: derivedCoverage(
+        fallbackSide(leftCluster, visualTagCoverage.left, visualTagCoverage.source.left),
+        fallbackSide(rightCluster, visualTagCoverage.right, visualTagCoverage.source.right),
+      ),
+    };
+  }
+  if (visualTagCoverage.pair === "known") {
+    return {
+      value: visualTagOverlapScore < 0.7,
+      coverage: derivedCoverage(
+        { status: "known", source: visualTagCoverage.source.left },
+        { status: "known", source: visualTagCoverage.source.right },
+      ),
+    };
+  }
+  return {
+    value: false,
+    coverage: derivedCoverage(
+      fallbackSide(leftCluster, visualTagCoverage.left, visualTagCoverage.source.left),
+      fallbackSide(rightCluster, visualTagCoverage.right, visualTagCoverage.source.right),
+    ),
+  };
 }
 
 function resolveEnergyProxy(
   signals: Candidate["editorial_signals"] | undefined,
   segEvidence: SegmentEvidence | undefined,
-  peakStrengthScore: number,
-): number {
-  return clamp01(
-    signals?.speech_intensity_score ??
-      signals?.motion_energy_score ??
-      segEvidence?.support_signals?.motion_support_score ??
-      signals?.audio_energy_score ??
-      peakStrengthScore ??
-      segEvidence?.support_signals?.fused_peak_score ??
-      0.5,
-  );
+): ResolvedSide<number> {
+  const candidates: Array<[number | undefined, DerivedEvidenceSource]> = [
+    [signals?.speech_intensity_score, "candidate_metadata"],
+    [signals?.motion_energy_score, "candidate_metadata"],
+    [segEvidence?.support_signals?.motion_support_score, "canonical_metadata"],
+    [signals?.audio_energy_score, "candidate_metadata"],
+    [signals?.peak_strength_score, "candidate_metadata"],
+    [segEvidence?.support_signals?.fused_peak_score, "canonical_metadata"],
+  ];
+  for (const [value, source] of candidates) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return { value: clamp01(value), status: "known", source };
+    }
+  }
+  return { value: 0.5, status: "missing", source: "none" };
 }
 
 function inferBRollStoryRole(
@@ -178,25 +328,52 @@ export function buildPairEvidence(
 
   const leftAdj = leftSegEvidence?.adjacency_features;
   const rightAdj = rightSegEvidence?.adjacency_features;
+  // Derived coverage is always emitted. The EYE-020 flag controls whether
+  // canonical observation metadata is loaded, not whether missing data is
+  // allowed to masquerade as a measured metric.
+  const evidenceCoverage = buildEvidenceCoverage(leftSegEvidence?.coverage, rightSegEvidence?.coverage);
   const sameAsset = leftClip.asset_id === rightClip.asset_id;
 
   // Visual tag overlap
-  const leftTags = leftAdj?.visual_tags ?? leftSignals?.visual_tags ?? [];
-  const rightTags = rightAdj?.visual_tags ?? rightSignals?.visual_tags ?? [];
-  const visualTagOverlapScore = jaccard(leftTags, rightTags);
+  const leftTags = resolveTags(leftSegEvidence, leftSignals);
+  const rightTags = resolveTags(rightSegEvidence, rightSignals);
+  const visualTagCoverage = derivedCoverage(leftTags, rightTags);
+  const rawTagStatus = (
+    segEvidence: SegmentEvidence | undefined,
+    signals: Candidate["editorial_signals"] | undefined,
+  ): EvidenceCoverageStatus => {
+    const status = segEvidence?.coverage?.visual_tags;
+    if (status === "known" || status === "unknown" || status === "not_applicable") return status;
+    return signals?.visual_tags !== undefined ? "known" : "missing";
+  };
+  const leftStatus = rawTagStatus(leftSegEvidence, leftSignals);
+  const rightStatus = rawTagStatus(rightSegEvidence, rightSignals);
+  evidenceCoverage.visual_tags = {
+    left: leftStatus,
+    right: rightStatus,
+    pair: pairCoverageStatus(leftStatus, rightStatus),
+  };
+  evidenceCoverage.visual_tag_overlap_score = visualTagCoverage;
+  const visualTagOverlapScore = visualTagCoverage.pair === "known"
+    ? jaccard(leftTags.value, rightTags.value)
+    : 0.5;
 
   // Motion continuity
-  const motionContinuityScore = motionContinuity(leftAdj?.motion_type, rightAdj?.motion_type);
+  const motionContinuityScore = motionContinuity(
+    knownFeature(leftAdj?.motion_type, leftSegEvidence?.coverage?.motion_type),
+    knownFeature(rightAdj?.motion_type, rightSegEvidence?.coverage?.motion_type),
+  );
 
   // Semantic cluster change
-  const leftCluster = leftSignals?.semantic_cluster_id;
-  const rightCluster = rightSignals?.semantic_cluster_id;
-  const semanticClusterChange = resolveSemanticClusterChange(
-    leftCluster,
-    rightCluster,
+  const semanticClusterResult = resolveSemanticClusterChange(
+    resolveCluster(leftSignals?.semantic_cluster_id),
+    resolveCluster(rightSignals?.semantic_cluster_id),
     sameAsset,
     visualTagOverlapScore,
+    visualTagCoverage,
   );
+  const semanticClusterChange = semanticClusterResult.value;
+  evidenceCoverage.semantic_cluster_change = semanticClusterResult.coverage;
 
   // Motif overlap
   const leftMotifs = leftCandidate?.motif_tags ?? [];
@@ -204,10 +381,12 @@ export function buildPairEvidence(
   const motifOverlapScore = jaccard(leftMotifs, rightMotifs);
 
   // Peak strength and type
-  const leftPeakStrength = leftSignals?.peak_strength_score ??
-    leftSegEvidence?.support_signals?.fused_peak_score ?? 0;
-  const rightPeakStrength = rightSignals?.peak_strength_score ??
-    rightSegEvidence?.support_signals?.fused_peak_score ?? 0;
+  const leftPeakStrengthValue = leftSignals?.peak_strength_score ??
+    leftSegEvidence?.support_signals?.fused_peak_score;
+  const rightPeakStrengthValue = rightSignals?.peak_strength_score ??
+    rightSegEvidence?.support_signals?.fused_peak_score;
+  const leftPeakStrength = leftPeakStrengthValue ?? 0;
+  const rightPeakStrength = rightPeakStrengthValue ?? 0;
   const leftPeakType = (leftSignals?.peak_type ??
     leftSegEvidence?.peak_moments?.[0]?.type) as PeakType | undefined;
   const rightPeakType = (rightSignals?.peak_type ??
@@ -220,10 +399,14 @@ export function buildPairEvidence(
     right_peak_type: rightPeakType,
   });
 
-  // Energy delta (positive = incoming is higher energy)
-  const leftEnergy = resolveEnergyProxy(leftSignals, leftSegEvidence, leftPeakStrength);
-  const rightEnergy = resolveEnergyProxy(rightSignals, rightSegEvidence, rightPeakStrength);
-  const energyDeltaScore = clamp01((rightEnergy - leftEnergy + 1) / 2);
+  // Signed energy delta in [-1, 1]: right_energy - left_energy.
+  const leftEnergy = resolveEnergyProxy(leftSignals, leftSegEvidence);
+  const rightEnergy = resolveEnergyProxy(rightSignals, rightSegEvidence);
+  const energyCoverage = derivedCoverage(leftEnergy, rightEnergy);
+  const energyDeltaScore = energyCoverage.pair === "known"
+    ? Math.max(-1, Math.min(1, rightEnergy.value - leftEnergy.value))
+    : 0;
+  evidenceCoverage.energy_delta_score = energyCoverage;
 
   // Silence and afterglow
   const outgoingSilenceRatio = leftSignals?.silence_ratio ?? 0;
@@ -236,15 +419,27 @@ export function buildPairEvidence(
 
   // Composition match
   const compositionMatchScore = resolveCompositionMatch(
-    { shot_scale: leftAdj?.shot_scale, composition_anchor: leftAdj?.composition_anchor, screen_side: leftAdj?.screen_side },
-    { shot_scale: rightAdj?.shot_scale, composition_anchor: rightAdj?.composition_anchor, screen_side: rightAdj?.screen_side },
+    {
+      shot_scale: knownFeature(leftAdj?.shot_scale, leftSegEvidence?.coverage?.shot_scale),
+      composition_anchor: knownFeature(leftAdj?.composition_anchor, leftSegEvidence?.coverage?.composition_anchor),
+      screen_side: knownFeature(leftAdj?.screen_side, leftSegEvidence?.coverage?.screen_side),
+    },
+    {
+      shot_scale: knownFeature(rightAdj?.shot_scale, rightSegEvidence?.coverage?.shot_scale),
+      composition_anchor: knownFeature(rightAdj?.composition_anchor, rightSegEvidence?.coverage?.composition_anchor),
+      screen_side: knownFeature(rightAdj?.screen_side, rightSegEvidence?.coverage?.screen_side),
+    },
   );
 
   // Shot scale continuity (separate from composition match)
   const shotScaleContinuityScore = resolveShotScaleContinuity(
-    leftAdj?.shot_scale,
-    rightAdj?.shot_scale,
+    knownFeature(leftAdj?.shot_scale, leftSegEvidence?.coverage?.shot_scale),
+    knownFeature(rightAdj?.shot_scale, rightSegEvidence?.coverage?.shot_scale),
   );
+  const shotScaleDiagnostic = evidenceCoverage?.shot_scale.pair === "known" &&
+    (leftAdj?.shot_scale === "insert" || rightAdj?.shot_scale === "insert")
+    ? "unsupported_shot_scale_rank:insert"
+    : undefined;
 
   // Cadence fit
   const snapToleranceFrames = durationMode === "strict" ? 6 : 12;
@@ -310,6 +505,10 @@ export function buildPairEvidence(
     same_asset_gap_us: sameAsset ? Math.abs(rightClip.src_in_us - leftClip.src_out_us) : undefined,
     bgm_snap_distance_frames: bgmSnapDistanceFrames,
     duration_mode: durationMode,
+    evidence_coverage: evidenceCoverage,
+    ...(shotScaleDiagnostic ? {
+      evidence_diagnostics: { shot_scale_continuity: shotScaleDiagnostic },
+    } : {}),
   };
 
   // Compute axis_break_readiness first (does not depend on axis_consistency)
@@ -317,8 +516,16 @@ export function buildPairEvidence(
 
   // Now compute axis_consistency with break readiness context
   partialForAxis.axis_consistency_score = resolveAxisConsistency(
-    { screen_side: leftAdj?.screen_side, gaze_direction: leftAdj?.gaze_direction, camera_axis: leftAdj?.camera_axis },
-    { screen_side: rightAdj?.screen_side, gaze_direction: rightAdj?.gaze_direction, camera_axis: rightAdj?.camera_axis },
+    {
+      screen_side: knownFeature(leftAdj?.screen_side, leftSegEvidence?.coverage?.screen_side),
+      gaze_direction: knownFeature(leftAdj?.gaze_direction, leftSegEvidence?.coverage?.gaze_direction),
+      camera_axis: knownFeature(leftAdj?.camera_axis, leftSegEvidence?.coverage?.camera_axis),
+    },
+    {
+      screen_side: knownFeature(rightAdj?.screen_side, rightSegEvidence?.coverage?.screen_side),
+      gaze_direction: knownFeature(rightAdj?.gaze_direction, rightSegEvidence?.coverage?.gaze_direction),
+      camera_axis: knownFeature(rightAdj?.camera_axis, rightSegEvidence?.coverage?.camera_axis),
+    },
     partialForAxis.axis_break_readiness_score,
   );
 
@@ -406,6 +613,29 @@ function resolvePairCraftTransition(
     return { transition: rightBeat.craft.transition_in, source: "transition_in" };
   }
   return undefined;
+}
+
+function pairCraftIntentEvidence(
+  leftBeat: NormalizedBeat | undefined,
+  rightBeat: NormalizedBeat | undefined,
+): ExplicitIntentEvidence[] {
+  const evidence: ExplicitIntentEvidence[] = [];
+  if (!leftBeat || !rightBeat || leftBeat.beat_id === rightBeat.beat_id) return evidence;
+  if (leftBeat?.craft?.transition_out) {
+    evidence.push({
+      source: "beat_craft",
+      source_ref: `edit_blueprint.beats.${leftBeat.beat_id}.craft.transition_out`,
+      intent: leftBeat.craft.transition_out,
+    });
+  }
+  if (rightBeat?.craft?.transition_in) {
+    evidence.push({
+      source: "beat_craft",
+      source_ref: `edit_blueprint.beats.${rightBeat.beat_id}.craft.transition_in`,
+      intent: rightBeat.craft.transition_in,
+    });
+  }
+  return evidence;
 }
 
 function metadataOnlyCraftTransition(transition: CraftTransition | undefined): boolean {
@@ -587,9 +817,10 @@ export function adjacencyDecide(
         captionPolicySource: opts.captionPolicySource,
         beatOrder,
         totalBeats: opts.beats.length,
+        segmentEvidenceCoverageEnabled: opts.segmentEvidenceIndex !== undefined,
       },
     );
-    const visualScore = opts.visualEmbeddings
+    const visualScore = opts.visualEmbeddings && opts.visualEmbeddings.size > 0
       ? visualCoherenceScore(leftClip, rightClip, opts.visualEmbeddings)
       : undefined;
     const visualHint = visualScore == null ? undefined : visualTransitionHint(visualScore);
@@ -599,6 +830,24 @@ export function adjacencyDecide(
     if (visualHint) {
       evidence.visual_transition_hint = visualHint;
     }
+    const cutRelation = opts.segmentEvidenceIndex !== undefined
+      ? classifyCutRelation({
+        left: {
+          asset_id: leftClip.asset_id,
+          beat_id: leftClip.beat_id,
+          story_role: leftBeat?.story_role,
+          evidence: leftSegEvidence,
+        },
+        right: {
+          asset_id: rightClip.asset_id,
+          beat_id: rightClip.beat_id,
+          story_role: rightBeat?.story_role,
+          evidence: rightSegEvidence,
+        },
+        visual_coherence_score: visualScore,
+        explicit_intent_evidence: pairCraftIntentEvidence(leftBeat, rightBeat),
+      })
+      : undefined;
 
     // Resolve axis scores
     const axisScores = resolveAxisScores(evidence);
@@ -611,6 +860,7 @@ export function adjacencyDecide(
       passesWhen: boolean;
       passesAvoidWhen: boolean;
       passesViability: boolean;
+      viabilityGates: Array<{ gateId: string; passed: boolean; failureReason: string }>;
     }
     const scoredCards: ScoredCard[] = [];
 
@@ -619,15 +869,17 @@ export function adjacencyDecide(
       const passesAvoidWhen = card.avoid_when
         ? !evaluatePredicateGroup(card.avoid_when, evidence)
         : true;
-      if (!passesAvoidWhen) continue;
 
       // Check when predicates
       const passesWhen = evaluatePredicateGroup(card.when, evidence);
 
       // Check viability gates
-      const passesViability = card.minimum_viable.every(
-        gate => evaluatePredicateGroup(gate.predicate, evidence),
-      );
+      const viabilityGates = card.minimum_viable.map(gate => ({
+        gateId: gate.id,
+        passed: evaluatePredicateGroup(gate.predicate, evidence),
+        failureReason: gate.failure_reason,
+      }));
+      const passesViability = viabilityGates.every(gate => gate.passed);
 
       // Compute Murch score
       let score = computeMurchScore(card.murch_weights, axisScores);
@@ -642,12 +894,12 @@ export function adjacencyDecide(
         score = Math.min(1, score + CRAFT_TRANSITION_SCORE_BONUS);
       }
 
-      scoredCards.push({ card, score, threshold, passesWhen, passesAvoidWhen, passesViability });
+      scoredCards.push({ card, score, threshold, passesWhen, passesAvoidWhen, passesViability, viabilityGates });
     }
 
     // Separate cards into: fully qualified, viability-failed (for fallback), threshold candidates
-    const qualifiedCards = scoredCards.filter(sc => sc.passesWhen && sc.passesViability);
-    const viabilityFailedCards = scoredCards.filter(sc => sc.passesWhen && !sc.passesViability);
+    const qualifiedCards = scoredCards.filter(sc => sc.passesAvoidWhen && sc.passesWhen && sc.passesViability);
+    const viabilityFailedCards = scoredCards.filter(sc => sc.passesAvoidWhen && sc.passesWhen && !sc.passesViability);
 
     // Apply threshold filter
     const thresholdQualified = qualifiedCards.filter(sc => sc.score >= sc.threshold);
@@ -678,22 +930,29 @@ export function adjacencyDecide(
     let selectedSkillScore = 0;
     let selectedSkillId: string | null = null;
     let activeTransitionEffects: TransitionEffects | undefined;
+    let baseSelectionOutcome: Exclude<SkillSelectionOutcome, "craft_override" | "visual_override"> = "no_eligible";
+    let selectionReasonCodes = ["no_eligible_card"];
+    let selectionOverride: import("./transition-types.js").SkillSelectionRationale["override"];
 
     // Fallback resolution: walk fallback_order[] when below threshold or viability failed
+    type FallbackResolution =
+      | { resolved: true; transitionType: TransitionType; appliedSkillId: string; params: Record<string, unknown> }
+      | { resolved: false; reasonCode: "fallback_skip_skill" | "fallback_order_exhausted" };
     const resolveFallback = (
       card: TransitionSkillCard,
-      originSkillId: string,
-    ): { transitionType: TransitionType; appliedSkillId: string; params: Record<string, unknown> } | null => {
+    ): FallbackResolution => {
       for (const step of card.fallback_order) {
         switch (step.kind) {
           case "hard_cut":
             return {
+              resolved: true,
               transitionType: step.transition_type ?? "cut",
               appliedSkillId: `fallback.hard_cut`,
               params: {},
             };
           case "crossfade":
             return {
+              resolved: true,
               transitionType: step.transition_type ?? "crossfade",
               appliedSkillId: `fallback.crossfade`,
               params: step.crossfade_sec ? { crossfade_sec: step.crossfade_sec } : {},
@@ -701,6 +960,7 @@ export function adjacencyDecide(
           case "same_asset_punch_in":
             if (evidence.same_asset) {
               return {
+                resolved: true,
                 transitionType: "cut",
                 appliedSkillId: `fallback.same_asset_punch_in`,
                 params: step.punch_in_scale ? { punch_in_scale: step.punch_in_scale } : {},
@@ -709,6 +969,7 @@ export function adjacencyDecide(
             continue; // try next step
           case "freeze_hold":
             return {
+              resolved: true,
               transitionType: "cut",
               appliedSkillId: `fallback.freeze_hold`,
               params: {
@@ -717,10 +978,10 @@ export function adjacencyDecide(
               },
             };
           case "skip_skill":
-            return null; // no transition emitted, marker only
+            return { resolved: false, reasonCode: "fallback_skip_skill" };
         }
       }
-      return null;
+      return { resolved: false, reasonCode: "fallback_order_exhausted" };
     };
 
     let fallbackParams: Record<string, unknown> = {};
@@ -733,10 +994,12 @@ export function adjacencyDecide(
       selectedSkillScore = selectedCard.score;
       minScoreThreshold = selectedCard.threshold;
       activeTransitionEffects = selectedCard.card.pipeline_effects;
+      baseSelectionOutcome = "selected";
+      selectionReasonCodes = ["threshold_qualified", "highest_score_selected"];
     } else if (selectedCard && belowThreshold) {
       // Below threshold — try fallback chain
-      const fb = resolveFallback(selectedCard.card, selectedCard.card.id);
-      if (fb) {
+      const fb = resolveFallback(selectedCard.card);
+      if (fb.resolved) {
         transitionType = fb.transitionType;
         appliedSkillId = fb.appliedSkillId;
         degradedFromSkillId = selectedCard.card.id;
@@ -748,12 +1011,17 @@ export function adjacencyDecide(
       selectedSkillId = selectedCard.card.id;
       selectedSkillScore = selectedCard.score;
       minScoreThreshold = selectedCard.threshold;
+      baseSelectionOutcome = "below_threshold_fallback";
+      selectionReasonCodes = [
+        "no_card_met_threshold",
+        fb.resolved ? "fallback_order_applied" : fb.reasonCode,
+      ];
     } else if (viabilityFailedCards.length > 0) {
       // Viability failed — try fallback chain on highest-scoring viability-failed card
       viabilityFailedCards.sort((a, b) => b.score - a.score || a.card.id.localeCompare(b.card.id));
       const failedCard = viabilityFailedCards[0];
-      const fb = resolveFallback(failedCard.card, failedCard.card.id);
-      if (fb) {
+      const fb = resolveFallback(failedCard.card);
+      if (fb.resolved) {
         transitionType = fb.transitionType;
         appliedSkillId = fb.appliedSkillId;
         degradedFromSkillId = failedCard.card.id;
@@ -763,10 +1031,18 @@ export function adjacencyDecide(
       selectedSkillScore = failedCard.score;
       minScoreThreshold = failedCard.threshold;
       belowThreshold = true;
+      baseSelectionOutcome = "viability_fallback";
+      selectionReasonCodes = [
+        "minimum_viable_failed",
+        fb.resolved ? "fallback_order_applied" : fb.reasonCode,
+      ];
     }
+
+    let selectionOutcome: SkillSelectionOutcome = baseSelectionOutcome;
 
     const forcedCraftTransitionType = defaultCraftTransitionType(craftTransition?.transition);
     if (craftTransition && forcedCraftTransitionType) {
+      const replacedOutcome = baseSelectionOutcome;
       const craftEffects = preferredCraftCard?.pipeline_effects;
       transitionType = craftEffects?.transition_type ?? forcedCraftTransitionType;
       appliedSkillId = preferredCraftCard?.id ?? `craft.${craftTransition.transition}`;
@@ -783,11 +1059,19 @@ export function adjacencyDecide(
           ? 0.5
           : undefined,
       };
+      selectionOutcome = "craft_override";
+      selectionReasonCodes = ["craft_transition_override", `craft_transition:${craftTransition.transition}`];
+      selectionOverride = {
+        kind: "craft",
+        selected_skill_id: appliedSkillId,
+        replaced_outcome: replacedOutcome,
+      };
     }
 
     const craftForcesCut = craftTransition?.transition === "hard_cut" ||
       metadataOnlyCraftTransition(craftTransition?.transition);
     if (craftForcesCut && craftTransition) {
+      const replacedOutcome = baseSelectionOutcome;
       transitionType = "cut";
       appliedSkillId = craftTransition.transition === "hard_cut"
         ? "craft.hard_cut"
@@ -800,9 +1084,17 @@ export function adjacencyDecide(
       belowThreshold = false;
       fallbackParams = {};
       activeTransitionEffects = undefined;
+      selectionOutcome = "craft_override";
+      selectionReasonCodes = ["craft_transition_override", `craft_transition:${craftTransition.transition}`];
+      selectionOverride = {
+        kind: "craft",
+        selected_skill_id: appliedSkillId,
+        replaced_outcome: replacedOutcome,
+      };
     }
 
     if (!craftTransition && visualHint === "dissolve" && transitionType === "cut") {
+      const replacedOutcome = baseSelectionOutcome;
       transitionType = "crossfade";
       appliedSkillId = "visual.dissolve";
       confidence = Math.max(confidence, 1 - (visualScore ?? VISUAL_DISSOLVE_THRESHOLD));
@@ -816,12 +1108,27 @@ export function adjacencyDecide(
         transition_type: "crossfade",
         crossfade_sec: 0.5,
       };
+      selectionOutcome = "visual_override";
+      selectionReasonCodes = ["visual_coherence_override", "visual_hint:dissolve"];
+      selectionOverride = {
+        kind: "visual",
+        selected_skill_id: appliedSkillId,
+        replaced_outcome: replacedOutcome,
+      };
     } else if (!craftTransition && visualHint === "hard_cut" && transitionType === "cut" && !appliedSkillId) {
+      const replacedOutcome = baseSelectionOutcome;
       appliedSkillId = "visual.hard_cut";
       confidence = Math.max(confidence, visualScore ?? VISUAL_HARD_CUT_THRESHOLD);
       selectedSkillId = appliedSkillId;
       selectedSkillScore = Math.max(selectedSkillScore, confidence);
       minScoreThreshold = 0;
+      selectionOutcome = "visual_override";
+      selectionReasonCodes = ["visual_coherence_override", "visual_hint:hard_cut"];
+      selectionOverride = {
+        kind: "visual",
+        selected_skill_id: appliedSkillId,
+        replaced_outcome: replacedOutcome,
+      };
     }
 
     applySameAssetPunchInTreatment({
@@ -932,6 +1239,8 @@ export function adjacencyDecide(
     // Build analysis pair
     const pairResult: AdjacencyPairResult = {
       pair_id: pairId,
+      left_clip_id: leftClip.clip_id,
+      right_clip_id: rightClip.clip_id,
       left_candidate_ref: evidence.left_candidate_ref,
       right_candidate_ref: evidence.right_candidate_ref,
       selected_skill_id: selectedSkillId,
@@ -943,6 +1252,13 @@ export function adjacencyDecide(
       evidence: {
         visual_tag_overlap_score: evidence.visual_tag_overlap_score,
         motion_continuity_score: evidence.motion_continuity_score,
+        ...(evidence.evidence_coverage ? {
+          shot_scale_continuity_score: evidence.shot_scale_continuity_score,
+          composition_match_score: evidence.composition_match_score,
+          axis_consistency_score: evidence.axis_consistency_score,
+          evidence_coverage: evidence.evidence_coverage,
+          ...(evidence.evidence_diagnostics ? { evidence_diagnostics: evidence.evidence_diagnostics } : {}),
+        } : {}),
         effective_peak_type: evidence.effective_peak_type,
         left_peak_type: evidence.left_peak_type,
         right_peak_type: evidence.right_peak_type,
@@ -957,6 +1273,39 @@ export function adjacencyDecide(
         visual_transition_hint: evidence.visual_transition_hint,
       },
       degraded_from_skill_id: degradedFromSkillId,
+      ...(cutRelation ? { cut_relation: cutRelation } : {}),
+      selection_rationale: {
+        outcome: selectionOutcome,
+        reason_codes: selectionReasonCodes,
+        active_cards: scoredCards
+          .map(scored => ({
+            skill_id: scored.card.id,
+            when_passed: scored.passesWhen,
+            avoid_matched: !scored.passesAvoidWhen,
+            viability_passed: scored.passesViability,
+            viability_gates: scored.viabilityGates.map(gate => ({
+              gate_id: gate.gateId,
+              passed: gate.passed,
+              failure_reason: gate.failureReason,
+            })),
+            score: roundScore(scored.score),
+            threshold: scored.threshold,
+            threshold_passed: scored.score >= scored.threshold,
+            reason_code: !scored.passesAvoidWhen
+              ? "avoid_matched" as const
+              : !scored.passesWhen
+                ? "when_failed" as const
+                : !scored.passesViability
+                  ? "viability_failed" as const
+                  : scored.score < scored.threshold
+                    ? "below_threshold" as const
+                    : "eligible" as const,
+          }))
+          .sort((a, b) => a.skill_id.localeCompare(b.skill_id)),
+        applied_skill_id: appliedSkillId ?? null,
+        fallback_from_skill_id: degradedFromSkillId,
+        ...(selectionOverride ? { override: selectionOverride } : {}),
+      },
     };
     pairs.push(pairResult);
 
@@ -965,7 +1314,7 @@ export function adjacencyDecide(
   }
 
   const analysis: AdjacencyAnalysis = {
-    version: "1",
+    version: "2",
     project_id: "",
     pairs,
   };
@@ -1318,6 +1667,7 @@ export function applyBeatSnap(
   fpsNum: number,
   minDurationFrames = 1,
 ): boolean {
+  if (leftClip.media_kind === "image" || rightClip.media_kind === "image") return false;
   if (snapDeltaFrames === 0) return true;
 
   const usPerFrame = 1_000_000 / fpsNum;

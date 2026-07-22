@@ -528,6 +528,17 @@ describe("C-01: command injection prevention", () => {
   });
 });
 
+describe("Librosa bridge compatibility", () => {
+  it("uses the Librosa 0.11-compatible rms signature", () => {
+    const source = fs.readFileSync(
+      path.resolve("runtime/media/bgm-analyzer.ts"),
+      "utf-8",
+    );
+    expect(source).toContain("librosa.feature.rms(y=y)[0]");
+    expect(source).not.toMatch(/librosa\.feature\.rms\(y=y,\s*sr=sr\)/);
+  });
+});
+
 // ── W-09: computeSourceHash fd safety ──────────────────────────────
 
 describe("W-09: computeSourceHash file descriptor safety", () => {

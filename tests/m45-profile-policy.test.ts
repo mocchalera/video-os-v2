@@ -124,6 +124,53 @@ describe("Profile / Policy Resolution", () => {
     };
     const result = resolveProfileAndPolicy(input, PROFILES_DIR, POLICIES_DIR);
     expect(result.resolvedProfile.source).toBe("default");
+    expect(result.resolvedProfile.id).toBe("generic-editorial");
+    expect(result.resolvedProfile.rationale).toContain("Generic fallback");
+    expect(result.resolvedProfile.rationale).toContain("insufficient editorial signal");
+    expect(result.resolvedPolicy.id).toBe("generic");
+    expect(result.insufficientSignal).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "unmatched landscape",
+      input: {
+        briefEditorial: { distribution_channel: "landscape-film", allow_inference: true },
+        editorialSummary: {
+          dominant_visual_mode: "mixed" as const,
+          speaker_topology: "unknown" as const,
+          motion_profile: "low" as const,
+        },
+      },
+    },
+    {
+      name: "non-screen-demo product",
+      input: {
+        briefEditorial: { distribution_channel: "product-page", allow_inference: true },
+        editorialSummary: {
+          dominant_visual_mode: "mixed" as const,
+          speaker_topology: "unknown" as const,
+          motion_profile: "medium" as const,
+        },
+      },
+    },
+    {
+      name: "montage summary",
+      input: {
+        briefEditorial: { allow_inference: true },
+        editorialSummary: {
+          dominant_visual_mode: "mixed" as const,
+          speaker_topology: "multi_speaker" as const,
+          motion_profile: "high" as const,
+          transcript_density: "sparse" as const,
+        },
+      },
+    },
+  ])("uses the generic fallback for $name", ({ input }) => {
+    const result = resolveProfileAndPolicy(input, PROFILES_DIR, POLICIES_DIR);
+    expect(result.resolvedProfile.id).toBe("generic-editorial");
+    expect(result.resolvedPolicy.id).toBe("generic");
+    expect(result.policyDefinition?.id).toBe("generic");
     expect(result.insufficientSignal).toBe(true);
   });
 
@@ -134,6 +181,92 @@ describe("Profile / Policy Resolution", () => {
     const result = resolveProfileAndPolicy(input, PROFILES_DIR, POLICIES_DIR);
     expect(result.insufficientSignal).toBe(true);
     expect(result.resolvedProfile.source).toBe("default");
+    expect(result.resolvedProfile.id).toBe("generic-editorial");
+    expect(result.resolvedPolicy.id).toBe("generic");
+  });
+
+  it("preserves an explicit policy_hint when the profile signal is insufficient", () => {
+    const result = resolveProfileAndPolicy(
+      {
+        briefEditorial: {
+          policy_hint: "documentary",
+          allow_inference: false,
+        },
+      },
+      PROFILES_DIR,
+      POLICIES_DIR,
+    );
+
+    expect(result.resolvedProfile.id).toBe("generic-editorial");
+    expect(result.resolvedProfile.source).toBe("default");
+    expect(result.resolvedPolicy).toEqual({
+      id: "documentary",
+      source: "explicit_hint",
+      rationale: 'policy_hint="documentary" from creative brief',
+    });
+    expect(result.policyDefinition?.id).toBe("documentary");
+    expect(result.insufficientSignal).toBe(true);
+  });
+
+  it("preserves the existing unknown explicit profile_hint contract", () => {
+    const result = resolveProfileAndPolicy(
+      { briefEditorial: { profile_hint: "unknown-profile" } },
+      PROFILES_DIR,
+      POLICIES_DIR,
+    );
+
+    expect(result.resolvedProfile).toEqual({
+      id: "unknown-profile",
+      source: "explicit_hint",
+      rationale: 'profile_hint="unknown-profile" from creative brief',
+    });
+    expect(result.resolvedPolicy.id).toBe("interview");
+    expect(result.policyDefinition?.id).toBe("interview");
+    expect(result.insufficientSignal).toBeUndefined();
+  });
+
+  it.each([
+    ["interview-highlight", "interview"],
+    ["product-demo", "tutorial"],
+    ["event-recap", "highlight"],
+    ["vertical-short", "highlight"],
+  ])("preserves explicit %s profile resolution", (profileId, policyId) => {
+    const result = resolveProfileAndPolicy(
+      { briefEditorial: { profile_hint: profileId } },
+      PROFILES_DIR,
+      POLICIES_DIR,
+    );
+    expect(result.resolvedProfile.id).toBe(profileId);
+    expect(result.resolvedProfile.source).toBe("explicit_hint");
+    expect(result.resolvedPolicy.id).toBe(policyId);
+    expect(result.insufficientSignal).toBeUndefined();
+  });
+
+  it("loads a conservative generic profile and policy from the registries", () => {
+    const result = resolveProfileAndPolicy(
+      { briefEditorial: { profile_hint: "generic-editorial" } },
+      PROFILES_DIR,
+      POLICIES_DIR,
+    );
+
+    expect(result.resolvedPolicy.id).toBe("generic");
+    expect(result.profileDefaults).toEqual({
+      default_transition: "cut",
+      active_editing_skills: [],
+      still_image_intent: {
+        min_hold_sec: 1,
+        default_hold_sec: 3,
+        max_hold_sec: 10,
+        motion_mode: "static",
+        fit_mode: "contain",
+        background: "black",
+      },
+    });
+    expect(result.policyDefinition).toEqual({
+      id: "generic",
+      skill_suppressions: [],
+      skill_enforcements: [],
+    });
   });
 
   it("provides profile defaults", () => {

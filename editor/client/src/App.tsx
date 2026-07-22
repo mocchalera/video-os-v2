@@ -25,6 +25,7 @@ import type {
 } from './types';
 import { buildLanes, computeAutoFitZoom, FALLBACK_ZOOM, findSelectedClip, getCaptionText, getTotalFrames } from './utils/editor-helpers';
 import { DEFAULT_CAPTION_STYLE_PRESET } from '@shared/caption-style-tokens';
+import { saveAudioGainFieldAsDb } from '@shared/audio-gain';
 import { formatClockFromFrames, getFps, framesToMicroseconds, microsecondsToFrames } from './utils/time';
 
 const MEDIA_TRACK_KINDS: MediaTrackKind[] = ['video', 'audio'];
@@ -611,7 +612,11 @@ export default function App() {
     const s = sel.selection;
     if (!s || aiJob.isRunning || !isMediaTrackKind(s.trackKind)) return;
     ts.updateClip(s.trackKind, s.trackId, s.clipId, (clip) => {
-      clip.audio_policy = { ...clip.audio_policy, [field]: typeof value === 'number' ? (Number.isFinite(value) ? value : 0) : value };
+      const normalized = typeof value === 'number' ? (Number.isFinite(value) ? value : 0) : value;
+      clip.audio_policy = typeof normalized === 'number' &&
+        (field === 'nat_gain' || field === 'nat_sound_gain' || field === 'bgm_gain')
+        ? saveAudioGainFieldAsDb(clip.audio_policy, field, normalized)
+        : { ...clip.audio_policy, [field]: normalized };
     });
   }
   function handleUpdateCaptionText(value: string): void {

@@ -14,6 +14,10 @@
     "version": { "type": "string" },
     "project_id": { "type": "string" },
     "base_timeline_version": { "type": "string" },
+    "mix_profile": {
+      "type": "string",
+      "enum": ["dialogue_first", "balanced", "music_forward"]
+    },
     "music_asset": { "$ref": "#/$defs/musicAsset" },
     "cues": {
       "type": "array",

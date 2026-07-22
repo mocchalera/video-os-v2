@@ -3,6 +3,7 @@ import { assemble } from "../runtime/compiler/assemble.js";
 import { compactGuideSingleTrackGaps } from "../runtime/compiler/index.js";
 import { compactTrimmedClipsWithinBeats } from "../runtime/compiler/trim.js";
 import type {
+  Candidate,
   DurationPolicy,
   NormalizedData,
   RankedCandidateTable,
@@ -31,6 +32,21 @@ const guidePolicy: DurationPolicy = {
 };
 
 describe("V1-first track layout", () => {
+  it("routes pure audio dialogue, selected music, and texture without creating V1 clips", () => {
+    const normalized = makeNormalized(30);
+    const table: RankedCandidateTable = new Map([["b01", [
+      score("speech", "AST_S", "dialogue", 1, "b01", undefined, audio("dialogue")),
+      score("music", "AST_M", "support", 0.9, "b01", undefined, audio("music")),
+      score("room", "AST_R", "texture", 0.8, "b01", undefined, audio("ambient")),
+    ]]]);
+    const assembled = assemble(normalized, table, params, 1, 1, guidePolicy, { audioPolicy: "bgm_only" });
+
+    expect(assembled.tracks.video.flatMap((track) => track.clips)).toEqual([]);
+    expect(assembled.tracks.audio.find((track) => track.track_id === "A1")?.clips.map((clip) => clip.segment_id)).toEqual(["speech"]);
+    expect(assembled.tracks.audio.find((track) => track.track_id === "A2")?.clips.map((clip) => clip.segment_id)).toEqual(["music"]);
+    expect(assembled.tracks.audio.find((track) => track.track_id === "A3")?.clips.map((clip) => clip.segment_id)).toEqual(["room"]);
+  });
+
   it("compacts post-trim V1 gaps within each beat without crossing beat boundaries", () => {
     const beats = makeNormalizedWithBeats([
       { beat_id: "b01", target_duration_frames: 100 },
@@ -91,6 +107,31 @@ describe("V1-first track layout", () => {
     expect(v1Clips.map((item) => item.timeline_in_frame)).toEqual([0, 30, 50]);
     expect(a1Clips.map((item) => item.timeline_in_frame)).toEqual([0, 30, 50]);
     expect(assembled.markers.map((item) => item.frame)).toEqual([0, 30, 50]);
+  });
+
+  it("retimes multiple authored mixed-audio placements to compacted beat markers in order", () => {
+    const beats = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 100 },
+      { beat_id: "b02", target_duration_frames: 100 },
+    ]).beats;
+    const visual = [clip("V1_A", "b01", 0, 20), clip("V1_B", "b02", 100, 20)];
+    const authored = [
+      { ...clip("A3_1", "b02", 105, 5), media_kind: "audio" as const, source_capabilities: { has_video: false, has_audio: true }, audio_role: "ambient" as const, motivation: "authored audio selection" },
+      { ...clip("A3_2", "b02", 115, 6), media_kind: "audio" as const, source_capabilities: { has_video: false, has_audio: true }, audio_role: "ambient" as const, motivation: "authored audio selection" },
+    ];
+    const assembled = {
+      tracks: {
+        video: [{ track_id: "V1", kind: "video" as const, clips: visual }],
+        audio: [{ track_id: "A3", kind: "audio" as const, clips: authored }],
+      },
+      markers: [
+        { frame: 0, kind: "beat" as const, label: "b01: Hook" },
+        { frame: 100, kind: "beat" as const, label: "b02: Close" },
+      ],
+    };
+    compactGuideSingleTrackGaps(assembled, beats);
+    expect(visual.map((item) => item.timeline_in_frame)).toEqual([0, 20]);
+    expect(authored.map((item) => item.timeline_in_frame)).toEqual([20, 25]);
   });
 
   it("single mode places hero/support/texture sequentially on V1 and leaves V2 empty", () => {
@@ -734,6 +775,7 @@ function score(
   candidateScore: number,
   beatId = "b01",
   semanticClusterId?: string,
+  overrides: Partial<Candidate> = {},
 ): ScoredCandidate {
   return {
     beat_id: beatId,
@@ -751,6 +793,7 @@ function score(
       editorial_signals: semanticClusterId
         ? { semantic_cluster_id: semanticClusterId }
         : undefined,
+      ...overrides,
     },
     breakdown: {
       semantic_rank_score: candidateScore,
@@ -759,6 +802,14 @@ function score(
       motif_reuse_penalty: 0,
       adjacency_penalty: 0,
     },
+  };
+}
+
+function audio(audioRole: Candidate["audio_role"]): Partial<Candidate> {
+  return {
+    media_kind: "audio",
+    source_capabilities: { has_video: false, has_audio: true },
+    audio_role: audioRole,
   };
 }
 

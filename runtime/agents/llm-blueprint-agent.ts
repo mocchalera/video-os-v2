@@ -13,14 +13,21 @@ import type {
   CaptionPolicySource,
   ConfirmedPreferences,
   CraftDirective,
+  CreativeBrief,
   DurationMode,
   DurationPolicy,
   EditBlueprint,
+  EditorialSummary,
   Role,
   StoryArc,
   StoryArcStrategy,
+  StillImageCandidateIntent,
+  SourceMediaKind,
+  SourceMediaSummary,
   TrackLayout,
 } from "../compiler/types.js";
+import { resolveStillDurationPolicy, sanitizeStillBackground } from "../artifacts/still-image-policy.js";
+import { resolveProfileAndPolicy } from "../editorial/policy-resolver.js";
 import type {
   BlueprintAgent,
   BlueprintAgentContext,
@@ -28,6 +35,12 @@ import type {
 } from "../commands/blueprint.js";
 import { parseLlmResponse } from "./llm-json.js";
 import type { LlmCompleter } from "./llm-triage-agent.js";
+import { assessDialogueCompleteness } from "../editorial/dialogue-completeness.js";
+import {
+  applyShortFormRetentionDefaults,
+  auditShortFormRetention,
+  shortFormRetentionPromptLines,
+} from "../editorial/short-form-retention.js";
 
 // Cockpit/repo-side editorial blueprinting should prefer Claude/Codex
 // subscription agents. Gemini flash-lite remains the headless CLI fallback.
@@ -123,6 +136,9 @@ export interface CompactBlueprintCandidate {
   evidence: string[];
   transcript_excerpt?: string;
   motif_tags: string[];
+  media_kind?: SourceMediaKind;
+  source_capabilities?: { has_video: boolean; has_audio: boolean };
+  audio_role?: "dialogue" | "music" | "nat_sound" | "ambient";
 }
 
 export interface CandidateIndex {
@@ -130,6 +146,7 @@ export interface CandidateIndex {
   canonicalByAlias: Map<string, string>;
   roleByRef: Map<string, Role>;
   refsByBeat: Map<string, string[]>;
+  dialogueCompletenessRankByRef: Map<string, number>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -236,6 +253,7 @@ function compactSelectsForPrompt(selectsContent: unknown): Record<string, unknow
     project_id: stringValue(selects.project_id),
     selection_notes: selects.selection_notes,
     editorial_summary: selects.editorial_summary,
+    source_media: selects.source_media,
     candidates: index.candidates.map((candidate) => ({
       candidate_ref: candidate.candidate_ref,
       segment_id: candidate.segment_id,
@@ -250,6 +268,9 @@ function compactSelectsForPrompt(selectsContent: unknown): Record<string, unknow
       evidence: candidate.evidence,
       transcript_excerpt: candidate.transcript_excerpt,
       motif_tags: candidate.motif_tags,
+      media_kind: candidate.media_kind,
+      source_capabilities: candidate.source_capabilities,
+      audio_role: candidate.audio_role,
     })),
   };
 }
@@ -266,6 +287,9 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
   const hookFrames = Math.round(totalFrames * 0.08);
   const middleFrames = Math.round(totalFrames * 0.7);
   const closingFrames = Math.round(totalFrames * 0.12);
+  const retentionLines = shortFormRetentionPromptLines(input.briefContent);
+  const sourceMedia = readSourceMediaSummary(input.selectsContent);
+  const pureAudio = sourceMedia?.mode === "audio_only";
 
   const outputExample = {
     version: "1",
@@ -279,6 +303,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
       {
         id: "b01",
         label: "hook",
+        viewer_label: "先に結果をどうぞ",
         purpose: "establish the emotional promise",
         target_duration_frames: hookFrames,
         required_roles: ["hero"],
@@ -287,6 +312,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
         candidate_plan: {
           primary_candidate_ref: "use_a_candidate_ref_from_the_list",
           fallback_candidate_refs: ["use_other_candidate_refs_from_the_list"],
+          still_image: { hold_duration_sec: 3, motion_mode: "static", fit_mode: "contain", background: "black" },
         },
         craft: {
           in_point: "cut_on_action",
@@ -322,6 +348,12 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
       delivery_mode: "burn_in",
       source: "transcript",
       styling_class: "clean-lower-third",
+      semantic_timing: {
+        mode: "speech_sync",
+        ordinary_lead_frames: 2,
+        audio_first_frames: 1,
+        anchors: [],
+      },
     },
     dialogue_policy: {
       preserve_natural_breath: true,
@@ -339,7 +371,13 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
       should_feel: "warm and resolved",
       final_line_strategy: "one clear closing line",
       avoid_cta: true,
-      final_hold_min_frames: 12,
+      final_hold_min_frames: 36,
+      final_visual_strategy: "keep source motion and fade to black",
+      final_audio_strategy: "fade room tone after the complete final assertion",
+      tail_hold_sec: 1.5,
+      audio_fade_out_sec: 1,
+      video_fade_out_sec: 1,
+      video_fade_color: "black",
     },
     rejection_rules: ["reject off-brief filler even when technically good"],
     duration_policy: {
@@ -359,17 +397,34 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
   return [
     "あなたは Video OS の blueprint-planner です。",
     "brief と承認済み selects 候補だけを根拠に、編集設計として EditBlueprint JSON を作ってください。",
+    ...((sourceMedia?.audio_only_candidate_count ?? 0) > 0 ? [
+      pureAudio
+        ? "このprojectはaudio-onlyです。candidateのtranscript/audio event/audio storyだけを根拠にし、映像、frame、被写体、構図、motion、location、visual transitionを捏造しないでください。"
+        : "mixed project内でもmedia_kind=audioのcandidateには映像、frame、被写体、構図、motion、location、visual transitionを割り当てず、transcript/audio event/audio storyだけを根拠にしてください。",
+      "candidate_planにはaudio-only candidate_refを通常どおり配置し、dialogue/nat sound/ambientのsemantic roleと発話の意味的完結性を優先してください。",
+    ] : []),
     "各 beat は story_arc と対応させ、candidate_plan.primary_candidate_ref は必ず下の selects の candidate_ref から選んでください。",
+    "primary candidate が media_kind=image の場合だけ candidate_plan.still_image で hold_duration_sec/min_hold_sec/max_hold_sec を秒単位で提案できます。motion_mode=static のみ実行可能で subtle_ken_burns は EYE-070C2B pending、background は black/white/transparent または厳密hex色のみです。path/URL/functionは禁止です。",
+    "beat.id と beat.label は構造用です。画面へ出す章題が必要な場合は viewer_label に視聴者が物語として読める言葉を書き、HOOK / LEVEL 1 / PAYOFF / ENDING のような編集者向け語彙をそのまま表示しないでください。",
     "未知の候補や存在しない candidate_ref を作らないでください。迷う場合は fallback_candidate_refs に別の既存 candidate_ref を置いてください。",
     "dialogue 候補は、質問テロップに頼らず主語または指示対象が選択範囲内で回収でき、話者が結論まで言い切っているものだけを採用してください。",
     "ASR item の端は意味上の文境界とは限りません。冒頭が前文への従属形、または末尾が未完節の候補は primary/fallback に置かず、完全な隣接範囲を持つ候補を選んでください。",
+    "推薦・受講推奨・CTA を closing に置く場合は、直前または同じ回答内に『なぜ必要か』を示す問題・判断根拠・具体例を必ず残し、推薦文だけを単独で切り出さないでください。",
+    "出力前に各 beat を自己監査し、誰が／何を／なぜ／どう変えたか、比較の前半と後半、原因と結果が選択範囲内で回収できない beat は候補を差し替えてください。",
     "cut_tail_hold_sec は言い切った後の呼吸・ルームトーン専用です。欠けた文を補完したり次の発話を取り込んだりする目的では使わないでください。",
+    "ending_policy は完全な最終発言の後に最低1.5秒の動く元素材を残し、音声と映像を自然にフェードさせてください。最終フレームの静止で尺を埋めないでください。",
+    "字幕は speech caption の単一レイヤーを前提とし、同じ発話を別テロップ層へ重複して出さないでください。",
+    "speech captionは内容を問わず発話より大きく先出ししないでください。caption_policy.semantic_timing.mode は transcript 字幕なら通常 speech_sync とし、読みやすさのための微先行は最大2フレームまでにします。",
+    "笑い・驚き・結果が成立する語だけは semantic_timing.mode: protect_reveals とし、通常の発話同期に加えて情報解禁アンカーを使います。protected reveal は音声 onset より先に表示しないでください。",
+    "semantic_timing anchor_text は候補 transcript_excerpt に実在し、字幕本文にもそのまま残る完全一致部分文字列だけを使ってください。segment_id も既存 selects の値だけを使い、精密時刻が分からないのに timeline_frame を推測しないでください。字幕なし・authored-onlyの場合だけ mode=off にしてください。",
     "brief の emotion_curve と pacing intent に基づいて、必要な beat だけに craft directives を割り当ててください。craft は任意です。",
     "For each beat, choose an in_point technique: use 'cut_on_action' for energetic beats, 'peak_hold' for emotional moments, 'clean_in_clean_out' for opening/closing, 'pre_roll_enter' for anticipation.",
     "For exit craft, choose an out_point technique: use 'cut_on_action' to leave during motion, 'peak_hold' for emotional weight, 'post_action_hold' for breath after action, 'clean_in_clean_out' for static exits.",
     "Use accelerando for building energy, ritardando for emotional resolution.",
     "Use dissolve between different locations, hard_cut within the same scene.",
     "",
+    ...retentionLines,
+    ...(retentionLines.length > 0 ? [""] : []),
     "## Creative brief",
     JSON.stringify(compactBriefForPrompt(input.briefContent, input.projectId), null, 2),
     "",
@@ -429,6 +484,7 @@ export function buildCandidateIndex(selectsContent: unknown): CandidateIndex {
   const canonicalByAlias = new Map<string, string>();
   const roleByRef = new Map<string, Role>();
   const refsByBeat = new Map<string, string[]>();
+  const dialogueCompletenessRankByRef = new Map<string, number>();
 
   for (const item of candidateRows(selectsContent)) {
     const segmentId = stringValue(item.segment_id);
@@ -453,14 +509,20 @@ export function buildCandidateIndex(selectsContent: unknown): CandidateIndex {
       evidence: stringArray(item.evidence),
       transcript_excerpt: stringValue(item.transcript_excerpt),
       motif_tags: stringArray(item.motif_tags),
+      media_kind: enumValue(item.media_kind, new Set(["video", "audio", "image", "sequence", "unknown"] as const)),
+      source_capabilities: sanitizeSourceCapabilities(item.source_capabilities),
+      audio_role: enumValue(item.audio_role, new Set(["dialogue", "music", "nat_sound", "ambient"] as const)),
     };
     candidates.push(compact);
+    const completenessRank = dialogueCandidateCompletenessRank(compact);
 
     for (const alias of aliases) {
       canonicalByAlias.set(alias, candidateRef);
       roleByRef.set(alias, role);
+      dialogueCompletenessRankByRef.set(alias, completenessRank);
     }
     roleByRef.set(candidateRef, role);
+    dialogueCompletenessRankByRef.set(candidateRef, completenessRank);
     for (const beatId of compact.eligible_beats) {
       const existing = refsByBeat.get(beatId) ?? [];
       existing.push(candidateRef);
@@ -468,7 +530,45 @@ export function buildCandidateIndex(selectsContent: unknown): CandidateIndex {
     }
   }
 
-  return { candidates, canonicalByAlias, roleByRef, refsByBeat };
+  return { candidates, canonicalByAlias, roleByRef, refsByBeat, dialogueCompletenessRankByRef };
+}
+
+function sanitizeSourceCapabilities(value: unknown): CompactBlueprintCandidate["source_capabilities"] {
+  const raw = recordValue(value);
+  if (!raw || typeof raw.has_video !== "boolean" || typeof raw.has_audio !== "boolean") return undefined;
+  return { has_video: raw.has_video, has_audio: raw.has_audio };
+}
+
+function readSourceMediaSummary(selectsContent: unknown): SourceMediaSummary | undefined {
+  const raw = recordValue(recordValue(selectsContent)?.source_media);
+  if (!raw) return undefined;
+  const mode = enumValue(raw.mode, new Set(["video", "audio_only", "mixed"] as const));
+  const mediaKinds = stringArray(raw.media_kinds)
+    .filter((kind): kind is SourceMediaKind => ["video", "audio", "image", "sequence", "unknown"].includes(kind));
+  const visualCount = nonNegativeInteger(raw.visual_candidate_count);
+  const audioOnlyCount = nonNegativeInteger(raw.audio_only_candidate_count);
+  if (!mode || visualCount === undefined || audioOnlyCount === undefined) return undefined;
+  return { mode, media_kinds: [...new Set(mediaKinds)], visual_candidate_count: visualCount, audio_only_candidate_count: audioOnlyCount };
+}
+
+function readSourceEditorialSummary(selectsContent: unknown): EditorialSummary | undefined {
+  const raw = recordValue(recordValue(selectsContent)?.editorial_summary);
+  if (!raw) return undefined;
+  return {
+    ...(typeof raw.dominant_visual_mode === "string" ? { dominant_visual_mode: raw.dominant_visual_mode as EditorialSummary["dominant_visual_mode"] } : {}),
+    ...(typeof raw.speaker_topology === "string" ? { speaker_topology: raw.speaker_topology as EditorialSummary["speaker_topology"] } : {}),
+    ...(typeof raw.motion_profile === "string" ? { motion_profile: raw.motion_profile as EditorialSummary["motion_profile"] } : {}),
+    ...(typeof raw.transcript_density === "string" ? { transcript_density: raw.transcript_density as EditorialSummary["transcript_density"] } : {}),
+  };
+}
+
+function dialogueCandidateCompletenessRank(candidate: CompactBlueprintCandidate): number {
+  if (candidate.role !== "dialogue") return 0;
+  if (!candidate.transcript_excerpt) return 1;
+  const assessment = assessDialogueCompleteness(candidate.transcript_excerpt);
+  if (assessment.hard_issue_count > 0) return 3;
+  if (assessment.soft_issue_count > 0) return 2;
+  return 0;
 }
 
 export function parseLlmBlueprintResponse(raw: string): Record<string, unknown> {
@@ -521,13 +621,54 @@ function sanitizeCandidatePlan(value: unknown, index: CandidateIndex): Candidate
       .filter((ref): ref is string => Boolean(ref)),
   );
   const explicitPrimary = canonicalizeRef(raw.primary_candidate_ref, index);
-  const primary = explicitPrimary ?? fallbacks.shift();
+  const rankedRefs = rankDialogueCandidateRefs(
+    uniqueStrings([...(explicitPrimary ? [explicitPrimary] : []), ...fallbacks]),
+    index,
+  );
+  const primary = rankedRefs.shift();
   if (!primary) return undefined;
+
+  const primaryCandidate = index.candidates.find((candidate) => candidate.candidate_ref === primary);
+  const stillImage = primaryCandidate?.media_kind === "image"
+    ? sanitizeStillCandidateIntent(raw.still_image)
+    : undefined;
 
   return {
     primary_candidate_ref: primary,
-    fallback_candidate_refs: fallbacks.filter((ref) => ref !== primary),
+    fallback_candidate_refs: rankedRefs.filter((ref) => ref !== primary),
+    ...(stillImage ? { still_image: stillImage } : {}),
   };
+}
+
+function sanitizeStillCandidateIntent(value: unknown): StillImageCandidateIntent | undefined {
+  const raw = recordValue(value);
+  if (!raw) return undefined;
+  const out: StillImageCandidateIntent = {};
+  for (const key of ["hold_duration_sec", "min_hold_sec", "max_hold_sec"] as const) {
+    const duration = positiveNumber(raw[key]);
+    if (duration !== undefined) out[key] = duration;
+  }
+  if (raw.motion_mode === "static" || raw.motion_mode === "subtle_ken_burns") out.motion_mode = raw.motion_mode;
+  if (raw.fit_mode === "contain" || raw.fit_mode === "cover") out.fit_mode = raw.fit_mode;
+  const background = sanitizeStillBackground(raw.background);
+  if (background) out.background = background;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function rankDialogueCandidateRefs(refs: string[], index: CandidateIndex): string[] {
+  const rankedDialogueRefs = refs
+    .filter((ref) => index.roleByRef.get(ref) === "dialogue")
+    .map((ref, order) => ({
+      ref,
+      order,
+      rank: index.dialogueCompletenessRankByRef.get(ref) ?? 1,
+    }))
+    .sort((left, right) => left.rank - right.rank || left.order - right.order)
+    .map((item) => item.ref);
+  let dialogueIndex = 0;
+  return refs.map((ref) => index.roleByRef.get(ref) === "dialogue"
+    ? rankedDialogueRefs[dialogueIndex++]
+    : ref);
 }
 
 function inferCandidatePlanForBeat(
@@ -539,7 +680,10 @@ function inferCandidatePlanForBeat(
   const roleMatched = index.candidates
     .filter((candidate) => requiredRoles.includes(candidate.role))
     .map((candidate) => candidate.candidate_ref);
-  const refs = uniqueStrings([...eligible, ...roleMatched, ...index.candidates.map((candidate) => candidate.candidate_ref)]);
+  const refs = rankDialogueCandidateRefs(
+    uniqueStrings([...eligible, ...roleMatched, ...index.candidates.map((candidate) => candidate.candidate_ref)]),
+    index,
+  );
   const primary = refs[0];
   if (!primary) return undefined;
   return {
@@ -615,6 +759,9 @@ function sanitizeBeat(
     target_duration_frames: positiveInteger(raw.target_duration_frames) ?? defaultDurationFrames,
     required_roles: effectiveRequiredRoles,
   };
+
+  const viewerLabel = stringValue(raw.viewer_label);
+  if (viewerLabel) beat.viewer_label = viewerLabel;
 
   const purpose = stringValue(raw.purpose);
   if (purpose) beat.purpose = purpose;
@@ -696,12 +843,44 @@ function sanitizeCaptionPolicy(value: unknown, briefContent: unknown): NonNullab
   const brief = recordValue(briefContent);
   const briefCaptionPolicy = stringValue(brief?.caption_policy);
   const defaultSource: CaptionPolicySource = briefCaptionPolicy === "off" ? "none" : "transcript";
-  return {
+  const policy: NonNullable<EditBlueprint["caption_policy"]> = {
     language: stringValue(raw.language) ?? "ja",
     delivery_mode: enumValue(raw.delivery_mode, VALID_CAPTION_DELIVERY) ?? "burn_in",
     source: enumValue(raw.source, VALID_CAPTION_SOURCES) ?? defaultSource,
     styling_class: stringValue(raw.styling_class) ?? "clean-lower-third",
   };
+  const semanticRaw = recordValue(raw.semantic_timing) ?? {};
+  const mode = enumValue(semanticRaw.mode, new Set(["off", "speech_sync", "protect_reveals"] as const))
+    ?? (policy.source === "transcript" ? "speech_sync" : "off");
+  const anchors = Array.isArray(semanticRaw.anchors)
+    ? semanticRaw.anchors.flatMap((value) => {
+          const anchor = recordValue(value);
+          if (!anchor) return [];
+          const anchorId = stringValue(anchor.anchor_id);
+          const anchorText = stringValue(anchor.anchor_text);
+          const role = enumValue(anchor.role, new Set(["punchline", "surprise", "reaction", "payoff"] as const));
+          if (!anchorId || !anchorText || !role) return [];
+          return [{
+            anchor_id: anchorId,
+            role,
+            anchor_text: anchorText,
+            ...(stringValue(anchor.segment_id) ? { segment_id: stringValue(anchor.segment_id) } : {}),
+            ...(stringValue(anchor.transcript_item_id) ? { transcript_item_id: stringValue(anchor.transcript_item_id) } : {}),
+            ...(nonNegativeInteger(anchor.timeline_frame) !== undefined ? { timeline_frame: nonNegativeInteger(anchor.timeline_frame) } : {}),
+            ...(nonNegativeInteger(anchor.source_start_us) !== undefined ? { source_start_us: nonNegativeInteger(anchor.source_start_us) } : {}),
+            ...(nonNegativeInteger(anchor.audio_first_frames) !== undefined ? { audio_first_frames: nonNegativeInteger(anchor.audio_first_frames) } : {}),
+          }];
+      })
+    : [];
+  policy.semantic_timing = {
+    mode,
+    ordinary_lead_frames: nonNegativeInteger(semanticRaw.ordinary_lead_frames) ?? 2,
+    ...(mode === "protect_reveals"
+      ? { audio_first_frames: nonNegativeInteger(semanticRaw.audio_first_frames) ?? 1 }
+      : {}),
+    ...(anchors.length > 0 ? { anchors } : {}),
+  };
+  return policy;
 }
 
 function sanitizeDialoguePolicy(value: unknown): EditBlueprint["dialogue_policy"] {
@@ -755,11 +934,21 @@ function sanitizeEndingPolicy(value: unknown): NonNullable<EditBlueprint["ending
   const avoidCta = booleanValue(raw.avoid_cta);
   if (avoidCta !== undefined) policy.avoid_cta = avoidCta;
   const finalHold = nonNegativeInteger(raw.final_hold_min_frames);
-  if (finalHold !== undefined) policy.final_hold_min_frames = finalHold;
+  policy.final_hold_min_frames = finalHold ?? 36;
   const finalVisualStrategy = stringValue(raw.final_visual_strategy);
-  if (finalVisualStrategy) policy.final_visual_strategy = finalVisualStrategy;
+  policy.final_visual_strategy = finalVisualStrategy ?? "keep source motion and fade to black";
   const finalAudioStrategy = stringValue(raw.final_audio_strategy);
-  if (finalAudioStrategy) policy.final_audio_strategy = finalAudioStrategy;
+  policy.final_audio_strategy = finalAudioStrategy ?? "fade room tone after the complete final assertion";
+  const tailHoldSec = numberValue(raw.tail_hold_sec);
+  policy.tail_hold_sec = tailHoldSec !== undefined && tailHoldSec >= 0 ? tailHoldSec : 1.5;
+  const audioFadeOutSec = numberValue(raw.audio_fade_out_sec);
+  policy.audio_fade_out_sec = audioFadeOutSec !== undefined && audioFadeOutSec >= 0 ? audioFadeOutSec : 1;
+  const videoFadeOutSec = numberValue(raw.video_fade_out_sec);
+  policy.video_fade_out_sec = videoFadeOutSec !== undefined && videoFadeOutSec >= 0 ? videoFadeOutSec : 1;
+  policy.video_fade_color = enumValue(
+    raw.video_fade_color,
+    new Set(["none", "black", "white"] as const),
+  ) ?? "black";
   return policy;
 }
 
@@ -911,6 +1100,15 @@ export function blueprintFromLlmResponse(
       ?? "editorial",
     track_layout: enumValue(source.track_layout, VALID_TRACK_LAYOUT) ?? "single",
   };
+  applySourceMediaContract(blueprint, readSourceMediaSummary(ctx.selectsContent), candidateIndex);
+  if (candidateIndex.candidates.some((candidate) => candidate.media_kind === "image")) {
+    const resolution = resolveProfileAndPolicy({
+      briefEditorial: (ctx.briefContent as CreativeBrief).editorial,
+      editorialSummary: readSourceEditorialSummary(ctx.selectsContent),
+      runtimeTargetSec: runtimeTargetSec(ctx.briefContent),
+    });
+    blueprint.still_duration_policy = resolveStillDurationPolicy(ctx.briefContent as CreativeBrief, resolution.profileDefaults, 24, 1);
+  }
 
   const resolvedProfile = sanitizeResolvedRef(source.resolved_profile);
   if (resolvedProfile) blueprint.resolved_profile = resolvedProfile;
@@ -933,8 +1131,8 @@ function buildRepairPrompt(originalPrompt: string, raw: string, error: unknown):
   return [
     originalPrompt,
     "",
-    "The previous response was not parseable as the required JSON object.",
-    `Parse error: ${message}`,
+    "The previous response did not satisfy the required JSON and editorial-quality contract.",
+    `Validation error: ${message}`,
     `Previous response excerpt: ${raw.slice(0, 1200)}`,
     "JSON のみで再出力してください。説明文、前後テキスト、コードフェンスは不要です。",
   ].join("\n");
@@ -943,14 +1141,19 @@ function buildRepairPrompt(originalPrompt: string, raw: string, error: unknown):
 async function completeWithSingleJsonRetry(
   llm: LlmCompleter,
   prompt: string,
+  validate?: (parsed: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
   const first = await llm(prompt);
   try {
-    return parseLlmBlueprintResponse(first);
+    const parsed = parseLlmBlueprintResponse(first);
+    validate?.(parsed);
+    return parsed;
   } catch (firstError) {
     const second = await llm(buildRepairPrompt(prompt, first, firstError));
     try {
-      return parseLlmBlueprintResponse(second);
+      const parsed = parseLlmBlueprintResponse(second);
+      validate?.(parsed);
+      return parsed;
     } catch (secondError) {
       const message = secondError instanceof Error ? secondError.message : String(secondError);
       throw new Error(`LLM blueprint response was not valid JSON after retry: ${message}`);
@@ -1008,7 +1211,7 @@ function deterministicBlueprint(
     };
   });
 
-  return {
+  const blueprint: EditBlueprint = {
     version: "1",
     project_id: ctx.projectId,
     decision_runtime: decisionRuntime,
@@ -1045,7 +1248,13 @@ function deterministicBlueprint(
     },
     ending_policy: {
       should_feel: "resolved",
-      final_hold_min_frames: 12,
+      final_hold_min_frames: 36,
+      final_visual_strategy: "keep source motion and fade to black",
+      final_audio_strategy: "fade room tone after the complete final assertion",
+      tail_hold_sec: 1.5,
+      audio_fade_out_sec: 1,
+      video_fade_out_sec: 1,
+      video_fade_color: "black",
     },
     rejection_rules: ["Reject off-brief filler even when technically acceptable."],
     story_arc: sanitizeStoryArc({}, [briefPrimaryMessage(ctx.briefContent) ?? "Message-first edit."], ctx.briefContent),
@@ -1053,13 +1262,58 @@ function deterministicBlueprint(
     timeline_order: briefTimelineOrder(ctx.briefContent) ?? "editorial",
     track_layout: "single",
   };
+  const retained = applyShortFormRetentionDefaults(ctx.briefContent, blueprint, ctx.selectsContent);
+  applySourceMediaContract(retained, readSourceMediaSummary(ctx.selectsContent), buildCandidateIndex(ctx.selectsContent));
+  if (candidates.some((candidate) => candidate.media_kind === "image")) {
+    const resolution = resolveProfileAndPolicy({
+      briefEditorial: (ctx.briefContent as CreativeBrief).editorial,
+      editorialSummary: readSourceEditorialSummary(ctx.selectsContent),
+      runtimeTargetSec: runtimeTargetSec(ctx.briefContent),
+    });
+    retained.still_duration_policy = resolveStillDurationPolicy(ctx.briefContent as CreativeBrief, resolution.profileDefaults, 24, 1);
+  }
+  return retained;
+}
+
+export function applySourceMediaContract(
+  blueprint: EditBlueprint,
+  sourceMedia: SourceMediaSummary | undefined,
+  candidateIndex?: CandidateIndex,
+): void {
+  if (!sourceMedia) return;
+  blueprint.source_media = {
+    ...sourceMedia,
+    media_kinds: [...sourceMedia.media_kinds],
+  };
+  for (const beat of blueprint.beats) {
+    const primaryRef = beat.candidate_plan?.primary_candidate_ref;
+    const isAudioBeat = sourceMedia.mode === "audio_only" || Boolean(primaryRef &&
+      candidateIndex?.candidates.find((candidate) => candidate.candidate_ref === primaryRef)?.media_kind === "audio");
+    if (!isAudioBeat) continue;
+    if (!beat.craft) continue;
+    const { in_point: _in, out_point: _out, transition_in: _transitionIn, transition_out: _transitionOut, shot_progression: _shot, flash_cut: _flash, ...audioCraft } = beat.craft;
+    beat.craft = Object.keys(audioCraft).length > 0 ? audioCraft : undefined;
+  }
+  const finalBeat = blueprint.beats.at(-1);
+  const finalRef = finalBeat?.candidate_plan?.primary_candidate_ref;
+  const audioEnding = sourceMedia.mode === "audio_only" || Boolean(finalRef &&
+    candidateIndex?.candidates.find((candidate) => candidate.candidate_ref === finalRef)?.media_kind === "audio");
+  if (audioEnding && blueprint.ending_policy) {
+    blueprint.ending_policy.final_visual_strategy = "black canvas for audio-only render";
+    blueprint.ending_policy.video_fade_out_sec = 0;
+    blueprint.ending_policy.video_fade_color = "none";
+  }
 }
 
 function validateBlueprintJson(
   parsed: Record<string, unknown>,
   ctx: BlueprintNormalizeContext,
 ): void {
-  blueprintFromLlmResponse(parsed, ctx);
+  const blueprint = blueprintFromLlmResponse(parsed, ctx);
+  const issues = auditShortFormRetention(ctx.briefContent, blueprint, ctx.selectsContent);
+  if (issues.length > 0) {
+    throw new Error(`Short-form retention audit failed: ${issues.map((issue) => issue.message).join("; ")}`);
+  }
 }
 
 export function createLlmBlueprintAgent(opts: {
@@ -1108,7 +1362,11 @@ export function createLlmBlueprintAgent(opts: {
         };
       }
       const parsed = opts.llm
-        ? await completeWithSingleJsonRetry(opts.llm, prompt)
+        ? await completeWithSingleJsonRetry(
+          opts.llm,
+          prompt,
+          (candidate) => validateBlueprintJson(candidate, normalizeContext),
+        )
         : completion?.parsed ?? {};
       return {
         blueprint: {

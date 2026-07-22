@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineIR, ClipOutput } from "../runtime/compiler/types.js";
 import { timelineToCompositionProps } from "../runtime/render/remotion/timeline-to-props.js";
+import { remotionTimelineFontStrings } from "../runtime/render/remotion/render-remotion.js";
+import { resolveRemotionOverlayClip } from "../runtime/render/remotion/overlay-clip-resolver.js";
 
 function makeClip(overrides: Partial<ClipOutput>): ClipOutput {
   return {
@@ -63,6 +65,11 @@ describe("timelineToCompositionProps", () => {
     expect(props.fps).toBe(30);
     expect(props.width).toBe(1920);
     expect(props.height).toBe(1080);
+    expect(props.defaultProps.fontAsset).toMatchObject({
+      fontId: "noto-sans-jp",
+      format: "truetype",
+      webPublicPath: "fonts/NotoSansJP-Variable.ttf",
+    });
   });
 
   it("computes duration from a single video clip", () => {
@@ -95,5 +102,98 @@ describe("timelineToCompositionProps", () => {
 
     expect(timelineToCompositionProps(timeline, {}).fps).toBe(24);
   });
-});
 
+  it("collects only Remotion-displayed overlay strings for font subsetting", () => {
+    const timeline = makeTimeline([
+      makeClip({ captions: [{ text: "字幕です", in_frame: 0, out_frame: 20, style: "simple-shadow" }] }),
+    ]);
+    (timeline.tracks as TimelineIR["tracks"] & { overlay: TimelineIR["tracks"]["video"] }).overlay = [{
+      track_id: "OV1",
+      kind: "overlay",
+      clips: [makeClip({
+        clip_id: "overlay-1",
+        metadata: {
+          overlay: { text: "会社の変化", styling_class: "vos:overlay.title-card" },
+          ignored_note: "これは描画されない",
+        },
+      })],
+    }];
+
+    // Speech captions are burned downstream from caption_approval.json, so
+    // changing them must not invalidate the expensive base assembly cache.
+    expect(remotionTimelineFontStrings(timeline)).toEqual(["会社の変化"]);
+  });
+
+  it("resolves canonical title and emphasis templates without arbitrary JSX", () => {
+    const canonicalClip = (templateRef: string, props: Record<string, string>) => makeClip({
+      clip_id: templateRef,
+      metadata: {
+        content_element: {
+          version: "content-element/v1",
+          element_id: templateRef.replace(/[^A-Za-z0-9._-]/g, "_"),
+          kind: "template",
+          template_ref: templateRef,
+          template_version: "1.0.0",
+          props,
+          layout: {
+            anchor: "top_center",
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation_deg: 0,
+            opacity: 1,
+            safe_area: true,
+            z_index: 100,
+          },
+          renderer_hint: "auto",
+        },
+      },
+    });
+
+    expect(resolveRemotionOverlayClip(
+      canonicalClip("vos:content.title-card/v1", { title: "本気のビートボックス" }),
+    )).toMatchObject({
+      presetId: "vos:overlay.title-card",
+      text: "本気のビートボックス",
+      anchor: "top-center",
+    });
+    expect(resolveRemotionOverlayClip(
+      canonicalClip("vos:content.emphasis-word/v1", { text: "BOOM" }),
+    )).toMatchObject({
+      presetId: "vos:overlay.emphasis-word",
+      text: "BOOM",
+    });
+    expect(resolveRemotionOverlayClip(
+      canonicalClip("vos:content.hook-title/v1", { title: "AIに頼んだ結果" }),
+    )).toMatchObject({
+      presetId: "vos:overlay.hook-title",
+      text: "AIに頼んだ結果",
+      anchor: "top-center",
+    });
+    expect(resolveRemotionOverlayClip(
+      canonicalClip("vos:content.cta-card/v1", { headline: "次の一歩を始める", action: "無料相談へ", brand: "VIDEO OS" }),
+    )).toMatchObject({
+      presetId: "vos:overlay.cta-card",
+      text: "次の一歩を始める",
+      actionText: "無料相談へ",
+      brandText: "VIDEO OS",
+    });
+  });
+
+  it("normalizes schema-valid legacy overlay anchors for Remotion presets", () => {
+    expect(resolveRemotionOverlayClip(makeClip({
+      clip_id: "legacy-title",
+      metadata: {
+        overlay: {
+          text: "AIと縦動画の編集会議",
+          styling_class: "vos:overlay.title-card",
+          anchor: "top_left",
+        },
+      },
+    }))).toMatchObject({
+      presetId: "vos:overlay.title-card",
+      text: "AIと縦動画の編集会議",
+      anchor: "top-left",
+    });
+  });
+});

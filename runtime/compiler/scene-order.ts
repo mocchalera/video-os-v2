@@ -67,7 +67,7 @@ export function reorderTrackSceneContinuity(
     averageVisualCoherenceBefore: beforeScore,
     averageVisualCoherenceAfter: beforeScore,
   };
-  if (!cache || cache.embeddings.size === 0 || track.clips.length <= 1) return result;
+  if (!cache || !hasSceneOrderingEvidence(cache) || track.clips.length <= 1) return result;
 
   const beatIndex = new Map(beatOrder.map((beatId, index) => [beatId, index]));
   const byBeat = new Map<string, TimelineClip[]>();
@@ -105,7 +105,7 @@ export function orderClipsBySceneContinuity(
   clips: TimelineClip[],
   cache: CompileVisualCache | null | undefined,
 ): TimelineClip[] {
-  if (!cache || cache.embeddings.size === 0 || clips.length <= 1) return [...clips];
+  if (!cache || !hasSceneOrderingEvidence(cache) || clips.length <= 1) return [...clips];
 
   const clusters = buildSceneClusters(clips, cache);
   if (clusters.length === 0) return [...clips];
@@ -185,6 +185,14 @@ function buildSceneClusters(
   }
 
   return clusters.sort((a, b) => a.firstIndex - b.firstIndex || a.key.localeCompare(b.key));
+}
+
+function hasSceneOrderingEvidence(cache: CompileVisualCache): boolean {
+  return cache.embeddings.size > 0 ||
+    cache.timestamps.size > 0 ||
+    cache.assetIds.size > 0 ||
+    cache.sourceInUs.size > 0 ||
+    cache.cameras.size > 0;
 }
 
 function makeCluster(

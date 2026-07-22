@@ -41,9 +41,9 @@ Executed 520 tests, with 0 failures (0 unexpected).
 swift run videoos-studio-cli doctor
 Build of product 'videoos-studio-cli' complete.
 Video OS Studio
-repo: /Users/mocchalera/Dev/video-os-v2-spec
+repo: /Users/operator/Dev/video-os-v2-spec
 projects: 29
-codex app-server: cwd=/Users/mocchalera/Dev/video-os-v2-spec codex app-server --listen stdio://
+codex app-server: cwd=/Users/operator/Dev/video-os-v2-spec codex app-server --listen stdio://
 
 git diff --check
 PASS

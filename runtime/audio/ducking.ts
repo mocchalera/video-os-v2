@@ -18,6 +18,10 @@ export interface SpeechInterval {
   end_ms: number;
 }
 
+function dbToLinear(db: number): string {
+  return Math.pow(10, db / 20).toFixed(8);
+}
+
 // ── Ducking Filter ─────────────────────────────────────────────────
 
 /**
@@ -108,7 +112,7 @@ export function buildDuckingFilter(
   // The volume expression sums all condition contributions;
   // regions not covered by any condition get base_gain_db.
   // We use a nested if-chain for clarity and correctness.
-  let expr = `${base_gain_db}`;
+  let expr = dbToLinear(base_gain_db);
   for (const si of relevant) {
     const speechStartSec = si.start_ms / 1000 - cueStartSec;
     const speechEndSec = si.end_ms / 1000 - cueStartSec;
@@ -117,10 +121,13 @@ export function buildDuckingFilter(
 
     // Simplified: use between() to select the entire duck region
     // (attack ramp start to release ramp end), applying duck_gain_db
-    expr = `if(between(t,${attackStart.toFixed(4)},${releaseEnd.toFixed(4)}),${duck_gain_db},${expr})`;
+    expr = `if(between(t,${attackStart.toFixed(4)},${releaseEnd.toFixed(4)}),${dbToLinear(duck_gain_db)},${expr})`;
   }
 
-  return `volume='${expr}dB':eval=frame`;
+  // FFmpeg accepts a dB suffix only for a constant value. Dynamic volume
+  // expressions must evaluate to a linear multiplier, otherwise an expression
+  // such as if(...,-11,-4)dB fails at runtime.
+  return `volume='${expr}':eval=frame`;
 }
 
 // ── Fade Filter ────────────────────────────────────────────────────

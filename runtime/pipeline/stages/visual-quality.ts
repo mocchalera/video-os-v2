@@ -10,6 +10,7 @@ import type { SegmentItem } from "../../connectors/ffmpeg-segmenter.js";
 import {
   FFMPEG_MOTION_CONNECTOR_VERSION,
   analyzeSegmentVisualQuality,
+  analyzeStillImageVisualQuality,
   computeVisualQualityRequestHash,
   failedVisualQualityMeasurement,
   type FfmpegMotionOptions,
@@ -18,8 +19,14 @@ import {
 import { atomicWriteJson } from "./_util.js";
 import { mapWithConcurrency } from "./vlm.js";
 import type { SegmentsJson } from "../pipeline-types.js";
+import type { MediaKind } from "../../media/media-kind-registry.js";
+import {
+  deterministicObservationContribution,
+  reduceEditorialObservation,
+} from "./editorial-observation.js";
 
 export const DEFAULT_VISUAL_QUALITY_CONCURRENCY = 2;
+const IMAGE_SEQUENCE_MIN_SAMPLE_FPS = 8;
 
 export type VisualQualityAnalyzeFn = (
   sourcePath: string,
@@ -35,6 +42,8 @@ export interface VisualQualityStageOptions {
   concurrency?: number;
   analyzeFn?: VisualQualityAnalyzeFn;
   ffmpegOptions?: FfmpegMotionOptions;
+  eligibleAssetIds?: ReadonlySet<string>;
+  assetMediaKinds?: ReadonlyMap<string, MediaKind>;
 }
 
 export interface VisualQualitySegmentFailure {
@@ -83,29 +92,40 @@ export async function runVisualQualityMeasurementStage(
     return { segmentsJson: options.segmentsJson, summary };
   }
 
-  const analyzeFn = options.analyzeFn ?? defaultAnalyzeFn;
+  const analyzeFn = options.analyzeFn;
   const ffmpegOptions = options.ffmpegOptions ?? {};
 
+  const candidates = options.segmentsJson.items.filter((segment) =>
+    !options.eligibleAssetIds || options.eligibleAssetIds.has(segment.asset_id)
+  );
   const shards = await mapWithConcurrency(
-    options.segmentsJson.items,
+    candidates,
     options.concurrency ?? DEFAULT_VISUAL_QUALITY_CONCURRENCY,
     async (segment): Promise<VisualQualityShard> => {
       const sourcePath = options.sourceFileMap.get(segment.asset_id);
       const durationUs = Math.max(0, segment.src_out_us - segment.src_in_us);
+      const mediaKind = options.assetMediaKinds?.get(segment.asset_id);
+      const effectiveFfmpegOptions = mediaKind === "sequence"
+        ? { ...ffmpegOptions, sampleFps: Math.max(IMAGE_SEQUENCE_MIN_SAMPLE_FPS, ffmpegOptions.sampleFps ?? 0) }
+        : ffmpegOptions;
       if (!sourcePath) {
         return {
           segment_id: segment.segment_id,
           asset_id: segment.asset_id,
           result: failedVisualQualityMeasurement("source_file_missing", {
-            sampleFps: ffmpegOptions.sampleFps,
-            maxWidth: ffmpegOptions.maxWidth,
+            sampleFps: effectiveFfmpegOptions.sampleFps,
+            maxWidth: effectiveFfmpegOptions.maxWidth,
             durationUs,
           }),
         };
       }
 
       try {
-        const result = await analyzeFn(sourcePath, segment, ffmpegOptions);
+        const result = analyzeFn
+          ? await analyzeFn(sourcePath, segment, effectiveFfmpegOptions)
+          : mediaKind === "image"
+            ? await analyzeStillImageVisualQuality(sourcePath, effectiveFfmpegOptions)
+            : await defaultAnalyzeFn(sourcePath, segment, effectiveFfmpegOptions);
         const requestHash = computeVisualQualityRequestHash({
           sourcePath,
           segmentId: segment.segment_id,
@@ -128,8 +148,8 @@ export async function runVisualQualityMeasurementStage(
           asset_id: segment.asset_id,
           sourcePath,
           result: failedVisualQualityMeasurement(errorMessage(error), {
-            sampleFps: ffmpegOptions.sampleFps,
-            maxWidth: ffmpegOptions.maxWidth,
+            sampleFps: effectiveFfmpegOptions.sampleFps,
+            maxWidth: effectiveFfmpegOptions.maxWidth,
             durationUs,
           }),
         };
@@ -163,6 +183,16 @@ export async function runVisualQualityMeasurementStage(
         request_hash: shard.requestHash ?? `failed:${shortReason(shard.result.failure_reason ?? "unknown")}`,
       },
     };
+    segment.editorial_observation = reduceEditorialObservation(
+      segment,
+      segment.editorial_observation,
+      [deterministicObservationContribution({
+        segment,
+        measurements: shard.result,
+        sourcePath: shard.sourcePath,
+        requestHash: shard.requestHash,
+      })],
+    );
 
     if (shard.result.measured) {
       summary.measuredSegments += 1;

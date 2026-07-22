@@ -33,6 +33,7 @@ import {
   reviewVisualQAGateReason,
   reviewVisualQAMinScore,
   summarizeReviewVisualQAGate,
+  timelineHasVisualClips,
   type EvaluateReviewVisualQAOptions,
   type ReviewVisualQA,
 } from "../../review/visual-qa.js";
@@ -255,15 +256,15 @@ export interface ReviewCommandOptions {
   visualQA?: Omit<EvaluateReviewVisualQAOptions, "render" | "minScore" | "createdAt">;
 }
 
-function isReviewApprovalEligible(report: ReviewReport): boolean {
+function isReviewApprovalEligible(report: ReviewReport, visualApplicable: boolean): boolean {
   return report.fatal_issues.length === 0 &&
     report.summary_judgment.status === "approved" &&
-    isReviewVisualQAApprovalGrade(report);
+    isReviewVisualQAApprovalGrade(report, visualApplicable);
 }
 
-function enforceVisualQAVerdict(report: ReviewReport): void {
+function enforceVisualQAVerdict(report: ReviewReport, visualApplicable: boolean): void {
   const visual = report.visual_qa;
-  const gateReason = reviewVisualQAGateReason(report);
+  const gateReason = reviewVisualQAGateReason(report, visualApplicable);
   const gateSummary = visual ? summarizeReviewVisualQAGate(visual) : gateReason;
 
   if (gateReason && report.summary_judgment.status === "approved") {
@@ -631,6 +632,9 @@ export async function runReview(
     minScore: visualQaMinScore,
     createdAt,
   });
+  const visualQaApplicable = timelineHasVisualClips(
+    path.join(absDir, "05_timeline/timeline.json"),
+  );
   preflight.steps.push({
     step: "visual_qa",
     status: visualQA.status === "verified" ? "completed" : "skipped",
@@ -678,7 +682,7 @@ export async function runReview(
     agentResult.report.visual_qa_waiver_created_at = createdAt;
   }
   enforceReviewMetricVerdict(agentResult.report, reviewMetrics);
-  enforceVisualQAVerdict(agentResult.report);
+  enforceVisualQAVerdict(agentResult.report, visualQaApplicable);
 
   const drafts: DraftFile[] = [
     {
@@ -738,8 +742,8 @@ export async function runReview(
   doc.artifact_hashes = snapshotArtifacts(absDir).hashes;
 
   const hasFatal = agentResult.report.fatal_issues.length > 0;
-  const approvalEligible = isReviewApprovalEligible(agentResult.report);
-  const visualGateReason = reviewVisualQAGateReason(agentResult.report);
+  const approvalEligible = isReviewApprovalEligible(agentResult.report, visualQaApplicable);
+  const visualGateReason = reviewVisualQAGateReason(agentResult.report, visualQaApplicable);
   let newState: ProjectState;
   let approvalRecord: ApprovalRecord | undefined;
 

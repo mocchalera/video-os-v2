@@ -11,16 +11,16 @@ beat 情報は `music_cues.json` の additive `beat_sync.beats_sec/downbeats_sec
 ## Evidence — 変更ファイル一覧、テストコマンドと結果件数
 
 変更ファイル:
-[runtime/compiler/beat-sync.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/compiler/beat-sync.ts),
-[runtime/compiler/index.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/compiler/index.ts),
-[runtime/compiler/types.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/compiler/types.ts),
-[runtime/compiler-defaults.yaml](/Users/mocchalera/Dev/video-os-v2-spec/runtime/compiler-defaults.yaml),
-[runtime/audio/music-cues.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/audio/music-cues.ts),
-[schemas/music-cues.schema.json](/Users/mocchalera/Dev/video-os-v2-spec/schemas/music-cues.schema.json),
-[scripts/compile-timeline.ts](/Users/mocchalera/Dev/video-os-v2-spec/scripts/compile-timeline.ts),
-[scripts/run-bgm-analysis.ts](/Users/mocchalera/Dev/video-os-v2-spec/scripts/run-bgm-analysis.ts),
-[tests/beat-sync-quantize.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/beat-sync-quantize.test.ts),
-[tests/golden/sample-timeline.json](/Users/mocchalera/Dev/video-os-v2-spec/tests/golden/sample-timeline.json).
+[runtime/compiler/beat-sync.ts](/Users/operator/Dev/video-os-v2-spec/runtime/compiler/beat-sync.ts),
+[runtime/compiler/index.ts](/Users/operator/Dev/video-os-v2-spec/runtime/compiler/index.ts),
+[runtime/compiler/types.ts](/Users/operator/Dev/video-os-v2-spec/runtime/compiler/types.ts),
+[runtime/compiler-defaults.yaml](/Users/operator/Dev/video-os-v2-spec/runtime/compiler-defaults.yaml),
+[runtime/audio/music-cues.ts](/Users/operator/Dev/video-os-v2-spec/runtime/audio/music-cues.ts),
+[schemas/music-cues.schema.json](/Users/operator/Dev/video-os-v2-spec/schemas/music-cues.schema.json),
+[scripts/compile-timeline.ts](/Users/operator/Dev/video-os-v2-spec/scripts/compile-timeline.ts),
+[scripts/run-bgm-analysis.ts](/Users/operator/Dev/video-os-v2-spec/scripts/run-bgm-analysis.ts),
+[tests/beat-sync-quantize.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/beat-sync-quantize.test.ts),
+[tests/golden/sample-timeline.json](/Users/operator/Dev/video-os-v2-spec/tests/golden/sample-timeline.json).
 
 Verification:
 `npx vitest run tests/beat-sync-quantize.test.ts` → 1 file passed, 8 tests passed.

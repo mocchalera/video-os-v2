@@ -5,6 +5,11 @@ dotenvConfig();
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync, execFileSync } from "node:child_process";
+import {
+  discoverRequestedSources,
+  type DiscoverySummary,
+  type SourceDiscoveryResult,
+} from "./media/source-discovery.js";
 
 export interface CheckResult {
   name: string;
@@ -15,25 +20,8 @@ export interface CheckResult {
 export interface PreflightResult {
   ok: boolean;
   checks: CheckResult[];
+  discovery: SourceDiscoveryResult;
 }
-
-const VIDEO_EXTENSIONS = new Set([
-  ".mp4",
-  ".mov",
-  ".avi",
-  ".mkv",
-  ".webm",
-  ".mts",
-  ".m2ts",
-  ".ts",
-  ".mxf",
-  ".flv",
-  ".wmv",
-  ".mpg",
-  ".mpeg",
-  ".m4v",
-  ".3gp",
-]);
 
 export function parsePreflightArgs(argv: string[]): {
   sourceFolder: string;
@@ -228,31 +216,39 @@ export function checkSourceFolder(folderPath: string): CheckResult {
     };
   }
 
-  const entries = fs.readdirSync(resolved);
-  const videoFiles = entries.filter((entry) => VIDEO_EXTENSIONS.has(path.extname(entry).toLowerCase()));
+  return checkSourceDiscovery(discoverRequestedSources([resolved]), "source_folder");
+}
 
-  if (videoFiles.length === 0) {
+export function checkSourceInputs(
+  locators: string[],
+  checkName = "source_inputs",
+  precomputedDiscovery?: SourceDiscoveryResult,
+): { check: CheckResult; discovery: SourceDiscoveryResult } {
+  const discovery = precomputedDiscovery ?? discoverRequestedSources(locators);
+  return { check: checkSourceDiscovery(discovery, checkName), discovery };
+}
+
+function checkSourceDiscovery(discovery: SourceDiscoveryResult, name: string): CheckResult {
+  const eligible = discovery.requests.filter((request) => request.disposition === "candidate");
+  const totalSize = eligible.reduce((sum, request) => sum + (request.size_bytes ?? 0), 0);
+  const counts = formatDiscoveryCounts(discovery.summary);
+  if (eligible.length === 0) {
     return {
-      name: "source_folder",
+      name,
       status: "fail",
-      detail: `no video files found in ${resolved} (${entries.length} total files)`,
+      detail: `no media files are ingest-eligible; ${counts}`,
     };
   }
-
-  const totalSize = videoFiles.reduce((sum, file) => {
-    try {
-      return sum + fs.statSync(path.join(resolved, file)).size;
-    } catch {
-      return sum;
-    }
-  }, 0);
-  const totalMB = (totalSize / (1024 * 1024)).toFixed(1);
-
   return {
-    name: "source_folder",
+    name,
     status: "pass",
-    detail: `${videoFiles.length} video file(s), ${totalMB} MB total in ${resolved}`,
+    detail: `${eligible.length} media file(s) ingest-eligible, ${(totalSize / (1024 * 1024)).toFixed(1)} MB; ${counts}`,
   };
+}
+
+function formatDiscoveryCounts(summary: DiscoverySummary): string {
+  const kinds = Object.entries(summary.by_media_kind).map(([kind, count]) => `${kind}=${count}`).join(", ");
+  return `requested=${summary.requested}, candidate=${summary.candidate}, unsupported=${summary.unsupported}, failed=${summary.failed}; ${kinds}`;
 }
 
 function getDirSize(dirPath: string): number {
@@ -269,16 +265,26 @@ function getDirSize(dirPath: string): number {
   return total;
 }
 
-export function runPreflight(sourceFolder: string): PreflightResult {
+export function runPreflight(
+  sourceInput: string | string[],
+  precomputedDiscovery?: SourceDiscoveryResult,
+): PreflightResult {
   const checks: CheckResult[] = [];
   checks.push(...checkApiKeys());
   checks.push(checkBinary("ffmpeg"));
   checks.push(checkBinary("ffprobe"));
-  checks.push(checkSourceFolder(sourceFolder));
+  const sourceLocators = Array.isArray(sourceInput) ? sourceInput : [sourceInput];
+  const sourceResult = checkSourceInputs(
+    sourceLocators,
+    Array.isArray(sourceInput) ? "source_inputs" : "source_folder",
+    precomputedDiscovery,
+  );
+  checks.push(sourceResult.check);
 
-  const folderCheck = checks.find((check) => check.name === "source_folder");
+  const folderCheck = sourceResult.check;
   if (folderCheck?.status !== "fail") {
-    checks.push(checkDiskSpace(path.resolve(sourceFolder)));
+    const diskTarget = resolveDiskTarget(sourceLocators);
+    if (diskTarget) checks.push(checkDiskSpace(diskTarget));
   }
 
   checks.push(checkShellCompat());
@@ -286,7 +292,17 @@ export function runPreflight(sourceFolder: string): PreflightResult {
   return {
     ok: checks.every((check) => check.status !== "fail"),
     checks,
+    discovery: sourceResult.discovery,
   };
+}
+
+function resolveDiskTarget(locators: string[]): string | undefined {
+  for (const locator of locators) {
+    const resolved = path.resolve(locator);
+    if (!fs.existsSync(resolved)) continue;
+    return fs.statSync(resolved).isDirectory() ? resolved : path.dirname(resolved);
+  }
+  return undefined;
 }
 
 export function runPreflightCli(argv: string[] = process.argv): void {

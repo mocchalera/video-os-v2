@@ -26,6 +26,7 @@ import {
   computeVlmRequestHash,
   guessAssetRole,
   buildSegmentPrompt,
+  createGeminiVlmFn,
   VLM_CONNECTOR_VERSION,
   PROMPT_TEMPLATE_ID,
   type VlmFn,
@@ -70,7 +71,7 @@ const MOCK_VLM_POLICY: VlmPolicy = {
   model_snapshot: "test-snapshot-vlm",
   input_mode: "frame_bundle_plus_text_context",
   response_format: "json_schema_v1",
-  prompt_template_id: "m2-segment-v2",
+  prompt_template_id: "m2-segment-grounded-v3",
   max_frame_width_px: 1024,
   segment_visual_token_budget_max: 8192,
   segment_visual_output_tokens_max: 512,
@@ -555,11 +556,25 @@ describe("VLM Request Hash", () => {
 
 describe("Constants", () => {
   it("has connector version", () => {
-    expect(VLM_CONNECTOR_VERSION).toBe("gemini-vlm-v2.0.0");
+    expect(VLM_CONNECTOR_VERSION).toBe("gemini-vlm-v3.0.0");
   });
 
   it("has prompt template ID", () => {
-    expect(PROMPT_TEMPLATE_ID).toBe("m2-segment-v2");
+    expect(PROMPT_TEMPLATE_ID).toBe("m2-segment-grounded-v3");
+  });
+});
+
+describe("Gemini live connector grounding guard", () => {
+  it("rejects zero-image and non-absolute image requests before provider access", async () => {
+    const connector = createGeminiVlmFn();
+    const options = { model: "test", maxOutputTokens: 1 };
+
+    await expect(connector([], "prompt", options)).rejects.toThrow(
+      "grounded_vlm_requires_at_least_one_image",
+    );
+    await expect(connector(["relative-frame.jpg"], "prompt", options)).rejects.toThrow(
+      "grounded_vlm_invalid_image_paths",
+    );
   });
 });
 
@@ -654,12 +669,20 @@ describe("Pipeline: VLM enrichment integration", () => {
     );
     expect(enriched.length).toBeGreaterThanOrEqual(1);
     for (const seg of enriched) {
-      const prov = seg.provenance as Record<string, Record<string, string>>;
+      const prov = seg.provenance as Record<string, Record<string, unknown>>;
       expect(prov.summary.stage).toBe("vlm");
       expect(prov.summary.method).toBe("gemini_frame_bundle");
       expect(prov.summary.connector_version).toBe(VLM_CONNECTOR_VERSION);
       expect(prov.summary.prompt_hash).toMatch(/^[0-9a-f]{16}$/);
       expect(prov.summary.model_alias).toBe("gemini-2.5-flash-lite");
+      expect(prov.summary.frame_count).toBeGreaterThan(0);
+      expect(prov.summary.sample_timestamps_us).toHaveLength(
+        prov.summary.frame_count as number,
+      );
+      expect(prov.summary.frame_cache_version).toBe("grounded-frame-cache-v2");
+      expect(prov.summary.frame_producer_version).toBe("ffmpeg-single-frame-v2");
+      expect(prov.summary.source_content_sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(prov.summary.cache_identity).toMatch(/^[0-9a-f]{64}$/);
     }
   });
 
@@ -755,4 +778,463 @@ describe("Pipeline: skipVlm flag", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+function writeLegacyTextOnlyVlmCache(projectDir: string): void {
+  const segmentsPath = path.join(projectDir, "03_analysis", "segments.json");
+  const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+    items: Array<Record<string, unknown>>;
+  };
+  for (const segment of segments.items) {
+    const legacyProvenance = {
+      stage: "vlm",
+      method: "gemini_frame_bundle",
+      connector_version: "gemini-vlm-v2.0.0",
+      policy_hash: "legacy-policy",
+      request_hash: "legacy-text-only-request",
+      model_alias: "gemini-2.0-flash",
+      model_snapshot: "legacy-text-only",
+      prompt_template_id: "m2-segment-v2",
+      prompt_hash: "legacy-text-only",
+      response_format: "json_schema_v1",
+    };
+    segment.summary = "Legacy text-only visual summary";
+    segment.tags = ["legacy_visual_tag"];
+    segment.quality_flags = ["blurry"];
+    segment.interest_points = [{
+      frame_us: 1_000_000,
+      label: "legacy text-only point",
+      confidence: 0.9,
+    }];
+    segment.confidence = {
+      ...(segment.confidence as Record<string, unknown>),
+      summary: { score: 0.9, source: "gemini-2.0-flash", status: "ready" },
+      tags: { score: 0.9, source: "gemini-2.0-flash", status: "ready" },
+      quality_flags: { score: 0.9, source: "gemini-2.0-flash", status: "ready" },
+    };
+    segment.provenance = {
+      ...(segment.provenance as Record<string, unknown>),
+      summary: legacyProvenance,
+      tags: legacyProvenance,
+      quality_flags: legacyProvenance,
+    };
+  }
+  fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2));
+}
+
+function writePeakCache(
+  projectDir: string,
+  sourcePass: "precision_dense_frames" | "degraded_ffmpeg_signals" | "marlin_temporal_semantics",
+): string {
+  const segmentsPath = path.join(projectDir, "03_analysis", "segments.json");
+  const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+    items: Array<Record<string, unknown>>;
+  };
+  const segment = segments.items[0];
+  const segmentId = segment.segment_id as string;
+  segment.peak_analysis = {
+    peak_moments: [{
+      peak_ref: `PK_${segmentId}`,
+      timestamp_us: 2_500_000,
+      type: "action_peak",
+      confidence: 0.9,
+      description: "cached peak",
+      source_pass: sourcePass,
+    }],
+    visual_energy_curve: [],
+    provenance: {
+      coarse_prompt_template_id: sourcePass === "marlin_temporal_semantics" ? "marlin" : "legacy",
+      refine_prompt_template_id: sourcePass === "marlin_temporal_semantics" ? "marlin" : "legacy",
+      precision_mode: sourcePass === "precision_dense_frames" ? "always" : "never",
+      fusion_version: "legacy",
+      support_signal_version: "legacy",
+    },
+  };
+  fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2));
+  return segmentId;
+}
+
+async function seedSourceAnalysisCache(projectDir: string, sourceFile: string): Promise<void> {
+  await runPipeline({
+    sourceFiles: [sourceFile],
+    projectDir,
+    repoRoot: REPO_ROOT,
+    skipStt: true,
+    skipVlm: true,
+    skipPeak: true,
+    skipAppraiser: true,
+    skipMediaLink: true,
+    skipBgmAnalysis: true,
+  });
+}
+
+describe("Pipeline: all-cached VLM grounding compatibility", () => {
+  it("re-analyzes legacy text-only VLM cache with real frames", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_vlm_cached_legacy");
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    try {
+      await seedSourceAnalysisCache(tmpDir, TEST_CLIP);
+      writeLegacyTextOnlyVlmCache(tmpDir);
+      const received: string[][] = [];
+
+      const result = await runPipeline({
+        sourceFiles: [TEST_CLIP],
+        projectDir: tmpDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        skipPeak: true,
+        skipAppraiser: true,
+        skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmFn: async (framePaths) => {
+          received.push(framePaths);
+          return {
+            rawJson: JSON.stringify({
+              summary: "Grounded replacement summary",
+              tags: ["grounded_replacement"],
+              interest_points: [],
+              quality_flags: [],
+              confidence: { summary: 0.9, tags: 0.9, quality_flags: 0.9 },
+            }),
+          };
+        },
+      });
+
+      expect(received.length).toBeGreaterThan(0);
+      for (const framePath of received.flat()) {
+        expect(path.isAbsolute(framePath)).toBe(true);
+        expect(fs.statSync(framePath).size).toBeGreaterThan(0);
+      }
+      const segment = result.segmentsJson.items[0];
+      expect(segment.summary).toBe("Grounded replacement summary");
+      expect(segment.tags).toContain("grounded_replacement");
+      expect(segment.tags).not.toContain("legacy_visual_tag");
+      const provenance = segment.provenance.summary as Record<string, unknown>;
+      expect(provenance.connector_version).toBe(VLM_CONNECTOR_VERSION);
+      expect(provenance.frame_count).toBe(received[0].length);
+      expect(provenance.sample_timestamps_us).toHaveLength(received[0].length);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("drops legacy visual success and preserves a gap when cached-source frame extraction fails", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_vlm_cached_extract_fail");
+    const sourceCopy = path.join(tmpDir, "source.mp4");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.copyFileSync(TEST_CLIP, sourceCopy);
+
+    try {
+      await seedSourceAnalysisCache(tmpDir, sourceCopy);
+      writeLegacyTextOnlyVlmCache(tmpDir);
+      const legacyPeakSegmentId = writePeakCache(tmpDir, "precision_dense_frames");
+      let vlmCalls = 0;
+      let removedSource = false;
+
+      const result = await runPipeline({
+        sourceFiles: [sourceCopy],
+        projectDir: tmpDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        skipPeak: true,
+        skipAppraiser: true,
+        skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmProgressReporter: {
+          onAssetProgress(event) {
+            if (event.status === "analyzing" && !removedSource) {
+              fs.rmSync(sourceCopy, { force: true });
+              removedSource = true;
+            }
+          },
+        },
+        vlmFn: async () => {
+          vlmCalls += 1;
+          return { rawJson: "{}" };
+        },
+      });
+
+      expect(removedSource).toBe(true);
+      expect(vlmCalls).toBe(0);
+      const segment = result.segmentsJson.items[0];
+      expect(segment.summary).toBe("");
+      expect(segment.tags).not.toContain("legacy_visual_tag");
+      expect(segment.interest_points).toEqual([]);
+      expect(segment.provenance.summary).toBeUndefined();
+      const vlmGaps = result.gapReport.entries.filter((entry) => entry.stage === "vlm");
+      expect(vlmGaps.length).toBeGreaterThan(0);
+      expect(vlmGaps[0].issue).toContain("vlm_frame_extraction_failed");
+      expect(result.gapReport.entries.some((entry) =>
+        entry.stage === "peak_detection" && entry.segment_id === legacyPeakSegmentId
+      )).toBe(true);
+      const persistedGap = fs.readFileSync(
+        path.join(tmpDir, "03_analysis", "gap_report.yaml"),
+        "utf-8",
+      );
+      expect(persistedGap).toContain("vlm_frame_extraction_failed");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("keeps compatible grounded VLM cache without another live call", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_vlm_cached_grounded");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    let firstRunCalls = 0;
+    const groundedVlm: VlmFn = async () => {
+      firstRunCalls += 1;
+      return {
+        rawJson: JSON.stringify({
+          summary: "Compatible grounded summary",
+          tags: ["compatible_grounded"],
+          interest_points: [],
+          quality_flags: [],
+          confidence: { summary: 0.9, tags: 0.9, quality_flags: 0.9 },
+        }),
+      };
+    };
+
+    try {
+      await runPipeline({
+        sourceFiles: [TEST_CLIP],
+        projectDir: tmpDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        skipPeak: true,
+        skipAppraiser: true,
+        skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmFn: groundedVlm,
+      });
+      expect(firstRunCalls).toBeGreaterThan(0);
+
+      let cachedRunCalls = 0;
+      const result = await runPipeline({
+        sourceFiles: [TEST_CLIP],
+        projectDir: tmpDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        skipPeak: true,
+        skipAppraiser: true,
+        skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmFn: async () => {
+          cachedRunCalls += 1;
+          return { rawJson: "{}" };
+        },
+      });
+
+      expect(cachedRunCalls).toBe(0);
+      expect(result.segmentsJson.items[0].summary).toBe("Compatible grounded summary");
+      expect(result.vlmSummary?.cachedAssets).toBe(1);
+      expect(result.gapReport.entries.filter((entry) => entry.stage === "vlm")).toHaveLength(0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("invalidates grounded VLM cache when the cached segment range changes", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_vlm_cached_range");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    try {
+      await runPipeline({
+        sourceFiles: [TEST_CLIP], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipPeak: true, skipAppraiser: true, skipMediaLink: true,
+        skipBgmAnalysis: true, vlmFn: createMockVlmFn(),
+      });
+      const segmentsPath = path.join(tmpDir, "03_analysis", "segments.json");
+      const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+        items: Array<Record<string, unknown>>;
+      };
+      segments.items[0].src_out_us = (segments.items[0].src_out_us as number) - 500_000;
+      segments.items[0].duration_us = (segments.items[0].duration_us as number) - 500_000;
+      fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2));
+      let calls = 0;
+      const result = await runPipeline({
+        sourceFiles: [TEST_CLIP], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipPeak: true, skipAppraiser: true, skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmFn: async (...args) => {
+          calls += 1;
+          return createMockVlmFn()(...args);
+        },
+      });
+      expect(calls).toBeGreaterThan(0);
+      const provenance = result.segmentsJson.items[0].provenance.summary as Record<string, unknown>;
+      expect(provenance.segment_src_out_us).toBe(result.segmentsJson.items[0].src_out_us);
+      expect(provenance.cache_decision_reasons).toContain("segment_range_mismatch");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("invalidates frame and VLM caches when source bytes change beyond the legacy prefix", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_vlm_full_source_hash");
+    const sourcePath = path.join(tmpDir, "padded-source.mp4");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.copyFileSync(TEST_CLIP, sourcePath);
+    const targetSize = 18 * 1024 * 1024;
+    fs.appendFileSync(sourcePath, Buffer.alloc(targetSize - fs.statSync(sourcePath).size));
+    try {
+      let firstCalls = 0;
+      const first = await runPipeline({
+        sourceFiles: [sourcePath], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipPeak: true, skipAppraiser: true, skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmFn: async (...args) => {
+          firstCalls += 1;
+          return createMockVlmFn()(...args);
+        },
+      });
+      expect(firstCalls).toBeGreaterThan(0);
+      const firstAssetId = first.assetsJson.items[0].asset_id;
+      const firstHash = (first.segmentsJson.items[0].provenance.summary as Record<string, unknown>)
+        .source_content_sha256;
+
+      let cachedCalls = 0;
+      await runPipeline({
+        sourceFiles: [sourcePath], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipPeak: true, skipAppraiser: true, skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmFn: async (...args) => {
+          cachedCalls += 1;
+          return createMockVlmFn()(...args);
+        },
+      });
+      expect(cachedCalls).toBe(0);
+
+      const originalStat = fs.statSync(sourcePath);
+      const fd = fs.openSync(sourcePath, "r+");
+      try {
+        fs.writeSync(fd, Buffer.from([0x55]), 0, 1, 17 * 1024 * 1024);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.utimesSync(sourcePath, originalStat.atime, originalStat.mtime);
+
+      let changedCalls = 0;
+      const changed = await runPipeline({
+        sourceFiles: [sourcePath], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipPeak: true, skipAppraiser: true, skipMediaLink: true,
+        skipBgmAnalysis: true,
+        vlmFn: async (...args) => {
+          changedCalls += 1;
+          return createMockVlmFn()(...args);
+        },
+      });
+      expect(changed.assetsJson.items[0].asset_id).toBe(firstAssetId);
+      expect(changedCalls).toBeGreaterThan(0);
+      expect((changed.segmentsJson.items[0].provenance.summary as Record<string, unknown>)
+        .source_content_sha256).not.toBe(firstHash);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
+
+describe("Pipeline: cached peak compatibility", () => {
+  it("fails loudly when a canonical cached artifact is corrupt", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_cached_canonical_corrupt");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    try {
+      await seedSourceAnalysisCache(tmpDir, TEST_CLIP);
+      fs.writeFileSync(path.join(tmpDir, "03_analysis", "segments.json"), "{not-json");
+      await expect(runPipeline({
+        sourceFiles: [TEST_CLIP], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipVlm: true, skipPeak: true, skipAppraiser: true,
+        skipMediaLink: true, skipBgmAnalysis: true,
+      })).rejects.toThrow("canonical_artifact_corrupt");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("removes old precision success without grounded provenance and keeps a peak gap", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_peak_cached_legacy");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    try {
+      await seedSourceAnalysisCache(tmpDir, TEST_CLIP);
+      const segmentId = writePeakCache(tmpDir, "precision_dense_frames");
+      const result = await runPipeline({
+        sourceFiles: [TEST_CLIP], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipVlm: true, skipPeak: true, skipAppraiser: true,
+        skipMediaLink: true, skipBgmAnalysis: true,
+      });
+      expect(result.segmentsJson.items.find((segment) => segment.segment_id === segmentId)?.peak_analysis)
+        .toBeUndefined();
+      expect(result.gapReport.entries.some((entry) =>
+        entry.stage === "peak_detection" &&
+        entry.segment_id === segmentId &&
+        entry.issue.includes("ungrounded_precision_cache_invalidated")
+      )).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it.each(["degraded_ffmpeg_signals", "marlin_temporal_semantics"] as const)(
+    "keeps non-precision %s peak cache valid",
+    async (sourcePass) => {
+      const tmpDir = path.join(import.meta.dirname, `_tmp_peak_cached_${sourcePass}`);
+      fs.mkdirSync(tmpDir, { recursive: true });
+      try {
+        await seedSourceAnalysisCache(tmpDir, TEST_CLIP);
+        const segmentId = writePeakCache(tmpDir, sourcePass);
+        const result = await runPipeline({
+          sourceFiles: [TEST_CLIP], projectDir: tmpDir, repoRoot: REPO_ROOT,
+          skipStt: true, skipVlm: true, skipPeak: true, skipAppraiser: true,
+          skipMediaLink: true, skipBgmAnalysis: true,
+        });
+        expect(result.segmentsJson.items.find((segment) => segment.segment_id === segmentId)
+          ?.peak_analysis?.peak_moments[0].source_pass).toBe(sourcePass);
+        expect(result.gapReport.entries.filter((entry) => entry.stage === "peak_detection"))
+          .toHaveLength(0);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  it("revalidates cached VLM and peak fields on a mixed partial cache hit", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_mixed_visual_cache");
+    const secondClip = path.join(FIXTURES_DIR, "test-scene-changes.mp4");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    try {
+      await seedSourceAnalysisCache(tmpDir, TEST_CLIP);
+      writeLegacyTextOnlyVlmCache(tmpDir);
+      const cachedSegmentId = writePeakCache(tmpDir, "precision_dense_frames");
+      const received: string[][] = [];
+      const result = await runPipeline({
+        sourceFiles: [TEST_CLIP, secondClip], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipAppraiser: true, skipMediaLink: true, skipBgmAnalysis: true,
+        vlmFn: async (framePaths, prompt) => {
+          received.push(framePaths);
+          if (prompt.includes("editorial peak discovery")) {
+            return { rawJson: JSON.stringify({ coarse_candidates: [] }) };
+          }
+          return createMockVlmFn()(framePaths, prompt, {
+            model: "gemini-2.0-flash",
+            maxOutputTokens: 512,
+          });
+        },
+      });
+      const cachedSegment = result.segmentsJson.items.find((segment) =>
+        segment.segment_id === cachedSegmentId
+      );
+      expect(cachedSegment?.tags).not.toContain("legacy_visual_tag");
+      expect(cachedSegment?.provenance.summary?.source_content_sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(cachedSegment?.peak_analysis).toBeUndefined();
+      expect(result.gapReport.entries.some((entry) =>
+        entry.stage === "peak_detection" && entry.segment_id === cachedSegmentId
+      )).toBe(true);
+      for (const framePath of received.flat()) {
+        expect(path.isAbsolute(framePath)).toBe(true);
+        expect(fs.statSync(framePath).size).toBeGreaterThan(0);
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

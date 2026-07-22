@@ -12,6 +12,17 @@ import type { SegmentItem } from "../connectors/ffmpeg-segmenter.js";
 import { generateCandidateId, getCandidateRef } from "../compiler/candidate-ref.js";
 import { primaryVideoClips } from "./qa-issue-detector.js";
 import type { QAFix } from "./qa-fix-proposer.js";
+import {
+  defaultDiscoveryContract,
+  existingEligibleCandidate,
+  replacementIsExcluded,
+  validateExternalReplacement,
+  normalizeQASnapshotString,
+  QA_FIX_SNAPSHOT_LIMITS,
+  type CanonicalReplacement,
+  type CanonicalSegment,
+  type QADiscoveryContract,
+} from "./qa-source-discovery.js";
 
 export interface ApplyResult {
   applied: QAFix[];
@@ -29,10 +40,10 @@ export interface ApplyFixesOptions {
   segmentIds?: Iterable<string>;
   segments?: Array<Pick<SegmentItem, "segment_id" | "asset_id" | "src_in_us" | "src_out_us"> & Partial<SegmentItem> & { trim_hint?: TrimHint }>;
   recompile?: (selects: SelectsCandidates, blueprint: EditBlueprint) => TimelineIR;
+  discovery?: QADiscoveryContract;
 }
 
 interface SegmentIndex {
-  loaded: boolean;
   byId: Map<string, SegmentLike>;
 }
 
@@ -74,6 +85,7 @@ export function applyFixes(
   const workingSelects = opts.dryRun ? structuredClone(selects) : selects;
   const workingBlueprint = opts.dryRun ? structuredClone(blueprint) : blueprint;
   const segmentIndex = buildSegmentIndex(opts);
+  const discovery = opts.discovery ?? defaultDiscoveryContract(selects.project_id);
 
   const result: ApplyResult = {
     applied: [],
@@ -86,8 +98,23 @@ export function applyFixes(
   };
   const modifiedBeatIds = new Set<string>();
 
+  if (
+    timeline.project_id !== selects.project_id
+    || blueprint.project_id !== selects.project_id
+    || discovery.projectId !== selects.project_id
+  ) {
+    result.skipped = [...fixes];
+    result.warnings.push("Skipped batch: timeline/selects/blueprint/discovery project_id mismatch");
+    return result;
+  }
+
+  if (!preflightExternalFixes(fixes, workingSelects, workingBlueprint, timeline, discovery, opts, segmentIndex, result)) {
+    result.skipped = [...fixes];
+    return result;
+  }
+
   for (const fix of fixes) {
-    const applied = applyOneFix(fix, workingSelects, workingBlueprint, timeline, segmentIndex, result, modifiedBeatIds);
+    const applied = applyOneFix(fix, workingSelects, workingBlueprint, timeline, segmentIndex, discovery, opts, result, modifiedBeatIds);
     if (applied) {
       result.applied.push(fix);
     } else {
@@ -100,12 +127,58 @@ export function applyFixes(
   return result;
 }
 
+function preflightExternalFixes(
+  fixes: QAFix[],
+  selects: SelectsCandidates,
+  blueprint: EditBlueprint,
+  timeline: TimelineIR,
+  discovery: QADiscoveryContract,
+  opts: ApplyFixesOptions,
+  segmentIndex: SegmentIndex,
+  result: ApplyResult,
+): boolean {
+  const seen = new Set<string>();
+  for (const fix of fixes) {
+    if (fix.fix_type !== "swap" && fix.fix_type !== "insert") continue;
+    const segmentId = fix.replacement?.segment_id;
+    if (!segmentId) continue;
+    const eligible = existingEligibleCandidate(selects, segmentId, fix.target_beat_id);
+    const external = Boolean(fix.replacement?.snapshot) || !eligible;
+    if (!external) continue;
+    if (seen.has(segmentId)) {
+      result.warnings.push(`Skipped batch: duplicate external replacement ${segmentId}`);
+      return false;
+    }
+    seen.add(segmentId);
+    const targetClip = clipForFix(fix, timeline);
+    if (!targetClip || targetClip.beat_id !== fix.target_beat_id) {
+      result.warnings.push(`Skipped batch: ${fix.issue_id} target clip/beat mismatch`);
+      return false;
+    }
+    if (!blueprint.beats.some((beat) => beat.id === fix.target_beat_id)) {
+      result.warnings.push(`Skipped batch: ${fix.issue_id} target beat is absent from blueprint`);
+      return false;
+    }
+    if (fix.fix_type === "swap" && !candidateForSegment(selects, targetClip.segment_id)) {
+      result.warnings.push(`Skipped batch: ${fix.issue_id} target candidate is missing`);
+      return false;
+    }
+    if (!prepareReplacement(fix, selects, timeline, fix.target_beat_id, discovery, opts, segmentIndex, result)) {
+      result.warnings.push("External replacement preflight failed; no fixes were applied");
+      return false;
+    }
+  }
+  return true;
+}
+
 function applyOneFix(
   fix: QAFix,
   selects: SelectsCandidates,
   blueprint: EditBlueprint,
   timeline: TimelineIR,
   segmentIndex: SegmentIndex,
+  discovery: QADiscoveryContract,
+  opts: ApplyFixesOptions,
   result: ApplyResult,
   modifiedBeatIds: Set<string>,
 ): boolean {
@@ -123,13 +196,13 @@ function applyOneFix(
 
   switch (fix.fix_type) {
     case "swap":
-      return applySwap(fix, selects, beat, timeline, segmentIndex, result, modifiedBeatIds);
+      return applySwap(fix, selects, beat, timeline, segmentIndex, discovery, opts, result, modifiedBeatIds);
     case "reorder":
       return applyReorder(fix, beat, timeline, result, modifiedBeatIds);
     case "trim":
       return applyTrim(fix, selects, timeline, result, modifiedBeatIds, beatId);
     case "insert":
-      return applyInsert(fix, selects, beat, timeline, segmentIndex, result, modifiedBeatIds);
+      return applyInsert(fix, selects, beat, timeline, segmentIndex, discovery, opts, result, modifiedBeatIds);
     case "remove":
       return applyRemove(fix, selects, beat, timeline, result, modifiedBeatIds, beatId);
     default:
@@ -144,6 +217,8 @@ function applySwap(
   beat: EditBlueprint["beats"][number],
   timeline: TimelineIR,
   segmentIndex: SegmentIndex,
+  discovery: QADiscoveryContract,
+  opts: ApplyFixesOptions,
   result: ApplyResult,
   modifiedBeatIds: Set<string>,
 ): boolean {
@@ -152,11 +227,6 @@ function applySwap(
     result.warnings.push(`Skipped ${fix.issue_id}: swap fix is missing replacement.segment_id`);
     return false;
   }
-  if (!replacementExists(replacementId, selects, segmentIndex)) {
-    result.warnings.push(`Skipped ${fix.issue_id}: replacement segment_id not found in segments/selects: ${replacementId}`);
-    return false;
-  }
-
   const targetClip = clipForFix(fix, timeline);
   if (!targetClip) {
     result.warnings.push(`Skipped ${fix.issue_id}: target clip not found: ${fix.target_clip_id}`);
@@ -177,11 +247,14 @@ function applySwap(
     return false;
   }
 
+  const prepared = prepareReplacement(fix, selects, timeline, beat.id, discovery, opts, segmentIndex, result);
+  if (!prepared) return false;
+
   const oldRefs = refsForCandidate(targetCandidate);
   const oldPrimarySegmentId = targetClip.segment_id;
   const oldPrimaryCandidate = structuredClone(targetCandidate);
-  const replacementCandidate = candidateForSegment(selects, replacementId);
-  const replacementSegment = segmentIndex.byId.get(replacementId);
+  const replacementCandidate = prepared.candidate;
+  const replacementSegment = prepared.canonical?.segment ?? segmentIndex.byId.get(replacementId);
   const nextCandidate = buildReplacementCandidate({
     projectId: selects.project_id,
     targetCandidate,
@@ -288,6 +361,8 @@ function applyInsert(
   beat: EditBlueprint["beats"][number],
   timeline: TimelineIR,
   segmentIndex: SegmentIndex,
+  discovery: QADiscoveryContract,
+  opts: ApplyFixesOptions,
   result: ApplyResult,
   modifiedBeatIds: Set<string>,
 ): boolean {
@@ -296,16 +371,19 @@ function applyInsert(
     result.warnings.push(`Skipped ${fix.issue_id}: insert fix is missing replacement.segment_id`);
     return false;
   }
-  if (!replacementExists(replacementId, selects, segmentIndex)) {
-    result.warnings.push(`Skipped ${fix.issue_id}: replacement segment_id not found in segments/selects: ${replacementId}`);
+  const targetClip = clipForFix(fix, timeline);
+  if (!targetClip || targetClip.beat_id !== beat.id) {
+    result.warnings.push(`Skipped ${fix.issue_id}: target clip/beat mismatch`);
     return false;
   }
+  const prepared = prepareReplacement(fix, selects, timeline, beat.id, discovery, opts, segmentIndex, result);
+  if (!prepared) return false;
 
   let changed = false;
   if (!candidateForSegment(selects, replacementId)) {
-    const segment = segmentIndex.byId.get(replacementId);
+    const segment = prepared.canonical?.segment;
     if (!segment) {
-      result.warnings.push(`Skipped ${fix.issue_id}: cannot materialize inserted candidate without segment metadata: ${replacementId}`);
+      result.warnings.push(`Skipped ${fix.issue_id}: cannot materialize inserted candidate without complete canonical metadata: ${replacementId}`);
       return false;
     }
     selects.candidates.push(candidateFromSegment(selects.project_id, segment, fix, beat.id));
@@ -414,17 +492,15 @@ function buildReplacementCandidate(input: {
     role,
     story_role: targetCandidate.story_role ?? replacementCandidate?.story_role,
     why_it_matches: replacementCandidate?.why_it_matches
-      ?? replacementSegment?.summary
-      ?? `QA replacement for ${targetCandidate.segment_id}`,
+      ?? discoveryWhy(fix, replacementSegment?.summary),
     risks: replacementCandidate?.risks ? [...replacementCandidate.risks] : [...(targetCandidate.risks ?? [])],
     confidence: replacementCandidate?.confidence ?? fix.replacement?.search_score ?? targetCandidate.confidence,
     quality_flags: replacementCandidate?.quality_flags ?? replacementSegment?.quality_flags ?? [],
-    evidence: [
+    evidence: uniqueStrings([
       ...(replacementCandidate?.evidence ?? []),
       ...(targetCandidate.evidence ?? []),
-      `qa_fix:${fix.issue_id}`,
-      ...(fix.replacement?.reason ? [fix.replacement.reason] : []),
-    ],
+      ...discoveryEvidence(fix),
+    ]),
     eligible_beats: includeBeat(replacementCandidate?.eligible_beats ?? targetCandidate.eligible_beats, beatId),
     transcript_excerpt: replacementCandidate?.transcript_excerpt ?? replacementSegment?.transcript_excerpt ?? targetCandidate.transcript_excerpt,
   };
@@ -440,30 +516,30 @@ function buildReplacementCandidate(input: {
 
 function candidateFromSegment(
   projectId: string,
-  segment: SegmentLike,
+  segment: CanonicalSegment,
   fix: QAFix,
   beatId: string,
 ): Candidate {
-  const srcInUs = segment.src_in_us ?? 0;
   const candidate: Candidate = {
     segment_id: segment.segment_id,
-    asset_id: segment.asset_id ?? `AST_${segment.segment_id}`,
-    src_in_us: srcInUs,
-    src_out_us: segment.src_out_us ?? srcInUs + 1_000_000,
+    asset_id: segment.asset_id,
+    src_in_us: segment.src_in_us,
+    src_out_us: segment.src_out_us,
     role: "support",
-    why_it_matches: segment.summary ?? fix.replacement?.reason ?? `QA inserted candidate for ${fix.issue_id}`,
+    why_it_matches: discoveryWhy(fix, segment.summary),
     risks: [],
     confidence: fix.replacement?.search_score ?? 0.5,
     quality_flags: segment.quality_flags ?? [],
-    evidence: [`qa_fix:${fix.issue_id}`, ...(fix.replacement?.reason ? [fix.replacement.reason] : [])],
+    evidence: discoveryEvidence(fix),
     eligible_beats: [beatId],
     transcript_excerpt: segment.transcript_excerpt,
   };
-  if (segment.trim_hint) {
-    candidate.trim_hint = { ...segment.trim_hint };
-  }
   candidate.candidate_id = generateCandidateId(projectId, candidate);
   return candidate;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return values.filter((value, index) => values.indexOf(value) === index);
 }
 
 function computedTrimHint(
@@ -507,16 +583,13 @@ function computedTrimHint(
 
 function buildSegmentIndex(opts: ApplyFixesOptions): SegmentIndex {
   const byId = new Map<string, SegmentLike>();
-  let loaded = false;
 
   if (opts.segments) {
-    loaded = true;
     for (const segment of opts.segments) {
       byId.set(segment.segment_id, segment);
     }
   }
   if (opts.segmentIds) {
-    loaded = true;
     for (const segmentId of opts.segmentIds) {
       if (!byId.has(segmentId)) byId.set(segmentId, { segment_id: segmentId });
     }
@@ -524,7 +597,6 @@ function buildSegmentIndex(opts: ApplyFixesOptions): SegmentIndex {
   if (opts.projectDir) {
     const segmentsPath = path.join(opts.projectDir, "03_analysis", "segments.json");
     if (fs.existsSync(segmentsPath)) {
-      loaded = true;
       try {
         const parsed = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as unknown;
         const items = Array.isArray(parsed)
@@ -539,17 +611,91 @@ function buildSegmentIndex(opts: ApplyFixesOptions): SegmentIndex {
           }
         }
       } catch {
-        loaded = true;
+        // Canonical external materialization is rejected by snapshot validation.
       }
     }
   }
 
-  return { loaded, byId };
+  return { byId };
 }
 
-function replacementExists(segmentId: string, selects: SelectsCandidates, segmentIndex: SegmentIndex): boolean {
-  if (segmentIndex.loaded) return segmentIndex.byId.has(segmentId) || Boolean(candidateForSegment(selects, segmentId));
-  return Boolean(candidateForSegment(selects, segmentId));
+function prepareReplacement(
+  fix: QAFix,
+  selects: SelectsCandidates,
+  timeline: TimelineIR,
+  beatId: string,
+  discovery: QADiscoveryContract,
+  opts: ApplyFixesOptions,
+  segmentIndex: SegmentIndex,
+  result: ApplyResult,
+): { candidate?: Candidate; canonical?: CanonicalReplacement } | null {
+  const segmentId = fix.replacement?.segment_id;
+  if (!segmentId) return null;
+  if (replacementIsExcluded(segmentId, timeline, selects, discovery)) {
+    result.warnings.push(`Skipped ${fix.issue_id}: replacement is used, rejected, or duplicated: ${segmentId}`);
+    return null;
+  }
+  const snapshot = fix.replacement?.snapshot;
+  if (snapshot) {
+    if (!opts.projectDir) {
+      result.warnings.push(`Skipped ${fix.issue_id}: external replacement requires projectDir`);
+      return null;
+    }
+    const canonical = validateExternalReplacement({
+      projectDir: opts.projectDir,
+      snapshot,
+      segmentId,
+      contract: discovery,
+      targetClipId: fix.target_clip_id,
+      targetBeatId: beatId,
+      searchMode: fix.replacement!.search_mode,
+      searchScore: fix.replacement!.search_score,
+      reason: fix.replacement!.reason,
+    });
+    if (!canonical) {
+      result.warnings.push(`Skipped ${fix.issue_id}: external replacement failed canonical snapshot validation: ${segmentId}`);
+      return null;
+    }
+    return { canonical };
+  }
+  const candidate = existingEligibleCandidate(selects, segmentId, beatId);
+  if (candidate) return { candidate };
+  if (segmentIndex.byId.has(segmentId)) {
+    result.warnings.push(`Skipped ${fix.issue_id}: external segment requires a canonical proposal snapshot: ${segmentId}`);
+  } else {
+    result.warnings.push(`Skipped ${fix.issue_id}: replacement segment_id not found in eligible selects: ${segmentId}`);
+  }
+  return null;
+}
+
+function discoveryWhy(fix: QAFix, summary?: string): string {
+  const replacement = fix.replacement;
+  return [
+    `QA ${normalizeQASnapshotString(fix.issue_id, QA_FIX_SNAPSHOT_LIMITS.array_item_chars)}`,
+    replacement ? normalizeQASnapshotString(replacement.reason, QA_FIX_SNAPSHOT_LIMITS.reason_chars) : undefined,
+    replacement ? `search_score=${safeSearchScore(replacement.search_score)}` : undefined,
+    `target_beat=${normalizeQASnapshotString(fix.target_beat_id, QA_FIX_SNAPSHOT_LIMITS.array_item_chars)}`,
+    replacement?.snapshot?.canonical_source_ref,
+    replacement?.snapshot?.summary
+      ?? (summary ? normalizeQASnapshotString(summary, QA_FIX_SNAPSHOT_LIMITS.summary_chars) : undefined),
+  ].filter(Boolean).join(" | ");
+}
+
+function discoveryEvidence(fix: QAFix): string[] {
+  const replacement = fix.replacement;
+  return [
+    `qa_issue:${normalizeQASnapshotString(fix.issue_id, QA_FIX_SNAPSHOT_LIMITS.array_item_chars)}`,
+    ...(replacement ? [
+      `search_reason:${normalizeQASnapshotString(replacement.reason, QA_FIX_SNAPSHOT_LIMITS.reason_chars)}`,
+      `search_score:${safeSearchScore(replacement.search_score)}`,
+    ] : []),
+    `target_beat:${normalizeQASnapshotString(fix.target_beat_id, QA_FIX_SNAPSHOT_LIMITS.array_item_chars)}`,
+    ...(replacement?.snapshot ? [`canonical_source:${replacement.snapshot.canonical_source_ref}`] : []),
+  ];
+}
+
+function safeSearchScore(score: number): string {
+  return Number.isFinite(score) ? String(Math.round(score * 1_000) / 1_000) : "invalid";
 }
 
 function resolveTargetBeatId(fix: QAFix, timeline: TimelineIR): string | undefined {

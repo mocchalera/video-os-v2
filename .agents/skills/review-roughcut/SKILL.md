@@ -93,6 +93,7 @@ craft 上のトレードオフは Walter Murch の Rule of Six で並べる。
 - `references/review-rubric.md` の構成 / 感情 / リズム / 技術チェックを順番に見る
 - 重要な指摘にはできるだけ `evidence`, `affected_beat_ids`, `affected_clip_ids` を付ける
 - 直接観測と推論を混ぜない
+- 短尺SNSでは `social_hook_treatment_valid`, `social_visual_refresh_valid`, `social_title_copy_fit_valid`, `social_cta_treatment_valid`, `social_audio_policy_valid` を確認する。brief がCTAを要求する場合、登録済み `cta-card` が終盤35%に2秒以上あることを完成条件にする
 
 ### Step 5: `review_report.yaml` を作る
 

@@ -81,6 +81,7 @@ function getNestedValue(obj: Record<string, unknown>, pathStr: string): unknown 
 }
 
 function evaluatePredicate(pred: Predicate, evidence: PairEvidence): boolean {
+  if (!hasRequiredCoverage(pred.path, evidence)) return false;
   const val = getNestedValue(evidence as unknown as Record<string, unknown>, pred.path);
   if (val === undefined || val === null) return false;
 
@@ -96,6 +97,34 @@ function evaluatePredicate(pred: Predicate, evidence: PairEvidence): boolean {
       return Array.isArray(val) && typeof pred.value === "string" && val.includes(pred.value);
     default: return false;
   }
+}
+
+function hasRequiredCoverage(pathStr: string, evidence: PairEvidence): boolean {
+  const coverage = evidence.evidence_coverage;
+  if (!coverage) return true;
+  // Coverage itself is evidence. Cards that intentionally handle unknown data
+  // may inspect this path without being blocked by the metric gate.
+  if (pathStr.startsWith("evidence_coverage.")) return true;
+  const derived = {
+    visual_tag_overlap_score: coverage.visual_tag_overlap_score,
+    semantic_cluster_change: coverage.semantic_cluster_change,
+    energy_delta_score: coverage.energy_delta_score,
+  } as const;
+  const derivedCoverage = derived[pathStr as keyof typeof derived];
+  if (derivedCoverage) return derivedCoverage.pair === "known";
+  if (pathStr === "semantic_cluster_change" || pathStr === "energy_delta_score") {
+    return false;
+  }
+  const direct = {
+    visual_tag_overlap_score: ["visual_tags"],
+    motion_continuity_score: ["motion_type"],
+    shot_scale_continuity_score: ["shot_scale"],
+    composition_match_score: ["shot_scale", "composition_anchor", "screen_side"],
+    axis_consistency_score: ["camera_axis", "screen_side"],
+  } as const;
+  const fields = direct[pathStr as keyof typeof direct];
+  if (!fields) return true;
+  return fields.some((field) => coverage[field].pair === "known");
 }
 
 export function evaluatePredicateGroup(group: PredicateGroup, evidence: PairEvidence): boolean {
@@ -115,6 +144,19 @@ const NEUTRAL = 0.5;
 
 function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
+}
+
+/** Normalize a signed [-1, 1] metric for unit-interval aggregation. */
+export function normalizeSignedUnitInterval(v: number): number {
+  return clamp01((Math.max(-1, Math.min(1, v)) + 1) / 2);
+}
+
+function hasKnownDerivedCoverage(
+  evidence: PairEvidence,
+  feature: "semantic_cluster_change" | "energy_delta_score",
+): boolean {
+  const coverage = evidence.evidence_coverage?.[feature];
+  return coverage === undefined || coverage.pair === "known";
 }
 
 /**
@@ -143,10 +185,13 @@ export function resolveEffectivePeakType(evidence: Pick<PairEvidence,
  * resolveEmotionAxisScore: compute the emotion axis score from PairEvidence.
  */
 export function resolveEmotionAxisScore(evidence: PairEvidence): number {
+  const energy = hasKnownDerivedCoverage(evidence, "energy_delta_score")
+    ? normalizeSignedUnitInterval(evidence.energy_delta_score)
+    : NEUTRAL;
   const baseScore =
     0.45 * evidence.outgoing_afterglow_score +
     0.35 * evidence.incoming_reaction_score +
-    0.20 * evidence.energy_delta_score;
+    0.20 * energy;
 
   const peakTypeBonus =
     evidence.effective_peak_type === "emotional_peak" ? 0.20 :
@@ -161,10 +206,16 @@ export function resolveEmotionAxisScore(evidence: PairEvidence): number {
  * resolveAxisBreakReadiness: compute axis break readiness from PairEvidence.
  */
 export function resolveAxisBreakReadiness(evidence: PairEvidence): number {
+  const energy = hasKnownDerivedCoverage(evidence, "energy_delta_score")
+    ? normalizeSignedUnitInterval(evidence.energy_delta_score)
+    : NEUTRAL;
+  const semanticChange = hasKnownDerivedCoverage(evidence, "semantic_cluster_change")
+    ? Number(evidence.semantic_cluster_change)
+    : NEUTRAL;
   const base =
-    0.50 * evidence.energy_delta_score +
+    0.50 * energy +
     0.30 * evidence.effective_peak_strength_score +
-    0.20 * Number(evidence.semantic_cluster_change);
+    0.20 * semanticChange;
 
   const typeMultiplier =
     evidence.effective_peak_type === "action_peak" ? 1.00 :
@@ -201,17 +252,19 @@ export function resolveCompositionMatch(
   leftComposition: { shot_scale?: string; composition_anchor?: string; screen_side?: string },
   rightComposition: { shot_scale?: string; composition_anchor?: string; screen_side?: string },
 ): number {
+  const usable = (value: string | undefined): value is string =>
+    value !== undefined && value !== "unknown" && value !== "not_applicable";
   let matches = 0;
   let total = 0;
-  if (leftComposition.shot_scale && rightComposition.shot_scale) {
+  if (usable(leftComposition.shot_scale) && usable(rightComposition.shot_scale)) {
     total++;
     if (leftComposition.shot_scale === rightComposition.shot_scale) matches++;
   }
-  if (leftComposition.composition_anchor && rightComposition.composition_anchor) {
+  if (usable(leftComposition.composition_anchor) && usable(rightComposition.composition_anchor)) {
     total++;
     if (leftComposition.composition_anchor === rightComposition.composition_anchor) matches++;
   }
-  if (leftComposition.screen_side && rightComposition.screen_side) {
+  if (usable(leftComposition.screen_side) && usable(rightComposition.screen_side)) {
     total++;
     if (leftComposition.screen_side === rightComposition.screen_side) matches++;
   }
@@ -227,17 +280,25 @@ export function resolveShotScaleContinuity(
   leftShotScale?: string,
   rightShotScale?: string,
 ): number {
-  if (!leftShotScale || !rightShotScale || leftShotScale === "unknown" || rightShotScale === "unknown") {
+  if (!leftShotScale || !rightShotScale || ["unknown", "not_applicable"].includes(leftShotScale) || ["unknown", "not_applicable"].includes(rightShotScale)) {
     return NEUTRAL;
   }
-  if (leftShotScale === rightShotScale) return 0.9;
+  const rankAlias = (value: string): string | undefined => ({
+    extreme_close_up: "extreme_close",
+    close_up: "close",
+    medium_close_up: "medium_close",
+  })[value] ?? (value === "insert" ? undefined : value);
+  const normalizedLeft = rankAlias(leftShotScale);
+  const normalizedRight = rankAlias(rightShotScale);
+  if (!normalizedLeft || !normalizedRight) return NEUTRAL;
+  if (normalizedLeft === normalizedRight) return 0.9;
 
   const scaleOrder: string[] = [
     "extreme_close", "close", "medium_close", "medium",
     "medium_wide", "wide", "extreme_wide",
   ];
-  const leftIdx = scaleOrder.indexOf(leftShotScale);
-  const rightIdx = scaleOrder.indexOf(rightShotScale);
+  const leftIdx = scaleOrder.indexOf(normalizedLeft);
+  const rightIdx = scaleOrder.indexOf(normalizedRight);
   if (leftIdx < 0 || rightIdx < 0) return NEUTRAL;
 
   const jump = Math.abs(leftIdx - rightIdx);
@@ -305,11 +366,13 @@ export function resolveAxisConsistency(
   rightFeatures: { screen_side?: string; gaze_direction?: string; camera_axis?: string },
   axisBreakReadinessScore?: number,
 ): number {
-  const axisSame = leftFeatures.camera_axis && rightFeatures.camera_axis &&
+  const usable = (value: string | undefined): value is string =>
+    value !== undefined && value !== "unknown" && value !== "not_applicable";
+  const axisSame = usable(leftFeatures.camera_axis) && usable(rightFeatures.camera_axis) &&
     leftFeatures.camera_axis === rightFeatures.camera_axis;
-  const sideSame = leftFeatures.screen_side && rightFeatures.screen_side &&
+  const sideSame = usable(leftFeatures.screen_side) && usable(rightFeatures.screen_side) &&
     leftFeatures.screen_side === rightFeatures.screen_side;
-  const gazeSame = leftFeatures.gaze_direction && rightFeatures.gaze_direction &&
+  const gazeSame = usable(leftFeatures.gaze_direction) && usable(rightFeatures.gaze_direction) &&
     leftFeatures.gaze_direction === rightFeatures.gaze_direction;
 
   // Both same axis and side = high consistency
@@ -317,8 +380,8 @@ export function resolveAxisConsistency(
   // One matches = moderate
   if (axisSame || sideSame) return gazeSame ? 0.65 : 0.6;
   // Both differ simultaneously = potential axis break
-  if (leftFeatures.camera_axis && rightFeatures.camera_axis &&
-      leftFeatures.screen_side && rightFeatures.screen_side) {
+  if (usable(leftFeatures.camera_axis) && usable(rightFeatures.camera_axis) &&
+      usable(leftFeatures.screen_side) && usable(rightFeatures.screen_side)) {
     // If axis break readiness is high, the break is justified → moderate score
     const readiness = axisBreakReadinessScore ?? 0;
     if (readiness >= 0.7) return 0.45;
@@ -334,8 +397,11 @@ export function resolveAxisConsistency(
 export function resolveAxisScores(evidence: PairEvidence): MurchAxisScores {
   const emotion = resolveEmotionAxisScore(evidence);
 
+  const semanticChange = hasKnownDerivedCoverage(evidence, "semantic_cluster_change")
+    ? Number(evidence.semantic_cluster_change)
+    : NEUTRAL;
   const story =
-    0.40 * Number(evidence.semantic_cluster_change) +
+    0.40 * semanticChange +
     0.30 * evidence.motif_overlap_score +
     0.30 * evidence.setup_payoff_relation_score;
 

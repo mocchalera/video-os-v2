@@ -1,0 +1,376 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/bgm-selection.schema.json",
+  "title": "Video OS BGM Selection",
+  "description": "Deterministic, explainable BGM candidate ranking and optional operator decision for one project.",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "created_at",
+    "mode",
+    "scoring_strategy",
+    "redistribution_trace",
+    "input_hashes",
+    "requirements",
+    "hard_constraints",
+    "candidates",
+    "selected",
+    "top_two_margin",
+    "operator_override",
+    "semantic_channel",
+    "usage_history_penalties",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "mode": { "type": "string", "enum": ["suggest", "auto", "operator_locked"] },
+    "scoring_strategy": { "$ref": "#/$defs/scoringStrategy" },
+    "redistribution_trace": { "$ref": "#/$defs/redistributionTrace" },
+    "input_hashes": { "$ref": "#/$defs/inputHashes" },
+    "requirements": { "$ref": "#/$defs/requirements" },
+    "hard_constraints": { "type": "array", "items": { "$ref": "#/$defs/hardConstraint" } },
+    "candidates": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+    "selected": { "anyOf": [{ "$ref": "#/$defs/selected" }, { "type": "null" }] },
+    "top_two_margin": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "operator_override": { "anyOf": [{ "$ref": "#/$defs/operatorOverride" }, { "type": "null" }] },
+    "semantic_channel": { "$ref": "#/$defs/semanticChannel" },
+    "usage_history_penalties": { "type": "array", "items": { "$ref": "#/$defs/usagePenalty" } },
+    "warnings": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "operator_locked" } }, "required": ["mode"] },
+      "then": {
+        "properties": {
+          "selected": { "$ref": "#/$defs/selected" },
+          "operator_override": { "$ref": "#/$defs/operatorOverride" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": { "const": "auto" },
+          "semantic_channel": {
+            "properties": { "status": { "const": "available" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["mode", "semantic_channel"]
+      },
+      "then": {
+        "properties": {
+          "selected": {
+            "allOf": [
+              { "$ref": "#/$defs/selected" },
+              { "properties": { "score": { "minimum": 70 } } }
+            ]
+          },
+          "top_two_margin": { "type": "number", "minimum": 8 },
+          "scoring_strategy": {
+            "properties": {
+              "auto_minimum_score": { "const": 70 },
+              "auto_minimum_margin": { "const": 8 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": { "const": "auto" },
+          "semantic_channel": {
+            "properties": { "status": { "enum": ["degraded", "unavailable"] } },
+            "required": ["status"]
+          }
+        },
+        "required": ["mode", "semantic_channel"]
+      },
+      "then": {
+        "properties": {
+          "selected": {
+            "allOf": [
+              { "$ref": "#/$defs/selected" },
+              { "properties": { "score": { "minimum": 78 } } }
+            ]
+          },
+          "top_two_margin": { "type": "number", "minimum": 12 },
+          "scoring_strategy": {
+            "properties": {
+              "auto_minimum_score": { "const": 78 },
+              "auto_minimum_margin": { "const": 12 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "semantic_channel": {
+            "properties": { "status": { "const": "available" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["semantic_channel"]
+      },
+      "then": {
+        "properties": {
+          "redistribution_trace": {
+            "properties": {
+              "applied": { "const": false },
+              "reason": { "type": "null" },
+              "allocations": { "maxItems": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "semantic_channel": {
+            "properties": { "status": { "const": "unavailable" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["semantic_channel"]
+      },
+      "then": {
+        "properties": {
+          "redistribution_trace": {
+            "properties": { "applied": { "const": true } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "contentHash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "scoringStrategy": {
+      "type": "object",
+      "required": ["strategy_id", "base_total_points", "auto_minimum_score", "auto_minimum_margin"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy_id": { "const": "bgm-score-v1" },
+        "base_total_points": { "const": 100 },
+        "auto_minimum_score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "auto_minimum_margin": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "redistributionAllocation": {
+      "type": "object",
+      "required": ["component", "added_points"],
+      "additionalProperties": false,
+      "properties": {
+        "component": {
+          "type": "string",
+          "enum": [
+            "editorial_family_arc_fit",
+            "speech_friendliness",
+            "energy_tempo_fit",
+            "duration_edit_ending_fit",
+            "beat_downbeat_confidence"
+          ]
+        },
+        "added_points": { "type": "number", "minimum": 0, "maximum": 30 }
+      }
+    },
+    "redistributionTrace": {
+      "type": "object",
+      "required": ["applied", "source_component", "source_weight", "reason", "allocations"],
+      "additionalProperties": false,
+      "properties": {
+        "applied": { "type": "boolean" },
+        "source_component": { "const": "semantic_fit" },
+        "source_weight": { "const": 30 },
+        "reason": { "type": ["string", "null"], "minLength": 1 },
+        "allocations": { "type": "array", "items": { "$ref": "#/$defs/redistributionAllocation" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "applied": { "const": true } }, "required": ["applied"] },
+          "then": {
+            "properties": {
+              "reason": { "type": "string", "minLength": 1 },
+              "allocations": { "minItems": 1 }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": { "type": "null" },
+              "allocations": { "maxItems": 0 }
+            }
+          }
+        }
+      ]
+    },
+    "inputHashes": {
+      "type": "object",
+      "required": ["creative_brief", "edit_blueprint", "timeline", "catalog", "analyses"],
+      "additionalProperties": false,
+      "properties": {
+        "creative_brief": { "$ref": "#/$defs/contentHash" },
+        "edit_blueprint": { "$ref": "#/$defs/contentHash" },
+        "timeline": { "$ref": "#/$defs/contentHash" },
+        "catalog": { "$ref": "#/$defs/contentHash" },
+        "analyses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["track_id", "analysis_hash"],
+            "additionalProperties": false,
+            "properties": {
+              "track_id": { "type": "string", "minLength": 1 },
+              "analysis_hash": { "$ref": "#/$defs/contentHash" }
+            }
+          }
+        }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "required": [
+        "families",
+        "intensities",
+        "use_cases",
+        "minimum_speech_friendliness",
+        "vocal_presence_allowed",
+        "duration_us"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "families": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "intensities": { "type": "array", "items": { "type": "string", "enum": ["low", "high"] }, "uniqueItems": true },
+        "use_cases": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "minimum_speech_friendliness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "vocal_presence_allowed": { "type": "array", "items": { "type": "string", "enum": ["none", "texture", "lead", "unknown"] }, "uniqueItems": true },
+        "duration_us": { "type": "integer", "exclusiveMinimum": 0 }
+      }
+    },
+    "hardConstraint": {
+      "type": "object",
+      "required": ["constraint_id", "kind", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "constraint_id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["metadata", "rights", "availability", "technical"] },
+        "value": {}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "required": [
+        "track_id",
+        "content_hash",
+        "rank",
+        "status",
+        "total_score",
+        "score_breakdown",
+        "rejection_reasons",
+        "explanation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "track_id": { "type": "string", "minLength": 1 },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "rank": { "type": ["integer", "null"], "minimum": 1 },
+        "status": { "type": "string", "enum": ["ranked", "rejected"] },
+        "total_score": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "score_breakdown": { "$ref": "#/$defs/scoreBreakdown" },
+        "rejection_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "explanation": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ranked" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "rank": { "type": "integer", "minimum": 1 },
+              "total_score": { "type": "number", "minimum": 0, "maximum": 100 },
+              "rejection_reasons": { "maxItems": 0 }
+            }
+          },
+          "else": {
+            "properties": {
+              "rank": { "type": "null" },
+              "total_score": { "type": "null" },
+              "rejection_reasons": { "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "scoreBreakdown": {
+      "type": "object",
+      "required": [
+        "semantic_fit",
+        "editorial_family_arc_fit",
+        "speech_friendliness",
+        "energy_tempo_fit",
+        "duration_edit_ending_fit",
+        "beat_downbeat_confidence",
+        "diversity_recent_use"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "semantic_fit": { "type": "number", "minimum": 0, "maximum": 30 },
+        "editorial_family_arc_fit": { "type": "number", "minimum": 0, "maximum": 20 },
+        "speech_friendliness": { "type": "number", "minimum": 0, "maximum": 15 },
+        "energy_tempo_fit": { "type": "number", "minimum": 0, "maximum": 15 },
+        "duration_edit_ending_fit": { "type": "number", "minimum": 0, "maximum": 10 },
+        "beat_downbeat_confidence": { "type": "number", "minimum": 0, "maximum": 5 },
+        "diversity_recent_use": { "type": "number", "minimum": 0, "maximum": 5 }
+      }
+    },
+    "selected": {
+      "type": "object",
+      "required": ["track_id", "content_hash", "rank", "score", "confidence", "explanation"],
+      "additionalProperties": false,
+      "properties": {
+        "track_id": { "type": "string", "minLength": 1 },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "rank": { "type": "integer", "minimum": 1 },
+        "score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "explanation": { "type": "string", "minLength": 1 }
+      }
+    },
+    "operatorOverride": {
+      "type": "object",
+      "required": ["selected_track_id", "reason", "operator_ref", "overridden_at"],
+      "additionalProperties": false,
+      "properties": {
+        "selected_track_id": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 },
+        "operator_ref": { "type": "string", "minLength": 1 },
+        "overridden_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "semanticChannel": {
+      "type": "object",
+      "required": ["status", "model_revision", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["available", "degraded", "unavailable"] },
+        "model_revision": { "type": ["string", "null"], "minLength": 1 },
+        "warnings": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "usagePenalty": {
+      "type": "object",
+      "required": ["track_id", "usage_count_90d", "penalty"],
+      "additionalProperties": false,
+      "properties": {
+        "track_id": { "type": "string", "minLength": 1 },
+        "usage_count_90d": { "type": "integer", "minimum": 0 },
+        "penalty": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

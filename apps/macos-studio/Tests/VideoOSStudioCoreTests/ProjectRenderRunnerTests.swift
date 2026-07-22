@@ -5,7 +5,7 @@ final class ProjectRenderRunnerTests: XCTestCase {
     func testPlanBuildsRenderWorkerCommandForApprovedProject() throws {
         let (root, project) = try temporaryRenderProject("videoos-render-plan", state: "approved")
 
-        let plan = ProjectRenderRunPlanner.plan(
+        let plan = renderPlan(
             repositoryRoot: root,
             projectURL: project,
             options: ProjectRenderRunOptions(skipRender: true)
@@ -22,17 +22,101 @@ final class ProjectRenderRunnerTests: XCTestCase {
     func testPlanRequiresApprovedOrPackagedState() throws {
         let (root, project) = try temporaryRenderProject("videoos-render-state", state: "critique_ready")
 
-        let plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+        let plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight(
+                #"current_state must be "approved" or "packaged", got "critique_ready""#
+            )
+        )
 
         XCTAssertFalse(plan.canRun)
-        XCTAssertEqual(plan.readinessLabel, "state must be approved or packaged")
+        XCTAssertEqual(
+            plan.readinessLabel,
+            #"current_state must be "approved" or "packaged", got "critique_ready""#
+        )
+    }
+
+    func testPlanRequiresGate10ApprovalAndHandoff() throws {
+        let (root, project) = try temporaryRenderProject("videoos-render-gate10", state: "approved")
+        try writeProjectState(project, state: "approved", approvalStatus: "pending")
+
+        var plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight("approval_record is missing")
+        )
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(plan.readinessLabel, "approval_record is missing")
+
+        try writeProjectState(project, state: "approved", handoffStatus: "pending")
+        plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight(
+                #"handoff_resolution.status must be "decided", got "pending""#
+            )
+        )
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(
+            plan.readinessLabel,
+            #"handoff_resolution.status must be "decided", got "pending""#
+        )
+    }
+
+    func testPlanRequiresOpenReviewGateAndResolvedFatalIssues() throws {
+        let (root, project) = try temporaryRenderProject("videoos-render-review-gate", state: "approved")
+        try writeProjectState(project, state: "approved", reviewGate: "blocked")
+
+        var plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight(
+                #"gates.review_gate must be "open", got "blocked""#
+            )
+        )
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(plan.readinessLabel, #"gates.review_gate must be "open", got "blocked""#)
+
+        try writeProjectState(project, state: "approved")
+        try writeReviewReport(project, fatalIssueCount: 1)
+        plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight("review_report contains 1 fatal issue(s)")
+        )
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(plan.readinessLabel, "review_report contains 1 fatal issue(s)")
+    }
+
+    func testPlanRequiresAudioOnlyVisualQAContract() throws {
+        let (root, project) = try temporaryRenderProject("videoos-render-visual-qa", state: "approved")
+        try writeReviewReport(project, visualStatus: "unverified", visualReason: "model_unavailable")
+
+        let plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight(
+                #"audio-only timeline requires review_report.visual_qa status "not_applicable""#
+            )
+        )
+
+        XCTAssertFalse(plan.canRun)
+        XCTAssertEqual(
+            plan.readinessLabel,
+            #"audio-only timeline requires review_report.visual_qa status "not_applicable""#
+        )
     }
 
     func testPlanRequiresWorkerInputsBeforeEnablingRender() throws {
         let (root, project) = try temporaryRenderProject("videoos-render-inputs", state: "approved")
         try FileManager.default.removeItem(at: project.appendingPathComponent("01_intent/creative_brief.yaml"))
 
-        var plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+        var plan = renderPlan(repositoryRoot: root, projectURL: project)
 
         XCTAssertFalse(plan.canRun)
         XCTAssertEqual(plan.readinessLabel, "missing creative brief")
@@ -44,7 +128,7 @@ final class ProjectRenderRunnerTests: XCTestCase {
         """.write(to: project.appendingPathComponent("01_intent/creative_brief.yaml"), atomically: true, encoding: .utf8)
         try FileManager.default.removeItem(at: project.appendingPathComponent("04_plan/edit_blueprint.yaml"))
 
-        plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+        plan = renderPlan(repositoryRoot: root, projectURL: project)
 
         XCTAssertFalse(plan.canRun)
         XCTAssertEqual(plan.readinessLabel, "missing edit blueprint")
@@ -57,7 +141,11 @@ final class ProjectRenderRunnerTests: XCTestCase {
             sourceOfTruthDecision: "nle_finishing"
         )
 
-        var plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+        var plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: readyPreflight(sourceOfTruth: "nle_finishing", currentState: "packaged")
+        )
 
         XCTAssertFalse(plan.canRun)
         XCTAssertEqual(plan.readinessLabel, "supplied final missing")
@@ -66,7 +154,11 @@ final class ProjectRenderRunnerTests: XCTestCase {
         try FileManager.default.createDirectory(at: publishedFinal.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data([0x00, 0x01]).write(to: publishedFinal, options: .atomic)
 
-        plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+        plan = renderPlan(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: readyPreflight(sourceOfTruth: "nle_finishing", currentState: "packaged")
+        )
 
         XCTAssertTrue(plan.canRun)
         XCTAssertEqual(plan.options.suppliedFinalURL, publishedFinal)
@@ -75,9 +167,24 @@ final class ProjectRenderRunnerTests: XCTestCase {
 
     func testRunUsesInjectedWorkerAndReadsRenderedPackageStatus() throws {
         let (root, project) = try temporaryRenderProject("videoos-render-run", state: "approved")
-        let plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project)
+        let plan = renderPlan(repositoryRoot: root, projectURL: project)
 
-        let result = try ProjectRenderRunner.run(plan: plan) { _, arguments in
+        let result = try ProjectRenderRunner.run(
+            plan: plan,
+            packageVerifier: { _, verifiedProject in
+                XCTAssertEqual(verifiedProject, project)
+                XCTAssertTrue(FileManager.default.fileExists(
+                    atPath: project.appendingPathComponent("07_package/package_manifest.json").path
+                ))
+                return ProjectPackageVerificationStatus(
+                    ready: true,
+                    projectDir: project.path,
+                    readinessLabel: "render packaged",
+                    projectID: "demo",
+                    sourceOfTruth: "engine_render"
+                )
+            }
+        ) { _, arguments in
             XCTAssertTrue(arguments.contains("render"))
             try writeRenderPackageFixture(project: project, qaPassed: true)
             return ProjectInitializationProcessResult(status: 0, stdout: "__RESULT__{\"success\":true}__END__", stderr: "")
@@ -87,6 +194,151 @@ final class ProjectRenderRunnerTests: XCTestCase {
         XCTAssertEqual(result.status.readinessLabel, "render packaged")
         XCTAssertEqual(result.status.qaPassed, true)
         XCTAssertTrue(result.status.publishedFinalVideoExists)
+    }
+
+    func testRunDoesNotSucceedWhenExitIsZeroButPackageContractIsInvalid() throws {
+        let (root, project) = try temporaryRenderProject("videoos-render-invalid-package", state: "approved")
+        let plan = renderPlan(repositoryRoot: root, projectURL: project)
+
+        let result = try ProjectRenderRunner.run(
+            plan: plan,
+            packageVerifier: { _, _ in
+                ProjectPackageVerificationStatus(
+                    ready: false,
+                    projectDir: project.path,
+                    readinessLabel: "package manifest unreadable",
+                    issues: ["package manifest invalid"],
+                    projectID: "demo",
+                    sourceOfTruth: "engine_render"
+                )
+            }
+        ) { _, _ in
+            try writeRenderPackageFixture(project: project, qaPassed: true)
+            try "{}".write(
+                to: project.appendingPathComponent("07_package/package_manifest.json"),
+                atomically: true,
+                encoding: .utf8
+            )
+            return ProjectInitializationProcessResult(status: 0, stdout: "", stderr: "")
+        }
+
+        XCTAssertFalse(result.succeeded)
+        XCTAssertEqual(result.status.readinessLabel, "package manifest unreadable")
+    }
+
+    func testPreflightRunnerDecodesBlockedExitAndFailsClosedOnInvalidJSON() throws {
+        let (root, project) = try temporaryRenderProject("videoos-render-preflight", state: "approved")
+        let blocked = ProjectPackagePreflightRunner.status(
+            repositoryRoot: root,
+            projectURL: project
+        ) { workingDirectory, arguments in
+            XCTAssertEqual(workingDirectory, root)
+            XCTAssertTrue(arguments.contains("--preflight-only"))
+            XCTAssertTrue(arguments.contains("--json"))
+            return ProjectInitializationProcessResult(
+                status: 1,
+                stdout: """
+                {"ok":false,"projectDir":"\(project.path)","issues":["approval_record is missing"],"nextSteps":[],"visualQaSummary":"missing"}
+                """,
+                stderr: ""
+            )
+        }
+
+        XCTAssertTrue(blocked.available)
+        XCTAssertFalse(blocked.canPackage)
+        XCTAssertEqual(blocked.failureLabel, "approval_record is missing")
+
+        let invalid = ProjectPackagePreflightRunner.status(
+            repositoryRoot: root,
+            projectURL: project
+        ) { _, _ in
+            ProjectInitializationProcessResult(status: 0, stdout: "not-json", stderr: "")
+        }
+
+        XCTAssertFalse(invalid.available)
+        XCTAssertEqual(invalid.failureLabel, "package preflight unavailable")
+    }
+
+    func testPreflightRunnerRejectsExitAndProjectIdentityContradictions() throws {
+        let (root, project) = try temporaryRenderProject("videoos-render-preflight-contract", state: "approved")
+        let readyJSON = """
+        {"ok":true,"projectDir":"\(project.path)","issues":[],"nextSteps":[],"sourceOfTruth":"engine_render","projectId":"demo","currentState":"approved","visualQaSummary":"verified"}
+        """
+        let blockedJSON = """
+        {"ok":false,"projectDir":"\(project.path)","issues":["blocked"],"nextSteps":[],"visualQaSummary":"missing"}
+        """
+
+        for (exitCode, json) in [(Int32(1), readyJSON), (Int32(0), blockedJSON), (Int32(2), blockedJSON)] {
+            let status = ProjectPackagePreflightRunner.status(
+                repositoryRoot: root,
+                projectURL: project
+            ) { _, _ in
+                ProjectInitializationProcessResult(status: exitCode, stdout: json, stderr: "")
+            }
+
+            XCTAssertFalse(status.available, "exit \(exitCode)")
+            XCTAssertEqual(status.failureLabel, "package preflight unavailable", "exit \(exitCode)")
+        }
+
+        let missingPath = ProjectPackagePreflightRunner.status(
+            repositoryRoot: root,
+            projectURL: project
+        ) { _, _ in
+            ProjectInitializationProcessResult(
+                status: 0,
+                stdout: readyJSON.replacingOccurrences(of: "\"projectDir\":\"\(project.path)\",", with: ""),
+                stderr: ""
+            )
+        }
+        XCTAssertFalse(missingPath.available)
+
+        let differentPath = ProjectPackagePreflightRunner.status(
+            repositoryRoot: root,
+            projectURL: project
+        ) { _, _ in
+            ProjectInitializationProcessResult(
+                status: 0,
+                stdout: readyJSON.replacingOccurrences(of: project.path, with: project.appendingPathComponent("other").path),
+                stderr: ""
+            )
+        }
+        XCTAssertFalse(differentPath.available)
+    }
+
+    private func renderPlan(
+        repositoryRoot: URL,
+        projectURL: URL,
+        options: ProjectRenderRunOptions = ProjectRenderRunOptions(),
+        preflightStatus: ProjectPackagePreflightStatus? = nil
+    ) -> ProjectRenderRunPlan {
+        ProjectRenderRunPlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            options: options,
+            preflightStatus: preflightStatus ?? readyPreflight()
+        )
+    }
+
+    private func readyPreflight(
+        sourceOfTruth: String = "engine_render",
+        currentState: String = "approved"
+    ) -> ProjectPackagePreflightStatus {
+        ProjectPackagePreflightStatus(
+            ok: true,
+            sourceOfTruth: sourceOfTruth,
+            autonomyMode: "full",
+            projectID: "demo",
+            currentState: currentState,
+            visualQaSummary: "verified"
+        )
+    }
+
+    private func blockedPreflight(_ issue: String) -> ProjectPackagePreflightStatus {
+        ProjectPackagePreflightStatus(
+            ok: false,
+            issues: [issue],
+            nextSteps: ["resolve the runtime Gate 10 blocker"]
+        )
     }
 
     private func temporaryRenderProject(
@@ -103,6 +355,7 @@ final class ProjectRenderRunnerTests: XCTestCase {
         try FileManager.default.createDirectory(at: project.appendingPathComponent("05_timeline"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: project.appendingPathComponent("06_review"), withIntermediateDirectories: true)
         try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        try "script".write(to: root.appendingPathComponent("scripts/package.ts"), atomically: true, encoding: .utf8)
         try "script".write(to: root.appendingPathComponent("scripts/editor-job-worker.ts"), atomically: true, encoding: .utf8)
         try """
         autonomy:
@@ -115,21 +368,60 @@ final class ProjectRenderRunnerTests: XCTestCase {
         """.write(to: project.appendingPathComponent("04_plan/edit_blueprint.yaml"), atomically: true, encoding: .utf8)
         try #"{"version":"1","sequence":{"fps":24},"tracks":{"video":[],"audio":[]}}"#
             .write(to: project.appendingPathComponent("05_timeline/timeline.json"), atomically: true, encoding: .utf8)
+        try writeReviewReport(project)
+        try writeProjectState(
+            project,
+            state: state,
+            sourceOfTruthDecision: sourceOfTruthDecision
+        )
+        return (root, project)
+    }
+
+    private func writeProjectState(
+        _ project: URL,
+        state: String,
+        approvalStatus: String = "clean",
+        handoffStatus: String = "decided",
+        sourceOfTruthDecision: String = "engine_render",
+        reviewGate: String = "open"
+    ) throws {
+        try """
+        project_id: demo
+        current_state: \(state)
+        approval_record:
+          status: \(approvalStatus)
+        handoff_resolution:
+          handoff_id: HND_test
+          status: \(handoffStatus)
+          source_of_truth_decision: \(sourceOfTruthDecision)
+        gates:
+          review_gate: \(reviewGate)
+        """.write(to: project.appendingPathComponent("project_state.yaml"), atomically: true, encoding: .utf8)
+    }
+
+    private func writeReviewReport(
+        _ project: URL,
+        fatalIssueCount: Int = 0,
+        visualStatus: String = "not_applicable",
+        visualReason: String = "audio_only_timeline"
+    ) throws {
+        let fatalIssues = fatalIssueCount == 0
+            ? "[]"
+            : "\n  - summary: unresolved"
         try """
         summary_judgment:
           status: approved
+        fatal_issues: \(fatalIssues)
+        visual_qa:
+          status: \(visualStatus)
+          reason: \(visualReason)
+          min_score: 70
+          issues:
+            fatal: 0
+            major: 0
+            minor: 0
+          issue_summaries: []
         """.write(to: project.appendingPathComponent("06_review/review_report.yaml"), atomically: true, encoding: .utf8)
-        try """
-        current_state: \(state)
-        approval_record:
-          status: clean
-        handoff_resolution:
-          status: decided
-          source_of_truth_decision: \(sourceOfTruthDecision)
-        gates:
-          review_gate: open
-        """.write(to: project.appendingPathComponent("project_state.yaml"), atomically: true, encoding: .utf8)
-        return (root, project)
     }
 
     private func writeRenderPackageFixture(project: URL, qaPassed: Bool) throws {

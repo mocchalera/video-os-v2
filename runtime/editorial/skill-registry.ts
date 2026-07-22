@@ -65,10 +65,12 @@ export function activateSkills(
   const registry = loadSkills(skillsDir);
 
   // Step 1: Start with blueprint's active_editing_skills or profile defaults
-  let activeIds = new Set<string>(blueprint.active_editing_skills ?? []);
+  const configuredSkillIds = blueprint.active_editing_skills;
+  let activeIds = new Set<string>(configuredSkillIds ?? []);
 
-  // If no skills specified in blueprint, use all available skills
-  if (activeIds.size === 0) {
+  // If the field is absent, use all available skills. An explicit empty list
+  // is authoritative and keeps conservative profiles free of skill effects.
+  if (configuredSkillIds === undefined) {
     for (const [id] of registry) {
       activeIds.add(id);
     }

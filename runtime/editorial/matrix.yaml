@@ -2,6 +2,7 @@
 # This file is the single source of truth for the profile-policy-skill relationship.
 
 profile_policy_map:
+  generic-editorial: generic
   interview-highlight: interview
   interview-pro-highlight: interview
   lp-testimonial: interview

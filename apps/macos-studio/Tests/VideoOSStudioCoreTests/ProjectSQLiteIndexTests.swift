@@ -88,6 +88,69 @@ final class ProjectSQLiteIndexTests: XCTestCase {
         XCTAssertTrue(results.contains { $0.assetID == "AST_BLUE" })
         XCTAssertTrue(results.contains { $0.assetID == "AST_GREEN" })
     }
+
+    func testRebuildIndexesCanonicalPreferenceMemoryWithoutModifyingIt() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-sqlite-index-canonical-preference-\(UUID().uuidString)")
+        let preferenceURL = try writePreferenceMemory(
+            at: root,
+            relativeDirectory: "00_project",
+            contents: sqliteFixturePreferenceMemory
+        )
+        let before = try Data(contentsOf: preferenceURL)
+
+        let summary = try ProjectSQLiteIndex.rebuild(projectURL: root)
+        let results = try ProjectSQLiteIndex.search(projectURL: root, query: "hold silence")
+
+        XCTAssertEqual(summary.editorialPreferenceCount, 1)
+        XCTAssertEqual(results.first?.kind, "editorial_preference")
+        XCTAssertEqual(try Data(contentsOf: preferenceURL), before)
+    }
+
+    func testRebuildFallsBackToLegacyPreferenceMemory() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-sqlite-index-legacy-preference-\(UUID().uuidString)")
+        _ = try writePreferenceMemory(
+            at: root,
+            relativeDirectory: "03_analysis",
+            contents: sqliteFixturePreferenceMemory
+        )
+
+        let summary = try ProjectSQLiteIndex.rebuild(projectURL: root)
+
+        XCTAssertEqual(summary.editorialPreferenceCount, 1)
+        XCTAssertEqual(try ProjectSQLiteIndex.search(projectURL: root, query: "hold silence").first?.kind, "editorial_preference")
+    }
+
+    func testRebuildUsesOnlyCanonicalPreferenceMemoryWhenBothExist() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-sqlite-index-preference-precedence-\(UUID().uuidString)")
+        _ = try writePreferenceMemory(
+            at: root,
+            relativeDirectory: "00_project",
+            contents: sqliteFixtureCanonicalPreferenceMemory
+        )
+        _ = try writePreferenceMemory(
+            at: root,
+            relativeDirectory: "03_analysis",
+            contents: sqliteFixturePreferenceMemory
+        )
+
+        let summary = try ProjectSQLiteIndex.rebuild(projectURL: root)
+
+        XCTAssertEqual(summary.editorialPreferenceCount, 1)
+        XCTAssertEqual(try ProjectSQLiteIndex.search(projectURL: root, query: "canonical rhythm").first?.kind, "editorial_preference")
+        XCTAssertTrue(try ProjectSQLiteIndex.search(projectURL: root, query: "hold silence").isEmpty)
+    }
+}
+
+@discardableResult
+private func writePreferenceMemory(at root: URL, relativeDirectory: String, contents: String) throws -> URL {
+    let directory = root.appendingPathComponent(relativeDirectory)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let url = directory.appendingPathComponent("editorial_preference_memory.jsonl")
+    try contents.write(to: url, atomically: true, encoding: .utf8)
+    return url
 }
 
 private let sqliteFixtureDuplicateTranscriptAssets = """
@@ -451,4 +514,8 @@ private let sqliteFixtureContinuityGraph = """
 
 private let sqliteFixturePreferenceMemory = """
 {"version":"1.0.0","project_id":"demo","entry_id":"EPM_hold_silence","created_at":"2026-05-22T00:00:00Z","actor":{"type":"human","id":"operator"},"source_event":{"event_type":"operator_command","event_ref":"brief-note"},"preference_type":"pacing","value":{"kind":"string","data":"hold silence after emotional lines"},"scope":"project","confidence":{"score":0.9,"source":"operator","status":"ready"},"status":"active","provenance":{"producer":"operator-command","inputs":[],"hash_policy":{}}}
+"""
+
+private let sqliteFixtureCanonicalPreferenceMemory = """
+{"version":"1.0.0","project_id":"demo","entry_id":"EPM_canonical_rhythm","created_at":"2026-05-22T00:00:00Z","actor":{"type":"human","id":"operator"},"source_event":{"event_type":"operator_command","event_ref":"brief-note"},"preference_type":"pacing","value":{"kind":"string","data":"canonical rhythm only"},"scope":"project","confidence":{"score":0.9,"source":"operator","status":"ready"},"status":"active","provenance":{"producer":"operator-command","inputs":[],"hash_policy":{}}}
 """

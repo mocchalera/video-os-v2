@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var commandPaletteKeyMonitor: Any?
 
     static func main() {
+        StudioBundledFontRegistry.register()
         let app = NSApplication.shared
         let delegate = AppDelegate()
         retainedDelegate = delegate

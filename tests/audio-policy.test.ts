@@ -72,7 +72,7 @@ describe("audio policy", () => {
     );
 
     expect(args).toContain("-af");
-    expect(args[args.indexOf("-af") + 1]).toBe("volume=1.8000");
+    expect(args[args.indexOf("-af") + 1]).toBe("volume=1.8");
   });
 
   it("defaults family-growth-recap briefs to ducking and emits original A1 audio", () => {
@@ -96,7 +96,7 @@ describe("audio policy", () => {
     expect(result.timeline.tracks.audio.find((track) => track.track_id === "A2")?.clips[0]).toMatchObject({
       asset_id: "AST_BGM",
       role: "bgm",
-      audio_policy: { mode: "ducking", bgm_gain: 0.25, a1_loudnorm: true },
+      audio_policy: { mode: "ducking", gain_unit: "linear", bgm_gain: 0.25, a1_loudnorm: true },
     });
 
     fs.rmSync(projectDir, { recursive: true, force: true });

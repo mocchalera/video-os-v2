@@ -31,6 +31,8 @@
               "insert_segment",
               "remove_segment",
               "change_audio_policy",
+              "change_visual_transform",
+              "change_audio_finish",
               "add_marker",
               "add_note"
             ]
@@ -102,10 +104,65 @@
           "audio_policy": {
             "type": "object",
             "properties": {
+              "gain_unit": { "type": "string", "enum": ["linear", "db"] },
               "duck_music_db": { "type": "number" },
+              "nat_gain": { "type": "number" },
+              "nat_sound_gain": { "type": "number" },
+              "bgm_gain": { "type": "number" },
               "preserve_nat_sound": { "type": "boolean" },
               "fade_in_frames": { "type": "integer", "minimum": 0 },
               "fade_out_frames": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "visual_transform": {
+            "type": "object",
+            "minProperties": 1,
+            "properties": {
+              "zoom": { "type": "number", "minimum": 0.1, "maximum": 8 },
+              "crop": {
+                "type": "object",
+                "required": ["x", "y", "width", "height"],
+                "properties": {
+                  "x": { "type": "number", "minimum": 0 },
+                  "y": { "type": "number", "minimum": 0 },
+                  "width": { "type": "number", "exclusiveMinimum": 0 },
+                  "height": { "type": "number", "exclusiveMinimum": 0 }
+                },
+                "additionalProperties": false
+              },
+              "position": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                  "x": { "type": "number" },
+                  "y": { "type": "number" }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "audio_finish": {
+            "type": "object",
+            "required": ["preset"],
+            "properties": {
+              "preset": { "type": "string", "enum": ["dialogue-clean", "loudness-only", "none"] },
+              "loudness_target_lufs": { "type": "number", "minimum": -24, "maximum": -8 },
+              "lra_target": { "type": "number", "minimum": 1, "maximum": 20 },
+              "true_peak_target_dbtp": { "type": "number", "minimum": -6, "maximum": -0.1 },
+              "codec_headroom_db": { "type": "number", "minimum": 0, "maximum": 3 },
+              "highpass_hz": { "type": "number", "minimum": 20, "maximum": 300 },
+              "lowpass_hz": { "type": "number", "minimum": 5000, "maximum": 22000 },
+              "noise_reduction_db": { "type": "number", "minimum": 0, "maximum": 30 },
+              "noise_floor_db": { "type": "number", "minimum": -80, "maximum": -20 },
+              "mud_cut_db": { "type": "number", "minimum": -12, "maximum": 0 },
+              "presence_gain_db": { "type": "number", "minimum": 0, "maximum": 8 },
+              "compressor_threshold_db": { "type": "number", "minimum": -60, "maximum": -1 },
+              "compressor_ratio": { "type": "number", "minimum": 1, "maximum": 12 },
+              "compressor_attack_ms": { "type": "number", "minimum": 0.1, "maximum": 500 },
+              "compressor_release_ms": { "type": "number", "minimum": 10, "maximum": 3000 },
+              "compressor_makeup_db": { "type": "number", "minimum": 0, "maximum": 18 }
             },
             "additionalProperties": false
           },

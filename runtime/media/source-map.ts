@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AssetItem } from "../connectors/ffprobe.js";
+import type { MediaKind } from "./media-kind-registry.js";
+import type { ImageSequenceGroup } from "./image-sequence.js";
 import { resolveBgmAnalysisPath } from "./bgm-analyzer.js";
 
 export const MEDIA_DIR_NAME = "02_media";
@@ -15,6 +17,21 @@ export interface MediaSourceMapEntry {
   display_name?: string;
   kind?: "asset" | "bgm";
   link_type?: "symlink";
+  media_kind?: MediaKind;
+  source_content_sha256?: string;
+  source_fingerprint?: string;
+  source_size_bytes?: number;
+  source_mtime_ms?: number;
+  image_sequence?: {
+    frame_set_content_sha256: string;
+    frame_count: number;
+    frames: Array<{
+      frame_number: number;
+      frame_link_path: string;
+      content_sha256: string;
+      size_bytes: number;
+    }>;
+  };
 }
 
 export interface MediaSourceMapDoc {
@@ -39,6 +56,7 @@ interface MediaLinkPlan {
   linkPath: string;
   sourceLocator: string;
   kind: "asset" | "bgm";
+  asset?: AssetItem;
 }
 
 export interface CreateMediaLinksOptions {
@@ -46,6 +64,7 @@ export interface CreateMediaLinksOptions {
   projectId: string;
   assets: AssetItem[];
   sourceFileMap: Map<string, string>;
+  imageSequenceGroupsByAssetId?: Map<string, ImageSequenceGroup>;
   generatedAt?: string;
 }
 
@@ -114,8 +133,8 @@ function allocateUniqueFilename(
 function ensureSymlink(linkPath: string, targetPath: string): void {
   fs.mkdirSync(path.dirname(linkPath), { recursive: true });
 
-  if (fs.existsSync(linkPath)) {
-    const stat = fs.lstatSync(linkPath);
+  const stat = lstatIfPresent(linkPath);
+  if (stat) {
     if (!stat.isSymbolicLink()) {
       throw new Error(`Refusing to overwrite non-symlink media entry: ${linkPath}`);
     }
@@ -131,10 +150,31 @@ function ensureSymlink(linkPath: string, targetPath: string): void {
 }
 
 function removeStaleSymlink(linkPath: string): void {
-  if (!fs.existsSync(linkPath)) return;
-  const stat = fs.lstatSync(linkPath);
+  const stat = lstatIfPresent(linkPath);
+  if (!stat) return;
   if (stat.isSymbolicLink()) {
     fs.unlinkSync(linkPath);
+  }
+}
+
+function removeEmptyParentDirectory(filePath: string, stopDir: string): void {
+  let current = path.dirname(filePath);
+  while (current !== stopDir && current.startsWith(`${stopDir}${path.sep}`)) {
+    try {
+      fs.rmdirSync(current);
+    } catch {
+      return;
+    }
+    current = path.dirname(current);
+  }
+}
+
+function lstatIfPresent(filePath: string): fs.Stats | undefined {
+  try {
+    return fs.lstatSync(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
   }
 }
 
@@ -189,7 +229,9 @@ function normalizeLoadedEntry(
     local_source_path: typeof entry.local_source_path === "string"
       ? (path.isAbsolute(entry.local_source_path)
           ? entry.local_source_path
-          : path.resolve(path.dirname(sourceMapFilePath), entry.local_source_path))
+          : entry.local_source_path.startsWith(`${MEDIA_DIR_NAME}/`)
+            ? path.resolve(projectPath, entry.local_source_path)
+            : path.resolve(path.dirname(sourceMapFilePath), entry.local_source_path))
       : sourceLocator,
     link_path: typeof entry.link_path === "string"
       ? entry.link_path
@@ -197,6 +239,12 @@ function normalizeLoadedEntry(
     ...(typeof entry.display_name === "string" ? { display_name: entry.display_name } : {}),
     ...(entry.kind === "asset" || entry.kind === "bgm" ? { kind: entry.kind } : {}),
     ...(entry.link_type === "symlink" ? { link_type: "symlink" as const } : {}),
+    ...(entry.media_kind ? { media_kind: entry.media_kind } : {}),
+    ...(entry.source_content_sha256 ? { source_content_sha256: entry.source_content_sha256 } : {}),
+    ...(entry.source_fingerprint ? { source_fingerprint: entry.source_fingerprint } : {}),
+    ...(typeof entry.source_size_bytes === "number" ? { source_size_bytes: entry.source_size_bytes } : {}),
+    ...(typeof entry.source_mtime_ms === "number" ? { source_mtime_ms: entry.source_mtime_ms } : {}),
+    ...(entry.image_sequence ? { image_sequence: entry.image_sequence } : {}),
   };
 }
 
@@ -232,6 +280,12 @@ export function loadSourceMap(
         display_name: typeof item.display_name === "string" ? item.display_name : undefined,
         kind: item.kind === "asset" || item.kind === "bgm" ? item.kind : undefined,
         link_type: item.link_type === "symlink" ? "symlink" : undefined,
+        media_kind: typeof item.media_kind === "string" ? item.media_kind as MediaKind : undefined,
+        source_content_sha256: typeof item.source_content_sha256 === "string" ? item.source_content_sha256 : undefined,
+        source_fingerprint: typeof item.source_fingerprint === "string" ? item.source_fingerprint : undefined,
+        source_size_bytes: typeof item.source_size_bytes === "number" ? item.source_size_bytes : undefined,
+        source_mtime_ms: typeof item.source_mtime_ms === "number" ? item.source_mtime_ms : undefined,
+        image_sequence: normalizeLoadedImageSequence(item.image_sequence),
       });
       if (normalized) entries.push(normalized);
     }
@@ -265,6 +319,37 @@ export function loadSourceMap(
     locatorMap: new Map(entries.map((entry) => [entry.asset_id, entry.source_locator])),
     entryMap: new Map(entries.map((entry) => [entry.asset_id, entry])),
     entries,
+  };
+}
+
+function normalizeLoadedImageSequence(value: unknown): MediaSourceMapEntry["image_sequence"] | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const sequence = value as Record<string, unknown>;
+  if (
+    typeof sequence.frame_set_content_sha256 !== "string" ||
+    typeof sequence.frame_count !== "number" ||
+    !Array.isArray(sequence.frames)
+  ) return undefined;
+  const frames = sequence.frames.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const frame = value as Record<string, unknown>;
+    if (
+      typeof frame.frame_number !== "number" ||
+      typeof frame.frame_link_path !== "string" ||
+      typeof frame.content_sha256 !== "string" ||
+      typeof frame.size_bytes !== "number"
+    ) return [];
+    return [{
+      frame_number: frame.frame_number,
+      frame_link_path: frame.frame_link_path,
+      content_sha256: frame.content_sha256,
+      size_bytes: frame.size_bytes,
+    }];
+  });
+  return {
+    frame_set_content_sha256: sequence.frame_set_content_sha256,
+    frame_count: sequence.frame_count,
+    frames,
   };
 }
 
@@ -381,6 +466,7 @@ export function createMediaLinks(
   const warnings: string[] = [];
 
   fs.mkdirSync(mediaDir, { recursive: true });
+  const previous = loadSourceMap(projectPath);
 
   const rootNameCounts = new Map<string, number>();
   const plans: MediaLinkPlan[] = [];
@@ -401,6 +487,7 @@ export function createMediaLinks(
       linkPath: sourceLocator,
       sourceLocator,
       kind: "asset",
+      asset,
     });
   }
 
@@ -416,8 +503,6 @@ export function createMediaLinks(
     }
   }
 
-  const previous = loadSourceMap(projectPath);
-
   for (const plan of plans) {
     if (!fs.existsSync(plan.sourcePath)) {
       warnings.push(`Source missing, skipped: ${plan.sourcePath}`);
@@ -426,16 +511,70 @@ export function createMediaLinks(
     ensureSymlink(plan.linkPath, plan.sourcePath);
   }
 
+  const sequenceMetadataByAssetId = new Map<string, NonNullable<MediaSourceMapEntry["image_sequence"]>>();
+  for (const plan of plans) {
+    if (!plan.assetId || plan.asset?.media_kind !== "sequence") continue;
+    const group = opts.imageSequenceGroupsByAssetId?.get(plan.assetId);
+    const assetSequence = plan.asset.image_sequence;
+    if (group) {
+      if (
+        group.status !== "candidate" ||
+        !assetSequence ||
+        group.frame_set_content_sha256 !== assetSequence.frame_set_content_sha256 ||
+        group.frame_count !== assetSequence.frame_count
+      ) {
+        throw new Error(`image_sequence_source_map_identity_mismatch:${plan.assetId}`);
+      }
+      const frameDir = path.join(mediaDir, ".image-sequence-frames", normalizeFallbackStem(plan.assetId));
+      const frameLinks = group.frames.map((frame) => {
+        const extension = normalizeExt(frame.canonical_path);
+        const frameName = `frame-${String(frame.frame_number).padStart(group.padding, "0")}${extension}`;
+        const frameLinkPath = path.join(frameDir, frameName);
+        ensureSymlink(frameLinkPath, frame.canonical_path);
+        return {
+          frame_number: frame.frame_number,
+          frame_link_path: toPosixRel(projectPath, frameLinkPath),
+          content_sha256: frame.content_sha256,
+          size_bytes: frame.size_bytes,
+        };
+      });
+      sequenceMetadataByAssetId.set(plan.assetId, {
+        frame_set_content_sha256: group.frame_set_content_sha256,
+        frame_count: group.frame_count,
+        frames: frameLinks,
+      });
+      continue;
+    }
+
+    const prior = previous.entryMap.get(plan.assetId)?.image_sequence;
+    if (
+      prior &&
+      assetSequence &&
+      prior.frame_set_content_sha256 === assetSequence.frame_set_content_sha256 &&
+      prior.frame_count === assetSequence.frame_count
+    ) {
+      sequenceMetadataByAssetId.set(plan.assetId, prior);
+    }
+  }
+
   const docItems: MediaSourceMapEntry[] = plans
     .filter((plan): plan is MediaLinkPlan & { assetId: string } => !!plan.assetId && fs.existsSync(plan.sourcePath))
     .map((plan) => ({
       asset_id: plan.assetId,
-      source_locator: plan.sourceLocator,
-      local_source_path: plan.sourcePath,
+      source_locator: toPosixRel(projectPath, plan.linkPath),
+      local_source_path: toPosixRel(projectPath, plan.linkPath),
       link_path: toPosixRel(projectPath, plan.linkPath),
       ...(plan.displayName ? { display_name: plan.displayName } : {}),
       kind: plan.kind,
       link_type: "symlink",
+      ...(plan.asset?.media_kind ? { media_kind: plan.asset.media_kind } : {}),
+      ...(plan.asset?.source_content_sha256 ? { source_content_sha256: plan.asset.source_content_sha256 } : {}),
+      ...(plan.asset?.source_fingerprint ? { source_fingerprint: plan.asset.source_fingerprint } : {}),
+      ...(typeof plan.asset?.source_size_bytes === "number" ? { source_size_bytes: plan.asset.source_size_bytes } : {}),
+      ...(typeof plan.asset?.source_mtime_ms === "number" ? { source_mtime_ms: plan.asset.source_mtime_ms } : {}),
+      ...(sequenceMetadataByAssetId.get(plan.assetId)
+        ? { image_sequence: sequenceMetadataByAssetId.get(plan.assetId)! }
+        : {}),
     }));
 
   const nextDoc: MediaSourceMapDoc = {
@@ -447,10 +586,20 @@ export function createMediaLinks(
   };
 
   const nextLinkPaths = new Set(nextDoc.items.map((item) => item.link_path));
+  const nextFrameLinkPaths = new Set(nextDoc.items.flatMap((item) =>
+    item.image_sequence?.frames.map((frame) => frame.frame_link_path) ?? []));
   for (const prevEntry of previous.entries) {
-    if (nextLinkPaths.has(prevEntry.link_path)) continue;
-    if (!prevEntry.link_path.startsWith(`${MEDIA_DIR_NAME}/`)) continue;
-    removeStaleSymlink(path.resolve(projectPath, prevEntry.link_path));
+    if (!nextLinkPaths.has(prevEntry.link_path) && prevEntry.link_path.startsWith(`${MEDIA_DIR_NAME}/`)) {
+      removeStaleSymlink(path.resolve(projectPath, prevEntry.link_path));
+    }
+    for (const frame of prevEntry.image_sequence?.frames ?? []) {
+      if (nextFrameLinkPaths.has(frame.frame_link_path)) continue;
+      const framePath = path.resolve(projectPath, frame.frame_link_path);
+      const frameRelative = path.relative(mediaDir, framePath);
+      if (frameRelative === ".." || frameRelative.startsWith(`..${path.sep}`) || path.isAbsolute(frameRelative)) continue;
+      removeStaleSymlink(framePath);
+      removeEmptyParentDirectory(framePath, mediaDir);
+    }
   }
 
   atomicWriteJson(sourceMapPath, nextDoc);

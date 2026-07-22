@@ -1,6 +1,6 @@
 ## Findings — 共有化の設計、unified適用位置、legacy参照調査の結果
 
-capture-timeクラスタリングは [runtime/editorial/clustering.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/editorial/clustering.ts) に抽出しました。`triage-enrichment.ts` は互換exportを残し、command系は従来と同じ enrichment → cluster refinement → quality gate の順序です。
+capture-timeクラスタリングは [runtime/editorial/clustering.ts](/Users/operator/Dev/video-os-v2-spec/runtime/editorial/clustering.ts) に抽出しました。`triage-enrichment.ts` は互換exportを残し、command系は従来と同じ enrichment → cluster refinement → quality gate の順序です。
 
 unified系は rough selects 正規化後、品質ゲート前に `refineClusters()` を適用します。`scripts/editorial-pipeline.ts` と `scripts/editorial-agent-task.ts` から `projectDir` を渡すようにしたため、`03_analysis/assets.json` の filename/display_name/source_locator/mtime 系も使えます。`selects_candidates.yaml` へ `semantic_cluster_id` が入った状態で quality gate が走ります。
 

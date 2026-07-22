@@ -50,7 +50,38 @@
         "skipped_reason": { "type": "string" },
         "chunking_strategy": { "type": "string" },
         "ffmpeg_version": { "type": "string" },
-        "provider_request_id": { "type": "string" }
+        "provider_request_id": { "type": "string" },
+        "frame_count": { "type": "integer", "minimum": 0 },
+        "sample_timestamps_us": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "requested_sample_timestamps_us": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "frame_cache_version": { "type": "string", "minLength": 1 },
+        "frame_producer_version": { "type": "string", "minLength": 1 },
+        "frame_cache_hits": { "type": "integer", "minimum": 0 },
+        "frame_content_sha256": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "asset_source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "segment_src_in_us": { "type": "integer", "minimum": 0 },
+        "segment_src_out_us": { "type": "integer", "minimum": 0 },
+        "cache_identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "cache_decision": { "type": "string", "enum": ["accepted", "refreshed", "miss"] },
+        "cache_decision_reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "provenance_schema_version": { "type": "string", "minLength": 1 },
+        "frame_extraction_failures": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
       },
       "additionalProperties": false
     },

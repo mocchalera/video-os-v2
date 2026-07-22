@@ -61,6 +61,59 @@
         "link_type": {
           "type": "string",
           "enum": ["symlink", "generated", "direct"]
+        },
+        "media_kind": {
+          "type": "string",
+          "enum": ["video", "audio", "image", "sequence", "unknown"]
+        },
+        "source_content_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source_fingerprint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_mtime_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "image_sequence": {
+          "$ref": "#/$defs/imageSequenceSourceSet"
+        }
+      },
+      "additionalProperties": false
+    },
+    "imageSequenceSourceSet": {
+      "type": "object",
+      "required": ["frame_set_content_sha256", "frame_count", "frames"],
+      "properties": {
+        "frame_set_content_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "frame_count": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "frames": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["frame_number", "frame_link_path", "content_sha256", "size_bytes"],
+            "properties": {
+              "frame_number": { "type": "integer", "minimum": 0 },
+              "frame_link_path": { "type": "string", "pattern": "^02_media/" },
+              "content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "size_bytes": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false

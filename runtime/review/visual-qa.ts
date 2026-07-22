@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { assertTimelineRenderSupported } from "../render/media-kind-guard.js";
 import { parse as parseYaml } from "yaml";
 import type { CreativeBrief } from "../artifacts/types.js";
 import type { MarlinQAReport } from "../eval/marlin-qa-types.js";
@@ -19,10 +20,16 @@ import {
   type AssemblerOptions,
 } from "../render/assembler.js";
 import { computeFileHash } from "../state/reconcile.js";
+import {
+  assessRenderArtifactFreshness,
+  createSourceInputAttestation,
+  writeRenderFreshnessMetadata as writeSharedRenderFreshnessMetadata,
+  type SourceInputAttestationStatus,
+} from "../render/source-input-attestation.js";
 
 export const DEFAULT_REVIEW_VISUAL_QA_MIN_SCORE = 70;
 
-export type ReviewVisualQAStatus = VisualQAStatus | "stale";
+export type ReviewVisualQAStatus = VisualQAStatus | "stale" | "not_applicable";
 
 export interface ReviewVisualQAIssueSummary {
   total: number;
@@ -43,6 +50,9 @@ export interface ReviewVisualQA {
   timeline_path?: string;
   timeline_hash?: string;
   timeline_version?: string;
+  source_inputs_hash?: string;
+  source_inputs_status?: SourceInputAttestationStatus;
+  source_input_warnings?: string[];
   render_meta_path?: string;
   marlin_report_path?: string;
 }
@@ -82,15 +92,23 @@ interface RenderFreshness {
   timelineVersion: string;
   videoHash?: string;
   renderMetaPath?: string;
+  sourceInputsHash?: string;
+  sourceInputsStatus?: SourceInputAttestationStatus;
+  sourceInputWarnings?: string[];
 }
 
-interface RenderMeta {
-  timeline_hash?: string;
-  timeline_version?: string;
-  timeline_path?: string;
-  video_hash?: string;
-  video_path?: string;
-}
+type RenderFreshnessEvaluation = (RenderFreshness & { status: "fresh" }) | {
+  status: "missing_timeline" | "stale";
+  reason: string;
+  timelinePath: string;
+  timelineHash?: string;
+  timelineVersion?: string;
+  videoHash?: string;
+  renderMetaPath?: string;
+  sourceInputsHash?: string;
+  sourceInputsStatus?: SourceInputAttestationStatus;
+  sourceInputWarnings?: string[];
+};
 
 export function reviewVisualQAMinScore(repoRoot = process.cwd()): number {
   const defaultsPath = path.join(repoRoot, "runtime/compiler-defaults.yaml");
@@ -119,7 +137,23 @@ export async function evaluateReviewVisualQA(
   const minScore = options.minScore ?? reviewVisualQAMinScore(options.repoRoot);
   const videoPath = defaultMarlinQAVideoPath(absDir);
   const timelinePath = path.join(absDir, "05_timeline/timeline.json");
+  if (fs.existsSync(timelinePath)) {
+    assertTimelineRenderSupported(JSON.parse(fs.readFileSync(timelinePath, "utf8")), {
+      projectDir: absDir,
+      timelinePath,
+    });
+  }
+  const visualApplicable = timelineHasVisualClips(timelinePath);
   let freshness = evaluateRenderFreshness(absDir, videoPath);
+
+  if (!visualApplicable) {
+    if (options.render === true && (!fs.existsSync(videoPath) || freshness.status === "stale")) {
+      const renderResult = await renderReviewVisualQAVideo(absDir, videoPath, options);
+      if (renderResult) return renderResult;
+      freshness = evaluateRenderFreshness(absDir, videoPath);
+    }
+    return notApplicableVisualQA(minScore, { videoPath, timelinePath, freshness });
+  }
 
   if ((!fs.existsSync(videoPath) || freshness.status === "stale") && options.render) {
     const renderResult = await renderReviewVisualQAVideo(absDir, videoPath, options);
@@ -221,6 +255,11 @@ export function visualQAFromMarlinReport(
     timeline_path: path.relative(context.projectDir, context.timelinePath),
     timeline_hash: context.freshness.timelineHash,
     timeline_version: context.freshness.timelineVersion,
+    ...(context.freshness.sourceInputsHash ? { source_inputs_hash: context.freshness.sourceInputsHash } : {}),
+    ...(context.freshness.sourceInputsStatus ? { source_inputs_status: context.freshness.sourceInputsStatus } : {}),
+    ...(context.freshness.sourceInputWarnings?.length
+      ? { source_input_warnings: context.freshness.sourceInputWarnings }
+      : {}),
     ...(context.freshness.renderMetaPath
       ? { render_meta_path: path.relative(context.projectDir, context.freshness.renderMetaPath) }
       : {}),
@@ -230,36 +269,17 @@ export function visualQAFromMarlinReport(
   };
 }
 
-export function writeRenderFreshnessMetadata(
-  projectDir: string,
-  videoPath: string,
-  options: { createdAt?: string } = {},
-): string | undefined {
-  const absDir = path.resolve(projectDir);
-  const absVideo = path.resolve(videoPath);
-  const timelinePath = path.join(absDir, "05_timeline/timeline.json");
-  if (!fs.existsSync(timelinePath) || !fs.existsSync(absVideo)) return undefined;
+export const writeRenderFreshnessMetadata = writeSharedRenderFreshnessMetadata;
 
-  const timeline = readTimelineVersion(timelinePath);
-  const metaPath = renderReportPath(absVideo);
-  const existing = readJsonIfExists<Record<string, unknown>>(metaPath) ?? {};
-  const next = {
-    ...existing,
-    timeline_path: path.relative(absDir, timelinePath),
-    timeline_hash: computeFileHash(timelinePath),
-    timeline_version: timeline.version,
-    video_path: path.relative(absDir, absVideo),
-    video_hash: computeFileHash(absVideo),
-    rendered_at: options.createdAt ?? new Date().toISOString(),
-  };
-  fs.mkdirSync(path.dirname(metaPath), { recursive: true });
-  fs.writeFileSync(metaPath, `${JSON.stringify(next, null, 2)}\n`, "utf-8");
-  return metaPath;
-}
-
-export function isReviewVisualQAApprovalGrade(report: ReviewVisualQAGateReport): boolean {
+export function isReviewVisualQAApprovalGrade(
+  report: ReviewVisualQAGateReport,
+  visualApplicable = true,
+): boolean {
   if (hasReviewVisualQAWaiver(report)) return true;
   const visual = report.visual_qa;
+  if (!visualApplicable) {
+    return visual?.status === "not_applicable" && visual.reason === "audio_only_timeline";
+  }
   if (!visual || visual.status !== "verified") return false;
   return typeof visual.score === "number" && visual.score >= visual.min_score;
 }
@@ -270,12 +290,20 @@ export function hasReviewVisualQAWaiver(report: ReviewVisualQAGateReport): boole
     report.visual_qa_waiver_reason.trim().length > 0;
 }
 
-export function reviewVisualQAGateReason(report: ReviewVisualQAGateReport): string | null {
+export function reviewVisualQAGateReason(
+  report: ReviewVisualQAGateReport,
+  visualApplicable = true,
+): string | null {
   if (hasReviewVisualQAWaiver(report)) {
     return null;
   }
   const visual = report.visual_qa;
   if (!visual) return "review_report.visual_qa is missing";
+  if (!visualApplicable) {
+    return visual.status === "not_applicable" && visual.reason === "audio_only_timeline"
+      ? null
+      : `audio-only timeline requires review_report.visual_qa status \"not_applicable\" with reason \"audio_only_timeline\", got \"${visual.status}\"`;
+  }
   if (visual.status !== "verified") {
     return `review_report.visual_qa.status must be "verified", got "${visual.status}"`;
   }
@@ -294,78 +322,23 @@ export function summarizeReviewVisualQAGate(visual: ReviewVisualQA): string {
   return `status=${visual.status}${score}${reason}`;
 }
 
-function evaluateRenderFreshness(
+export function evaluateRenderFreshness(
   projectDir: string,
   videoPath: string,
-): (RenderFreshness & { status: "fresh" }) | {
-  status: "missing_timeline" | "stale";
-  reason: string;
-  timelinePath: string;
-  timelineHash?: string;
-  timelineVersion?: string;
-  videoHash?: string;
-  renderMetaPath?: string;
-} {
-  const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
-  if (!fs.existsSync(timelinePath)) {
-    return { status: "missing_timeline", reason: "timeline_missing", timelinePath };
-  }
-
-  const timeline = readTimelineVersion(timelinePath);
-  const timelineHash = computeFileHash(timelinePath);
-  const videoHash = fs.existsSync(videoPath) ? computeFileHash(videoPath) : undefined;
-  const renderMeta = readRenderMeta(videoPath);
-  const renderMetaPath = renderMeta.path;
-  const metadata = renderMeta.meta;
-
-  if (metadata?.timeline_hash && metadata.timeline_hash !== timelineHash) {
-    return {
-      status: "stale",
-      reason: "render_timeline_hash_mismatch",
-      timelinePath,
-      timelineHash,
-      timelineVersion: timeline.version,
-      videoHash,
-      renderMetaPath,
-    };
-  }
-
-  if (metadata?.video_hash && videoHash && metadata.video_hash !== videoHash) {
-    return {
-      status: "stale",
-      reason: "render_video_hash_mismatch",
-      timelinePath,
-      timelineHash,
-      timelineVersion: timeline.version,
-      videoHash,
-      renderMetaPath,
-    };
-  }
-
-  if (!metadata?.timeline_hash && fs.existsSync(videoPath)) {
-    const videoStat = fs.statSync(videoPath);
-    const timelineStat = fs.statSync(timelinePath);
-    if (videoStat.mtimeMs + 1 < timelineStat.mtimeMs) {
-      return {
-        status: "stale",
-        reason: "render_older_than_timeline",
-        timelinePath,
-        timelineHash,
-        timelineVersion: timeline.version,
-        videoHash,
-        renderMetaPath,
-      };
-    }
-  }
-
+): RenderFreshnessEvaluation {
+  const assessed = assessRenderArtifactFreshness(projectDir, videoPath);
   return {
-    status: "fresh",
-    timelinePath,
-    timelineHash,
-    timelineVersion: timeline.version,
-    videoHash,
-    ...(renderMetaPath ? { renderMetaPath } : {}),
-  };
+    status: assessed.status === "missing" ? "stale" : assessed.status,
+    ...(assessed.reason ? { reason: assessed.reason } : {}),
+    timelinePath: assessed.timelinePath,
+    ...(assessed.timelineHash ? { timelineHash: assessed.timelineHash } : {}),
+    ...(assessed.timelineVersion ? { timelineVersion: assessed.timelineVersion } : {}),
+    ...(assessed.artifactHash ? { videoHash: assessed.artifactHash } : {}),
+    ...(assessed.metaPath ? { renderMetaPath: assessed.metaPath } : {}),
+    ...(assessed.sourceInputsHash ? { sourceInputsHash: assessed.sourceInputsHash } : {}),
+    ...(assessed.sourceInputsStatus ? { sourceInputsStatus: assessed.sourceInputsStatus } : {}),
+    ...(assessed.sourceInputWarnings ? { sourceInputWarnings: assessed.sourceInputWarnings } : {}),
+  } as RenderFreshnessEvaluation;
 }
 
 async function renderReviewVisualQAVideo(
@@ -377,6 +350,7 @@ async function renderReviewVisualQAVideo(
   const minScore = options.minScore ?? reviewVisualQAMinScore(options.repoRoot);
   const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
   try {
+    const sourceInputsBefore = createSourceInputAttestation(projectDir, { timelinePath });
     await render({
       projectDir,
       timelinePath,
@@ -384,6 +358,7 @@ async function renderReviewVisualQAVideo(
     });
     writeRenderFreshnessMetadata(projectDir, videoPath, {
       createdAt: options.createdAt,
+      sourceInputsBefore,
     });
     return null;
   } catch (err) {
@@ -418,10 +393,71 @@ function blockedVisualQA(
     timeline_path: path.relative(projectDir, context.timelinePath),
     ...(context.freshness?.timelineHash ? { timeline_hash: context.freshness.timelineHash } : {}),
     ...(context.freshness?.timelineVersion ? { timeline_version: context.freshness.timelineVersion } : {}),
+    ...(context.freshness?.sourceInputsHash ? { source_inputs_hash: context.freshness.sourceInputsHash } : {}),
+    ...(context.freshness?.sourceInputsStatus ? { source_inputs_status: context.freshness.sourceInputsStatus } : {}),
+    ...(context.freshness?.sourceInputWarnings?.length
+      ? { source_input_warnings: context.freshness.sourceInputWarnings }
+      : {}),
     ...(context.freshness?.renderMetaPath
       ? { render_meta_path: path.relative(projectDir, context.freshness.renderMetaPath) }
       : {}),
   };
+}
+
+function notApplicableVisualQA(
+  minScore: number,
+  context: {
+    videoPath: string;
+    timelinePath: string;
+    freshness?: Partial<RenderFreshness> & { renderMetaPath?: string };
+  },
+): ReviewVisualQA {
+  const projectDir = path.dirname(path.dirname(context.timelinePath));
+  return {
+    status: "not_applicable",
+    reason: "audio_only_timeline",
+    min_score: minScore,
+    issues: { total: 0, critical: 0, warning: 0, info: 0 },
+    issue_summaries: [],
+    ...(fs.existsSync(context.videoPath)
+      ? { video_path: path.relative(projectDir, context.videoPath) }
+      : {}),
+    ...(context.freshness?.videoHash ? { video_hash: context.freshness.videoHash } : {}),
+    timeline_path: path.relative(projectDir, context.timelinePath),
+    ...(context.freshness?.timelineHash ? { timeline_hash: context.freshness.timelineHash } : {}),
+    ...(context.freshness?.timelineVersion ? { timeline_version: context.freshness.timelineVersion } : {}),
+    ...(context.freshness?.sourceInputsHash ? { source_inputs_hash: context.freshness.sourceInputsHash } : {}),
+    ...(context.freshness?.sourceInputsStatus ? { source_inputs_status: context.freshness.sourceInputsStatus } : {}),
+    ...(context.freshness?.sourceInputWarnings?.length
+      ? { source_input_warnings: context.freshness.sourceInputWarnings }
+      : {}),
+    ...(context.freshness?.renderMetaPath
+      ? { render_meta_path: path.relative(projectDir, context.freshness.renderMetaPath) }
+      : {}),
+  };
+}
+
+export function timelineHasVisualClips(timelinePath: string): boolean {
+  if (!fs.existsSync(timelinePath)) return true;
+  try {
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+      tracks?: {
+        video?: Array<{ clips?: unknown[] }>;
+        audio?: Array<{ clips?: unknown[] }>;
+      };
+    };
+    const hasVideo = (timeline.tracks?.video ?? []).some(
+      (track) => (track.clips?.length ?? 0) > 0,
+    );
+    if (hasVideo) return true;
+    const hasAudio = (timeline.tracks?.audio ?? []).some(
+      (track) => (track.clips?.length ?? 0) > 0,
+    );
+    // Empty/malformed timelines are not eligible for the audio-only exemption.
+    return !hasAudio;
+  } catch {
+    return true;
+  }
 }
 
 function summarizeIssues(report: MarlinQAReport): ReviewVisualQAIssueSummary {
@@ -442,36 +478,6 @@ function readCreativeBrief(projectDir: string): CreativeBrief | null {
     return parseYaml(fs.readFileSync(briefPath, "utf-8")) as CreativeBrief;
   } catch {
     return null;
-  }
-}
-
-function readTimelineVersion(timelinePath: string): { version: string } {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as { version?: unknown };
-    return { version: typeof parsed.version === "string" ? parsed.version : "unknown" };
-  } catch {
-    return { version: "unknown" };
-  }
-}
-
-function readRenderMeta(videoPath: string): { path?: string; meta?: RenderMeta } {
-  for (const candidate of [renderReportPath(videoPath), path.join(path.dirname(videoPath), "render-meta.json")]) {
-    const parsed = readJsonIfExists<RenderMeta>(candidate);
-    if (parsed) return { path: candidate, meta: parsed };
-  }
-  return {};
-}
-
-function renderReportPath(videoPath: string): string {
-  return path.join(path.dirname(videoPath), "render-report.json");
-}
-
-function readJsonIfExists<T>(filePath: string): T | undefined {
-  if (!fs.existsSync(filePath)) return undefined;
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
-  } catch {
-    return undefined;
   }
 }
 

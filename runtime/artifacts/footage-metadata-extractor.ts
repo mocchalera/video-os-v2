@@ -75,6 +75,162 @@ export interface AudioRange {
   endUs: number;
 }
 
+export const EDITORIAL_OBSERVATION_FIELDS = [
+  "visual_tags",
+  "motion_type",
+  "camera_motion_direction",
+  "subject_motion_direction",
+  "shot_scale",
+  "composition_anchor",
+  "screen_side",
+  "gaze_direction",
+  "camera_axis",
+  "dominant_subject_type",
+  "avg_luma",
+  "dominant_colors",
+  "text_presence",
+] as const;
+
+export type EditorialObservationField = typeof EDITORIAL_OBSERVATION_FIELDS[number];
+
+export interface EditorialObservationExtraction {
+  present: boolean;
+  values: Partial<Record<EditorialObservationField, string | number | string[]>>;
+  field_confidence: Partial<Record<EditorialObservationField, number>>;
+  field_evidence_refs: Partial<Record<EditorialObservationField, string[]>>;
+  evidence_refs: string[];
+  index_terms: string[];
+  evidence_terms: string[];
+}
+
+const OBSERVATION_CONFIDENCE_GROUP: Record<EditorialObservationField, string> = {
+  visual_tags: "tags",
+  motion_type: "motion",
+  camera_motion_direction: "direction",
+  subject_motion_direction: "direction",
+  shot_scale: "framing",
+  composition_anchor: "framing",
+  screen_side: "framing",
+  gaze_direction: "direction",
+  camera_axis: "direction",
+  dominant_subject_type: "appearance",
+  avg_luma: "appearance",
+  dominant_colors: "appearance",
+  text_presence: "text",
+};
+
+/**
+ * Reads only the materialized top-level observation. Producer snapshots are
+ * deliberately ignored: the reducer's top-level values are the canonical truth.
+ */
+export function extractEditorialObservation(raw: unknown): EditorialObservationExtraction {
+  const observation = objectValue(raw);
+  if (!observation) return emptyEditorialObservationExtraction();
+  const confidence = objectValue(observation.confidence) ?? {};
+  const evidence = Array.isArray(observation.evidence) ? observation.evidence : [];
+  const values: EditorialObservationExtraction["values"] = {};
+  const fieldConfidence: EditorialObservationExtraction["field_confidence"] = {};
+  const fieldEvidenceRefs: EditorialObservationExtraction["field_evidence_refs"] = {};
+  const evidenceRefs: string[] = [];
+  const indexTerms: string[] = [];
+  const evidenceTerms: string[] = [];
+
+  for (const field of EDITORIAL_OBSERVATION_FIELDS) {
+    const value = canonicalObservationValue(field, observation[field]);
+    if (value === undefined) continue;
+    values[field] = value;
+    indexTerms.push(...observationFieldTerms(field, value));
+    evidenceTerms.push(...observationEvidenceTerms(field, value));
+    const group = objectValue(confidence[OBSERVATION_CONFIDENCE_GROUP[field]]);
+    const score = finiteScore(group?.score);
+    if (score != null) {
+      fieldConfidence[field] = score;
+      indexTerms.push(`editorial_observation.confidence.${OBSERVATION_CONFIDENCE_GROUP[field]}=${score}`);
+    }
+    const refs = stringArray(group?.evidence_refs);
+    if (refs.length > 0) {
+      fieldEvidenceRefs[field] = refs;
+      evidenceRefs.push(...refs);
+      indexTerms.push(...refs.map((ref) => `editorial_observation.evidence_ref=${ref}`));
+    }
+  }
+
+  for (const item of evidence) {
+    const record = objectValue(item);
+    const ref = typeof record?.evidence_ref === "string" ? record.evidence_ref.trim() : "";
+    if (ref) evidenceRefs.push(ref);
+  }
+  return {
+    present: true,
+    values,
+    field_confidence: fieldConfidence,
+    field_evidence_refs: fieldEvidenceRefs,
+    evidence_refs: Array.from(new Set(evidenceRefs)),
+    index_terms: Array.from(new Set(indexTerms)),
+    evidence_terms: Array.from(new Set(evidenceTerms)),
+  };
+}
+
+function emptyEditorialObservationExtraction(): EditorialObservationExtraction {
+  return {
+    present: false,
+    values: {},
+    field_confidence: {},
+    field_evidence_refs: {},
+    evidence_refs: [],
+    index_terms: [],
+    evidence_terms: [],
+  };
+}
+
+function canonicalObservationValue(
+  field: EditorialObservationField,
+  value: unknown,
+): string | number | string[] | undefined {
+  if (field === "avg_luma") return finiteScore(value) ?? undefined;
+  if (field === "visual_tags" || field === "dominant_colors") {
+    return Array.isArray(value) ? stringArray(value) : undefined;
+  }
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function observationFieldTerms(field: EditorialObservationField, value: string | number | string[]): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.flatMap((item) => {
+    if (item === "unknown" || item === "not_applicable") return [];
+    return [
+      `editorial_observation.${field}=${String(item)}`,
+      `${field}=${String(item)}`,
+      String(item),
+    ];
+  });
+}
+
+function observationEvidenceTerms(field: EditorialObservationField, value: string | number | string[]): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => `editorial_observation.${field}=${String(item)}`);
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean)));
+}
+
+function finiteScore(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1
+    ? value
+    : null;
+}
+
 export function extractCameraMotion(description: string): CameraMotionExtraction {
   const text = normalized(description);
   const evidence = evidenceSentences(description);

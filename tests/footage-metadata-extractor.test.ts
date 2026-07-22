@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractCameraMotion,
+  extractEditorialObservation,
   extractSceneShotTake,
   extractShotScale,
 } from "../runtime/artifacts/footage-metadata-extractor.js";
@@ -86,5 +87,36 @@ describe("footage metadata extractor", () => {
       take_number: "0075",
       clip_number: "0075",
     });
+  });
+
+  it("extracts only top-level canonical observation values and keeps unknown out of index text", () => {
+    const extracted = extractEditorialObservation({
+      status: "partial",
+      visual_tags: ["title_card"],
+      camera_motion_direction: "right",
+      shot_scale: "unknown",
+      text_presence: "present",
+      confidence: {
+        direction: { score: 0.91, evidence_refs: ["frame:right"] },
+        framing: { score: 0.72, evidence_refs: ["frame:scale"] },
+      },
+      evidence: [{ evidence_ref: "frame:right" }],
+      producer_snapshots: {
+        grounded_vlm: {
+          values: { camera_motion_direction: "left", shot_scale: "close_up" },
+        },
+      },
+    });
+
+    expect(extracted.values).toMatchObject({
+      visual_tags: ["title_card"],
+      camera_motion_direction: "right",
+      shot_scale: "unknown",
+      text_presence: "present",
+    });
+    expect(extracted.field_confidence.camera_motion_direction).toBe(0.91);
+    expect(extracted.evidence_terms).toContain("editorial_observation.shot_scale=unknown");
+    expect(extracted.index_terms.join(" ")).not.toContain("unknown");
+    expect(extracted.index_terms.join(" ")).not.toContain("close_up");
   });
 });

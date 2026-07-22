@@ -609,6 +609,7 @@ function stripReviewFields(entry: CaptionReviewPreview["speech_captions"][number
     source: entry.source,
     styling_class: entry.styling_class,
     metrics: { ...entry.metrics },
+    ...(entry.reveal_timing ? { reveal_timing: structuredClone(entry.reveal_timing) } : {}),
   };
 }
 

@@ -244,7 +244,7 @@ except Exception:
     bound_times = np.array([0.0, duration])
 
 # Compute per-section energy
-rms = librosa.feature.rms(y=y, sr=sr)[0]
+rms = librosa.feature.rms(y=y)[0]
 rms_times = librosa.frames_to_time(np.arange(len(rms)), sr=sr)
 max_rms = float(np.max(rms)) if len(rms) > 0 else 1.0
 
@@ -750,9 +750,17 @@ function makeFailed(
 export const BGM_EXTENSIONS = new Set([".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a"]);
 
 export interface ProjectBgmAnalysisOptions {
-  sourceFiles: string[];
+  bgmSources: Array<{ sourceFile: string; assetId: string }>;
+  /** Total explicit role requests, including requests that did not resolve to a current source asset. */
+  explicitRequestCount?: number;
   projectDir: string;
   projectId: string;
+}
+
+export interface ProjectBgmAnalysisResult {
+  writtenPaths: string[];
+  readyAssetIds: string[];
+  failures: Array<{ assetId: string; reason: string }>;
 }
 
 export function resolveBgmAnalysisPath(projectPath: string): string {
@@ -785,28 +793,44 @@ export function detectBgmFiles(sourceFiles: string[]): string[] {
 }
 
 /**
- * Run project-level BGM analysis for detected audio-only source files.
+ * Run project-level BGM analysis for explicitly role-tagged BGM sources.
  * Writes the canonical 03_analysis artifact before downstream stages consume it.
  */
 export function runProjectBgmAnalysis(
   opts: ProjectBgmAnalysisOptions,
-): string[] {
+): ProjectBgmAnalysisResult {
   const writtenPaths: string[] = [];
-  const bgmFiles = detectBgmFiles(opts.sourceFiles);
-
-  for (const bgmPath of bgmFiles) {
-    const assetId = `BGM_${path.basename(bgmPath, path.extname(bgmPath)).replace(/[^a-zA-Z0-9]/g, "_")}`;
+  // The explicit role set is authoritative for this pipeline run. Never retain
+  // a pipeline-owned BGM artifact from a prior, different source set.
+  fs.rmSync(resolveBgmAnalysisPath(opts.projectDir), { force: true });
+  if ((opts.explicitRequestCount ?? opts.bgmSources.length) > 1) {
+    return {
+      writtenPaths,
+      readyAssetIds: [],
+      failures: opts.bgmSources.map((source) => ({
+        assetId: source.assetId,
+        reason: "multiple_explicit_bgm_sources_unsupported",
+      })),
+    };
+  }
+  const readyAssetIds: string[] = [];
+  const failures: ProjectBgmAnalysisResult["failures"] = [];
+  for (const { sourceFile: bgmPath, assetId } of opts.bgmSources) {
     const result = analyzeBgm({
       audioPath: bgmPath,
       projectDir: opts.projectDir,
       projectId: opts.projectId,
       assetId,
     });
-    if (result.analysis_status === "failed") continue;
+    if (result.analysis_status === "failed") {
+      failures.push({ assetId, reason: "bgm_analysis_failed" });
+      continue;
+    }
     writtenPaths.push(writeBgmAnalysis(result, opts.projectDir));
+    readyAssetIds.push(assetId);
   }
 
-  return writtenPaths;
+  return { writtenPaths, readyAssetIds, failures };
 }
 
 /**

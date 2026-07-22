@@ -40,6 +40,9 @@ export interface PackageManifest {
     remotion_bundle_hash?: string;
     render_defaults_hash?: string;
     handoff_id?: string;
+    source_inputs_hash?: string;
+    source_inputs_attestation_status?: "verified" | "live_only" | "not_applicable";
+    source_inputs_freshness_reason?: string;
   };
 }
 
@@ -102,6 +105,9 @@ export function buildEngineRenderManifest(opts: {
   musicCuesHash?: string;
   ffmpegVersion?: string;
   renderDefaultsHash?: string;
+  sourceInputsHash: string;
+  sourceInputsAttestationStatus: "verified" | "live_only" | "not_applicable";
+  sourceInputsFreshnessReason?: string;
   captionPolicy: { source: string; delivery_mode: string };
   createdAt?: string;
 }): PackageManifest {
@@ -197,6 +203,11 @@ export function buildEngineRenderManifest(opts: {
         : {}),
       ...(opts.renderDefaultsHash
         ? { render_defaults_hash: opts.renderDefaultsHash }
+        : {}),
+      source_inputs_hash: opts.sourceInputsHash,
+      source_inputs_attestation_status: opts.sourceInputsAttestationStatus,
+      ...(opts.sourceInputsFreshnessReason
+        ? { source_inputs_freshness_reason: opts.sourceInputsFreshnessReason }
         : {}),
     },
   };

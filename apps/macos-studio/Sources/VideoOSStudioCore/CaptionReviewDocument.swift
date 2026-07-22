@@ -212,6 +212,9 @@ public struct CaptionReviewQueueDocument: Codable, Equatable, Sendable {
 }
 
 public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
+    public static let defaultFontID = "noto-sans-jp"
+    public static let defaultFontFamily = "Noto Sans JP"
+
     public enum Alignment: String, Codable, Sendable {
         case bottomCenter = "bottom_center"
         case center
@@ -219,6 +222,7 @@ public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
     }
 
     public let presetID: String
+    public let fontID: String
     public let fontFamily: String
     public let fontWeight: Int
     public let fontSizePx1080: Double
@@ -230,6 +234,7 @@ public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case presetID = "preset_id"
+        case fontID = "font_id"
         case fontFamily = "font_family"
         case fontWeight = "font_weight"
         case fontSizePx1080 = "font_size_px_1080"
@@ -242,6 +247,7 @@ public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
 
     public init(
         presetID: String,
+        fontID: String = CaptionReviewPreviewStyle.defaultFontID,
         fontFamily: String,
         fontWeight: Int,
         fontSizePx1080: Double,
@@ -252,6 +258,7 @@ public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
         alignment: Alignment
     ) {
         self.presetID = presetID
+        self.fontID = fontID
         self.fontFamily = fontFamily
         self.fontWeight = fontWeight
         self.fontSizePx1080 = fontSizePx1080
@@ -262,9 +269,24 @@ public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
         self.alignment = alignment
     }
 
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        presetID = try values.decode(String.self, forKey: .presetID)
+        fontID = try values.decodeIfPresent(String.self, forKey: .fontID) ?? Self.defaultFontID
+        fontFamily = try values.decode(String.self, forKey: .fontFamily)
+        fontWeight = try values.decode(Int.self, forKey: .fontWeight)
+        fontSizePx1080 = try values.decode(Double.self, forKey: .fontSizePx1080)
+        lineHeightPx1080 = try values.decode(Double.self, forKey: .lineHeightPx1080)
+        outlinePx1080 = try values.decode(Double.self, forKey: .outlinePx1080)
+        marginV1080 = try values.decode(Double.self, forKey: .marginV1080)
+        maxWidthRatio = try values.decode(Double.self, forKey: .maxWidthRatio)
+        alignment = try values.decode(Alignment.self, forKey: .alignment)
+    }
+
     public static let `default` = CaptionReviewPreviewStyle(
         presetID: "default",
-        fontFamily: "Arial",
+        fontID: defaultFontID,
+        fontFamily: defaultFontFamily,
         fontWeight: 700,
         fontSizePx1080: 24,
         lineHeightPx1080: 32,

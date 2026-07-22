@@ -3,6 +3,8 @@ import SQLite3
 
 public enum ProjectSQLiteIndex {
     public static let relativePath = "03_analysis/search/project_index.sqlite"
+    private static let canonicalPreferenceMemoryRelativePath = "00_project/editorial_preference_memory.jsonl"
+    private static let legacyPreferenceMemoryRelativePath = "03_analysis/editorial_preference_memory.jsonl"
 
     public static func indexURL(for projectURL: URL) -> URL {
         projectURL.appendingPathComponent(relativePath)
@@ -667,7 +669,9 @@ public enum ProjectSQLiteIndex {
     }
 
     private static func loadEditorialPreferences(projectURL: URL) -> [EditorialPreferenceEntry] {
-        let url = projectURL.appendingPathComponent("03_analysis/editorial_preference_memory.jsonl")
+        let canonicalURL = projectURL.appendingPathComponent(canonicalPreferenceMemoryRelativePath)
+        let legacyURL = projectURL.appendingPathComponent(legacyPreferenceMemoryRelativePath)
+        let url = FileManager.default.fileExists(atPath: canonicalURL.path) ? canonicalURL : legacyURL
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         return text
             .split(separator: "\n", omittingEmptySubsequences: true)

@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   CANONICAL_PIPELINE_STAGES,
+  CANONICAL_STAGE_OBSERVABILITY,
+  FULL_PIPELINE_RESUME_STAGE_ORDER,
   FULL_PIPELINE_TIMING_STAGE_ORDER,
   buildEditorialPipelineTimingStages,
   buildFullPipelineCommandPhases,
   buildFullPipelineCommandTimingStages,
   buildScriptFullPipelineTimingStages,
   isFullPipelinePhase,
+  isFullPipelineResumeStage,
   isFullPipelineTimingStage,
   shouldRunScriptAnalyze,
   shouldRunScriptFootageDb,
@@ -33,8 +36,8 @@ describe("canonical pipeline plan", () => {
     ]);
   });
 
-  it("uses one timing-stage order for the single-command CLI", () => {
-    expect(FULL_PIPELINE_TIMING_STAGE_ORDER).toEqual([
+  it("keeps the public resume vocabulary separate from canonical stage names", () => {
+    expect(FULL_PIPELINE_RESUME_STAGE_ORDER).toEqual([
       "ingest",
       "stt",
       "marlin",
@@ -47,8 +50,36 @@ describe("canonical pipeline plan", () => {
       "render",
       "QA",
     ]);
+    expect(FULL_PIPELINE_TIMING_STAGE_ORDER).toBe(FULL_PIPELINE_RESUME_STAGE_ORDER);
+    expect(isFullPipelineResumeStage("embeddings")).toBe(true);
+    expect(isFullPipelineResumeStage("footageDb")).toBe(false);
+
+    // Compatibility guard for callers that used the historical timing-stage name.
     expect(isFullPipelineTimingStage("embeddings")).toBe(true);
     expect(isFullPipelineTimingStage("footageDb")).toBe(false);
+  });
+
+  it("makes canonical-to-observability folding explicit", () => {
+    expect(CANONICAL_STAGE_OBSERVABILITY.visualQuality).toEqual({
+      timingStages: ["visual-quality"],
+      resumeStage: "visual-quality",
+    });
+    expect(CANONICAL_STAGE_OBSERVABILITY.footageDb).toEqual({
+      timingStages: ["embeddings"],
+      resumeStage: "embeddings",
+    });
+    expect(CANONICAL_STAGE_OBSERVABILITY.review).toEqual({
+      timingStages: ["QA"],
+      resumeStage: "QA",
+    });
+    expect(CANONICAL_STAGE_OBSERVABILITY.qa).toEqual({
+      timingStages: ["QA"],
+      resumeStage: "QA",
+    });
+    expect(CANONICAL_STAGE_OBSERVABILITY.package).toEqual({
+      timingStages: [],
+      resumeStage: null,
+    });
   });
 
   it("filters the script full-pipeline plan without changing resume semantics", () => {

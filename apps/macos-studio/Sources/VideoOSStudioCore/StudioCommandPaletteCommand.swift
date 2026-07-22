@@ -22,6 +22,7 @@ public enum StudioCommandPaletteCommand: String, CaseIterable, Identifiable, Sen
     case rebuildSearchIndex = "rebuild-search-index"
     case runMarlinEvaluation = "run-marlin-evaluation"
     case buildAudioStoryGraph = "build-audio-story-graph"
+    case openBGMReview = "open-bgm-review"
     case buildPreviewProxies = "build-preview-proxies"
     case relinkMissingMedia = "relink-missing-media"
     case exportPremiereXML = "export-premiere-xml"
@@ -118,6 +119,8 @@ public enum StudioCommandPaletteCommand: String, CaseIterable, Identifiable, Sen
             return "Marlin評価を実行"
         case .buildAudioStoryGraph:
             return "音声ストーリーを構築"
+        case .openBGMReview:
+            return "BGM試聴・レビューを開く"
         case .buildPreviewProxies:
             return "プレビュー素材を作成"
         case .relinkMissingMedia:
@@ -263,6 +266,8 @@ public enum StudioCommandPaletteCommand: String, CaseIterable, Identifiable, Sen
             return "sparkles.tv"
         case .buildAudioStoryGraph:
             return "waveform.badge.magnifyingglass"
+        case .openBGMReview:
+            return "music.note.list"
         case .buildPreviewProxies:
             return "film.stack"
         case .relinkMissingMedia:
@@ -408,6 +413,8 @@ public enum StudioCommandPaletteCommand: String, CaseIterable, Identifiable, Sen
             return ["vlm", "marlin", "temporal", "評価", "時間"]
         case .buildAudioStoryGraph:
             return ["audio", "story", "bgm", "音声", "ストーリー"]
+        case .openBGMReview:
+            return ["bgm", "music", "audition", "review", "rights", "楽曲", "試聴", "レビュー", "権利"]
         case .buildPreviewProxies:
             return ["media", "proxy", "preview", "プレビュー", "プロキシ", "素材"]
         case .relinkMissingMedia:

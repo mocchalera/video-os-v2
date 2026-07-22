@@ -9,6 +9,13 @@ import type {
   TimelineClip,
   TimelineIR,
 } from "../compiler/types.js";
+import type {
+  AdjacencyAnalysis,
+  AdjacencyPairResult,
+  CutRelationAxis,
+  CutRelationResult,
+  CutRelationSignal,
+} from "../compiler/transition-types.js";
 import { validateAgainstSchema } from "../commands/shared.js";
 import { assessDialogueCompleteness } from "../editorial/dialogue-completeness.js";
 
@@ -18,6 +25,7 @@ export type ReviewMetricTier =
   | "rhythm"
   | "eye_trace"
   | "plane_2d"
+  | "space_3d"
   | "audio";
 
 export type ReviewMetricStatus = "pass" | "warn" | "fail" | "skipped";
@@ -32,7 +40,12 @@ export type ReviewMetricId =
   | "emotion.peak_retention"
   | "emotion.hook_density"
   | "eye_trace.same_asset_adjacency"
+  | "eye_trace.attention_jump"
+  | "eye_trace.motion_flow"
   | "plane_2d.motif_overuse"
+  | "plane_2d.framing_jump"
+  | "plane_2d.luma_color_jump"
+  | "space_3d.direction_axis"
   | "audio.speech_cut";
 
 type JsonPrimitive = string | number | boolean | null;
@@ -50,11 +63,11 @@ export interface ReviewMetricCheck {
 export interface ReviewMetricsSummary {
   total_checks: number;
   by_status: Record<ReviewMetricStatus, number>;
-  by_tier: Record<ReviewMetricTier, Record<ReviewMetricStatus, number>>;
+  by_tier: Partial<Record<ReviewMetricTier, Record<ReviewMetricStatus, number>>>;
 }
 
 export interface ReviewMetricsArtifact {
-  version: "1";
+  version: "1" | "2";
   project_id: string;
   timeline_version: string;
   summary: ReviewMetricsSummary;
@@ -123,6 +136,7 @@ export interface ReviewMetricsInputs {
   selects?: SelectsArtifact;
   segments?: SegmentsArtifact;
   transcripts?: TranscriptArtifact[];
+  adjacency?: AdjacencyAnalysis;
 }
 
 export interface ReviewMetricsRunResult {
@@ -144,10 +158,77 @@ const TIERS: ReviewMetricTier[] = [
   "rhythm",
   "eye_trace",
   "plane_2d",
+  "space_3d",
   "audio",
 ];
 
 const STATUSES: ReviewMetricStatus[] = ["pass", "warn", "fail", "skipped"];
+
+const RELATION_POLICY_SOURCE = "05_timeline/adjacency_analysis.json:pairs[].cut_relation";
+
+interface RelationMetricDefinition {
+  id: Extract<ReviewMetricId,
+    | "eye_trace.attention_jump"
+    | "eye_trace.motion_flow"
+    | "plane_2d.framing_jump"
+    | "plane_2d.luma_color_jump"
+    | "space_3d.direction_axis">;
+  tier: Extract<ReviewMetricTier, "eye_trace" | "plane_2d" | "space_3d">;
+  axes: CutRelationAxis[];
+  mappingReason: string;
+}
+
+const RELATION_METRICS: RelationMetricDefinition[] = [
+  {
+    id: "eye_trace.attention_jump",
+    tier: "eye_trace",
+    axes: ["composition", "text_presence"],
+    mappingReason: "Attention continuity overlaps composition placement and overlay text presence; both canonical signals are retained instead of inventing a new attention threshold.",
+  },
+  {
+    id: "eye_trace.motion_flow",
+    tier: "eye_trace",
+    axes: ["motion_flow"],
+    mappingReason: "Motion flow maps directly to the canonical motion_flow signal.",
+  },
+  {
+    id: "plane_2d.framing_jump",
+    tier: "plane_2d",
+    axes: ["shot_scale"],
+    mappingReason: "Framing continuity maps to the canonical shot_scale signal.",
+  },
+  {
+    id: "plane_2d.luma_color_jump",
+    tier: "plane_2d",
+    axes: ["luma", "dominant_color"],
+    mappingReason: "Two-dimensional tonal continuity overlaps luma and dominant color; both canonical signals are surfaced without combining them into a new threshold.",
+  },
+  {
+    id: "space_3d.direction_axis",
+    tier: "space_3d",
+    axes: ["gaze_axis"],
+    mappingReason: "Screen-direction continuity maps to the canonical gaze_axis signal, which already carries the camera/gaze comparison evidence.",
+  },
+];
+
+type AdjacencyBindingStatus = "bound" | "missing" | "mismatch";
+type AdjacencyBindingMode = "clip_ids" | "legacy_refs" | null;
+
+interface BoundAdjacencyPair {
+  index: number;
+  pair: AdjacencyPairResult;
+  left: TimelineClip;
+  right: TimelineClip;
+}
+
+interface AdjacencyBinding {
+  status: AdjacencyBindingStatus;
+  mode: AdjacencyBindingMode;
+  reason_codes: string[];
+  expected_pair_count: number;
+  artifact_pair_count: number;
+  pairs: BoundAdjacencyPair[];
+}
 
 function check(
   id: ReviewMetricId,
@@ -172,6 +253,7 @@ function skipped(id: ReviewMetricId, tier: ReviewMetricTier, reason: string): Re
 }
 
 export function computeReviewMetrics(input: ReviewMetricsInputs): ReviewMetricsArtifact {
+  const adjacencyBinding = bindAdjacencyToTimeline(input);
   const checks: ReviewMetricCheck[] = [
     checkBeatDurationDeviation(input),
     checkMaxShotLength(input),
@@ -181,13 +263,15 @@ export function computeReviewMetrics(input: ReviewMetricsInputs): ReviewMetricsA
     checkDialogueCompleteness(input),
     checkPeakRetention(input),
     checkHookDensity(input),
-    checkSameAssetAdjacency(input),
+    checkSameAssetAdjacency(input, adjacencyBinding),
+    ...RELATION_METRICS.map((definition) =>
+      checkRelationMetric(input, adjacencyBinding, definition)),
     checkMotifOveruse(input),
     checkSpeechCut(input),
   ];
 
   return {
-    version: "1",
+    version: "2",
     project_id: resolveProjectId(input),
     timeline_version: input.timeline?.version ?? "unknown",
     summary: summarize(checks),
@@ -202,8 +286,9 @@ export function loadReviewMetricsInputs(projectDir: string): ReviewMetricsInputs
   const brief = readYamlIfExists<CreativeBrief>(path.join(absDir, "01_intent/creative_brief.yaml"));
   const selects = readYamlIfExists<SelectsArtifact>(path.join(absDir, "04_plan/selects_candidates.yaml"));
   const segments = readJsonIfExists<SegmentsArtifact>(path.join(absDir, "03_analysis/segments.json"));
+  const adjacency = readJsonIfExists<AdjacencyAnalysis>(path.join(absDir, "05_timeline/adjacency_analysis.json"));
   const transcripts = readTranscriptArtifacts(path.join(absDir, "03_analysis/transcripts"));
-  return { timeline, blueprint, brief, selects, segments, transcripts };
+  return { timeline, blueprint, brief, selects, segments, transcripts, adjacency };
 }
 
 export function writeReviewMetricsArtifact(
@@ -671,17 +756,382 @@ function checkHookDensity(input: ReviewMetricsInputs): ReviewMetricCheck {
     : [`Hook density ${round(density)} is below target ${target} (${highSignalClips.length}/${hookClips.length} hook clips with retained peak signal).`]);
 }
 
-function checkSameAssetAdjacency(input: ReviewMetricsInputs): ReviewMetricCheck {
+function bindAdjacencyToTimeline(input: ReviewMetricsInputs): AdjacencyBinding {
+  const clips = input.timeline ? getV1Clips(input.timeline) : [];
+  const expectedPairCount = Math.max(0, clips.length - 1);
+  const artifactPairs = input.adjacency?.pairs ?? [];
+  const base = {
+    expected_pair_count: expectedPairCount,
+    artifact_pair_count: artifactPairs.length,
+    pairs: [] as BoundAdjacencyPair[],
+  };
+
+  if (!input.timeline || !input.adjacency) {
+    return {
+      ...base,
+      status: "missing",
+      mode: null,
+      reason_codes: [!input.timeline ? "timeline_missing" : "adjacency_analysis_missing"],
+    };
+  }
+
+  if (input.timeline.project_id !== input.adjacency.project_id) {
+    return {
+      ...base,
+      status: "mismatch",
+      mode: null,
+      reason_codes: ["adjacency_timeline_mismatch", "project_id_mismatch"],
+    };
+  }
+
+  if (artifactPairs.length !== expectedPairCount) {
+    return {
+      ...base,
+      status: "mismatch",
+      mode: null,
+      reason_codes: ["adjacency_timeline_mismatch", "pair_count_mismatch"],
+    };
+  }
+
+  const hasAnyClipIds = artifactPairs.some((pair) => pair.left_clip_id !== undefined || pair.right_clip_id !== undefined);
+  const hasCompleteClipIds = artifactPairs.every((pair) =>
+    typeof pair.left_clip_id === "string" && typeof pair.right_clip_id === "string");
+  if (hasAnyClipIds && !hasCompleteClipIds) {
+    return {
+      ...base,
+      status: "mismatch",
+      mode: null,
+      reason_codes: ["adjacency_timeline_mismatch", "partial_clip_id_binding"],
+    };
+  }
+
+  const candidateMap = buildCandidateMap(input.selects);
+  const mode: Exclude<AdjacencyBindingMode, null> = hasCompleteClipIds ? "clip_ids" : "legacy_refs";
+  const reasons: string[] = [];
+  const boundPairs: BoundAdjacencyPair[] = [];
+  for (let index = 0; index < artifactPairs.length; index += 1) {
+    const pair = artifactPairs[index];
+    const left = clips[index];
+    const right = clips[index + 1];
+    const expectedPairId = `V1:${left.beat_id}->${right.beat_id}`;
+    const expectedLeftRefs = expectedAdjacencyRefs(left, candidateMap);
+    const expectedRightRefs = expectedAdjacencyRefs(right, candidateMap);
+    if (pair.pair_id !== expectedPairId) reasons.push("beat_pair_mismatch");
+    if (!expectedLeftRefs.includes(pair.left_candidate_ref) || !expectedRightRefs.includes(pair.right_candidate_ref)) {
+      reasons.push("candidate_ref_mismatch");
+    }
+    if (mode === "clip_ids" &&
+        (pair.left_clip_id !== left.clip_id || pair.right_clip_id !== right.clip_id)) {
+      reasons.push("clip_id_mismatch");
+    }
+    boundPairs.push({ index, pair, left, right });
+  }
+
+  if (reasons.length > 0) {
+    return {
+      ...base,
+      status: "mismatch",
+      mode,
+      reason_codes: ["adjacency_timeline_mismatch", ...[...new Set(reasons)].sort()],
+    };
+  }
+
+  return {
+    ...base,
+    status: "bound",
+    mode,
+    reason_codes: [mode === "clip_ids" ? "ordered_clip_id_binding" : "ordered_legacy_ref_binding"],
+    pairs: boundPairs,
+  };
+}
+
+function expectedAdjacencyRefs(clip: TimelineClip, candidateMap: Map<string, Candidate>): string[] {
+  const candidate = candidateForClip(clip, candidateMap);
+  return [...new Set([
+    candidate?.candidate_id,
+    clip.candidate_ref,
+    clip.segment_id,
+    clip.clip_id,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0))].sort();
+}
+
+function checkRelationMetric(
+  input: ReviewMetricsInputs,
+  binding: AdjacencyBinding,
+  definition: RelationMetricDefinition,
+): ReviewMetricCheck {
+  const threshold = relationMetricThreshold(input, definition);
+  const measuredBase = {
+    total_pairs: binding.expected_pair_count,
+    evaluated_pairs: 0,
+    unknown_pairs: binding.expected_pair_count,
+    intentional_pairs: 0,
+    risky_pairs: 0,
+    binding: {
+      status: binding.status,
+      mode: binding.mode,
+      reason_codes: binding.reason_codes,
+      expected_pair_count: binding.expected_pair_count,
+      artifact_pair_count: binding.artifact_pair_count,
+    },
+    pairs: [],
+    violations: [],
+    warnings: [],
+  };
+
+  if (binding.status !== "bound") {
+    return check(
+      definition.id,
+      definition.tier,
+      "skipped",
+      measuredBase,
+      threshold,
+      [binding.status === "mismatch"
+        ? `adjacency_timeline_mismatch: ${binding.reason_codes.join(", ")}; canonical relation evidence was not evaluated.`
+        : "Canonical adjacency_analysis.json or timeline.json is missing; relation evidence was not evaluated."],
+    );
+  }
+  if (binding.pairs.length === 0) {
+    return check(definition.id, definition.tier, "skipped", measuredBase, threshold, [
+      "The current V1 timeline has no adjacent clip pairs to evaluate.",
+    ]);
+  }
+
+  let evaluatedPairs = 0;
+  let unknownPairs = 0;
+  let intentionalPairs = 0;
+  let riskyPairs = 0;
+  let relationPresentPairs = 0;
+  const pairs: JsonValue[] = [];
+  const violations: JsonValue[] = [];
+  const warnings: JsonValue[] = [];
+
+  for (const bound of binding.pairs) {
+    const relation = bound.pair.cut_relation;
+    if (!relation) {
+      unknownPairs += 1;
+      const finding = relationPairFinding(bound, definition, null, ["cut_relation_missing"], "warning");
+      pairs.push(finding);
+      warnings.push(finding);
+      continue;
+    }
+    relationPresentPairs += 1;
+    if (relation.relationship === "intentional_contrast") intentionalPairs += 1;
+    if (relation.relationship === "risky_jump") riskyPairs += 1;
+
+    const mappedSignals = definition.axes.map((axis) => ({ axis, signal: relation.signals?.[axis] }));
+    const sufficientlyKnown = mappedSignals.every(({ signal }) =>
+      signal !== undefined && (signal.coverage === "known" || signal.coverage === "not_applicable"));
+    if (sufficientlyKnown) evaluatedPairs += 1;
+    if (!sufficientlyKnown || relation.relationship === "unknown") unknownPairs += 1;
+
+    const major = mappedSignals.some(({ signal }) => signal?.major_discontinuity === true);
+    const contrast = mappedSignals.some(({ signal }) => signal?.evaluation === "contrast");
+    const warningReasons: string[] = [];
+    if (!sufficientlyKnown) warningReasons.push("axis_coverage_incomplete");
+    if (relation.relationship === "unknown") warningReasons.push("cut_relationship_unknown");
+
+    if (relation.relationship === "intentional_contrast") {
+      const finding = relationPairFinding(
+        bound,
+        definition,
+        relation,
+        [...warningReasons, "intentional_contrast_excluded"],
+        warningReasons.length > 0 ? "warning" : "intentional",
+      );
+      pairs.push(finding);
+      if (warningReasons.length > 0) warnings.push(finding);
+      continue;
+    }
+
+    if (relation.relationship === "risky_jump" && major) {
+      const finding = relationPairFinding(
+        bound,
+        definition,
+        relation,
+        ["risky_jump_with_mapped_major_discontinuity"],
+        "violation",
+      );
+      pairs.push(finding);
+      violations.push(finding);
+      continue;
+    }
+
+    if (major) warningReasons.push("mapped_major_without_risky_relation");
+    else if (contrast) warningReasons.push("known_non_major_contrast");
+    const finding = relationPairFinding(
+      bound,
+      definition,
+      relation,
+      warningReasons,
+      warningReasons.length > 0 ? "warning" : "clean",
+    );
+    pairs.push(finding);
+    if (warningReasons.length > 0) warnings.push(finding);
+  }
+
+  const measured = {
+    ...measuredBase,
+    evaluated_pairs: evaluatedPairs,
+    unknown_pairs: unknownPairs,
+    intentional_pairs: intentionalPairs,
+    risky_pairs: riskyPairs,
+    pairs,
+    violations,
+    warnings,
+  };
+  if (relationPresentPairs === 0) {
+    return check(definition.id, definition.tier, "skipped", measured, threshold, [
+      "All bound adjacency pairs are missing cut_relation; no relation finding was evaluated.",
+    ]);
+  }
+
+  const status: ReviewMetricStatus = violations.length > 0
+    ? "fail"
+    : warnings.length > 0 || relationPresentPairs < binding.pairs.length
+      ? "warn"
+      : "pass";
+  const evidence = status === "fail"
+    ? [`${violations.length} bound pair(s) have risky_jump with a mapped major discontinuity.`]
+    : status === "warn"
+      ? [`${warnings.length} bound pair finding(s) remain advisory because relation or axis evidence is partial, unknown, or non-major.`]
+      : [`All ${binding.pairs.length} bound pair(s) are sufficiently covered for ${definition.axes.join(" + ")} with no continuity finding.`];
+  return check(definition.id, definition.tier, status, measured, threshold, evidence);
+}
+
+function relationMetricThreshold(
+  input: ReviewMetricsInputs,
+  definition: RelationMetricDefinition,
+): JsonValue {
+  return {
+    advisory: true,
+    policy_source: "runtime/compiler/cut-relation.ts:CUT_RELATION_THRESHOLDS",
+    canonical_relation_source: RELATION_POLICY_SOURCE,
+    decision_rule: "canonical_relationship_and_signal_major_discontinuity",
+    axis_mapping: definition.axes,
+    axis_mapping_reason: definition.mappingReason,
+    profile_brief_signal: {
+      resolved_profile_id: input.blueprint?.resolved_profile?.id ?? null,
+      brief_profile_hint: input.brief?.editorial?.profile_hint ?? null,
+      brief_policy_hint: input.brief?.editorial?.policy_hint ?? null,
+      threshold_override_applied: false,
+    },
+  };
+}
+
+function relationPairFinding(
+  bound: BoundAdjacencyPair,
+  definition: RelationMetricDefinition,
+  relation: CutRelationResult | null,
+  findingReasonCodes: string[],
+  outcome: "clean" | "intentional" | "violation" | "warning",
+): JsonValue {
+  return {
+    pair_index: bound.index,
+    pair_id: bound.pair.pair_id,
+    left_clip_id: bound.left.clip_id,
+    right_clip_id: bound.right.clip_id,
+    left_ref: bound.pair.left_candidate_ref,
+    right_ref: bound.pair.right_candidate_ref,
+    left_beat_id: bound.left.beat_id,
+    right_beat_id: bound.right.beat_id,
+    relationship: relation?.relationship ?? "missing",
+    relation_confidence: relation?.confidence ?? null,
+    relation_reason_codes: relation?.reason_codes ?? [],
+    explicit_intent_evidence: intentEvidenceMeasured(relation),
+    mapped_axes: definition.axes,
+    axis_signals: definition.axes.map((axis) => relationSignalMeasured(axis, relation?.signals?.[axis])),
+    outcome,
+    finding_reason_codes: findingReasonCodes,
+    description: relationFindingDescription(definition.id, bound, relation, findingReasonCodes),
+  };
+}
+
+function relationSignalMeasured(axis: CutRelationAxis, signal: CutRelationSignal | undefined): JsonValue {
+  if (!signal) {
+    return {
+      axis_id: axis,
+      coverage: "missing",
+      evaluation: "unknown",
+      major_discontinuity: false,
+      raw: { left: null, right: null },
+      raw_coverage: { left: "missing", right: "missing", pair: "missing" },
+      source_refs: { left: [], right: [] },
+      confidence: { left: null, right: null },
+      reason_codes: ["cut_relation_signal_missing"],
+    };
+  }
+  return {
+    axis_id: axis,
+    coverage: signal.coverage,
+    evaluation: signal.evaluation,
+    major_discontinuity: signal.major_discontinuity,
+    raw: signal.raw as JsonValue,
+    raw_coverage: signal.raw_coverage as unknown as JsonValue,
+    source_refs: signal.source_refs,
+    confidence: signal.confidence,
+    reason_codes: signal.reason_codes,
+  };
+}
+
+function intentEvidenceMeasured(relation: CutRelationResult | null | undefined): JsonValue[] {
+  return (relation?.explicit_intent_evidence ?? []).map((item) => ({
+    source: item.source,
+    source_ref: item.source_ref,
+    intent: item.intent,
+  }));
+}
+
+function relationFindingDescription(
+  metricId: ReviewMetricId,
+  bound: BoundAdjacencyPair,
+  relation: CutRelationResult | null,
+  reasons: string[],
+): string {
+  return `${metricId} ${bound.left.clip_id}->${bound.right.clip_id}: relationship=${relation?.relationship ?? "missing"}; ${reasons.join(", ") || "no continuity finding"}`;
+}
+
+function checkSameAssetAdjacency(input: ReviewMetricsInputs, binding: AdjacencyBinding): ReviewMetricCheck {
   const id: ReviewMetricId = "eye_trace.same_asset_adjacency";
   if (!input.timeline) return skipped(id, "eye_trace", "timeline.json is missing.");
 
   const v1 = getV1Clips(input.timeline);
   const selectedCandidateAssetIds = uniqueSortedAssetIds(input.selects?.candidates ?? []);
   const timelineAssetIds = uniqueSortedAssetIds(v1);
+  if (binding.status === "mismatch") {
+    return check(id, "eye_trace", "skipped", {
+      adjacent_pairs: Math.max(0, v1.length - 1),
+      same_asset_pairs: [],
+      untreated_same_asset_pairs: [],
+      visually_differentiated_pairs: [],
+      intentional_pairs: [],
+      violations: [],
+      warnings: [],
+      v1_asset_ids: timelineAssetIds,
+      selected_candidate_asset_ids: selectedCandidateAssetIds,
+      binding: {
+        status: binding.status,
+        mode: binding.mode,
+        reason_codes: binding.reason_codes,
+        expected_pair_count: binding.expected_pair_count,
+        artifact_pair_count: binding.artifact_pair_count,
+      },
+    }, {
+      advisory: true,
+      policy_source: RELATION_POLICY_SOURCE,
+      max_same_asset_adjacent_pairs: 0,
+      scope: "V1",
+    }, [`adjacency_timeline_mismatch: ${binding.reason_codes.join(", ")}; same-asset findings were not evaluated without trustworthy intent binding.`]);
+  }
   if (v1.length < 2) {
     return check(id, "eye_trace", "pass", {
       adjacent_pairs: 0,
       same_asset_pairs: [],
+      untreated_same_asset_pairs: [],
+      visually_differentiated_pairs: [],
+      intentional_pairs: [],
+      violations: [],
+      warnings: [],
       v1_asset_ids: timelineAssetIds,
       selected_candidate_asset_ids: selectedCandidateAssetIds,
     }, {
@@ -692,13 +1142,21 @@ function checkSameAssetAdjacency(input: ReviewMetricsInputs): ReviewMetricCheck 
 
   const candidateMap = buildCandidateMap(input.selects);
   type SameAssetPair = {
+    pair_id: string;
     left_clip_id: string;
     right_clip_id: string;
+    left_ref: string;
+    right_ref: string;
     asset_id: string;
+    relationship: string;
+    relation_reason_codes: string[];
+    explicit_intent_evidence: JsonValue[];
+    description: string;
   };
   const sameAssetPairs: SameAssetPair[] = [];
   const violations: SameAssetPair[] = [];
   const visuallyDifferentiatedPairs: Array<SameAssetPair & { treatment: "punch_in" }> = [];
+  const intentionalPairs: SameAssetPair[] = [];
 
   for (let i = 0; i < v1.length - 1; i++) {
     const left = v1[i];
@@ -715,14 +1173,25 @@ function checkSameAssetAdjacency(input: ReviewMetricsInputs): ReviewMetricCheck 
       "guide",
     );
     if (pair.same_asset) {
+      const adjacencyPair = binding.status === "bound" ? binding.pairs[i]?.pair : undefined;
+      const relation = adjacencyPair?.cut_relation;
       const item = {
+        pair_id: adjacencyPair?.pair_id ?? `V1:${left.beat_id}->${right.beat_id}`,
         left_clip_id: left.clip_id,
         right_clip_id: right.clip_id,
+        left_ref: adjacencyPair?.left_candidate_ref ?? left.candidate_ref ?? left.segment_id,
+        right_ref: adjacencyPair?.right_candidate_ref ?? right.candidate_ref ?? right.segment_id,
         asset_id: left.asset_id,
+        relationship: relation?.relationship ?? "unknown",
+        relation_reason_codes: relation?.reason_codes ?? ["cut_relation_missing"],
+        explicit_intent_evidence: intentEvidenceMeasured(relation),
+        description: `${id} ${left.clip_id}->${right.clip_id}: adjacent V1 clips reuse ${left.asset_id}`,
       };
       sameAssetPairs.push(item);
       if (hasPunchInDifferentiation(left, right)) {
         visuallyDifferentiatedPairs.push({ ...item, treatment: "punch_in" });
+      } else if (relation?.relationship === "intentional_contrast") {
+        intentionalPairs.push(item);
       } else {
         violations.push(item);
       }
@@ -745,9 +1214,21 @@ function checkSameAssetAdjacency(input: ReviewMetricsInputs): ReviewMetricCheck 
     same_asset_pairs: sameAssetPairs,
     untreated_same_asset_pairs: violations,
     visually_differentiated_pairs: visuallyDifferentiatedPairs,
+    intentional_pairs: intentionalPairs,
+    violations: longformReduction ? [] : violations,
+    warnings: !longformReduction && singleAssetPool ? violations : [],
     v1_asset_ids: timelineAssetIds,
     selected_candidate_asset_ids: selectedCandidateAssetIds,
+    binding: {
+      status: binding.status,
+      mode: binding.mode,
+      reason_codes: binding.reason_codes,
+      expected_pair_count: binding.expected_pair_count,
+      artifact_pair_count: binding.artifact_pair_count,
+    },
   }, {
+    advisory: true,
+    policy_source: RELATION_POLICY_SOURCE,
     max_same_asset_adjacent_pairs: 0,
     scope: "V1",
     longform_continuity_allowed: longformReduction,
@@ -762,8 +1243,8 @@ function checkSameAssetAdjacency(input: ReviewMetricsInputs): ReviewMetricCheck 
         `${item.left_clip_id}->${item.right_clip_id}: adjacent V1 clips reuse ${item.asset_id}`,
         ),
       ]
-    : visuallyDifferentiatedPairs.length > 0
-      ? [`All ${visuallyDifferentiatedPairs.length} same-asset adjacent pair(s) are visually differentiated with an explicit punch-in treatment.`]
+    : visuallyDifferentiatedPairs.length > 0 || intentionalPairs.length > 0
+      ? [`All same-asset adjacent pair(s) are visually differentiated or exempt through ${visuallyDifferentiatedPairs.length} explicit punch-in treatment(s) and ${intentionalPairs.length} canonical intentional contrast(s).`]
       : ["No adjacent V1 clips reuse the same asset."]);
 }
 

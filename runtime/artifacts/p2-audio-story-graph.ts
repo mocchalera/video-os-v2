@@ -132,7 +132,7 @@ interface BgmAnalysisLike {
 export interface BuildAudioStoryGraphOptions {
   projectId: string;
   manifest: SourceMediaManifest | { source_media_manifest_hash?: string; items?: Array<{ asset_id?: string }> };
-  coverageReport: AnalysisCoverageReport | { hash?: string; lanes?: Array<{ lane_id?: string; status?: string }> };
+  coverageReport: AnalysisCoverageReport | { hash?: string; lanes?: Array<{ lane_id?: string; status?: string; reason?: string | null }> };
   transcripts?: TranscriptLike[];
   audioEvents?: AudioEventsLike | null;
   bgmAnalysis?: BgmAnalysisLike | null;
@@ -186,6 +186,9 @@ export function validateAudioStoryGraph(
       if (options.manifestAssetIds && !options.manifestAssetIds.includes(node.asset_id)) {
         violations.push(`nodes/${index} asset_id ${node.asset_id} not found in source_media_manifest`);
       }
+      if (node.asset_id.startsWith("BGM_") && node.node_type !== "music_section") {
+        violations.push(`nodes/${index} BGM asset_id is only valid for music_section nodes`);
+      }
       if (graph.coverage?.dialogue_lane === "failed" && ["utterance", "speaker_turn"].includes(node.node_type)) {
         violations.push("failed dialogue_lane cannot contain invented dialogue nodes");
       }
@@ -216,6 +219,13 @@ export function validateAudioStoryGraph(
 
 export function buildAudioStoryGraph(options: BuildAudioStoryGraphOptions): AudioStoryGraph {
   const manifestItems = Array.isArray(options.manifest.items) ? options.manifest.items : [];
+  const manifestAssetIds = manifestItems
+    .map((item) => item.asset_id)
+    .filter((id): id is string => typeof id === "string");
+  const bgmAssetId = options.bgmAnalysis?.music_asset?.asset_id;
+  const validationAssetIds = bgmAssetId?.startsWith("BGM_")
+    ? [...manifestAssetIds, bgmAssetId]
+    : manifestAssetIds;
   const manifestHash = getManifestHash(options.manifest);
   const coverageHash = options.coverageReportHash ?? getCoverageHash(options.coverageReport);
   const transcriptHashes = options.transcriptHashes ?? [];
@@ -251,10 +261,10 @@ export function buildAudioStoryGraph(options: BuildAudioStoryGraphOptions): Audi
         excluded_fields: ["created_at"],
       },
     },
-  }, manifestItems.map((item) => item.asset_id).filter((id): id is string => typeof id === "string"));
+  }, manifestAssetIds);
 
   const integrity = validateAudioStoryGraph(sorted, {
-    manifestAssetIds: manifestItems.map((item) => item.asset_id).filter((id): id is string => typeof id === "string"),
+    manifestAssetIds: validationAssetIds,
     sourceMediaManifestHash: manifestHash,
   });
   if (!integrity.valid) {
@@ -474,10 +484,25 @@ function deriveGraphCoverage(
     const status = coverageReport.lanes?.find((lane) => lane.lane_id === laneId)?.status;
     return toGraphStatus(status);
   };
+  const laneNeutral = (laneId: string): boolean => {
+    const lane = coverageReport.lanes?.find((item) => item.lane_id === laneId);
+    return lane?.status === "skipped" && [
+      "no_explicit_bgm_role_input",
+      "not_applicable_silent_audio",
+      "not_applicable_no_audio_stream",
+      "stt skipped by request",
+      "stt not attempted on cached run",
+      "bgm analysis skipped by request",
+    ].includes(lane.reason ?? "");
+  };
   const dialogueLane = laneStatus("stt");
   const audioEventLane = laneStatus("audio_events");
   const musicLane = laneStatus("bgm_analysis");
-  const statuses = [dialogueLane, audioEventLane, musicLane];
+  const statuses = [
+    ...(laneNeutral("stt") ? [] : [dialogueLane]),
+    ...(laneNeutral("audio_events") ? [] : [audioEventLane]),
+    ...(laneNeutral("bgm_analysis") ? [] : [musicLane]),
+  ];
   const status: GraphStatus = statuses.includes("failed")
     ? "partial"
     : statuses.includes("partial") || statuses.includes("skipped")
@@ -486,9 +511,9 @@ function deriveGraphCoverage(
         ? "skipped"
         : "ready";
   const missingInputs = [
-    ...(dialogueLane === "failed" || dialogueLane === "skipped" ? ["transcript"] : []),
-    ...(audioEventLane === "failed" || audioEventLane === "skipped" ? ["audio_events"] : []),
-    ...(musicLane === "failed" || musicLane === "skipped" ? ["bgm_analysis"] : []),
+    ...(!laneNeutral("stt") && (dialogueLane === "failed" || dialogueLane === "skipped") ? ["transcript"] : []),
+    ...(!laneNeutral("audio_events") && (audioEventLane === "failed" || audioEventLane === "skipped") ? ["audio_events"] : []),
+    ...(!laneNeutral("bgm_analysis") && (musicLane === "failed" || musicLane === "skipped") ? ["bgm_analysis"] : []),
   ];
 
   return {

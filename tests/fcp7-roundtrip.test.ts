@@ -702,6 +702,7 @@ describe("audio track roundtrip", () => {
     const imported = parsedSequenceToTimelineIR(parsed, timeline);
     const importedClip = imported.tracks.audio[0].clips[0];
     expect(importedClip.audio_policy?.bgm_gain).toBeCloseTo(-12, 1);
+    expect(importedClip.audio_policy?.gain_unit).toBe("db");
   });
 
   it("preserves audio clips with bgm_gain", () => {
@@ -721,6 +722,7 @@ describe("audio track roundtrip", () => {
     const imported = parsedSequenceToTimelineIR(parsed, timeline);
     const importedClip = imported.tracks.audio[0].clips[0];
     expect(importedClip.audio_policy?.bgm_gain).toBeCloseTo(-6, 1);
+    expect(importedClip.audio_policy?.gain_unit).toBe("db");
   });
 
   it("preserves nat_sound_gain through roundtrip", () => {
@@ -740,6 +742,7 @@ describe("audio track roundtrip", () => {
     const imported = parsedSequenceToTimelineIR(parsed, timeline);
     const importedClip = imported.tracks.audio[0].clips[0];
     expect(importedClip.audio_policy?.nat_sound_gain).toBeCloseTo(-9, 1);
+    expect(importedClip.audio_policy?.gain_unit).toBe("db");
   });
 
   it("preserves fade keyframes through roundtrip", () => {

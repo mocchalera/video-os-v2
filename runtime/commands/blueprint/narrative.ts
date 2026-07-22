@@ -7,7 +7,9 @@ import { buildScriptDraft, type DraftInput } from "../../script/draft.js";
 import { evaluateScript, type EvaluateInput } from "../../script/evaluate.js";
 import type {
   Candidate,
+  CreativeBriefEditorial,
   EditBlueprint,
+  EditorialSummary,
   NormalizedBeat,
 } from "../../artifacts/types.js";
 import { buildDefaultStubBlueprint } from "./stub.js";
@@ -112,7 +114,7 @@ export async function runNarrativeLoop(
     }
   }
 
-  const agentResult = await phases.project(ctx, draftResult, lastEvaluation);
+  const agentResult = await phases.project(ctx, draftResult, lastEvaluation, frameResult);
   return {
     success: true,
     agentResult,
@@ -137,6 +139,7 @@ export function buildDefaultPhases(
   const selects = selectsContent as {
     candidates?: Candidate[];
     beats?: NormalizedBeat[];
+    editorial_summary?: EditorialSummary;
   };
   const candidates = selects?.candidates ?? [];
 
@@ -170,9 +173,12 @@ export function buildDefaultPhases(
           closing_intent?: string;
           runtime_target_sec?: number;
         };
+        editorial?: CreativeBriefEditorial;
         editorial_profile_hint?: string;
         editorial_policy_hint?: string;
       };
+      const profileHint = brief?.editorial?.profile_hint ?? brief?.editorial_profile_hint;
+      const policyHint = brief?.editorial?.policy_hint ?? brief?.editorial_policy_hint;
 
       const frameInput: FrameInput = {
         projectId: ctx.projectId,
@@ -182,21 +188,27 @@ export function buildDefaultPhases(
         closingIntent: brief?.project?.closing_intent ?? "resolve and reflect",
         resolutionInput: {
           briefEditorial: {
-            profile_hint: brief?.editorial_profile_hint ?? "interview-highlight",
-            policy_hint: brief?.editorial_policy_hint ?? "default",
+            ...brief?.editorial,
+            profile_hint: profileHint,
+            policy_hint: policyHint,
           },
+          editorialSummary: selects?.editorial_summary,
           runtimeTargetSec: brief?.project?.runtime_target_sec,
         },
         beatCount: beats.length || 4,
       };
 
-      const { frame } = buildMessageFrame(frameInput);
+      const { frame, resolution } = buildMessageFrame(frameInput);
       return {
         storyPromise: frame.story_promise,
         hookAngle: frame.hook_angle,
         closingIntent: frame.closing_intent,
         beatCount: frame.beat_strategy.beat_count,
         qualityTargets: frame.quality_targets,
+        resolvedProfile: frame.resolved_profile_candidate,
+        resolvedPolicy: frame.resolved_policy_candidate,
+        profileDefaults: resolution.profileDefaults,
+        diagnostics: frame.diagnostics,
       };
     },
 
@@ -258,8 +270,9 @@ export function buildDefaultPhases(
         story_promise: frameResult.storyPromise,
         hook_angle: frameResult.hookAngle,
         closing_intent: frameResult.closingIntent,
-        resolved_profile_candidate: { id: "default", source: "default" },
-        resolved_policy_candidate: { id: "default", source: "default" },
+        resolved_profile_candidate: frameResult.resolvedProfile ?? { id: "default", source: "default" },
+        resolved_policy_candidate: frameResult.resolvedPolicy ?? { id: "default", source: "default" },
+        ...(frameResult.diagnostics ? { diagnostics: frameResult.diagnostics } : {}),
         beat_strategy: {
           beat_count: frameResult.beatCount,
           role_sequence: buildDefaultRoleSequenceFromCount(frameResult.beatCount),
@@ -312,6 +325,10 @@ export function buildDefaultPhases(
       };
 
       const evaluation = evaluateScript(evalInput);
+      const frameWarnings = (frameResult.diagnostics ?? []).map((diagnostic) =>
+        `${diagnostic.code} [${diagnostic.severity}]: ${diagnostic.message} ` +
+        `resolved_profile=${diagnostic.resolved_profile}`
+      );
       const revisionBrief: RevisionBrief | undefined = !evaluation.gate_pass
         ? {
             preserve: evaluation.warnings
@@ -330,7 +347,10 @@ export function buildDefaultPhases(
           hookDensity: evaluation.metrics.hook_density,
           noveltyRate: evaluation.metrics.novelty_rate,
         },
-        warnings: evaluation.warnings.map((warning) => warning.message),
+        warnings: [
+          ...frameWarnings,
+          ...evaluation.warnings.map((warning) => warning.message),
+        ],
         revisionBrief,
       };
     },
@@ -342,12 +362,21 @@ export function buildDefaultPhases(
       return { status: "skipped" };
     },
 
-    async project(ctx, draftResult, evaluation) {
+    async project(ctx, draftResult, evaluation, frameResult) {
       const now = new Date().toISOString();
+      const resolvedProfile = existingBlueprint?.resolved_profile ?? frameResult.resolvedProfile;
+      const resolvedPolicy = existingBlueprint?.resolved_policy ?? frameResult.resolvedPolicy;
+      const activeEditingSkills = existingBlueprint?.active_editing_skills
+        ?? frameResult.profileDefaults?.active_editing_skills;
       const blueprint: EditBlueprint = {
         version: "1",
         project_id: ctx.projectId,
         created_at: now,
+        ...(resolvedProfile ? { resolved_profile: resolvedProfile } : {}),
+        ...(resolvedPolicy ? { resolved_policy: resolvedPolicy } : {}),
+        ...(activeEditingSkills !== undefined
+          ? { active_editing_skills: activeEditingSkills }
+          : {}),
         sequence_goals: existingBlueprint?.sequence_goals ?? [],
         beats: beats.map((beat) => ({
           id: beat.beat_id,
@@ -386,8 +415,11 @@ export function buildDefaultPhases(
           should_feel: "resolved",
           tail_hold_sec: 1.5,
           audio_fade_out_sec: 1,
-          video_fade_out_sec: 0,
-          video_fade_color: "none",
+          video_fade_out_sec: 1,
+          video_fade_color: "black",
+          final_hold_min_frames: 36,
+          final_visual_strategy: "keep source motion and fade to black",
+          final_audio_strategy: "fade room tone after the complete final assertion",
         },
         rejection_rules: existingBlueprint?.rejection_rules ?? [],
       };

@@ -51,7 +51,8 @@
         "language": { "type": "string", "minLength": 1 },
         "delivery_mode": { "enum": ["burn_in", "sidecar", "both"] },
         "source": { "enum": ["transcript", "authored", "none"] },
-        "styling_class": { "type": "string", "minLength": 1 }
+        "styling_class": { "type": "string", "minLength": 1 },
+        "semantic_timing": { "type": "object" }
       },
       "additionalProperties": false
     },
@@ -59,7 +60,7 @@
       "type": "object",
       "required": ["code", "severity", "message"],
       "properties": {
-        "code": { "enum": ["empty_text", "too_many_lines", "line_too_long", "orphan_character", "protected_term_split", "unnatural_line_break", "density_violation", "low_timing_confidence", "timing_fallback", "invalid_timing", "overlap", "flagged"] },
+        "code": { "enum": ["empty_text", "too_many_lines", "line_too_long", "orphan_character", "protected_term_split", "unnatural_line_break", "density_violation", "low_timing_confidence", "timing_fallback", "unresolved_reveal_anchor", "invalid_timing", "overlap", "flagged"] },
         "severity": { "enum": ["info", "warn", "block"] },
         "message": { "type": "string", "minLength": 1 },
         "evidence": { "type": "array", "items": { "type": "string" } }
@@ -92,6 +93,7 @@
         },
         "editorial": { "type": "object" },
         "timing": { "type": "object" },
+        "reveal_timing": { "type": "object" },
         "review": {
           "type": "object",
           "required": ["state", "edited", "source_text"],

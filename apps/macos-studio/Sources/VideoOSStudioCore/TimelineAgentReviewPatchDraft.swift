@@ -148,6 +148,20 @@ public struct TimelineAgentReviewPatchDraft: Equatable, Sendable {
             return parts.joined(separator: " / ")
         case let .changeAudioPolicy(clipID, policy, _):
             return "\(clipID) audio \(policy)"
+        case let .changeVisualTransform(clipID, transform, confidence, _):
+            var parts = ["\(clipID) visual"]
+            if let zoom = transform.zoom {
+                parts.append(String(format: "zoom %.2fx", zoom))
+            }
+            if let position = transform.position {
+                parts.append(String(format: "pan %.0f,%.0f", position.x, position.y))
+            }
+            if let confidence {
+                parts.append(String(format: "confidence %.2f", confidence))
+            }
+            return parts.joined(separator: " / ")
+        case let .changeAudioFinish(audioFinish, _):
+            return "timeline MA \(audioFinish.preset)"
         case let .addMarker(frame, label, _):
             return "marker \(frame): \(label)"
         case let .addNote(targetClipID, text):

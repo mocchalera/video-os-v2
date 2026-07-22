@@ -1,0 +1,12 @@
+id: generic-editorial
+default_policy: generic
+defaults:
+  default_transition: "cut"
+  active_editing_skills: []
+  still_image_intent:
+    min_hold_sec: 1
+    default_hold_sec: 3
+    max_hold_sec: 10
+    motion_mode: static
+    fit_mode: contain
+    background: black

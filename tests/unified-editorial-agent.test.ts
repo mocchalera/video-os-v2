@@ -1,8 +1,10 @@
 import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  detectRoughEditorialQualityIssues,
   fineCutRefinement,
   formatFineFrameReferences,
   formatRoughFrameReferences,
@@ -20,6 +22,7 @@ import type {
   VisualRetrievalEvidence,
 } from "../runtime/agents/visual-retrieval-evidence.js";
 import { parseArgs } from "../scripts/editorial-pipeline.js";
+import { ImageSequenceGroundingError } from "../runtime/artifacts/image-sequence-grounding.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -484,6 +487,28 @@ function underCoveredRoughPlanningResponse(): string {
   return JSON.stringify(parsed);
 }
 
+function unearnedRecommendationRoughPlanningResponse(): string {
+  const parsed = JSON.parse(validRoughPlanningResponse()) as {
+    selects: { candidates: Array<Record<string, unknown>> };
+  };
+  parsed.selects.candidates[0].role = "dialogue";
+  parsed.selects.candidates[0].transcript_excerpt = "AX-1を受講しました";
+  parsed.selects.candidates[1].role = "dialogue";
+  parsed.selects.candidates[1].transcript_excerpt = "経営者であれば全員受けた方がいいと思います";
+  return JSON.stringify(parsed);
+}
+
+function resolvedRecommendationRoughPlanningResponse(): string {
+  const parsed = JSON.parse(validRoughPlanningResponse()) as {
+    blueprint: { beats: Array<{ candidate_plan?: { primary_candidate_ref: string; fallback_candidate_refs: string[] } }> };
+  };
+  parsed.blueprint.beats[1].candidate_plan = {
+    primary_candidate_ref: "SEG_003",
+    fallback_candidate_refs: ["SEG_002"],
+  };
+  return JSON.stringify(parsed);
+}
+
 function extractVisualEvidenceJson(prompt: string): Record<string, unknown> {
   const sectionStart = prompt.indexOf("## Visual Retrieval Evidence (Qwen3-VL)");
   expect(sectionStart).toBeGreaterThanOrEqual(0);
@@ -523,6 +548,106 @@ afterEach(() => {
 });
 
 describe("unified editorial agent", () => {
+  it("keeps roughCutPlanning open for images and fail-closed for legacy ungrounded sequences", async () => {
+    const makeProject = (mediaKind: "image" | "sequence") => {
+      const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), `rough-capability-${mediaKind}-`));
+      fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+      fs.writeFileSync(path.join(projectDir, "03_analysis/assets.json"), JSON.stringify({ items: [{
+        asset_id: "AST_001",
+        media_kind: mediaKind,
+        source_capabilities: { has_video: true, has_audio: false },
+      }] }));
+      return projectDir;
+    };
+    const sequenceDir = makeProject("sequence");
+    const imageDir = makeProject("image");
+    try {
+      await expect(roughCutPlanning(
+        brief(), marlinEvents(), representativeFrames(), segments(), null,
+        { mode: "headless", projectDir: sequenceDir },
+      )).rejects.toBeInstanceOf(ImageSequenceGroundingError);
+      await expect(roughCutPlanning(
+        brief(), marlinEvents(), representativeFrames(), segments(), null,
+        { mode: "headless", projectDir: imageDir },
+      )).resolves.toMatchObject({ selects: { project_id: "unified-test" } });
+    } finally {
+      fs.rmSync(sequenceDir, { recursive: true, force: true });
+      fs.rmSync(imageDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps canonical audio-only rough planning grounded and free of visual example claims", async () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "unified-audio-"));
+    try {
+      fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+      fs.writeFileSync(path.join(projectDir, "03_analysis", "assets.json"), JSON.stringify({
+        items: [{ asset_id: "AST_AUDIO", audio_stream: { codec_name: "aac" } }],
+      }));
+      const audioSegment = segment({
+        segment_id: "SEG_AUDIO", asset_id: "AST_AUDIO", summary: "", transcript_excerpt: "A complete grounded assertion.", tags: ["speech"],
+      });
+      const task = await roughCutPlanning(brief(), marlinEvents(),
+        new Map([["AST_AUDIO", "03_analysis/representative_frames/should-not-exist.jpg"]]), [audioSegment], null,
+        { mode: "interactive", projectDir });
+
+      expect(task.frame_refs).toEqual([]);
+      expect(task.prompt).toContain("clearest grounded audio hook");
+      expect(task.prompt).toContain("visual evidence is not applicable");
+      expect(task.prompt).not.toContain("strongest visual hook");
+      expect(task.prompt).not.toContain("representative frame shows readable subject");
+      expect(task.prompt).not.toContain("keep source motion and fade to black");
+      expect(task.prompt).not.toContain("Use the Read tool on the absolute frame paths");
+      expect(task.tools).toEqual([]);
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps interactive audio-only fine refinement free of visual example and inspection prompts", async () => {
+    const rough = await roughCutPlanning(brief(), marlinEvents(), representativeFrames(), segments(), 24);
+    const audioCandidate = {
+      ...rough.selects.candidates[0],
+      candidate_id: "cand_audio",
+      segment_id: "SEG_AUDIO",
+      asset_id: "AST_AUDIO",
+      role: "dialogue" as const,
+      why_it_matches: "Transcript: A complete grounded assertion.",
+      transcript_excerpt: "A complete grounded assertion.",
+      media_kind: "audio" as const,
+      source_capabilities: { has_video: false, has_audio: true },
+      audio_role: "dialogue" as const,
+    };
+    const selects = {
+      ...rough.selects,
+      candidates: [audioCandidate],
+      source_media: { mode: "audio_only" as const, media_kinds: ["audio" as const], visual_candidate_count: 0, audio_only_candidate_count: 1 },
+    };
+    const blueprint = {
+      ...rough.blueprint,
+      source_media: selects.source_media,
+      beats: rough.blueprint.beats.slice(0, 1).map((beat) => ({
+        ...beat,
+        candidate_plan: { primary_candidate_ref: "cand_audio", fallback_candidate_refs: [] },
+        craft: { rhythm: "breath" as const },
+      })),
+    };
+
+    const task = await fineCutRefinement(
+      brief(), selects, blueprint, { ...marlinEvents(), items: [] }, new Map(), null,
+      { mode: "interactive", projectDir: path.resolve("tmp", "unified-audio-fine") },
+    );
+
+    expect(task.prompt).toContain("Enter at the complete thought and preserve the final audible cadence.");
+    expect(task.prompt).not.toContain('"event_id": "evt_001"');
+    expect(task.prompt).not.toContain('"peak_type": "action_peak"');
+    expect(task.prompt).not.toContain("Enter before the action and hold through the peak.");
+    expect(task.prompt).not.toContain("Use Marlin event ids");
+    expect(task.prompt).not.toContain("Use the Read tool on the absolute key-frame paths");
+    expect(task.prompt).not.toContain("## Key frames for fine pass");
+    expect(task.frame_refs).toEqual([]);
+    expect(task.tools).toEqual([]);
+  });
+
   it("rough pass returns schema-valid selects and blueprint without an API key", async () => {
     const result = await roughCutPlanning(
       brief(),
@@ -857,6 +982,8 @@ describe("unified editorial agent", () => {
       expect(task.prompt).toContain("semantically complete assertion");
       expect(task.prompt).toContain("Never use an interviewer question card to repair a missing subject");
       expect(task.prompt).toContain("Post-roll is presentation-only");
+      expect(task.prompt).toContain("Never isolate a convenient recommendation quote");
+      expect(task.prompt).toContain("exactly one speech-caption layer");
       expect(task.prompt).toContain(path.resolve(projectDir, "03_analysis/representative_frames/AST_001.jpg"));
       expect(task.frame_refs.length).toBe(3);
       expect(task.frame_refs.every((ref) => path.isAbsolute(ref.path))).toBe(true);
@@ -898,6 +1025,8 @@ describe("unified editorial agent", () => {
     expect(task.prompt).toContain("cite the query, result segment_id, evidence_refs, and key_frame_path");
     expect(task.prompt).toContain("verify semantic boundaries before visual craft");
     expect(task.prompt).toContain("Post-roll may preserve breath or room tone only after the assertion is complete");
+    expect(task.prompt).toContain("a recommendation must retain the nearby reason");
+    expect(task.prompt).toContain("do not freeze the last frame or change crop/zoom only for the tail");
     expect(task.tools?.map((tool) => tool.name)).toEqual([
       "analyze_clip_range",
       "find_moment",
@@ -909,6 +1038,47 @@ describe("unified editorial agent", () => {
       "unused_footage",
       "best_for_beat",
     ]);
+  });
+
+  it("flags an unearned closing recommendation and clears it when rationale is retained", () => {
+    const result = parseRoughCutPlanningResponse(validRoughPlanningResponse(), {
+      brief: brief(),
+      marlinEvents: marlinEvents(),
+      representativeFrames: representativeFrames(),
+      segments: segments(),
+      bgmDurationSec: 24,
+    });
+    const reason = {
+      ...result.selects.candidates[0],
+      candidate_id: "cand_reason",
+      segment_id: "SEG_REASON",
+      role: "dialogue" as const,
+      transcript_excerpt: "AX-1を受講しました",
+    };
+    const recommendation = {
+      ...result.selects.candidates[1],
+      candidate_id: "cand_recommend",
+      segment_id: "SEG_RECOMMEND",
+      role: "dialogue" as const,
+      transcript_excerpt: "経営者であれば全員受けた方がいいと思います",
+    };
+    result.selects.candidates = [reason, recommendation];
+    result.blueprint.beats = result.blueprint.beats.map((beat, index) => ({
+      ...beat,
+      candidate_plan: {
+        primary_candidate_ref: index === 0 ? "cand_reason" : "cand_recommend",
+        fallback_candidate_refs: [],
+      },
+    }));
+
+    expect(detectRoughEditorialQualityIssues(result)).toContain(
+      "closing recommendation has no nearby reason, decision problem, or consequence",
+    );
+
+    reason.transcript_excerpt = "経営者の理解が浅いと担当者の提案を正しく判断できないと思います";
+    expect(detectRoughEditorialQualityIssues(result)).not.toContain(
+      "closing recommendation has no nearby reason, decision problem, or consequence",
+    );
   });
 
   it("headless mode calls Gemini when an API key is configured", async () => {
@@ -977,6 +1147,48 @@ describe("unified editorial agent", () => {
       expect(geminiCalls[1]).toContain("Coverage hard constraint retry");
       expect(geminiCalls[1]).toContain("unused_segment_ids");
       expect(result.selects.coverage?.status).toBe("met");
+    } finally {
+      vi.doUnmock("../runtime/connectors/gemini-json.js");
+      vi.resetModules();
+    }
+  });
+
+  it("retries the unified rough pass when a closing recommendation lacks rationale", async () => {
+    const geminiCalls: string[] = [];
+    const responses = [
+      unearnedRecommendationRoughPlanningResponse(),
+      resolvedRecommendationRoughPlanningResponse(),
+    ];
+    vi.resetModules();
+    vi.doMock("../runtime/connectors/gemini-json.js", () => ({
+      callGeminiJson: async (prompt: string) => {
+        geminiCalls.push(prompt);
+        return responses.shift() ?? validRoughPlanningResponse();
+      },
+    }));
+
+    try {
+      process.env.GEMINI_API_KEY = "test-key";
+      process.env.VOS_EDITORIAL_LLM = "gemini";
+      const mod = await import("../runtime/agents/unified-editorial-agent.js");
+      const recommendationSegments = segments().map((item) => item.segment_id === "SEG_001"
+        ? { ...item, transcript_excerpt: "AX-1を受講しました" }
+        : item.segment_id === "SEG_002"
+          ? { ...item, transcript_excerpt: "経営者であれば全員受けた方がいいと思います" }
+          : item);
+      const result = await mod.roughCutPlanning(
+        brief(),
+        marlinEvents(),
+        representativeFrames(),
+        recommendationSegments,
+        24,
+        { mode: "headless" },
+      );
+
+      expect(geminiCalls).toHaveLength(2);
+      expect(geminiCalls[1]).toContain("First-pass editorial quality retry");
+      expect(geminiCalls[1]).toContain("closing recommendation has no nearby reason");
+      expect(detectRoughEditorialQualityIssues(result)).toEqual([]);
     } finally {
       vi.doUnmock("../runtime/connectors/gemini-json.js");
       vi.resetModules();

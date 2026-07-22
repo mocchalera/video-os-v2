@@ -1,10 +1,24 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  assertStillImageCandidateGrounding,
+  assertStillImageSegmentGrounding,
+} from "../../artifacts/still-image-grounding.js";
+import {
+  assertImageSequenceCandidateGrounding,
+  assertImageSequenceGrounding,
+} from "../../artifacts/image-sequence-grounding.js";
+import {
+  assertCandidatePlanningMediaKindsSupported,
+  assertProjectPlanningMediaKindsSupported,
+  MediaKindPlanningBlockedError,
+} from "../../artifacts/source-media-capabilities.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   draftAndPromote,
   initCommand,
   isCommandError,
+  resolveProjectRoot,
   transitionState,
   type CommandError,
   type DraftFile,
@@ -16,9 +30,12 @@ import type {
   ConfirmedPreferences,
   CreativeBrief,
   EditBlueprint,
+  ProfileDefaults,
   QualityTargets,
+  ResolvedRef,
   SelectsCandidates,
 } from "../../artifacts/types.js";
+import type { MessageFrameDiagnostic } from "../../script/frame.js";
 import type { MarlinEventsArtifact } from "../../connectors/marlin-types.js";
 import { loadSourceMap } from "../../media/source-map.js";
 import {
@@ -107,6 +124,7 @@ export interface NarrativePhases {
     ctx: NarrativePhaseContext,
     draft: DraftResult,
     evaluation: EvaluateResult,
+    frame: FrameResult,
   ): Promise<BlueprintAgentResult>;
 }
 
@@ -126,6 +144,10 @@ export interface FrameResult {
   closingIntent: string;
   beatCount: number;
   qualityTargets?: Partial<QualityTargets>;
+  resolvedProfile?: ResolvedRef;
+  resolvedPolicy?: ResolvedRef;
+  profileDefaults?: ProfileDefaults;
+  diagnostics?: MessageFrameDiagnostic[];
 }
 
 export interface ReadResult {
@@ -223,8 +245,13 @@ export async function runBlueprint(
   options?: BlueprintCommandOptions,
   phases?: NarrativePhases,
 ): Promise<BlueprintCommandResult> {
-  const pt = new ProgressTracker(projectDir, "blueprint", 5);
-  const ctx = initCommand(projectDir, "/blueprint", ALLOWED_STATES);
+  const preflightProjectDir = resolveProjectRoot(projectDir);
+  // Grounding is read-only; run it before ProgressTracker/initCommand persist
+  // progress and reconciled project state.
+  assertBlueprintGroundingPreflight(preflightProjectDir);
+
+  const pt = new ProgressTracker(preflightProjectDir, "blueprint", 5);
+  const ctx = initCommand(preflightProjectDir, "/blueprint", ALLOWED_STATES);
   if (isCommandError(ctx)) {
     pt.fail("init", ctx.message);
     return { success: false, error: ctx };
@@ -234,6 +261,24 @@ export async function runBlueprint(
   const { projectDir: absDir, reconcileResult, doc, preflightHashes } = ctx;
   const previousState = doc.current_state;
   const projectId = doc.project_id || "";
+  try {
+    assertProjectPlanningMediaKindsSupported(absDir);
+  } catch (error) {
+    if (!(error instanceof MediaKindPlanningBlockedError)) throw error;
+    pt.block("gate", error.message);
+    return {
+      success: false,
+      error: {
+        code: "GATE_CHECK_FAILED",
+        message: error.message,
+        details: { consumer_impact: "planning_block", reason: "media_kind_not_plannable", asset_ids: error.assetIds },
+      },
+      previousState,
+      planningBlocked: true,
+    };
+  }
+  assertStillImageSegmentGrounding(absDir);
+
 
   const briefPath = path.join(absDir, "01_intent/creative_brief.yaml");
   if (!fs.existsSync(briefPath)) {
@@ -278,6 +323,24 @@ export async function runBlueprint(
     };
   }
   const selectsContent = parseYaml(fs.readFileSync(selectsPath, "utf-8"));
+  try {
+    assertCandidatePlanningMediaKindsSupported((selectsContent as SelectsCandidates).candidates ?? []);
+  } catch (error) {
+    if (!(error instanceof MediaKindPlanningBlockedError)) throw error;
+    pt.block("gate", error.message);
+    return {
+      success: false,
+      error: {
+        code: "GATE_CHECK_FAILED",
+        message: error.message,
+        details: { consumer_impact: "planning_block", reason: "media_kind_not_plannable", asset_ids: error.assetIds },
+      },
+      previousState,
+      planningBlocked: true,
+    };
+  }
+  assertStillImageCandidateGrounding(absDir, (selectsContent as SelectsCandidates).candidates ?? []);
+  assertImageSequenceCandidateGrounding(absDir, (selectsContent as SelectsCandidates).candidates ?? []);
 
   const stylePath = path.join(absDir, "STYLE.md");
   const styleContent = fs.existsSync(stylePath)
@@ -658,6 +721,24 @@ export async function runBlueprint(
     loopSummary,
     craftDecision,
   };
+}
+
+function assertBlueprintGroundingPreflight(projectDir: string): void {
+  assertStillImageSegmentGrounding(projectDir);
+  assertImageSequenceGrounding(projectDir);
+
+  const selectsPath = path.join(projectDir, "04_plan/selects_candidates.yaml");
+  if (!fs.existsSync(selectsPath)) return;
+
+  let selects: SelectsCandidates;
+  try {
+    selects = parseYaml(fs.readFileSync(selectsPath, "utf-8")) as SelectsCandidates;
+  } catch {
+    return;
+  }
+  const candidates = Array.isArray(selects?.candidates) ? selects.candidates : [];
+  assertStillImageCandidateGrounding(projectDir, candidates);
+  assertImageSequenceCandidateGrounding(projectDir, candidates);
 }
 
 function readProjectMarlinEvents(projectDir: string): MarlinEventsArtifact | null {

@@ -10,7 +10,7 @@ import {
   reconcileAndPersist,
   type CommandError,
 } from "./shared.js";
-import { runPipeline } from "../pipeline/ingest.js";
+import { runPipeline, SourceReadinessError } from "../pipeline/ingest.js";
 import { createGeminiVlmFn } from "../connectors/gemini-vlm.js";
 import type { MarlinFn } from "../connectors/marlin-types.js";
 import { DEFAULT_VLM_CONCURRENCY } from "../pipeline/vlm-analysis.js";
@@ -19,10 +19,21 @@ import { ProgressTracker, type PipelineStageProgress } from "../progress.js";
 import { runPreflight } from "../preflight.js";
 import {
   buildAnalysisCoverageReport,
-  isP1ManifestCoverageEnabled,
   writeAnalysisCoverageReport,
   writeSourceMediaManifest,
 } from "../artifacts/p1-manifest-coverage.js";
+import {
+  buildSourceLedger,
+  writeSourceLedger,
+  type SourceLedger,
+} from "../artifacts/source-ledger.js";
+import {
+  discoverRequestedSources,
+  normalizeSourceLocators,
+  type SourceDiscoveryResult,
+} from "../media/source-discovery.js";
+import { atomicWriteJson, atomicWriteYaml } from "../pipeline/stages/_util.js";
+import { buildGapReport } from "../pipeline/stages/gap-report.js";
 import {
   createMarlinFnFromEnvironment,
   marlinModelFromEnvironment,
@@ -38,6 +49,7 @@ export interface AnalyzeCommandOptions {
   skipDiarize?: boolean;
   skipPeak?: boolean;
   skipMarlin?: boolean;
+  skipAppraiser?: boolean;
   skipMediaLink?: boolean;
   skipPreflight?: boolean;
   skipBgmAnalysis?: boolean;
@@ -48,6 +60,7 @@ export interface AnalyzeCommandOptions {
   noCache?: boolean;
   clearCache?: boolean;
   stageProgress?: PipelineStageProgress;
+  sourceDiscovery?: SourceDiscoveryResult;
 }
 
 export interface AnalyzeRunnerContext extends AnalyzeCommandOptions {
@@ -58,10 +71,11 @@ export interface AnalyzeRunnerContext extends AnalyzeCommandOptions {
 
 export interface AnalyzeRunnerResult {
   artifactsCreated?: string[];
+  sourceLedger?: SourceLedger;
 }
 
 export interface AnalyzeRunner {
-  run(ctx: AnalyzeRunnerContext): Promise<AnalyzeRunnerResult | void>;
+  run(ctx: AnalyzeRunnerContext): Promise<AnalyzeRunnerResult>;
 }
 
 export interface AnalyzeCommandResult {
@@ -93,8 +107,15 @@ export async function runAnalyze(
     return { success: false, error: ctx };
   }
   pt.advance();
+  const projectId = ctx.doc.project_id || path.basename(ctx.projectDir);
+  const normalizedSourceFiles = normalizeSourceLocators(options.sourceFiles ?? [], process.cwd());
 
-  if (!options.sourceFiles || options.sourceFiles.length === 0) {
+  if (normalizedSourceFiles.length === 0) {
+    persistAnalyzeReadinessArtifacts(
+      ctx.projectDir,
+      projectId,
+      discoverRequestedSources([]),
+    );
     const error: CommandError = {
       code: "GATE_CHECK_FAILED",
       message: "Analyze phase requires at least one source file.",
@@ -103,48 +124,83 @@ export async function runAnalyze(
     return { success: false, error };
   }
 
+  let sourceDiscovery = options.sourceDiscovery;
   if (!options.skipPreflight) {
-    const preflight = runPreflight(path.dirname(path.resolve(options.sourceFiles[0])));
+    const preflight = runPreflight(normalizedSourceFiles, sourceDiscovery);
+    sourceDiscovery = preflight.discovery;
     if (!preflight.ok) {
-    const error: CommandError = {
-      code: "GATE_CHECK_FAILED",
-      message: "Analyze preflight failed. Fix environment or re-run with skipPreflight.",
-      details: preflight.checks,
-    };
+      const failedChecks = preflight.checks.filter((check) => check.status === "fail");
+      const ledger = persistAnalyzeReadinessArtifacts(
+        ctx.projectDir,
+        projectId,
+        preflight.discovery,
+        undefined,
+        {
+          stage: "preflight",
+          reason: `preflight_failed:${failedChecks.map((check) => `${check.name}:${check.detail}`).join(" | ")}`,
+        },
+      );
+      const error: CommandError = {
+        code: "GATE_CHECK_FAILED",
+        message: "Analyze preflight failed. Fix environment or re-run with skipPreflight.",
+        details: {
+          checks: preflight.checks,
+          source_readiness: {
+            summary: ledger.summary,
+            items: ledger.items,
+          },
+        },
+      };
       pt.block("preflight", error.message);
       return { success: false, error };
     }
   }
+  sourceDiscovery ??= discoverRequestedSources(normalizedSourceFiles);
 
   const previousState = ctx.doc.current_state;
 
   try {
     const runnerResult = await runner.run({
       ...options,
+      sourceFiles: normalizedSourceFiles,
+      sourceDiscovery,
       projectDir: ctx.projectDir,
-      projectId: ctx.doc.project_id || "",
+      projectId,
       currentState: previousState,
       concurrency: options.concurrency ?? DEFAULT_VLM_CONCURRENCY,
     });
-    const p1Artifacts: string[] = [];
-    if (isP1ManifestCoverageEnabled()) {
-      const projectId = ctx.doc.project_id || path.basename(ctx.projectDir);
-      const manifest = writeSourceMediaManifest({
-        projectDir: ctx.projectDir,
-        projectId,
-        sourceFiles: options.sourceFiles,
-        producer: "analysis-ingest",
-      });
-      const coverage = buildAnalysisCoverageReport({
-        projectId,
-        manifest,
-      });
-      writeAnalysisCoverageReport(ctx.projectDir, coverage);
-      p1Artifacts.push(
-        "02_media/source_media_manifest.json",
-        "03_analysis/analysis_coverage_report.json",
+    const p1Artifacts = [
+      "03_analysis/source_ledger.json",
+      "02_media/source_media_manifest.json",
+      "03_analysis/analysis_coverage_report.json",
+    ];
+    if (!runnerResult.sourceLedger) {
+      throw new Error("AnalyzeRunner must return the source ledger produced by the current run.");
+    }
+    if (runnerResult.sourceLedger.summary.requested === 0 || runnerResult.sourceLedger.summary.ready === 0) {
+      throw new Error("AnalyzeRunner source ledger has no ready requested source.");
+    }
+    const requestedSourceIds = new Set(sourceDiscovery.requests.map((request) => request.source_id));
+    if (
+      runnerResult.sourceLedger.project_id !== projectId ||
+      runnerResult.sourceLedger.items.length !== requestedSourceIds.size ||
+      runnerResult.sourceLedger.items.some((item) => !requestedSourceIds.has(item.source_id))
+    ) {
+      throw new Error(
+        "AnalyzeRunner source ledger does not match the current project and requested inputs: " +
+        `project=${runnerResult.sourceLedger.project_id}, expected_project=${projectId}, ` +
+        `source_ids=${runnerResult.sourceLedger.items.map((item) => item.source_id).join(",")}, ` +
+        `expected_source_ids=${[...requestedSourceIds].join(",")}`,
       );
     }
+    persistAnalyzeReadinessArtifacts(
+      ctx.projectDir,
+      projectId,
+      sourceDiscovery,
+      runnerResult.sourceLedger,
+      undefined,
+      true,
+    );
     pt.advance("03_analysis/assets.json");
 
     const reconcileResult = reconcileAndPersist(
@@ -167,6 +223,20 @@ export async function runAnalyze(
       progressPath: pt.filePath,
     };
   } catch (err) {
+    if (err instanceof SourceReadinessError) {
+      const error: CommandError = {
+        code: "GATE_CHECK_FAILED",
+        message: err.message,
+        details: {
+          source_readiness: {
+            summary: err.sourceLedger.summary,
+            items: err.sourceLedger.items,
+          },
+        },
+      };
+      pt.block("source-readiness", error.message);
+      return { success: false, error, previousState };
+    }
     const error: CommandError = {
       code: "VALIDATION_FAILED",
       message: `Analyze phase failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -193,14 +263,16 @@ class DefaultAnalyzeRunner implements AnalyzeRunner {
     }
 
     try {
-      await runPipeline({
+      const result = await runPipeline({
         sourceFiles: ctx.sourceFiles,
         projectDir: ctx.projectDir,
+        projectId: ctx.projectId,
         skipStt: ctx.skipStt,
         skipVlm: ctx.skipVlm,
         skipDiarize: ctx.skipDiarize,
         skipPeak: ctx.skipPeak,
         skipMarlin: ctx.skipMarlin,
+        skipAppraiser: ctx.skipAppraiser,
         vlmFn,
         marlinFn,
         marlinModel: marlinFn ? marlinModelFromEnvironment(ctx.projectDir) : undefined,
@@ -214,15 +286,63 @@ class DefaultAnalyzeRunner implements AnalyzeRunner {
         noCache: ctx.noCache,
         clearCache: ctx.clearCache,
         stageProgress: ctx.stageProgress,
+        sourceDiscovery: ctx.sourceDiscovery,
       });
+      return {
+        artifactsCreated: collectExistingAnalyzeArtifacts(ctx.projectDir),
+        sourceLedger: result.sourceLedger,
+      };
     } finally {
       await marlinFn?.close?.();
     }
-
-    return {
-      artifactsCreated: collectExistingAnalyzeArtifacts(ctx.projectDir),
-    };
   }
+}
+
+export function persistAnalyzeReadinessArtifacts(
+  projectDir: string,
+  projectId: string,
+  discovery: SourceDiscoveryResult,
+  suppliedLedger?: SourceLedger,
+  failureOverride?: { stage: string; reason: string },
+  preserveExistingAnalysis = false,
+): SourceLedger {
+  const ledger = suppliedLedger ?? buildSourceLedger(projectId, discovery, new Map(), undefined, projectDir);
+  if (failureOverride) {
+    const candidateIds = new Set(discovery.requests
+      .filter((request) => request.disposition === "candidate")
+      .map((request) => request.source_id));
+    for (const item of ledger.items) {
+      if (!candidateIds.has(item.source_id) || item.status !== "failed") continue;
+      item.stage = failureOverride.stage;
+      item.reason = failureOverride.reason;
+      item.consumer_impact = "planning_block";
+    }
+  }
+  writeSourceLedger(projectDir, ledger);
+  const assetsPath = path.join(projectDir, "03_analysis/assets.json");
+  const existingAssets = fs.existsSync(assetsPath)
+    ? (JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as { items?: import("../connectors/ffprobe.js").AssetItem[] }).items ?? []
+    : [];
+  const manifest = writeSourceMediaManifest({ projectDir, projectId, ledger, assets: existingAssets, producer: "analysis-ingest" });
+  const coverage = buildAnalysisCoverageReport({ projectId, manifest, ledger });
+  writeAnalysisCoverageReport(projectDir, coverage);
+  const analysisDir = path.join(projectDir, "03_analysis");
+  fs.mkdirSync(analysisDir, { recursive: true });
+  const segmentsPath = path.join(analysisDir, "segments.json");
+  if (!preserveExistingAnalysis || !fs.existsSync(assetsPath)) {
+    atomicWriteJson(assetsPath, { project_id: projectId, artifact_version: "2.0.0", items: [] });
+  }
+  if (!preserveExistingAnalysis || !fs.existsSync(segmentsPath)) {
+    atomicWriteJson(segmentsPath, { project_id: projectId, artifact_version: "2.0.0", items: [] });
+  }
+  const gapPath = path.join(analysisDir, "gap_report.yaml");
+  if (!preserveExistingAnalysis || !fs.existsSync(gapPath)) {
+    atomicWriteYaml(
+      gapPath,
+      buildGapReport([], new Map(), new Map(), new Map(), undefined, undefined, undefined, ledger),
+    );
+  }
+  return ledger;
 }
 
 function collectExistingAnalyzeArtifacts(projectDir: string): string[] {

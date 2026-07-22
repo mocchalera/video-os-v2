@@ -954,6 +954,33 @@ describe("validate-schemas", () => {
   // ── 9. WARNING 1: error handling for malformed input ──────────────
 
   describe("error handling", () => {
+    it("runs the source-ledger requested equation invariant after canonical schema validation", () => {
+      const tmp = createTempProject("source-ledger-equation", {
+        "03_analysis/source_ledger.json": {
+          version: "1.0.0",
+          artifact_version: "source-ledger-v1",
+          project_id: "sample-mountain-reset",
+          created_at: "2026-07-20T00:00:00.000Z",
+          hidden_sidecar_policy: "exclude-dot-prefixed-files-and-directories",
+          summary: { requested: 1, ready: 0, unsupported: 0, failed: 0 },
+          items: [],
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+
+      expect(result.valid).toBe(false);
+      expect(result.violations).toContainEqual(expect.objectContaining({
+        artifact: "03_analysis/source_ledger.json",
+        rule: "source_ledger_invariant",
+        message: "summary.requested must equal ready + unsupported + failed",
+      }));
+      expect(result.violations.some((violation) =>
+        violation.artifact === "03_analysis/source_ledger.json" && violation.rule === "schema"
+      )).toBe(false);
+    });
+
     it("reports malformed YAML as parse_error violation (no exception)", () => {
       const tmp = createTempProject("bad-yaml", {
         "04_plan/selects_candidates.yaml": "{{{{not: valid: yaml: [[[",

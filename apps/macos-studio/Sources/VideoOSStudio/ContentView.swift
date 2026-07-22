@@ -86,6 +86,23 @@ struct ContentView: View {
                     .frame(width: 360, height: 180)
             }
         }
+        .sheet(isPresented: $model.isBGMReviewPresented) {
+            if let project = model.selectedProject {
+                BGMReviewView(
+                    projectURL: project.path,
+                    repositoryRoot: model.repositoryRoot
+                )
+            } else {
+                ProgressView("プロジェクトを読み込んでいます...")
+                    .frame(width: 360, height: 180)
+            }
+        }
+        .sheet(isPresented: $model.isEditorialPreferenceMemoryPresented) {
+            EditorialPreferenceMemoryView(
+                model: model,
+                isPresented: $model.isEditorialPreferenceMemoryPresented
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openStudioCommandPalette)) { _ in
             commandPaletteQuery = ""
             isCommandPalettePresented = true
@@ -347,6 +364,17 @@ private struct StudioTopBar: View {
             .accessibilityLabel("字幕仕上げを開く")
             .accessibilityIdentifier("CaptionFinishingButton")
             .help("字幕の本文、改行、確認状態をリスク順に仕上げます")
+
+            Button(action: { model.isBGMReviewPresented = true }) {
+                Label("BGM試聴・レビュー", systemImage: "music.note.list")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 30, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .disabled(model.selectedProject == nil)
+            .accessibilityLabel("BGM試聴・レビューを開く")
+            .accessibilityIdentifier("BGMReviewButton")
+            .help("生成BGM候補を会話と重ねて試聴し、音楽・品質・独自性・権利をレビューします")
 
             Button(action: { model.refresh() }) {
                 Label("プロジェクトを更新", systemImage: "arrow.clockwise")
@@ -756,6 +784,13 @@ private struct StudioCommandPaletteView: View {
                 isEnabled: hasProject && !model.isBuildingAudioStoryGraph && model.audioStoryGraphRunPlan.canRun,
                 disabledReason: hasProject ? localizedStudioLabel(model.audioStoryGraphRunPlan.readinessLabel) : "プロジェクト未選択",
                 perform: { model.buildSelectedProjectAudioStoryGraph() }
+            ),
+            StudioCommandPaletteItem(
+                command: .openBGMReview,
+                subtitle: "生成BGM候補を会話と重ねて試聴し、5つの独立ゲートを保存します。",
+                isEnabled: hasProject,
+                disabledReason: hasProject ? nil : "プロジェクト未選択",
+                perform: { model.isBGMReviewPresented = true }
             ),
             StudioCommandPaletteItem(
                 command: .buildPreviewProxies,
@@ -1665,10 +1700,12 @@ private struct StudioWorkspaceView: View {
                 statusMessage: model.roughCutCompileStatus,
                 canPromote: model.canPromoteLatestStudioPatch,
                 canUndo: !model.feedbackSession.patchHistory.isEmpty,
+                canOpenPreferenceMemory: model.selectedProject != nil,
                 onApplyAndPreview: { model.applyStudioPatch() },
                 onPromote: { model.promoteStudioPatch() },
                 onUndo: { model.undoLastPatch() },
-                onDiscard: { model.discardPendingStudioFeedback() }
+                onDiscard: { model.discardPendingStudioFeedback() },
+                onOpenPreferenceMemory: { model.openEditorialPreferenceMemory() }
             )
             .frame(height: feedbackBarHeight)
         }
@@ -1692,7 +1729,11 @@ private struct StudioWorkspaceView: View {
             audioMedia: model.activeViewerAudioMediaReference,
             nextMedia: model.activeViewerNextMediaReference,
             transitionPreview: model.activeViewerTransitionPreview,
+            captionText: model.activeViewerCaptionText,
             monitorSnapshot: model.activeViewerMonitorSnapshot,
+            interviewVisualTransformPreview: model.activeInterviewVisualTransformPreview,
+            sequenceWidth: model.timeline?.sequence.width ?? 1_920,
+            sequenceHeight: model.timeline?.sequence.height ?? 1_080,
             mediaPreviewSummary: model.mediaPreviewSummary,
             timelinePreviewDiagnostics: model.timelinePreviewDiagnostics,
             playheadLabel: model.activeViewerPlayheadLabel,
@@ -1770,6 +1811,8 @@ private extension StudioCommandPaletteCommand {
             return "Marlin評価を実行"
         case .buildAudioStoryGraph:
             return "音声ストーリーを構築"
+        case .openBGMReview:
+            return "BGM試聴・レビューを開く"
         case .buildPreviewProxies:
             return "プレビュー素材を作成"
         case .relinkMissingMedia:

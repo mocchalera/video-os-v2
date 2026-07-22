@@ -240,7 +240,8 @@ describe("caption review CLI workflow", () => {
       glossary_proposals: [{ canonical: "Tomy", variants: ["富井"] }],
       caption_style: {
         preset_id: "longform-event",
-        font_family: "Hiragino Sans",
+        font_id: "noto-sans-jp",
+        font_family: "Noto Sans JP",
         font_size_px_1080: 56,
         line_height_px_1080: 70,
         outline_px_1080: 4,

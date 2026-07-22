@@ -1,6 +1,6 @@
 ## Findings — CLI設計、assembly自動生成の鮮度判定、skills更新内容
 
-`packageCommand()` 本体は変更せず、新規 [scripts/package.ts](/Users/mocchalera/Dev/video-os-v2-spec/scripts/package.ts) を薄い CLI として追加しました。`npm run package -- <project>` と `npx tsx scripts/package.ts <project>` の両方で起動でき、`--source-of-truth` / `--autonomy-mode` は Gate 入力の assertion、`--skip-render` / `--no-assembly` / `--assembly-path` / `--supplied-final` を公開しています。
+`packageCommand()` 本体は変更せず、新規 [scripts/package.ts](/Users/operator/Dev/video-os-v2-spec/scripts/package.ts) を薄い CLI として追加しました。`npm run package -- <project>` と `npx tsx scripts/package.ts <project>` の両方で起動でき、`--source-of-truth` / `--autonomy-mode` は Gate 入力の assertion、`--skip-render` / `--no-assembly` / `--assembly-path` / `--supplied-final` を公開しています。
 
 assembly は CLI 側で `05_timeline/assembly.mp4` を標準ターゲットにし、`05_timeline/render-report.json` または `render-meta.json` の `timeline_hash` / `video_hash` を見て freshness 判定します。metadata が無い場合は mtime fallback です。missing/stale なら `assembleTimelineToMp4()` で生成し、F-0023 と同じ `writeRenderFreshnessMetadata()` で鮮度メタデータを書きます。`--no-assembly` 時は自動生成を止め、明示 path を渡して既存の missing-only auto assemble を迂回します。
 
@@ -9,12 +9,12 @@ skills は inline `npx tsx -e` を削除し、新 CLI 手順に更新しまし�
 ## Evidence — 変更ファイル一覧、テストコマンドと結果件数
 
 変更ファイル:
-- [scripts/package.ts](/Users/mocchalera/Dev/video-os-v2-spec/scripts/package.ts)
-- [tests/package-cli.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/package-cli.test.ts)
-- [package.json](/Users/mocchalera/Dev/video-os-v2-spec/package.json)
-- [.agents/skills/render-video/SKILL.md](/Users/mocchalera/Dev/video-os-v2-spec/.agents/skills/render-video/SKILL.md)
-- [.claude/skills/render-video/SKILL.md](/Users/mocchalera/Dev/video-os-v2-spec/.claude/skills/render-video/SKILL.md) byte-identical hard link
-- [.claude/commands/render.md](/Users/mocchalera/Dev/video-os-v2-spec/.claude/commands/render.md)
+- [scripts/package.ts](/Users/operator/Dev/video-os-v2-spec/scripts/package.ts)
+- [tests/package-cli.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/package-cli.test.ts)
+- [package.json](/Users/operator/Dev/video-os-v2-spec/package.json)
+- [.agents/skills/render-video/SKILL.md](/Users/operator/Dev/video-os-v2-spec/.agents/skills/render-video/SKILL.md)
+- [.claude/skills/render-video/SKILL.md](/Users/operator/Dev/video-os-v2-spec/.claude/skills/render-video/SKILL.md) byte-identical hard link
+- [.claude/commands/render.md](/Users/operator/Dev/video-os-v2-spec/.claude/commands/render.md)
 
 検証:
 - `npx tsc --noEmit`: pass

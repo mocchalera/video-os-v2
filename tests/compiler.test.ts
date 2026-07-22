@@ -42,6 +42,22 @@ function createTempProject(): string {
   return tmpDir;
 }
 
+function audioSelect(
+  candidateId: string,
+  segmentId: string,
+  assetId: string,
+  role: "dialogue" | "support" | "texture",
+  audioRole: "dialogue" | "music" | "ambient",
+) {
+  return {
+    candidate_id: candidateId, segment_id: segmentId, asset_id: assetId, src_in_us: 0, src_out_us: 2_000_000,
+    role, why_it_matches: audioRole === "dialogue" ? "Transcript: complete grounded assertion." : `Audio event: ${audioRole}`,
+    risks: [], confidence: 0.9, quality_flags: [], evidence: [`Audio event: ${audioRole}`], eligible_beats: ["b01"],
+    motif_tags: [audioRole], ...(audioRole === "dialogue" ? { transcript_excerpt: "Complete grounded assertion." } : {}),
+    media_kind: "audio", source_capabilities: { has_video: false, has_audio: true }, audio_role: audioRole,
+  };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("Timeline Compiler", () => {
@@ -85,6 +101,108 @@ describe("Timeline Compiler", () => {
     const json2 = JSON.stringify(result2.timeline);
 
     expect(json1).toBe(json2);
+  });
+
+  it("compiles canonical pure-audio artifacts into authored A1/A2/A3 with an empty V1", () => {
+    const audioProject = createTempProject();
+    try {
+      const sourceMedia = { mode: "audio_only", media_kinds: ["audio"], visual_candidate_count: 0, audio_only_candidate_count: 3 };
+      const candidates = [
+        audioSelect("cand_speech", "SEG_SPEECH", "AST_SPEECH", "dialogue", "dialogue"),
+        audioSelect("cand_music", "SEG_MUSIC", "AST_MUSIC", "support", "music"),
+        audioSelect("cand_room", "SEG_ROOM", "AST_ROOM", "texture", "ambient"),
+      ];
+      fs.writeFileSync(path.join(audioProject, "04_plan/selects_candidates.yaml"), stringifyYaml({
+        version: "1", project_id: "sample-mountain-reset", source_media: sourceMedia, candidates,
+      }));
+      fs.writeFileSync(path.join(audioProject, "04_plan/edit_blueprint.yaml"), stringifyYaml({
+        version: "1", project_id: "sample-mountain-reset", source_media: sourceMedia,
+        sequence_goals: ["Build a grounded audio story."],
+        beats: [{ id: "b01", label: "audio story", target_duration_frames: 144, required_roles: ["dialogue", "support", "texture"],
+          candidate_plan: { primary_candidate_ref: "cand_speech", fallback_candidate_refs: ["cand_music", "cand_room"] },
+          craft: { rhythm: "steady" } }],
+        pacing: { opening_cadence: "steady", middle_cadence: "steady", ending_cadence: "breath" },
+        music_policy: { start_sparse: false, allow_release_late: false },
+        dialogue_policy: { preserve_natural_breath: true, avoid_wall_to_wall_voiceover: false },
+        transition_policy: { prefer_match_texture_over_flashy_fx: true, allow_hard_cuts: true, avoid_speed_ramps: true },
+        ending_policy: { should_feel: "resolved", final_visual_strategy: "black canvas for audio-only render",
+          final_audio_strategy: "fade grounded room tone", tail_hold_sec: 0.5, audio_fade_out_sec: 0.5,
+          video_fade_out_sec: 0, video_fade_color: "none" },
+        rejection_rules: ["Reject ungrounded audio."],
+        duration_policy: { mode: "guide", source: "explicit_brief", target_source: "explicit_brief", target_duration_sec: 6,
+          min_duration_sec: 0, max_duration_sec: null, hard_gate: false, protect_vlm_peaks: false },
+        timeline_order: "editorial", track_layout: "single", active_editing_skills: ["human_golden_order"],
+      }));
+      fs.writeFileSync(path.join(audioProject, "03_analysis/segments.json"), JSON.stringify({
+        project_id: "sample-mountain-reset", artifact_version: "analysis-v1",
+        items: candidates.map((candidate) => ({ segment_id: candidate.segment_id, asset_id: candidate.asset_id,
+          src_in_us: 0, src_out_us: candidate.segment_id === "SEG_ROOM" ? 4_000_000 : 2_000_000,
+          summary: "", transcript_excerpt: candidate.transcript_excerpt ?? "", quality_flags: [], tags: [candidate.audio_role] })),
+      }, null, 2));
+      fs.writeFileSync(path.join(audioProject, "03_analysis/assets.json"), JSON.stringify({
+        project_id: "sample-mountain-reset", artifact_version: "analysis-v1",
+        items: candidates.map((candidate) => ({ asset_id: candidate.asset_id, filename: `${candidate.asset_id}.wav`, duration_us: 4_000_000,
+          has_transcript: candidate.audio_role === "dialogue", transcript_ref: null, segments: 1, segment_ids: [candidate.segment_id],
+          quality_flags: [], tags: [candidate.audio_role], frame_rate_mode: "audio_only",
+          audio_stream: { sample_rate: 48_000, channels: 2, codec: "pcm_s16le" } })),
+      }, null, 2));
+
+      const result = compile({ projectPath: audioProject, createdAt: FIXED_CREATED_AT });
+      expect(result.timeline.tracks.video.find((track) => track.track_id === "V1")?.clips).toEqual([]);
+      expect(result.timeline.tracks.audio.find((track) => track.track_id === "A1")?.clips.map((clip) => clip.segment_id)).toEqual(["SEG_SPEECH"]);
+      expect(result.timeline.tracks.audio.find((track) => track.track_id === "A2")?.clips.map((clip) => clip.segment_id)).toEqual(["SEG_MUSIC"]);
+      expect(result.timeline.tracks.audio.find((track) => track.track_id === "A3")?.clips.map((clip) => clip.segment_id)).toEqual(["SEG_ROOM"]);
+      const authored = result.timeline.tracks.audio.flatMap((track) => track.clips).filter((clip) => clip.role !== "bgm");
+      expect(authored.every((clip) => clip.media_kind === "audio" && clip.source_capabilities?.has_video === false)).toBe(true);
+      expect(authored.at(-1)?.metadata?.ending_treatment).toMatchObject({ audio_fade_out_frames: 12, video_fade_out_frames: 0 });
+      expect(result.resolution.total_frames).toBeGreaterThan(0);
+      expect(validateProject(audioProject).violations.filter((item) => item.artifact === "05_timeline/timeline.json")).toEqual([]);
+    } finally {
+      removeDirSync(audioProject);
+    }
+  });
+
+  it("compiles mixed human-golden-order plans across visual and authored audio without duplicate source audio", () => {
+    const mixedProject = createTempProject();
+    try {
+      const video = {
+        candidate_id: "cand_video", segment_id: "SEG_VIDEO", asset_id: "AST_VIDEO", src_in_us: 0, src_out_us: 2_000_000,
+        role: "hero", why_it_matches: "Grounded visual source.", risks: [], confidence: 0.9, quality_flags: [],
+        eligible_beats: ["b01"], media_kind: "video", source_capabilities: { has_video: true, has_audio: true },
+      };
+      const audio = audioSelect("cand_audio", "SEG_AUDIO", "AST_AUDIO", "texture", "ambient");
+      const sourceMedia = { mode: "mixed", media_kinds: ["audio", "video"], visual_candidate_count: 1, audio_only_candidate_count: 1 };
+      fs.writeFileSync(path.join(mixedProject, "04_plan/selects_candidates.yaml"), stringifyYaml({
+        version: "1", project_id: "sample-mountain-reset", source_media: sourceMedia, candidates: [video, audio],
+      }));
+      fs.writeFileSync(path.join(mixedProject, "04_plan/edit_blueprint.yaml"), stringifyYaml({
+        version: "1", project_id: "sample-mountain-reset", source_media: sourceMedia,
+        sequence_goals: ["Keep canonical mixed order."],
+        beats: [{ id: "b01", label: "mixed", target_duration_frames: 96, required_roles: ["hero", "texture"],
+          candidate_plan: { primary_candidate_ref: "cand_video", fallback_candidate_refs: ["cand_audio"] }, craft: { rhythm: "steady" } }],
+        pacing: {}, music_policy: {}, dialogue_policy: { preserve_natural_breath: false }, transition_policy: {},
+        ending_policy: { should_feel: "resolved" }, rejection_rules: ["Reject unknown sources."],
+        duration_policy: { mode: "guide", source: "explicit_brief", target_source: "explicit_brief", target_duration_sec: 4,
+          min_duration_sec: 0, max_duration_sec: null, hard_gate: false, protect_vlm_peaks: false },
+        timeline_order: "editorial", track_layout: "single", active_editing_skills: ["human_golden_order"],
+      }));
+      fs.writeFileSync(path.join(mixedProject, "03_analysis/segments.json"), JSON.stringify({
+        project_id: "sample-mountain-reset", artifact_version: "analysis-v1", items: [video, audio].map((candidate) => ({
+          segment_id: candidate.segment_id, asset_id: candidate.asset_id, src_in_us: 0, src_out_us: 2_000_000,
+          summary: candidate.why_it_matches, transcript_excerpt: "", quality_flags: [], tags: [],
+        })),
+      }));
+
+      const result = compile({ projectPath: mixedProject, createdAt: FIXED_CREATED_AT });
+      expect(result.timeline.tracks.video.find((track) => track.track_id === "V1")?.clips.map((clip) => clip.segment_id)).toEqual(["SEG_VIDEO"]);
+      expect(result.timeline.tracks.audio.find((track) => track.track_id === "A3")?.clips.map((clip) => clip.segment_id)).toEqual(["SEG_AUDIO"]);
+      const mirrors = result.timeline.tracks.audio.flatMap((track) => track.clips)
+        .filter((clip) => clip.motivation === "original clip audio");
+      expect(mirrors.every((clip) => clip.segment_id === "SEG_VIDEO")).toBe(true);
+      expect(result.timeline.tracks.audio.flatMap((track) => track.clips).filter((clip) => clip.segment_id === "SEG_AUDIO")).toHaveLength(1);
+    } finally {
+      removeDirSync(mixedProject);
+    }
   });
 
   it("all clips have motivation set", () => {

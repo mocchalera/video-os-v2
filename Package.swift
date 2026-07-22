@@ -21,9 +21,13 @@ let package = Package(
             name: "VideoOSStudio",
             dependencies: ["VideoOSStudioCore"],
             path: "apps/macos-studio/Sources/VideoOSStudio",
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
-                .linkedFramework("AVKit")
+                .linkedFramework("AVKit"),
+                .linkedFramework("CoreText")
             ]
         ),
         .executableTarget(
@@ -34,7 +38,10 @@ let package = Package(
         .testTarget(
             name: "VideoOSStudioCoreTests",
             dependencies: ["VideoOSStudioCore"],
-            path: "apps/macos-studio/Tests/VideoOSStudioCoreTests"
+            path: "apps/macos-studio/Tests/VideoOSStudioCoreTests",
+            resources: [
+                .copy("Fixtures")
+            ]
         )
     ]
 )

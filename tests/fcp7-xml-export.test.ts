@@ -482,14 +482,46 @@ describe("dB ↔ linear gain conversion", () => {
     expect(linearGainToDb(0)).toBe(-96);
   });
 
-  it("linearGainToDb returns -96 for negative gain (clamped silence floor)", () => {
-    expect(linearGainToDb(-1)).toBe(-96);
+  it("linearGainToDb rejects negative gain as out of policy", () => {
+    expect(() => linearGainToDb(-1)).toThrow(RangeError);
   });
 });
 
 // ── Audio gain export ────────────────────────────────────────────
 
 describe("audio gain export (Audio Levels filter)", () => {
+  it("exports explicit linear gain without treating it as dB", () => {
+    const audioClip = makeClip({
+      clip_id: "nat-linear",
+      asset_id: "AST_NAT",
+      role: "nat_sound",
+      beat_id: "beat-1",
+      audio_policy: { gain_unit: "linear", nat_sound_gain: 1.8 },
+    });
+    const xml = timelineToFcp7Xml(makeTimeline([], [[audioClip]]), {
+      sourceMap: new Map([["AST_NAT", "/media/nat.wav"]]),
+    });
+    const gainMatch = xml.match(/<value>([\d.]+)<\/value>/);
+    expect(gainMatch).not.toBeNull();
+    expect(Number(gainMatch![1])).toBeCloseTo(1.8, 8);
+  });
+
+  it("uses unit-aware audio_mix when the clip has no gain", () => {
+    const audioClip = makeClip({
+      clip_id: "nat-mix",
+      asset_id: "AST_NAT",
+      role: "nat_sound",
+      beat_id: "beat-1",
+    });
+    const timeline = makeTimeline([], [[audioClip]]);
+    timeline.audio_mix = { gain_unit: "linear", nat_sound_gain: 0.5 };
+    const xml = timelineToFcp7Xml(timeline, {
+      sourceMap: new Map([["AST_NAT", "/media/nat.wav"]]),
+    });
+    const gainMatch = xml.match(/<value>([\d.]+)<\/value>/);
+    expect(Number(gainMatch![1])).toBeCloseTo(0.5, 8);
+  });
+
   it("emits Audio Levels filter with linear gain for bgm_gain", () => {
     const audioClip = makeClip({
       clip_id: "bgm-1",

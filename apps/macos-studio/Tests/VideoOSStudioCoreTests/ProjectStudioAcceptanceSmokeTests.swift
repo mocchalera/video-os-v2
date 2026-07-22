@@ -30,6 +30,16 @@ final class ProjectStudioAcceptanceSmokeTests: XCTestCase {
                             try Data([0x00, 0x01, 0x02]).write(to: URL(fileURLWithPath: output))
                         }
                     },
+                    preflightReader: { _, _ in
+                        ProjectPackagePreflightStatus(
+                            ok: true,
+                            sourceOfTruth: "nle_finishing",
+                            autonomyMode: "full",
+                            projectID: "synthetic-studio-smoke",
+                            currentState: "approved",
+                            visualQaSummary: "verified"
+                        )
+                    },
                     renderRunner: { plan in
                         let outputDir = plan.projectURL.appendingPathComponent("09_output")
                         let packageDir = plan.projectURL.appendingPathComponent("07_package")
@@ -44,10 +54,13 @@ final class ProjectStudioAcceptanceSmokeTests: XCTestCase {
                         try Data([0x06, 0x07, 0x08]).write(to: finalMixURL)
                         try """
                         {
+                          "version": "1",
+                          "project_id": "synthetic-studio-smoke",
                           "passed": true,
                           "source_of_truth": "nle_finishing",
+                          "qa_profile": "nle_finishing",
                           "checks": [
-                            { "name": "synthetic", "passed": true }
+                            { "name": "synthetic", "passed": true, "details": "ok" }
                           ],
                           "metrics": {},
                           "artifacts": {}
@@ -55,11 +68,30 @@ final class ProjectStudioAcceptanceSmokeTests: XCTestCase {
                         """.write(to: packageDir.appendingPathComponent("qa-report.json"), atomically: true, encoding: .utf8)
                         try """
                         {
+                          "version": "package-v1",
+                          "project_id": "synthetic-studio-smoke",
                           "source_of_truth": "nle_finishing",
-                          "created_at": "2026-05-22T00:00:00Z"
+                          "base_timeline_version": "1",
+                          "packaging_projection_hash": "synthetic",
+                          "created_at": "2026-05-22T00:00:00Z",
+                          "artifacts": {
+                            "final_video": { "path": "09_output/final.mp4", "sha256": "video" },
+                            "qa_report": { "path": "07_package/qa-report.json", "sha256": "qa" }
+                          },
+                          "provenance": {
+                            "editorial_timeline_hash": "timeline"
+                          }
                         }
                         """.write(to: packageDir.appendingPathComponent("package_manifest.json"), atomically: true, encoding: .utf8)
-                        let status = ProjectRenderPackageStatusReader.status(projectURL: plan.projectURL)
+                        let status = ProjectRenderPackageStatusReader.status(
+                            projectURL: plan.projectURL,
+                            verificationStatus: ProjectPackageVerificationStatus(
+                                ready: true,
+                                readinessLabel: "render packaged",
+                                projectID: "synthetic-studio-smoke",
+                                sourceOfTruth: "nle_finishing"
+                            )
+                        )
                         return ProjectRenderRunResult(plan: plan, exitCode: 0, stdout: "", stderr: "", status: status)
                     },
                     editorPacketExporter: { root, projectURL in

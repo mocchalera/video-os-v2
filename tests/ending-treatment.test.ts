@@ -7,6 +7,23 @@ import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { ClipOutput, TimelineIR } from "../runtime/compiler/types.js";
 
 describe("ending treatment", () => {
+  it("applies fade and tail metadata directly to a pure-audio program clip", () => {
+    const timeline = timelineWithMirroredEnding();
+    timeline.tracks.video = [];
+    timeline.tracks.audio[0].clips = [endingClip("AUDIO_END", "dialogue")];
+    timeline.tracks.audio[0].clips[0].media_kind = "audio";
+    timeline.tracks.audio[0].clips[0].source_capabilities = { has_video: false, has_audio: true };
+    const result = applyEndingTreatment(timeline, { should_feel: "resolved", tail_hold_sec: 1, audio_fade_out_sec: 0.5 }, [{
+      segment_id: "SEG_END", asset_id: "AST_END", src_in_us: 0, src_out_us: 20_000_000, duration_us: 20_000_000,
+    } as SegmentItem], 24);
+
+    expect(result).toMatchObject({ extendedFrames: 24, audioClipCount: 0 });
+    expect(timeline.tracks.audio[0].clips[0].audio_policy?.fade_out_frames).toBe(12);
+    expect(timeline.tracks.audio[0].clips[0].metadata?.ending_treatment).toMatchObject({
+      extended_frames: 24, audio_fade_out_frames: 12,
+    });
+  });
+
   it("keeps legacy blueprints unchanged unless an ending treatment is requested", () => {
     expect(resolveEndingTreatment({ should_feel: "resolved" })).toEqual({
       tailHoldSec: 0,

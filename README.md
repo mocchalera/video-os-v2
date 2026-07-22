@@ -47,7 +47,7 @@ CI はこの境界に合わせ、`macos-studio` job で SwiftPM tests と CLI sm
 - アスペクト比自動対応: 最頻アスペクト比を推定し、`letterbox` / `pillarbox` を判定
 - 時系列順コンパイル: `keepsake` / `event-recap` 系は chronological order を選択可能
 - 長尺イベント削減: `longform-event` は2時間級の固定カメラ素材を発話窓と章に分け、不要区間を記録しながら約1時間の時系列タイムラインへ決定論的に圧縮
-- macOS Studio: Viewer、Source Monitor、素材ビン、Timeline、Inspector、候補差し替え、マルチモーダル検索、QA、patch apply / undo、render / handoff を1つのネイティブUIで操作
+- macOS Studio: Viewer、Source Monitor、素材ビン、Timeline、Inspector、候補差し替え、マルチモーダル検索、QA、インタビューMA・自動画角、patch apply / undo、render / handoff を1つのネイティブUIで操作
 - 字幕ヒューマンレビュー: リスク順キュー、本文・分割・結合・IN/OUT編集、動画loopと波形、IME対応autosave、用語候補、stale競合検出を備え、明示的な人間承認だけで `caption_approval.json` を生成
 - Schema 駆動 + Gate 制御: canonical artifacts を validate しながら進行
 - Full Autonomy Mode: `autonomy.mode: full` で brief 確定後の確認ゲートを自動通過し、粗編集まで自走
@@ -61,6 +61,13 @@ CI はこの境界に合わせ、`macos-studio` job で SwiftPM tests と CLI sm
 ```bash
 npm install
 ```
+
+HyperFrames / Remotion の exact preview は、ローカルに `pyftsubset`
+（FontTools）があれば表示文字だけの WOFF2 を生成・再利用します。未導入でも
+ネットワークへは接続せず、同梱済み Noto Sans JP のフルTTFへ安全に
+fallbackします。キャッシュ先は macOS では
+`~/Library/Caches/video-os/font-subsets`、上書きは
+`VOS_FONT_SUBSET_CACHE_DIR` / `VOS_PYFTSUBSET_BIN` で指定できます。
 
 ### 2. 環境変数とローカルモデルを用意
 
@@ -158,8 +165,20 @@ npm run full-pipeline -- \
 ### 5. パッケージまで進める
 
 ```bash
+npm run render-route -- projects/my-project
+npm run package -- projects/my-project --preflight-only --json
 npm run package -- projects/my-project
 ```
+
+`--preflight-only --json` はproject artifactを書き換えず、Studioと同じGate 10判定を返します。
+`render-route` は `timeline.json` の要素所有権から FFmpeg / Remotion /
+HyperFrames の組み合わせを読み取り専用で表示します。`package` は同じ判定を
+`auto` で使い、通常ジャンルの既存 FFmpeg 経路を維持したまま、登録済み要素が
+必要な場合だけ Remotion / HyperFrames を有効化します。詳細は
+[`docs/render-routing.md`](docs/render-routing.md) を参照してください。
+
+短尺SNSのコールドオープン、早いpayoff、視聴者向け章題、固定画の意味的な視覚更新は、
+[`docs/short-form-retention-planning.md`](docs/short-form-retention-planning.md) の明示的な適用条件と監査に従います。
 
 `npm run full-pipeline` は粗編集と QA loop までを主導します。final package / handoff artifact が必要な場合は、承認・caption/music 前提を満たしたあと `npm run package` を出口にしてください。
 
@@ -172,6 +191,13 @@ swift run VideoOSStudio
 VideoOSStudio はこのリポジトリの正式なオペレーターUIです。canonical artifacts を直接読み、素材検索、タイムライン編集、Agent相談、QA、字幕仕上げ、render、Premiere / editor packet handoffを同じプロジェクト上で扱います。診断・自動化には `swift run videoos-studio-cli <command>` を使います。
 
 字幕の機械ドラフトを人間が仕上げる場合は、Studio上部の「字幕仕上げ」を開きます。headless運用では同じReview Coreを使う `scripts/caption-review.ts` を利用できます。字幕のartifact契約と操作手順は [`docs/design-caption-human-review-workflow.md`](docs/design-caption-human-review-workflow.md)、プロジェクト固有の表記ルールは [`docs/caption-glossary.md`](docs/caption-glossary.md) を参照してください。
+
+生成BGM候補を仕上げる場合は、Studio上部の音符アイコンから
+`musical-review-queue.json` を開きます。候補を単体または照合済みtimeline
+previewの会話と重ねて試聴し、音楽適合・会話適合・生成品質・独自性・
+権利証跡を別々に保存できます。候補の完了や採用候補化は公開利用許可を
+意味しません。詳細は
+[`docs/bgm-pack/core-v1/README.md`](docs/bgm-pack/core-v1/README.md) を参照してください。
 
 ## CLI EntryPoints
 
@@ -187,7 +213,9 @@ VideoOSStudio はこのリポジトリの正式なオペレーターUIです。c
 | `render-rough-cut` | `timeline.json` を BGM 付き MP4 にレンダーし duration parity を記録 | `npx tsx scripts/render-rough-cut.ts --project projects/<project-id> [--output path] [--bgm path]` |
 | `promo-finish` | transcript aligned 字幕、最後の余韻、音声/映像フェード付き宣材MP4を生成 | `npm run promo-finish -- --project projects/<project-id> [--output path]` |
 | `caption-review` | 字幕のrisk queue、編集、split / merge、timing、用語候補、検証、人間承認 | `npx tsx scripts/caption-review.ts <queue|init|edit|split|merge|glossary-propose|undo|apply|validate|approve> --project projects/<project-id> [options]` |
-| `package` | approved rough cut から final package / QA manifest を作成 | `npm run package -- projects/<project-id> [options]` |
+| `bgm-shortlist` | 生成BGM候補の元音源をSHA照合し、音楽・会話適合・類似性・権利の人間レビューキューを作成・更新 | `npx tsx scripts/bgm-shortlist.ts <verify|prepare-review|review> [options]` |
+| `package` | approved rough cut から final package / QA manifest を作成。`--preflight-only --json`は読み取り専用Gate 10確認 | `npm run package -- projects/<project-id> [options]` |
+| `render-route` | timeline要素から FFmpeg / Remotion / HyperFrames の描画経路を読み取り専用で確認 | `npm run render-route -- projects/<project-id> [--json]` |
 | `status` | Gate 状態と次アクション確認 | `npx tsx scripts/status.ts projects/<project-id>` |
 | `compile` | `timeline.json` と preview manifest 生成 | `npx tsx scripts/compile-timeline.ts projects/<project-id>` |
 | `preview` | preview clip / overview 生成 | `npx tsx scripts/preview-segment.ts projects/<project-id> [--beat <beat-name>]` |
@@ -364,6 +392,21 @@ Creative Brief
 | `full-pipeline` | 「全自動で」「素材から動画を作って」 | 全ステージを Gate 付きでオーケストレーション |
 | `troubleshoot-error` | エラー発生時、「直して」 | エラーカタログから原因特定・復旧手順を案内 |
 | `re-edit` | 「ここを変えて」「尺を短くして」 | 既存 timeline への部分的な再編集指示を処理 |
+| `finish-interview` | 「MAして」「人物を大きく」「画角を整えて」 | overlay前の人物リフレーム、2-pass会話MA、ラウドネス・同期QAを実行 |
+
+インタビュー仕上げでは review patch の `change_visual_transform` で
+clip metadataのzoom/crop/positionを更新し、`change_audio_finish` で
+`dialogue-clean` または `loudness-only` を指定できます。共有assemblerが
+preview/final共通の映像filterと、測定値を使った2-pass MAを適用します。
+Studioの選択クリップInspectorではMA presetとzoom/panを調整でき、Viewerへ
+即時プレビューされます。顔landmark・yaw・手首位置から再現可能な提案値だけを
+取得する場合は次を使います。
+
+```bash
+swift build --product videoos-studio-cli
+.build/debug/videoos-studio-cli interview-reframe \
+  --source=/path/to/interview.mov --in-us=0 --out-us=30000000
+```
 
 ## テスト
 
@@ -393,6 +436,7 @@ CI でも Node / TypeScript とmacOS Studioの境界を分けて検証します�
 - AJV + JSON Schema + YAML
 - SQLite / FTS5 / `better-sqlite3`
 - `ffmpeg` / `ffprobe`
+- FontTools `pyftsubset`（browser exact preview の文字単位 WOFF2 最適化、任意）
 - Qwen3-VL-Embedding-2B（visual / text embedding、2048-dim）
 - CLAP `laion/clap-htsat-fused`（audio embedding、512-dim）
 - Marlin-2B（local video VLM）

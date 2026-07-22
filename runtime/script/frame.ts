@@ -7,6 +7,13 @@ import type { ResolvedRef, QualityTargets } from "../compiler/types.js";
 import type { ResolutionInput, ResolutionResult } from "../editorial/policy-resolver.js";
 import { resolveProfileAndPolicy } from "../editorial/policy-resolver.js";
 
+export interface MessageFrameDiagnostic {
+  code: "EDITORIAL_PROFILE_INSUFFICIENT_SIGNAL";
+  severity: "warning";
+  message: string;
+  resolved_profile: string;
+}
+
 export interface MessageFrame {
   version: string;
   project_id: string;
@@ -16,6 +23,7 @@ export interface MessageFrame {
   closing_intent: string;
   resolved_profile_candidate: ResolvedRef;
   resolved_policy_candidate: ResolvedRef;
+  diagnostics?: MessageFrameDiagnostic[];
   beat_strategy: {
     beat_count: number;
     role_sequence: Array<"hook" | "setup" | "experience" | "closing">;
@@ -69,6 +77,16 @@ export function buildMessageFrame(input: FrameInput): {
     closing_intent: input.closingIntent,
     resolved_profile_candidate: resolution.resolvedProfile,
     resolved_policy_candidate: resolution.resolvedPolicy,
+    ...(resolution.insufficientSignal
+      ? {
+          diagnostics: [{
+            code: "EDITORIAL_PROFILE_INSUFFICIENT_SIGNAL",
+            severity: "warning",
+            message: "Editorial profile inference had insufficient signal; using the conservative generic fallback.",
+            resolved_profile: resolution.resolvedProfile.id ?? "generic-editorial",
+          }],
+        }
+      : {}),
     beat_strategy: {
       beat_count: input.beatCount,
       role_sequence: roleSequence,

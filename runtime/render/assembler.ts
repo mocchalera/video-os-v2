@@ -2,7 +2,14 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ClipOutput, TimelineIR, TrackOutput } from "../compiler/types.js";
+import type { AudioMix, ClipOutput, TimelineIR, TrackOutput } from "../compiler/types.js";
+import { assertTimelineRenderSupported } from "./media-kind-guard.js";
+import {
+  materializeVerifiedStillSnapshots,
+  resolveCanonicalRenderInputs,
+  type VerifiedStillSnapshotSet,
+} from "./canonical-render-input.js";
+import { assertSourceInputsUnchanged, createSourceInputAttestation } from "./source-input-attestation.js";
 import { loadSourceMap, type LoadedSourceMap } from "../media/source-map.js";
 import {
   buildAspectRatioFitFilter,
@@ -17,6 +24,12 @@ import {
   dialogueCutFadeSec,
   TALKING_HEAD_PACING_SKILL_ID,
 } from "../../editor/shared/dialogue-cut-fade.js";
+import {
+  buildAudioFinishApplyFilter,
+  buildAudioFinishPass1Args,
+  resolveAudioFinishPolicy,
+} from "../audio/dialogue-finishing.js";
+import { parseLoudnormOutput } from "../audio/mastering.js";
 import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 import {
   buildTransitionSpec,
@@ -28,6 +41,14 @@ import {
   type TransitionAudioExtension,
 } from "../../editor/shared/filtergraph.js";
 import type { RenderTransition } from "../../editor/shared/render-spec.js";
+import { resolveBundledFontPaths } from "../fonts/bundled-font.js";
+import { assertSafeAudioDelayFilterOrder } from "./audio-filter-safety.js";
+import {
+  canonicalLinearGainFilter,
+  resolveAudioGain,
+  resolveAudioGainWithFallback,
+  type AudioGainRole,
+} from "../../editor/shared/audio-gain.js";
 
 export interface AssemblerOptions {
   projectDir: string;
@@ -45,6 +66,7 @@ export interface AssemblerOptions {
    * Lets the orchestrator pass the same sourceMap it gives Remotion.
    */
   sourceOverrides?: Record<string, string>;
+  includeAudio?: boolean;
 }
 
 export interface AssemblyResult {
@@ -65,6 +87,11 @@ export interface VideoSegmentPlan {
   asset_id?: string;
   source_in_sec?: number;
   source_out_sec?: number;
+  still?: {
+    hold_frames: number;
+    fit_mode: "contain" | "cover";
+    background: string;
+  };
 }
 
 export interface AudioClipPlan {
@@ -109,6 +136,7 @@ interface SourceResolverContext {
   previewByAssetId: Map<string, PreviewManifestClip[]>;
   assetsById: Map<string, AssetsManifestEntry>;
   sourceOverrides?: Record<string, string>;
+  canonicalInputs: VerifiedStillSnapshotSet;
 }
 
 interface ExecResult {
@@ -141,6 +169,46 @@ export function getTimelineFps(timeline: TimelineIR): number {
     throw new Error(`Invalid timeline fps: ${timeline.sequence.fps_num}/${timeline.sequence.fps_den}`);
   }
   return fps;
+}
+
+export function getTimelineFpsRational(timeline: TimelineIR): string {
+  return `${timeline.sequence.fps_num}/${timeline.sequence.fps_den}`;
+}
+
+function ffmpegColor(background: string): string {
+  if (background === "black" || background === "white") return background;
+  if (background === "transparent") return "black@0";
+  if (/^#[a-fA-F0-9]{6}$/.test(background)) return `0x${background.slice(1)}`;
+  if (/^#[a-fA-F0-9]{8}$/.test(background)) return `0x${background.slice(1)}`;
+  throw new Error(`still_image_background_invalid:${background}`);
+}
+
+export function buildStillVideoFilter(width: number, height: number, fitMode: "contain" | "cover", background: string): string {
+  const scale = fitMode === "contain"
+    ? `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos`
+    : `scale=${width}:${height}:force_original_aspect_ratio=increase:flags=lanczos`;
+  const placement = fitMode === "contain"
+    ? `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${ffmpegColor(background)}`
+    : `crop=${width}:${height}`;
+  return `${scale},format=rgba,${placement},format=yuv420p,setsar=1`;
+}
+
+export function buildStillVideoArgs(
+  inputPath: string,
+  outputPath: string,
+  frameCount: number,
+  width: number,
+  height: number,
+  fpsRational: string,
+  fitMode: "contain" | "cover",
+  background: string,
+): string[] {
+  return [
+    "-y", "-loop", "1", "-framerate", fpsRational, "-i", inputPath,
+    "-map", "0:v:0", "-vf", buildStillVideoFilter(width, height, fitMode, background),
+    "-frames:v", String(frameCount), "-an", "-r", fpsRational,
+    ...x264Args(INTERMEDIATE_X264), "-pix_fmt", "yuv420p", outputPath,
+  ];
 }
 
 export function getTimelineDurationFrames(timeline: TimelineIR): number {
@@ -183,6 +251,7 @@ export function buildVideoTrimArgs(
   fps: number,
   transform?: ClipFilterTransform,
   endingFade?: { color: "black" | "white"; durationSec: number },
+  timelineDurationSec?: number,
 ): string[] {
   const fitFilter = transform
     ? buildVideoFitFilterFromTransform(width, height, transform)
@@ -191,9 +260,12 @@ export function buildVideoTrimArgs(
   const fadeDurationSec = endingFade
     ? Math.min(clipDurationSec, endingFade.durationSec)
     : 0;
-  const videoFilter = fadeDurationSec > 0 && endingFade
+  const composedFilter = fadeDurationSec > 0 && endingFade
     ? `${fitFilter},fade=t=out:st=${formatFfmpegTimestamp(clipDurationSec - fadeDurationSec)}:d=${formatFfmpegTimestamp(fadeDurationSec)}:color=${endingFade.color}`
     : fitFilter;
+  const videoFilter = timelineDurationSec !== undefined
+    ? `${composedFilter},tpad=stop_mode=clone:stop_duration=1,trim=duration=${formatFfmpegTimestamp(timelineDurationSec)},setpts=PTS-STARTPTS`
+    : composedFilter;
   return [
     "-y",
     "-ss", formatFfmpegTimestamp(startSec),
@@ -203,6 +275,9 @@ export function buildVideoTrimArgs(
     "-vf", videoFilter,
     "-an",
     "-r", String(fps),
+    ...(timelineDurationSec !== undefined
+      ? ["-t", formatFfmpegTimestamp(timelineDurationSec)]
+      : []),
     // Parity: segment encodes must use the same near-lossless profile as
     // the preview path so cross-path frames share encoder settings.
     ...x264Args(INTERMEDIATE_X264),
@@ -219,7 +294,7 @@ export function buildVideoTrimArgs(
  * is the orchestrator's job.
  */
 export function extractClipTransform(
-  clip: ClipOutput,
+  clip: { metadata?: Record<string, unknown> },
 ): ClipFilterTransform | undefined {
   const meta = clip.metadata;
   if (!meta || typeof meta !== "object") return undefined;
@@ -357,6 +432,7 @@ export function buildCaptionDrawtextFilter(
   fps: number,
   width: number,
   height: number,
+  fontPath: string = resolveBundledFontPaths().fontPath,
 ): string {
   return captions
     .map((caption) => {
@@ -368,7 +444,7 @@ export function buildCaptionDrawtextFilter(
       return [
         "drawtext=",
         `text='${escapeDrawtext(caption.text)}'`,
-        ":font='Hiragino Sans'",
+        `:fontfile='${escapeDrawtext(fontPath)}'`,
         ":fontcolor=white",
         `:fontsize=${Math.max(28, preset.fontSize)}`,
         ":line_spacing=8",
@@ -393,11 +469,12 @@ export function buildCaptionOverlayArgs(
   fps: number,
   width: number,
   height: number,
+  fontPath: string = resolveBundledFontPaths().fontPath,
 ): string[] {
   return [
     "-y",
     "-i", inputPath,
-    "-vf", buildCaptionDrawtextFilter(captions, fps, width, height),
+    "-vf", buildCaptionDrawtextFilter(captions, fps, width, height, fontPath),
     "-an",
     "-r", String(fps),
     "-c:v", "libx264",
@@ -422,9 +499,12 @@ export function buildAudioTrimArgs(
   audioPolicy?: ClipOutput["audio_policy"],
   fades?: AudioTransitionFades,
   fps = 30,
+  gainRole: AudioGainRole = "nat",
+  fallbackPolicy?: AudioMix,
 ): string[] {
-  const gain = audioPolicy?.nat_gain ?? audioPolicy?.nat_sound_gain ?? 1;
-  const filters = gain > 0 && gain !== 1 ? [`volume=${gain.toFixed(4)}`] : [];
+  const gain = resolveAudioGainWithFallback(audioPolicy, fallbackPolicy, gainRole).gainLinear;
+  const gainFilter = canonicalLinearGainFilter(gain);
+  const filters = gainFilter ? [gainFilter] : [];
   const fadeInSec = Math.max(
     fades?.fadeInSec ?? 0,
     fades?.dialogueCutFadeSec ?? 0,
@@ -468,16 +548,19 @@ export function buildBgmAudioRenderArgs(
   audioChannels: 1 | 2,
   fps: number,
   audioPolicy?: ClipOutput["audio_policy"],
+  fallbackPolicy?: AudioMix,
 ): string[] {
   const fadeInFrames = audioPolicy?.bgm_fade_in_frames ?? audioPolicy?.fade_in_frames ?? 0;
   const fadeOutFrames = audioPolicy?.bgm_fade_out_frames ?? audioPolicy?.fade_out_frames ?? Math.round(fps);
   const fadeInSec = Math.max(0, fadeInFrames / fps);
   const fadeOutSec = Math.max(0, Math.min(durationSec / 2, fadeOutFrames / fps));
   const filters: string[] = [];
-  const bgmGain = audioPolicy?.bgm_gain ?? 0.25;
-  if (bgmGain > 0 && bgmGain !== 1) {
-    filters.push(`volume=${bgmGain.toFixed(4)}`);
-  }
+  const resolvedGain = resolveAudioGainWithFallback(audioPolicy, fallbackPolicy, "bgm");
+  const bgmGain = resolvedGain.sourceField === null
+    ? resolveAudioGain({ gain_unit: "linear", bgm_gain: 0.25 }, "bgm").gainLinear
+    : resolvedGain.gainLinear;
+  const gainFilter = canonicalLinearGainFilter(bgmGain);
+  if (gainFilter) filters.push(gainFilter);
 
   if (fadeInSec > 0) {
     filters.push(`afade=t=in:d=${fadeInSec.toFixed(4)}`);
@@ -522,7 +605,9 @@ export function buildAudioMixFilter(
     `${inputs}amix=inputs=${delaysMs.length + 1}:duration=longest:dropout_transition=0:normalize=0[aout]`,
   );
 
-  return steps.join(";");
+  const filterGraph = steps.join(";");
+  assertSafeAudioDelayFilterOrder(filterGraph);
+  return filterGraph;
 }
 
 export function buildDuckingAudioMixFilter(
@@ -548,7 +633,9 @@ export function buildDuckingAudioMixFilter(
   if (originalLabels.length === 0 || bgmLabels.length === 0) {
     const labels = [`[0:a]`, ...originalLabels, ...bgmLabels].join("");
     steps.push(`${labels}amix=inputs=${plans.length + 1}:duration=longest:dropout_transition=0:normalize=0[aout]`);
-    return steps.join(";");
+    const filterGraph = steps.join(";");
+    assertSafeAudioDelayFilterOrder(filterGraph);
+    return filterGraph;
   }
 
   const mixGroup = (labels: string[], output: string) => {
@@ -572,7 +659,9 @@ export function buildDuckingAudioMixFilter(
   steps.push("[bgm][sc]sidechaincompress=threshold=0.05:ratio=4:attack=20:release=400:makeup=1:detection=rms[ducked]");
   steps.push("[orig][ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]");
 
-  return steps.join(";");
+  const filterGraph = steps.join(";");
+  assertSafeAudioDelayFilterOrder(filterGraph);
+  return filterGraph;
 }
 
 export function buildSilentAudioArgs(
@@ -622,21 +711,26 @@ export function buildFinalAssemblyMuxArgs(
   videoPath: string,
   audioPath: string,
   outputPath: string,
+  options: { audioFilter?: string; durationSec?: number } = {},
 ): string[] {
+  const durationArgs = options.durationSec !== undefined
+    ? ["-t", formatFfmpegTimestamp(options.durationSec), "-shortest"]
+    : [];
   return [
     "-y",
     "-i", videoPath,
     "-i", audioPath,
     "-c:v", "copy",
-    "-af", "loudnorm=I=-16:LRA=11:TP=-1.5",
+    "-af", options.audioFilter ?? "loudnorm=I=-16:LRA=11:TP=-1.5",
     "-ar", "48000",
     "-c:a", "aac",
     "-b:a", "192k",
+    ...durationArgs,
     outputPath,
   ];
 }
 
-export function buildVideoAssemblyPlan(timeline: TimelineIR): VideoSegmentPlan[] {
+export function buildVideoAssemblyPlan(timeline: TimelineIR, imageAssetIds: ReadonlySet<string> = new Set()): VideoSegmentPlan[] {
   const fps = getTimelineFps(timeline);
   const totalFrames = getTimelineDurationFrames(timeline);
   if (totalFrames <= 0) {
@@ -683,6 +777,13 @@ export function buildVideoAssemblyPlan(timeline: TimelineIR): VideoSegmentPlan[]
       asset_id: active.clip.asset_id,
       source_in_sec: sourceRange.startSec,
       source_out_sec: sourceRange.endSec,
+      ...(active.clip.media_kind === "image" || active.clip.still_image || imageAssetIds.has(active.clip.asset_id)
+        ? { still: {
+            hold_frames: endFrame - startFrame,
+            fit_mode: active.clip.still_image?.fit_mode ?? "contain",
+            background: active.clip.still_image?.background ?? "black",
+          } }
+        : {}),
     });
   }
 
@@ -928,7 +1029,18 @@ export async function assembleTimelineToMp4(
   const execFileImpl: ExecFileLike = opts.execFileImpl ?? defaultExecFile;
 
   const timeline = readTimeline(timelinePath);
+  assertTimelineRenderSupported(timeline, {
+    projectDir,
+    timelinePath,
+    sourceLocators: opts.sourceOverrides,
+  });
+  const sourceInputsBefore = createSourceInputAttestation(projectDir, {
+    timelinePath,
+    sourceOverrides: opts.sourceOverrides,
+    includeAudio: opts.includeAudio !== false,
+  });
   const fps = getTimelineFps(timeline);
+  const fpsRational = getTimelineFpsRational(timeline);
   const totalFrames = getTimelineDurationFrames(timeline);
   if (totalFrames <= 0) {
     throw new Error(`Timeline has no clips to assemble: ${timelinePath}`);
@@ -943,18 +1055,19 @@ export async function assembleTimelineToMp4(
   const workingDirRoot = opts.workingDirRoot ?? os.tmpdir();
   const workingDir = fs.mkdtempSync(path.join(workingDirRoot, "vos-assembler-"));
   const timelineDir = path.dirname(timelinePath);
-  const resolver = createSourceResolver(projectDir, timelineDir, opts.sourceOverrides);
-  const videoPlans = buildVideoAssemblyPlan(timeline);
-  const audioPlans = buildAudioAssemblyPlan(timeline);
+  const resolver = createSourceResolver(projectDir, timelineDir, timeline, opts.sourceOverrides);
+  try {
+  const videoPlans = buildVideoAssemblyPlan(timeline, resolver.canonicalInputs.imageAssetIds);
+  const audioPlans = opts.includeAudio === false ? [] : buildAudioAssemblyPlan(timeline);
   const transitionWindows = collectTransitionWindows(timeline);
   const audioPolicyMode = getTimelineAudioPolicyMode(timeline);
+  const audioFinish = resolveAudioFinishPolicy(timeline.metadata?.audio_finish);
   const dialogueCutFadeEnabled = timelineHasAppliedSkill(
     timeline,
     TALKING_HEAD_PACING_SKILL_ID,
   );
   const totalDurationSec = totalFrames / fps;
 
-  try {
     const renderedVideoSegments: string[] = [];
 
     // Single-generation transition chain (cross-path parity): render every
@@ -991,16 +1104,21 @@ export async function assembleTimelineToMp4(
     });
 
     const clipChainInputs: TransitionChainTimelineInput[] = orderedClips.map((clip) => {
-      const transform = extractClipTransform(clip);
+      const canonical = resolver.canonicalInputs.byAssetId.get(clip.asset_id);
+      const isStill = canonical?.relationship === "normalized_still_frame";
+      const transform = isStill ? undefined : extractClipTransform(clip);
       return {
         kind: "source",
         clipId: clip.clip_id,
         timelineInFrame: clip.timeline_in_frame,
         durationFrames: clip.timeline_duration_frames,
         sourcePath: resolveClipSourcePath(resolver, clip),
-        sourceInSec: clip.src_in_us / 1_000_000,
-        durationSec: (clip.src_out_us - clip.src_in_us) / 1_000_000,
-        videoFilter: transform
+        sourceInSec: isStill ? 0 : clip.src_in_us / 1_000_000,
+        durationSec: clip.timeline_duration_frames / fps,
+        ...(isStill ? { still: { fps: fpsRational, frameCount: clip.timeline_duration_frames } } : {}),
+        videoFilter: isStill
+          ? buildStillVideoFilter(width, height, clip.still_image?.fit_mode ?? "contain", clip.still_image?.background ?? "black")
+          : transform
           ? buildVideoFitFilterFromTransform(width, height, transform)
           : buildAspectRatioFitFilter(width, height),
         hasAudio: false,
@@ -1057,6 +1175,7 @@ export async function assembleTimelineToMp4(
               fps,
               extractClipTransform(clip),
               extractEndingVideoFade(clip, fps),
+              durationSec,
             ));
             halfPaths.push(half);
           }
@@ -1070,6 +1189,14 @@ export async function assembleTimelineToMp4(
         } else {
           const clip = findClipById(timeline.tracks.video, plan.clip_id!);
           const sourcePath = resolveClipSourcePath(resolver, clip);
+          if (plan.still) {
+            await runFfmpeg(execFileImpl, ffmpegBin, buildStillVideoArgs(
+              sourcePath, segmentPath, plan.still.hold_frames, width, height, fpsRational,
+              plan.still.fit_mode, plan.still.background,
+            ));
+            renderedVideoSegments.push(segmentPath);
+            continue;
+          }
           // FATAL-1: derive per-clip transform from metadata so the final
           // segment goes through the same shared filtergraph as preview.
           const transform = extractClipTransform(clip);
@@ -1083,6 +1210,7 @@ export async function assembleTimelineToMp4(
             fps,
             transform,
             extractEndingVideoFade(clip, fps),
+            plan.duration_sec,
           ));
         }
       }
@@ -1117,6 +1245,32 @@ export async function assembleTimelineToMp4(
         width,
         height,
       ));
+    }
+
+    const canonicalStillWithoutAudio = audioPlans.length === 0 && orderedClips.some(
+      (clip) => resolver.canonicalInputs.imageAssetIds.has(clip.asset_id),
+    );
+    if (opts.includeAudio === false || canonicalStillWithoutAudio) {
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      fs.copyFileSync(captionedVideoPath, outputPath);
+      try {
+        const sourceInputsAfter = createSourceInputAttestation(projectDir, {
+          timelinePath,
+          sourceOverrides: opts.sourceOverrides,
+          includeAudio: opts.includeAudio !== false,
+        });
+        assertSourceInputsUnchanged(sourceInputsBefore, sourceInputsAfter);
+      } catch (error) {
+        fs.rmSync(outputPath, { force: true });
+        throw error;
+      }
+      return {
+        outputPath,
+        workingDir,
+        timelineDurationFrames: totalFrames,
+        videoSegmentCount: videoPlans.length,
+        audioClipCount: 0,
+      };
     }
 
     const renderedAudioSegments: string[] = [];
@@ -1159,6 +1313,7 @@ export async function assembleTimelineToMp4(
           audioChannels,
           fps,
           plan.audio_policy,
+          timeline.audio_mix,
         )
         : buildAudioTrimArgs(
           sourcePath,
@@ -1170,6 +1325,8 @@ export async function assembleTimelineToMp4(
           plan.audio_policy,
           mergeAudioFades(transitionFades, speechCutFadeSec),
           fps,
+          plan.role === "nat_sound" ? "nat_sound" : "nat",
+          timeline.audio_mix,
         );
       await runFfmpeg(execFileImpl, ffmpegBin, audioArgs);
       renderedAudioSegments.push(segmentPath);
@@ -1177,7 +1334,11 @@ export async function assembleTimelineToMp4(
       duckingPlans.push({
         delay_ms: plan.delay_ms,
         isBgm,
-        a1_loudnorm: isBgm ? undefined : plan.audio_policy?.a1_loudnorm,
+        a1_loudnorm: isBgm
+          ? undefined
+          : audioFinish
+            ? false
+            : plan.audio_policy?.a1_loudnorm,
       });
     }
 
@@ -1201,12 +1362,36 @@ export async function assembleTimelineToMp4(
       ));
     }
 
+    let finalAudioFilter: string | undefined;
+    if (audioFinish) {
+      const measurementResult = await runFfmpeg(
+        execFileImpl,
+        ffmpegBin,
+        buildAudioFinishPass1Args(mixedAudioPath, audioFinish),
+      );
+      const measurement = parseLoudnormOutput(measurementResult.stderr);
+      finalAudioFilter = buildAudioFinishApplyFilter(audioFinish, measurement);
+    }
+
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     await runFfmpeg(execFileImpl, ffmpegBin, buildFinalAssemblyMuxArgs(
       captionedVideoPath,
       mixedAudioPath,
       outputPath,
+      { audioFilter: finalAudioFilter, durationSec: totalDurationSec },
     ));
+
+    try {
+      const sourceInputsAfter = createSourceInputAttestation(projectDir, {
+        timelinePath,
+        sourceOverrides: opts.sourceOverrides,
+        includeAudio: true,
+      });
+      assertSourceInputsUnchanged(sourceInputsBefore, sourceInputsAfter);
+    } catch (error) {
+      fs.rmSync(outputPath, { force: true });
+      throw error;
+    }
 
     return {
       outputPath,
@@ -1216,6 +1401,7 @@ export async function assembleTimelineToMp4(
       audioClipCount: audioPlans.length,
     };
   } finally {
+    resolver.canonicalInputs.dispose();
     if (cleanupTemp) {
       fs.rmSync(workingDir, { recursive: true, force: true });
     }
@@ -1324,6 +1510,7 @@ function findClipById(
 function createSourceResolver(
   projectDir: string,
   timelineDir: string,
+  timeline: TimelineIR,
   sourceOverrides?: Record<string, string>,
 ): SourceResolverContext {
   const previewPath = path.join(projectDir, "05_timeline", "preview-manifest.json");
@@ -1363,6 +1550,13 @@ function createSourceResolver(
     previewByAssetId,
     assetsById,
     sourceOverrides,
+    canonicalInputs: materializeVerifiedStillSnapshots(
+      resolveCanonicalRenderInputs(timeline, {
+        projectDir,
+        timelinePath: path.join(timelineDir, "timeline.json"),
+        sourceOverrides,
+      }),
+    ),
   };
 }
 
@@ -1370,6 +1564,8 @@ function resolveClipSourcePath(
   ctx: SourceResolverContext,
   clip: ClipOutput,
 ): string {
+  const canonical = ctx.canonicalInputs.byAssetId.get(clip.asset_id);
+  if (canonical) return canonical.renderInputPath;
   const previewClip = ctx.previewByClipId.get(clip.clip_id);
   const previewAsset = ctx.previewByAssetId.get(clip.asset_id) ?? [];
   const sourceEntry = ctx.sourceMap.entryMap.get(clip.asset_id);

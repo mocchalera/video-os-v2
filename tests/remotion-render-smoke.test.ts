@@ -24,12 +24,18 @@ async function createBlackSource(outputPath: string): Promise<void> {
     "-f",
     "lavfi",
     "-i",
-    "color=c=black:s=128x128:d=1",
-    "-an",
+    "color=c=black:s=320x568:d=1.5",
+    "-f",
+    "lavfi",
+    "-i",
+    "anullsrc=r=48000:cl=stereo",
+    "-shortest",
     "-c:v",
     "libx264",
     "-pix_fmt",
     "yuv420p",
+    "-c:a",
+    "aac",
     outputPath,
   ]);
 }
@@ -65,6 +71,41 @@ async function probeVideo(outputPath: string): Promise<{
   };
 }
 
+async function probeAudioCodec(outputPath: string): Promise<string | undefined> {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "a:0",
+    "-show_entries",
+    "stream=codec_name",
+    "-of",
+    "json",
+    outputPath,
+  ]);
+  const parsed = JSON.parse(stdout) as { streams?: Array<{ codec_name?: string }> };
+  return parsed.streams?.[0]?.codec_name;
+}
+
+async function probeFrameLuma(outputPath: string, frame: number): Promise<number> {
+  const { stderr } = await execFileAsync("ffmpeg", [
+    "-v",
+    "info",
+    "-i",
+    outputPath,
+    "-vf",
+    `select=eq(n\\,${frame}),signalstats,metadata=print`,
+    "-frames:v",
+    "1",
+    "-f",
+    "null",
+    "-",
+  ]);
+  const match = stderr.match(/lavfi\.signalstats\.YAVG=([0-9.]+)/);
+  if (!match) throw new Error(`ffmpeg did not report YAVG for frame ${frame}`);
+  return Number(match[1]);
+}
+
 function writeTimeline(timelinePath: string): TimelineIR {
   const timeline: TimelineIR = {
     version: "1",
@@ -74,8 +115,8 @@ function writeTimeline(timelinePath: string): TimelineIR {
       name: "Remotion Smoke",
       fps_num: 24,
       fps_den: 1,
-      width: 128,
-      height: 128,
+      width: 320,
+      height: 568,
       start_frame: 0,
       letterbox_policy: "none",
     },
@@ -90,9 +131,9 @@ function writeTimeline(timelinePath: string): TimelineIR {
               segment_id: "SEG_0001",
               asset_id: "AST_001",
               src_in_us: 0,
-              src_out_us: 1_000_000,
+              src_out_us: 1_500_000,
               timeline_in_frame: 0,
-              timeline_duration_frames: 24,
+              timeline_duration_frames: 36,
               role: "hero",
               motivation: "remotion smoke test",
               beat_id: "b01",
@@ -113,6 +154,117 @@ function writeTimeline(timelinePath: string): TimelineIR {
       compiler_version: "remotion-smoke",
     },
   };
+
+  (timeline.tracks as TimelineIR["tracks"] & { overlay: TimelineIR["tracks"]["video"] }).overlay = [{
+    track_id: "OV1",
+    kind: "overlay",
+    clips: [{
+      clip_id: "OVL_0001",
+      segment_id: "OVL_0001",
+      asset_id: "__overlay__",
+      src_in_us: 0,
+      src_out_us: 1_000_000,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 12,
+      role: "title",
+      motivation: "verify Japanese subset font loading",
+      beat_id: "b01",
+      fallback_segment_ids: [],
+      confidence: 1,
+      quality_flags: [],
+      metadata: {
+        content_element: {
+          version: "content-element/v1",
+          element_id: "remotion_title",
+          kind: "template",
+          template_ref: "vos:content.title-card/v1",
+          template_version: "1.0.0",
+          props: { title: "経営者本人がAIを使う意味" },
+          layout: {
+            anchor: "center",
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation_deg: 0,
+            opacity: 1,
+            safe_area: true,
+            z_index: 100,
+          },
+          renderer_hint: "auto",
+        },
+      },
+    }, {
+      clip_id: "OVL_0002",
+      segment_id: "OVL_0002",
+      asset_id: "__overlay__",
+      src_in_us: 0,
+      src_out_us: 500_000,
+      timeline_in_frame: 12,
+      timeline_duration_frames: 12,
+      role: "title",
+      motivation: "verify non-zero overlay timing",
+      beat_id: "b01",
+      fallback_segment_ids: [],
+      confidence: 1,
+      quality_flags: [],
+      metadata: {
+        content_element: {
+          version: "content-element/v1",
+          element_id: "remotion_emphasis",
+          kind: "template",
+          template_ref: "vos:content.emphasis-word/v1",
+          template_version: "1.0.0",
+          props: { text: "後半字幕" },
+          layout: {
+            anchor: "center",
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation_deg: 0,
+            opacity: 1,
+            safe_area: true,
+            z_index: 110,
+          },
+          renderer_hint: "auto",
+        },
+      },
+    }, {
+      clip_id: "OVL_0003",
+      segment_id: "OVL_0003",
+      asset_id: "__overlay__",
+      src_in_us: 0,
+      src_out_us: 500_000,
+      timeline_in_frame: 24,
+      timeline_duration_frames: 12,
+      role: "title",
+      motivation: "verify full-frame CTA treatment",
+      beat_id: "b01",
+      fallback_segment_ids: [],
+      confidence: 1,
+      quality_flags: [],
+      metadata: {
+        content_element: {
+          version: "content-element/v1",
+          element_id: "remotion_cta",
+          kind: "template",
+          template_ref: "vos:content.cta-card/v1",
+          template_version: "1.0.0",
+          props: { headline: "次の一歩を始める", action: "詳しく見る", brand: "VIDEO OS" },
+          layout: {
+            anchor: "center",
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation_deg: 0,
+            opacity: 1,
+            safe_area: true,
+            z_index: 120,
+          },
+          renderer_hint: "auto",
+        },
+      },
+    }],
+  }];
 
   fs.writeFileSync(timelinePath, JSON.stringify(timeline, null, 2), "utf-8");
 
@@ -149,17 +301,26 @@ describeIf("Remotion renderer smoke", () => {
 
       expect(result).toMatchObject({
         assemblyPath: outputPath,
-        durationInFrames: 24,
+        durationInFrames: 36,
         fps: 24,
         width: timeline.sequence.width,
         height: timeline.sequence.height,
+        font: {
+          mode: "subset",
+          format: "woff2",
+          sourceSha256: "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f",
+        },
       });
+      expect(result.font.sizeBytes).toBeLessThan(250_000);
       expect(fs.existsSync(outputPath)).toBe(true);
       expect(fs.statSync(outputPath).size).toBeGreaterThan(0);
 
       const stream = await probeVideo(outputPath);
       expect(stream.codec_name).toBe("h264");
       expect(stream.pix_fmt).toBe("yuv420p");
+      expect(await probeAudioCodec(outputPath)).toBe("aac");
+      expect(await probeFrameLuma(outputPath, 18)).toBeGreaterThan(16.1);
+      expect(await probeFrameLuma(outputPath, 30)).toBeGreaterThan(16.1);
     },
     180_000,
   );

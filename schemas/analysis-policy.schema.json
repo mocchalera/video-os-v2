@@ -11,6 +11,23 @@
   "properties": {
     "version": { "type": "string" },
     "policy_name": { "type": "string", "minLength": 1 },
+    "image_sequence": {
+      "type": "object",
+      "required": ["frame_rate", "minimum_frame_count"],
+      "additionalProperties": false,
+      "properties": {
+        "frame_rate": {
+          "type": "object",
+          "required": ["fps_num", "fps_den"],
+          "additionalProperties": false,
+          "properties": {
+            "fps_num": { "type": "integer", "minimum": 1 },
+            "fps_den": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "minimum_frame_count": { "type": "integer", "minimum": 2 }
+      }
+    },
     "classification": {
       "type": "object",
       "required": ["dialogue", "music_driven", "action", "static", "general"],

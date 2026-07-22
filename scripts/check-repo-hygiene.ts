@@ -2,6 +2,11 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 
 const MAX_TRACKED_FILE_BYTES = 2 * 1024 * 1024;
+const PINNED_BUNDLED_FONT_PATHS = new Set([
+  "apps/macos-studio/Sources/VideoOSStudio/Resources/Fonts/NotoSansJP-Variable.ttf",
+  "apps/macos-studio/Sources/VideoOSStudio/Resources/Fonts/VideoOSNotoSansJPBlack.ttf",
+]);
+const ALLOWED_TRACKED_PROJECTS = new Set(["_template", "demo", "sample"]);
 
 type Violation = {
   path: string;
@@ -47,11 +52,17 @@ function isProjectGeneratedOutput(path: string): boolean {
   return /^projects\/[^/]+\/09_output\//.test(path);
 }
 
+function isUnexpectedTrackedProject(path: string): boolean {
+  const match = /^projects\/([^/]+)(?:\/|$)/.exec(path);
+  return match !== null && !ALLOWED_TRACKED_PROJECTS.has(match[1]);
+}
+
 function isLargeFileAllowed(path: string): boolean {
   return (
     path.startsWith("docs/ux/screenshots/") ||
     path.startsWith("docs/ux/approved/") ||
-    /^reports\/native-editor-visual-qa.*\.png$/.test(path)
+    /^reports\/native-editor-visual-qa.*\.png$/.test(path) ||
+    PINNED_BUNDLED_FONT_PATHS.has(path)
   );
 }
 
@@ -70,6 +81,9 @@ for (const filePath of trackedFiles) {
   }
   if (isProjectGeneratedOutput(filePath)) {
     add(filePath, "tracked project render outputs are not allowed");
+  }
+  if (isUnexpectedTrackedProject(filePath)) {
+    add(filePath, "tracked project is outside the public fixture allowlist");
   }
 
   const stat = fs.statSync(filePath);

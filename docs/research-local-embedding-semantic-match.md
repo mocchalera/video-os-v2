@@ -32,7 +32,7 @@ This explains the failure mode: a Japanese must-have like `焚き火のシーン
 
 ## mdedit Findings
 
-Source inspected: `/Users/mocchalera/Dev/mdedit`.
+Source inspected: `/Users/operator/Dev/mdedit`.
 
 ### Provider registry
 
@@ -400,10 +400,10 @@ Default should remain deterministic lexical matching until the fixture calibrati
 
 Local code:
 
-- `/Users/mocchalera/Dev/mdedit/src-tauri/src/semantic_provider.rs`
-- `/Users/mocchalera/Dev/mdedit/src-tauri/src/apple_nl_embedding.swift`
-- `/Users/mocchalera/Dev/mdedit/src-tauri/src/search_index.rs`
-- `/Users/mocchalera/Dev/mdedit/CONTINUITY.md`
+- `/Users/operator/Dev/mdedit/src-tauri/src/semantic_provider.rs`
+- `/Users/operator/Dev/mdedit/src-tauri/src/apple_nl_embedding.swift`
+- `/Users/operator/Dev/mdedit/src-tauri/src/search_index.rs`
+- `/Users/operator/Dev/mdedit/CONTINUITY.md`
 - `runtime/eval/selection-coverage.ts`
 - `runtime/eval/brief-alignment-deterministic.ts`
 - `runtime/eval/brief-alignment.ts`

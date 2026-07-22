@@ -49,6 +49,13 @@
 - omit だけでよい:
   relevance が低いだけで、特に共有すべき拒否理由が無い場合
 
+## 5.1 初見視聴者に閉じない断片
+
+- 「両方」「双方」「どちらも」の対象が候補内に無い発話は、hook / opening の positive candidate にしない
+- 人名、過去の会話、個人的エピソードの理解が先に必要な断片は、cold audience 向けでは omit を基本とする
+- 近接する antecedent を含めれば自己完結する場合は reject せず、`src_in_us` を前へ広げる
+- 個人的内容でも、brief の message や信頼形成へ直接効き、候補内だけで意味が通るなら採用してよい
+
 ## 6. reject candidate の必須項目
 
 - `segment_id`, `asset_id`, `src_in_us`, `src_out_us`

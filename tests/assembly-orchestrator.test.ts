@@ -160,16 +160,32 @@ describe("produceAssembly", () => {
     "renders through the Remotion engine when VOS_REMOTION_RENDER=1",
     async () => {
       const tempDir = createTempDir("vos-assembly-orchestrator-");
-      const sourcePath = path.join(tempDir, "source.mp4");
-      const timelinePath = path.join(tempDir, "timeline.json");
-      const outputPath = path.join(tempDir, "assembly.mp4");
+      const sourcePath = path.join(tempDir, "02_media/source.mp4");
+      const sourceOverride = path.join(tempDir, "02_media/source-override.mp4");
+      const timelinePath = path.join(tempDir, "05_timeline/timeline.json");
+      const outputPath = path.join(tempDir, "05_timeline/assembly.mp4");
 
+      fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+      fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
       await createBlackSource(sourcePath);
+      fs.symlinkSync(sourcePath, sourceOverride);
       writeTimeline(timelinePath);
+      fs.writeFileSync(path.join(tempDir, "02_media/source_map.json"), JSON.stringify({
+        version: "1",
+        project_id: "assembly-orchestrator-test",
+        media_dir: "02_media",
+        generated_at: "2026-07-20T00:00:00.000Z",
+        items: [{
+          asset_id: "AST_001",
+          source_locator: sourcePath,
+          local_source_path: sourcePath,
+          link_path: "02_media/source.mp4",
+        }],
+      }));
 
       const result = await produceAssembly({
         timelinePath,
-        sourceMap: { AST_001: sourcePath },
+        sourceMap: { AST_001: sourceOverride },
         outputPath,
         engine: "remotion",
       });
@@ -177,6 +193,13 @@ describe("produceAssembly", () => {
       expect(result).toEqual({ assemblyPath: outputPath, engine: "remotion" });
       expect(fs.existsSync(outputPath)).toBe(true);
       expect(fs.statSync(outputPath).size).toBeGreaterThan(0);
+      const metadata = JSON.parse(fs.readFileSync(
+        path.join(tempDir, "05_timeline/render-report.json"),
+        "utf-8",
+      ));
+      expect(metadata.source_inputs[0].render_input_identity).toMatchObject({
+        relationship: "same_as_original",
+      });
     },
     180_000,
   );

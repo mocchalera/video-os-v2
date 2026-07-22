@@ -119,10 +119,12 @@ final class ProjectHandoffExportTests: XCTestCase {
         let reviewDir = project.appendingPathComponent("06_review")
         let timelineDir = project.appendingPathComponent("05_timeline")
         let audioPackageDir = project.appendingPathComponent("07_package/audio")
+        let captionPackageDir = project.appendingPathComponent("07_package/captions")
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: handoffDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: reviewDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: audioPackageDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: captionPackageDir, withIntermediateDirectories: true)
         try "<xmeml version=\"5\"></xmeml>"
             .write(to: outputDir.appendingPathComponent("demo_premiere.xml"), atomically: true, encoding: .utf8)
         try Data([0x00, 0x01, 0x02])
@@ -131,6 +133,10 @@ final class ProjectHandoffExportTests: XCTestCase {
             .write(to: outputDir.appendingPathComponent("final.mp4"), options: .atomic)
         try Data([0x06, 0x07, 0x08])
             .write(to: audioPackageDir.appendingPathComponent("final_mix.wav"), options: .atomic)
+        try "1\n00:00:00,000 --> 00:00:02,000\n字幕\n"
+            .write(to: captionPackageDir.appendingPathComponent("ja.srt"), atomically: true, encoding: .utf8)
+        try #"{"version":"caption-approval/v1"}"#
+            .write(to: project.appendingPathComponent("07_package/caption_approval.json"), atomically: true, encoding: .utf8)
         try """
         {
           "version": "editor-annotations-v1",
@@ -195,13 +201,17 @@ final class ProjectHandoffExportTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.packetURL.appendingPathComponent("media/preview_media-preview-first30s.mp4").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.packetURL.appendingPathComponent("media/final_media-final.mp4").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.packetURL.appendingPathComponent("media/final_audio-final_mix.wav").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.packetURL.appendingPathComponent("captions/ja.srt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: result.packetURL.appendingPathComponent("captions/caption_approval.json").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.manifestURL.path))
         XCTAssertEqual(result.files.map(\.lastPathComponent).sorted(), [
+            "caption_approval.json",
             "demo_premiere.xml",
             "editor_annotations.json",
             "editor_notes.md",
             "final_audio-final_mix.wav",
             "final_media-final.mp4",
+            "ja.srt",
             "manifest.json",
             "preview_media-preview-first30s.mp4",
             "review_patch.json",
@@ -215,10 +225,12 @@ final class ProjectHandoffExportTests: XCTestCase {
         XCTAssertTrue(notes.contains("## Review Summary"))
         XCTAssertTrue(notes.contains("Hook needs tighter trim before delivery."))
         XCTAssertTrue(notes.contains("Trim the first hero shot by two frames."))
-        XCTAssertTrue(notes.contains("## Included Media"))
+        XCTAssertTrue(notes.contains("## Included Assets"))
         XCTAssertTrue(notes.contains("preview_media: media/preview_media-preview-first30s.mp4"))
         XCTAssertTrue(notes.contains("final_media: media/final_media-final.mp4"))
         XCTAssertTrue(notes.contains("final_audio: media/final_audio-final_mix.wav"))
+        XCTAssertTrue(notes.contains("caption_sidecar: captions/ja.srt"))
+        XCTAssertTrue(notes.contains("caption_approval: captions/caption_approval.json"))
 
         let manifest = try JSONDecoder().decode(ProjectEditorPacketManifest.self, from: Data(contentsOf: result.manifestURL))
         XCTAssertEqual(manifest.version, "editor-packet-v1")
@@ -237,7 +249,9 @@ final class ProjectHandoffExportTests: XCTestCase {
             "review_patch",
             "preview_media",
             "final_media",
-            "final_audio"
+            "final_audio",
+            "caption_sidecar",
+            "caption_approval"
         ])
 
         let verified = ProjectEditorPacketVerificationStatusReader.status(projectURL: project)
@@ -245,13 +259,15 @@ final class ProjectHandoffExportTests: XCTestCase {
         XCTAssertTrue(verified.packetExists)
         XCTAssertTrue(verified.manifestReadable)
         XCTAssertEqual(verified.manifestProjectID, "demo")
-        XCTAssertEqual(verified.manifestFileCount, 8)
-        XCTAssertEqual(verified.existingFileCount, 8)
+        XCTAssertEqual(verified.manifestFileCount, 10)
+        XCTAssertEqual(verified.existingFileCount, 10)
         XCTAssertEqual(verified.missingFileCount, 0)
         XCTAssertEqual(verified.mediaFileCount, 3)
         XCTAssertTrue(verified.previewMediaIncluded)
         XCTAssertTrue(verified.finalMediaIncluded)
         XCTAssertTrue(verified.finalAudioIncluded)
+        XCTAssertTrue(verified.captionSidecarIncluded)
+        XCTAssertTrue(verified.captionApprovalIncluded)
     }
 
     func testEditorPacketVerificationReportsMissingManifestFile() throws {

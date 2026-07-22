@@ -104,6 +104,9 @@ final class TimelineDocumentTests: XCTestCase {
         XCTAssertEqual(captionTrack.clips.first?.captionText, "導入の字幕")
         XCTAssertEqual(captionTrack.clips.first?.timelineInFrame, 10)
         XCTAssertEqual(captionTrack.clips.first?.timelineDurationFrames, 30)
+        XCTAssertEqual(document.captionSelection(atFrame: 10)?.clip.captionText, "導入の字幕")
+        XCTAssertNil(document.captionSelection(atFrame: 40))
+        XCTAssertEqual(document.captionSelection(atFrame: 42)?.clip.captionText, "続きの字幕")
     }
 
     func testTimelineMarkerAllowsKindOnlyGeneratedMarkers() throws {

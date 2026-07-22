@@ -22,7 +22,7 @@ Prepare the Project Loop Harness checkpoint review that `pcl next` recommends af
 
 ## Validation Snapshot
 
-Run from `/Users/mocchalera/Dev/video-os-v2-spec` on 2026-07-01 JST:
+Run from `/Users/operator/Dev/video-os-v2-spec` on 2026-07-01 JST:
 
 | Command | Result |
 | --- | --- |

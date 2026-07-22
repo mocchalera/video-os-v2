@@ -22,6 +22,7 @@ import {
 import {
   validateContinuityGraph,
 } from "../artifacts/p3-continuity-graph.js";
+import { validateSourceLedger } from "../artifacts/source-ledger.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -105,6 +106,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "04_plan/bgm_selection.json",
+    schemaFile: "bgm-selection.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "04_plan/uncertainty_register.yaml",
     schemaFile: "uncertainty-register.schema.json",
     format: "yaml",
@@ -154,6 +162,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_package/caption_timing_report.json",
+    schemaFile: "caption-timing-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "06_review/editorial_pipeline_status.json",
     schemaFile: "editorial-pipeline-status.schema.json",
     format: "json",
@@ -170,6 +185,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
   {
     artifactPath: "07_package/release_safety_report.yaml",
     schemaFile: "release-safety-report.schema.json",
+    format: "yaml",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/rights_license_register.yaml",
+    schemaFile: "rights-license-register.schema.json",
     format: "yaml",
     optional: true,
     runnerChecks: [],
@@ -222,6 +244,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     format: "json",
     optional: true,
     runnerChecks: [],
+  },
+  {
+    artifactPath: "03_analysis/source_ledger.json",
+    schemaFile: "source-ledger.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: ["source_ledger_invariant"],
   },
   {
     artifactPath: "02_media/source_media_manifest.json",
@@ -402,6 +431,7 @@ export function validateProject(
     }
 
     for (const check of entry.runnerChecks) {
+      if (check === "source_ledger_invariant" && !valid) continue;
       switch (check) {
         case "src_time_check":
           runSrcTimeCheck(parsed.data, entry.artifactPath, violations);
@@ -444,6 +474,9 @@ export function validateProject(
           break;
         case "continuity_graph_integrity":
           runContinuityGraphIntegrityCheck(parsed.data, absProject, entry.artifactPath, violations);
+          break;
+        case "source_ledger_invariant":
+          runSourceLedgerInvariantCheck(parsed.data, entry.artifactPath, violations);
           break;
       }
     }
@@ -567,6 +600,21 @@ export function validateProject(
     gate2_timeline_valid: gate2TimelineValid,
     gate3_no_fatal_reviews: gate3NoFatalReviews,
   };
+}
+
+function runSourceLedgerInvariantCheck(
+  data: unknown,
+  artifactPath: string,
+  violations: Violation[],
+): void {
+  const result = validateSourceLedger(data);
+  for (const message of result.violations) {
+    violations.push({
+      artifact: artifactPath,
+      rule: "source_ledger_invariant",
+      message,
+    });
+  }
 }
 
 export function validateProjects(

@@ -16,6 +16,13 @@ import {
   DIALOGUE_CUT_FADE_DEFAULT_MS,
   TALKING_HEAD_PACING_SKILL_ID,
 } from "./dialogue-cut-fade.js";
+import {
+  appendAudioGainWarning,
+  resolveAudioGain,
+  resolveAudioGainWithFallback,
+  type AudioGainProvenance,
+  type GainUnit,
+} from "./audio-gain.js";
 
 // ── Sub-types ────────────────────────────────────────────────────────
 
@@ -75,13 +82,23 @@ export interface RenderAudioClip {
   durationFrames: number;
   sourceInSec: number;
   sourceOutSec: number;
-  gainDb: number | null;
+  /** Canonical gain in dB. Renderers must not reinterpret timeline values. */
+  gainDb: number;
+  /** Canonical amplitude multiplier; preserves exact mute at zero. */
+  gainLinear: number;
+  gainProvenance: AudioGainProvenance;
+  fadeInFrames: number;
+  fadeOutFrames: number;
 }
 
 export interface RenderBgmSpec {
   assetId: string;
   sourcePath: string;
+  /** Canonical gain in dB. Renderers must not reinterpret timeline values. */
   gainDb: number;
+  /** Canonical amplitude multiplier; preserves exact mute at zero. */
+  gainLinear: number;
+  gainProvenance: AudioGainProvenance;
   fadeInFrames: number;
   fadeOutFrames: number;
   /** Ducking level in dB (negative) applied to BGM during dialogue */
@@ -146,7 +163,7 @@ export function isSupportedEffectType(t: string): t is RenderEffectType {
 export interface RenderSpec {
   version: "1";
   /** Bump when renderer semantics change so persisted exact-preview caches invalidate. */
-  rendererContractVersion: "3";
+  rendererContractVersion: "5";
   timelineRevision: string;
   renderSpecHash: string;
   sequence: {
@@ -200,9 +217,17 @@ interface MinimalClip {
   timeline_in_frame: number;
   timeline_duration_frames: number;
   audio_policy?: {
+    gain_unit?: GainUnit;
+    duck_music_db?: number;
     nat_sound_gain?: number;
     nat_gain?: number;
     bgm_gain?: number;
+    fade_in_frames?: number;
+    fade_out_frames?: number;
+    nat_sound_fade_in_frames?: number;
+    nat_sound_fade_out_frames?: number;
+    bgm_fade_in_frames?: number;
+    bgm_fade_out_frames?: number;
   };
   metadata?: Record<string, unknown>;
 }
@@ -232,6 +257,8 @@ interface MinimalTransition {
 }
 
 interface MinimalAudioMix {
+  gain_unit?: GainUnit;
+  nat_sound_gain?: number;
   bgm_asset_id?: string;
   bgm_gain?: number;
   duck_music_db?: number;
@@ -409,7 +436,16 @@ export function buildRenderSpec(
         warnings.push(`Missing audio source for asset ${clip.asset_id}`);
         continue;
       }
-      const gainDb = computeGainDb(clip.audio_policy);
+      const gain = resolveAudioGainWithFallback(
+        clip.audio_policy,
+        timeline.audio_mix,
+        clip.role === "bgm" || clip.role === "music" || track.track_id === "A2"
+          ? "bgm"
+          : clip.role === "nat_sound"
+            ? "nat_sound"
+            : "nat",
+      );
+      appendAudioGainWarning(warnings, gain.warning);
       audioClips.push({
         clipId: clip.clip_id,
         assetId: clip.asset_id,
@@ -420,7 +456,17 @@ export function buildRenderSpec(
         durationFrames: clip.timeline_duration_frames,
         sourceInSec: clip.src_in_us / 1_000_000,
         sourceOutSec: clip.src_out_us / 1_000_000,
-        gainDb,
+        gainDb: gain.gainDb,
+        gainLinear: gain.gainLinear,
+        gainProvenance: gain.provenance,
+        fadeInFrames: clip.audio_policy?.nat_sound_fade_in_frames
+          ?? clip.audio_policy?.bgm_fade_in_frames
+          ?? clip.audio_policy?.fade_in_frames
+          ?? 0,
+        fadeOutFrames: clip.audio_policy?.nat_sound_fade_out_frames
+          ?? clip.audio_policy?.bgm_fade_out_frames
+          ?? clip.audio_policy?.fade_out_frames
+          ?? 0,
       });
     }
   }
@@ -576,10 +622,17 @@ export function buildRenderSpec(
   if (timeline.audio_mix?.bgm_asset_id) {
     const bgmPath = resolveAssetPath(timeline.audio_mix.bgm_asset_id);
     if (bgmPath) {
+      const bgmPolicy = timeline.audio_mix.bgm_gain === undefined
+        ? { ...timeline.audio_mix, gain_unit: "linear" as const, bgm_gain: 0.25 }
+        : timeline.audio_mix;
+      const bgmGain = resolveAudioGain(bgmPolicy, "bgm");
+      appendAudioGainWarning(warnings, bgmGain.warning);
       bgmSpec = {
         assetId: timeline.audio_mix.bgm_asset_id,
         sourcePath: bgmPath,
-        gainDb: timeline.audio_mix.bgm_gain ?? -16,
+        gainDb: bgmGain.gainDb,
+        gainLinear: bgmGain.gainLinear,
+        gainProvenance: bgmGain.provenance,
         fadeInFrames: timeline.audio_mix.bgm_fade_in_frames ?? 0,
         fadeOutFrames: timeline.audio_mix.bgm_fade_out_frames ?? 0,
         duckMusicDb: timeline.audio_mix.duck_music_db,
@@ -594,7 +647,7 @@ export function buildRenderSpec(
   // ── Assemble spec (without hash) ──
   const spec: RenderSpec = {
     version: "1",
-    rendererContractVersion: "3",
+    rendererContractVersion: "5",
     timelineRevision,
     renderSpecHash: "", // computed below
     sequence: {
@@ -679,13 +732,4 @@ function sortClips<T extends { timeline_in_frame: number; clip_id: string }>(
       a.timeline_in_frame - b.timeline_in_frame ||
       a.clip_id.localeCompare(b.clip_id),
   );
-}
-
-function computeGainDb(
-  policy?: { nat_sound_gain?: number; nat_gain?: number },
-): number | null {
-  if (!policy) return null;
-  const gain = policy.nat_sound_gain ?? policy.nat_gain ?? null;
-  if (gain === null || gain === undefined || gain === 0) return null;
-  return gain;
 }

@@ -16,7 +16,7 @@ export interface ContactSheetManifest {
   contact_sheet_id: string;
   asset_id: string;
   image_path: string;
-  mode: "shot_keyframes" | "overview";
+  mode: "shot_keyframes" | "overview" | "still_image";
   sample_fps?: number;
   tile_map: Array<{
     tile_index: number;
@@ -532,10 +532,45 @@ export async function generateAllDerivatives(
   segments: SegmentItem[],
   outputDir: string,
 ): Promise<DerivativeResults> {
-  // Contact sheets
-  const contactSheets = await generateContactSheets(
-    filePath, asset, segments, outputDir,
-  );
+  if (asset.media_kind === "image") {
+    if (!asset.still_image) {
+      throw new Error(`still_image_metadata_missing:${asset.asset_id}`);
+    }
+    const normalizedPath = path.resolve(outputDir, asset.still_image.normalized_frame_path);
+    const stat = fs.statSync(normalizedPath);
+    if (!stat.isFile() || stat.size <= 0) {
+      throw new Error(`still_image_normalized_frame_missing_or_empty:${asset.asset_id}`);
+    }
+    const contactSheetId = `CS_${asset.asset_id}_STILL`;
+    const manifest: ContactSheetManifest = {
+      contact_sheet_id: contactSheetId,
+      asset_id: asset.asset_id,
+      image_path: asset.still_image.normalized_frame_path,
+      mode: "still_image",
+      tile_map: [{
+        tile_index: 0,
+        segment_id: segments[0]?.segment_id,
+        rep_frame_us: 0,
+        src_in_us: 0,
+        src_out_us: 1,
+      }],
+    };
+    const manifestPath = path.join(outputDir, "contact_sheets", `${contactSheetId}.json`);
+    ensureDir(path.dirname(manifestPath));
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+    return {
+      contactSheets: [manifest],
+      posterPath: asset.still_image.normalized_frame_path,
+      filmstripPaths: new Map(),
+      waveformPath: null,
+    };
+  }
+
+  // Visual derivatives are not applicable without a video stream. rep_frame_us
+  // remains a timeline representative timestamp, never image evidence.
+  const contactSheets = asset.video_stream
+    ? await generateContactSheets(filePath, asset, segments, outputDir)
+    : [];
 
   // Poster
   let posterPath: string | null = null;

@@ -109,6 +109,9 @@ describe("editor server source_map API redaction", () => {
           local_source_path: "/Users/example/private/clip.mov",
           link_path: "02_media/clip.mov",
           source_locator: "file:///Users/example/private/clip.mov",
+          image_sequence: {
+            frames: [{ frame_link_path: "02_media/.image-sequence-frames/private/frame-0001.png" }],
+          },
           duration_us: 1_000_000,
         },
       ],

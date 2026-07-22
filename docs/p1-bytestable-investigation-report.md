@@ -92,7 +92,7 @@ preview_equal_ignoring_created_at=true
 ```bash
 TMPHEAD=$(mktemp -d /tmp/vos-head-demo.XXXXXX)
 git archive HEAD | tar -x -C "$TMPHEAD"
-ln -s /Users/mocchalera/Dev/video-os-v2-spec/node_modules "$TMPHEAD/node_modules"
+ln -s /Users/operator/Dev/video-os-v2-spec/node_modules "$TMPHEAD/node_modules"
 (cd "$TMPHEAD" && npm run demo)
 ```
 

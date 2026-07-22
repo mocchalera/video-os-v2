@@ -1,0 +1,2396 @@
+{
+  "artifactVersion": "macos-studio-contract/v1",
+  "generatedFrom": [
+    "runtime/preview/playback-contract.ts",
+    "scripts/package.ts#buildPackagePreflight",
+    "runtime/packaging/package-verification.ts"
+  ],
+  "playbackCases": [
+    {
+      "id": "missing_timeline",
+      "files": {},
+      "expected": {
+        "state": "missing_timeline",
+        "timeline_hash": null,
+        "manifest_base_timeline_hash": null,
+        "recommendation": "No timeline.json. Compile the rough cut first."
+      }
+    },
+    {
+      "id": "missing_manifest",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\"\n}\n"
+      },
+      "expected": {
+        "state": "missing_manifest",
+        "timeline_hash": "24d104b154c4ad78",
+        "manifest_base_timeline_hash": null,
+        "recommendation": "No preview manifest. Compile the timeline to generate one."
+      }
+    },
+    {
+      "id": "legacy_manifest",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\"\n}\n",
+        "05_timeline/preview-manifest.json": "{\n  \"version\": \"1\"\n}\n"
+      },
+      "expected": {
+        "state": "legacy_manifest",
+        "timeline_hash": "24d104b154c4ad78",
+        "manifest_base_timeline_hash": null,
+        "recommendation": "Preview manifest predates contract stamping. Recompile to make playback approval-grade."
+      }
+    },
+    {
+      "id": "exact",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\"\n}\n",
+        "05_timeline/preview-manifest.json": "{\n  \"version\": \"1\",\n  \"base_timeline_hash\": \"24d104b154c4ad78\"\n}\n"
+      },
+      "expected": {
+        "state": "exact",
+        "timeline_hash": "24d104b154c4ad78",
+        "manifest_base_timeline_hash": "24d104b154c4ad78",
+        "recommendation": "Preview manifest matches the current timeline. Playback is approval-grade."
+      }
+    },
+    {
+      "id": "stale",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"2\",\n  \"project_id\": \"studio-contract\"\n}\n",
+        "05_timeline/preview-manifest.json": "{\n  \"version\": \"1\",\n  \"base_timeline_hash\": \"24d104b154c4ad78\"\n}\n"
+      },
+      "expected": {
+        "state": "stale",
+        "timeline_hash": "e4a728844301a5f4",
+        "manifest_base_timeline_hash": "24d104b154c4ad78",
+        "recommendation": "Timeline changed after the preview manifest was generated. Recompile before approving."
+      }
+    }
+  ],
+  "preflightCases": [
+    {
+      "id": "ready_engine_render",
+      "files": {
+        "01_intent/creative_brief.yaml": "version: \"1\"\nproject_id: studio-contract\nproject:\n  id: studio-contract\n  title: Studio Contract\n  runtime_target_sec: 10\nautonomy:\n  mode: full\n  may_decide:\n    - render\n  must_ask: []\n",
+        "04_plan/edit_blueprint.yaml": "version: \"1\"\nproject_id: studio-contract\ncaption_policy:\n  source: none\n  delivery_mode: both\n",
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "06_review/review_report.yaml": "version: \"1\"\nproject_id: studio-contract\ntimeline_version: timeline-v2\nsummary_judgment:\n  status: approved\n  rationale: Fixture is ready for packaging.\nstrengths: []\nweaknesses: []\nfatal_issues: []\nwarnings: []\nmismatches_to_brief: []\nmismatches_to_blueprint: []\nrecommended_next_pass:\n  goal: Package the approved timeline.\n  actions:\n    - Run the package preflight.\nvisual_qa:\n  status: not_applicable\n  reason: audio_only_timeline\n  min_score: 70\n  issues:\n    total: 0\n    critical: 0\n    warning: 0\n    info: 0\n  issue_summaries: []\n",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: approved\napproval_record:\n  status: clean\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\ngates:\n  review_gate: open\n"
+      },
+      "expected": {
+        "ok": true,
+        "issues": [],
+        "nextSteps": [
+          "Fix the listed Gate 10 prerequisites, then rerun package."
+        ],
+        "sourceOfTruth": "engine_render",
+        "autonomyMode": "full",
+        "projectId": "studio-contract",
+        "currentState": "approved",
+        "visualQaSummary": "status=not_applicable reason=audio_only_timeline"
+      }
+    },
+    {
+      "id": "missing_approval",
+      "files": {
+        "01_intent/creative_brief.yaml": "version: \"1\"\nproject_id: studio-contract\nproject:\n  id: studio-contract\n  title: Studio Contract\n  runtime_target_sec: 10\nautonomy:\n  mode: full\n  may_decide:\n    - render\n  must_ask: []\n",
+        "04_plan/edit_blueprint.yaml": "version: \"1\"\nproject_id: studio-contract\ncaption_policy:\n  source: none\n  delivery_mode: both\n",
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "06_review/review_report.yaml": "version: \"1\"\nproject_id: studio-contract\ntimeline_version: timeline-v2\nsummary_judgment:\n  status: approved\n  rationale: Fixture is ready for packaging.\nstrengths: []\nweaknesses: []\nfatal_issues: []\nwarnings: []\nmismatches_to_brief: []\nmismatches_to_blueprint: []\nrecommended_next_pass:\n  goal: Package the approved timeline.\n  actions:\n    - Run the package preflight.\nvisual_qa:\n  status: not_applicable\n  reason: audio_only_timeline\n  min_score: 70\n  issues:\n    total: 0\n    critical: 0\n    warning: 0\n    info: 0\n  issue_summaries: []\n",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: approved\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\ngates:\n  review_gate: open\n"
+      },
+      "expected": {
+        "ok": false,
+        "issues": [
+          "approval_record is missing"
+        ],
+        "nextSteps": [
+          "Run /review and approve the rough cut before packaging."
+        ],
+        "sourceOfTruth": "engine_render",
+        "autonomyMode": "full",
+        "projectId": "studio-contract",
+        "currentState": "approved",
+        "visualQaSummary": "status=not_applicable reason=audio_only_timeline"
+      }
+    },
+    {
+      "id": "stale_caption_approval",
+      "files": {
+        "01_intent/creative_brief.yaml": "version: \"1\"\nproject_id: studio-contract\nproject:\n  id: studio-contract\n  title: Studio Contract\n  runtime_target_sec: 10\nautonomy:\n  mode: full\n  may_decide:\n    - render\n  must_ask: []\n",
+        "04_plan/edit_blueprint.yaml": "version: \"1\"\nproject_id: studio-contract\ncaption_policy:\n  source: transcript\n  delivery_mode: both\n",
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "06_review/review_report.yaml": "version: \"1\"\nproject_id: studio-contract\ntimeline_version: timeline-v2\nsummary_judgment:\n  status: approved\n  rationale: Fixture is ready for packaging.\nstrengths: []\nweaknesses: []\nfatal_issues: []\nwarnings: []\nmismatches_to_brief: []\nmismatches_to_blueprint: []\nrecommended_next_pass:\n  goal: Package the approved timeline.\n  actions:\n    - Run the package preflight.\nvisual_qa:\n  status: not_applicable\n  reason: audio_only_timeline\n  min_score: 70\n  issues:\n    total: 0\n    critical: 0\n    warning: 0\n    info: 0\n  issue_summaries: []\n",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: approved\napproval_record:\n  status: clean\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\ngates:\n  review_gate: open\n",
+        "07_package/caption_approval.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"base_timeline_version\": \"timeline-v1\",\n  \"approval\": {\n    \"status\": \"approved\"\n  }\n}\n"
+      },
+      "expected": {
+        "ok": false,
+        "issues": [
+          "caption_approval is stale"
+        ],
+        "nextSteps": [
+          "Refresh caption approval before packaging."
+        ],
+        "sourceOfTruth": "engine_render",
+        "autonomyMode": "full",
+        "projectId": "studio-contract",
+        "currentState": "approved",
+        "visualQaSummary": "status=not_applicable reason=audio_only_timeline"
+      }
+    }
+  ],
+  "packageCases": [
+    {
+      "id": "valid",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": true,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "render packaged",
+        "issues": [],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "qa_missing_details",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:53b8f85897eefc2eb9d1aef1699843b90eee6534ea53382350ed5c05d6416d5a\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "qa report unreadable",
+        "issues": [
+          "qa_report_schema_valid: /checks/0: must have required property 'details'"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": false,
+            "details": "/checks/0: must have required property 'details'"
+          }
+        ]
+      }
+    },
+    {
+      "id": "qa_unknown_property",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ],\n  \"unexpected\": true\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:d2063bf6c4f859f3f1c32731f36b1aaf3dd451aa726a0f55cd17a4c5e96f3b71\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "qa report unreadable",
+        "issues": [
+          "qa_report_schema_valid: /: must NOT have additional properties"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": false,
+            "details": "/: must NOT have additional properties"
+          }
+        ]
+      }
+    },
+    {
+      "id": "manifest_missing_provenance",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package manifest unreadable",
+        "issues": [
+          "package_manifest_schema_valid: /: must have required property 'provenance'"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": false,
+            "details": "/: must have required property 'provenance'"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "manifest_unknown_property",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    },\n    \"unexpected\": true\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package manifest unreadable",
+        "issues": [
+          "package_manifest_schema_valid: /artifacts: must NOT have additional properties"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": false,
+            "details": "/artifacts: must NOT have additional properties"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "qa_profile_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"nle_finishing\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:d7d9ab5d78519a804417ce12c2834344dcc10944f950a2f4de23efa25ab6542f\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "source_of_truth_matches: state=engine_render qa=engine_render profile=nle_finishing manifest=engine_render"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": false,
+            "details": "state=engine_render qa=engine_render profile=nle_finishing manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:d7d9ab5d78519a804417ce12c2834344dcc10944f950a2f4de23efa25ab6542f actual=sha256:d7d9ab5d78519a804417ce12c2834344dcc10944f950a2f4de23efa25ab6542f"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "project_id_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"other-project\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "project_identity_matches: timeline=studio-contract state=studio-contract qa=studio-contract manifest=other-project"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": false,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=other-project"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "source_of_truth_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"nle_finishing\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "source_of_truth_matches: state=engine_render qa=engine_render profile=engine_render manifest=nle_finishing",
+          "handoff_provenance_matches: manifest=- state=HND_studio_contract"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": false,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=nle_finishing"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "handoff_provenance_matches",
+            "passed": false,
+            "details": "manifest=- state=HND_studio_contract"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "final_hash_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:stale\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "final_video_hash_matches: manifest=sha256:stale actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": false,
+            "details": "manifest=sha256:stale actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "qa_hash_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:stale\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "qa_report_hash_matches: manifest=sha256:stale actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": false,
+            "details": "manifest=sha256:stale actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "timeline_hash_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"stale\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "editorial_timeline_hash_matches: manifest=stale actual=b1cd67fba6533c21"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": false,
+            "details": "manifest=stale actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "packaging_projection_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"stale\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "packaging_projection_hash_matches: manifest=stale actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": false,
+            "details": "manifest=stale actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "packaging_projection_input_changed",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n",
+        "07_package/caption_approval.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"approval\": {\n    \"status\": \"approved\"\n  }\n}\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "caption_approval_provenance_matches: manifest=- actual=ea11c7da23658e94",
+          "packaging_projection_hash_matches: manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=47079cc0daf2f1af8e2567309cd72baa56e9927df4112713f90ddc4d05bd3125"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": false,
+            "details": "manifest=- actual=ea11c7da23658e94"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": false,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=47079cc0daf2f1af8e2567309cd72baa56e9927df4112713f90ddc4d05bd3125"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "qa_passed_with_failed_check",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": false,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:5f86dfe0c18aafbb1f2ffed6a261723296fd56d7ed8ff24c3236b9cae128d5ab\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "qa failed",
+        "issues": [
+          "qa_result_consistent: passed=true all_checks_passed=false",
+          "qa_passed: failed=timeline_schema_valid"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": false,
+            "details": "passed=true all_checks_passed=false"
+          },
+          {
+            "name": "qa_passed",
+            "passed": false,
+            "details": "failed=timeline_schema_valid"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:5f86dfe0c18aafbb1f2ffed6a261723296fd56d7ed8ff24c3236b9cae128d5ab actual=sha256:5f86dfe0c18aafbb1f2ffed6a261723296fd56d7ed8ff24c3236b9cae128d5ab"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "qa_empty_checks",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": []\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:03daf831882dd42f3c41ec614b1ed9f0b9b4e846cc37bacce34f12719f28185f\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "qa failed",
+        "issues": [
+          "qa_has_checks: QA report has no checks",
+          "qa_result_consistent: passed=true all_checks_passed=false",
+          "qa_passed: failed=aggregate_result"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": false,
+            "details": "QA report has no checks"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": false,
+            "details": "passed=true all_checks_passed=false"
+          },
+          {
+            "name": "qa_passed",
+            "passed": false,
+            "details": "failed=aggregate_result"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:03daf831882dd42f3c41ec614b1ed9f0b9b4e846cc37bacce34f12719f28185f actual=sha256:03daf831882dd42f3c41ec614b1ed9f0b9b4e846cc37bacce34f12719f28185f"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "timeline_version_mismatch",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v1\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "base_timeline_version_matches: timeline=timeline-v2 manifest=timeline-v1"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": true,
+            "details": "schema=project-state"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": false,
+            "details": "timeline=timeline-v2 manifest=timeline-v1"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "source_inputs_provenance_missing",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package manifest unreadable",
+        "issues": [
+          "package_manifest_schema_valid: /provenance: must have required property 'source_inputs_hash'; /provenance: must have required property 'source_inputs_attestation_status'; /: must match \"then\" schema"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": false,
+            "details": "/provenance: must have required property 'source_inputs_hash'; /provenance: must have required property 'source_inputs_attestation_status'; /: must match \"then\" schema"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    },
+    {
+      "id": "state_unknown_property",
+      "files": {
+        "05_timeline/timeline.json": "{\n  \"version\": \"timeline-v2\",\n  \"project_id\": \"studio-contract\",\n  \"sequence\": {\n    \"name\": \"Studio Contract\",\n    \"fps_num\": 30,\n    \"fps_den\": 1,\n    \"width\": 1920,\n    \"height\": 1080,\n    \"start_frame\": 0\n  },\n  \"tracks\": {\n    \"video\": [],\n    \"audio\": [\n      {\n        \"track_id\": \"A1\",\n        \"kind\": \"audio\",\n        \"clips\": [\n          {\n            \"clip_id\": \"audio-1\",\n            \"segment_id\": \"segment-1\",\n            \"asset_id\": \"asset-1\",\n            \"src_in_us\": 0,\n            \"src_out_us\": 10000000,\n            \"timeline_in_frame\": 0,\n            \"timeline_duration_frames\": 300,\n            \"role\": \"dialogue\",\n            \"motivation\": \"Exercise the audio-only Gate 10 exemption.\",\n            \"media_kind\": \"audio\",\n            \"source_capabilities\": {\n              \"has_video\": false,\n              \"has_audio\": true\n            },\n            \"audio_role\": \"dialogue\"\n          }\n        ]\n      }\n    ]\n  },\n  \"markers\": [],\n  \"provenance\": {\n    \"brief_path\": \"01_intent/creative_brief.yaml\",\n    \"blueprint_path\": \"04_plan/edit_blueprint.yaml\",\n    \"selects_path\": \"03_selects/selects.yaml\",\n    \"compiler_version\": \"studio-contract-fixture\"\n  }\n}\n",
+        "00_sources/fixture-audio.wav": "fixture-audio",
+        "02_media/fixture-audio.wav": "fixture-audio",
+        "02_media/source_map.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"media_dir\": \"02_media\",\n  \"generated_at\": \"2026-07-22T00:00:00Z\",\n  \"items\": [\n    {\n      \"asset_id\": \"asset-1\",\n      \"source_locator\": \"00_sources/fixture-audio.wav\",\n      \"local_source_path\": \"02_media/fixture-audio.wav\",\n      \"link_path\": \"02_media/fixture-audio.wav\",\n      \"media_kind\": \"audio\"\n    }\n  ]\n}\n",
+        "07_package/qa-report.json": "{\n  \"version\": \"1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"qa_profile\": \"engine_render\",\n  \"passed\": true,\n  \"checks\": [\n    {\n      \"name\": \"timeline_schema_valid\",\n      \"passed\": true,\n      \"details\": \"ok\"\n    }\n  ]\n}\n",
+        "07_package/package_manifest.json": "{\n  \"version\": \"package-v1\",\n  \"project_id\": \"studio-contract\",\n  \"source_of_truth\": \"engine_render\",\n  \"base_timeline_version\": \"timeline-v2\",\n  \"packaging_projection_hash\": \"cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e\",\n  \"created_at\": \"2026-07-22T00:00:00Z\",\n  \"artifacts\": {\n    \"final_video\": {\n      \"path\": \"09_output/final.mp4\",\n      \"sha256\": \"sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938\"\n    },\n    \"qa_report\": {\n      \"path\": \"07_package/qa-report.json\",\n      \"sha256\": \"sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255\"\n    }\n  },\n  \"provenance\": {\n    \"editorial_timeline_hash\": \"b1cd67fba6533c21\",\n    \"source_inputs_hash\": \"5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8\",\n    \"source_inputs_attestation_status\": \"live_only\"\n  }\n}\n",
+        "09_output/final.mp4": "fixture-video",
+        "project_state.yaml": "version: 1\nproject_id: studio-contract\ncurrent_state: packaged\nhandoff_resolution:\n  handoff_id: HND_studio_contract\n  status: decided\n  source_of_truth_decision: engine_render\nunexpected: true\n"
+      },
+      "expected": {
+        "ready": false,
+        "projectDir": "$PROJECT_DIR",
+        "readinessLabel": "package contract mismatch",
+        "issues": [
+          "project_state_schema_valid: /: must NOT have additional properties"
+        ],
+        "checks": [
+          {
+            "name": "required_artifacts_present",
+            "passed": true,
+            "details": "timeline, QA report, manifest, final video, and project state are present"
+          },
+          {
+            "name": "qa_report_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "qa_report_schema_valid",
+            "passed": true,
+            "details": "schema=package-qa-report"
+          },
+          {
+            "name": "package_manifest_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "package_manifest_schema_valid",
+            "passed": true,
+            "details": "schema=package-manifest"
+          },
+          {
+            "name": "timeline_json_readable",
+            "passed": true,
+            "details": "JSON parsed"
+          },
+          {
+            "name": "timeline_schema_valid",
+            "passed": true,
+            "details": "schema=timeline-ir"
+          },
+          {
+            "name": "project_state_readable",
+            "passed": true,
+            "details": "YAML parsed"
+          },
+          {
+            "name": "project_state_schema_valid",
+            "passed": false,
+            "details": "/: must NOT have additional properties"
+          },
+          {
+            "name": "project_identity_matches",
+            "passed": true,
+            "details": "timeline=studio-contract state=studio-contract qa=studio-contract manifest=studio-contract"
+          },
+          {
+            "name": "source_of_truth_matches",
+            "passed": true,
+            "details": "state=engine_render qa=engine_render profile=engine_render manifest=engine_render"
+          },
+          {
+            "name": "project_state_is_packaged",
+            "passed": true,
+            "details": "current_state=packaged"
+          },
+          {
+            "name": "base_timeline_version_matches",
+            "passed": true,
+            "details": "timeline=timeline-v2 manifest=timeline-v2"
+          },
+          {
+            "name": "qa_has_checks",
+            "passed": true,
+            "details": "1 QA checks declared"
+          },
+          {
+            "name": "qa_result_consistent",
+            "passed": true,
+            "details": "passed=true all_checks_passed=true"
+          },
+          {
+            "name": "qa_passed",
+            "passed": true,
+            "details": "1 QA checks passed"
+          },
+          {
+            "name": "final_video_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/09_output/final.mp4 canonical=$PROJECT_DIR/09_output/final.mp4"
+          },
+          {
+            "name": "final_video_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938 actual=sha256:cf5664a86426afa42799efd6c0e8b2e9df0ef34c9024dc89e132032872edf938"
+          },
+          {
+            "name": "qa_report_path_is_canonical",
+            "passed": true,
+            "details": "manifest=$PROJECT_DIR/07_package/qa-report.json canonical=$PROJECT_DIR/07_package/qa-report.json"
+          },
+          {
+            "name": "qa_report_hash_matches",
+            "passed": true,
+            "details": "manifest=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255 actual=sha256:879418d7d15a2634fae5f178591ccff46ecaf36e7e4195653a64711d9cedb255"
+          },
+          {
+            "name": "editorial_timeline_hash_matches",
+            "passed": true,
+            "details": "manifest=b1cd67fba6533c21 actual=b1cd67fba6533c21"
+          },
+          {
+            "name": "caption_approval_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "music_cues_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "render_defaults_provenance_matches",
+            "passed": true,
+            "details": "manifest=- actual=-"
+          },
+          {
+            "name": "packaging_projection_hash_matches",
+            "passed": true,
+            "details": "manifest=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e actual=cfc0c0607a3380f7975346b30c14af8284f5493d9781b0ed847f499f01b4768e"
+          },
+          {
+            "name": "source_inputs_provenance_matches",
+            "passed": true,
+            "details": "manifest=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only actual=5f3425e3e8e1d4e77164128e69a99af3e8ab08a594936458466866a5cc43cec8/live_only"
+          }
+        ],
+        "projectId": "studio-contract",
+        "sourceOfTruth": "engine_render"
+      }
+    }
+  ]
+}

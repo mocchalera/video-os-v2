@@ -34,6 +34,7 @@ npx tsx scripts/compile-timeline.ts projects/<project> --patch projects/<project
 ```
 
 4. 出力された `timeline.json`、`preview-manifest.json`、必要なら `adjacency_analysis.json` を確認する。
+5. 既存preview/finalがある状態でtimelineを更新した場合、それらをfreshとみなさない。Studio確認前にrenderを再実行し、`playback-contract-status` が `exact` であることを確認する。
 
 ## 出力 artifact
 - `05_timeline/timeline.json`
@@ -43,4 +44,5 @@ npx tsx scripts/compile-timeline.ts projects/<project> --patch projects/<project
 ## 注意事項
 - `scripts/compile-timeline.ts` の `createdAt` は `01_intent/creative_brief.yaml.created_at` から決まる。
 - patch mode は `timeline.json` を上書きし、同時に `preview-manifest.json` も再生成する。
+- manifest hashだけを手編集して古いpreviewをfresh扱いにしない。
 - `adjacency_analysis.json` は debug / explanation 用 artifact。常に生成されるわけではない。

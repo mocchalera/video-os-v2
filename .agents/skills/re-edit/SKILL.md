@@ -26,6 +26,8 @@ metadata:
   - `insert_segment`
   - `remove_segment`
   - `change_audio_policy`
+  - `change_visual_transform`
+  - `change_audio_finish`
   - `add_marker`
   - `add_note`
 - `review_patch.json.timeline_version` には **`timeline.json.version`** を入れること
@@ -56,6 +58,8 @@ patch で直せる代表例:
 - 既存クリップの順番や入る frame をずらす
 - approved candidate に差し替える
 - nat sound / ducking / fade を局所調整する
+- 人物のzoom/crop/positionを変更する
+- タイムライン全体へ会話MAプリセットを指定する
 
 patch だけでは不正確な代表例:
 
@@ -117,4 +121,5 @@ npx tsx scripts/compile-timeline.ts projects/<project> --fps 30
 - `reorder` という patch op はない。現在の repo では並べ替えは主に `move_segment` で表現する
 - `change_audio_policy` は ducking / nat sound / fade 調整であり、BGM asset の差し替えではない
 - 「長くして」は `move_segment` / `insert_segment` / upstream blueprint 修正になることがある。duration を盲目的に伸ばさない
+- MAまたは人物リフレームを含む場合は `finish-interview` を併用し、字幕や質問カードより前の映像レイヤーへ変換を適用する
 - patch mode は `selects_candidates.yaml` や `edit_blueprint.yaml` を自動更新しない

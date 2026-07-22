@@ -6,6 +6,7 @@ import {
   runCompileTimeline,
 } from "../scripts/compile-timeline.js";
 import { renderRoughCut } from "../scripts/render-rough-cut.js";
+import { parseArgs as parseEditorialAgentTaskArgs } from "../scripts/editorial-agent-task.js";
 
 describe("editorial pipeline entrypoints", () => {
   it("exposes compile and rough-render functions without requiring CLI subprocesses", () => {
@@ -39,18 +40,58 @@ describe("editorial pipeline entrypoints", () => {
   });
 
   it("does not shell out to compile or render CLIs from editorial orchestration", () => {
-    const files = [
+    const orchestrators = [
       "scripts/editorial-pipeline.ts",
       "scripts/editorial-agent-task.ts",
     ];
 
-    for (const file of files) {
+    for (const file of orchestrators) {
       const source = fs.readFileSync(file, "utf-8");
       expect(source).not.toContain("node:child_process");
       expect(source).not.toContain("scripts/compile-timeline.ts");
       expect(source).not.toContain("scripts/render-rough-cut.ts");
-      expect(source).toContain('import { runCompileTimeline } from "./compile-timeline.js";');
-      expect(source).toContain('import { renderRoughCut } from "./render-rough-cut.js";');
+      expect(source).toContain('from "./editorial-downstream.js";');
     }
+
+    const downstream = fs.readFileSync("scripts/editorial-downstream.ts", "utf-8");
+    expect(downstream).toContain('from "./editorial-stages.js";');
+    expect(downstream).not.toContain("node:child_process");
+
+    const sharedStages = fs.readFileSync("scripts/editorial-stages.ts", "utf-8");
+    expect(sharedStages).toContain('import { runCompileTimeline } from "./compile-timeline.js";');
+    expect(sharedStages).toContain('import { renderRoughCut } from "./render-rough-cut.js";');
+    expect(sharedStages).not.toContain("node:child_process");
+  });
+
+  it("keeps headless and interactive planning on the shared guarded context", () => {
+    for (const file of ["scripts/editorial-pipeline.ts", "scripts/editorial-agent-task.ts"]) {
+      const source = fs.readFileSync(file, "utf-8");
+      expect(source).toContain("loadEditorialPlanningContext");
+      expect(source).not.toContain("function loadMarlinEvents");
+      expect(source).not.toContain("function loadSegments");
+    }
+  });
+
+  it("makes interactive QA completion explicit and opt-out", () => {
+    expect(parseEditorialAgentTaskArgs([
+      "node",
+      "scripts/editorial-agent-task.ts",
+      "--project",
+      "projects/demo",
+      "--mode",
+      "interactive",
+      "--skip-qa",
+    ])).toMatchObject({
+      mode: "interactive",
+      skipQa: true,
+    });
+
+    const interactiveSource = fs.readFileSync("scripts/editorial-agent-task.ts", "utf8");
+    const headlessSource = fs.readFileSync("scripts/editorial-pipeline.ts", "utf8");
+    for (const source of [interactiveSource, headlessSource]) {
+      expect(source).toContain('from "./editorial-downstream.js";');
+      expect(source).toContain("runEditorialDownstream");
+    }
+    expect(interactiveSource).not.toContain("runEditorialCompileAndMaybeRender");
   });
 });

@@ -10,17 +10,27 @@ import {
 import type { QAFix } from "./qa-fix-proposer.js";
 import type { QAIssue } from "./qa-issue-detector.js";
 
+export type QAFixDisposition = "proposed" | "applied" | "rolled_back" | "skipped" | "rejected";
+
+export interface QAReportedFix extends QAFix {
+  disposition?: QAFixDisposition;
+  disposition_reason?: string;
+}
+
 export interface QAImprovementReport {
   iteration: number;
   total_issues: number;
   fixable_issues: number;
   proposed_fixes: number;
   issues: QAIssue[];
-  fixes: QAFix[];
+  fixes: QAReportedFix[];
   overall_qa_score: number;
-  visual_qa: VisualQAStatus;
+  visual_qa: VisualQAStatus | "not_applicable";
   visual_qa_reason?: string;
   visual_qa_mock?: boolean;
+  evaluation_status?: "available" | "unavailable";
+  evaluation_unavailable_reason?: string;
+  timeline_hash?: string;
   brief_alignment_scores: Record<string, number>;
   timestamp: string;
 }
@@ -28,10 +38,16 @@ export interface QAImprovementReport {
 export function buildQAReport(
   iteration: number,
   issues: QAIssue[],
-  fixes: QAFix[],
+  fixes: QAReportedFix[],
   marlinQaResult: MarlinQAReport,
   briefAlignmentResult: BriefAlignmentReport,
-  options: { now?: () => Date } = {},
+  options: {
+    now?: () => Date;
+    evaluationStatus?: "available" | "unavailable";
+    evaluationUnavailableReason?: string;
+    timelineHash?: string;
+    visualQaApplicable?: boolean;
+  } = {},
 ): QAImprovementReport {
   return {
     iteration,
@@ -40,10 +56,21 @@ export function buildQAReport(
     proposed_fixes: fixes.length,
     issues,
     fixes,
-    overall_qa_score: isMarlinQAReportVerified(marlinQaResult) ? marlinQaResult.score : 0,
-    visual_qa: marlinQAStatus(marlinQaResult),
-    ...(marlinQaResult.visual_qa_reason ? { visual_qa_reason: marlinQaResult.visual_qa_reason } : {}),
+    overall_qa_score: options.visualQaApplicable === false
+      ? briefAlignmentResult.composite
+      : isMarlinQAReportVerified(marlinQaResult) ? marlinQaResult.score : 0,
+    visual_qa: options.visualQaApplicable === false
+      ? "not_applicable"
+      : marlinQAStatus(marlinQaResult),
+    ...(options.visualQaApplicable === false
+      ? { visual_qa_reason: "audio_only_timeline" }
+      : marlinQaResult.visual_qa_reason ? { visual_qa_reason: marlinQaResult.visual_qa_reason } : {}),
     ...(marlinQaResult.mock === true ? { visual_qa_mock: true } : {}),
+    ...(options.evaluationStatus ? { evaluation_status: options.evaluationStatus } : {}),
+    ...(options.evaluationUnavailableReason
+      ? { evaluation_unavailable_reason: options.evaluationUnavailableReason }
+      : {}),
+    ...(options.timelineHash ? { timeline_hash: options.timelineHash } : {}),
     brief_alignment_scores: flattenBriefAlignmentScores(briefAlignmentResult),
     timestamp: (options.now ?? (() => new Date()))().toISOString(),
   };

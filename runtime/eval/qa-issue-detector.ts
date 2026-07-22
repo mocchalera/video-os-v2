@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import type { ClipOutput, TimelineIR } from "../artifacts/types.js";
 import type { BriefAlignmentAxis, BriefAlignmentReport, AxisScore } from "./brief-alignment-types.js";
+import type { ReviewMetricId, ReviewMetricsArtifact } from "../review/metrics.js";
 import {
   isMarlinQAReportVerified,
   marlinQAStatus,
@@ -25,7 +26,7 @@ export interface QAIssue {
   description: string;
   fixable: boolean;
   suggested_fix_type?: QAIssueFixType;
-  source?: "marlin_qa" | "brief_alignment" | "timeline";
+  source?: "marlin_qa" | "brief_alignment" | "timeline" | "review_metrics";
   source_category?: string;
   source_axis?: BriefAlignmentAxis;
   adjacent_clip_ids?: {
@@ -51,10 +52,13 @@ export function detectIssues(
   marlinQaResult: MarlinQAResult,
   briefAlignmentResult: BriefAlignmentResult,
   timeline: Timeline,
+  reviewMetrics?: ReviewMetricsArtifact,
 ): QAIssue[] {
   const issues: QAIssue[] = [];
 
-  const visualQAIssue = detectVisualQAStateIssue(marlinQaResult);
+  const visualQAIssue = isAudioOnlyTimeline(timeline)
+    ? null
+    : detectVisualQAStateIssue(marlinQaResult);
   if (visualQAIssue) {
     issues.push(visualQAIssue);
   } else {
@@ -122,8 +126,98 @@ export function detectIssues(
 
   issues.push(...detectTimelineMicroClips(timeline, issues));
   issues.push(...detectBriefAlignmentIssues(briefAlignmentResult));
+  issues.push(...detectReviewMetricIssues(reviewMetrics, timeline));
 
   return issues.sort(compareIssues);
+}
+
+export function isAudioOnlyTimeline(timeline: Timeline): boolean {
+  const videoClips = timeline.tracks?.video?.flatMap((track) => track.clips ?? []) ?? [];
+  const audioClips = timeline.tracks?.audio?.flatMap((track) => track.clips ?? []) ?? [];
+  return videoClips.length === 0 && audioClips.length > 0;
+}
+
+const REVIEW_CONTINUITY_METRIC_IDS = new Set<ReviewMetricId>([
+  "eye_trace.same_asset_adjacency",
+  "eye_trace.attention_jump",
+  "eye_trace.motion_flow",
+  "plane_2d.framing_jump",
+  "plane_2d.luma_color_jump",
+  "space_3d.direction_axis",
+]);
+
+function detectReviewMetricIssues(
+  reviewMetrics: ReviewMetricsArtifact | undefined,
+  timeline: Timeline,
+): QAIssue[] {
+  if (!reviewMetrics) return [];
+  if (reviewMetrics.project_id !== timeline.project_id || reviewMetrics.timeline_version !== timeline.version) return [];
+  const clips = primaryVideoClips(timeline);
+  const fps = timelineFps(timeline);
+  const issues: QAIssue[] = [];
+
+  for (const metric of reviewMetrics.checks) {
+    if (!REVIEW_CONTINUITY_METRIC_IDS.has(metric.id)) continue;
+    if (metric.status !== "fail" && metric.status !== "warn") continue;
+    const measured = recordValue(metric.measured);
+    if (!measured) continue;
+    const findings = [
+      ...reviewMetricFindings(measured.violations, "fail"),
+      ...reviewMetricFindings(measured.warnings, "warn"),
+    ];
+    for (const finding of findings) {
+      const relationship = typeof finding.value.relationship === "string"
+        ? finding.value.relationship
+        : "unknown";
+      if (relationship === "intentional_contrast" || finding.value.outcome === "intentional") continue;
+      const leftClipId = stringValue(finding.value.left_clip_id);
+      const rightClipId = stringValue(finding.value.right_clip_id);
+      if (!leftClipId || !rightClipId) continue;
+      const leftIndex = clips.findIndex((clip) => clip.clip_id === leftClipId);
+      if (leftIndex < 0 || clips[leftIndex + 1]?.clip_id !== rightClipId) continue;
+      const right = clips[leftIndex + 1];
+      const description = stringValue(finding.value.description) ??
+        `${metric.id} reports an advisory continuity finding for ${leftClipId}->${rightClipId}.`;
+      issues.push({
+        issue_id: issueId([
+          "review_metrics",
+          metric.id,
+          finding.kind,
+          leftClipId,
+          rightClipId,
+          stringValue(finding.value.pair_id),
+          description,
+        ]),
+        type: "continuity",
+        severity: finding.kind === "fail" ? 0.8 : 0.4,
+        timestamp_sec: round3(right.timeline_in_frame / fps),
+        clip_id: right.clip_id,
+        beat_id: right.beat_id,
+        description,
+        fixable: false,
+        source: "review_metrics",
+        source_category: metric.id,
+        adjacent_clip_ids: { before: leftClipId, after: rightClipId },
+        non_fixable_reason: "Advisory review metric before profile calibration; excluded from automatic proposal and application.",
+      });
+    }
+  }
+  return issues;
+}
+
+function reviewMetricFindings(
+  value: unknown,
+  kind: "fail" | "warn",
+): Array<{ value: Record<string, unknown>; kind: "fail" | "warn" }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => recordValue(item))
+    .filter((item): item is Record<string, unknown> => item !== undefined)
+    .map((item) => ({ value: item, kind }));
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function detectVisualQAStateIssue(report: MarlinQAResult): QAIssue | null {

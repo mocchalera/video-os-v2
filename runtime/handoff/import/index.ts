@@ -17,7 +17,11 @@ import { normalizeOneToMany, type OneToManyResult } from "./normalization.js";
 import { normalizeOtioViaBridge } from "./parser.js";
 import { buildImportReport } from "./report.js";
 import { isP3ContinuityPreferenceEnabled } from "../../artifacts/p3-continuity-graph.js";
-import { appendPreferenceEntry } from "../../artifacts/p3-preference-memory.js";
+import {
+  appendProjectPreferenceEntry,
+  canonicalPreferenceMemoryPath,
+  validatePreferenceMemoryEntry,
+} from "../../artifacts/p3-preference-memory.js";
 
 export interface HandoffImportInput {
   manifestPath: string;
@@ -28,7 +32,9 @@ export interface HandoffImportInput {
   pythonPath?: string;
   nleSessionObserved?: NleSessionObserved;
   confirmedPreferenceLesson?: string;
+  /** @deprecated Pass preferenceMemoryProjectDir. Only an exact canonical path remains accepted. */
   preferenceMemoryPath?: string;
+  preferenceMemoryProjectDir?: string;
 }
 
 export interface NleSessionObserved {
@@ -413,10 +419,12 @@ export function executeHandoffImport(
   };
 }
 
-function appendConfirmedImportLesson(input: HandoffImportInput, report: RoundtripImportReport): void {
+export function appendConfirmedImportLesson(input: HandoffImportInput, report: RoundtripImportReport): void {
   if (!isP3ContinuityPreferenceEnabled()) return;
-  if (!input.confirmedPreferenceLesson || !input.preferenceMemoryPath) return;
-  appendPreferenceEntry(input.preferenceMemoryPath, {
+  if (!input.confirmedPreferenceLesson) return;
+  const preferenceMemoryProjectDir = resolveHandoffPreferenceMemoryProjectDir(input);
+  if (!preferenceMemoryProjectDir) return;
+  appendProjectPreferenceEntry(preferenceMemoryProjectDir, {
     version: "1.0.0",
     project_id: report.project_id,
     entry_id: `EPM_import_${safeId(report.handoff_id)}_${Date.now()}`,
@@ -435,7 +443,26 @@ function appendConfirmedImportLesson(input: HandoffImportInput, report: Roundtri
       inputs: [{ path: "roundtrip_import_report.yaml", hash: report.base_timeline.hash }],
       hash_policy: { algorithm: "sha256", canonicalization: "jsonl-records-v1", excluded_fields: [] },
     },
-  });
+  }, { validateEntry: validatePreferenceMemoryEntry });
+}
+
+export function resolveHandoffPreferenceMemoryProjectDir(
+  input: Pick<HandoffImportInput, "preferenceMemoryPath" | "preferenceMemoryProjectDir">,
+): string | undefined {
+  const explicitProjectDir = input.preferenceMemoryProjectDir
+    ? path.resolve(input.preferenceMemoryProjectDir)
+    : undefined;
+  if (!input.preferenceMemoryPath) return explicitProjectDir;
+
+  const legacyFieldPath = path.resolve(input.preferenceMemoryPath);
+  const inferredProjectDir = path.dirname(path.dirname(legacyFieldPath));
+  if (canonicalPreferenceMemoryPath(inferredProjectDir) !== legacyFieldPath) {
+    throw new Error("preferenceMemoryPath must be the exact canonical editorial preference memory path");
+  }
+  if (explicitProjectDir && canonicalPreferenceMemoryPath(explicitProjectDir) !== legacyFieldPath) {
+    throw new Error("preferenceMemoryPath conflicts with preferenceMemoryProjectDir");
+  }
+  return explicitProjectDir ?? inferredProjectDir;
 }
 
 function safeId(value: string): string {

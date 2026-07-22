@@ -23,7 +23,7 @@ import {
 } from "../artifacts/p3-continuity-graph.js";
 import {
   computePreferenceMemoryHash,
-  readPreferenceEntries,
+  readResolvedPreferenceEntries,
   resolveActivePreference,
   type PreferenceType,
 } from "../artifacts/p3-preference-memory.js";
@@ -127,14 +127,22 @@ export function projectP3ContinuityPreferenceSignals(projectDir: string, bluepri
     }
   }
 
-  const preferencePath = path.join(projectDir, "00_project/editorial_preference_memory.jsonl");
-  const preferenceRead = readPreferenceEntries(preferencePath);
-  const preferences = preferenceRead.entries.map((item) => item.entry);
-  const active = (["pacing", "chronology", "transition_style"] as PreferenceType[])
+  const preferenceRead = readResolvedPreferenceEntries(projectDir, blueprint.project_id);
+  const preferences = preferenceRead.entries.map((item) => item.entry)
+    .filter((entry) => entry.scope === "project" && (entry.scope_ref === undefined || entry.scope_ref === blueprint.project_id));
+  const active = ([
+    "pacing",
+    "chronology",
+    "transition_style",
+    "repetition_tolerance",
+    "bgm_loudness",
+    "caption_density",
+    "delivery_preference",
+  ] as PreferenceType[])
     .map((type) => resolveActivePreference(preferences, type).active)
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   if (active.length > 0) {
-    const raw = fs.readFileSync(preferencePath, "utf-8");
+    const raw = fs.readFileSync(preferenceRead.resolution.path, "utf-8");
     const consumedHash = computePreferenceMemoryHash(raw);
     for (const beat of beats) {
       beat.applied_preferences = active.map((entry) => ({

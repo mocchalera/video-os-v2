@@ -58,7 +58,7 @@ function makeSegment(overrides: Partial<SegmentItem> = {}): SegmentItem {
   };
 }
 
-function makeShard(summary: string): VlmShard {
+function makeShard(summary: string, verifiedFramePath: string): VlmShard {
   return {
     segment_id: "SEG_001",
     result: {
@@ -66,6 +66,15 @@ function makeShard(summary: string): VlmShard {
       prompt_hash: "abcd1234abcd1234",
       model_alias: "gemini-2.5-flash-lite",
       model_snapshot: "gemini-test",
+      frame_grounding: {
+        frame_count: 1,
+        verified_frame_paths: [verifiedFramePath],
+        sample_timestamps_us: [2_500_000],
+        requested_sample_timestamps_us: [2_500_000],
+        frame_cache_version: "grounded-frame-cache-v1",
+        frame_producer_version: "ffmpeg-single-frame-v1",
+        frame_cache_hits: 0,
+      },
       output: {
         summary,
         tags: ["gemini_appraisal"],
@@ -97,6 +106,8 @@ function makeShard(summary: string): VlmShard {
 function reduceOnce(segment: SegmentItem): SegmentItem {
   const projectDir = makeTempProject();
   try {
+    const verifiedFramePath = path.join(projectDir, "verified-frame.jpg");
+    fs.writeFileSync(verifiedFramePath, "verified-frame");
     const assets: AssetsJson = {
       project_id: "vlm-marlin",
       artifact_version: "2.0.0",
@@ -108,7 +119,7 @@ function reduceOnce(segment: SegmentItem): SegmentItem {
       items: [segment],
     };
     const result = vlmReduce(
-      [makeShard("Gemini generic person holding an object.")],
+      [makeShard("Gemini generic person holding an object.", verifiedFramePath)],
       assets,
       segments,
       "policyhash",

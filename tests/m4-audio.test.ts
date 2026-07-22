@@ -15,6 +15,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validateMusicCues,
+  applyMusicMixProfile,
   buildA2TrackClips,
   projectMusicToTimeline,
   type MusicCuesDoc,
@@ -70,6 +71,41 @@ function makeMockDoc(overrides?: Partial<MusicCuesDoc>): MusicCuesDoc {
     ...overrides,
   };
 }
+
+describe("applyMusicMixProfile", () => {
+  it("limits an implicit social talking-head mix to dialogue-first values", () => {
+    const result = applyMusicMixProfile(makeMockDoc({
+      cues: [makeMockCue({
+        ducking: { base_gain_db: -4, duck_gain_db: -12, attack_ms: 15, release_ms: 180 },
+      })],
+    }), "social_talking_head");
+
+    expect(result.profile).toBe("dialogue_first");
+    expect(result.adjusted).toBe(true);
+    expect(result.doc.cues[0].ducking).toEqual({
+      base_gain_db: -10,
+      duck_gain_db: -18,
+      attack_ms: 20,
+      release_ms: 280,
+    });
+  });
+
+  it("does not change non-social or explicit music-forward mixes", () => {
+    const original = makeMockDoc({
+      mix_profile: "music_forward",
+      cues: [makeMockCue({
+        ducking: { base_gain_db: -4, duck_gain_db: -12, attack_ms: 15, release_ms: 180 },
+      })],
+    });
+    const explicit = applyMusicMixProfile(original, "social_talking_head");
+    const longform = applyMusicMixProfile(makeMockDoc({ cues: original.cues }), "longform_event");
+
+    expect(explicit.adjusted).toBe(false);
+    expect(explicit.doc.cues[0].ducking.base_gain_db).toBe(-4);
+    expect(longform.profile).toBe("balanced");
+    expect(longform.adjusted).toBe(false);
+  });
+});
 
 const mockLoudnormStderr = `
 frame=    0 fps=0.0 q=0.0 size=N/A time=00:00:00.00 bitrate=N/A speed=N/A
@@ -353,6 +389,7 @@ describe("buildDuckingFilter", () => {
     // Multiple between() for multiple intervals
     const betweenCount = (filter.match(/between\(/g) || []).length;
     expect(betweenCount).toBeGreaterThanOrEqual(2);
+    expect(filter).not.toContain(")dB'");
   });
 });
 

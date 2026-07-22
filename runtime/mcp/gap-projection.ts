@@ -20,6 +20,8 @@ export interface GapEntry {
   reason?: string;
   issue?: string;
   attempted_at?: string;
+  source_id?: string;
+  consumer_impact?: string;
 }
 
 export interface GapReport {
@@ -73,23 +75,29 @@ export function projectAnalysisGaps(report: GapReport): string[] {
     if (sevDiff !== 0) return sevDiff;
 
     // stage asc
-    const stageCmp = a.stage.localeCompare(b.stage);
+    const stageCmp = binaryCompare(a.stage, b.stage);
     if (stageCmp !== 0) return stageCmp;
 
     // asset_id asc
-    const assetCmp = a.asset_id.localeCompare(b.asset_id);
+    const assetCmp = binaryCompare(a.asset_id, b.asset_id);
     if (assetCmp !== 0) return assetCmp;
 
     // segment_id asc (undefined sorts before defined)
     const segA = a.segment_id ?? "";
     const segB = b.segment_id ?? "";
-    return segA.localeCompare(segB);
+    return binaryCompare(segA, segB);
   });
 
   return sorted.map((entry) => {
     const segPart = entry.segment_id ? `/${entry.segment_id}` : "";
     return `${entry.severity}/${entry.stage}/${entry.asset_id}${segPart}: ${getReasonText(entry)}`;
   });
+}
+
+function binaryCompare(left: string, right: string): number {
+  const a = left.normalize("NFC");
+  const b = right.normalize("NFC");
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 // ── QC Status Crosswalk ────────────────────────────────────────────
@@ -126,7 +134,7 @@ export function deriveQcStatus(
         (entry.severity === "error" &&
           (entry.stage === "ingest" || entry.stage === "segment"));
       if (isBlocking) {
-        blockedAssets.add(entry.asset_id);
+        if (!entry.source_id) blockedAssets.add(entry.asset_id);
       }
     }
 

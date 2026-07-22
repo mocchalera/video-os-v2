@@ -12,8 +12,8 @@
  */
 
 import { config as dotenvConfig } from "dotenv";
-dotenvConfig({ path: ".env.local" });
-dotenvConfig();
+dotenvConfig({ path: ".env.local", quiet: true });
+dotenvConfig({ quiet: true });
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -29,6 +29,11 @@ import {
   runGoldenEvalSuite,
   type RunEvalSuiteOptions,
 } from "../runtime/eval/suite.js";
+import {
+  canonicalJson,
+  evaluateEditorialEye,
+  writeEditorialEyeReport,
+} from "../runtime/eval/editorial-eye-suite.js";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 
@@ -41,14 +46,22 @@ Modes (choose one):
   --candidate <dir> --golden <dir>
                                Compare a candidate run against a golden project
   --suite golden               Run the integrated golden regression suite
+  --suite editorial-eye        Run the immutable Editorial Eye v1 benchmark contract
 
 Options:
   --judge                      Also run the Gemini LLM judge (needs GEMINI_API_KEY)
   --marlin                     Run live Marlin visual QA for suite projects with fresh renders
-  --projects <a,b,c>           Override suite projects (default: fumoto-growth,togakushi-camp,ena-promo,ax1-komatsu-testimonial-d4892,ax1-female-testimonial-d4892)
+  --projects <a,b,c>           Override suite projects (default: discover approved local projects)
   --divergence-threshold <n>   Suite WARNING threshold for structure/video divergence (default: 30)
   --min-score <n>              Exit non-zero when any overall score falls below n (0-100)
   --out <dir>                  Report output directory (default: reports/eval)
+  --manifest <path>            Editorial Eye suite manifest (required)
+  --labels <path>              Editorial Eye labels (required)
+  --baseline-report <path>     Explicit immutable baseline report (required; never auto-discovered)
+  --baseline-report-sha256 <h> Trusted SHA-256 lock for exact baseline report bytes (required)
+  --results <path>             Explicit measured case results (required; never inferred from suite)
+  --candidate-commit <sha>     Complete candidate commit SHA (required)
+  --output-root <dir>          Editorial Eye report root (default: reports/editorial-eye)
   --no-write                   Print to stdout only, write no report files
   --help, -h                   Show this help`;
 
@@ -59,7 +72,14 @@ export interface EvalCliArgs {
   self: string | null;
   candidate: string | null;
   golden: string | null;
-  suite: "golden" | null;
+  suite: "golden" | "editorial-eye" | null;
+  manifest: string | null;
+  labels: string | null;
+  baselineReport: string | null;
+  baselineReportSha256: string | null;
+  results: string | null;
+  candidateCommit: string | null;
+  outputRoot: string;
   projects: string[] | null;
   divergenceThreshold: number;
   judge: boolean;
@@ -78,6 +98,13 @@ export function parseArgs(argv: string[]): EvalCliArgs {
     candidate: null,
     golden: null,
     suite: null,
+    manifest: null,
+    labels: null,
+    baselineReport: null,
+    baselineReportSha256: null,
+    results: null,
+    candidateCommit: null,
+    outputRoot: "reports/editorial-eye",
     projects: null,
     divergenceThreshold: 30,
     judge: false,
@@ -123,8 +150,8 @@ export function parseArgs(argv: string[]): EvalCliArgs {
         break;
       case "--suite": {
         const value = takeValue(arg, i, rest);
-        if (value !== "golden") {
-          throw new Error(`Invalid --suite: ${value} (expected golden)`);
+        if (value !== "golden" && value !== "editorial-eye") {
+          throw new Error(`Invalid --suite: ${value} (expected golden or editorial-eye)`);
         }
         args.suite = value;
         i += 1;
@@ -164,6 +191,34 @@ export function parseArgs(argv: string[]): EvalCliArgs {
       }
       case "--out":
         args.out = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--manifest":
+        args.manifest = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--labels":
+        args.labels = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--baseline-report":
+        args.baselineReport = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--baseline-report-sha256":
+        args.baselineReportSha256 = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--results":
+        args.results = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--candidate-commit":
+        args.candidateCommit = takeValue(arg, i, rest);
+        i += 1;
+        break;
+      case "--output-root":
+        args.outputRoot = takeValue(arg, i, rest);
         i += 1;
         break;
       case "--no-write":
@@ -221,6 +276,36 @@ export async function main(argv: string[] = process.argv): Promise<number> {
 
   const outDir = path.resolve(repoRoot, args.out);
 
+  if (args.suite === "editorial-eye") {
+    if (args.minScore !== null) {
+      throw new Error("--min-score is a legacy artifact-agreement threshold and does not apply to --suite editorial-eye");
+    }
+    const missing = [
+      ["--manifest", args.manifest],
+      ["--labels", args.labels],
+      ["--baseline-report", args.baselineReport],
+      ["--baseline-report-sha256", args.baselineReportSha256],
+      ["--results", args.results],
+      ["--candidate-commit", args.candidateCommit],
+    ].filter(([, value]) => !value).map(([flag]) => flag);
+    if (missing.length > 0) throw new Error(`Editorial Eye requires explicit ${missing.join(", ")}`);
+    const report = evaluateEditorialEye({
+      repoRoot,
+      manifestPath: path.resolve(args.manifest!),
+      labelsPath: path.resolve(args.labels!),
+      baselineReportPath: path.resolve(args.baselineReport!),
+      baselineReportSha256: args.baselineReportSha256!,
+      candidateCommit: args.candidateCommit!,
+      resultsPath: path.resolve(args.results!),
+    });
+    console.log(canonicalJson(report));
+    if (args.write) {
+      const reportPath = writeEditorialEyeReport(report, path.resolve(repoRoot, args.outputRoot));
+      console.error(`Editorial Eye report: ${path.relative(repoRoot, reportPath)}`);
+    }
+    return report.verdict.status === "pass" ? 0 : 1;
+  }
+
   if (args.list) {
     const goldens = discoverGoldenProjects(repoRoot);
     if (goldens.length === 0) {
@@ -238,7 +323,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
 
   const reports: EvalReport[] = [];
 
-  if (args.suite) {
+  if (args.suite === "golden") {
     const result = await runGoldenEvalSuite(evalSuiteOptionsFromArgs(args));
     console.log("\nEval suite results:");
     for (const project of result.summary.projects) {

@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "project_id": "synthetic-bgm-contract",
+  "created_at": "2026-07-16T00:00:00.000Z",
+  "mode": "operator_locked",
+  "scoring_strategy": {
+    "strategy_id": "bgm-score-v1",
+    "base_total_points": 100,
+    "auto_minimum_score": 78,
+    "auto_minimum_margin": 12
+  },
+  "redistribution_trace": {
+    "applied": true,
+    "source_component": "semantic_fit",
+    "source_weight": 30,
+    "reason": "semantic channel unavailable",
+    "allocations": [
+      { "component": "editorial_family_arc_fit", "added_points": 30 }
+    ]
+  },
+  "input_hashes": {
+    "creative_brief": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "edit_blueprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "timeline": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "catalog": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "analyses": []
+  },
+  "requirements": {
+    "families": [],
+    "intensities": [],
+    "use_cases": [],
+    "minimum_speech_friendliness": 0,
+    "vocal_presence_allowed": ["none"],
+    "duration_us": 60000000
+  },
+  "hard_constraints": [],
+  "candidates": [],
+  "selected": null,
+  "top_two_margin": null,
+  "operator_override": null,
+  "semantic_channel": {
+    "status": "unavailable",
+    "model_revision": null,
+    "warnings": []
+  },
+  "usage_history_penalties": [],
+  "warnings": []
+}

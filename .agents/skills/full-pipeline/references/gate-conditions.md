@@ -38,7 +38,7 @@
 | Gate 6 | compile が成功し、`05_timeline/timeline.json` が schema valid。 | `scripts/compile-timeline.ts` の pre/post validation、`scripts/validate-schemas.ts` の `gate2_timeline_valid`。 | `compile-timeline` を再実行する。schema failure や upstream mismatch なら Gate 5, 4, 2 のどこに原因があるか切り分けて戻る。 |
 | Gate 7 | `06_review/review_report.yaml` が存在し、FATAL 相当が無い。実コード上は `fatal_issues.length === 0`。 | `runtime/state/reconcile.ts` の `review_gate`、`schemas/review-report.schema.json`、`runtime/commands/review.ts`。 | `review-roughcut` を再実行する。fatal なら Gate 8 patch loop か upstream stage に戻る。 |
 | Gate 8 | `review_patch.json` 適用後の再 compile が成功し、patched `timeline.json` が再び schema valid。patch が不要なら N/A 扱いで Gate 7 の結果を採用してよい。 | `scripts/compile-timeline.ts --patch ...` の patch/apply path と post-patch validation。 | safe patch なら `compile-timeline` patch mode -> `review-roughcut`。unsafe または patch 不可能なら Gate 5 または Gate 4 に戻る。 |
-| Gate 9 | package 前提が揃っている。少なくとも `current_state: approved`、`approval_record.status in {clean, creative_override}`、`handoff_resolution.status: decided`、valid な `source_of_truth_decision`、`review_gate: open`。caption が有効なら `caption_approval.json`、BGM が有効なら `music_cues.json`。`engine_render` なら `05_timeline/assembly.mp4`、`nle_finishing` なら supplied final も必要。 | `runtime/state/reconcile.ts` の `packaging_gate`、`runtime/packaging/gate10.ts`、`runtime/commands/package.ts`。 | `review-roughcut` の結果に対して operator accept または creative override で `approved` に進める。handoff decision や caption/music artifact を揃え、`render-video` 前提を満たす。 |
+| Gate 9 | package 前提が揃っている。少なくとも `current_state: approved`、`approval_record.status in {clean, creative_override}`、`handoff_resolution.status: decided`、valid な `source_of_truth_decision`、`review_gate: open`。caption が有効なら `caption_approval.json` と `caption_timing_report.json` に block がなく、BGM が有効なら `music_cues.json`。protected revealがある場合はcaption reviewにも `unresolved_reveal_anchor` がない。`engine_render` なら `05_timeline/assembly.mp4`、`nle_finishing` なら supplied final も必要。 | `runtime/state/reconcile.ts` の `packaging_gate`、`runtime/packaging/gate10.ts`、`runtime/commands/package.ts`、`runtime/caption/semantic-timing.ts`。 | `review-roughcut` の結果に対して operator accept または creative override で `approved` に進める。speech cueの過剰先行を補正し、未解決の reveal anchor は word timing、発話冒頭、明示 source/timeline frame のどれかで解決する。handoff decision や caption/music artifact を揃えて `render-video` 前提を満たす。 |
 | Gate 10 | final output QA が pass し、`qa-report.json` と `package_manifest.json` が生成される。loudness、A/V sync、caption delivery、package completeness、必要なら strict duration policy が通る。 | `runtime/commands/package.ts`、`runtime/packaging/qa.ts`、`runtime/packaging/manifest.ts`。 | 失敗した QA check を修正し、Gate 9 から `render-video` をやり直す。 |
 
 ## Notes By Gate
@@ -81,3 +81,11 @@
   - `loudness_target_valid`
   - `package_completeness_valid`
 - `duration_policy_valid` は strict mode のときだけ required
+
+### Gate 9 semantic caption timing note
+
+- 全speech captionでcue全体が発話より大きく先行しないことを先に確認する
+- 通常字幕は最大2フレームまで音声より先行してよいが、それを超えた先出しは補正する
+- `punchline` / `surprise` / `reaction` / `payoff` anchor は既定で音声 onset の1フレーム後に出す
+- word timingが無い状態で発話途中のanchorを文字数比例補間しない。明示時刻が無ければレビューblockにする
+- anchorなしの作品でも `speech_sync` は適用する。音声後への追加遅延・字幕分割は `protect_reveals` の明示anchorだけに適用する

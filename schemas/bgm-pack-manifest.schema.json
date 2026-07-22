@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/bgm-pack-manifest.schema.json",
+  "title": "Video OS BGM Pack Manifest",
+  "description": "Immutable identity, assets, editorial metadata, and provenance for an installed BGM pack.",
+  "type": "object",
+  "required": [
+    "version",
+    "pack_id",
+    "pack_version",
+    "title",
+    "created_at",
+    "catalog_license",
+    "default_content_license",
+    "compatible_video_os",
+    "tracks",
+    "provenance",
+    "hash_policy"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.0.0" },
+    "pack_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "pack_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$" },
+    "title": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "catalog_license": { "type": "string", "minLength": 1 },
+    "default_content_license": { "type": "string", "minLength": 1 },
+    "compatible_video_os": { "$ref": "#/$defs/contractRange" },
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/track" }
+    },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "hash_policy": { "$ref": "#/$defs/hashPolicy" }
+  },
+  "$defs": {
+    "contentHash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*:)(?!.*//)(?!.*/$)(?!\\.{1,2}(?:/|$))(?!.*\\/\\.{1,2}(?:/|$))(?!.*[\\u0000-\\u001F\\u007F])[^\\\\]+$"
+    },
+    "contractRange": {
+      "type": "object",
+      "required": ["contract_min", "contract_max"],
+      "additionalProperties": false,
+      "properties": {
+        "contract_min": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "contract_max": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+      }
+    },
+    "assetRef": {
+      "type": "object",
+      "required": ["path", "content_hash", "size_bytes", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath" },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "format": { "$ref": "#/$defs/audioFormat" }
+      }
+    },
+    "audioFormat": {
+      "type": "string",
+      "enum": ["wav", "flac", "aiff", "mp3", "m4a", "ogg"]
+    },
+    "dataRef": {
+      "type": "object",
+      "required": ["path", "content_hash", "size_bytes", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath" },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "format": { "type": "string", "enum": ["json", "yaml"] }
+      }
+    },
+    "alternateMix": {
+      "type": "object",
+      "required": ["mix_id", "path", "content_hash", "size_bytes", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "mix_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "format": { "$ref": "#/$defs/audioFormat" }
+      }
+    },
+    "stem": {
+      "type": "object",
+      "required": ["stem_id", "path", "content_hash", "size_bytes", "format"],
+      "additionalProperties": false,
+      "properties": {
+        "stem_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "content_hash": { "$ref": "#/$defs/contentHash" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "format": { "$ref": "#/$defs/audioFormat" }
+      }
+    },
+    "axisValue": {
+      "type": "object",
+      "required": ["value", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source": { "const": "authored" }
+      }
+    },
+    "editorialAxes": {
+      "type": "object",
+      "required": [
+        "energy",
+        "valence",
+        "tension",
+        "warmth",
+        "modernity",
+        "playfulness",
+        "sophistication",
+        "organic_electronic",
+        "density",
+        "speech_friendliness",
+        "beat_prominence",
+        "build_strength",
+        "ending_resolution"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "energy": { "$ref": "#/$defs/axisValue" },
+        "valence": { "$ref": "#/$defs/axisValue" },
+        "tension": { "$ref": "#/$defs/axisValue" },
+        "warmth": { "$ref": "#/$defs/axisValue" },
+        "modernity": { "$ref": "#/$defs/axisValue" },
+        "playfulness": { "$ref": "#/$defs/axisValue" },
+        "sophistication": { "$ref": "#/$defs/axisValue" },
+        "organic_electronic": { "$ref": "#/$defs/axisValue" },
+        "density": { "$ref": "#/$defs/axisValue" },
+        "speech_friendliness": { "$ref": "#/$defs/axisValue" },
+        "beat_prominence": { "$ref": "#/$defs/axisValue" },
+        "build_strength": { "$ref": "#/$defs/axisValue" },
+        "ending_resolution": { "$ref": "#/$defs/axisValue" }
+      }
+    },
+    "loopWindow": {
+      "type": "object",
+      "required": ["in_us", "out_us"],
+      "additionalProperties": false,
+      "properties": {
+        "in_us": { "type": "integer", "minimum": 0 },
+        "out_us": { "type": "integer", "exclusiveMinimum": 0 },
+        "label": { "type": "string", "minLength": 1 },
+        "max_repetitions": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "track": {
+      "type": "object",
+      "required": [
+        "track_id",
+        "title",
+        "contributor_id",
+        "duration_us",
+        "format",
+        "full_mix",
+        "preview",
+        "rights_ref",
+        "analysis_ref",
+        "family",
+        "intensity",
+        "use_cases",
+        "exclusions",
+        "instruments",
+        "edit_points_us",
+        "loop_windows",
+        "axes",
+        "vocal_presence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "track_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "title": { "type": "string", "minLength": 1 },
+        "contributor_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "duration_us": { "type": "integer", "exclusiveMinimum": 0 },
+        "format": { "$ref": "#/$defs/audioFormat" },
+        "full_mix": { "$ref": "#/$defs/assetRef" },
+        "preview": { "$ref": "#/$defs/assetRef" },
+        "alternate_mixes": { "type": "array", "items": { "$ref": "#/$defs/alternateMix" } },
+        "stems": { "type": "array", "items": { "$ref": "#/$defs/stem" } },
+        "rights_ref": { "$ref": "#/$defs/dataRef" },
+        "analysis_ref": { "$ref": "#/$defs/dataRef" },
+        "family": { "type": "string", "minLength": 1 },
+        "intensity": { "type": "string", "enum": ["low", "high"] },
+        "use_cases": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "exclusions": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "instruments": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "edit_points_us": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 }, "uniqueItems": true },
+        "loop_windows": { "type": "array", "items": { "$ref": "#/$defs/loopWindow" } },
+        "axes": { "$ref": "#/$defs/editorialAxes" },
+        "vocal_presence": { "type": "string", "enum": ["none", "texture", "lead", "unknown"] }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["producer", "source_type", "evidence_refs"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "minLength": 1 },
+        "source_type": { "type": "string", "enum": ["bundled_pack", "user_library", "project_local"] },
+        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/relativePath" }, "uniqueItems": true }
+      }
+    },
+    "hashPolicy": {
+      "description": "Canonical manifest identity policy. The complete manifest is normalized and hashed; archive release receipts are external artifacts.",
+      "type": "object",
+      "required": ["algorithm", "canonicalization", "excluded_fields"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "const": "sha256" },
+        "canonicalization": { "const": "normalized-json-v1" },
+        "excluded_fields": { "type": "array", "maxItems": 0 }
+      }
+    }
+  }
+}

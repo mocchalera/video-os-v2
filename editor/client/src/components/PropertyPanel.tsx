@@ -10,6 +10,7 @@ import type { BlueprintResponse } from '../hooks/useReview';
 import { getCaptionText } from '../utils/editor-helpers';
 import { formatMicroseconds } from '../utils/time';
 import { DEFAULT_CAPTION_STYLE_PRESET, type CaptionStylePreset } from '@shared/caption-style-tokens';
+import { audioGainFieldDisplayDb } from '@shared/audio-gain';
 import AiDecisionPanel from './AiDecisionPanel';
 
 type PanelTab = 'properties' | 'ai-context' | 'review';
@@ -266,28 +267,28 @@ function PropertiesTab({
           <PanelSection title="Audio">
             <div className="space-y-4">
               <SliderField
-                label="Nat Gain"
-                value={audioPolicy.nat_gain ?? 0}
+                label="Nat Gain (dB)"
+                value={audioGainFieldDisplayDb(audioPolicy, 'nat_gain')}
                 min={-96}
                 max={12}
                 onChange={(value) => onUpdateAudioNumber('nat_gain', value)}
               />
               <SliderField
-                label="Nat Sound"
-                value={audioPolicy.nat_sound_gain ?? 0}
+                label="Nat Sound (dB)"
+                value={audioGainFieldDisplayDb(audioPolicy, 'nat_sound_gain')}
                 min={-96}
                 max={12}
                 onChange={(value) => onUpdateAudioNumber('nat_sound_gain', value)}
               />
               <SliderField
-                label="BGM Gain"
-                value={audioPolicy.bgm_gain ?? 0}
+                label="BGM Gain (dB)"
+                value={audioGainFieldDisplayDb(audioPolicy, 'bgm_gain')}
                 min={-96}
                 max={12}
                 onChange={(value) => onUpdateAudioNumber('bgm_gain', value)}
               />
               <SliderField
-                label="Duck"
+                label="Duck (dB)"
                 value={audioPolicy.duck_music_db ?? 0}
                 min={-96}
                 max={0}

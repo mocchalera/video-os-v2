@@ -71,7 +71,7 @@ Inputs:
 - `03_analysis/analysis_coverage_report.json`
 - `03_analysis/audio_story_graph.json`
 - `03_analysis/continuity_graph.json`
-- `03_analysis/editorial_preference_memory.jsonl`
+- `00_project/editorial_preference_memory.jsonl`
 - `07_package/qa-report.json`
 
 Check generators:

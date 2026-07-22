@@ -24,6 +24,18 @@
         "ready_lane_count": { "type": "integer", "minimum": 0 },
         "blocked_lane_count": { "type": "integer", "minimum": 0 },
         "partial_lane_count": { "type": "integer", "minimum": 0 }
+        ,
+        "source_counts": {
+          "type": "object",
+          "required": ["requested", "ready", "unsupported", "failed"],
+          "additionalProperties": false,
+          "properties": {
+            "requested": { "type": "integer", "minimum": 0 },
+            "ready": { "type": "integer", "minimum": 0 },
+            "unsupported": { "type": "integer", "minimum": 0 },
+            "failed": { "type": "integer", "minimum": 0 }
+          }
+        }
       }
     },
     "lanes": {
@@ -53,7 +65,7 @@
         "lane_id": {
           "type": "string",
           "enum": [
-            "source_manifest", "ffprobe", "segments", "contact_sheets", "filmstrips", "stt",
+            "source_manifest", "ffprobe", "segments", "contact_sheets", "filmstrips", "visual_quality", "stt",
             "diarization", "vlm_tags", "vlm_peaks", "audio_events", "bgm_analysis",
             "audio_story_graph", "continuity_graph", "embeddings", "sync_quality"
           ]

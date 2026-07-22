@@ -19,6 +19,7 @@ import type {
   RenderTransition,
   RenderEffectSpec,
 } from "./render-spec.js";
+import { canonicalLinearGainFilter } from "./audio-gain.js";
 
 interface SequenceDimensions {
   width: number;
@@ -31,7 +32,7 @@ interface SequenceDimensions {
  * - zoom === 1.0: scale to fit within sequence dimensions, pad to fill
  * - zoom > 1.0: scale to (width*zoom)x(height*zoom), crop to center
  * - crop: applied after zoom (absolute pixel coords within sequence frame)
- * - position: translate after crop
+ * - position: pan inside zoom overscan when zoom > 1; otherwise translate
  *
  * Returns an array of filter expressions to be joined with commas for -vf.
  */
@@ -42,6 +43,7 @@ export function buildVideoClipFilter(
   const { width, height } = sequence;
   const { zoom, crop, position } = clip.transform;
   const filters: string[] = [];
+  let positionConsumedByZoomPan = false;
 
   if (zoom <= 1.0) {
     // Scale to fit, pad to fill (letterbox/pillarbox)
@@ -50,13 +52,27 @@ export function buildVideoClipFilter(
       `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
     );
   } else {
-    // Scale to cover: zoom into the frame, then crop to sequence dimensions
+    // Scale to cover: zoom into the frame, then crop to sequence dimensions.
+    // A position offset pans the crop window inside the zoom overscan. The old
+    // pad->crop translation happened after the center crop and exposed black
+    // edges even when enough scaled source pixels were available.
     const scaledW = Math.round(width * zoom);
     const scaledH = Math.round(height * zoom);
+    const positionX = crop ? 0 : Math.round(position?.x ?? 0);
+    const positionY = crop ? 0 : Math.round(position?.y ?? 0);
+    // `force_original_aspect_ratio=increase` can make the actual scaled frame
+    // much wider or taller than scaledW/scaledH (notably 16:9 -> 9:16). The
+    // previous numeric clamp used only scaledW/scaledH, so it cropped from the
+    // left edge of the real frame and could push the subject out of portrait
+    // output. Defer the centered/clamped crop calculation to ffmpeg, where
+    // `iw`/`ih` are the true post-scale dimensions.
+    const cropX = `max(0\\,min(iw-${width}\\,(iw-${width})/2-${positionX}))`;
+    const cropY = `max(0\\,min(ih-${height}\\,(ih-${height})/2-${positionY}))`;
     filters.push(
       `scale=${scaledW}:${scaledH}:force_original_aspect_ratio=increase`,
-      `crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`,
+      `crop=${width}:${height}:${cropX}:${cropY}`,
     );
+    positionConsumedByZoomPan = !crop && position !== undefined;
   }
 
   // Optional explicit crop (absolute coords within the sequence frame)
@@ -69,7 +85,7 @@ export function buildVideoClipFilter(
   }
 
   // Optional translate (position offset)
-  if (position && (position.x !== 0 || position.y !== 0)) {
+  if (!positionConsumedByZoomPan && position && (position.x !== 0 || position.y !== 0)) {
     // Shift the image on a black canvas via pad→crop.
     // Input is guaranteed WxH at this point (from zoom or crop+scale above).
     const padW = width + Math.abs(position.x) * 2;
@@ -468,8 +484,12 @@ export interface TransitionChainInput {
   videoFilter: string;
   /** Whether the source file carries an audio stream. */
   hasAudio: boolean;
+  /** Canonical normalized still input. It is looped for exactly frameCount frames. */
+  still?: { fps: string; frameCount: number };
   /** Optional nat-audio gain in dB. */
   gainDb?: number | null;
+  /** Canonical amplitude multiplier. Preferred over gainDb when present. */
+  gainLinear?: number | null;
   /** Audio role/track metadata, used by callers to decide speech-cut fades. */
   audioRole?: string;
   audioTrackId?: string;
@@ -709,11 +729,15 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
       if (!input.sourcePath) {
         throw new Error("Transition chain source input is missing sourcePath");
       }
-      args.push(
-        "-ss", (input.sourceInSec ?? 0).toFixed(6),
-        "-t", input.durationSec.toFixed(6),
-        "-i", input.sourcePath,
-      );
+      if (input.still) {
+        args.push("-loop", "1", "-framerate", input.still.fps, "-i", input.sourcePath);
+      } else {
+        args.push(
+          "-ss", (input.sourceInSec ?? 0).toFixed(6),
+          "-t", input.durationSec.toFixed(6),
+          "-i", input.sourcePath,
+        );
+      }
     }
   }
 
@@ -758,7 +782,8 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
   // Label bindings: [i:v] → per-clip filters → [vN]; audio → [aN].
   const parts: string[] = [];
   opts.inputs.forEach((input, i) => {
-    parts.push(`[${i}:v]${input.videoFilter},settb=AVTB,setpts=PTS-STARTPTS[v${i}]`);
+    const exactStill = input.still ? `,trim=end_frame=${input.still.frameCount}` : "";
+    parts.push(`[${i}:v]${input.videoFilter}${exactStill},settb=AVTB,setpts=PTS-STARTPTS[v${i}]`);
   });
   if (opts.includeAudio) {
     opts.inputs.forEach((input, i) => {
@@ -803,7 +828,10 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
 
 function buildAudioInputFilter(input: TransitionChainInput): string {
   const filters: string[] = [];
-  if (
+  if (input.gainLinear !== null && input.gainLinear !== undefined) {
+    const gainFilter = canonicalLinearGainFilter(input.gainLinear);
+    if (gainFilter) filters.push(gainFilter);
+  } else if (
     input.gainDb !== null &&
     input.gainDb !== undefined &&
     input.gainDb !== 0

@@ -21,7 +21,7 @@ export interface DialogueCompletenessAssessment {
 }
 
 const HARD_DEPENDENT_OPENING = /^(?:ってことは|ということは|なので|ですので|ですが|けど|だけど|一方で)/;
-const SOFT_IMPLICIT_ANTECEDENT_OPENING = /^(?:作って|使って|やって|なって|思って|言って|感じて)(?:い|た|き|しま|る|ま)/;
+const SOFT_IMPLICIT_ANTECEDENT_OPENING = /^(?:(?:両方|双方|どちらも|どっちも)(?:を|が|は|も|で|に|とも)?|(?:作って|使って|やって|なって|思って|言って|感じて)(?:い|た|き|しま|る|ま))/;
 const HARD_DEPENDENT_ENDING = /(?:ってことは|ということは|けど|だけど|ですが|たり|とか|のと|のが|だけでなく|一方で|そして|それから|また|も)$/;
 const SOFT_CONTINUATIVE_ENDING = /(?:ので|から|って|という|なって|思って|言って|感じて|使って|作って|やって|して)$/;
 const LOW_INFORMATION_FRAGMENT = /^(?:はい|ええ|そうですね|そうなんです|なるほど|お願いします|ありがとうございます)$/;

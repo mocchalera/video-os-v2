@@ -10,6 +10,134 @@ public struct ReviewPatchDocument: Codable, Equatable, Sendable {
     }
 }
 
+public struct ReviewVisualTransform: Codable, Equatable, Sendable {
+    public struct Crop: Codable, Equatable, Sendable {
+        public let x: Double
+        public let y: Double
+        public let width: Double
+        public let height: Double
+
+        public init(x: Double, y: Double, width: Double, height: Double) {
+            self.x = x
+            self.y = y
+            self.width = width
+            self.height = height
+        }
+    }
+
+    public struct Position: Codable, Equatable, Sendable {
+        public let x: Double
+        public let y: Double
+
+        public init(x: Double, y: Double) {
+            self.x = x
+            self.y = y
+        }
+    }
+
+    public let zoom: Double?
+    public let crop: Crop?
+    public let position: Position?
+
+    public init(zoom: Double? = nil, crop: Crop? = nil, position: Position? = nil) {
+        self.zoom = zoom
+        self.crop = crop
+        self.position = position
+    }
+
+    var isValid: Bool {
+        let zoomValid = zoom.map { $0.isFinite && (0.1...8).contains($0) } ?? true
+        let cropValid = crop.map {
+            $0.x.isFinite && $0.x >= 0
+                && $0.y.isFinite && $0.y >= 0
+                && $0.width.isFinite && $0.width > 0
+                && $0.height.isFinite && $0.height > 0
+        } ?? true
+        let positionValid = position.map { $0.x.isFinite && $0.y.isFinite } ?? true
+        return zoom != nil || crop != nil || position != nil
+            ? zoomValid && cropValid && positionValid
+            : false
+    }
+}
+
+public struct ReviewAudioFinish: Codable, Equatable, Sendable {
+    public let preset: String
+    public let loudness_target_lufs: Double?
+    public let lra_target: Double?
+    public let true_peak_target_dbtp: Double?
+    public let codec_headroom_db: Double?
+    public let highpass_hz: Double?
+    public let lowpass_hz: Double?
+    public let noise_reduction_db: Double?
+    public let noise_floor_db: Double?
+    public let mud_cut_db: Double?
+    public let presence_gain_db: Double?
+    public let compressor_threshold_db: Double?
+    public let compressor_ratio: Double?
+    public let compressor_attack_ms: Double?
+    public let compressor_release_ms: Double?
+    public let compressor_makeup_db: Double?
+
+    public init(
+        preset: String,
+        loudness_target_lufs: Double? = nil,
+        lra_target: Double? = nil,
+        true_peak_target_dbtp: Double? = nil,
+        codec_headroom_db: Double? = nil,
+        highpass_hz: Double? = nil,
+        lowpass_hz: Double? = nil,
+        noise_reduction_db: Double? = nil,
+        noise_floor_db: Double? = nil,
+        mud_cut_db: Double? = nil,
+        presence_gain_db: Double? = nil,
+        compressor_threshold_db: Double? = nil,
+        compressor_ratio: Double? = nil,
+        compressor_attack_ms: Double? = nil,
+        compressor_release_ms: Double? = nil,
+        compressor_makeup_db: Double? = nil
+    ) {
+        self.preset = preset
+        self.loudness_target_lufs = loudness_target_lufs
+        self.lra_target = lra_target
+        self.true_peak_target_dbtp = true_peak_target_dbtp
+        self.codec_headroom_db = codec_headroom_db
+        self.highpass_hz = highpass_hz
+        self.lowpass_hz = lowpass_hz
+        self.noise_reduction_db = noise_reduction_db
+        self.noise_floor_db = noise_floor_db
+        self.mud_cut_db = mud_cut_db
+        self.presence_gain_db = presence_gain_db
+        self.compressor_threshold_db = compressor_threshold_db
+        self.compressor_ratio = compressor_ratio
+        self.compressor_attack_ms = compressor_attack_ms
+        self.compressor_release_ms = compressor_release_ms
+        self.compressor_makeup_db = compressor_makeup_db
+    }
+
+    var isValid: Bool {
+        guard ["dialogue-clean", "loudness-only", "none"].contains(preset) else { return false }
+        return Self.inRange(loudness_target_lufs, -24 ... -8)
+            && Self.inRange(lra_target, 1 ... 20)
+            && Self.inRange(true_peak_target_dbtp, -6 ... -0.1)
+            && Self.inRange(codec_headroom_db, 0 ... 3)
+            && Self.inRange(highpass_hz, 20 ... 300)
+            && Self.inRange(lowpass_hz, 5_000 ... 22_000)
+            && Self.inRange(noise_reduction_db, 0 ... 30)
+            && Self.inRange(noise_floor_db, -80 ... -20)
+            && Self.inRange(mud_cut_db, -12 ... 0)
+            && Self.inRange(presence_gain_db, 0 ... 8)
+            && Self.inRange(compressor_threshold_db, -60 ... -1)
+            && Self.inRange(compressor_ratio, 1 ... 12)
+            && Self.inRange(compressor_attack_ms, 0.1 ... 500)
+            && Self.inRange(compressor_release_ms, 10 ... 3_000)
+            && Self.inRange(compressor_makeup_db, 0 ... 18)
+    }
+
+    private static func inRange(_ value: Double?, _ range: ClosedRange<Double>) -> Bool {
+        value.map { $0.isFinite && range.contains($0) } ?? true
+    }
+}
+
 public enum ReviewPatchOperation: Codable, Equatable, Sendable {
     case replaceSegment(target_clip_id: String, with_segment_id: String, with_candidate_ref: String?, new_src_in_us: Int?, new_src_out_us: Int?, reason: String)
     case trimSegment(target_clip_id: String, new_src_in_us: Int, new_src_out_us: Int, reason: String)
@@ -19,6 +147,8 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
     case insertSegment(beat_id: String, segment_id: String, role: String, new_timeline_in_frame: Int, new_duration_frames: Int, target_track_id: String?, new_src_in_us: Int?, new_src_out_us: Int?, reason: String)
     case removeSegment(target_clip_id: String, reason: String)
     case changeAudioPolicy(target_clip_id: String, audio_policy: [String: JSONValue], reason: String)
+    case changeVisualTransform(target_clip_id: String, visual_transform: ReviewVisualTransform, confidence: Double?, reason: String)
+    case changeAudioFinish(audio_finish: ReviewAudioFinish, reason: String)
     case addMarker(frame: Int, label: String, kind: String)
     case addNote(target_clip_id: String, text: String)
 
@@ -40,6 +170,9 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
         case applied_skill_id
         case reason
         case audio_policy
+        case visual_transform
+        case audio_finish
+        case confidence
         case beat_id
         case role
         case label
@@ -110,6 +243,18 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
             self = .changeAudioPolicy(
                 target_clip_id: try container.decode(String.self, forKey: .target_clip_id),
                 audio_policy: try container.decode([String: JSONValue].self, forKey: .audio_policy),
+                reason: try container.decode(String.self, forKey: .reason)
+            )
+        case "change_visual_transform":
+            self = .changeVisualTransform(
+                target_clip_id: try container.decode(String.self, forKey: .target_clip_id),
+                visual_transform: try container.decode(ReviewVisualTransform.self, forKey: .visual_transform),
+                confidence: try container.decodeIfPresent(Double.self, forKey: .confidence),
+                reason: try container.decode(String.self, forKey: .reason)
+            )
+        case "change_audio_finish":
+            self = .changeAudioFinish(
+                audio_finish: try container.decode(ReviewAudioFinish.self, forKey: .audio_finish),
                 reason: try container.decode(String.self, forKey: .reason)
             )
         case "add_marker":
@@ -192,6 +337,16 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
             try container.encode(targetClipID, forKey: .target_clip_id)
             try container.encode(audioPolicy, forKey: .audio_policy)
             try container.encode(reason, forKey: .reason)
+        case let .changeVisualTransform(targetClipID, visualTransform, confidence, reason):
+            try container.encode("change_visual_transform", forKey: .op)
+            try container.encode(targetClipID, forKey: .target_clip_id)
+            try container.encode(visualTransform, forKey: .visual_transform)
+            try container.encodeIfPresent(confidence, forKey: .confidence)
+            try container.encode(reason, forKey: .reason)
+        case let .changeAudioFinish(audioFinish, reason):
+            try container.encode("change_audio_finish", forKey: .op)
+            try container.encode(audioFinish, forKey: .audio_finish)
+            try container.encode(reason, forKey: .reason)
         case let .addMarker(frame, label, kind):
             try container.encode("add_marker", forKey: .op)
             try container.encode(frame, forKey: .new_timeline_in_frame)
@@ -215,6 +370,8 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
         case .insertSegment: return "insert_segment"
         case .removeSegment: return "remove_segment"
         case .changeAudioPolicy: return "change_audio_policy"
+        case .changeVisualTransform: return "change_visual_transform"
+        case .changeAudioFinish: return "change_audio_finish"
         case .addMarker: return "add_marker"
         case .addNote: return "add_note"
         }
@@ -228,9 +385,10 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
              let .splitSegment(targetClipID, _, _),
              let .removeSegment(targetClipID, _),
              let .changeAudioPolicy(targetClipID, _, _),
+             let .changeVisualTransform(targetClipID, _, _, _),
              let .addNote(targetClipID, _):
             return targetClipID
-        case .setTransition, .insertSegment, .addMarker:
+        case .setTransition, .insertSegment, .changeAudioFinish, .addMarker:
             return nil
         }
     }
@@ -247,14 +405,17 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
     }
 
     var deduplicationKey: String? {
+        if case .changeAudioFinish = self {
+            return opName
+        }
         if case let .setTransition(fromClipID, toClipID, trackID, _, _, _, _) = self {
             return "\(opName):\(trackID):\(fromClipID):\(toClipID)"
         }
         guard let targetClipID else { return nil }
         switch self {
-        case .replaceSegment, .trimSegment, .moveSegment, .splitSegment, .removeSegment, .changeAudioPolicy:
+        case .replaceSegment, .trimSegment, .moveSegment, .splitSegment, .removeSegment, .changeAudioPolicy, .changeVisualTransform:
             return "\(opName):\(targetClipID)"
-        case .setTransition, .addNote, .insertSegment, .addMarker:
+        case .setTransition, .changeAudioFinish, .addNote, .insertSegment, .addMarker:
             return nil
         }
     }
@@ -312,6 +473,13 @@ public enum ReviewPatchOperation: Codable, Equatable, Sendable {
                 && !audioPolicy.isEmpty
                 && Set(audioPolicy.keys).isSubset(of: Self.allowedAudioPolicyKeys)
                 && !reason.isEmpty
+        case let .changeVisualTransform(targetClipID, visualTransform, confidence, reason):
+            return !targetClipID.isEmpty
+                && visualTransform.isValid
+                && (confidence.map { $0.isFinite && (0 ... 1).contains($0) } ?? true)
+                && !reason.isEmpty
+        case let .changeAudioFinish(audioFinish, reason):
+            return audioFinish.isValid && !reason.isEmpty
         case let .addMarker(frame, label, kind):
             return frame >= 0 && !label.isEmpty && !kind.isEmpty
         case .addNote:

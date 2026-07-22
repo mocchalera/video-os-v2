@@ -15,6 +15,33 @@ export interface CaptionPolicy {
   delivery_mode: "burn_in" | "sidecar" | "both";
   source: "transcript" | "authored" | "none";
   styling_class: string;
+  semantic_timing?: CaptionSemanticTimingPolicy;
+}
+
+export type CaptionRevealRole = "punchline" | "surprise" | "reaction" | "payoff";
+
+export interface CaptionRevealAnchor {
+  anchor_id: string;
+  role: CaptionRevealRole;
+  /** Exact substring in the generated caption body. */
+  anchor_text: string;
+  segment_id?: string;
+  transcript_item_id?: string;
+  /** Explicit timeline override when word timing is unavailable. */
+  timeline_frame?: number;
+  /** Explicit source-time override when word timing is unavailable. */
+  source_start_us?: number;
+  /** Per-anchor override; 1 frame lets the ear receive the reveal first. */
+  audio_first_frames?: number;
+}
+
+export interface CaptionSemanticTimingPolicy {
+  mode: "off" | "speech_sync" | "protect_reveals";
+  /** Reading-aid allowance for ordinary text. Defaults to 2 frames. */
+  ordinary_lead_frames?: number;
+  /** Delay after protected audio onset. Defaults to 1 frame. */
+  audio_first_frames?: number;
+  anchors?: CaptionRevealAnchor[];
 }
 
 export interface SpeechCaption {
@@ -29,6 +56,21 @@ export interface SpeechCaption {
   source: "transcript" | "authored";
   styling_class: string;
   metrics: { cps: number; dwell_ms: number };
+  reveal_timing?: {
+    anchor_id: string;
+    role: CaptionRevealRole;
+    anchor_text: string;
+    status: "protected" | "setup_only" | "unresolved";
+    source:
+      | "word_timing"
+      | "transcript_item_onset"
+      | "explicit_source_time"
+      | "explicit_timeline_frame"
+      | "unresolved";
+    anchor_frame?: number;
+    audio_first_frames: number;
+    original_timeline_in_frame: number;
+  };
 }
 
 export interface TextOverlay {
@@ -612,7 +654,12 @@ export function generateCaptionSource(
 
     // Apply auto line-breaking (opt-in to preserve backward compatibility)
     if (options?.autoLineBreak === true) {
-      const breakResult = formatCaption(text, language, options?.protectedTerms);
+      const breakResult = formatCaption(
+        text,
+        language,
+        options?.protectedTerms,
+        policy.styling_class,
+      );
       text = breakResult.lines.join("\n");
     }
 

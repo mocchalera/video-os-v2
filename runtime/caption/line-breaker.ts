@@ -29,8 +29,23 @@ export const LAYOUT_POLICIES: Record<string, LayoutPolicy> = {
   en: { maxCharsPerLine: 42, maxLines: 2, maxCps: 15.0, language: "en" },
 };
 
-export function getLayoutPolicy(language: string): LayoutPolicy {
-  if (language.startsWith("ja")) return LAYOUT_POLICIES.ja;
+export function getLayoutPolicy(
+  language: string,
+  stylingClass?: string,
+): LayoutPolicy {
+  if (language.startsWith("ja")) {
+    if (
+      stylingClass &&
+      /(?:sns-vertical|speaker-separated.*outline|outline.*speaker-separated|social-short)/i.test(stylingClass)
+    ) {
+      return {
+        ...LAYOUT_POLICIES.ja,
+        maxCharsPerLine: 13,
+        maxCps: 16,
+      };
+    }
+    return LAYOUT_POLICIES.ja;
+  }
   if (language.startsWith("en")) return LAYOUT_POLICIES.en;
   // Default to Japanese policy for CJK, English otherwise
   return LAYOUT_POLICIES.en;
@@ -364,7 +379,8 @@ export function formatCaption(
   text: string,
   language: string,
   protectedTerms: string[] = [],
+  stylingClass?: string,
 ): LineBreakResult {
-  const policy = getLayoutPolicy(language);
+  const policy = getLayoutPolicy(language, stylingClass);
   return breakLines(text, policy, protectedTerms);
 }

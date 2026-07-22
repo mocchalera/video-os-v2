@@ -240,12 +240,14 @@ describe("promo finisher ASS and ffmpeg args", () => {
       fadeSec: 0.8,
     });
 
-    expect(ass).toContain("Style: Default,Hiragino Sans,66");
+    expect(ass).toContain("Style: Default,Noto Sans JP,66");
     expect(ass).toContain("PlayResX: 1920");
     expect(ass).toContain("PlayResY: 1080");
     expect(ass).toContain(",1,6,0,2,90,90,72,1");
     expect(ass).toContain("Dialogue: 0,0:00:00.00,0:00:03.00");
     expect(args.join(" ")).toContain("subtitles=filename='subtitles.ass'");
+    expect(args.join(" ")).toContain(":fontsdir='");
+    expect(args.join(" ")).toContain("Resources/Fonts");
     expect(args.join(" ")).toContain("fade=t=out:st=75.2:d=0.8");
     expect(args.join(" ")).toContain("afade=t=out:st=75.2:d=0.8");
   });

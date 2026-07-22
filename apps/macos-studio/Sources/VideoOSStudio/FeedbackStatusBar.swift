@@ -6,10 +6,12 @@ struct FeedbackStatusBar: View {
     var statusMessage: String
     var canPromote: Bool
     var canUndo: Bool
+    var canOpenPreferenceMemory: Bool
     var onApplyAndPreview: () -> Void
     var onPromote: () -> Void
     var onUndo: () -> Void
     var onDiscard: () -> Void
+    var onOpenPreferenceMemory: () -> Void
 
     private var conflicts: [PatchConflict] {
         feedbackSession.detectConflicts()
@@ -48,6 +50,13 @@ struct FeedbackStatusBar: View {
             }
 
             Spacer(minLength: 12)
+
+            Button(action: onOpenPreferenceMemory) {
+                Label("判断を記憶", systemImage: "brain.head.profile")
+            }
+            .disabled(!canOpenPreferenceMemory)
+            .help(canOpenPreferenceMemory ? "人間がfeature/valueを確認して判断を記憶または取り消します。" : "判断を記憶するにはプロジェクトを選択してください。")
+            .accessibilityIdentifier("FeedbackStatus.PreferenceMemoryButton")
 
             Button(action: onApplyAndPreview) {
                 Label("保存", systemImage: "square.and.arrow.down")

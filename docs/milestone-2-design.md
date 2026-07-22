@@ -23,7 +23,7 @@ The milestone boundary is:
   - OTIO round-trip changes
   - final render / packaging improvements
 
-Milestone 2 must preserve the architecture gates in [ARCHITECTURE.md](/Users/mocchalera/Dev/video-os-v2-spec/ARCHITECTURE.md) and the `media-mcp` tool interface in [contracts/media-mcp.md](/Users/mocchalera/Dev/video-os-v2-spec/contracts/media-mcp.md).
+Milestone 2 must preserve the architecture gates in [ARCHITECTURE.md](/Users/operator/Dev/video-os-v2-spec/ARCHITECTURE.md) and the `media-mcp` tool interface in [contracts/media-mcp.md](/Users/operator/Dev/video-os-v2-spec/contracts/media-mcp.md).
 
 ### Success Criteria
 
@@ -91,7 +91,7 @@ Milestone 3 agents should consume M2 output through two surfaces:
 - unchanged `media-mcp` tools backed by those artifacts
 
 The primary M3 entrypoint is the `footage-triager` role in
-[agent-src/roles/footage-triager.yaml](/Users/mocchalera/Dev/video-os-v2-spec/agent-src/roles/footage-triager.yaml),
+[agent-src/roles/footage-triager.yaml](/Users/operator/Dev/video-os-v2-spec/agent-src/roles/footage-triager.yaml),
 which already expects:
 
 - `projects/*/03_analysis/*`
@@ -111,7 +111,7 @@ Gate rule for handoff:
 
 ## Analysis Architecture
 
-The live pipeline keeps the repository layering from [ARCHITECTURE.md](/Users/mocchalera/Dev/video-os-v2-spec/ARCHITECTURE.md):
+The live pipeline keeps the repository layering from [ARCHITECTURE.md](/Users/operator/Dev/video-os-v2-spec/ARCHITECTURE.md):
 
 ```text
 source media
@@ -1204,7 +1204,7 @@ Idempotency rules:
 ## `media-mcp` Integration
 
 Milestone 1 fixed the tool contract in
-[contracts/media-mcp.md](/Users/mocchalera/Dev/video-os-v2-spec/contracts/media-mcp.md). Milestone 2 must not
+[contracts/media-mcp.md](/Users/operator/Dev/video-os-v2-spec/contracts/media-mcp.md). Milestone 2 must not
 change request or response shapes.
 
 Chosen integration pattern:
@@ -1326,8 +1326,8 @@ Bundled in repo:
 
 External smoke projects from the roadmap:
 
-- `rokutaro-bicycle` at `/Users/mocchalera/Downloads/麓太朗自転車`
-- `AX-1 D4887` at `/Users/mocchalera/Downloads/AX-1_参加者の声/D4887.MP4`
+- `rokutaro-bicycle` at `/Users/operator/Downloads/麓太朗自転車`
+- `AX-1 D4887` at `/Users/operator/Downloads/AX-1_参加者の声/D4887.MP4`
 
 The external assets are manual or nightly smoke targets, not required for every commit.
 

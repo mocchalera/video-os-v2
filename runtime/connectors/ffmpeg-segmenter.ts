@@ -12,6 +12,11 @@ import {
   type AssetItem,
 } from "./ffprobe.js";
 import type { VisualQualityMeasurements } from "./ffmpeg-motion.js";
+import {
+  reduceEditorialObservation,
+  stillImageApplicabilityContribution,
+  type EditorialObservation,
+} from "../pipeline/stages/editorial-observation.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -40,6 +45,12 @@ export interface SegmentItem {
   src_out_us: number;
   duration_us: number;
   rep_frame_us: number;
+  source_interval?: {
+    semantics: "physical_media_interval" | "schema_compatible_single_frame_interval";
+    physical_duration_us: number;
+    schema_compatibility_epsilon_us?: number;
+    editing_hold_duration_us: number | null;
+  };
   summary: string;
   transcript_excerpt: string;
   quality_flags: string[];
@@ -73,13 +84,15 @@ export interface SegmentItem {
       request_hash: string;
       ffmpeg_version?: string;
     };
-    summary?: Record<string, string>;
-    tags?: Record<string, string>;
-    quality_flags?: Record<string, string>;
-    visual_quality_measurements?: Record<string, string>;
+    summary?: Record<string, string | number | string[] | number[]>;
+    tags?: Record<string, string | number | string[] | number[]>;
+    quality_flags?: Record<string, string | number | string[] | number[]>;
+    visual_quality_measurements?: Record<string, string | number | string[] | number[]>;
   };
   /** Deterministic ffmpeg-derived shake/sharpness/exposure measurements. */
   visual_quality_measurements?: VisualQualityMeasurements;
+  /** Genre-neutral, evidence-grounded segment facts. Additive for legacy artifacts. */
+  editorial_observation?: EditorialObservation;
   // Peak analysis extension (vlm-peak-detection-design.md §7.1)
   peak_analysis?: {
     coarse_locator?: {
@@ -121,6 +134,28 @@ export interface SegmentItem {
       precision_mode: string;
       fusion_version: string;
       support_signal_version: string;
+      coarse_frame_count?: number;
+      refine_frame_count?: number;
+      precision_frame_count?: number;
+      precision_sample_timestamps_us?: number[];
+      precision_requested_sample_timestamps_us?: number[];
+      frame_cache_version?: string;
+      frame_producer_version?: string;
+      precision_frame_cache_hits?: number;
+      precision_frame_extraction_failures?: string[];
+      precision_failure_reason?: string;
+      source_content_sha256?: string;
+      segment_src_in_us?: number;
+      segment_src_out_us?: number;
+      cache_identity?: string;
+      cache_decision?: string;
+      cache_decision_reasons?: string[];
+      policy_hash?: string;
+      model_alias?: string;
+      precision_prompt_template_id?: string;
+      precision_prompt_hash?: string;
+      detector_version?: string;
+      provenance_schema_version?: string;
     };
   };
 }
@@ -296,37 +331,44 @@ export async function detectSilenceRegions(
   filePath: string,
   thresholds: QualityThresholds,
 ): Promise<TimeRange[]> {
-  const absPath = path.resolve(filePath);
   try {
-    const { stderr } = await execFilePromise("ffmpeg", [
-      "-i", absPath,
-      "-af", `silencedetect=n=${thresholds.silencedetect_noise_db}dB:d=${thresholds.silencedetect_duration_s}`,
-      "-vn",
-      "-f", "null",
-      "-",
-    ]);
-
-    const regions: TimeRange[] = [];
-    let currentStart: number | null = null;
-    for (const line of stderr.split("\n")) {
-      const startMatch = line.match(/silence_start:\s*([\d.e+-]+)/);
-      const endMatch = line.match(/silence_end:\s*([\d.e+-]+)/);
-      if (startMatch) {
-        currentStart = Math.round(parseFloat(startMatch[1]) * 1_000_000);
-      }
-      if (endMatch && currentStart !== null) {
-        regions.push({
-          start_us: currentStart,
-          end_us: Math.round(parseFloat(endMatch[1]) * 1_000_000),
-        });
-        currentStart = null;
-      }
-    }
-    return regions;
+    return await detectSilenceRegionsStrict(filePath, thresholds);
   } catch {
     // No audio stream — no silence regions
     return [];
   }
+}
+
+/** Strict silence detector used by the audio-only lane so detector failure can be
+ * distinguished from a valid result with no silence. */
+export async function detectSilenceRegionsStrict(
+  filePath: string,
+  thresholds: QualityThresholds,
+): Promise<TimeRange[]> {
+  const absPath = path.resolve(filePath);
+  const { stderr } = await execFilePromise("ffmpeg", [
+    "-i", absPath,
+    "-af", `silencedetect=n=${thresholds.silencedetect_noise_db}dB:d=${thresholds.silencedetect_duration_s}`,
+    "-vn",
+    "-f", "null",
+    "-",
+  ]);
+
+  const regions: TimeRange[] = [];
+  let currentStart: number | null = null;
+  for (const line of stderr.split("\n")) {
+    const startMatch = line.match(/silence_start:\s*([\d.e+-]+)/);
+    const endMatch = line.match(/silence_end:\s*([\d.e+-]+)/);
+    if (startMatch) currentStart = Math.round(parseFloat(startMatch[1]) * 1_000_000);
+    if (endMatch && currentStart !== null) {
+      regions.push({
+        start_us: currentStart,
+        end_us: Math.round(parseFloat(endMatch[1]) * 1_000_000),
+      });
+      currentStart = null;
+    }
+  }
+  return regions;
 }
 
 // ── Signal Stats Detectors ──────────────────────────────────────────
@@ -720,6 +762,14 @@ export async function segmentAsset(
 ): Promise<SegmentAssetResult> {
   const detectorFailures: string[] = [];
 
+  if (asset.media_kind === "image") {
+    return segmentStillImageAsset(asset, opts);
+  }
+
+  if (!asset.video_stream && asset.audio_stream) {
+    return segmentAudioOnlyAsset(filePath, asset, thresholds, opts);
+  }
+
   // Run all detectors in parallel, catching failures individually
   const [sceneResult, blackResult, frozenResult, silenceResult, sigResult, audioResult] =
     await Promise.all([
@@ -868,4 +918,161 @@ export async function segmentAsset(
   });
 
   return { segments, detectorFailures };
+}
+
+function segmentStillImageAsset(
+  asset: AssetItem,
+  opts: { policyHash?: string; ffmpegVersion?: string },
+): SegmentAssetResult {
+  const segmentId = generateSegmentId(asset.asset_id, 1);
+  const policyHash = opts.policyHash ?? "none";
+  const ffmpegVersion = opts.ffmpegVersion ?? "unknown";
+  const requestHash = computeRequestHash({
+    connector_version: CONNECTOR_VERSION,
+    ffmpeg_version: ffmpegVersion,
+    asset_id: asset.asset_id,
+    media_kind: "image",
+    method: "still_image_single_frame",
+    source_interval_epsilon_us: 1,
+  });
+  const segment: SegmentItem = {
+    segment_id: segmentId,
+    asset_id: asset.asset_id,
+    src_in_us: 0,
+    src_out_us: 1,
+    duration_us: 1,
+    rep_frame_us: 0,
+    source_interval: {
+      semantics: "schema_compatible_single_frame_interval",
+      physical_duration_us: 0,
+      schema_compatibility_epsilon_us: 1,
+      editing_hold_duration_us: null,
+    },
+    summary: "",
+    transcript_excerpt: "",
+    quality_flags: [],
+    tags: [],
+    segment_type: "static",
+    transcript_ref: null,
+    confidence: {
+      boundary: {
+        score: 1,
+        source: "still_image_single_frame",
+        status: "ready",
+      },
+    },
+    provenance: {
+      boundary: {
+        stage: "segment",
+        method: "still_image_single_frame",
+        connector_version: CONNECTOR_VERSION,
+        policy_hash: policyHash,
+        request_hash: requestHash,
+        ffmpeg_version: ffmpegVersion,
+      },
+    },
+  };
+  segment.editorial_observation = reduceEditorialObservation(
+    segment,
+    undefined,
+    [stillImageApplicabilityContribution(segment)],
+  );
+  return {
+    detectorFailures: [],
+    segments: [segment],
+  };
+}
+
+async function segmentAudioOnlyAsset(
+  filePath: string,
+  asset: AssetItem,
+  thresholds: QualityThresholds,
+  opts: { policyHash?: string; ffmpegVersion?: string },
+): Promise<SegmentAssetResult> {
+  const detectorFailures: string[] = [];
+  let silenceRegions: TimeRange[] = [];
+  try {
+    silenceRegions = (await detectSilenceRegionsStrict(filePath, thresholds))
+      .map((range) => ({
+        start_us: clampInteger(range.start_us, 0, asset.duration_us),
+        end_us: clampInteger(range.end_us, 0, asset.duration_us),
+      }))
+      .filter((range) => range.end_us > range.start_us)
+      .sort((a, b) => a.start_us - b.start_us || a.end_us - b.end_us);
+  } catch (error) {
+    detectorFailures.push("silencedetect: detector_failed");
+  }
+  const audioStats = await detectAudioStats(filePath);
+  const cutPoints = silenceRegions.flatMap((range) => [
+    { pts_us: range.start_us, score: 0.9 },
+    { pts_us: range.end_us, score: 0.9 },
+  ]);
+  const rawSegments = buildSegments(
+    mergeCutCandidates(cutPoints, thresholds.merge_gap_us),
+    asset.duration_us,
+    thresholds.min_segment_duration_us,
+  );
+  const policyHash = opts.policyHash ?? "none";
+  const ffmpegVersion = opts.ffmpegVersion ?? "unknown";
+  const status = detectorFailures.length > 0 ? "partial" : "ready";
+  const segments = rawSegments.map((raw, index): SegmentItem => {
+    const segmentId = generateSegmentId(asset.asset_id, index + 1);
+    const requestHash = computeRequestHash({
+      connector_version: CONNECTOR_VERSION,
+      ffmpeg_version: ffmpegVersion,
+      asset_id: asset.asset_id,
+      segment_ordinal: index + 1,
+      method: "ffmpeg_silencedetect_audio_activity",
+      silence_noise_db: thresholds.silencedetect_noise_db,
+      silence_duration_s: thresholds.silencedetect_duration_s,
+    });
+    const qualityFlags = computeQualityFlags(
+      raw.src_in_us,
+      raw.src_out_us,
+      [],
+      [],
+      silenceRegions,
+      thresholds.min_segment_duration_us,
+      null,
+      audioStats,
+    );
+    return {
+      segment_id: segmentId,
+      asset_id: asset.asset_id,
+      src_in_us: raw.src_in_us,
+      src_out_us: raw.src_out_us,
+      duration_us: raw.src_out_us - raw.src_in_us,
+      rep_frame_us: Math.round((raw.src_in_us + raw.src_out_us) / 2),
+      summary: "",
+      transcript_excerpt: "",
+      quality_flags: qualityFlags,
+      tags: [],
+      segment_type: qualityFlags.includes("near_silent") ? "static" : "general",
+      transcript_ref: asset.transcript_ref,
+      confidence: {
+        boundary: {
+          score: detectorFailures.length > 0 ? 0.5 : raw.boundary_score,
+          source: "ffmpeg_silencedetect",
+          status,
+        },
+      },
+      provenance: {
+        boundary: {
+          stage: "segment",
+          method: detectorFailures.length > 0
+            ? "duration_fallback_after_silencedetect_failure"
+            : "ffmpeg_silencedetect_audio_activity",
+          connector_version: CONNECTOR_VERSION,
+          policy_hash: policyHash,
+          request_hash: requestHash,
+          ffmpeg_version: ffmpegVersion,
+        },
+      },
+    };
+  });
+  return { segments, detectorFailures };
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(value)));
 }

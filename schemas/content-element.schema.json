@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-os.local/schemas/content-element.schema.json",
+  "title": "Video OS Content Element v1",
+  "type": "object",
+  "required": ["version", "element_id", "kind", "props", "layout"],
+  "properties": {
+    "version": { "const": "content-element/v1" },
+    "element_id": { "type": "string", "pattern": "^[A-Za-z0-9._:-]+$" },
+    "kind": { "enum": ["text", "image", "shape", "svg", "template", "group"] },
+    "template_ref": { "type": "string", "minLength": 1 },
+    "template_version": { "type": "string", "minLength": 1 },
+    "props": { "type": "object" },
+    "layout": {
+      "type": "object",
+      "required": ["anchor", "x", "y", "scale", "rotation_deg", "opacity", "safe_area", "z_index"],
+      "properties": {
+        "anchor": { "enum": ["top_left", "top_center", "top_right", "center_left", "center", "center_right", "bottom_left", "bottom_center", "bottom_right"] },
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "minimum": 0.01, "maximum": 1 },
+        "height": { "type": "number", "minimum": 0.01, "maximum": 1 },
+        "scale": { "type": "number", "minimum": 0.05, "maximum": 8 },
+        "rotation_deg": { "type": "number", "minimum": -360, "maximum": 360 },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safe_area": { "type": "boolean" },
+        "z_index": { "type": "integer", "minimum": -1000, "maximum": 1000 }
+      },
+      "additionalProperties": false
+    },
+    "animation": {
+      "type": "object",
+      "properties": {
+        "in": { "$ref": "#/$defs/animationRef" },
+        "loop": { "$ref": "#/$defs/animationRef" },
+        "out": { "$ref": "#/$defs/animationRef" }
+      },
+      "additionalProperties": false
+    },
+    "renderer_hint": { "enum": ["auto", "ffmpeg", "remotion", "hyperframes"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "template" } }, "required": ["kind"] },
+      "then": { "required": ["template_ref"] }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "animationRef": {
+      "type": "object",
+      "required": ["preset"],
+      "properties": {
+        "preset": { "enum": ["none", "fade", "fade-rise", "slide-left", "slide-up"] },
+        "duration_frames": { "type": "integer", "minimum": 0 },
+        "delay_frames": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

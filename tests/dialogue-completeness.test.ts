@@ -7,6 +7,8 @@ describe("dialogue completeness", () => {
     ["判断の質も", ["dependent_ending"]],
     ["使ってましたけど", ["implicit_antecedent_opening", "dependent_ending"]],
     ["作ってたんですよ", ["implicit_antecedent_opening"]],
+    ["両方を変える必要があります", ["implicit_antecedent_opening"]],
+    ["どちらも大切です", ["implicit_antecedent_opening"]],
   ])("flags context-dependent Japanese boundary: %s", (text, expectedCodes) => {
     const result = assessDialogueCompleteness(text);
     expect(result.issues.map((item) => item.code)).toEqual(expectedCodes);

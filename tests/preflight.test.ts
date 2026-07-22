@@ -105,7 +105,16 @@ describe("checkSourceFolder", () => {
 
     const result = checkSourceFolder(dir);
     expect(result.status).toBe("pass");
-    expect(result.detail).toContain("2 video file(s)");
+    expect(result.detail).toContain("2 media file(s)");
+  });
+
+  it("passes when folder has an image file", () => {
+    const dir = mkTmpDir("with-images");
+    createDummyFile(dir, "photo.jpg", 200);
+
+    const result = checkSourceFolder(dir);
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("1 media file(s)");
   });
 
   it("fails when folder does not exist", () => {
@@ -114,14 +123,14 @@ describe("checkSourceFolder", () => {
     expect(result.detail).toContain("not found");
   });
 
-  it("fails when folder has no video files", () => {
+  it("fails when folder has no supported media files", () => {
     const dir = mkTmpDir("no-videos");
     createDummyFile(dir, "readme.txt", 100);
-    createDummyFile(dir, "photo.jpg", 200);
+    createDummyFile(dir, "archive.unknown", 200);
 
     const result = checkSourceFolder(dir);
     expect(result.status).toBe("fail");
-    expect(result.detail).toContain("no video files");
+    expect(result.detail).toContain("no media files");
   });
 
   it("fails when path is a file, not a directory", () => {
@@ -272,5 +281,28 @@ describe("runPreflight", () => {
     // ok depends on ffmpeg/ffprobe, not on API key warns
     const hasFail = result.checks.some((c) => c.status === "fail");
     expect(result.ok).toBe(!hasFail);
+  });
+
+  it("uses the same discovery accounting across multiple explicit source directories", () => {
+    const first = mkTmpDir("multi-explicit-a");
+    const second = mkTmpDir("multi-explicit-b");
+    const video = path.join(first, "nested", "VIDEO.MP4");
+    fs.mkdirSync(path.dirname(video), { recursive: true });
+    fs.writeFileSync(video, "video");
+    const audio = path.join(second, "audio.WAV");
+    fs.writeFileSync(audio, "audio");
+    const unknown = path.join(second, "notes.bin");
+    fs.writeFileSync(unknown, "unknown");
+
+    const result = runPreflight([first, second]);
+    expect(result.discovery.summary).toEqual({
+      requested: 3,
+      candidate: 2,
+      unsupported: 1,
+      failed: 0,
+      by_media_kind: { video: 1, audio: 1, image: 0, sequence: 0, unknown: 1 },
+    });
+    expect(result.checks.find((check) => check.name === "source_inputs")?.detail).toContain("audio=1");
+    expect(result.checks.find((check) => check.name === "source_inputs")?.detail).toContain("unknown=1");
   });
 });

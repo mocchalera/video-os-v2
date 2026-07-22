@@ -506,7 +506,7 @@ describe("TextOverlay", () => {
     const ovl = overlays[0];
     expect(ovl.overlay_id).toBe("OVL_001");
     expect(ovl.text).toBe("Title Card");
-    expect(ovl.styling_class).toBe("title-card");
+    expect(ovl.styling_class).toBe("vos:overlay.title-card");
     expect(ovl.writing_mode).toBe("horizontal_tb");
     expect(ovl.anchor).toBe("bottom_center");
     expect(ovl.source).toBe("authored");

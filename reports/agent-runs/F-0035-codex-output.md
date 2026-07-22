@@ -1,22 +1,22 @@
 ## Findings — suite設計、乖離監視の算出方法、judgeルーティング変更点
 
-`npm run eval -- --suite golden` を追加しました。デフォルト対象は `fumoto-growth,togakushi-camp,ena-promo`、`--projects a,b,c` と `--divergence-threshold n` で上書きできます。suite 本体は [runtime/eval/suite.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/suite.ts:10)、CLI 分岐は [scripts/eval.ts](/Users/mocchalera/Dev/video-os-v2-spec/scripts/eval.ts:40) です。
+`npm run eval -- --suite golden` を追加しました。デフォルト対象は `fumoto-growth,togakushi-camp,ena-promo`、`--projects a,b,c` と `--divergence-threshold n` で上書きできます。suite 本体は [runtime/eval/suite.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/suite.ts:10)、CLI 分岐は [scripts/eval.ts](/Users/operator/Dev/video-os-v2-spec/scripts/eval.ts:40) です。
 
 乖離監視は、構造一致スコアと LLM judge が走った brief-alignment を primary の `structure/alignment` 平均にし、verified な F-0023 `visual_qa` の Marlin score と絶対差分を取ります。差分が閾値超えなら `WARNING`。`deterministic-only` の brief-alignment は `参考値` として primary 平均から除外します。
 
-brief-alignment judge は Gemini 直結から `editorial-llm` 経由に変更し、`codex_exec -> claude_cli -> gemini -> deterministic` の順にルーティングします。judge 不実行時は `judge_source: "deterministic-only"` と `decision_runtime` を report に残します。主な変更は [runtime/eval/brief-alignment-judge.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/brief-alignment-judge.ts:184) と [runtime/eval/brief-alignment.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/brief-alignment.ts:366) です。
+brief-alignment judge は Gemini 直結から `editorial-llm` 経由に変更し、`codex_exec -> claude_cli -> gemini -> deterministic` の順にルーティングします。judge 不実行時は `judge_source: "deterministic-only"` と `decision_runtime` を report に残します。主な変更は [runtime/eval/brief-alignment-judge.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/brief-alignment-judge.ts:184) と [runtime/eval/brief-alignment.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/brief-alignment.ts:366) です。
 
 ## Evidence — 変更ファイル一覧、テストコマンドと結果件数
 
 変更ファイル:
-- [runtime/eval/suite.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/suite.ts:322) 新規 suite 集計、skip、前回比、Markdown/JSON 出力
-- [scripts/eval.ts](/Users/mocchalera/Dev/video-os-v2-spec/scripts/eval.ts:217) `--suite golden` CLI 追加
-- [runtime/eval/brief-alignment-judge.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/brief-alignment-judge.ts:205) editorial-llm 経由化
-- [runtime/eval/brief-alignment.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/brief-alignment.ts:432) `judge_source` / `decision_runtime` 記録
-- [runtime/eval/brief-alignment-types.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/brief-alignment-types.ts:28) additive report 型
-- [runtime/review/visual-qa.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/review/visual-qa.ts:67) suite 用 Marlin report 出力先 option
-- [tests/brief-alignment.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/brief-alignment.test.ts:259) judge routing / deterministic-only テスト
-- [tests/eval-suite.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/eval-suite.test.ts:102) suite 集計 / skip / WARNING テスト
+- [runtime/eval/suite.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/suite.ts:322) 新規 suite 集計、skip、前回比、Markdown/JSON 出力
+- [scripts/eval.ts](/Users/operator/Dev/video-os-v2-spec/scripts/eval.ts:217) `--suite golden` CLI 追加
+- [runtime/eval/brief-alignment-judge.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/brief-alignment-judge.ts:205) editorial-llm 経由化
+- [runtime/eval/brief-alignment.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/brief-alignment.ts:432) `judge_source` / `decision_runtime` 記録
+- [runtime/eval/brief-alignment-types.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/brief-alignment-types.ts:28) additive report 型
+- [runtime/review/visual-qa.ts](/Users/operator/Dev/video-os-v2-spec/runtime/review/visual-qa.ts:67) suite 用 Marlin report 出力先 option
+- [tests/brief-alignment.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/brief-alignment.test.ts:259) judge routing / deterministic-only テスト
+- [tests/eval-suite.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/eval-suite.test.ts:102) suite 集計 / skip / WARNING テスト
 
 検証:
 - `pcl validate --strict --json`: ok, errors 0, warnings 0

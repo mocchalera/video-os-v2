@@ -1,11 +1,16 @@
 // Rough-cut renderer CLI.
 // Usage:
-//   npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--reuse-video <path>] [--no-audio]
+//   npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--reuse-video <path>] [--no-audio] [--defer-ending-fade]
 
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  canonicalLinearGainFilter,
+  resolveAudioGainWithFallback,
+  type AudioGainPolicyLike,
+} from "../editor/shared/audio-gain.js";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import {
@@ -13,13 +18,26 @@ import {
   type MediaSourceMapDoc,
   type MediaSourceMapEntry,
 } from "../runtime/media/source-map.js";
-import { writeRenderFreshnessMetadata } from "../runtime/review/visual-qa.js";
+import {
+  assembleTimelineToMp4,
+  extractClipTransform,
+} from "../runtime/render/assembler.js";
+import { buildVideoFitFilterFromTransform } from "../runtime/render/pipeline.js";
+import {
+  assessRenderArtifactFreshness,
+  createSourceInputAttestation,
+  SourceInputAttestationError,
+  writeRenderFreshnessMetadata,
+} from "../runtime/render/source-input-attestation.js";
 import { computeFileHash } from "../runtime/state/reconcile.js";
+import { assertTimelineRenderSupported } from "../runtime/render/media-kind-guard.js";
+import { resolveCanonicalRenderInputs } from "../runtime/render/canonical-render-input.js";
+import { assertSafeAudioDelayFilterOrder } from "../runtime/render/audio-filter-safety.js";
 
 const execFileAsync = promisify(execFile);
 
 const USAGE =
-  "Usage: npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--reuse-video <path>] [--no-audio]";
+  "Usage: npx tsx scripts/render-rough-cut.ts --project <project-dir> [--output <path>] [--bgm <path>] [--reuse-video <path>] [--no-audio] [--defer-ending-fade]";
 
 const VIDEO_EXTENSIONS = new Set([".mov", ".mp4"]);
 const BGM_EXTENSIONS = new Set([".mp3", ".wav"]);
@@ -34,6 +52,7 @@ export interface RenderArgs {
   bgmPath?: string;
   reuseVideoPath?: string;
   noAudio: boolean;
+  deferEndingFade?: boolean;
 }
 
 export interface TimelineClip {
@@ -46,6 +65,8 @@ export interface TimelineClip {
   timeline_duration_frames: number;
   role?: string;
   audio_policy?: {
+    gain_unit?: "linear" | "db";
+    duck_music_db?: number;
     nat_gain?: number;
     nat_sound_gain?: number;
     bgm_gain?: number;
@@ -71,6 +92,7 @@ export interface RenderClip {
   timelineOutFrame: number;
   role?: string;
   audioPolicy?: TimelineClip["audio_policy"];
+  audioMixPolicy?: AudioGainPolicyLike;
   candidateRef?: string;
   metadata?: Record<string, unknown>;
 }
@@ -172,6 +194,7 @@ interface TimelineDoc {
     }>;
   };
   transitions?: unknown[];
+  audio_mix?: AudioGainPolicyLike & { bgm_asset_id?: string };
 }
 
 interface AssetDoc {
@@ -190,6 +213,7 @@ export function parseArgs(argv: string[]): RenderArgs {
   let bgmPath: string | undefined;
   let reuseVideoPath: string | undefined;
   let noAudio = false;
+  let deferEndingFade = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -206,13 +230,15 @@ export function parseArgs(argv: string[]): RenderArgs {
       reuseVideoPath = args[++i];
     } else if (arg === "--no-audio") {
       noAudio = true;
+    } else if (arg === "--defer-ending-fade") {
+      deferEndingFade = true;
     } else {
       throw new Error(`Unknown or incomplete argument: ${arg}`);
     }
   }
 
   if (!projectPath) throw new Error("--project is required");
-  return { projectPath, outputPath, bgmPath, reuseVideoPath, noAudio };
+  return { projectPath, outputPath, bgmPath, reuseVideoPath, noAudio, deferEndingFade };
 }
 
 function readJson<T>(filePath: string): T {
@@ -434,6 +460,7 @@ export function extractVideoClips(timeline: TimelineDoc): TimelineClip[] {
         timeline_duration_frames: clip.timeline_duration_frames,
         role: clip.role,
         candidate_ref: clip.candidate_ref,
+        metadata: clip.metadata,
       };
     });
 }
@@ -603,6 +630,7 @@ export function buildRenderClips(
   sourceMap: Map<string, MediaSourceMapEntry>,
   fps: number,
   warn: (message: string) => void = console.warn,
+  options: { allowEndingPostroll?: boolean; audioMixPolicy?: AudioGainPolicyLike } = {},
 ): RenderClip[] {
   const renderClips: RenderClip[] = [];
 
@@ -620,19 +648,26 @@ export function buildRenderClips(
 
     const timelineDurationSec = clip.timeline_duration_frames / fps;
     const sourceRangeDurationSec = (clip.src_out_us - clip.src_in_us) / 1_000_000;
+    const endingTreatment = recordValue(clip.metadata?.ending_treatment);
+    const hasMovingEndingPostroll = options.allowEndingPostroll === true &&
+      endingTreatment !== undefined &&
+      timelineDurationSec > sourceRangeDurationSec;
     renderClips.push({
       clipId: clip.clip_id ?? `${clip.asset_id}_${renderClips.length + 1}`,
       ...(clip.segment_id ? { segmentId: clip.segment_id } : {}),
       assetId: clip.asset_id,
       sourcePath,
       startSec: clip.src_in_us / 1_000_000,
-      durationSec: Math.min(timelineDurationSec, sourceRangeDurationSec),
+      durationSec: hasMovingEndingPostroll
+        ? timelineDurationSec
+        : Math.min(timelineDurationSec, sourceRangeDurationSec),
       timelineInFrame: clip.timeline_in_frame ?? 0,
       timelineDurationSec,
       sourceRangeDurationSec,
       timelineOutFrame: (clip.timeline_in_frame ?? 0) + clip.timeline_duration_frames,
       role: clip.role,
       audioPolicy: clip.audio_policy,
+      audioMixPolicy: options.audioMixPolicy,
       ...(clip.candidate_ref ? { candidateRef: clip.candidate_ref } : {}),
       ...(clip.metadata ? { metadata: clip.metadata } : {}),
     });
@@ -662,8 +697,13 @@ function ffmpegAudioDelay(valueMs: number): string {
 }
 
 function audioGainFilter(clip: RenderAudioClip): string | undefined {
-  const gain = clip.audioPolicy?.nat_gain ?? clip.audioPolicy?.nat_sound_gain ?? 1;
-  return gain > 0 && gain !== 1 ? `volume=${gain.toFixed(4)}` : undefined;
+  const role = clip.role === "bgm" || clip.role === "music"
+    ? "bgm"
+    : clip.role === "nat_sound"
+      ? "nat_sound"
+      : "nat";
+  const gain = resolveAudioGainWithFallback(clip.audioPolicy, clip.audioMixPolicy, role).gainLinear;
+  return canonicalLinearGainFilter(gain);
 }
 
 function audioFadeFilters(clip: RenderAudioClip, fps: number): string[] {
@@ -694,14 +734,21 @@ function videoFadeFilter(clip: RenderClip, fps: number): string | undefined {
   return `fade=t=out:st=${ffmpegNumber(startSec)}:d=${ffmpegNumber(durationSec)}:color=${color}`;
 }
 
-export function buildClipVideoFilters(clip: RenderClip, fps: number): string {
+export function buildClipVideoFilters(
+  clip: RenderClip,
+  fps: number,
+  options: { applyEndingFade?: boolean } = {},
+): string {
+  const fitFilter = buildVideoFitFilterFromTransform(
+    1920,
+    1080,
+    extractClipTransform(clip) ?? {},
+  );
   return [
     "setpts=PTS-STARTPTS",
     `fps=${fps}`,
-    "scale=1920:1080:force_original_aspect_ratio=decrease",
-    "pad=1920:1080:(ow-iw)/2:(oh-ih)/2",
-    "setsar=1",
-    videoFadeFilter(clip, fps),
+    fitFilter,
+    options.applyEndingFade === false ? undefined : videoFadeFilter(clip, fps),
   ].filter(Boolean).join(",");
 }
 
@@ -760,6 +807,23 @@ export function findTimelineAudioVideoSyncIssues(
 
       const deltaSec = audioClip.startSec - videoClip.startSec;
       const durationDeltaSec = Math.abs(audioClip.durationSec - videoClip.durationSec);
+      const timelineStartDeltaSec =
+        (audioClip.timelineInFrame - videoClip.timelineInFrame) / fps;
+      const sourceEndDeltaSec =
+        (videoClip.startSec + videoClip.sourceRangeDurationSec) -
+        (audioClip.startSec + audioClip.sourceRangeDurationSec);
+      const timelineEndDeltaSec =
+        (videoClip.timelineOutFrame - audioClip.timelineOutFrame) / fps;
+      const intentionalCutBreathing =
+        Math.abs(deltaSec - timelineStartDeltaSec) <= toleranceSec &&
+        Math.abs(sourceEndDeltaSec - timelineEndDeltaSec) <= toleranceSec;
+      const intentionalMovingPostroll =
+        recordValue(videoClip.metadata?.ending_treatment) !== undefined &&
+        videoClip.durationSec >= audioClip.durationSec &&
+        Math.abs(deltaSec) <= toleranceSec;
+      if (intentionalCutBreathing || intentionalMovingPostroll) {
+        continue;
+      }
       if (Math.abs(deltaSec) <= toleranceSec && durationDeltaSec <= toleranceSec) {
         continue;
       }
@@ -885,8 +949,10 @@ export function buildTimelineAudioMixFilter(
     );
   }
 
+  const filterComplex = parts.join(";");
+  assertSafeAudioDelayFilterOrder(filterComplex);
   return {
-    filterComplex: parts.join(";"),
+    filterComplex,
     outputLabel: "aout",
   };
 }
@@ -1029,6 +1095,82 @@ export function computeRenderDurationAccounting(
     crossfade_overlap_sec: roundSec(crossfadeOverlapSec),
     source_clamp_sec: roundSec(sourceClampSec),
     expected_rendered_sec: roundSec(expectedRenderedSec),
+  };
+}
+
+export function computeTimelineVideoDurationAccounting(
+  timeline: TimelineDoc,
+  fps: number,
+): RenderDurationAccounting {
+  const clips = extractVideoClips(timeline).map((clip): RenderClip => {
+    const durationSec = clip.timeline_duration_frames / fps;
+    return {
+      clipId: clip.clip_id ?? clip.asset_id,
+      segmentId: clip.segment_id,
+      assetId: clip.asset_id,
+      sourcePath: "",
+      startSec: 0,
+      durationSec,
+      timelineInFrame: clip.timeline_in_frame ?? 0,
+      timelineDurationSec: durationSec,
+      sourceRangeDurationSec: durationSec,
+      timelineOutFrame: (clip.timeline_in_frame ?? 0) + clip.timeline_duration_frames,
+      role: clip.role,
+    };
+  });
+  const transitions = extractCrossfadeTransitions(timeline, fps);
+  const groups = buildRenderGroups(clips, clips.map((clip) => clip.clipId), transitions);
+  return computeRenderDurationAccounting(clips, groups, fps);
+}
+
+export function computeAudioOnlyDurationAccounting(
+  clips: TimelineClip[],
+  fps: number,
+): RenderDurationAccounting {
+  const intervals = clips
+    .map((clip) => ({
+      start: Math.max(0, clip.timeline_in_frame ?? 0),
+      end: Math.max(0, clip.timeline_in_frame ?? 0) + clip.timeline_duration_frames,
+    }))
+    .filter((interval) => interval.end > interval.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  if (intervals.length === 0) {
+    return {
+      timeline_span_sec: 0,
+      timeline_content_sec: 0,
+      gap_sec: 0,
+      gap_count: 0,
+      crossfade_overlap_sec: 0,
+      source_clamp_sec: 0,
+      expected_rendered_sec: 0,
+    };
+  }
+
+  let contentFrames = 0;
+  let gapCount = intervals[0].start > 0 ? 1 : 0;
+  let currentStart = intervals[0].start;
+  let currentEnd = intervals[0].end;
+  for (const interval of intervals.slice(1)) {
+    if (interval.start > currentEnd) {
+      contentFrames += currentEnd - currentStart;
+      gapCount += 1;
+      currentStart = interval.start;
+      currentEnd = interval.end;
+    } else {
+      currentEnd = Math.max(currentEnd, interval.end);
+    }
+  }
+  contentFrames += currentEnd - currentStart;
+  const timelineSpanFrames = Math.max(...intervals.map((interval) => interval.end));
+
+  return {
+    timeline_span_sec: roundSec(timelineSpanFrames / fps),
+    timeline_content_sec: roundSec(contentFrames / fps),
+    gap_sec: roundSec((timelineSpanFrames - contentFrames) / fps),
+    gap_count: gapCount,
+    crossfade_overlap_sec: 0,
+    source_clamp_sec: 0,
+    expected_rendered_sec: roundSec(timelineSpanFrames / fps),
   };
 }
 
@@ -1394,27 +1536,123 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
   if (!fs.existsSync(timelinePath)) throw new Error(`Timeline not found: ${timelinePath}`);
 
   const timeline = readJson<TimelineDoc>(timelinePath);
+  assertTimelineRenderSupported(timeline, { projectDir: projectPath, timelinePath });
   const fps = getTimelineFps(timeline);
   const sourceMap = ensureSourceMap(projectPath);
-  const clips = buildRenderClips(extractVideoClips(timeline), sourceMap, fps);
-  const timelineAudioClips = buildRenderAudioClips(extractAudioClips(timeline), sourceMap, fps);
-  if (clips.length === 0) throw new Error("No renderable video clips found");
+  const reuseVideoPath = args.reuseVideoPath
+    ? resolveUserPath(projectPath, args.reuseVideoPath)
+    : undefined;
+  const reuseFreshnessBefore = reuseVideoPath
+    ? assessRenderArtifactFreshness(projectPath, reuseVideoPath)
+    : undefined;
+  if (reuseFreshnessBefore && reuseFreshnessBefore.status !== "fresh") {
+    throw new Error(
+      `Reusable video lacks fresh canonical source identity metadata: ${reuseFreshnessBefore.reason ?? reuseFreshnessBefore.status}`,
+    );
+  }
+  const sourceInputsBefore = createSourceInputAttestation(projectPath, {
+    timelinePath,
+    includeAudio: !args.noAudio,
+  });
+  const outputPath = args.outputPath
+    ? resolveUserPath(projectPath, args.outputPath)
+    : path.join(projectPath, "09_output", "rough-cut.mp4");
+  const canonicalInputs = resolveCanonicalRenderInputs(timeline as never, {
+    projectDir: projectPath,
+    timelinePath,
+    includeAudio: !args.noAudio,
+  });
+  if (canonicalInputs.imageAssetIds.size > 0) {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    const assembly = await assembleTimelineToMp4({
+      projectDir: projectPath,
+      timelinePath,
+      outputPath,
+      includeAudio: !args.noAudio,
+    });
+    const actualRenderedSec = await probeVideoDurationSec(outputPath);
+    const durationAccounting = validateRenderDurationAccounting(
+      computeTimelineVideoDurationAccounting(timeline, fps),
+      actualRenderedSec,
+    );
+    writeRenderFreshnessMetadata(projectPath, outputPath, { sourceInputsBefore });
+    return {
+      outputPath,
+      clipCount: extractVideoClips(timeline).length,
+      audioClipCount: assembly.audioClipCount,
+      durationSec: actualRenderedSec,
+      fileSizeBytes: fs.statSync(outputPath).size,
+      xfadeCount: extractCrossfadeTransitions(timeline, fps).size,
+      durationAccounting,
+    };
+  }
+  const clips = buildRenderClips(
+    extractVideoClips(timeline),
+    sourceMap,
+    fps,
+    console.warn,
+    { allowEndingPostroll: true },
+  );
+  const rawTimelineAudioClips = extractAudioClips(timeline);
+  const timelineAudioClips = buildRenderAudioClips(
+    rawTimelineAudioClips,
+    sourceMap,
+    fps,
+    console.warn,
+    { audioMixPolicy: timeline.audio_mix },
+  );
+  if (clips.length === 0) {
+    if (rawTimelineAudioClips.length === 0 || args.noAudio) {
+      throw new Error("No renderable video clips found");
+    }
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    const assembly = await assembleTimelineToMp4({
+      projectDir: projectPath,
+      timelinePath,
+      outputPath,
+    });
+    const actualRenderedSec = await probeVideoDurationSec(outputPath);
+    const durationAccounting = computeAudioOnlyDurationAccounting(rawTimelineAudioClips, fps);
+    const validatedAccounting = validateRenderDurationAccounting(
+      durationAccounting,
+      actualRenderedSec,
+    );
+    atomicWriteJson(path.join(path.dirname(outputPath), "render-report.json"), {
+      ...validatedAccounting,
+      render_mode: "audio_only_timeline_assembler",
+      placeholder_video: "black",
+      video_clip_count: 0,
+      video_segment_count: assembly.videoSegmentCount,
+      audio_clip_count: assembly.audioClipCount,
+      audio_rendered: assembly.audioClipCount > 0,
+      bgm_rendered: timelineAudioClips.some((clip) =>
+        clip.role === "bgm" || clip.role === "music"
+      ),
+      audio_timing_mode: "canonical_timeline_frames",
+      audio_timeline_scale: 1,
+    });
+    writeRenderFreshnessMetadata(projectPath, outputPath, { sourceInputsBefore });
+    return {
+      outputPath,
+      clipCount: 0,
+      audioClipCount: assembly.audioClipCount,
+      durationSec: actualRenderedSec,
+      fileSizeBytes: fs.statSync(outputPath).size,
+      xfadeCount: 0,
+      durationAccounting: validatedAccounting,
+    };
+  }
 
   const crossfades = extractCrossfadeTransitions(timeline, fps);
   const plannedGroups = buildRenderGroups(clips, clips.map((clip) => clip.clipId), crossfades);
   const initialDurationAccounting = computeRenderDurationAccounting(clips, plannedGroups, fps);
-  const outputPath = args.outputPath
-    ? resolveUserPath(projectPath, args.outputPath)
-    : path.join(projectPath, "09_output", "rough-cut.mp4");
-
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rough-cut-"));
   try {
     let videoAssembly: { outputPath: string; durationSec: number; xfadeCount: number };
     let renderedDurationSecByVideoClipId: Map<string, number> | undefined;
-    if (args.reuseVideoPath) {
-      const reuseVideoPath = resolveUserPath(projectPath, args.reuseVideoPath);
+    if (reuseVideoPath) {
       if (!fs.existsSync(reuseVideoPath)) {
         throw new Error(`Reusable video not found: ${reuseVideoPath}`);
       }
@@ -1437,7 +1675,9 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
       for (let index = 0; index < clips.length; index++) {
         const clip = clips[index];
         const tmpClip = path.join(tempDir, `clip-${String(index + 1).padStart(4, "0")}.mp4`);
-        const videoFilters = buildClipVideoFilters(clip, fps);
+        const videoFilters = buildClipVideoFilters(clip, fps, {
+          applyEndingFade: !args.deferEndingFade,
+        });
         await runFfmpeg([
           "-ss",
           String(clip.startSec),
@@ -1488,10 +1728,20 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
 
     let bgmPath: string | undefined;
     if (!args.noAudio) {
+      const bgmAssetId = timeline.audio_mix?.bgm_asset_id;
       if (args.bgmPath) {
         bgmPath = resolveUserPath(projectPath, args.bgmPath);
-      } else {
-        bgmPath = selectBgmCandidate(await findBgmCandidates(projectPath), videoAssembly.durationSec)?.path;
+        const attestedBgmPath = bgmAssetId ? sourceMap.get(bgmAssetId)?.source_locator : undefined;
+        if (!attestedBgmPath || path.resolve(attestedBgmPath) !== path.resolve(bgmPath)) {
+          throw new Error(
+            "Explicit --bgm must resolve to timeline.audio_mix.bgm_asset_id in source_map.json",
+          );
+        }
+      } else if (bgmAssetId) {
+        bgmPath = sourceMap.get(bgmAssetId)?.source_locator;
+        if (!bgmPath) {
+          throw new Error(`Missing source_map entry for timeline BGM asset ${bgmAssetId}`);
+        }
       }
     }
 
@@ -1533,6 +1783,18 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
 
     const actualRenderedSec = await probeVideoDurationSec(outputPath);
     const durationAccounting = validateRenderDurationAccounting(initialDurationAccounting, actualRenderedSec);
+    if (reuseVideoPath && reuseFreshnessBefore) {
+      const reuseFreshnessAfter = assessRenderArtifactFreshness(projectPath, reuseVideoPath);
+      if (
+        reuseFreshnessAfter.status !== "fresh" ||
+        reuseFreshnessAfter.artifactHash !== reuseFreshnessBefore.artifactHash
+      ) {
+        throw new SourceInputAttestationError(
+          "source_changed_during_render",
+          `Reusable video changed while rendering: ${reuseVideoPath}`,
+        );
+      }
+    }
     atomicWriteJson(path.join(path.dirname(outputPath), "render-report.json"), {
       ...durationAccounting,
       audio_clip_count: audioClips.length,
@@ -1546,8 +1808,11 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
         : initialDurationAccounting.expected_rendered_sec > 0
           ? Number((videoAssembly.durationSec / initialDurationAccounting.expected_rendered_sec).toFixed(6))
           : 1,
+      ...(reuseFreshnessBefore?.artifactHash
+        ? { reused_video_hash: reuseFreshnessBefore.artifactHash }
+        : {}),
     });
-    writeRenderFreshnessMetadata(projectPath, outputPath);
+    writeRenderFreshnessMetadata(projectPath, outputPath, { sourceInputsBefore });
 
     return {
       outputPath,

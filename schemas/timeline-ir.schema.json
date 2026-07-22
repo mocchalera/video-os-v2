@@ -197,6 +197,24 @@
             "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] }
           },
           "additionalProperties": false
+        },
+        "still_duration_policy": {
+          "type": "object",
+          "required": ["source", "fps_num", "fps_den", "min_hold_frames", "default_hold_frames", "max_hold_frames", "motion_mode", "fit_mode", "background"],
+          "properties": {
+            "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+            "fps_num": { "type": "integer", "minimum": 1 },
+            "fps_den": { "type": "integer", "minimum": 1 },
+            "min_hold_frames": { "type": "integer", "minimum": 1 },
+            "default_hold_frames": { "type": "integer", "minimum": 1 },
+            "max_hold_frames": { "type": "integer", "minimum": 1 },
+            "motion_mode": { "const": "static" },
+            "requested_motion_mode": { "const": "subtle_ken_burns" },
+            "motion_status": { "const": "pending_EYE-070C2B" },
+            "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+            "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -319,9 +337,47 @@
             "type": "string"
           }
         },
+        "media_kind": {
+          "type": "string",
+          "enum": ["video", "audio", "image", "sequence", "unknown"]
+        },
+        "source_capabilities": {
+          "type": "object",
+          "required": ["has_video", "has_audio"],
+          "properties": {
+            "has_video": { "type": "boolean" },
+            "has_audio": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "audio_role": {
+          "type": "string",
+          "enum": ["dialogue", "music", "nat_sound", "ambient"]
+        },
+        "still_image": {
+          "type": "object",
+          "required": ["hold_frames", "min_hold_frames", "max_hold_frames", "hold_source", "policy_clamp", "motion_mode", "fit_mode", "background"],
+          "properties": {
+            "hold_frames": { "type": "integer", "minimum": 1 },
+            "min_hold_frames": { "type": "integer", "minimum": 1 },
+            "max_hold_frames": { "type": "integer", "minimum": 1 },
+            "hold_source": { "type": "string", "enum": ["candidate_override", "explicit_brief", "profile_default", "global_default"] },
+            "policy_clamp": { "type": "string", "enum": ["none", "min", "max", "beat_budget", "duration_cap"] },
+            "motion_mode": { "const": "static" },
+            "requested_motion_mode": { "const": "subtle_ken_burns" },
+            "motion_status": { "const": "pending_EYE-070C2B" },
+            "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+            "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+          },
+          "additionalProperties": false
+        },
         "audio_policy": {
           "type": "object",
           "properties": {
+            "gain_unit": {
+              "type": "string",
+              "enum": ["linear", "db"]
+            },
             "mode": {
               "type": "string",
               "enum": ["ducking", "bgm_only", "original_only"]
@@ -396,11 +452,28 @@
           "type": "object"
         }
       },
+      "allOf": [
+        {
+          "if": { "properties": { "media_kind": { "const": "image" } }, "required": ["media_kind"] },
+          "then": {
+            "required": ["still_image"],
+            "properties": { "src_in_us": { "const": 0 }, "src_out_us": { "const": 1 } }
+          }
+        },
+        {
+          "if": { "required": ["still_image"] },
+          "then": { "required": ["media_kind"], "properties": { "media_kind": { "const": "image" } } }
+        }
+      ],
       "additionalProperties": false
     },
     "audioMix": {
       "type": "object",
       "properties": {
+        "gain_unit": {
+          "type": "string",
+          "enum": ["linear", "db"]
+        },
         "nat_sound_gain": {
           "type": "number"
         },

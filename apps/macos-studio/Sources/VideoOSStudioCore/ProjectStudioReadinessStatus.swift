@@ -150,19 +150,35 @@ public struct ProjectStudioReadinessStatus: Equatable, Sendable {
 }
 
 public enum ProjectStudioReadinessStatusReader {
-    public static func status(repositoryRoot: URL, projectURL: URL) -> ProjectStudioReadinessStatus {
+    public static func status(
+        repositoryRoot: URL,
+        projectURL: URL,
+        preflightStatus: ProjectPackagePreflightStatus = ProjectPackagePreflightRunner.pending(),
+        packageVerificationStatus: ProjectPackageVerificationStatus = ProjectPackageVerificationRunner.pending()
+    ) -> ProjectStudioReadinessStatus {
         let fileManager = FileManager.default
         let evidence = ProjectEvidenceStore.load(projectURL: projectURL)
         let intent = ProjectIntentSummaryReader.summary(projectURL: projectURL)
         let library = ProjectLibraryReadinessStatusReader.status(projectURL: projectURL)
         let planning = ProjectPlanningStatusReader.status(projectURL: projectURL)
-        let pipeline = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        let pipeline = ProjectPipelineGateStatusReader.status(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            preflightStatus: preflightStatus
+        )
         let marlin = ProjectMarlinEvaluationStatusReader.status(projectURL: projectURL, repositoryRoot: repositoryRoot)
         let marlinDefault = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: repositoryRoot)
         let marlinQueue = ProjectMarlinEvaluationQueueReader.queue(repositoryRoot: repositoryRoot)
         let handoff = ProjectEditorPacketExporter.plan(repositoryRoot: repositoryRoot, projectURL: projectURL, assets: evidence.assets)
-        let renderPackage = ProjectRenderPackageStatusReader.status(projectURL: projectURL)
-        let renderPlan = ProjectRenderRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        let renderPackage = ProjectRenderPackageStatusReader.status(
+            projectURL: projectURL,
+            verificationStatus: packageVerificationStatus
+        )
+        let renderPlan = ProjectRenderRunPlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            preflightStatus: preflightStatus
+        )
         let packageJSONExists = fileManager.fileExists(atPath: repositoryRoot.appendingPathComponent("package.json").path)
         let projectID = projectURL.lastPathComponent
 

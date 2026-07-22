@@ -575,6 +575,19 @@ Goal: make Studio feel dense, stable, and professional at real project scale.
 - [ ] Continue reducing form-heavy surfaces where editors need fast repeated action; first timeline viewport preferences now persist.
 - [ ] Verify with screenshots and interaction smoke tests across compact and wide layouts.
 
+### Candidate: M10 — BGM Library and Music Intelligence
+
+Goal: ship an openly reusable local BGM pack and make music selection, fitting,
+ducking, licensing, and Studio audition part of the canonical editing workflow.
+
+- [ ] Implement the phased plan in `docs/design-bgm-library-selection-mixing.md`.
+- [ ] Add versioned pack/catalog, integrity verification, and rights register before automated selection.
+- [ ] Extend local BGM analysis with speech-friendliness and fixed-vocabulary semantic descriptors while preserving no-model fallback.
+- [ ] Add explainable brief/timeline-aware top-three selection and confidence-gated auto mode.
+- [ ] Converge rough-cut, exact preview, assembler, and package output on one A2 audio render plan.
+- [ ] Add Studio BGM search, audition-with-ducking, apply/lock/replace/remove, and license visibility.
+- [ ] Release Core Pack v1 only after the independent `9cd0d6eb` music-production workstream and explicit rights review are complete.
+
 ## Out of Scope
 
 - Broad rewrites of schemas, compiler contracts, or planning routes without explicit approval.

@@ -21,6 +21,13 @@ import type {
   ClipOutput,
   TimelineTransitionOutput,
 } from "../compiler/types.js";
+import {
+  dbToLinearGain,
+  linearGainToDb,
+  resolveAudioGainWithFallback,
+} from "../../editor/shared/audio-gain.js";
+
+export { dbToLinearGain, linearGainToDb } from "../../editor/shared/audio-gain.js";
 
 const DEFAULT_TRANSITION_FRAMES = 15;
 
@@ -92,19 +99,6 @@ export function timelineToFcp7Xml(
 ): string {
   const ctx = new ExportContext(timeline, options);
   return ctx.build();
-}
-
-// ── Audio Gain Helpers ────────────────────────────────────────────
-
-/** Convert a dB value to linear gain: gain = 10^(dB/20) */
-export function dbToLinearGain(db: number): number {
-  return Math.pow(10, db / 20);
-}
-
-/** Convert linear gain to dB: dB = 20 * log10(gain). Returns -Infinity for gain <= 0. */
-export function linearGainToDb(gain: number): number {
-  if (gain <= 0) return -96;
-  return Math.max(-96, 20 * Math.log10(gain));
 }
 
 // ── Internal Implementation ───────────────────────────────────────
@@ -685,32 +679,32 @@ class ExportContext {
     clip: ClipOutput,
   ): void {
     const ap = clip.audio_policy;
-    if (!ap) return;
+    const mix = this.timeline.audio_mix;
+    if (!ap && !mix) return;
 
     const isBgm = clip.role === "bgm" || clip.role === "music";
 
-    // Resolve gain dB: most specific field first
-    const gainDb: number | undefined = isBgm
-      ? (ap.bgm_gain ?? ap.duck_music_db)
-      : (ap.nat_sound_gain ?? ap.nat_gain ?? ap.duck_music_db);
+    const gain = resolveAudioGainWithFallback(ap, mix, isBgm ? "bgm" : "nat_sound", {
+      fallbackToDuckMusicDb: isBgm,
+    });
 
     // Resolve fade frames
     const fadeInFrames: number | undefined = isBgm
-      ? (ap.bgm_fade_in_frames ?? ap.fade_in_frames)
-      : (ap.nat_sound_fade_in_frames ?? ap.fade_in_frames);
+      ? (ap?.bgm_fade_in_frames ?? ap?.fade_in_frames ?? mix?.bgm_fade_in_frames ?? mix?.fade_in_frames)
+      : (ap?.nat_sound_fade_in_frames ?? ap?.fade_in_frames ?? mix?.nat_sound_fade_in_frames ?? mix?.fade_in_frames);
 
     const fadeOutFrames: number | undefined = isBgm
-      ? (ap.bgm_fade_out_frames ?? ap.fade_out_frames)
-      : (ap.nat_sound_fade_out_frames ?? ap.fade_out_frames);
+      ? (ap?.bgm_fade_out_frames ?? ap?.fade_out_frames ?? mix?.bgm_fade_out_frames ?? mix?.fade_out_frames)
+      : (ap?.nat_sound_fade_out_frames ?? ap?.fade_out_frames ?? mix?.nat_sound_fade_out_frames ?? mix?.fade_out_frames);
 
-    const hasGain = gainDb !== undefined;
+    const hasGain = gain.sourceField !== null;
     const hasFadeIn = fadeInFrames !== undefined && fadeInFrames > 0;
     const hasFadeOut = fadeOutFrames !== undefined && fadeOutFrames > 0;
 
     // Nothing to emit
     if (!hasGain && !hasFadeIn && !hasFadeOut) return;
 
-    const linearGain = hasGain ? dbToLinearGain(gainDb) : 1.0;
+    const linearGain = hasGain ? gain.gainLinear : 1.0;
     const d = this.indent(depth);
 
     lines.push(`${d}<filter>`);

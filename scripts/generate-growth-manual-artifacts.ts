@@ -73,6 +73,7 @@ function main(): void {
       confidence: segment.role === "hero" ? 0.98 : 0.92,
       quality_flags: [],
       audio_policy: {
+        gain_unit: "linear",
         duck_music_db: segment.role === "hero" ? 2.0 : 0,
       },
     });
@@ -92,6 +93,7 @@ function main(): void {
       confidence: 1,
       quality_flags: [],
       audio_policy: {
+        gain_unit: "linear",
         duck_music_db: segment.role === "hero" ? 2.0 : 0,
         nat_gain: segment.nat_gain,
       },

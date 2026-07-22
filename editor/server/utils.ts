@@ -47,6 +47,7 @@ const SOURCE_MAP_API_REDACTED_ITEM_KEYS = new Set([
   "local_source_path",
   "link_path",
   "source_locator",
+  "image_sequence",
 ]);
 
 export function redactSourceMapItemForApi(

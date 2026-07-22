@@ -4,6 +4,7 @@
 
 import type { AssembledTimeline, Candidate, DurationPolicy, Track } from "./types.js";
 import { computeFrameBounds, isWithinWindow } from "./duration-helpers.js";
+import { primaryContentClips } from "./primary-content.js";
 
 export type DurationStatus = "pass" | "short" | "over";
 
@@ -64,6 +65,7 @@ export function resolve(
   //    If inverted, swap. If equal (zero-duration), extend out by 1 second.
   for (const track of allTracks) {
     for (const clip of track.clips) {
+      if (clip.media_kind === "image") continue;
       if (clip.src_in_us > clip.src_out_us) {
         // Swap if inverted
         const tmp = clip.src_in_us;
@@ -100,6 +102,7 @@ export function resolve(
       for (let i = 1; i < clips.length; i++) {
         const prev = clips[i - 1];
         const curr = clips[i];
+        if (prev.media_kind === "image" || curr.media_kind === "image") continue;
         if (curr.src_in_us < prev.src_out_us) {
           // Trim current clip's in-point to resolve overlap
           curr.src_in_us = prev.src_out_us;
@@ -122,7 +125,9 @@ export function resolve(
     const segmentUsage = new Map<string, { trackId: string; clipId: string }[]>();
     for (const track of allTracks) {
       for (const clip of track.clips) {
-        const usageKey = `${track.kind}:${clipUsageKey(clip)}`;
+        const usageKey = clip.media_kind === "image"
+          ? `${track.kind}:still:${clip.clip_id}`
+          : `${track.kind}:${clipUsageKey(clip)}`;
         const list = segmentUsage.get(usageKey) ?? [];
         list.push({ trackId: track.track_id, clipId: clip.clip_id });
         segmentUsage.set(usageKey, list);
@@ -148,7 +153,11 @@ export function resolve(
           while (clip.fallback_segment_ids.length > 0) {
             const fallbackSegId = clip.fallback_segment_ids.shift()!;
             const fallbackCandidate = candidateMap.get(fallbackSegId);
-            if (fallbackCandidate) {
+            const trackAcceptsCandidate = fallbackCandidate &&
+              fallbackCandidate.media_kind !== "image" && clip.media_kind !== "image" &&
+              (track.kind === "audio" || fallbackCandidate.source_capabilities?.has_video !== false) &&
+              (track.kind === "video" || fallbackCandidate.source_capabilities?.has_video === false || fallbackCandidate.role === "dialogue");
+            if (fallbackCandidate && trackAcceptsCandidate) {
               // Full clip replacement from candidate data
               clip.segment_id = fallbackCandidate.segment_id;
               clip.asset_id = fallbackCandidate.asset_id;
@@ -158,6 +167,11 @@ export function resolve(
               clip.quality_flags = fallbackCandidate.quality_flags ?? [];
               clip.motivation = `[fallback] replaced duplicate ${segId} with ${fallbackSegId}`;
               clip.role = fallbackCandidate.role as typeof clip.role;
+              clip.media_kind = fallbackCandidate.media_kind;
+              clip.source_capabilities = fallbackCandidate.source_capabilities
+                ? { ...fallbackCandidate.source_capabilities }
+                : undefined;
+              clip.audio_role = fallbackCandidate.audio_role;
               replaced = true;
               break;
             }
@@ -177,11 +191,9 @@ export function resolve(
 
   // 4. Duration fit check
   let maxFrame = 0;
-  for (const track of timeline.tracks.video) {
-    for (const clip of track.clips) {
-      const end = clip.timeline_in_frame + clip.timeline_duration_frames;
-      if (end > maxFrame) maxFrame = end;
-    }
+  for (const clip of primaryContentClips(timeline)) {
+    const end = clip.timeline_in_frame + clip.timeline_duration_frames;
+    if (end > maxFrame) maxFrame = end;
   }
 
   // Duration fit: for guide mode, use policy max bounds (target is a floor, not a cap).
@@ -222,7 +234,7 @@ export function resolve(
     durationFit = maxFrame <= totalTargetFrames;
   }
 
-  const content_frames = sumVideoContentFrames(timeline);
+  const content_frames = sumPrimaryContentFrames(timeline);
   const content_fill_ratio = resolved_target_frames > 0
     ? content_frames / resolved_target_frames
     : 1;
@@ -278,12 +290,9 @@ export function resolve(
   };
 }
 
-function sumVideoContentFrames(timeline: AssembledTimeline): number {
-  return timeline.tracks.video.reduce(
-    (sum, track) => sum + track.clips.reduce(
-      (trackSum, clip) => trackSum + Math.max(0, clip.timeline_duration_frames),
-      0,
-    ),
+function sumPrimaryContentFrames(timeline: AssembledTimeline): number {
+  return primaryContentClips(timeline).reduce(
+    (sum, clip) => sum + Math.max(0, clip.timeline_duration_frames),
     0,
   );
 }
@@ -293,8 +302,7 @@ function computeGapSummary(
   targetFrames: number,
 ): { gap_frames: number; gap_count: number } {
   if (targetFrames <= 0) return { gap_frames: 0, gap_count: 0 };
-  const intervals = timeline.tracks.video
-    .flatMap((track) => track.clips)
+  const intervals = primaryContentClips(timeline)
     .map((clip) => ({
       start: Math.max(0, Math.min(targetFrames, clip.timeline_in_frame)),
       end: Math.max(0, Math.min(targetFrames, clip.timeline_in_frame + clip.timeline_duration_frames)),
@@ -325,7 +333,7 @@ function computeBeatFill(
   targetFrames: number,
 ): BeatFillDiagnostic[] {
   const beatWindows = getBeatWindows(timeline, targetFrames);
-  const clips = timeline.tracks.video.flatMap((track) => track.clips);
+  const clips = primaryContentClips(timeline);
 
   return beatWindows.map((beat) => {
     const actual = clips
@@ -367,7 +375,7 @@ function getBeatWindows(
   }
 
   const beatIds = [...new Set(
-    timeline.tracks.video.flatMap((track) => track.clips.map((clip) => clip.beat_id)),
+    primaryContentClips(timeline).map((clip) => clip.beat_id),
   )].sort();
   if (beatIds.length === 0) return [];
   const fallbackTarget = Math.floor(targetFrames / beatIds.length);

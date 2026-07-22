@@ -4,8 +4,8 @@
 > Status: Draft
 > Scope: Structure-first design for making editorial craft executable by the deterministic compiler
 > Non-goal: No runtime, schema, MCP, or project artifact changes in this document task
-> Companion: [docs/design-editorial-craft-agent-first.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/design-editorial-craft-agent-first.md)
-> Related: [docs/cut-transition-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/cut-transition-design.md), [docs/vlm-peak-detection-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/vlm-peak-detection-design.md), [docs/milestone-4.5-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-4.5-design.md)
+> Companion: [docs/design-editorial-craft-agent-first.md](/Users/operator/Dev/video-os-v2-spec/docs/design-editorial-craft-agent-first.md)
+> Related: [docs/cut-transition-design.md](/Users/operator/Dev/video-os-v2-spec/docs/cut-transition-design.md), [docs/vlm-peak-detection-design.md](/Users/operator/Dev/video-os-v2-spec/docs/vlm-peak-detection-design.md), [docs/milestone-4.5-design.md](/Users/operator/Dev/video-os-v2-spec/docs/milestone-4.5-design.md)
 
 ## 1. Position
 

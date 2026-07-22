@@ -48,6 +48,15 @@ export interface MarlinAnalysisOptions {
   chunkSeconds?: number;
   chunkOverlapSeconds?: number;
   maxChunks?: number;
+  applyToSegments?: boolean;
+}
+
+/** Failure from the optional proxy/model/worker boundary. */
+export class MarlinOptionalAnalysisError extends Error {
+  constructor(readonly originalError: unknown) {
+    super(originalError instanceof Error ? originalError.message : String(originalError));
+    this.name = "MarlinOptionalAnalysisError";
+  }
 }
 
 interface AssetsDoc {
@@ -58,6 +67,8 @@ interface AssetDocItem {
   asset_id?: string;
   filename?: string;
   source_locator?: string;
+  video_stream?: unknown;
+  audio_stream?: unknown;
 }
 
 export interface MarlinAssetInput {
@@ -192,6 +203,7 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
         outputPath,
         model,
         items,
+        applyToSegments: opts.applyToSegments,
       });
       if (
         deferMaxSourcesUntilUnfinished &&
@@ -209,6 +221,7 @@ export async function runMarlinAnalysis(opts: MarlinAnalysisOptions): Promise<st
     outputPath,
     model,
     items,
+    applyToSegments: opts.applyToSegments,
   });
 }
 
@@ -222,12 +235,21 @@ async function runMarlinWholeAsset(args: {
   // Bounded proxy: never hand an unbounded-resolution source to the
   // worker (marlin-proxy.ts). Timestamps are unaffected — the proxy
   // keeps the source duration, so spans map 1:1 onto the original.
-  const proxy = await prepareMarlinProxy(args.projectDir, args.asset.sourcePath);
-  const caption = await args.opts.marlinFn.caption(proxy.evaluationPath);
+  const proxy = await optionalMarlinOperation(() =>
+    prepareMarlinProxy(args.projectDir, args.asset.sourcePath),
+    args.asset.sourcePath,
+  );
+  const caption = await optionalMarlinOperation(() =>
+    args.opts.marlinFn.caption(proxy.evaluationPath),
+    args.asset.sourcePath,
+  );
   const findResults = [];
   if (!args.opts.captionOnly) {
     for (const query of args.queries) {
-      findResults.push(await args.opts.marlinFn.find(proxy.evaluationPath, query));
+      findResults.push(await optionalMarlinOperation(() =>
+        args.opts.marlinFn.find(proxy.evaluationPath, query),
+        args.asset.sourcePath,
+      ));
     }
   }
   return normalizeMarlinAssetEvents({
@@ -283,18 +305,27 @@ async function runMarlinAssetChunks(args: {
   }
 
   for (const chunk of selectedChunks) {
-    const range = await createMarlinRangeProxy(
+    const range = await optionalMarlinOperation(() => createMarlinRangeProxy(
       args.projectDir,
       args.asset.sourcePath,
       chunk.startSec,
       chunk.endSec,
+    ), args.asset.sourcePath);
+    const proxy = await optionalMarlinOperation(() =>
+      prepareMarlinProxy(args.projectDir, range.rangePath),
+      args.asset.sourcePath,
     );
-    const proxy = await prepareMarlinProxy(args.projectDir, range.rangePath);
-    const caption = await args.opts.marlinFn.caption(proxy.evaluationPath);
+    const caption = await optionalMarlinOperation(() =>
+      args.opts.marlinFn.caption(proxy.evaluationPath),
+      args.asset.sourcePath,
+    );
     const findResults = [];
     if (!args.opts.captionOnly) {
       for (const query of args.queries) {
-        findResults.push(await args.opts.marlinFn.find(proxy.evaluationPath, query));
+        findResults.push(await optionalMarlinOperation(() =>
+          args.opts.marlinFn.find(proxy.evaluationPath, query),
+          args.asset.sourcePath,
+        ));
       }
     }
     const chunkItem = normalizeMarlinAssetEvents({
@@ -315,6 +346,7 @@ async function runMarlinAssetChunks(args: {
       outputPath: args.outputPath,
       model: args.model,
       items: args.items,
+      applyToSegments: args.opts.applyToSegments,
     });
   }
 
@@ -466,6 +498,7 @@ function writeMarlinArtifactCheckpoint(args: {
   outputPath: string;
   model: MarlinModelRecord;
   items: MarlinAssetEvents[];
+  applyToSegments?: boolean;
 }): string {
   // Incremental evidence: merge with any existing artifact so partial
   // evaluations accumulate instead of overwriting. Items for assets
@@ -485,8 +518,22 @@ function writeMarlinArtifactCheckpoint(args: {
     items: mergedItems,
   });
   atomicWriteJson(args.outputPath, artifact);
-  applyMarlinEventsToSegments(args.projectDir, artifact);
+  if (args.applyToSegments !== false) {
+    applyMarlinEventsToSegments(args.projectDir, artifact);
+  }
   return args.outputPath;
+}
+
+async function optionalMarlinOperation<T>(
+  operation: () => Promise<T>,
+  _sourcePath?: string,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof MarlinOptionalAnalysisError) throw error;
+    throw new MarlinOptionalAnalysisError(error);
+  }
 }
 
 export function applyMarlinEventsToSegments(projectDir: string, artifact: MarlinEventsArtifact): boolean {
@@ -631,7 +678,9 @@ export function loadMarlinAssetInputs(projectDir: string, sourceFiles: string[])
   }
 
   const inputs = items
-    .filter((item): item is AssetDocItem & { asset_id: string } => Boolean(item.asset_id))
+    .filter((item): item is AssetDocItem & { asset_id: string } =>
+      Boolean(item.asset_id) && !(Boolean(item.audio_stream) && !item.video_stream)
+    )
     .map((item, index) => ({
       assetId: item.asset_id,
       sourcePath: resolveAssetSourcePath(

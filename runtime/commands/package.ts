@@ -14,6 +14,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { assertTimelineRenderSupported } from "../render/media-kind-guard.js";
 import { parse as parseYaml } from "yaml";
 import {
   initCommand,
@@ -39,14 +40,18 @@ import {
   checkCaptionAlignment,
   checkAvDrift,
   checkLoudnessTarget,
+  checkAudioMixPolicy,
   checkPackageCompleteness,
   checkDialogueOccupancy,
+  checkDialogueTimelineAlignment,
   checkResolutionSpec,
   getRequiredChecks,
   type ExpectedVideoFrameSpec,
   type QaReport,
   type QaCheckResult,
 } from "../packaging/qa.js";
+import { hasCaptionStylePreset } from "../../editor/shared/caption-style-tokens.js";
+import { checkSocialRetentionFinishing } from "../packaging/social-retention-qa.js";
 import {
   buildEngineRenderManifest,
   buildNleFinishingManifest,
@@ -59,9 +64,17 @@ import {
   writeQaMeasurements,
   type PrecomputedQaMetrics,
   type QaMeasurements,
+  type TimeWindowMs,
 } from "../packaging/qa-measure.js";
 import { assembleTimelineToMp4 } from "../render/assembler.js";
 import { runRenderPipeline } from "../render/pipeline.js";
+import { timelineEmbeddedMusicAssetIds } from "../audio/timeline-music.js";
+import type { AssemblyEngine } from "../render/assembly-orchestrator.js";
+import {
+  resolveProjectRenderRoute,
+  type RenderRouteDecision,
+} from "../render/route-resolver.js";
+import { loadSourceMap } from "../media/source-map.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
 import { publishFinalVideo } from "../packaging/deliverable.js";
 import {
@@ -71,6 +84,16 @@ import {
   writeReleaseSafetyReport,
   type ReleaseSafetyReport,
 } from "../artifacts/p4a-release-safety.js";
+import { assessMusicAssetEligibility } from "../music/asset-eligibility.js";
+import type { AudioMixReport } from "../audio/mixer.js";
+import { timelineHasVisualClips } from "../review/visual-qa.js";
+import {
+  assessRenderArtifactFreshness,
+  assertSourceInputsUnchanged,
+  createSourceInputAttestation,
+  writeRenderFreshnessMetadata,
+  type RenderArtifactFreshness,
+} from "../render/source-input-attestation.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -88,6 +111,10 @@ export interface PackageCommandResult {
 export interface PackageCommandOptions {
   /** Pre-built assembly.mp4 path (skips Remotion) */
   assemblyPath?: string;
+  /** Produce assembly through the selected engine instead of prebuilding with FFmpeg. */
+  assemblyEngine?: AssemblyEngine;
+  /** Capability-based route resolved by the package CLI. */
+  renderRouteDecision?: RenderRouteDecision;
   /** For nle_finishing: operator-provided final.mp4 */
   suppliedFinalPath?: string;
   /** Timestamp override for testing */
@@ -113,12 +140,21 @@ export async function packageCommand(
   const allowedStates: ProjectState[] = options?.allowedStates ?? ["approved", "packaged"];
   const commandName = options?.commandName ?? "package";
   const actorName = options?.actorName ?? "package_command";
+  const requestedProjectDir = path.resolve(projectDir);
+  const requestedTimelinePath = path.join(requestedProjectDir, "05_timeline", "timeline.json");
+  if (fs.existsSync(requestedTimelinePath)) {
+    assertTimelineRenderSupported(JSON.parse(fs.readFileSync(requestedTimelinePath, "utf8")), {
+      projectDir: requestedProjectDir,
+      timelinePath: requestedTimelinePath,
+    });
+  }
   const ctx = initCommand(projectDir, commandName, allowedStates);
   if (isCommandError(ctx)) {
     return { success: false, error: ctx };
   }
 
   const { projectDir: absDir, doc } = ctx;
+  const timelinePath = path.join(absDir, "05_timeline", "timeline.json");
   const createdAt = options?.createdAt || new Date().toISOString();
   const autonomyMode = readCreativeBriefAutonomyMode(absDir);
   if (!autonomyMode) {
@@ -130,10 +166,15 @@ export async function packageCommand(
       },
     };
   }
+  const creativeBrief = parseYaml(
+    fs.readFileSync(path.join(absDir, "01_intent/creative_brief.yaml"), "utf-8"),
+  );
 
-  const timelinePath = path.join(absDir, "05_timeline/timeline.json");
   const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+  const timelineRequiresAudio = (timeline.tracks?.audio ?? []).some((track: { clips?: unknown[] }) => (track.clips?.length ?? 0) > 0) ||
+    typeof timeline.audio_mix?.bgm_asset_id === "string";
   const currentTimelineVersion = timeline.version || "1";
+  const embeddedMusicAssetIds = timelineEmbeddedMusicAssetIds(timeline);
 
   const blueprintPath = path.join(absDir, "04_plan/edit_blueprint.yaml");
   const blueprint = parseYaml(
@@ -151,6 +192,16 @@ export async function packageCommand(
   const musicCues = fs.existsSync(musicCuesPath)
     ? JSON.parse(fs.readFileSync(musicCuesPath, "utf-8"))
     : null;
+  const musicEligibility = assessMusicAssetEligibility(absDir, musicCues);
+  if (!musicEligibility.eligible) {
+    return {
+      success: false,
+      error: {
+        code: "GATE_CHECK_FAILED",
+        message: musicEligibility.message ?? "BGM asset is not eligible for packaging.",
+      },
+    };
+  }
   const reviewReportResult = readReviewReportForGate10(absDir);
   if (reviewReportResult.error) {
     return {
@@ -168,6 +219,7 @@ export async function packageCommand(
     captionApproval,
     musicCues,
     reviewReport: reviewReportResult.reviewReport,
+    visualQaApplicable: timelineHasVisualClips(timelinePath),
   });
   if (!gate10.passed) {
     return {
@@ -185,10 +237,33 @@ export async function packageCommand(
   }
 
   const sourceOfTruth = gate10.source_of_truth!;
+  let renderRouteDecision: RenderRouteDecision;
+  try {
+    renderRouteDecision = options?.renderRouteDecision
+      ?? resolveProjectRenderRoute(absDir, options?.assemblyEngine ?? "auto");
+  } catch (err) {
+    return {
+      success: false,
+      sourceOfTruth,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Render route resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
   fs.mkdirSync(path.join(packageDir, "video"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "audio"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "captions"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "logs"), { recursive: true });
+  if (sourceOfTruth === "engine_render" && !timelineRequiresAudio) {
+    for (const staleAudioArtifact of [
+      path.join(packageDir, "audio/raw_dialogue.wav"),
+      path.join(packageDir, "audio/final_mix.wav"),
+      path.join(packageDir, "logs/audio-mix-report.json"),
+    ]) {
+      fs.rmSync(staleAudioArtifact, { force: true });
+    }
+  }
 
   let releaseSafetyReport: ReleaseSafetyReport | undefined;
   if (isP4aReleaseSafetyEnabled()) {
@@ -217,7 +292,12 @@ export async function packageCommand(
   // 2. Read timeline and caption_policy
   const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
   const frameDurationMs = 1000 / fps;
-  const captionPolicy = blueprint.caption_policy || {
+  // The approved caption artifact is the finishing source of truth. Operators
+  // may refine the concrete style after the blueprint is compiled; rendering
+  // the older blueprint alias can silently fall back to the default font and
+  // discard speaker separation even though every approved cue names the final
+  // preset.
+  const captionPolicy = captionApproval?.caption_policy || blueprint.caption_policy || {
     language: "ja",
     delivery_mode: "both",
     source: "none",
@@ -229,13 +309,16 @@ export async function packageCommand(
   const metrics: QaReport["metrics"] = {};
   let qaMeasurementVideoPath: string | undefined;
   let qaMeasurementAudioPath: string | undefined;
+  let qaMeasurementDialoguePath: string | undefined;
   let qaMeasurementAssemblyPath: string | undefined = options?.assemblyPath;
   let finalVideoSourcePath: string | undefined;
   const defaultAssemblyPath = path.join(absDir, "05_timeline/assembly.mp4");
-  if (!qaMeasurementAssemblyPath && fs.existsSync(defaultAssemblyPath)) {
+  if (!options?.assemblyEngine && !qaMeasurementAssemblyPath && fs.existsSync(defaultAssemblyPath)) {
     qaMeasurementAssemblyPath = defaultAssemblyPath;
   }
   let completenessCheck: QaCheckResult | undefined;
+  let audioMixReportPath = path.join(packageDir, "logs/audio-mix-report.json");
+  let assemblyFreshness: RenderArtifactFreshness | undefined;
 
   // timeline_schema_valid
   const timelineValidation = validateAgainstSchema(timeline, "timeline-ir.schema.json");
@@ -246,18 +329,27 @@ export async function packageCommand(
       ? "timeline-ir.schema.json validation passed"
       : timelineValidation.errors.join("; "),
   });
+  if (renderRouteDecision.genre === "social_talking_head") {
+    checks.push(...checkSocialRetentionFinishing(timeline, creativeBrief));
+  }
 
   // caption_policy_valid
+  const socialCaptionStyleValid = renderRouteDecision.genre !== "social_talking_head"
+    || captionPolicy.source === "none"
+    || hasCaptionStylePreset(captionPolicy.styling_class);
   const policyValid =
     ["transcript", "authored", "none"].includes(captionPolicy.source) &&
     (captionPolicy.source === "none" ||
-      ["burn_in", "sidecar", "both"].includes(captionPolicy.delivery_mode));
+      ["burn_in", "sidecar", "both"].includes(captionPolicy.delivery_mode)) &&
+    socialCaptionStyleValid;
   checks.push({
     name: "caption_policy_valid",
     passed: policyValid,
     details: policyValid
       ? `source=${captionPolicy.source} delivery_mode=${captionPolicy.delivery_mode}`
-      : `field=caption_policy reason=invalid_combination`,
+      : socialCaptionStyleValid
+        ? `field=caption_policy reason=invalid_combination`
+        : `field=caption_policy.styling_class reason=unknown_social_style value=${captionPolicy.styling_class}`,
   });
 
   // Profile-specific checks
@@ -268,6 +360,7 @@ export async function packageCommand(
         captionApproval.speech_captions || [],
         fps,
         captionPolicy.language,
+        captionPolicy.styling_class,
       );
       checks.push(densityCheck);
       metrics.caption_max_density = parseDensityFromDetails(densityCheck.details);
@@ -280,12 +373,27 @@ export async function packageCommand(
 
     const existingArtifacts = new Set<string>();
     if (options?.skipRender) {
+      if (qaMeasurementAssemblyPath && fs.existsSync(qaMeasurementAssemblyPath)) {
+        assemblyFreshness = assessRenderArtifactFreshness(absDir, qaMeasurementAssemblyPath);
+        if (assemblyFreshness.status !== "fresh") {
+          return {
+            success: false,
+            sourceOfTruth,
+            error: {
+              code: "VALIDATION_FAILED",
+              message: `Assembly is not fresh: ${assemblyFreshness.reason ?? assemblyFreshness.status}`,
+            },
+          };
+        }
+      }
       // For testing: create stub files and assume standard artifacts exist
       const stubs = [
         path.join(packageDir, "video/final.mp4"),
         path.join(packageDir, "video/raw_video.mp4"),
-        path.join(packageDir, "audio/raw_dialogue.wav"),
-        path.join(packageDir, "audio/final_mix.wav"),
+        ...(timelineRequiresAudio ? [
+          path.join(packageDir, "audio/raw_dialogue.wav"),
+          path.join(packageDir, "audio/final_mix.wav"),
+        ] : []),
       ];
       for (const stub of stubs) {
         if (!fs.existsSync(stub)) {
@@ -294,9 +402,69 @@ export async function packageCommand(
       }
       existingArtifacts.add("final_video");
       existingArtifacts.add("raw_video");
-      existingArtifacts.add("raw_dialogue");
-      existingArtifacts.add("final_mix");
+      if (timelineRequiresAudio) {
+        existingArtifacts.add("raw_dialogue");
+        existingArtifacts.add("final_mix");
+      }
       existingArtifacts.add("qa_report");
+      const stubMixReport: AudioMixReport = embeddedMusicAssetIds.length > 0
+        ? {
+            version: "audio-mix-report/v1",
+            has_bgm: true,
+            strategy: "timeline_embedded_bgm_mastering_v1",
+            bgm_ownership: {
+              owner: "timeline_assembler",
+              asset_ids: embeddedMusicAssetIds,
+            },
+            final_mastering: {
+              loudness_target_lufs: -16,
+              lra_target: 7,
+              true_peak_target_dbtp: -1.5,
+              premaster_measurement: stubLoudnormMeasurement(),
+            },
+          }
+        : musicCues
+        ? {
+            version: "audio-mix-report/v1",
+            has_bgm: true,
+            strategy: "waveform_sidechain_v1",
+            final_mastering: {
+              loudness_target_lufs: -16,
+              lra_target: 7,
+              true_peak_target_dbtp: -1.5,
+              premaster_measurement: stubLoudnormMeasurement(),
+            },
+            bgm_reference_mastering: {
+              loudness_target_lufs: -23,
+              lra_target: 7,
+              true_peak_target_dbtp: -2,
+              source_measurement: stubLoudnormMeasurement(),
+            },
+            sidechain: {
+              detector: "dialogue_waveform_rms",
+              threshold: 0.03,
+              ratio: 13,
+              attack_ms: 80,
+              release_ms: 180,
+              base_gain_db: -16,
+              requested_duck_gain_db: -24,
+            },
+          }
+        : {
+            version: "audio-mix-report/v1",
+            has_bgm: false,
+            strategy: "dialogue_only_mastering_v1",
+            final_mastering: {
+              loudness_target_lufs: -16,
+              lra_target: 7,
+              true_peak_target_dbtp: -1.5,
+              premaster_measurement: stubLoudnormMeasurement(),
+            },
+          };
+      if (timelineRequiresAudio) {
+        fs.writeFileSync(audioMixReportPath, `${JSON.stringify(stubMixReport, null, 2)}\n`, "utf-8");
+        existingArtifacts.add("audio_mix_report");
+      }
       if (captionPolicy.source !== "none" &&
           (captionPolicy.delivery_mode === "sidecar" || captionPolicy.delivery_mode === "both")) {
         existingArtifacts.add("srt_sidecar");
@@ -313,23 +481,45 @@ export async function packageCommand(
         : undefined;
 
       try {
-        if (!assemblyPath) {
-          assemblyPath = path.join(absDir, "05_timeline/assembly.mp4");
-          if (!fs.existsSync(assemblyPath)) {
+        const assemblyEngine = options?.assemblyEngine ?? renderRouteDecision.assembly_engine;
+        const sourceInputsBefore = createSourceInputAttestation(absDir, { timelinePath });
+        if (!assemblyPath && assemblyEngine === "ffmpeg") {
+          const existingFreshness = assessRenderArtifactFreshness(absDir, defaultAssemblyPath);
+          if (existingFreshness.status === "fresh") {
+            assemblyPath = defaultAssemblyPath;
+          } else {
             await assembleTimelineToMp4({
               projectDir: absDir,
               timelinePath,
-              outputPath: assemblyPath,
+              outputPath: defaultAssemblyPath,
             });
+            writeRenderFreshnessMetadata(absDir, defaultAssemblyPath, { sourceInputsBefore, createdAt });
+            assemblyPath = defaultAssemblyPath;
           }
         }
-
+        if (assemblyPath) {
+          const suppliedFreshness = assessRenderArtifactFreshness(absDir, assemblyPath);
+          if (suppliedFreshness.status !== "fresh") {
+            throw new Error(
+              `Assembly is not fresh: ${suppliedFreshness.reason ?? suppliedFreshness.status}`,
+            );
+          }
+        }
+        const sourceMap = !assemblyPath
+          ? Object.fromEntries(loadSourceMap(absDir).locatorMap)
+          : undefined;
         const renderResult = await runRenderPipeline({
           projectDir: absDir,
           timelinePath,
           captionApprovalPath,
           musicCuesPath,
           assemblyPath,
+          ...(!assemblyPath ? {
+            assemblyEngine,
+            sourceMap,
+            assemblyOutputPath: defaultAssemblyPath,
+          } : {}),
+          renderRouteDecision,
           captionPolicy: captionPolicy as {
             language: string;
             delivery_mode: "burn_in" | "sidecar" | "both";
@@ -339,16 +529,38 @@ export async function packageCommand(
           outputDir: packageDir,
           fps,
         });
-        qaMeasurementAssemblyPath = assemblyPath;
+        if (!options?.assemblyPath) {
+          writeRenderFreshnessMetadata(absDir, renderResult.assemblyPath, {
+            sourceInputsBefore,
+            createdAt,
+          });
+        } else {
+          assertSourceInputsUnchanged(
+            sourceInputsBefore,
+            createSourceInputAttestation(absDir, { timelinePath }),
+          );
+        }
+        assemblyFreshness = assessRenderArtifactFreshness(absDir, renderResult.assemblyPath);
+        if (assemblyFreshness.status !== "fresh") {
+          throw new Error(
+            `Rendered assembly is not fresh: ${assemblyFreshness.reason ?? assemblyFreshness.status}`,
+          );
+        }
+        qaMeasurementAssemblyPath = renderResult.assemblyPath;
         qaMeasurementVideoPath = renderResult.finalVideoPath;
         finalVideoSourcePath = renderResult.finalVideoPath;
         qaMeasurementAudioPath = renderResult.finalMixPath;
+        qaMeasurementDialoguePath = renderResult.rawDialoguePath;
+        audioMixReportPath = renderResult.audioMixReportPath;
 
         // Check which artifacts the render produced
         if (fs.existsSync(renderResult.finalVideoPath)) existingArtifacts.add("final_video");
         if (fs.existsSync(renderResult.rawVideoPath)) existingArtifacts.add("raw_video");
         if (fs.existsSync(renderResult.rawDialoguePath)) existingArtifacts.add("raw_dialogue");
         if (fs.existsSync(renderResult.finalMixPath)) existingArtifacts.add("final_mix");
+        if (fs.existsSync(renderResult.audioMixReportPath)) {
+          existingArtifacts.add("audio_mix_report");
+        }
         for (const sp of renderResult.sidecarPaths) {
           if (sp.endsWith(".srt")) existingArtifacts.add("srt_sidecar");
           if (sp.endsWith(".vtt")) existingArtifacts.add("vtt_sidecar");
@@ -365,10 +577,18 @@ export async function packageCommand(
       }
       existingArtifacts.add("qa_report"); // Will be generated below
     }
+    checks.push(timelineRequiresAudio
+      ? checkAudioMixPolicy(
+          readAudioMixReport(audioMixReportPath),
+          Boolean(musicCues) || embeddedMusicAssetIds.length > 0,
+          renderRouteDecision.genre === "social_talking_head",
+        )
+      : { name: "audio_mix_policy_valid", passed: true, details: "not_applicable: timeline has no audio or BGM" });
     completenessCheck = checkPackageCompleteness(
       sourceOfTruth,
       captionPolicy,
       existingArtifacts,
+      timelineRequiresAudio,
     );
     if (!qaMeasurementVideoPath) {
       qaMeasurementVideoPath = path.join(packageDir, "video/final.mp4");
@@ -376,8 +596,11 @@ export async function packageCommand(
     if (!finalVideoSourcePath) {
       finalVideoSourcePath = qaMeasurementVideoPath;
     }
-    if (!qaMeasurementAudioPath) {
+    if (timelineRequiresAudio && !qaMeasurementAudioPath) {
       qaMeasurementAudioPath = path.join(packageDir, "audio/final_mix.wav");
+    }
+    if (timelineRequiresAudio && !qaMeasurementDialoguePath) {
+      qaMeasurementDialoguePath = path.join(packageDir, "audio/raw_dialogue.wav");
     }
   } else {
     // nle_finishing checks
@@ -437,7 +660,12 @@ export async function packageCommand(
       skipRender: options?.skipRender ?? false,
       finalVideoPath: qaMeasurementVideoPath,
       finalAudioPath: qaMeasurementAudioPath,
+      dialoguePath: qaMeasurementDialoguePath,
+      expectedDialogueWindowsMs: sourceOfTruth === "engine_render"
+        ? resolveDialogueWindowsMs(timeline, fps)
+        : undefined,
       assemblyPath: qaMeasurementAssemblyPath,
+      requireAudio: timelineRequiresAudio,
       precomputedMetrics: options?.precomputedMetrics,
     });
   } catch (err) {
@@ -464,7 +692,7 @@ export async function packageCommand(
   });
   Object.assign(metrics, resolutionCheck.metrics);
 
-  if (sourceOfTruth === "engine_render") {
+  if (sourceOfTruth === "engine_render" && timelineRequiresAudio) {
     const occupancyCheck = checkDialogueOccupancy(
       qaMeasurements.dialogue_window_ms,
       qaMeasurements.observed_non_silent_ms,
@@ -472,12 +700,34 @@ export async function packageCommand(
     checks.push(occupancyCheck);
     metrics.dialogue_occupancy_ratio = qaMeasurements.dialogue_occupancy;
 
+    const alignmentCheck = checkDialogueTimelineAlignment(
+      qaMeasurements.dialogue_outside_expected_ms,
+      frameDurationMs,
+    );
+    checks.push(alignmentCheck);
+    if (qaMeasurements.dialogue_outside_expected_ms != null) {
+      metrics.dialogue_outside_expected_ms = qaMeasurements.dialogue_outside_expected_ms;
+    }
+    if (qaMeasurements.dialogue_first_signal_ms != null) {
+      metrics.dialogue_first_signal_ms = qaMeasurements.dialogue_first_signal_ms;
+    }
+    if (qaMeasurements.dialogue_last_signal_ms != null) {
+      metrics.dialogue_last_signal_ms = qaMeasurements.dialogue_last_signal_ms;
+    }
+    if (qaMeasurements.expected_dialogue_start_ms != null) {
+      metrics.expected_dialogue_start_ms = qaMeasurements.expected_dialogue_start_ms;
+    }
+    if (qaMeasurements.expected_dialogue_end_ms != null) {
+      metrics.expected_dialogue_end_ms = qaMeasurements.expected_dialogue_end_ms;
+    }
+
     const driftCheck = checkAvDrift(
       qaMeasurements.video_duration_ms,
       qaMeasurements.audio_duration_ms,
       frameDurationMs,
     );
     checks.push(driftCheck);
+    metrics.av_duration_delta_ms = qaMeasurements.av_duration_delta_ms ?? qaMeasurements.av_drift_ms;
     metrics.av_drift_ms = qaMeasurements.av_drift_ms;
 
     const loudnessCheck = checkLoudnessTarget(
@@ -487,6 +737,13 @@ export async function packageCommand(
     checks.push(loudnessCheck);
     metrics.integrated_lufs = qaMeasurements.loudness_integrated;
     metrics.true_peak_dbtp = qaMeasurements.loudness_true_peak;
+  } else if (sourceOfTruth === "engine_render") {
+    checks.push(
+      { name: "dialogue_occupancy_valid", passed: true, details: "not_applicable: timeline has no audio" },
+      { name: "dialogue_timeline_alignment_valid", passed: true, details: "not_applicable: video-only timeline" },
+      { name: "av_drift_valid", passed: true, details: "not_applicable: video-only timeline" },
+      { name: "loudness_target_valid", passed: true, details: "not_applicable: timeline has no audio" },
+    );
   } else {
     const syncCheck = checkAvDrift(
       qaMeasurements.video_duration_ms,
@@ -498,6 +755,7 @@ export async function packageCommand(
       passed: syncCheck.passed,
       details: syncCheck.details,
     });
+    metrics.av_duration_delta_ms = qaMeasurements.av_duration_delta_ms ?? qaMeasurements.av_drift_ms;
     metrics.av_drift_ms = qaMeasurements.av_drift_ms;
 
     const loudnessCheck = checkLoudnessTarget(
@@ -512,20 +770,47 @@ export async function packageCommand(
   if (completenessCheck) {
     checks.push(completenessCheck);
   }
+  if (sourceOfTruth === "engine_render" && assemblyFreshness) {
+    checks.push({
+      name: "source_inputs_freshness_valid",
+      passed: assemblyFreshness.status === "fresh",
+      details: assemblyFreshness.status === "fresh"
+        ? `status=fresh source_inputs_hash=${assemblyFreshness.sourceInputsHash ?? "not_applicable"}`
+        : `status=${assemblyFreshness.status} reason=${assemblyFreshness.reason ?? "unknown"}`,
+    });
+  }
 
   // 6. Build QA report
-  const qaReport = buildQaReport(
-    doc.project_id,
-    sourceOfTruth,
-    checks,
-    metrics,
-    {
-      final_video: "07_package/video/final.mp4",
-      final_mix: sourceOfTruth === "engine_render"
-        ? "07_package/audio/final_mix.wav"
-        : undefined,
-    },
-  );
+  const qaReport: QaReport = {
+    ...buildQaReport(
+      doc.project_id,
+      sourceOfTruth,
+      checks,
+      metrics,
+      {
+        final_video: "07_package/video/final.mp4",
+        ...(sourceOfTruth === "engine_render" && timelineRequiresAudio ? {
+          final_mix: "07_package/audio/final_mix.wav",
+          audio_mix_report: "07_package/logs/audio-mix-report.json",
+        } : {}),
+      },
+    ),
+    ...(assemblyFreshness ? {
+      source_inputs_freshness: {
+        status: assemblyFreshness.status === "fresh" ? "fresh" as const : "stale" as const,
+        ...(assemblyFreshness.reason ? { reason: assemblyFreshness.reason } : {}),
+        ...(assemblyFreshness.sourceInputsHash
+          ? { source_inputs_hash: assemblyFreshness.sourceInputsHash }
+          : {}),
+        ...(assemblyFreshness.sourceInputsStatus
+          ? { attestation_status: assemblyFreshness.sourceInputsStatus }
+          : {}),
+        ...(assemblyFreshness.sourceInputWarnings?.length
+          ? { warnings: assemblyFreshness.sourceInputWarnings }
+          : {}),
+      },
+    } : {}),
+  };
 
   // Write QA report
   fs.writeFileSync(
@@ -571,6 +856,21 @@ export async function packageCommand(
 
   // 8. Build package manifest
   const editorialTimelineHash = computeFileHash(timelinePath);
+  const renderDefaultsPath = path.join(absDir, "runtime", "render-pipeline-defaults.yaml");
+  const renderDefaultsHash = fs.existsSync(renderDefaultsPath)
+    ? computeFileHash(renderDefaultsPath)
+    : undefined;
+  const packageSourceInputs = sourceOfTruth === "engine_render"
+    ? assemblyFreshness?.sourceInputsHash && assemblyFreshness.sourceInputsStatus
+      ? {
+          hash: assemblyFreshness.sourceInputsHash,
+          status: assemblyFreshness.sourceInputsStatus,
+        }
+      : (() => {
+          const attestation = createSourceInputAttestation(absDir, { timelinePath });
+          return { hash: attestation.source_inputs_hash, status: attestation.status };
+        })()
+    : undefined;
   let packageManifest: PackageManifest;
   const publishedFinalVideo = publishFinalVideo(absDir, finalVideoSourcePath!);
 
@@ -582,6 +882,12 @@ export async function packageCommand(
       outputDir: packageDir,
       captionApprovalHash: doc.artifact_hashes?.caption_approval_hash,
       musicCuesHash: doc.artifact_hashes?.music_cues_hash,
+      renderDefaultsHash,
+      sourceInputsHash: packageSourceInputs!.hash,
+      sourceInputsAttestationStatus: packageSourceInputs!.status,
+      sourceInputsFreshnessReason: assemblyFreshness
+        ? assemblyFreshness.reason ?? "fresh"
+        : undefined,
       captionPolicy,
       finalVideoPath: publishedFinalVideo.path,
       createdAt,
@@ -594,6 +900,7 @@ export async function packageCommand(
       outputDir: packageDir,
       handoffId: doc.handoff_resolution?.handoff_id || "unknown",
       captionApprovalHash: doc.artifact_hashes?.caption_approval_hash,
+      renderDefaultsHash,
       captionPolicy,
       finalVideoPath: publishedFinalVideo.path,
       qaReportPath: path.join(packageDir, "qa-report.json"),
@@ -658,6 +965,24 @@ function readReviewReportForGate10(projectDir: string): {
       },
     };
   }
+}
+
+function readAudioMixReport(reportPath: string): AudioMixReport | null {
+  try {
+    return JSON.parse(fs.readFileSync(reportPath, "utf-8")) as AudioMixReport;
+  } catch {
+    return null;
+  }
+}
+
+function stubLoudnormMeasurement(): AudioMixReport["final_mastering"]["premaster_measurement"] {
+  return {
+    input_i: "-16.00",
+    input_tp: "-1.50",
+    input_lra: "7.00",
+    input_thresh: "-26.00",
+    target_offset: "0.00",
+  };
 }
 
 const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }> = {
@@ -817,6 +1142,44 @@ function parseDensityFromDetails(details: string): number | undefined {
   return match ? parseFloat(match[1]) : undefined;
 }
 
+function resolveDialogueWindowsMs(
+  timeline: {
+    tracks?: {
+      audio?: Array<{
+        clips?: Array<{
+          timeline_in_frame?: number;
+          timeline_duration_frames?: number;
+          role?: string;
+          audio_role?: string;
+        }>;
+      }>;
+    };
+  },
+  fps: number,
+): TimeWindowMs[] {
+  if (!Number.isFinite(fps) || fps <= 0) return [];
+
+  return (timeline.tracks?.audio ?? []).flatMap((track) =>
+    (track.clips ?? [])
+      .filter((clip) => clip.role !== "music" && clip.role !== "bgm" && clip.audio_role !== "music")
+      .flatMap((clip) => {
+        const startFrame = clip.timeline_in_frame;
+        const durationFrames = clip.timeline_duration_frames;
+        if (
+          !Number.isFinite(startFrame) ||
+          !Number.isFinite(durationFrames) ||
+          (durationFrames ?? 0) <= 0
+        ) {
+          return [];
+        }
+        return [{
+          start_ms: (startFrame! / fps) * 1000,
+          end_ms: ((startFrame! + durationFrames!) / fps) * 1000,
+        }];
+      })
+  );
+}
+
 interface ResolveQaMeasurementsOptions {
   packageDir: string;
   sourceOfTruth: SourceOfTruth;
@@ -824,7 +1187,10 @@ interface ResolveQaMeasurementsOptions {
   skipRender: boolean;
   finalVideoPath?: string;
   finalAudioPath?: string;
+  dialoguePath?: string;
+  expectedDialogueWindowsMs?: TimeWindowMs[];
   assemblyPath?: string;
+  requireAudio: boolean;
   precomputedMetrics?: PrecomputedQaMetrics;
 }
 
@@ -838,6 +1204,11 @@ async function resolveQaMeasurements(
     if (options.sourceOfTruth === "engine_render" && assemblyExists) {
       return measureQaMedia({
         videoPath: options.assemblyPath!,
+        dialoguePath: options.dialoguePath && fs.existsSync(options.dialoguePath)
+          ? options.dialoguePath
+          : undefined,
+        expectedDialogueWindowsMs: options.expectedDialogueWindowsMs,
+        videoOnly: !options.requireAudio,
         outputPath,
         createdAt: options.createdAt,
       });
@@ -867,6 +1238,11 @@ async function resolveQaMeasurements(
     return measureQaMedia({
       videoPath: measuredVideoPath,
       audioPath: measuredAudioPath,
+      dialoguePath: options.dialoguePath && fs.existsSync(options.dialoguePath)
+        ? options.dialoguePath
+        : undefined,
+      expectedDialogueWindowsMs: options.expectedDialogueWindowsMs,
+      videoOnly: !options.requireAudio,
       outputPath,
       createdAt: options.createdAt,
     });
@@ -885,6 +1261,7 @@ async function resolveQaMeasurements(
 }
 
 function logQaMeasurementWarnings(measurements: QaMeasurements): void {
+  if (!measurements.audio_path) return;
   for (const warning of collectQaMeasurementWarnings(measurements)) {
     console.warn(`[package] QA warning: ${warning.message}`);
   }

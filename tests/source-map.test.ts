@@ -213,7 +213,7 @@ describe("createMediaLinks", () => {
     expect(result.doc.items[0]).toMatchObject({
       asset_id: "BGM_theme",
       kind: "bgm",
-      local_source_path: bgmSource,
+      local_source_path: "02_media/bgm/theme.mp3",
       link_path: "02_media/bgm/theme.mp3",
     });
 
@@ -265,7 +265,9 @@ describe("loadSourceMap", () => {
     expect(loaded.locatorMap.get("AST_001")).toBe(
       path.join(projectDir, result.doc.items[0].link_path),
     );
-    expect(loaded.entryMap.get("AST_001")?.local_source_path).toBe(source);
+    expect(loaded.entryMap.get("AST_001")?.local_source_path).toBe(
+      path.join(projectDir, result.doc.items[0].link_path),
+    );
   });
 
   it("accepts legacy asset_id to path object maps", () => {
@@ -307,7 +309,9 @@ describe("writePreviewManifest", () => {
     expect(manifest.clips[0].media_link_path).toBe(
       "02_media/01-jul-a-child-practicing-bicycle.mov",
     );
-    expect(manifest.clips[0].local_source_path).toBe(source);
+    expect(manifest.clips[0].local_source_path).toBe(
+      path.join(projectDir, "02_media/01-jul-a-child-practicing-bicycle.mov"),
+    );
   });
 });
 

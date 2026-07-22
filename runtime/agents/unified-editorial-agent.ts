@@ -29,16 +29,27 @@ import {
   type EditorialToolDefinition,
 } from "../tools/editorial-tools.js";
 import {
+  applySourceMediaContract,
   blueprintFromLlmResponse,
   buildCandidateIndex,
   type CandidateIndex,
 } from "./llm-blueprint-agent.js";
 import {
+  loadCompactSegmentEvidence,
   selectsFromLlmResponse,
   type CompactPeakEvidence,
   type CompactSegmentEvidence,
   type LlmCompleter,
 } from "./llm-triage-agent.js";
+import { materializeCandidateMediaCapabilities } from "../artifacts/candidate-media-materialization.js";
+import {
+  assertProjectPlanningMediaKindsSupported,
+  candidateSupportsVisual,
+  isAudioOnlyCandidate,
+  readAssetMediaCapabilities,
+} from "../artifacts/source-media-capabilities.js";
+import { resolveStillDurationPolicy } from "../artifacts/still-image-policy.js";
+import { resolveProfileAndPolicy } from "../editorial/policy-resolver.js";
 import { parseLlmResponse } from "./llm-json.js";
 import {
   formatAudioEvidenceForPrompt,
@@ -62,6 +73,12 @@ import {
   refineClusters,
   type ClusterAssetMetadata,
 } from "../editorial/clustering.js";
+import { assessDialogueCompleteness } from "../editorial/dialogue-completeness.js";
+import {
+  applyShortFormRetentionDefaults,
+  auditShortFormRetention,
+  shortFormRetentionPromptLines,
+} from "../editorial/short-form-retention.js";
 
 // Cockpit/repo-side editorial planning should prefer Claude/Codex
 // subscription agents. Gemini flash-lite is only the headless automation
@@ -123,6 +140,8 @@ const VALID_PEAK_TYPES = new Set<NonNullable<TrimHint["peak_type"]>>([
 
 interface AssetRoughEvidence {
   asset_id: string;
+  media_kind?: "video" | "audio" | "image" | "sequence" | "unknown";
+  source_capabilities?: { has_video: boolean; has_audio: boolean };
   scene?: string;
   representative_frame?: string;
   segment_count: number;
@@ -153,9 +172,9 @@ interface FineClipEvidence {
   src_out_us: number;
   why_it_matches: string;
   transcript_excerpt?: string;
-  key_frames: KeyFrame[];
+  key_frames?: KeyFrame[];
   marlin_scene?: string;
-  marlin_events: Array<{
+  marlin_events?: Array<{
     event_id: string;
     start_us: number;
     end_us: number;
@@ -376,7 +395,7 @@ function overlapsSegment(segment: Pick<SegmentItem, "src_in_us" | "src_out_us">,
   return event.start_us < segment.src_out_us && event.end_us > segment.src_in_us;
 }
 
-function eventToPrompt(event: MarlinEvent): FineClipEvidence["marlin_events"][number] {
+function eventToPrompt(event: MarlinEvent): NonNullable<FineClipEvidence["marlin_events"]>[number] {
   return {
     event_id: event.event_id,
     start_us: event.start_us,
@@ -399,9 +418,15 @@ function compactSegmentsForSelects(
   segments: SegmentItem[],
   marlinEvents: MarlinEventsArtifact,
   representativeFrames?: Map<string, string>,
+  projectDir?: string,
 ): CompactSegmentEvidence[] {
+  const canonicalBySegment = new Map(
+    (projectDir ? loadCompactSegmentEvidence(projectDir) : []).map((item) => [item.segment_id, item]),
+  );
   const byAsset = marlinByAsset(marlinEvents);
   return segments.map((segment) => {
+    const canonical = canonicalBySegment.get(segment.segment_id);
+    if (canonical?.media_kind === "audio") return canonical;
     const marlin = byAsset.get(segment.asset_id);
     return {
       segment_id: segment.segment_id,
@@ -428,7 +453,9 @@ function buildRoughAssetEvidence(
   marlinEvents: MarlinEventsArtifact,
   representativeFrames: Map<string, string>,
   segments: SegmentItem[],
+  projectDir?: string,
 ): AssetRoughEvidence[] {
+  const capabilities = projectDir ? readAssetMediaCapabilities(projectDir) : new Map();
   const segmentsByAsset = new Map<string, SegmentItem[]>();
   for (const segment of segments) {
     const items = segmentsByAsset.get(segment.asset_id) ?? [];
@@ -444,9 +471,11 @@ function buildRoughAssetEvidence(
 
   return assetIds.map((assetId) => {
     const assetEvents = marlin.get(assetId);
+    const capability = capabilities.get(assetId);
     const assetSegments = (segmentsByAsset.get(assetId) ?? []).sort((a, b) => a.src_in_us - b.src_in_us);
     return {
       asset_id: assetId,
+      ...(capability ? { media_kind: capability.media_kind, source_capabilities: capability.source_capabilities } : {}),
       scene: assetEvents?.scene,
       representative_frame: representativeFrames.get(assetId),
       segment_count: assetSegments.length,
@@ -506,10 +535,15 @@ export function formatRoughFrameReferences(input: {
 }
 
 function buildRoughPrompt(input: RoughCutPlanningInput): string {
+  const capabilities = input.projectDir ? readAssetMediaCapabilities(input.projectDir) : new Map();
+  const pureAudio = input.segments.length > 0 && input.segments.every((segment) =>
+    capabilities.get(segment.asset_id)?.source_capabilities.has_video === false
+  );
   const assetEvidence = buildRoughAssetEvidence(
     input.marlinEvents,
     input.representativeFrames,
     input.segments,
+    input.projectDir,
   );
   const briefProject = (input.brief as Record<string, unknown>).project as Record<string, unknown> | undefined;
   const targetSec = Number(briefProject?.runtime_target_sec ?? input.bgmDurationSec ?? 120);
@@ -518,32 +552,45 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
   const beatCount = 5;
   const visualEvidenceSection = formatEvidenceForPrompt(input.visualEvidence ?? []);
   const audioEvidenceSection = formatAudioEvidenceForPrompt(input.audioEvidence ?? []);
+  const retentionLines = shortFormRetentionPromptLines(input.brief);
   return [
     "You are the unified Claude/Codex editorial agent for Video OS.",
     "Pass 1 is rough-cut planning: see all available material, select the best clips, and decide what goes where.",
-    "Use only the provided segment ids, asset ids, source ranges, Marlin facts, and representative frame paths.",
-    "Headless fallback runs are text-only; frame paths are evidence references, not new canonical data.",
+    pureAudio
+      ? "Use only the provided segment ids, asset ids, source ranges, transcripts, audio events, and audio story evidence. Visual evidence is not applicable."
+      : "Use only the provided segment ids, asset ids, source ranges, Marlin facts, and representative frame paths.",
+    pureAudio
+      ? "This is an audio-only project: do not invent frames, shots, subjects, motion, locations, visible actions, or visual transitions."
+      : "Headless fallback runs are text-only; frame paths are evidence references, not new canonical data.",
     "",
     "## Creative brief",
     JSON.stringify(compactBrief(input.brief, input.bgmDurationSec), null, 2),
     "",
     ...(visualEvidenceSection ? [visualEvidenceSection, ""] : []),
     ...(audioEvidenceSection ? [audioEvidenceSection, ""] : []),
-    "## All Marlin asset reports plus representative frames",
+    pureAudio ? "## Audio source windows" : "## All Marlin asset reports plus representative frames",
     JSON.stringify(assetEvidence, null, 2),
     "",
     "## Task",
     "- Select the best 30-50 clips for this PV when enough material exists; otherwise select the strongest available clips.",
     "- Assign each selected clip to one or more exact beat ids.",
     "- Choose rhythm per beat and explain why each clip was selected.",
-    "- Cite Marlin event ids or representative frame paths as evidence.",
+    pureAudio
+      ? "- Cite transcript, audio event, or audio story evidence; visual evidence is not applicable."
+      : "- Cite Marlin event ids or representative frame paths as evidence.",
+    "- In mixed projects, each media_kind=audio source is grounded only by transcript/audio evidence; never assign it frame, subject, camera, motion, or visual-transition claims.",
     "- Use context_knowledge to correct likely subject, food/product, person, terminology, or place misidentifications in Marlin text.",
     "- For every dialogue candidate, select a semantically complete assertion: the subject or antecedent must be recoverable inside the selected line, and the speaker must reach the conclusion before src_out_us.",
     "- An ASR item boundary is not proof of editorial completeness. Expand to neighboring transcript items when a line begins with a dependent continuation or ends on an unfinished clause; otherwise reject it.",
     "- Never use an interviewer question card to repair a missing subject, and never rely on post-roll or fade-out to finish the selected assertion.",
+    "- If the closing recommends a course, product, action, or speaker, retain the nearby reason, decision problem, or concrete consequence that earns the recommendation. Never isolate a convenient recommendation quote from its rationale.",
+    "- Before returning JSON, audit every beat for who/what/why/result, both sides of comparisons, and cause-to-effect continuity; replace or expand any candidate that fails this audit.",
     "- Post-roll is presentation-only: it may retain breath or room tone after a complete assertion, but it must not introduce the next assertion.",
+    "- Use exactly one speech-caption layer. Question/section labels may guide structure but must not duplicate the spoken subtitle text.",
     "- Do not invent clips, visual facts, source ranges, or new schema fields.",
     "",
+    ...retentionLines,
+    ...(retentionLines.length > 0 ? [""] : []),
     "## CRITICAL: Beat duration rules",
     `- Target runtime is ${targetSec}s (${totalFrames} frames at ${fps}fps).`,
     `- The SUM of all beat target_duration_frames MUST equal approximately ${totalFrames}.`,
@@ -557,7 +604,7 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
       selects: {
         selection_notes: ["emotional progression", "pacing approach"],
         editorial_summary: {
-          dominant_visual_mode: "mixed",
+          dominant_visual_mode: pureAudio ? "unknown" : "mixed",
           speaker_topology: "unknown",
           motion_profile: "medium",
           transcript_density: "sparse",
@@ -574,22 +621,24 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
             risks: [],
             confidence: 0.82,
             semantic_rank: 1,
-            evidence: ["Marlin evt_001: visible action", "representative frame shows readable subject"],
+            evidence: pureAudio
+              ? ["Transcript: exact grounded line", "Audio event: speech"]
+              : ["Marlin evt_001: visible action", "representative frame shows readable subject"],
             transcript_excerpt: "exact complete transcript assertion for dialogue candidates",
             eligible_beats: ["b01_hook"],
-            motif_tags: ["specific_visual_theme"],
+            motif_tags: [pureAudio ? "speech" : "specific_visual_theme"],
           },
         ],
       },
       blueprint: {
         version: "1",
         project_id: projectIdFromBrief(input.brief),
-        sequence_goals: ["Open with the strongest visual hook."],
+        sequence_goals: [pureAudio ? "Open with the clearest grounded audio hook." : "Open with the strongest visual hook."],
         beats: [
           {
             id: "b01_hook",
             label: "hook",
-            purpose: "establish the promise quickly",
+            purpose: pureAudio ? "establish the promise through a complete audible assertion" : "establish the promise quickly",
             target_duration_frames: Math.round(totalFrames * 0.1),
             required_roles: ["hero"],
             preferred_roles: ["support", "texture"],
@@ -598,12 +647,8 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
               primary_candidate_ref: "SEG_001",
               fallback_candidate_refs: [],
             },
-            craft: {
-              in_point: "cut_on_action",
-              out_point: "peak_hold",
-              transition_out: "hard_cut",
-              rhythm: "accelerando",
-              beat_sync: true,
+            craft: pureAudio ? { rhythm: "breath" } : {
+              in_point: "cut_on_action", out_point: "peak_hold", transition_out: "hard_cut", rhythm: "accelerando", beat_sync: true,
             },
           },
         ],
@@ -637,7 +682,13 @@ function buildRoughPrompt(input: RoughCutPlanningInput): string {
         },
         ending_policy: {
           should_feel: "resolved",
-          final_hold_min_frames: 12,
+          final_hold_min_frames: 36,
+          final_visual_strategy: pureAudio ? "black canvas for audio-only render" : "keep source motion and fade to black",
+          final_audio_strategy: "fade room tone after the complete final assertion",
+          tail_hold_sec: 1.5,
+          audio_fade_out_sec: 1,
+          video_fade_out_sec: pureAudio ? 0 : 1,
+          video_fade_color: pureAudio ? "none" : "black",
         },
         rejection_rules: ["Reject material that cannot be tied to the brief."],
         duration_policy: {
@@ -667,6 +718,7 @@ function buildFineClipEvidence(
   return (selects.candidates ?? [])
     .filter((candidate) => candidate.role !== "reject")
     .map((candidate) => {
+      const audioOnly = isAudioOnlyCandidate(candidate);
       const events = (eventsByAsset.get(candidate.asset_id) ?? [])
         .filter((event) => overlapsSegment(candidate, event))
         .slice(0, 6)
@@ -681,9 +733,11 @@ function buildFineClipEvidence(
         src_out_us: candidate.src_out_us,
         why_it_matches: candidate.why_it_matches,
         ...(candidate.transcript_excerpt ? { transcript_excerpt: candidate.transcript_excerpt } : {}),
-        key_frames: keyFrames.get(candidate.segment_id) ?? [],
-        marlin_scene: byAsset.get(candidate.asset_id)?.scene,
-        marlin_events: events,
+        ...(audioOnly ? {} : {
+          key_frames: keyFrames.get(candidate.segment_id) ?? [],
+          marlin_scene: byAsset.get(candidate.asset_id)?.scene,
+          marlin_events: events,
+        }),
       };
     });
 }
@@ -711,7 +765,9 @@ function fineFrameReferenceBundle(input: {
   const refs: EditorialFrameReference[] = [];
   const lines = ["## Key frames for fine pass"];
   const eventsByAsset = marlinEventsForAsset(input.marlinEvents);
-  const activeCandidates = input.selects.candidates.filter((candidate) => candidate.role !== "reject");
+  const activeCandidates = input.selects.candidates.filter((candidate) =>
+    candidate.role !== "reject" && candidateSupportsVisual(candidate)
+  );
 
   if (activeCandidates.length === 0) {
     lines.push("_No selected clips were available for fine-cut key frames._");
@@ -768,13 +824,33 @@ export function formatFineFrameReferences(input: {
 }
 
 function buildFinePrompt(input: FineCutRefinementInput): string {
+  const pureAudio = input.selects.source_media?.mode === "audio_only";
+  const hasAudioOnly = (input.selects.source_media?.audio_only_candidate_count ?? 0) > 0;
   const clipEvidence = buildFineClipEvidence(input.selects, input.marlinEvents, input.keyFrames);
+  const retentionLines = shortFormRetentionPromptLines(input.brief);
+  const clipCraftExample = pureAudio
+    ? {
+        segment_id: "SEG_AUDIO_001",
+        recommended_in_us: 1000000,
+        recommended_out_us: 3600000,
+        preferred_duration_us: 2600000,
+        rationale: "Enter at the complete thought and preserve the final audible cadence.",
+      }
+    : {
+        segment_id: "SEG_001",
+        event_id: "evt_001",
+        recommended_in_us: 1000000,
+        recommended_out_us: 3600000,
+        preferred_duration_us: 2600000,
+        peak_type: "action_peak",
+        rationale: "Enter before the action and hold through the peak.",
+      };
   return [
     "You are the unified Claude/Codex editorial agent for Video OS.",
     "Pass 2 is fine-cut refinement: default to selected clips, inspect them in detail, and decide exactly how they should cut.",
     "Default to existing selected and fallback candidates. Search the full footage pool only when a beat gap, QA issue, or inspected weakness justifies it, and cite the search result evidence before recommending a replacement.",
-    "Use Marlin event ids for in/out rationale whenever possible.",
-    "Use context_knowledge to resolve ambiguous visual subjects or local terminology before changing selections or craft.",
+    pureAudio ? "Use transcript, audio event, and audio story evidence for semantic in/out rationale." : "Use Marlin event ids for visual in/out rationale whenever possible.",
+    hasAudioOnly ? "For every media_kind=audio candidate, prohibit frame, motion, subject, camera, and visual-transition claims; refine semantic boundary and audio cadence instead." : "Use context_knowledge to resolve ambiguous visual subjects or local terminology before changing selections or craft.",
     "",
     "## Creative brief",
     JSON.stringify(compactBrief(input.brief, input.bgmDurationSec), null, 2),
@@ -782,45 +858,54 @@ function buildFinePrompt(input: FineCutRefinementInput): string {
     "## Current beat structure",
     JSON.stringify(input.blueprint, null, 2),
     "",
-    "## Selected clips with key frames and Marlin temporal events",
+    pureAudio
+      ? "## Selected audio windows and grounded semantic evidence"
+      : hasAudioOnly
+        ? "## Selected media candidates (visual candidates have frames; audio candidates use transcript/audio evidence)"
+        : "## Selected clips with key frames and Marlin temporal events",
     JSON.stringify(clipEvidence, null, 2),
     "",
     "## Task",
-    "- For each selected clip, choose the best in/out point by referencing a specific Marlin event.",
-    "- For dialogue, verify semantic boundaries before visual craft: retain the subject or antecedent and the complete conclusion, even when that requires neighboring ASR items.",
+    pureAudio
+      ? "- For each selected audio window, choose semantic in/out points from transcript/audio evidence and preserve audible cadence."
+      : hasAudioOnly
+        ? "- Branch by candidate media_kind: visual candidates use Marlin/key frames; audio candidates use transcript/audio events and semantic cadence."
+        : "- For each selected visual clip, choose the best in/out point by referencing a specific Marlin event.",
+    pureAudio
+      ? "- For dialogue, verify semantic boundaries before audio craft: retain the subject or antecedent and the complete conclusion, even when that requires neighboring ASR items."
+      : "- For dialogue, verify semantic boundaries before visual craft: retain the subject or antecedent and the complete conclusion, even when that requires neighboring ASR items.",
     "- Do not approve a line that only becomes understandable from a question card. Post-roll may preserve breath or room tone only after the assertion is complete and must stop before the next assertion.",
+    "- Audit the sequence-level argument, not just each quote: a recommendation must retain the nearby reason, decision problem, or consequence that makes it credible.",
+    pureAudio ? "- Preserve the final authored audio through its grounded tail and fade without inventing source motion." : "- Keep final source motion running through the ending fade; do not freeze the last frame or change crop/zoom only for the tail.",
     "- Choose beat-level transition_in / transition_out, rhythm, and in_point / out_point craft.",
     "- Adjust pacing and duration policy for the BGM duration when needed.",
-    "- If a selected clip is weak, repetitive, too short, technically poor, or mismatched to its beat, use search_footage or best_for_beat to find a replacement candidate and cite the query, result segment_id, evidence_refs, and key_frame_path in revision_notes.",
+    pureAudio
+      ? "- If a selected audio window is weak, repetitive, too short, or mismatched to its beat, use grounded transcript/audio retrieval and cite the query, result segment_id, and audio evidence refs in revision_notes."
+      : "- If a selected clip is weak, repetitive, too short, technically poor, or mismatched to its beat, use search_footage or best_for_beat to find a replacement candidate and cite the query, result segment_id, evidence_refs, and key_frame_path in revision_notes.",
     "- Keep the output schema-compatible: per-clip in/out belongs in clip_craft; beat craft belongs in blueprint.beats[].craft.",
     "",
+    ...retentionLines,
+    ...(retentionLines.length > 0 ? [""] : []),
     "## JSON output",
     "Return JSON only with this shape:",
     JSON.stringify({
       blueprint: input.blueprint,
-      clip_craft: [
-        {
-          segment_id: "SEG_001",
-          event_id: "evt_001",
-          recommended_in_us: 1000000,
-          recommended_out_us: 3600000,
-          preferred_duration_us: 2600000,
-          peak_type: "action_peak",
-          rationale: "Enter before the action and hold through the peak.",
-        },
-      ],
+      clip_craft: [clipCraftExample],
       revision_notes: ["what changed and why"],
     }, null, 2),
   ].join("\n");
 }
 
-function fineToolPromptSection(passLabel: "rough" | "fine" = "fine"): string {
+function fineToolPromptSection(passLabel: "rough" | "fine" = "fine", pureAudio = false): string {
   const lines = [
     "## Available tools",
     passLabel === "rough"
       ? "You can call these optional tools to inspect representative frames or search for mood, lighting, texture, and visual tone matches during the rough pass:"
       : "You can call these optional tools to inspect selected clips or search for justified full-pool alternatives during the fine pass:",
   ];
+  if (pureAudio) {
+    return ["## Available tools", "Use transcript/audio retrieval tools only. Frame reads and visual search are not applicable to this audio-only project."].join("\n");
+  }
   for (const tool of EDITORIAL_TOOL_DEFINITIONS) {
     const signature = Object.keys(tool.parameters).join(", ");
     lines.push(`- ${tool.name}(${signature}): ${tool.description}`);
@@ -835,6 +920,9 @@ function buildRoughInteractivePrompt(
   options: EditorialAgentOptions,
 ): EditorialInteractivePrompt {
   const representativeFrames = absoluteRepresentativeFrames(input.representativeFrames, options.projectDir);
+  const pureAudio = input.segments.length > 0 && input.segments.every((segment) =>
+    readAssetMediaCapabilities(options.projectDir ?? "").get(segment.asset_id)?.source_capabilities.has_video === false
+  );
   const interactiveInput = { ...input, representativeFrames };
   const bundle = roughFrameReferenceBundle({
     marlinEvents: input.marlinEvents,
@@ -844,13 +932,13 @@ function buildRoughInteractivePrompt(
   const prompt = [
     buildRoughPrompt(interactiveInput),
     "",
-    fineToolPromptSection("rough"),
+    fineToolPromptSection("rough", pureAudio),
     "",
     bundle.markdown,
     "",
     "## Repo-side agent instructions",
-    "- Use the Read tool on the absolute frame paths above before deciding.",
-    "- Use search_footage, visual_search, or best_for_beat when mood, lighting, texture, or visual tone needs evidence beyond the provided representative frames.",
+    pureAudio ? "- Frame Read and visual search are not applicable; use grounded transcript/audio evidence." : "- Use the Read tool on the absolute frame paths above before deciding.",
+    ...(pureAudio ? [] : ["- Use search_footage, visual_search, or best_for_beat when mood, lighting, texture, or visual tone needs evidence beyond the provided representative frames."]),
     "- Return the JSON object requested in the prompt. Do not write timeline.json.",
   ].join("\n");
   return {
@@ -859,7 +947,7 @@ function buildRoughInteractivePrompt(
     prompt,
     frame_refs: bundle.refs,
     frame_reference_markdown: bundle.markdown,
-    tools: EDITORIAL_TOOL_DEFINITIONS,
+    tools: pureAudio ? [] : EDITORIAL_TOOL_DEFINITIONS,
   };
 }
 
@@ -868,24 +956,29 @@ function buildFineInteractivePrompt(
   options: EditorialAgentOptions,
 ): EditorialInteractivePrompt {
   const keyFrames = absoluteKeyFrames(input.keyFrames, options.projectDir);
+  const pureAudio = input.selects.source_media?.mode === "audio_only";
   const interactiveInput = { ...input, keyFrames };
-  const bundle = fineFrameReferenceBundle({
-    selects: input.selects,
-    marlinEvents: input.marlinEvents,
-    keyFrames,
-    projectDir: options.projectDir,
-  });
+  const bundle = pureAudio
+    ? { markdown: "", refs: [] }
+    : fineFrameReferenceBundle({
+        selects: input.selects,
+        marlinEvents: input.marlinEvents,
+        keyFrames,
+        projectDir: options.projectDir,
+      });
   const prompt = [
     buildFinePrompt(interactiveInput),
     "",
-    fineToolPromptSection(),
+    fineToolPromptSection("fine", pureAudio),
     "",
     bundle.markdown,
     "",
     "## Repo-side agent instructions",
-    "- Use the Read tool on the absolute key-frame paths above before setting in/out points.",
-    "- Use the available inspection tools when a key frame is ambiguous, blurred, shaky, or misses the action boundary.",
-    "- Use search_footage or best_for_beat when inspection shows a weak clip and cite returned evidence before recommending a replacement.",
+    pureAudio ? "- Frame Read is not applicable; use grounded transcript/audio evidence for semantic boundaries." : "- Use the Read tool on the absolute key-frame paths above before setting in/out points.",
+    ...(pureAudio ? [] : ["- Use the available inspection tools when a key frame is ambiguous, blurred, shaky, or misses the action boundary."]),
+    pureAudio
+      ? "- Use grounded transcript/audio retrieval when an audio window is weak and cite returned audio evidence before recommending a replacement."
+      : "- Use search_footage or best_for_beat when inspection shows a weak clip and cite returned evidence before recommending a replacement.",
     "- Return the JSON object requested in the prompt. Do not write timeline.json.",
   ].join("\n");
   return {
@@ -894,7 +987,7 @@ function buildFineInteractivePrompt(
     prompt,
     frame_refs: bundle.refs,
     frame_reference_markdown: bundle.markdown,
-    tools: EDITORIAL_TOOL_DEFINITIONS,
+    tools: pureAudio ? [] : EDITORIAL_TOOL_DEFINITIONS,
   };
 }
 
@@ -924,6 +1017,90 @@ function roughCoverageRetryPrompt(
     "Add or replace candidates so every under-sampled semantic cluster and every must_have item is covered.",
     "Return JSON only with the same requested top-level shape.",
   ].join("\n");
+}
+
+function roughEditorialQualityRetryPrompt(
+  originalPrompt: string,
+  issues: string[],
+): string {
+  return [
+    originalPrompt,
+    "",
+    "## First-pass editorial quality retry",
+    `The previous rough cut failed deterministic interview-quality checks: ${JSON.stringify(issues)}.`,
+    "Rebuild the selects and blueprint from the supplied evidence before returning JSON again.",
+    "Every dialogue primary must contain its own subject or antecedent and reach a complete conclusion.",
+    "A recommendation or CTA must be earned by a preceding or same-answer reason, decision problem, or concrete consequence; never isolate the recommendation as a convenient final quote.",
+    "End only after a complete final assertion, keep at least 1.5 seconds of moving source post-roll when handles exist, then fade audio and moving video naturally. Never create a frozen-frame tail.",
+    "Return the same schema-valid JSON shape only.",
+  ].join("\n");
+}
+
+const RECOMMENDATION_PATTERN = /(?:受けた方がいい|受講(?:すべき|した方がいい)|おすすめ|勧め(?:ます|たい)|should\s+(?:take|join)|recommend)/i;
+const RECOMMENDATION_REASON_PATTERN = /(?:なぜ|理由|判断|理解|基準|リテラシー|差|意味|使わない|適応|時代|だから|なので|ので|ため|ないと|decision|understand|because|reason|otherwise)/i;
+
+/** Deterministic gate for the feedback patterns that repeatedly weaken interview first cuts. */
+export function detectRoughEditorialQualityIssues(
+  result: RoughCutPlanningResult,
+  brief?: CreativeBrief,
+): string[] {
+  const issues: string[] = [];
+  const candidatesByRef = new Map<string, Candidate>();
+  for (const candidate of result.selects.candidates) {
+    const refs = [candidate.candidate_id, candidate.segment_id, getCandidateRef(candidate)]
+      .filter((ref): ref is string => typeof ref === "string" && ref.length > 0);
+    for (const ref of refs) candidatesByRef.set(ref, candidate);
+  }
+
+  const orderedPrimaryCandidates = result.blueprint.beats.flatMap((beat) => {
+    const ref = beat.candidate_plan?.primary_candidate_ref;
+    const candidate = ref ? candidatesByRef.get(ref) : undefined;
+    return candidate ? [{ beatId: beat.id, candidate }] : [];
+  });
+
+  for (const { beatId, candidate } of orderedPrimaryCandidates) {
+    if (candidate.role !== "dialogue" || !candidate.transcript_excerpt?.trim()) continue;
+    const assessment = assessDialogueCompleteness(candidate.transcript_excerpt);
+    if (assessment.hard_issue_count > 0) {
+      issues.push(
+        `${beatId}: primary dialogue is not self-contained (${assessment.issues.map((item) => item.code).join(", ")})`,
+      );
+    }
+  }
+
+  let recommendationIndex = -1;
+  for (let index = orderedPrimaryCandidates.length - 1; index >= 0; index--) {
+    if (RECOMMENDATION_PATTERN.test(orderedPrimaryCandidates[index].candidate.transcript_excerpt ?? "")) {
+      recommendationIndex = index;
+      break;
+    }
+  }
+  if (recommendationIndex >= 0) {
+    const context = orderedPrimaryCandidates
+      .slice(Math.max(0, recommendationIndex - 2), recommendationIndex + 1)
+      .map(({ candidate }) => candidate.transcript_excerpt ?? "")
+      .join(" ");
+    if (!RECOMMENDATION_REASON_PATTERN.test(context)) {
+      issues.push("closing recommendation has no nearby reason, decision problem, or consequence");
+    }
+  }
+
+  const ending = result.blueprint.ending_policy;
+  if ((ending?.tail_hold_sec ?? 0) < 1.5) {
+    issues.push("ending tail hold is shorter than 1.5 seconds");
+  }
+  if ((ending?.video_fade_out_sec ?? 0) <= 0 || ending?.video_fade_color === "none") {
+    issues.push("ending has no moving-video fade treatment");
+  }
+  if ((ending?.audio_fade_out_sec ?? 0) <= 0) {
+    issues.push("ending has no audio fade treatment");
+  }
+
+  if (brief) {
+    issues.push(...auditShortFormRetention(brief, result.blueprint, result.selects).map((issue) => issue.message));
+  }
+
+  return [...new Set(issues)];
 }
 
 function storyRoleForIndex(index: number, total: number): SelectStoryRole {
@@ -1118,7 +1295,7 @@ function fallbackBlueprint(
     return beat;
   });
 
-  return {
+  const blueprint: EditBlueprint = {
     version: "1",
     project_id: projectId,
     sequence_goals: [
@@ -1163,7 +1340,13 @@ function fallbackBlueprint(
     },
     ending_policy: {
       should_feel: "resolved",
-      final_hold_min_frames: 12,
+      final_hold_min_frames: 36,
+      final_visual_strategy: "keep source motion and fade to black",
+      final_audio_strategy: "fade room tone after the complete final assertion",
+      tail_hold_sec: 1.5,
+      audio_fade_out_sec: 1,
+      video_fade_out_sec: 1,
+      video_fade_color: "black",
     },
     rejection_rules: ["Reject material that cannot be tied to the brief or selected evidence."],
     story_arc: {
@@ -1186,6 +1369,7 @@ function fallbackBlueprint(
     timeline_order: brief.order_policy ?? "editorial",
     track_layout: "single",
   };
+  return applyShortFormRetentionDefaults(brief, blueprint, selects);
 }
 
 function selectSourceObject(parsed: Record<string, unknown>): Record<string, unknown> {
@@ -1328,7 +1512,7 @@ function normalizeRoughSelects(
   const projectId = projectIdFromBrief(input.brief);
   let selects: SelectsCandidates;
   try {
-    const compactSegments = compactSegmentsForSelects(input.segments, input.marlinEvents, input.representativeFrames);
+    const compactSegments = compactSegmentsForSelects(input.segments, input.marlinEvents, input.representativeFrames, input.projectDir);
     selects = parsed
       ? selectsFromLlmResponse(selectSourceObject(parsed), projectId, compactSegments) as SelectsCandidates
       : fallbackSelects(input.brief, input.marlinEvents, input.representativeFrames, input.segments);
@@ -1342,6 +1526,7 @@ function normalizeRoughSelects(
   ensureCandidateIds(projectId, selects.candidates);
   enrichSelectedCandidatesWithVisualEvidence(selects, input.visualEvidence);
   enrichSelectedCandidatesWithAudioEvidence(selects, input.audioEvidence);
+  if (input.projectDir) materializeCandidateMediaCapabilities(input.projectDir, selects, input.segments);
   return selects;
 }
 
@@ -1404,6 +1589,15 @@ function normalizeRoughBlueprint(
   }
   blueprint.decision_runtime = decisionRuntime;
   blueprint = enforceSelectedCandidatePool(blueprint, selects);
+  applySourceMediaContract(blueprint, selects.source_media, buildCandidateIndex(selects));
+  if (selects.candidates.some((candidate) => candidate.media_kind === "image")) {
+    const resolution = resolveProfileAndPolicy({
+      briefEditorial: input.brief.editorial,
+      editorialSummary: selects.editorial_summary,
+      runtimeTargetSec: input.brief.project.runtime_target_sec,
+    });
+    blueprint.still_duration_policy = resolveStillDurationPolicy(input.brief, resolution.profileDefaults, 24, 1);
+  }
   validateArtifact<EditBlueprint>(blueprint, "edit-blueprint.schema.json");
   return blueprint;
 }
@@ -1436,6 +1630,7 @@ async function normalizeRoughResult(
     assets: clusterAssetsForRough(input),
     projectDir: input.projectDir,
   });
+  if (input.projectDir) materializeCandidateMediaCapabilities(input.projectDir, selects, input.segments);
   selects = applyRoughQualityGate(selects, input);
   selects = applyRoughCoverage(selects, input);
   validateArtifact<SelectsCandidates>(selects, "selects-candidates.schema.json");
@@ -1452,6 +1647,7 @@ function normalizeRoughResultSync(
 ): { selects: SelectsCandidates; blueprint: EditBlueprint } {
   const projectId = projectIdFromBrief(input.brief);
   let selects = normalizeRoughSelects(parsed, input, decisionRuntime);
+  if (input.projectDir) materializeCandidateMediaCapabilities(input.projectDir, selects, input.segments);
   selects = applyRoughQualityGate(selects, input);
   selects = applyRoughCoverage(selects, input);
   validateArtifact<SelectsCandidates>(selects, "selects-candidates.schema.json");
@@ -1503,10 +1699,17 @@ export async function roughCutPlanning(
   bgmDurationSec: number | null,
   options?: EditorialAgentOptions,
 ): Promise<RoughCutPlanningResult | EditorialInteractivePrompt> {
+  if (options?.projectDir) assertProjectPlanningMediaKindsSupported(options.projectDir);
+  const sourceCapabilities = options?.projectDir
+    ? readAssetMediaCapabilities(options.projectDir)
+    : new Map();
+  const visualRepresentativeFrames = new Map(
+    [...representativeFrames].filter(([assetId]) => sourceCapabilities.get(assetId)?.source_capabilities.has_video !== false),
+  );
   const input: RoughCutPlanningInput = {
     brief,
     marlinEvents,
-    representativeFrames,
+    representativeFrames: visualRepresentativeFrames,
     segments,
     bgmDurationSec,
     ...(options?.projectDir ? { projectDir: options.projectDir } : {}),
@@ -1523,7 +1726,7 @@ export async function roughCutPlanning(
   let decisionRuntime: DecisionRuntimeRecord = deterministicDecisionRuntime("unified-editorial-rough");
   let usedLiveRuntime = false;
   const validateRoughJson = (candidate: Record<string, unknown>): void => {
-    const compactSegments = compactSegmentsForSelects(input.segments, input.marlinEvents, input.representativeFrames);
+    const compactSegments = compactSegmentsForSelects(input.segments, input.marlinEvents, input.representativeFrames, input.projectDir);
     const selects = selectsFromLlmResponse(
       selectSourceObject(candidate),
       projectIdFromBrief(input.brief),
@@ -1557,6 +1760,21 @@ export async function roughCutPlanning(
     decisionRuntime = deterministicDecisionRuntime("unified-editorial-rough");
   }
   let result = await normalizeRoughResult(parsed, input, decisionRuntime);
+  if (usedLiveRuntime) {
+    const qualityIssues = detectRoughEditorialQualityIssues(result, input.brief);
+    if (qualityIssues.length > 0) {
+      try {
+        const retryCompletion = await completeRoughJson(
+          roughEditorialQualityRetryPrompt(prompt, qualityIssues),
+        );
+        decisionRuntime = decisionRuntimeRecord(retryCompletion, "unified-editorial-rough");
+        parsed = retryCompletion.runtime === "deterministic" ? undefined : retryCompletion.parsed;
+        result = await normalizeRoughResult(parsed, input, decisionRuntime);
+      } catch {
+        // Keep the first normalized artifact; review metrics will expose unresolved issues.
+      }
+    }
+  }
   if (usedLiveRuntime && result.selects.coverage?.status === "failed") {
     try {
       const retryCompletion = await completeRoughJson(

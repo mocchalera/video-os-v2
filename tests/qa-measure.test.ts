@@ -14,7 +14,20 @@ vi.mock("node:child_process", () => ({
 import {
   collectQaMeasurementWarnings,
   measureQaMedia,
+  parseNonSilentIntervals,
 } from "../runtime/packaging/qa-measure.js";
+
+describe("dialogue signal placement measurement", () => {
+  it("inverts silencedetect output into timeline signal intervals", () => {
+    expect(parseNonSilentIntervals([
+      "[silencedetect] silence_start: 0",
+      "[silencedetect] silence_end: 3.33 | silence_duration: 3.33",
+      "[silencedetect] silence_start: 7.5",
+    ].join("\n"), 10_000)).toEqual([
+      { start_ms: 3330, end_ms: 7500 },
+    ]);
+  });
+});
 
 describe("qa measurement", () => {
   let tmpDir: string;
@@ -99,6 +112,7 @@ describe("qa measurement", () => {
     const result = await measureQaMedia({
       videoPath,
       audioPath,
+      expectedDialogueWindowsMs: [{ start_ms: 2000, end_ms: 12300 }],
       outputPath,
       createdAt: "2026-03-24T00:00:00.000Z",
     });
@@ -129,10 +143,14 @@ describe("qa measurement", () => {
 
     expect(result.video_duration_ms).toBe(12345);
     expect(result.audio_duration_ms).toBe(12300);
+    expect(result.av_duration_delta_ms).toBe(45);
     expect(result.av_drift_ms).toBe(45);
     expect(result.loudness_integrated).toBe(-16.2);
     expect(result.loudness_true_peak).toBe(-1.1);
-    expect(result.dialogue_occupancy).toBeCloseTo(11300 / 12300, 6);
+    expect(result.dialogue_occupancy).toBe(1);
+    expect(result.dialogue_outside_expected_ms).toBe(1000);
+    expect(result.dialogue_first_signal_ms).toBe(0);
+    expect(result.expected_dialogue_start_ms).toBe(2000);
     expect(result.video_frame).toEqual({
       width: 1920,
       height: 1080,
@@ -146,6 +164,7 @@ describe("qa measurement", () => {
     const persisted = JSON.parse(fs.readFileSync(outputPath, "utf-8")) as {
       video_duration_ms: number;
       audio_duration_ms: number;
+      av_duration_delta_ms: number;
       av_drift_ms: number;
       loudness_integrated: number;
       video_frame: {
@@ -156,6 +175,7 @@ describe("qa measurement", () => {
     };
     expect(persisted.video_duration_ms).toBe(12345);
     expect(persisted.audio_duration_ms).toBe(12300);
+    expect(persisted.av_duration_delta_ms).toBe(45);
     expect(persisted.av_drift_ms).toBe(45);
     expect(persisted.loudness_integrated).toBe(-16.2);
     expect(persisted.video_frame.width).toBe(1920);

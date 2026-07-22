@@ -27,6 +27,7 @@ final class StudioCommandPaletteCommandTests: XCTestCase {
             "rebuild-search-index",
             "run-marlin-evaluation",
             "build-audio-story-graph",
+            "open-bgm-review",
             "build-preview-proxies",
             "relink-missing-media",
             "export-premiere-xml",
@@ -89,6 +90,7 @@ final class StudioCommandPaletteCommandTests: XCTestCase {
         XCTAssertTrue(StudioCommandPaletteCommand.promoFinish.matches(query: "テロップ promo"))
         XCTAssertTrue(StudioCommandPaletteCommand.compileRoughCut.matches(query: "rough cut"))
         XCTAssertTrue(StudioCommandPaletteCommand.openSwapBrowser.matches(query: "差替え 候補"))
+        XCTAssertTrue(StudioCommandPaletteCommand.openBGMReview.matches(query: "BGM 試聴 権利"))
         XCTAssertTrue(StudioCommandPaletteCommand.applyReviewPatch.matches(
             query: "deterministic compiler",
             subtitle: "Apply review_patch.json through the deterministic compiler."

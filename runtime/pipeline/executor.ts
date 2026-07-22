@@ -21,13 +21,23 @@ import {
   buildScriptFullPipelineTimingStages,
   shouldRunScriptAnalyze,
   shouldRunScriptFootageDb,
+  type FullPipelineResumeStage,
 } from "./plan.js";
+import {
+  discoverRequestedSources,
+  type SourceDiscoveryOptions,
+  type SourceDiscoveryResult,
+} from "../media/source-discovery.js";
+import {
+  executePipelinePhases,
+  type PipelinePhaseStep,
+} from "./phase-executor.js";
 
 export interface ProjectPipelineOptions {
   project: string;
   sourceDir?: string;
   contentHint?: string;
-  from?: PipelineTimingStage;
+  from?: FullPipelineResumeStage;
   skipAnalyze: boolean;
   skipFootageDb: boolean;
   skipRender: boolean;
@@ -53,6 +63,7 @@ export interface ProjectPipelineDeps {
   initProject?: (projectId: string, options: { sourceDir: string }) => InitProjectResult;
   runAnalyze?: (projectDir: string, options: AnalyzeCommandOptions) => Promise<AnalyzeCommandResult>;
   buildFootageDb?: (options: BuildFootageDbOptions) => Promise<BuildFootageDbResult>;
+  discoverSources?: (locators: string[]) => SourceDiscoveryResult;
   runEditorialPipeline: (options: RunEditorialPipelineOptions) => Promise<void>;
 }
 
@@ -63,6 +74,8 @@ export interface ProjectPipelineResult {
   error?: unknown;
   message?: string;
 }
+
+type ProjectPipelinePhase = "analyze" | "footageDb" | "editorial";
 
 export async function runProjectPipeline(
   options: ProjectPipelineOptions,
@@ -79,40 +92,62 @@ export async function runProjectPipeline(
   let currentStage: PipelineTimingStage = stages[0] ?? "triage";
 
   try {
+    const phaseSteps: Array<PipelinePhaseStep<ProjectPipelinePhase, never>> = [];
+
     if (shouldRunScriptAnalyze(options)) {
-      currentStage = "ingest";
-      const sourceFiles = collectSourceFiles(
-        options.sourceDir ? path.resolve(options.sourceDir) : path.join(projectDir, "02_media", "source"),
-      );
-      const analyze = await (deps.runAnalyze ?? runAnalyze)(projectDir, {
-        sourceFiles,
-        contentHint: options.contentHint,
-        stageProgress: progress,
+      phaseSteps.push({
+        phase: "analyze",
+        run: async () => {
+          currentStage = "ingest";
+          const sourceDirectory = options.sourceDir
+            ? path.resolve(options.sourceDir)
+            : path.join(projectDir, "02_media", "source");
+          if (!fs.existsSync(sourceDirectory)) throw new Error(`Source directory not found: ${sourceDirectory}`);
+          const sourceDiscovery = (deps.discoverSources ?? discoverRequestedSources)([sourceDirectory]);
+          const sourceFiles = sourceDiscovery.requests.map((request) => request.lexical_path);
+          const analyze = await (deps.runAnalyze ?? runAnalyze)(projectDir, {
+            sourceFiles,
+            sourceDiscovery,
+            contentHint: options.contentHint,
+            stageProgress: progress,
+          });
+          if (!analyze.success) throw new Error(analyze.error?.message ?? "Analyze failed");
+          progress.refreshEstimates(readSegmentCount(projectDir));
+        },
       });
-      if (!analyze.success) throw new Error(analyze.error?.message ?? "Analyze failed");
-      progress.refreshEstimates(readSegmentCount(projectDir));
     }
 
     if (shouldRunScriptFootageDb(options)) {
-      currentStage = "embeddings";
-      await progress.track("embeddings", () => (deps.buildFootageDb ?? buildFootageDb)({
-        projectDir,
-        embeddingPolicy: "auto",
-        qwen3vlEnabled: options.qwen3vlEnabled,
-        clapAudioEnabled: options.clapAudioEnabled,
-      }));
+      phaseSteps.push({
+        phase: "footageDb",
+        run: async () => {
+          currentStage = "embeddings";
+          await progress.track("embeddings", () => (deps.buildFootageDb ?? buildFootageDb)({
+            projectDir,
+            embeddingPolicy: "auto",
+            qwen3vlEnabled: options.qwen3vlEnabled,
+            clapAudioEnabled: options.clapAudioEnabled,
+          }));
+        },
+      });
     }
 
-    currentStage = "triage";
-    await deps.runEditorialPipeline({
-      projectDir,
-      skipFine: false,
-      skipRender: options.skipRender,
-      qa: !options.skipQa,
-      skipQa: options.skipQa,
-      stageProgress: progress,
+    phaseSteps.push({
+      phase: "editorial",
+      run: async () => {
+        currentStage = "triage";
+        await deps.runEditorialPipeline({
+          projectDir,
+          skipFine: false,
+          skipRender: options.skipRender,
+          qa: !options.skipQa,
+          skipQa: options.skipQa,
+          stageProgress: progress,
+        });
+      },
     });
 
+    await executePipelinePhases(phaseSteps);
     progress.finish("completed");
     return { success: true, projectDir };
   } catch (error) {
@@ -149,11 +184,13 @@ export function resolveProjectDir(project: string): string {
 }
 
 export function collectSourceFiles(sourceDir: string): string[] {
+  return collectSourceDiscovery(sourceDir).requests.map((request) => request.lexical_path);
+}
+
+export function collectSourceDiscovery(
+  sourceDir: string,
+  discoveryOptions?: SourceDiscoveryOptions,
+): SourceDiscoveryResult {
   if (!fs.existsSync(sourceDir)) throw new Error(`Source directory not found: ${sourceDir}`);
-  const files = fs.readdirSync(sourceDir)
-    .map((entry) => path.join(sourceDir, entry))
-    .filter((filePath) => fs.statSync(filePath).isFile())
-    .filter((filePath) => /\.(mp4|mov|m4v|avi|mkv|webm)$/i.test(filePath));
-  if (files.length === 0) throw new Error(`No source video files found in ${sourceDir}`);
-  return files;
+  return discoverRequestedSources([sourceDir], discoveryOptions);
 }

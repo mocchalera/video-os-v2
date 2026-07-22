@@ -30,10 +30,9 @@ This is a live repository audit, not a line-by-line revalidation of the 2026-06-
 source document.
 
 - Branch and commit: `Dev` at `8dd8814467c190449a36fd86e6fe291392622b15`
-- Latest GitHub Actions run: `29063263116`, started 2026-07-10 10:49:51 JST and
-  completed 10:50:58 JST
-- GitHub Actions URL:
-  <https://github.com/mocchalera/video-os-v2-dev/actions/runs/29063263116>
+- Internal GitHub Actions run `29063263116` started 2026-07-10 10:49:51 JST
+  and completed 10:50:58 JST. The private development-repository URL is not
+  part of the OSS snapshot.
 - Local toolchain used for cross-check: Apple Swift 6.2.4, Node 22.x project
   dependencies already installed
 - Project Loop: after explicit Cockpit human approval, migrations

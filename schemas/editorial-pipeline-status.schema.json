@@ -17,7 +17,10 @@
   "properties": {
     "version": { "type": "string", "const": "1" },
     "project_id": { "type": "string", "minLength": 1 },
-    "entrypoint": { "type": "string", "const": "editorial-pipeline" },
+    "entrypoint": {
+      "type": "string",
+      "enum": ["editorial-pipeline", "editorial-agent-task"]
+    },
     "created_at": { "type": "string", "format": "date-time" },
     "preview": {
       "type": "object",
@@ -46,6 +49,18 @@
         "initial_score": { "type": "number" },
         "final_score": { "type": "number" },
         "warnings_count": { "type": "integer", "minimum": 0 },
+        "visual_qa": {
+          "type": "object",
+          "required": ["status"],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["verified", "blocked", "not_applicable"]
+            },
+            "reason": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
         "message": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false

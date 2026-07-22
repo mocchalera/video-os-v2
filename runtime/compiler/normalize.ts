@@ -21,6 +21,7 @@ export function normalize(
   const beats: NormalizedBeat[] = blueprint.beats.map((b) => ({
     beat_id: b.id,
     label: b.label,
+    viewer_label: b.viewer_label,
     target_duration_frames: b.target_duration_frames,
     required_roles: [...b.required_roles],
     preferred_roles: b.preferred_roles ? [...b.preferred_roles] : [],

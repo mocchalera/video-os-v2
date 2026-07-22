@@ -5,7 +5,7 @@ import VideoOSStudioCore
 struct VideoOSStudioCLI {
     private static let defaultMarlinRequestTimeoutMs = 300_000
 
-    static func main() {
+    static func main() async {
         let root = ProjectScanner.locateRepositoryRoot()
         let args = Array(CommandLine.arguments.dropFirst())
         let command = args.first ?? "doctor"
@@ -95,6 +95,8 @@ struct VideoOSStudioCLI {
             printAudioMap(root: root, args: Array(args.dropFirst()))
         case "audio-waveform":
             printAudioWaveform(root: root, args: Array(args.dropFirst()))
+        case "interview-reframe":
+            await analyzeInterviewReframe(root: root, args: Array(args.dropFirst()))
         case "audio-story-plan":
             printAudioStoryGraphPlan(root: root, args: Array(args.dropFirst()))
         case "audio-story-run":
@@ -163,6 +165,41 @@ struct VideoOSStudioCLI {
         print("repo: \(root.path)")
         print("projects: \(projects.count)")
         print("codex app-server: \(CodexAppServerLaunchPlan(workspace: root).environmentDescription)")
+    }
+
+    private static func analyzeInterviewReframe(root: URL, args: [String]) async {
+        do {
+            guard let source = try valueOption(args, names: ["--source"], errorLabel: "--source") else {
+                throw CLIError.message("usage: videoos-studio-cli interview-reframe --source=<video> [--in-us=<n>] [--out-us=<n>] [--width=1920] [--height=1080] [--samples=9]")
+            }
+            let sourceURL = resolvePathArgument(source, root: root)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+                throw CLIError.message("source video not found: \(sourceURL.path)")
+            }
+            let proposal = try await InterviewAutoReframeAnalyzer.analyze(
+                url: sourceURL,
+                sourceInUS: intOption(args, name: "in-us"),
+                sourceOutUS: intOption(args, name: "out-us"),
+                outputWidth: intOption(args, name: "width") ?? 1_920,
+                outputHeight: intOption(args, name: "height") ?? 1_080,
+                sampleCount: intOption(args, name: "samples") ?? 9
+            )
+            let payload: [String: Any] = [
+                "source": sourceURL.path,
+                "zoom": proposal.zoom,
+                "position": ["x": proposal.positionX, "y": proposal.positionY],
+                "confidence": proposal.confidence,
+                "analyzed_sample_count": proposal.analyzedSampleCount,
+                "face_sample_count": proposal.faceSampleCount,
+                "gesture_sample_count": proposal.gestureSampleCount,
+                "reason": proposal.reason,
+            ]
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            print(String(decoding: data, as: UTF8.self))
+        } catch {
+            fputs("interview reframe failed: \(error.localizedDescription)\n", stderr)
+            Foundation.exit(1)
+        }
     }
 
     private static func listProjects(root: URL) {
@@ -1577,7 +1614,14 @@ struct VideoOSStudioCLI {
     private static func printRenderStatus(root: URL, args: [String]) {
         do {
             let project = try resolveProject(root: root, args: args)
-            let status = ProjectRenderPackageStatusReader.status(projectURL: project.path)
+            let verification = ProjectPackageVerificationRunner.status(
+                repositoryRoot: root,
+                projectURL: project.path
+            )
+            let status = ProjectRenderPackageStatusReader.status(
+                projectURL: project.path,
+                verificationStatus: verification
+            )
             print("project: \(project.id)")
             print("status: \(status.readinessLabel)")
             print("qaReport: \(status.qaReportExists)")
@@ -1593,6 +1637,8 @@ struct VideoOSStudioCLI {
             print("publishedFinalVideo: \(status.publishedFinalVideoExists)")
             print("packageFinalVideo: \(status.packageFinalVideoExists)")
             print("finalMix: \(status.finalMixExists)")
+            print("packageVerificationAvailable: \(verification.available)")
+            print("packageVerificationIssues: \(verification.issues.count)")
             print("qaReportPath: \(status.qaReportURL.path)")
             print("manifestPath: \(status.packageManifestURL.path)")
             print("publishedFinalVideoPath: \(status.publishedFinalVideoURL.path)")
@@ -1626,7 +1672,16 @@ struct VideoOSStudioCLI {
     private static func printRenderPlan(root: URL, args: [String]) {
         do {
             let project = try resolveProject(root: root, args: args)
-            let plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project.path, options: renderRunOptions(root: root, args: args))
+            let preflight = ProjectPackagePreflightRunner.status(
+                repositoryRoot: root,
+                projectURL: project.path
+            )
+            let plan = ProjectRenderRunPlanner.plan(
+                repositoryRoot: root,
+                projectURL: project.path,
+                options: renderRunOptions(root: root, args: args),
+                preflightStatus: preflight
+            )
             print("project: \(project.id)")
             print("status: \(plan.readinessLabel)")
             print("canRun: \(plan.canRun)")
@@ -1647,7 +1702,16 @@ struct VideoOSStudioCLI {
     private static func runRender(root: URL, args: [String]) {
         do {
             let project = try resolveProject(root: root, args: args)
-            let plan = ProjectRenderRunPlanner.plan(repositoryRoot: root, projectURL: project.path, options: renderRunOptions(root: root, args: args))
+            let preflight = ProjectPackagePreflightRunner.status(
+                repositoryRoot: root,
+                projectURL: project.path
+            )
+            let plan = ProjectRenderRunPlanner.plan(
+                repositoryRoot: root,
+                projectURL: project.path,
+                options: renderRunOptions(root: root, args: args),
+                preflightStatus: preflight
+            )
             let result = try ProjectRenderRunner.run(plan: plan)
             print("ok: render \(result.succeeded ? "completed" : "failed")")
             print("project: \(project.id)")
@@ -2167,6 +2231,8 @@ struct VideoOSStudioCLI {
             print("previewMedia: \(status.previewMediaIncluded)")
             print("finalMedia: \(status.finalMediaIncluded)")
             print("finalAudio: \(status.finalAudioIncluded)")
+            print("captionSidecar: \(status.captionSidecarIncluded)")
+            print("captionApproval: \(status.captionApprovalIncluded)")
             print("recommendation: \(status.recommendation)")
             for file in status.missingFiles {
                 print("missing\t\(file)")
@@ -2391,7 +2457,7 @@ struct VideoOSStudioCLI {
 
     private static func printUsage() {
         print("""
-        usage: videoos-studio-cli [doctor|projects|project-init|codex-plan|policy-status|library-status|studio-goal-status|native-editor-visual-qa-status|studio-status|studio-action|gate-status|intent-status|intent-alignment|review-status|planning-status|analysis-plan|analysis-run|compile-plan|compile-run|request-sample|agent-jobs|agent-prompt|annotations-status|clip-note-add|clip-note-clear|clip-note-prompt|index-rebuild|index-status|index-search|index-context|media-status|media-source-map-status|media-relink-plan|media-relink-apply|media-synthetic-plan|media-synthetic-build|media-proxy-plan|media-proxy-build|monitor-status|timeline-markers|audio-map|audio-waveform|audio-story-plan|audio-story-run|marlin-status|marlin-runtime-status|marlin-model-access-status|marlin-preference-status|marlin-preference-apply|marlin-representative-plan|marlin-eval-queue|marlin-eval-next|marlin-eval-plan|marlin-materialize|marlin-eval-run|playback-contract-status|render-status|render-plan|render-run|handoff-status|handoff-export-premiere|handoff-packet-status|handoff-packet-verify|handoff-export-packet|handoff-synthetic-smoke|studio-synthetic-smoke|studio-acceptance-smoke|app-server-smoke|thread-smoke|turn-smoke]
+        usage: videoos-studio-cli [doctor|projects|project-init|codex-plan|policy-status|library-status|studio-goal-status|native-editor-visual-qa-status|studio-status|studio-action|gate-status|intent-status|intent-alignment|review-status|planning-status|analysis-plan|analysis-run|compile-plan|compile-run|request-sample|agent-jobs|agent-prompt|annotations-status|clip-note-add|clip-note-clear|clip-note-prompt|index-rebuild|index-status|index-search|index-context|media-status|media-source-map-status|media-relink-plan|media-relink-apply|media-synthetic-plan|media-synthetic-build|media-proxy-plan|media-proxy-build|monitor-status|timeline-markers|audio-map|audio-waveform|interview-reframe|audio-story-plan|audio-story-run|marlin-status|marlin-runtime-status|marlin-model-access-status|marlin-preference-status|marlin-preference-apply|marlin-representative-plan|marlin-eval-queue|marlin-eval-next|marlin-eval-plan|marlin-materialize|marlin-eval-run|playback-contract-status|render-status|render-plan|render-run|handoff-status|handoff-export-premiere|handoff-packet-status|handoff-packet-verify|handoff-export-packet|handoff-synthetic-smoke|studio-synthetic-smoke|studio-acceptance-smoke|app-server-smoke|thread-smoke|turn-smoke]
 
         Commands:
           doctor            Print repository and app-server readiness.
@@ -2443,6 +2509,7 @@ struct VideoOSStudioCLI {
           timeline-markers  Print timeline markers with frame and timecode.
           audio-map         Print timeline-positioned audio events, story cues, and BGM beats.
           audio-waveform    Extract normalized waveform peaks for audio timeline clips.
+          interview-reframe Analyze face landmarks, look direction, and hand poses, then print a safe zoom/pan proposal. Required: --source=<video>. Optional: --in-us=<n> --out-us=<n> --width=<px> --height=<px> --samples=<n>.
           audio-story-plan  Print the audio story graph build command for transcript/BGM/audio-event evidence.
           audio-story-run   Build 03_analysis/audio_story_graph.json and rebuild the SQLite RAG index. Optional: --no-index.
           marlin-status     Print Marlin-2B temporal VLM evaluation readiness.

@@ -526,6 +526,7 @@ export function applyAdaptiveTrim(
   }
 
   for (const clip of clips) {
+    if (clip.media_kind === "image") continue;
     const key = `${clip.segment_id}:${clip.src_in_us}:${clip.src_out_us}`;
     const candidate = candidateMap.get(key);
     if (!candidate) continue;
@@ -950,6 +951,7 @@ export function applyUtteranceSnap(
   let snappedCount = 0;
 
   for (const clip of clips) {
+    if (clip.media_kind === "image") continue;
     const utterances = utteranceMap.get(clip.asset_id);
     if (!utterances || utterances.length === 0) continue;
 

@@ -75,7 +75,7 @@ export interface ExposureMeasurement {
 export interface VisualQualityMeasurements {
   measured: boolean;
   connector_version: string;
-  method: "ffmpeg_sampled_signals";
+  method: "ffmpeg_sampled_signals" | "ffmpeg_single_frame_signals";
   sample_fps: number;
   max_width: number;
   duration_us: number;
@@ -244,6 +244,40 @@ export async function analyzeSegmentVisualQuality(
     ...(sharpness ? { sharpness } : {}),
     ...(exposure ? { exposure } : {}),
     ...(failures.length > 0 ? { failure_reason: failures.join("; ") } : {}),
+  };
+}
+
+export async function analyzeStillImageVisualQuality(
+  sourcePath: string,
+  options: FfmpegMotionOptions = {},
+): Promise<VisualQualityMeasurements> {
+  const sampleFps = options.sampleFps ?? DEFAULT_MOTION_SAMPLE_FPS;
+  const maxWidth = options.maxWidth ?? DEFAULT_MOTION_MAX_WIDTH;
+  const failures: string[] = [];
+  const sharpness = await measureStillSharpness(sourcePath, options).catch((error: unknown) => {
+    failures.push(`sharpness:${errorMessage(error)}`);
+    return undefined;
+  });
+  const exposure = await measureStillExposure(sourcePath, options).catch((error: unknown) => {
+    failures.push(`exposure:${errorMessage(error)}`);
+    return undefined;
+  });
+  return {
+    measured: Boolean(sharpness && exposure),
+    connector_version: FFMPEG_MOTION_CONNECTOR_VERSION,
+    method: "ffmpeg_single_frame_signals",
+    sample_fps: sampleFps,
+    max_width: maxWidth,
+    duration_us: 0,
+    metrics_measured: {
+      shake: false,
+      sharpness: Boolean(sharpness),
+      exposure: Boolean(exposure),
+    },
+    ...(sharpness ? { sharpness } : {}),
+    ...(exposure ? { exposure } : {}),
+    ...(failures.length > 0 ? { failure_reason: failures.join("; ") } : {}),
+    warnings: ["motion_not_applicable_still_image"],
   };
 }
 
@@ -525,6 +559,87 @@ async function measureExposure(
     underexposed: blackClipRatio >= 0.3 || avgLuma < 48,
     overexposed: whiteClipRatio >= 0.3 || avgLuma > 208,
     sample_count: Math.min(blackValues.length, whiteValues.length, yValues.length),
+  };
+}
+
+async function measureStillSharpness(
+  sourcePath: string,
+  options: FfmpegMotionOptions,
+): Promise<SharpnessMeasurement> {
+  const maxWidth = options.maxWidth ?? DEFAULT_MOTION_MAX_WIDTH;
+  try {
+    const { stderr } = await execFilePromise(options.execFileImpl, "ffmpeg", [
+      "-hide_banner", "-nostats", "-i", sourcePath,
+      "-vf", [`scale=${maxWidth}:-2`, "blurdetect"].join(","),
+      "-frames:v", "1", "-an", "-f", "null", "-",
+    ]);
+    const match = stderr.match(/blur mean:\s*([-+]?\d+(?:\.\d+)?)/);
+    if (!match) throw new Error("blurdetect_output_missing");
+    const blurMean = Number.parseFloat(match[1]);
+    const blurScore = clamp01(blurMean / BLUR_MEAN_FULL_SCALE);
+    return {
+      measured: true,
+      sharpness_score: round3(1 - blurScore),
+      blur_score: round3(blurScore),
+      blur_mean: round3(blurMean),
+      method: "blurdetect",
+      sample_count: 1,
+    };
+  } catch {
+    const { stderr } = await execFilePromise(options.execFileImpl, "ffmpeg", [
+      "-hide_banner", "-nostats", "-i", sourcePath,
+      "-vf", [`scale=${maxWidth}:-2`, "format=gray", "convolution='0 -1 0 -1 4 -1 0 -1 0'", "signalstats", "metadata=print:key=lavfi.signalstats.YAVG"].join(","),
+      "-frames:v", "1", "-an", "-f", "null", "-",
+    ]);
+    const values = parseMetadataValues(stderr, "lavfi.signalstats.YAVG");
+    if (values.length === 0) throw new Error("laplacian_samples_missing");
+    const edgeMean = average(values);
+    const sharpness = clamp01(edgeMean / 12);
+    return {
+      measured: true,
+      sharpness_score: round3(sharpness),
+      blur_score: round3(1 - sharpness),
+      edge_mean: round3(edgeMean),
+      method: "laplacian_convolution",
+      sample_count: 1,
+    };
+  }
+}
+
+async function measureStillExposure(
+  sourcePath: string,
+  options: FfmpegMotionOptions,
+): Promise<ExposureMeasurement> {
+  const maxWidth = options.maxWidth ?? DEFAULT_MOTION_MAX_WIDTH;
+  const base = ["-hide_banner", "-nostats", "-i", sourcePath];
+  const blackRun = await execFilePromise(options.execFileImpl, "ffmpeg", [
+    ...base,
+    "-vf", [`scale=${maxWidth}:-2`, "signalstats", "metadata=print:key=lavfi.signalstats.YAVG", `blackframe=amount=0:threshold=${BLACKFRAME_THRESHOLD}`].join(","),
+    "-frames:v", "1", "-an", "-f", "null", "-",
+  ]);
+  const whiteRun = await execFilePromise(options.execFileImpl, "ffmpeg", [
+    ...base,
+    "-vf", [`scale=${maxWidth}:-2`, "negate", `blackframe=amount=0:threshold=${BLACKFRAME_THRESHOLD}`].join(","),
+    "-frames:v", "1", "-an", "-f", "null", "-",
+  ]);
+  const blackValues = parsePblackValues(blackRun.stderr);
+  const whiteValues = parsePblackValues(whiteRun.stderr);
+  const yValues = parseMetadataValues(blackRun.stderr, "lavfi.signalstats.YAVG");
+  if (!blackValues.length || !whiteValues.length || !yValues.length) throw new Error("exposure_samples_missing");
+  const blackClipRatio = average(blackValues) / 100;
+  const whiteClipRatio = average(whiteValues) / 100;
+  const avgLuma = average(yValues);
+  const lumaPenalty = avgLuma < 48 ? (48 - avgLuma) / 48 : avgLuma > 208 ? (avgLuma - 208) / 47 : 0;
+  const worstPenalty = Math.max(blackClipRatio, whiteClipRatio, clamp01(lumaPenalty));
+  return {
+    measured: true,
+    exposure_score: round3(1 - clamp01(worstPenalty)),
+    black_clip_ratio: round3(blackClipRatio),
+    white_clip_ratio: round3(whiteClipRatio),
+    avg_luma: round3(avgLuma),
+    underexposed: blackClipRatio >= 0.3 || avgLuma < 48,
+    overexposed: whiteClipRatio >= 0.3 || avgLuma > 208,
+    sample_count: 1,
   };
 }
 

@@ -26,6 +26,25 @@
     "artifacts": { "$ref": "#/$defs/artifactSet" },
     "provenance": { "$ref": "#/$defs/provenance" }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "source_of_truth": { "const": "engine_render" } },
+        "required": ["source_of_truth"]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "required": [
+              "editorial_timeline_hash",
+              "source_inputs_hash",
+              "source_inputs_attestation_status"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false,
   "$defs": {
     "artifactSet": {
@@ -74,7 +93,13 @@
         "ffmpeg_version": { "type": "string" },
         "remotion_bundle_hash": { "type": "string" },
         "render_defaults_hash": { "type": "string" },
-        "handoff_id": { "type": "string" }
+        "handoff_id": { "type": "string" },
+        "source_inputs_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "source_inputs_attestation_status": {
+          "type": "string",
+          "enum": ["verified", "live_only", "not_applicable"]
+        },
+        "source_inputs_freshness_reason": { "type": "string" }
       },
       "additionalProperties": false
     }

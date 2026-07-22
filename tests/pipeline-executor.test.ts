@@ -4,12 +4,15 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   collectSourceFiles,
+  collectSourceDiscovery,
   resolveProjectDir,
   runProjectPipeline,
   type ProjectPipelineDeps,
   type ProjectPipelineOptions,
 } from "../runtime/pipeline/executor.js";
 import type { BuildFootageDbResult } from "../runtime/artifacts/footage-db-builder.js";
+import { runPreflight } from "../runtime/preflight.js";
+import { discoverRequestedSources } from "../runtime/media/source-discovery.js";
 
 const tempDirs: string[] = [];
 
@@ -151,6 +154,42 @@ describe("project pipeline executor", () => {
     fs.writeFileSync(path.join(projectDir, "02_media", "source", "ignore.txt"), "");
 
     expect(resolveProjectDir("demo")).toBe(path.resolve("projects", "demo"));
-    expect(collectSourceFiles(path.join(projectDir, "02_media", "source")).map((file) => path.basename(file))).toEqual(["clip.mp4"]);
+    expect(collectSourceFiles(path.join(projectDir, "02_media", "source")).map((file) => path.basename(file))).toEqual(["clip.mp4", "ignore.txt"]);
+  });
+
+  it("hands one precomputed discovery from full-pipeline into analyze without hashing again", async () => {
+    const projectDir = makeTempProject("executor-discovery-handoff");
+    const sourceDir = path.join(projectDir, "02_media", "source");
+    let hashCalls = 0;
+    const discoverOnce = (locators: string[]) => discoverRequestedSources(locators, {
+      hashFile() {
+        hashCalls += 1;
+        return `sha256:${"a".repeat(64)}`;
+      },
+    });
+    const discovery = discoverOnce([sourceDir]);
+    expect(hashCalls).toBe(1);
+
+    const preflight = runPreflight(discovery.requests.map((request) => request.lexical_path), discovery);
+    expect(preflight.discovery).toBe(discovery);
+    expect(hashCalls).toBe(1);
+    hashCalls = 0;
+
+    let handedDiscovery: unknown;
+    const result = await runProjectPipeline(baseOptions(projectDir), {
+      discoverSources: discoverOnce,
+      runAnalyze: async (_projectDir, options) => {
+        handedDiscovery = options.sourceDiscovery;
+        expect(options.sourceFiles).toEqual([path.join(sourceDir, "clip.mp4")]);
+        expect(options.sourceFiles.every((filePath) => path.isAbsolute(filePath) && fs.statSync(filePath).isFile())).toBe(true);
+        return { success: true };
+      },
+      buildFootageDb: async (options) => fakeFootageDbResult(options.projectDir),
+      runEditorialPipeline: async () => {},
+    });
+
+    expect(result.success).toBe(true);
+    expect(handedDiscovery).toMatchObject({ summary: { requested: 1 } });
+    expect(hashCalls).toBe(1);
   });
 });

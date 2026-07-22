@@ -1,4 +1,6 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runRenderPipeline } from "../runtime/render/pipeline.js";
 
@@ -67,5 +69,47 @@ describe("render pipeline alternate assembly engine fallback", () => {
         assemblyPath,
       }),
     ).rejects.toThrow(`Assembly file not found: ${assemblyPath}`);
+  });
+
+  it("fails closed when a prebuilt FFmpeg assembly could omit Remotion overlays", async () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-route-prebuilt-"));
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(assemblyPath, "stub");
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: { width: 1080, height: 1920, fps_num: 30, fps_den: 1 },
+      tracks: {
+        video: [],
+        audio: [],
+        overlay: [{
+          track_id: "O1",
+          kind: "overlay",
+          clips: [{
+            clip_id: "TITLE",
+            timeline_in_frame: 0,
+            timeline_duration_frames: 30,
+            metadata: {
+              overlay: {
+                text: "本気のビートボックス",
+                styling_class: "vos:overlay.title-card",
+              },
+            },
+          }],
+        }],
+      },
+    }));
+
+    try {
+      await expect(runRenderPipeline({
+        ...minimalRenderOptions(),
+        projectDir,
+        timelinePath,
+        outputDir: path.join(projectDir, "07_package"),
+        assemblyPath,
+      })).rejects.toThrow("Prebuilt assemblyPath cannot prove that 1 Remotion-owned overlay");
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
+    }
   });
 });

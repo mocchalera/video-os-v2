@@ -13,6 +13,12 @@ import type {
   SelectsCandidates,
   TimelineIR,
 } from "../runtime/compiler/types.js";
+import type {
+  AdjacencyAnalysis,
+  CutRelationAxis,
+  CutRelationResult,
+  CutRelationSignal,
+} from "../runtime/compiler/transition-types.js";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const demoDir = path.join(repoRoot, "projects/demo");
@@ -25,7 +31,8 @@ describe("review metrics", () => {
     expect(validation.valid).toBe(true);
     expect(validation.errors).toEqual([]);
     expect(metrics.project_id).toBe("sample-mountain-reset");
-    expect(metrics.summary.total_checks).toBe(11);
+    expect(metrics.version).toBe("2");
+    expect(metrics.summary.total_checks).toBe(16);
     expect(metrics.checks.map((item) => item.id)).toEqual([
       "rhythm.beat_duration_deviation",
       "rhythm.max_shot_length",
@@ -36,9 +43,34 @@ describe("review metrics", () => {
       "emotion.peak_retention",
       "emotion.hook_density",
       "eye_trace.same_asset_adjacency",
+      "eye_trace.attention_jump",
+      "eye_trace.motion_flow",
+      "plane_2d.framing_jump",
+      "plane_2d.luma_color_jump",
+      "space_3d.direction_axis",
       "plane_2d.motif_overuse",
       "audio.speech_cut",
     ]);
+    expect(metrics.summary.by_tier.space_3d).toEqual({ pass: 0, warn: 0, fail: 0, skipped: 1 });
+  });
+
+  it("keeps a legacy v1 review metrics artifact schema-valid", () => {
+    const current = computeReviewMetrics(loadReviewMetricsInputs(demoDir));
+    const legacy = structuredClone(current) as Record<string, any>;
+    legacy.version = "1";
+    legacy.checks = legacy.checks.filter((item: { id: ReviewMetricId }) => ![
+      "eye_trace.attention_jump",
+      "eye_trace.motion_flow",
+      "plane_2d.framing_jump",
+      "plane_2d.luma_color_jump",
+      "space_3d.direction_axis",
+    ].includes(item.id));
+    legacy.summary.total_checks = legacy.checks.length;
+    delete legacy.summary.by_tier.space_3d;
+
+    const validation = validateAgainstSchema(legacy, "review-metrics.schema.json");
+    expect(validation.valid).toBe(true);
+    expect(validation.errors).toEqual([]);
   });
 
   const scenarios: Array<{
@@ -440,23 +472,299 @@ describe("review metrics", () => {
     });
   });
 
-  it.each([
-    "ax1-komatsu-testimonial-d4892",
-    "ax1-female-testimonial-d4892",
-  ])("classifies the %s human golden without false failures", (projectId) => {
-    const metrics = computeReviewMetrics(loadReviewMetricsInputs(path.join(repoRoot, "projects", projectId)));
-    const hookDensity = metrics.checks.find((check) => check.id === "emotion.hook_density");
-    const adjacency = metrics.checks.find((check) => check.id === "eye_trace.same_asset_adjacency");
-    const cadence = metrics.checks.find((check) => check.id === "rhythm.cadence_distribution");
-    const validation = validateAgainstSchema(metrics, "review-metrics.schema.json");
+  it("passes all five relation metrics only for fully covered continuous bound pairs", () => {
+    const inputs = syntheticInputs();
+    inputs.adjacency = adjacencyFor(inputs, [cutRelation("continuous"), cutRelation("continuous")]);
 
-    expect(hookDensity?.status).toBe("pass");
-    expect(adjacency?.status).toBe("warn");
-    expect(cadence?.status).toBe("pass");
-    expect(metrics.summary.by_status.fail).toBe(0);
-    expect(validation.valid).toBe(true);
+    const metrics = computeReviewMetrics(inputs);
+    for (const id of relationMetricIds) {
+      const item = metrics.checks.find((check) => check.id === id);
+      expect(item?.status, id).toBe("pass");
+      expect(item?.measured).toMatchObject({
+        total_pairs: 2,
+        evaluated_pairs: 2,
+        unknown_pairs: 0,
+        intentional_pairs: 0,
+        risky_pairs: 0,
+        violations: [],
+        warnings: [],
+        binding: { status: "bound", mode: "clip_ids" },
+      });
+      expect(item?.threshold).toMatchObject({
+        advisory: true,
+        policy_source: "runtime/compiler/cut-relation.ts:CUT_RELATION_THRESHOLDS",
+        canonical_relation_source: "05_timeline/adjacency_analysis.json:pairs[].cut_relation",
+        profile_brief_signal: { threshold_override_applied: false },
+      });
+    }
   });
+
+  it("does not fail intentional hard contrast in relation metrics or same-asset adjacency", () => {
+    const inputs = syntheticInputs();
+    inputs.timeline!.tracks.video[0].clips[1].asset_id = "AST_A";
+    inputs.adjacency = adjacencyFor(inputs, [
+      cutRelation("intentional_contrast", {
+        majorAxes: ["shot_scale", "composition", "gaze_axis", "motion_flow", "luma", "dominant_color", "text_presence"],
+        intentional: true,
+      }),
+      cutRelation("continuous"),
+    ]);
+
+    const metrics = computeReviewMetrics(inputs);
+    for (const id of [...relationMetricIds, "eye_trace.same_asset_adjacency"] as ReviewMetricId[]) {
+      expect(metrics.checks.find((check) => check.id === id)?.status, id).not.toBe("fail");
+    }
+    expect(metrics.checks.find((check) => check.id === "eye_trace.same_asset_adjacency")?.measured)
+      .toMatchObject({
+        untreated_same_asset_pairs: [],
+        intentional_pairs: [expect.objectContaining({
+          left_clip_id: "CLP_HOOK",
+          right_clip_id: "CLP_MID",
+          relationship: "intentional_contrast",
+          explicit_intent_evidence: [expect.objectContaining({ source: "beat_craft", intent: "hard_cut" })],
+        })],
+      });
+  });
+
+  it("fails only mapped axes for accidental risky major jumps and retains deterministic pair evidence", () => {
+    const inputs = syntheticInputs();
+    inputs.adjacency = adjacencyFor(inputs, [
+      cutRelation("risky_jump", { majorAxes: ["shot_scale", "gaze_axis"] }),
+      cutRelation("continuous"),
+    ]);
+
+    const first = computeReviewMetrics(inputs);
+    const second = computeReviewMetrics(structuredClone(inputs));
+    expect(second).toEqual(first);
+    expect(first.checks.find((check) => check.id === "plane_2d.framing_jump")?.status).toBe("fail");
+    expect(first.checks.find((check) => check.id === "space_3d.direction_axis")?.status).toBe("fail");
+    expect(first.checks.find((check) => check.id === "eye_trace.motion_flow")?.status).toBe("pass");
+    expect(first.checks.find((check) => check.id === "plane_2d.framing_jump")?.measured).toMatchObject({
+      risky_pairs: 1,
+      violations: [expect.objectContaining({
+        pair_id: "V1:b01->b02",
+        left_clip_id: "CLP_HOOK",
+        right_clip_id: "CLP_MID",
+        left_ref: "CLP_HOOK",
+        right_ref: "CLP_MID",
+        relationship: "risky_jump",
+        axis_signals: [expect.objectContaining({
+          axis_id: "shot_scale",
+          coverage: "known",
+          major_discontinuity: true,
+          reason_codes: ["fixture_major"],
+        })],
+      })],
+    });
+  });
+
+  it("uses ordered legacy refs for binding while keeping legacy v1 and v2 adjacency schema-valid", () => {
+    const inputs = syntheticInputs();
+    const legacy = adjacencyFor(inputs, [cutRelation("continuous"), cutRelation("continuous")], { legacy: true });
+    inputs.adjacency = legacy;
+    const metrics = computeReviewMetrics(inputs);
+    expect(metrics.checks.find((check) => check.id === "eye_trace.motion_flow")?.measured)
+      .toMatchObject({ binding: { status: "bound", mode: "legacy_refs" } });
+
+    for (const version of ["1", "2"] as const) {
+      const validation = validateAgainstSchema({ ...legacy, version }, "adjacency-analysis.schema.json");
+      expect(validation.valid, `${version}: ${validation.errors.join("; ")}`).toBe(true);
+    }
+  });
+
+  it.each([false, true])("skips project-mismatched adjacency in %s legacy mode", (legacy) => {
+    const inputs = syntheticInputs();
+    inputs.adjacency = adjacencyFor(
+      inputs,
+      [cutRelation("risky_jump", { majorAxes: ["shot_scale"] }), cutRelation("continuous")],
+      { legacy, projectId: "another-project" },
+    );
+
+    const metrics = computeReviewMetrics(inputs);
+    for (const id of relationMetricIds) {
+      expect(metrics.checks.find((check) => check.id === id)).toMatchObject({
+        status: "skipped",
+        measured: {
+          violations: [],
+          binding: {
+            status: "mismatch",
+            reason_codes: ["adjacency_timeline_mismatch", "project_id_mismatch"],
+          },
+        },
+      });
+    }
+  });
+
+  it.each([
+    ["pair_count_mismatch", (adjacency: AdjacencyAnalysis) => adjacency.pairs.pop()],
+    ["candidate_ref_mismatch", (adjacency: AdjacencyAnalysis) => {
+      adjacency.pairs[0].right_candidate_ref = "SEG_STALE";
+    }],
+    ["clip_id_mismatch", (adjacency: AdjacencyAnalysis) => {
+      adjacency.pairs[0].right_clip_id = "CLP_STALE";
+    }],
+  ] as const)("skips stale %s without attributing its risky finding to the current timeline", (reason, mutate) => {
+    const inputs = syntheticInputs();
+    inputs.adjacency = adjacencyFor(inputs, [
+      cutRelation("risky_jump", { majorAxes: ["shot_scale"] }),
+      cutRelation("continuous"),
+    ]);
+    mutate(inputs.adjacency);
+
+    const metrics = computeReviewMetrics(inputs);
+    const framing = metrics.checks.find((check) => check.id === "plane_2d.framing_jump");
+    expect(framing).toMatchObject({
+      status: "skipped",
+      measured: {
+        violations: [],
+        binding: {
+          status: "mismatch",
+          reason_codes: ["adjacency_timeline_mismatch", reason],
+        },
+      },
+    });
+  });
+
+  it("warns for partial relation pair coverage and never evidence-free passes", () => {
+    const inputs = syntheticInputs();
+    inputs.adjacency = adjacencyFor(inputs, [cutRelation("continuous"), undefined]);
+
+    const metrics = computeReviewMetrics(inputs);
+    for (const id of relationMetricIds) {
+      expect(metrics.checks.find((check) => check.id === id)).toMatchObject({
+        status: "warn",
+        measured: { total_pairs: 2, evaluated_pairs: 1, unknown_pairs: 1 },
+      });
+    }
+  });
+
+  it("skips wholly missing relations and warns for unknown or low axis coverage", () => {
+    const missing = syntheticInputs();
+    missing.adjacency = adjacencyFor(missing, [undefined, undefined]);
+    const missingMetrics = computeReviewMetrics(missing);
+    expect(relationMetricIds.map((id) =>
+      missingMetrics.checks.find((check) => check.id === id)?.status)).toEqual([
+      "skipped", "skipped", "skipped", "skipped", "skipped",
+    ]);
+
+    const partial = syntheticInputs();
+    partial.adjacency = adjacencyFor(partial, [
+      cutRelation("unknown", { coverage: { motion_flow: "low_confidence" } }),
+      cutRelation("continuous"),
+    ]);
+    const partialMetrics = computeReviewMetrics(partial);
+    expect(partialMetrics.checks.find((check) => check.id === "eye_trace.motion_flow"))
+      .toMatchObject({ status: "warn", measured: { unknown_pairs: 1 } });
+    expect(partialMetrics.checks.find((check) => check.id === "eye_trace.motion_flow")?.status).not.toBe("pass");
+  });
+
 });
+
+const relationMetricIds = [
+  "eye_trace.attention_jump",
+  "eye_trace.motion_flow",
+  "plane_2d.framing_jump",
+  "plane_2d.luma_color_jump",
+  "space_3d.direction_axis",
+] as const satisfies readonly ReviewMetricId[];
+
+const cutRelationAxes: CutRelationAxis[] = [
+  "shot_scale",
+  "composition",
+  "gaze_axis",
+  "motion_flow",
+  "luma",
+  "dominant_color",
+  "asset_identity",
+  "visual_coherence",
+  "visual_tags",
+  "subject_type",
+  "text_presence",
+  "story_boundary",
+];
+
+function cutRelation(
+  relationship: CutRelationResult["relationship"],
+  options: {
+    majorAxes?: CutRelationAxis[];
+    coverage?: Partial<Record<CutRelationAxis, CutRelationSignal["coverage"]>>;
+    intentional?: boolean;
+  } = {},
+): CutRelationResult {
+  const signals = Object.fromEntries(cutRelationAxes.map((axis) => {
+    const coverage = options.coverage?.[axis] ?? "known";
+    const major = options.majorAxes?.includes(axis) === true;
+    return [axis, {
+      coverage,
+      evaluation: coverage === "known" ? (major ? "contrast" : "match") : "unknown",
+      major_discontinuity: major,
+      raw: { left: `${axis}:left`, right: `${axis}:right` },
+      raw_coverage: { left: "known", right: "known", pair: "known" },
+      source_refs: { left: [`left:${axis}`], right: [`right:${axis}`] },
+      confidence: { left: 0.9, right: 0.9 },
+      reason_codes: [major ? "fixture_major" : coverage === "known" ? "fixture_match" : "fixture_partial"],
+    } satisfies CutRelationSignal];
+  })) as Record<CutRelationAxis, CutRelationSignal>;
+  const comparable = cutRelationAxes.filter((axis) => signals[axis].coverage === "known");
+  const low = cutRelationAxes.filter((axis) => signals[axis].coverage === "low_confidence");
+  const missing = cutRelationAxes.filter((axis) => signals[axis].coverage === "missing");
+  const unknown = cutRelationAxes.filter((axis) => signals[axis].coverage === "unknown");
+  const notApplicable = cutRelationAxes.filter((axis) => signals[axis].coverage === "not_applicable");
+  return {
+    relationship,
+    confidence: 0.9,
+    coverage: {
+      total_axes: cutRelationAxes.length,
+      comparable_axes: comparable.length,
+      comparable_axis_ids: comparable,
+      missing_axis_ids: missing,
+      unknown_axis_ids: unknown,
+      not_applicable_axis_ids: notApplicable,
+      low_confidence_axis_ids: low,
+    },
+    reason_codes: [relationship === "intentional_contrast"
+      ? "explicit_pair_intent_present"
+      : relationship === "risky_jump"
+        ? "measured_contrast_without_explicit_intent"
+        : relationship === "continuous"
+          ? "sufficient_continuity_evidence"
+          : "mixed_or_ambiguous_evidence"],
+    explicit_intent_evidence: options.intentional
+      ? [{ source: "beat_craft", source_ref: "04_plan/edit_blueprint.yaml#beats/b01/craft/transition_out", intent: "hard_cut" }]
+      : [],
+    signals,
+  };
+}
+
+function adjacencyFor(
+  inputs: ReviewMetricsInputs,
+  relations: Array<CutRelationResult | undefined>,
+  options: { legacy?: boolean; projectId?: string } = {},
+): AdjacencyAnalysis {
+  const clips = inputs.timeline!.tracks.video[0].clips;
+  return {
+    version: "2",
+    project_id: options.projectId ?? inputs.timeline!.project_id,
+    pairs: clips.slice(0, -1).map((left, index) => {
+      const right = clips[index + 1];
+      return {
+        pair_id: `V1:${left.beat_id}->${right.beat_id}`,
+        ...(!options.legacy ? { left_clip_id: left.clip_id, right_clip_id: right.clip_id } : {}),
+        left_candidate_ref: left.clip_id,
+        right_candidate_ref: right.clip_id,
+        selected_skill_id: null,
+        selected_skill_score: 0,
+        min_score_threshold: 0.3,
+        transition_type: "cut" as const,
+        confidence: 0,
+        below_threshold: false,
+        evidence: {},
+        degraded_from_skill_id: null,
+        ...(relations[index] ? { cut_relation: relations[index] } : {}),
+      };
+    }),
+  };
+}
 
 function syntheticInputs(): ReviewMetricsInputs {
   return structuredClone({

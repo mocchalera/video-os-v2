@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BriefAlignmentAxis, BriefAlignmentReport, StageResult } from "../runtime/eval/brief-alignment-types.js";
 import type { MarlinQAReport } from "../runtime/eval/marlin-qa-types.js";
+import type { ReviewMetricCheck, ReviewMetricsArtifact } from "../runtime/review/metrics.js";
 import {
   detectIssues,
   type Timeline,
@@ -115,6 +116,29 @@ function briefReport(overrides: Partial<Record<BriefAlignmentAxis, { score: numb
   };
 }
 
+function reviewMetrics(checks: ReviewMetricCheck[]): ReviewMetricsArtifact {
+  const zero = { pass: 0, warn: 0, fail: 0, skipped: 0 };
+  return {
+    version: "2",
+    project_id: "qa-fixture",
+    timeline_version: "1",
+    summary: {
+      total_checks: checks.length,
+      by_status: { ...zero },
+      by_tier: {
+        emotion: { ...zero },
+        story: { ...zero },
+        rhythm: { ...zero },
+        eye_trace: { ...zero },
+        plane_2d: { ...zero },
+        space_3d: { ...zero },
+        audio: { ...zero },
+      },
+    },
+    checks,
+  };
+}
+
 describe("detectIssues", () => {
   it("maps camera_shake to a quality issue on the correct clip", () => {
     const issues = detectIssues(
@@ -218,6 +242,135 @@ describe("detectIssues", () => {
       briefReport(),
       timeline([{ clip_id: "CLP_OK", segment_id: "SEG_OK", start: 0, duration: 72 }]),
     )).toEqual([]);
+  });
+
+  it("keeps the legacy three-argument detectIssues call compatible", () => {
+    const currentTimeline = timeline([{ clip_id: "CLP_OK", segment_id: "SEG_OK", start: 0, duration: 72 }]);
+    expect(() => detectIssues(marlinReport(), briefReport(), currentTimeline)).not.toThrow();
+  });
+
+  it("maps a risky review metric finding to the exact adjacent pair as non-fixable advisory", () => {
+    const currentTimeline = timeline([
+      { clip_id: "CLP_A", segment_id: "SEG_A", start: 0, duration: 96, beat_id: "b1" },
+      { clip_id: "CLP_B", segment_id: "SEG_B", start: 96, duration: 96, beat_id: "b2" },
+    ]);
+    const metrics = reviewMetrics([{
+      id: "plane_2d.framing_jump",
+      tier: "plane_2d",
+      status: "fail",
+      measured: {
+        violations: [{
+          pair_id: "V1:b1->b2",
+          left_clip_id: "CLP_A",
+          right_clip_id: "CLP_B",
+          relationship: "risky_jump",
+          outcome: "violation",
+          description: "Framing jumps across the cut.",
+        }],
+        warnings: [],
+      },
+      threshold: { advisory: true },
+      evidence: ["fixture"],
+    }]);
+
+    const issues = detectIssues(marlinReport(), briefReport(), currentTimeline, metrics);
+    expect(issues).toEqual([
+      expect.objectContaining({
+        type: "continuity",
+        timestamp_sec: 4,
+        clip_id: "CLP_B",
+        beat_id: "b2",
+        fixable: false,
+        source: "review_metrics",
+        source_category: "plane_2d.framing_jump",
+        adjacent_clip_ids: { before: "CLP_A", after: "CLP_B" },
+        non_fixable_reason: expect.stringContaining("before profile calibration"),
+      }),
+    ]);
+  });
+
+  it("maps the existing same-asset review finding through the same advisory QA path", () => {
+    const currentTimeline = timeline([
+      { clip_id: "CLP_A", segment_id: "SEG_A", start: 0, duration: 96, beat_id: "b1" },
+      { clip_id: "CLP_B", segment_id: "SEG_B", start: 96, duration: 96, beat_id: "b2" },
+    ]);
+    const metrics = reviewMetrics([{
+      id: "eye_trace.same_asset_adjacency",
+      tier: "eye_trace",
+      status: "fail",
+      measured: {
+        violations: [{
+          pair_id: "V1:b1->b2",
+          left_clip_id: "CLP_A",
+          right_clip_id: "CLP_B",
+          relationship: "risky_jump",
+          description: "Untreated same-asset adjacency.",
+        }],
+        warnings: [],
+      },
+      threshold: { advisory: true },
+      evidence: ["fixture"],
+    }]);
+
+    expect(detectIssues(marlinReport(), briefReport(), currentTimeline, metrics)).toEqual([
+      expect.objectContaining({
+        source: "review_metrics",
+        source_category: "eye_trace.same_asset_adjacency",
+        fixable: false,
+        adjacent_clip_ids: { before: "CLP_A", after: "CLP_B" },
+      }),
+    ]);
+  });
+
+  it("does not create review metric issues for intentional, skipped, or stale pair findings", () => {
+    const currentTimeline = timeline([
+      { clip_id: "CLP_A", segment_id: "SEG_A", start: 0, duration: 96 },
+      { clip_id: "CLP_B", segment_id: "SEG_B", start: 96, duration: 96 },
+    ]);
+    const metrics = reviewMetrics([
+      {
+        id: "eye_trace.attention_jump",
+        tier: "eye_trace",
+        status: "warn",
+        measured: {
+          violations: [],
+          warnings: [{
+            left_clip_id: "CLP_A",
+            right_clip_id: "CLP_B",
+            relationship: "intentional_contrast",
+            outcome: "intentional",
+          }],
+        },
+        threshold: { advisory: true },
+        evidence: ["fixture"],
+      },
+      {
+        id: "eye_trace.motion_flow",
+        tier: "eye_trace",
+        status: "skipped",
+        measured: { violations: [], warnings: [] },
+        threshold: { advisory: true },
+        evidence: ["fixture"],
+      },
+      {
+        id: "plane_2d.framing_jump",
+        tier: "plane_2d",
+        status: "fail",
+        measured: {
+          violations: [{
+            left_clip_id: "CLP_A",
+            right_clip_id: "CLP_STALE",
+            relationship: "risky_jump",
+            outcome: "violation",
+          }],
+          warnings: [],
+        },
+        threshold: { advisory: true },
+        evidence: ["fixture"],
+      },
+    ]);
+
+    expect(detectIssues(marlinReport(), briefReport(), currentTimeline, metrics)).toEqual([]);
   });
 
   it("treats legacy skipped Marlin placeholders as blocked visual QA", () => {

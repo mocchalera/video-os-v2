@@ -59,6 +59,13 @@ import {
   loadProjectCaptionGlossary,
   mergeGlossarySources,
 } from "../caption/project-glossary.js";
+import {
+  applyCaptionSemanticTiming,
+  type CaptionTimingReport,
+  type RevealClipContext,
+  type RevealTranscriptItem,
+} from "../caption/semantic-timing.js";
+import { planSocialHookOverlay } from "../caption/social-finishing.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -68,6 +75,7 @@ export interface CaptionCommandResult {
   captionSource?: CaptionSource;
   captionDraft?: CaptionDraft;
   editorialReport?: EditorialReport;
+  captionTimingReport?: CaptionTimingReport;
   /** @deprecated Use approveCaptions() for approval. Always undefined from captionCommand(). */
   captionApproval?: CaptionApproval;
   /** @deprecated Use approveCaptions() for timeline projection. Always undefined from captionCommand(). */
@@ -120,7 +128,7 @@ export function captionCommand(
   projectDir: string,
   options?: CaptionCommandOptions,
 ): CaptionCommandResult | Promise<CaptionCommandResult> {
-  const allowedStates: ProjectState[] = ["approved", "critique_ready"];
+  const allowedStates: ProjectState[] = ["approved", "critique_ready", "packaged"];
   const ctx = initCommand(projectDir, "caption", allowedStates);
   if (isCommandError(ctx)) {
     return { success: false, error: ctx };
@@ -143,6 +151,10 @@ export function captionCommand(
   const blueprint = parseYaml(
     fs.readFileSync(blueprintPath, "utf-8"),
   ) as { caption_policy?: CaptionPolicy };
+  const briefPath = path.join(absDir, "01_intent/creative_brief.yaml");
+  const brief = fs.existsSync(briefPath)
+    ? parseYaml(fs.readFileSync(briefPath, "utf-8"))
+    : {};
 
   const captionPolicy = blueprint.caption_policy;
   if (!captionPolicy) {
@@ -203,10 +215,8 @@ export function captionCommand(
       excludeSpeakers: options?.excludeSpeakers,
       removeFillers: options?.removeFillers,
       autoLineBreak: true,
-      maxCharsPerCaption: captionPolicy.styling_class === "longform-event"
-        ? 30
-        : undefined,
-      maxCps: captionPolicy.styling_class === "longform-event" ? 15 : undefined,
+      maxCharsPerCaption: resolvedCaptionMaxChars(captionPolicy),
+      maxCps: resolvedCaptionMaxCps(captionPolicy),
       minCaptionDurationMs: captionPolicy.styling_class === "longform-event" ? 400 : undefined,
       operatorCorrections: glossarySources.operatorCorrections,
       protectedTerms: buildGlossary(glossarySources),
@@ -214,8 +224,15 @@ export function captionCommand(
   );
 
   // 5. Add text overlays if provided
-  if (options?.overlayInputs && options.overlayInputs.length > 0) {
-    captionSource.text_overlays = buildTextOverlays(options.overlayInputs);
+  const overlayInputs = planSocialHookOverlay({
+    brief,
+    overlays: options?.overlayInputs,
+    fps: timeline.sequence.fps_num / timeline.sequence.fps_den,
+    width: timeline.sequence.width,
+    height: timeline.sequence.height,
+  });
+  if (overlayInputs.length > 0) {
+    captionSource.text_overlays = buildTextOverlays(overlayInputs);
   }
 
   // 6. Write caption_source.json
@@ -239,14 +256,27 @@ export function captionCommand(
   }
 
   // Sync path: no editorial, build draft with timing + readiness gate
-  const draft = buildPassthroughDraft(captionSource, captionPolicy, timeline, transcripts);
+  const { draft, timingReport } = buildPassthroughDraft(
+    captionSource,
+    captionPolicy,
+    timeline,
+    transcripts,
+  );
   fs.writeFileSync(
     path.join(packageDir, "caption_draft.json"),
     JSON.stringify(draft, null, 2),
     "utf-8",
   );
 
-  return { success: true, captionSource, captionDraft: draft };
+  if (timingReport) {
+    fs.writeFileSync(
+      path.join(packageDir, "caption_timing_report.json"),
+      JSON.stringify(timingReport, null, 2),
+      "utf-8",
+    );
+  }
+
+  return { success: true, captionSource, captionDraft: draft, captionTimingReport: timingReport };
 }
 
 // ── Separate approval command (human-only) ──────────────────────
@@ -259,7 +289,7 @@ export function approveCaptions(
   projectDir: string,
   options: ApproveCaptionsOptions,
 ): ApproveCaptionsResult {
-  const allowedStates: ProjectState[] = ["approved", "critique_ready"];
+  const allowedStates: ProjectState[] = ["approved", "critique_ready", "packaged"];
   const ctx = initCommand(projectDir, "caption-approve", allowedStates);
   if (isCommandError(ctx)) {
     return { success: false, error: ctx };
@@ -323,6 +353,7 @@ export function approveCaptions(
       source: entry.source,
       styling_class: entry.styling_class,
       metrics: entry.metrics,
+      ...(entry.reveal_timing ? { reveal_timing: entry.reveal_timing } : {}),
     })),
   };
 
@@ -347,9 +378,11 @@ export function approveCaptions(
     };
   }
 
-  // Project captions into timeline (if approved state)
+  // Project captions into the canonical timeline even after packaging. This
+  // invalidates downstream receipts naturally and avoids moving manifests out
+  // of the way merely to make a caption-only correction.
   let timelineUpdated = false;
-  if (doc.current_state === "approved") {
+  if (doc.current_state === "approved" || doc.current_state === "packaged") {
     const timelinePath = path.join(absDir, "05_timeline/timeline.json");
     if (fs.existsSync(timelinePath)) {
       const timeline: TimelineIR = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
@@ -390,14 +423,20 @@ async function runEditorialAndFinishDraft(
 
   // Apply timing phase to editorial draft
   const timedDraft = applyTimingPhase(draft, captionPolicy, timeline, transcripts);
+  const timingResult = applySemanticTimingPhase(timedDraft, captionPolicy, timeline, transcripts);
 
   // Apply readiness gate
-  applyReadinessGate(timedDraft, captionPolicy);
+  applyReadinessGate(
+    timingResult.draft,
+    captionPolicy,
+    timingResult.report,
+    timeline.sequence.fps_num / timeline.sequence.fps_den,
+  );
 
   // Write draft and report
   fs.writeFileSync(
     path.join(packageDir, "caption_draft.json"),
-    JSON.stringify(timedDraft, null, 2),
+    JSON.stringify(timingResult.draft, null, 2),
     "utf-8",
   );
   fs.writeFileSync(
@@ -405,12 +444,20 @@ async function runEditorialAndFinishDraft(
     JSON.stringify(report, null, 2),
     "utf-8",
   );
+  if (timingResult.report) {
+    fs.writeFileSync(
+      path.join(packageDir, "caption_timing_report.json"),
+      JSON.stringify(timingResult.report, null, 2),
+      "utf-8",
+    );
+  }
 
   return {
     success: true,
     captionSource,
-    captionDraft: timedDraft,
+    captionDraft: timingResult.draft,
     editorialReport: report,
+    captionTimingReport: timingResult.report,
   };
 }
 
@@ -510,10 +557,90 @@ function applyTimingPhase(
   };
 }
 
+// ── Semantic speech timing phase ───────────────────────────────
+
+function applySemanticTimingPhase(
+  draft: CaptionDraft,
+  captionPolicy: CaptionPolicy,
+  timeline: TimelineIR,
+  transcripts: Map<string, TranscriptArtifact>,
+): { draft: CaptionDraft; report?: CaptionTimingReport } {
+  const semanticTiming = captionPolicy.semantic_timing
+    ?? { mode: captionPolicy.source === "transcript" ? "speech_sync" as const : "off" as const };
+  if (semanticTiming.mode === "off") {
+    return { draft };
+  }
+
+  const transcriptItems = new Map<string, RevealTranscriptItem>();
+  for (const transcript of transcripts.values()) {
+    for (const item of transcript.items ?? []) {
+      transcriptItems.set(item.item_id, {
+        item_id: item.item_id,
+        start_us: item.start_us,
+        end_us: item.end_us,
+        text: item.text,
+        words: item.words,
+        word_timing_mode: item.word_timing_mode,
+      });
+    }
+  }
+
+  const audioTracks = timeline.tracks?.audio ?? [];
+  const preferredTracks = audioTracks.some((track) => track.track_id === "A1")
+    ? audioTracks.filter((track) => track.track_id === "A1")
+    : audioTracks;
+  const clips: RevealClipContext[] = preferredTracks.flatMap((track) =>
+    (track.clips ?? []).map((clip) => ({
+      segment_id: clip.segment_id,
+      asset_id: clip.asset_id,
+      src_in_us: clip.src_in_us ?? 0,
+      src_out_us: clip.src_out_us ?? (clip.src_in_us ?? 0) + 1_000_000,
+      timeline_in_frame: clip.timeline_in_frame,
+      timeline_duration_frames: clip.timeline_duration_frames,
+    }))
+  );
+  const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
+  const result = applyCaptionSemanticTiming({
+    captions: draft.speech_captions,
+    policy: semanticTiming,
+    transcriptItems,
+    clips,
+    fps,
+  });
+  return {
+    draft: { ...draft, speech_captions: result.captions },
+    report: result.report,
+  };
+}
+
 // ── Readiness Gate ───────────────────────────────────────────────
 
 /** Minimum timing confidence for ready_for_human_approval */
 const MIN_TIMING_CONFIDENCE = 0.75;
+
+function resolvedCaptionMaxCps(captionPolicy: CaptionPolicy): number | undefined {
+  if (captionPolicy.styling_class === "longform-event") return 15;
+  if (
+    /(?:sns-vertical|speaker-separated.*outline|outline.*speaker-separated|social-short)/i.test(
+      captionPolicy.styling_class,
+    )
+  ) {
+    return 16;
+  }
+  return undefined;
+}
+
+function resolvedCaptionMaxChars(captionPolicy: CaptionPolicy): number | undefined {
+  if (captionPolicy.styling_class === "longform-event") return 30;
+  if (
+    /(?:sns-vertical|speaker-separated.*outline|social-short)/i.test(
+      captionPolicy.styling_class,
+    )
+  ) {
+    return 26;
+  }
+  return undefined;
+}
 
 /**
  * Apply readiness gate: checks timing, layout, and density.
@@ -522,14 +649,21 @@ const MIN_TIMING_CONFIDENCE = 0.75;
 function applyReadinessGate(
   draft: CaptionDraft,
   captionPolicy: CaptionPolicy,
+  timingReport?: CaptionTimingReport,
+  fps = 24,
 ): void {
   const language = captionPolicy.language;
-  const baseLayout = getLayoutPolicy(language);
-  const layout = captionPolicy.styling_class === "longform-event"
-    ? { ...baseLayout, maxCps: 15 }
-    : baseLayout;
+  const baseLayout = getLayoutPolicy(language, captionPolicy.styling_class);
+  const styleMaxCps = resolvedCaptionMaxCps(captionPolicy);
+  const layout = styleMaxCps === undefined
+    ? baseLayout
+    : { ...baseLayout, maxCps: styleMaxCps };
 
   let hasFailure = false;
+
+  if (timingReport?.issues.some((issue) => issue.severity === "block")) {
+    hasFailure = true;
+  }
 
   for (const entry of draft.speech_captions) {
     // Check timing confidence
@@ -538,7 +672,7 @@ function applyReadinessGate(
     }
 
     // Check CPS (checkCps takes durationMs)
-    const durationMs = (entry.timeline_duration_frames / 24) * 1000; // approximate
+    const durationMs = (entry.timeline_duration_frames / fps) * 1000;
     if (durationMs > 0) {
       const cpsResult = checkCps(entry.text, durationMs, layout);
       if (!cpsResult.withinLimit) {
@@ -570,7 +704,7 @@ function buildPassthroughDraft(
   captionPolicy: CaptionPolicy,
   timeline: TimelineIR,
   transcripts: Map<string, TranscriptArtifact>,
-): CaptionDraft {
+): { draft: CaptionDraft; timingReport?: CaptionTimingReport } {
   const draft: CaptionDraft = {
     version: source.version,
     project_id: source.project_id,
@@ -593,9 +727,15 @@ function buildPassthroughDraft(
 
   // Apply timing phase
   const timedDraft = applyTimingPhase(draft, captionPolicy, timeline, transcripts);
+  const timingResult = applySemanticTimingPhase(timedDraft, captionPolicy, timeline, transcripts);
 
   // Apply readiness gate
-  applyReadinessGate(timedDraft, captionPolicy);
+  applyReadinessGate(
+    timingResult.draft,
+    captionPolicy,
+    timingResult.report,
+    timeline.sequence.fps_num / timeline.sequence.fps_den,
+  );
 
-  return timedDraft;
+  return { draft: timingResult.draft, timingReport: timingResult.report };
 }

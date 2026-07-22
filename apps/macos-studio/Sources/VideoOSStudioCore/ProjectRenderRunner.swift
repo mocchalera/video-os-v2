@@ -25,9 +25,11 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
     public let hasBlueprint: Bool
     public let hasTimeline: Bool
     public let hasReview: Bool
-    public let currentState: String?
-    public let sourceOfTruthDecision: String?
+    public let preflightStatus: ProjectPackagePreflightStatus
     public let hasPackageFinalVideo: Bool
+
+    public var currentState: String? { preflightStatus.currentState }
+    public var sourceOfTruthDecision: String? { preflightStatus.sourceOfTruth }
 
     public var canRun: Bool {
         FileManager.default.fileExists(atPath: scriptURL.path)
@@ -35,7 +37,7 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
             && hasBlueprint
             && hasTimeline
             && hasReview
-            && stateIsEligible
+            && preflightStatus.canPackage
             && nleFinalIsAvailable
             && assemblyIsReadable
             && suppliedFinalIsReadable
@@ -57,8 +59,8 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
         if !hasReview {
             return "missing review"
         }
-        if !stateIsEligible {
-            return "state must be approved or packaged"
+        if let preflightFailure = preflightStatus.failureLabel {
+            return preflightFailure
         }
         if !nleFinalIsAvailable {
             return "supplied final missing"
@@ -85,11 +87,6 @@ public struct ProjectRenderRunPlan: Equatable, Sendable {
 
     public var commandLine: String {
         commandArguments.map(shellQuote).joined(separator: " ")
-    }
-
-    private var stateIsEligible: Bool {
-        guard let currentState else { return false }
-        return ["approved", "packaged"].contains(currentState)
     }
 
     private var assemblyIsReadable: Bool {
@@ -141,7 +138,9 @@ public struct ProjectRenderRunResult: Equatable, Sendable {
     public let status: ProjectRenderPackageStatus
 
     public var succeeded: Bool {
-        exitCode == 0 && status.qaReportExists && status.packageManifestExists
+        exitCode == 0
+            && status.packageContractMatches
+            && status.verificationStatus.ready
     }
 }
 
@@ -160,9 +159,11 @@ public enum ProjectRenderRunPlanner {
     public static func plan(
         repositoryRoot: URL,
         projectURL: URL,
-        options: ProjectRenderRunOptions = ProjectRenderRunOptions()
+        options: ProjectRenderRunOptions = ProjectRenderRunOptions(),
+        preflightStatus: ProjectPackagePreflightStatus? = nil
     ) -> ProjectRenderRunPlan {
-        let sourceOfTruth = sourceOfTruthDecision(projectURL: projectURL)
+        let resolvedPreflight = preflightStatus ?? ProjectPackagePreflightRunner.pending()
+        let sourceOfTruth = resolvedPreflight.sourceOfTruth
         let packageFinalVideoURL = projectURL.appendingPathComponent("07_package/video/final.mp4")
         var resolvedOptions = options
         if sourceOfTruth == "nle_finishing", resolvedOptions.suppliedFinalURL == nil {
@@ -181,62 +182,74 @@ public enum ProjectRenderRunPlanner {
             hasBlueprint: FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("04_plan/edit_blueprint.yaml").path),
             hasTimeline: FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("05_timeline/timeline.json").path),
             hasReview: FileManager.default.fileExists(atPath: projectURL.appendingPathComponent("06_review/review_report.yaml").path),
-            currentState: currentState(projectURL: projectURL),
-            sourceOfTruthDecision: sourceOfTruth,
+            preflightStatus: resolvedPreflight,
             hasPackageFinalVideo: FileManager.default.fileExists(atPath: packageFinalVideoURL.path)
         )
     }
 
-    private static func currentState(projectURL: URL) -> String? {
-        guard let text = try? String(contentsOf: projectURL.appendingPathComponent("project_state.yaml"), encoding: .utf8) else {
-            return nil
-        }
-        for rawLine in text.split(separator: "\n").map(String.init) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.hasPrefix("current_state:") else { continue }
-            return String(line.dropFirst("current_state:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return nil
-    }
-
-    private static func sourceOfTruthDecision(projectURL: URL) -> String? {
-        guard let text = try? String(contentsOf: projectURL.appendingPathComponent("project_state.yaml"), encoding: .utf8) else {
-            return nil
-        }
-        for rawLine in text.split(separator: "\n").map(String.init) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.hasPrefix("source_of_truth_decision:") else { continue }
-            return String(line.dropFirst("source_of_truth_decision:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return nil
-    }
 }
 
 public enum ProjectRenderRunner {
     public typealias Runner = @Sendable (_ workingDirectory: URL, _ arguments: [String]) throws -> ProjectInitializationProcessResult
+    public typealias PackageVerifier = @Sendable (
+        _ repositoryRoot: URL,
+        _ projectURL: URL
+    ) -> ProjectPackageVerificationStatus
 
     public static func run(
         plan: ProjectRenderRunPlan
     ) throws -> ProjectRenderRunResult {
-        try run(plan: plan, runner: { workingDirectory, arguments in
-            try runProcess(workingDirectory: workingDirectory, arguments: arguments)
-        })
+        try run(
+            plan: plan,
+            packageVerifier: { repositoryRoot, projectURL in
+                ProjectPackageVerificationRunner.status(
+                    repositoryRoot: repositoryRoot,
+                    projectURL: projectURL
+                )
+            },
+            runner: { workingDirectory, arguments in
+                try runProcess(workingDirectory: workingDirectory, arguments: arguments)
+            }
+        )
     }
 
     public static func run(
         plan: ProjectRenderRunPlan,
         runner: Runner
     ) throws -> ProjectRenderRunResult {
+        try run(
+            plan: plan,
+            packageVerifier: { repositoryRoot, projectURL in
+                ProjectPackageVerificationRunner.status(
+                    repositoryRoot: repositoryRoot,
+                    projectURL: projectURL
+                )
+            },
+            runner: runner
+        )
+    }
+
+    public static func run(
+        plan: ProjectRenderRunPlan,
+        packageVerifier: PackageVerifier,
+        runner: Runner
+    ) throws -> ProjectRenderRunResult {
         guard plan.canRun else {
             throw ProjectRenderRunError.notReady(plan.readinessLabel)
         }
         let result = try runner(plan.repositoryRoot, plan.commandArguments)
+        let verification = packageVerifier(plan.repositoryRoot, plan.projectURL)
         return ProjectRenderRunResult(
             plan: plan,
             exitCode: result.status,
             stdout: result.stdout,
             stderr: result.stderr,
-            status: ProjectRenderPackageStatusReader.status(projectURL: plan.projectURL)
+            status: ProjectRenderPackageStatusReader.status(
+                projectURL: plan.projectURL,
+                expectedProjectID: plan.preflightStatus.projectID,
+                expectedSourceOfTruth: plan.preflightStatus.sourceOfTruth,
+                verificationStatus: verification
+            )
         )
     }
 

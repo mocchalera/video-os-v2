@@ -1,4 +1,8 @@
 import type { TimelineIR } from "../../compiler/types.js";
+import {
+  DEFAULT_VIDEO_WEB_FONT_ASSET,
+  type VideoWebFontAsset,
+} from "../../../editor/shared/font-contract.js";
 
 export const REMOTION_COMPOSITION_ID = "vos-timeline";
 
@@ -11,12 +15,16 @@ export interface RemotionCompositionProps {
   defaultProps: {
     timeline: TimelineIR;
     sourceMap: Record<string, string>;
+    stillAssetIds: string[];
+    fontAsset: VideoWebFontAsset;
   };
 }
 
 export function timelineToCompositionProps(
   timeline: TimelineIR,
   sourceMap: Record<string, string>,
+  fontAsset: VideoWebFontAsset = DEFAULT_VIDEO_WEB_FONT_ASSET,
+  stillAssetIds: string[] = [],
 ): RemotionCompositionProps {
   let durationInFrames = 0;
 
@@ -38,7 +46,8 @@ export function timelineToCompositionProps(
     defaultProps: {
       timeline,
       sourceMap,
+      stillAssetIds,
+      fontAsset,
     },
   };
 }
-

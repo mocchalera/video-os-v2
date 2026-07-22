@@ -14,7 +14,7 @@
  * Text authority: editorial does NOT change timing.
  */
 
-import type { SpeechCaption, CaptionSource } from "./segmenter.js";
+import type { SpeechCaption, CaptionSource, CaptionRevealRole } from "./segmenter.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,6 +59,22 @@ export interface TimingMetadata {
   timelineDurationFrames: number;
 }
 
+export interface RevealTimingMetadata {
+  anchor_id: string;
+  role: CaptionRevealRole;
+  anchor_text: string;
+  status: "protected" | "setup_only" | "unresolved";
+  source:
+    | "word_timing"
+    | "transcript_item_onset"
+    | "explicit_source_time"
+    | "explicit_timeline_frame"
+    | "unresolved";
+  anchor_frame?: number;
+  audio_first_frames: number;
+  original_timeline_in_frame: number;
+}
+
 export interface CaptionDraftEntry {
   caption_id: string;
   asset_id: string;
@@ -74,6 +90,8 @@ export interface CaptionDraftEntry {
   editorial?: EditorialMetadata;
   /** Word-level timing remap metadata */
   timing?: TimingMetadata;
+  /** Semantic reveal protection metadata. */
+  reveal_timing?: RevealTimingMetadata;
 }
 
 export interface CaptionDraft {

@@ -115,7 +115,7 @@ describe("ffmpeg assembler", () => {
 
     const trimCall = calls.find((call) =>
       call.args.includes("-vf") &&
-      call.args.includes(buildAspectRatioFitFilter(1920, 1080)) &&
+      call.args.some((arg) => arg.startsWith(buildAspectRatioFitFilter(1920, 1080))) &&
       call.args.some((arg) => arg.endsWith("video-segment-0001.mp4"))
     );
     expect(trimCall).toBeDefined();
@@ -150,6 +150,64 @@ describe("ffmpeg assembler", () => {
 
     expect(result.outputPath).toBe(path.join(projectDir, "05_timeline", "assembly.mp4"));
     expect(fs.existsSync(result.outputPath)).toBe(true);
+  });
+
+  it("runs measured dialogue-clean finishing and caps the final mux to timeline duration", async () => {
+    const projectDir = createTempDemoProject();
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+      metadata?: Record<string, unknown>;
+    };
+    timeline.metadata = {
+      ...(timeline.metadata ?? {}),
+      audio_finish: { preset: "dialogue-clean" },
+    };
+    fs.writeFileSync(timelinePath, JSON.stringify(timeline), "utf-8");
+
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const execWithMeasurement: ExecFileLike = (cmd, args, _opts, cb) => {
+      calls.push({ cmd, args: [...args] });
+      const outputPath = args[args.length - 1];
+      if (typeof outputPath === "string" && !outputPath.startsWith("-")) {
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, "stub-output", "utf-8");
+      }
+      const isMeasurement = args.some((arg) => arg.includes("print_format=json"));
+      cb(null, "", isMeasurement ? `
+        {
+          "input_i": "-33.37",
+          "input_tp": "-13.77",
+          "input_lra": "6.90",
+          "input_thresh": "-44.07",
+          "target_offset": "-0.27"
+        }
+      ` : "");
+    };
+
+    await assembleTimelineToMp4({
+      projectDir,
+      cleanupTemp: false,
+      workingDirRoot: projectDir,
+      execFileImpl: execWithMeasurement,
+    });
+
+    const measurementCall = calls.find((call) =>
+      call.args.some((arg) => arg.includes("print_format=json"))
+    );
+    expect(measurementCall).toBeDefined();
+    expect(measurementCall!.args.join(" ")).toContain("afftdn=nr=8:nf=-50:tn=1");
+
+    const muxCall = calls.find((call) =>
+      call.args.some((arg) => arg.endsWith("assembly.mp4")) &&
+      call.args.includes("-c:v") &&
+      call.args.includes("copy")
+    );
+    expect(muxCall).toBeDefined();
+    const audioFilter = muxCall!.args[muxCall!.args.indexOf("-af") + 1];
+    expect(audioFilter).toContain("measured_I=-33.37");
+    expect(audioFilter).toContain("TP=-1.8");
+    expect(muxCall!.args).toContain("-shortest");
+    expect(muxCall!.args).toContain("-t");
   });
 
   it("renders BGM clips with loop-to-picture duration and an ending fade", () => {
@@ -213,6 +271,26 @@ describe("ffmpeg assembler", () => {
     );
   });
 
+  it("normalizes VFR source clips to the authored timeline duration", () => {
+    const args = buildVideoTrimArgs(
+      "/tmp/source.mov",
+      "/tmp/video.mp4",
+      14.32,
+      53.732249,
+      1920,
+      1080,
+      24,
+      undefined,
+      undefined,
+      946 / 24,
+    );
+    const filter = args[args.indexOf("-vf") + 1];
+
+    expect(filter).toContain("tpad=stop_mode=clone:stop_duration=1");
+    expect(filter).toContain("trim=duration=39.416667");
+    expect(args[args.indexOf("-t") + 1]).toBe("39.416667");
+  });
+
   it("masters final audio with loudnorm during mux", () => {
     const args = buildFinalAssemblyMuxArgs(
       "/tmp/video.mp4",
@@ -226,6 +304,19 @@ describe("ffmpeg assembler", () => {
     expect(args[args.indexOf("-ar") + 1]).toBe("48000");
     expect(args).toContain("-c:a");
     expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
+  });
+
+  it("accepts a measured finishing filter and explicit timeline duration", () => {
+    const args = buildFinalAssemblyMuxArgs(
+      "/tmp/video.mp4",
+      "/tmp/audio.m4a",
+      "/tmp/final.mp4",
+      { audioFilter: "custom-dialogue-filter", durationSec: 12.5 },
+    );
+
+    expect(args[args.indexOf("-af") + 1]).toBe("custom-dialogue-filter");
+    expect(args[args.indexOf("-t") + 1]).toBe("12.5");
+    expect(args).toContain("-shortest");
   });
 
   it("throws a clear error when ffmpeg is not available", async () => {

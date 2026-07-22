@@ -11,7 +11,11 @@ struct ViewerPanel: View {
     var audioMedia: ProjectMediaReference?
     var nextMedia: ProjectMediaReference?
     var transitionPreview: ViewerTransitionPreview?
+    var captionText: String?
     var monitorSnapshot: TimelineMonitorSnapshot?
+    var interviewVisualTransformPreview: ReviewVisualTransform?
+    var sequenceWidth: Int
+    var sequenceHeight: Int
     var mediaPreviewSummary: ProjectMediaPreviewSummary
     var timelinePreviewDiagnostics: ProjectTimelinePreviewDiagnostics
     var playheadLabel: String?
@@ -79,6 +83,10 @@ struct ViewerPanel: View {
                 audioMedia: audioMedia,
                 nextMedia: nextMedia,
                 transitionPreview: transitionPreview,
+                captionText: captionText,
+                interviewVisualTransformPreview: interviewVisualTransformPreview,
+                sequenceWidth: sequenceWidth,
+                sequenceHeight: sequenceHeight,
                 mediaPreviewSummary: mediaPreviewSummary,
                 isTimelineFallbackPlayback: isTimelineFallbackPlayback,
                 isPlaying: isPlaying,
@@ -655,6 +663,10 @@ struct ViewerSurface: View {
     var audioMedia: ProjectMediaReference?
     var nextMedia: ProjectMediaReference?
     var transitionPreview: ViewerTransitionPreview?
+    var captionText: String?
+    var interviewVisualTransformPreview: ReviewVisualTransform?
+    var sequenceWidth: Int
+    var sequenceHeight: Int
     var mediaPreviewSummary: ProjectMediaPreviewSummary
     var isTimelineFallbackPlayback: Bool
     var isPlaying: Bool
@@ -672,14 +684,22 @@ struct ViewerSurface: View {
                 .fill(.black)
 
             if let videoURL {
-                MediaVideoPlayer(
-                    url: videoURL,
-                    startSeconds: videoStartSeconds,
-                    isPlaying: isPlaying,
-                    playbackRate: playbackRate,
-                    syncGeneration: syncGeneration,
-                    onPlaybackTimeUpdate: onPlaybackTimeUpdate
-                )
+                GeometryReader { proxy in
+                    MediaVideoPlayer(
+                        url: videoURL,
+                        startSeconds: videoStartSeconds,
+                        isPlaying: isPlaying,
+                        playbackRate: playbackRate,
+                        syncGeneration: syncGeneration,
+                        onPlaybackTimeUpdate: onPlaybackTimeUpdate
+                    )
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .scaleEffect(interviewPreviewZoom)
+                    .offset(
+                        x: interviewPreviewOffsetX(viewerWidth: proxy.size.width),
+                        y: interviewPreviewOffsetY(viewerHeight: proxy.size.height)
+                    )
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .accessibilityLabel("プログラム映像プレビュー")
@@ -715,6 +735,26 @@ struct ViewerSurface: View {
                 )
             }
 
+            if let captionText, !captionText.isEmpty {
+                VStack {
+                    Spacer(minLength: 0)
+                    Text(captionText)
+                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.72)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(.black.opacity(0.76), in: RoundedRectangle(cornerRadius: 8))
+                        .shadow(color: .black.opacity(0.55), radius: 4, y: 2)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 28)
+                        .accessibilityIdentifier("Viewer.CaptionOverlay")
+                }
+                .allowsHitTesting(false)
+            }
+
             if let media, media.viewerNeedsAttention || isTimelineFallbackPlayback {
                 VStack {
                     Spacer()
@@ -739,6 +779,24 @@ struct ViewerSurface: View {
                     Spacer(minLength: 0)
                 }
             }
+
+            if interviewVisualTransformPreview != nil {
+                VStack {
+                    HStack {
+                        Label("画角プレビュー", systemImage: "viewfinder")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(.blue.opacity(0.82), in: Capsule())
+                            .accessibilityIdentifier("Viewer.InterviewReframePreviewBadge")
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    Spacer(minLength: 0)
+                }
+                .allowsHitTesting(false)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -746,6 +804,20 @@ struct ViewerSurface: View {
     private var videoURL: URL? {
         guard let media, media.exists, media.isPlayableVideo else { return nil }
         return media.url
+    }
+
+    private var interviewPreviewZoom: Double {
+        max(1, interviewVisualTransformPreview?.zoom ?? 1)
+    }
+
+    private func interviewPreviewOffsetX(viewerWidth: CGFloat) -> CGFloat {
+        guard sequenceWidth > 0, let x = interviewVisualTransformPreview?.position?.x else { return 0 }
+        return CGFloat(x / Double(sequenceWidth)) * viewerWidth
+    }
+
+    private func interviewPreviewOffsetY(viewerHeight: CGFloat) -> CGFloat {
+        guard sequenceHeight > 0, let y = interviewVisualTransformPreview?.position?.y else { return 0 }
+        return CGFloat(y / Double(sequenceHeight)) * viewerHeight
     }
 
     private var audioSource: ProjectMediaReference? {

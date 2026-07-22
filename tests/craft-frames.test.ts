@@ -11,6 +11,7 @@ import type { MarlinEventsArtifact } from "../runtime/connectors/marlin-types.js
 import type { MediaSourceMapEntry } from "../runtime/media/source-map.js";
 import {
   extractCraftKeyFrames,
+  extractRepresentativeFrames,
   type KeyFrame,
   type SelectCandidate,
 } from "../runtime/pipeline/stages/craft-frames.js";
@@ -226,6 +227,23 @@ function blueprint(): EditBlueprint {
 }
 
 describe("craft key frame extraction", () => {
+  it("skips representative and craft frame extraction for canonical audio-only assets", async () => {
+    const { projectDir, sourcePath } = createProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "03_analysis", "assets.json"), JSON.stringify({
+      items: [{ asset_id: "AST_AUDIO", audio_stream: { codec: "aac" } }],
+    }));
+    const clip = { ...candidate("AUDIO", 5_000_000, "AST_AUDIO"), media_kind: "audio" as const, source_capabilities: { has_video: false, has_audio: true } };
+    const sources = sourceMap(sourcePath, ["AST_AUDIO"]);
+
+    const craft = await extractCraftKeyFrames(projectDir, [clip], null, sources);
+    const representative = await extractRepresentativeFrames(projectDir, [clip], null, sources);
+
+    expect(craft.get("AUDIO")).toEqual([]);
+    expect(representative.size).toBe(0);
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
   it("extracts 2 frames for short clips, 3 for medium clips, and 4-5 for long clips", async () => {
     const { projectDir, sourcePath } = createProject();
     const clips = [

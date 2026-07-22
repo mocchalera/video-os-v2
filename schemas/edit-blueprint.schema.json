@@ -27,6 +27,9 @@
     "decision_runtime": {
       "$ref": "#/$defs/decisionRuntime"
     },
+    "source_media": {
+      "$ref": "#/$defs/sourceMediaSummary"
+    },
     "sequence_goals": {
       "type": "array",
       "minItems": 1,
@@ -141,6 +144,9 @@
     "duration_policy": {
       "$ref": "#/$defs/durationPolicy"
     },
+    "still_duration_policy": {
+      "$ref": "#/$defs/stillDurationPolicy"
+    },
     "timeline_order": {
       "type": "string",
       "enum": ["chronological", "editorial"],
@@ -158,6 +164,51 @@
     }
   },
   "$defs": {
+    "stillImageCandidateIntent": {
+      "type": "object",
+      "properties": {
+        "hold_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "min_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "max_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "motion_mode": { "type": "string", "enum": ["static", "subtle_ken_burns"] },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+        "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+      },
+      "additionalProperties": false
+    },
+    "stillDurationPolicy": {
+      "type": "object",
+      "required": ["source", "fps_num", "fps_den", "min_hold_frames", "default_hold_frames", "max_hold_frames", "motion_mode", "fit_mode", "background"],
+      "properties": {
+        "source": { "type": "string", "enum": ["explicit_brief", "profile_default", "global_default"] },
+        "fps_num": { "type": "integer", "minimum": 1 },
+        "fps_den": { "type": "integer", "minimum": 1 },
+        "min_hold_frames": { "type": "integer", "minimum": 1 },
+        "default_hold_frames": { "type": "integer", "minimum": 1 },
+        "max_hold_frames": { "type": "integer", "minimum": 1 },
+        "motion_mode": { "const": "static" },
+        "requested_motion_mode": { "const": "subtle_ken_burns" },
+        "motion_status": { "const": "pending_EYE-070C2B" },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+        "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+      },
+      "additionalProperties": false
+    },
+    "sourceMediaSummary": {
+      "type": "object",
+      "required": ["mode", "media_kinds", "visual_candidate_count", "audio_only_candidate_count"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["video", "audio_only", "mixed"] },
+        "media_kinds": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["video", "audio", "image", "sequence", "unknown"] },
+          "uniqueItems": true
+        },
+        "visual_candidate_count": { "type": "integer", "minimum": 0 },
+        "audio_only_candidate_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
     "longformPlan": {
       "type": "object",
       "required": [
@@ -302,6 +353,11 @@
           "type": "string",
           "minLength": 1
         },
+        "viewer_label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Audience-facing chapter or section copy. Keep structural vocabulary in label/id."
+        },
         "purpose": {
           "type": "string"
         },
@@ -355,8 +411,15 @@
             "fallback_candidate_refs": {
               "type": "array",
               "items": { "type": "string" }
-            }
+            },
+            "still_image": { "$ref": "#/$defs/stillImageCandidateIntent" }
           },
+          "allOf": [
+            {
+              "if": { "required": ["still_image"] },
+              "then": { "required": ["primary_candidate_ref"] }
+            }
+          ],
           "additionalProperties": false
         },
         "allow_revisit": {
@@ -659,7 +722,39 @@
         "styling_class": {
           "type": "string",
           "minLength": 1
+        },
+        "semantic_timing": {
+          "$ref": "#/$defs/captionSemanticTimingPolicy"
         }
+      },
+      "additionalProperties": false
+    },
+    "captionSemanticTimingPolicy": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["off", "speech_sync", "protect_reveals"] },
+        "ordinary_lead_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "audio_first_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "anchors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/captionRevealAnchor" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "captionRevealAnchor": {
+      "type": "object",
+      "required": ["anchor_id", "role", "anchor_text"],
+      "properties": {
+        "anchor_id": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["punchline", "surprise", "reaction", "payoff"] },
+        "anchor_text": { "type": "string", "minLength": 1 },
+        "segment_id": { "type": "string", "minLength": 1 },
+        "transcript_item_id": { "type": "string", "minLength": 1 },
+        "timeline_frame": { "type": "integer", "minimum": 0 },
+        "source_start_us": { "type": "integer", "minimum": 0 },
+        "audio_first_frames": { "type": "integer", "minimum": 0, "maximum": 6 }
       },
       "additionalProperties": false
     },

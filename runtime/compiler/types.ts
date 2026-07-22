@@ -7,6 +7,25 @@ export type DurationMode = "strict" | "guide";
 export type TrackLayout = "single" | "multi";
 export type CaptionPolicySource = "transcript" | "authored" | "none";
 export type BriefCaptionPolicy = "auto" | "manual" | "off";
+export type CaptionRevealRole = "punchline" | "surprise" | "reaction" | "payoff";
+
+export interface CaptionRevealAnchor {
+  anchor_id: string;
+  role: CaptionRevealRole;
+  anchor_text: string;
+  segment_id?: string;
+  transcript_item_id?: string;
+  timeline_frame?: number;
+  source_start_us?: number;
+  audio_first_frames?: number;
+}
+
+export interface CaptionSemanticTimingPolicy {
+  mode: "off" | "speech_sync" | "protect_reveals";
+  ordinary_lead_frames?: number;
+  audio_first_frames?: number;
+  anchors?: CaptionRevealAnchor[];
+}
 export type BriefAudioPolicy = "ducking" | "bgm_only" | "original_only";
 export type SelectStoryRole = "hook" | "setup" | "experience" | "payoff" | "reaction" | "closing";
 
@@ -104,12 +123,54 @@ export interface CreativeBrief {
   a1_loudnorm?: boolean;
   editorial?: CreativeBriefEditorial;
   longform?: LongformEditConfig;
+  still_image_intent?: StillImageIntentPolicy;
   [key: string]: unknown;
 }
 
 export interface CandidatePlan {
   primary_candidate_ref?: string;
   fallback_candidate_refs?: string[];
+  still_image?: StillImageCandidateIntent;
+}
+
+export interface StillImageIntentPolicy {
+  min_hold_sec?: number;
+  default_hold_sec?: number;
+  max_hold_sec?: number;
+  motion_mode?: "static" | "subtle_ken_burns";
+  fit_mode?: "contain" | "cover";
+  background?: string;
+}
+
+export interface StillImageCandidateIntent extends StillImageIntentPolicy {
+  hold_duration_sec?: number;
+}
+
+export interface StillDurationPolicy {
+  source: "explicit_brief" | "profile_default" | "global_default";
+  fps_num: number;
+  fps_den: number;
+  min_hold_frames: number;
+  default_hold_frames: number;
+  max_hold_frames: number;
+  motion_mode: "static";
+  requested_motion_mode?: "subtle_ken_burns";
+  motion_status?: "pending_EYE-070C2B";
+  fit_mode: "contain" | "cover";
+  background: string;
+}
+
+export interface StillImageTimelineMetadata {
+  hold_frames: number;
+  min_hold_frames: number;
+  max_hold_frames: number;
+  hold_source: "candidate_override" | "explicit_brief" | "profile_default" | "global_default";
+  policy_clamp: "none" | "min" | "max" | "beat_budget" | "duration_cap";
+  motion_mode: "static";
+  requested_motion_mode?: "subtle_ken_burns";
+  motion_status?: "pending_EYE-070C2B";
+  fit_mode: "contain" | "cover";
+  background: string;
 }
 
 export interface AllowRevisitDirective {
@@ -169,6 +230,8 @@ export interface CraftDirective {
 export interface Beat {
   id: string;
   label: string;
+  /** Audience-facing chapter/section copy. Structural labels stay in `label`. */
+  viewer_label?: string;
   purpose?: string;
   target_duration_frames: number;
   required_roles: Role[];
@@ -260,6 +323,7 @@ export interface EditBlueprint {
   project_id: string;
   created_at?: string;
   decision_runtime?: DecisionRuntimeMetadata;
+  source_media?: SourceMediaSummary;
   sequence_goals: string[];
   beats: Beat[];
   pacing: {
@@ -285,6 +349,7 @@ export interface EditBlueprint {
     delivery_mode?: "burn_in" | "sidecar" | "both";
     source?: CaptionPolicySource;
     styling_class?: string;
+    semantic_timing?: CaptionSemanticTimingPolicy;
   };
   dialogue_policy: {
     preserve_natural_breath: boolean;
@@ -308,6 +373,7 @@ export interface EditBlueprint {
   trim_policy?: TrimPolicy;
   // Duration Mode additive field
   duration_policy?: DurationPolicy;
+  still_duration_policy?: StillDurationPolicy;
   // Timeline ordering: chronological (source timestamp) or editorial (score-based)
   timeline_order?: "chronological" | "editorial";
   // Track layout: single keeps visual story on V1; multi preserves overlay-style V2 inserts.
@@ -318,6 +384,20 @@ export interface EditBlueprint {
 
 export type Role = "hero" | "support" | "transition" | "texture" | "dialogue";
 export type ClipRole = Role | "music" | "nat_sound" | "bgm" | "title";
+export type SourceMediaKind = "video" | "audio" | "image" | "sequence" | "unknown";
+export type AudioSemanticRole = "dialogue" | "music" | "nat_sound" | "ambient";
+
+export interface SourceCapabilities {
+  has_video: boolean;
+  has_audio: boolean;
+}
+
+export interface SourceMediaSummary {
+  mode: "video" | "audio_only" | "mixed";
+  media_kinds: SourceMediaKind[];
+  visual_candidate_count: number;
+  audio_only_candidate_count: number;
+}
 
 export interface TrimHint {
   source_center_us?: number;
@@ -363,8 +443,8 @@ export interface PeakSignals {
   speech_keyword?: string[];
 }
 
-export type QualityGateDecision = "reject" | "warn" | "pass" | "unmeasured";
-export type QualityConfidence = "measured" | "partial" | "appraiser" | "low";
+export type QualityGateDecision = "reject" | "warn" | "pass" | "unmeasured" | "not_applicable";
+export type QualityConfidence = "measured" | "partial" | "appraiser" | "low" | "not_applicable";
 
 export interface QualityGateMeasurements {
   shake_score?: number;
@@ -410,6 +490,7 @@ export interface SelectsQualityGateSummary {
     warn: number;
     pass: number;
     unmeasured: number;
+    not_applicable?: number;
   };
   decisions: QualityGateRecord[];
 }
@@ -477,6 +558,9 @@ export interface Candidate {
   why_it_matches: string;
   risks: string[];
   confidence: number;
+  media_kind?: SourceMediaKind;
+  source_capabilities?: SourceCapabilities;
+  audio_role?: AudioSemanticRole;
   semantic_rank?: number;
   quality_flags?: string[];
   evidence?: string[];
@@ -493,6 +577,7 @@ export interface Candidate {
   editorial_signals?: EditorialSignals;
   peak_signals?: PeakSignals;
   trim_hint?: TrimHint;
+  still_image?: StillImageCandidateIntent;
   quality_confidence?: QualityConfidence;
   quality_gate?: QualityGateRecord;
 }
@@ -513,6 +598,7 @@ export interface SelectsCandidates {
   project_id: string;
   decision_runtime?: DecisionRuntimeMetadata;
   candidates: Candidate[];
+  source_media?: SourceMediaSummary;
   editorial_summary?: EditorialSummary;
   quality_gate?: SelectsQualityGateSummary;
   coverage?: SelectsCoverageSummary;
@@ -572,6 +658,7 @@ export interface ProfileDefaults {
   audio_policy?: BriefAudioPolicy;
   a1_loudnorm?: boolean;
   caption_policy?: BriefCaptionPolicy;
+  still_image_intent?: StillImageIntentPolicy;
 }
 
 export interface ProfileDefinition {
@@ -661,6 +748,7 @@ export interface ContinuityCompileMetadata {
 export interface NormalizedBeat {
   beat_id: string;
   label: string;
+  viewer_label?: string;
   target_duration_frames: number;
   required_roles: Role[];
   preferred_roles: Role[];
@@ -729,6 +817,10 @@ export interface TimelineClip {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  media_kind?: SourceMediaKind;
+  source_capabilities?: SourceCapabilities;
+  audio_role?: AudioSemanticRole;
+  still_image?: StillImageTimelineMetadata;
   captions?: CaptionOverlay[];
   audio_policy?: AudioPolicy;
   // M4.5 additive fields
@@ -800,10 +892,13 @@ export interface TimelineIR {
   tracks: {
     video: TrackOutput[];
     audio: TrackOutput[];
+    overlay?: TrackOutput[];
+    caption?: TrackOutput[];
   };
   markers: MarkerOutput[];
   transitions?: TimelineTransitionOutput[];
   metadata?: Record<string, unknown>;
+  audio_mix?: AudioMix;
   provenance: {
     brief_path: string;
     blueprint_path: string;
@@ -828,6 +923,7 @@ export interface TimelineIR {
       mode: BriefCaptionPolicy;
       source: "explicit_brief" | "profile_default" | "global_default";
     };
+    still_duration_policy?: StillDurationPolicy;
   };
 }
 
@@ -851,6 +947,10 @@ export interface ClipOutput {
   fallback_segment_ids: string[];
   confidence: number;
   quality_flags: string[];
+  media_kind?: SourceMediaKind;
+  source_capabilities?: SourceCapabilities;
+  audio_role?: AudioSemanticRole;
+  still_image?: StillImageTimelineMetadata;
   captions?: CaptionOverlay[];
   audio_policy?: AudioPolicy;
   // M4.5 additive fields
@@ -867,6 +967,7 @@ export interface MarkerOutput {
 
 export interface AudioPolicy {
   mode?: BriefAudioPolicy;
+  gain_unit?: "linear" | "db";
   duck_music_db?: number;
   nat_gain?: number;
   nat_sound_gain?: number;
@@ -881,6 +982,23 @@ export interface AudioPolicy {
   bgm_fade_out_frames?: number;
 }
 
+export interface AudioMix {
+  gain_unit?: "linear" | "db";
+  nat_sound_gain?: number;
+  bgm_gain?: number;
+  duck_music_db?: number;
+  fade_in_frames?: number;
+  fade_out_frames?: number;
+  nat_sound_fade_in_frames?: number;
+  nat_sound_fade_out_frames?: number;
+  bgm_fade_in_frames?: number;
+  bgm_fade_out_frames?: number;
+  bgm_asset_id?: string;
+  bgm_clip_id?: string;
+  strategy?: "manual_mix" | "nat_under_bgm" | "dialogue_ducked_bgm";
+  notes?: string;
+}
+
 // ── Compiler options ────────────────────────────────────────────────
 
 export interface CompileOptions {
@@ -891,8 +1009,10 @@ export interface CompileOptions {
   reviewPatch?: import("./patch.js").ReviewPatch;
   /** Optional BGM duration cap, in microseconds. When set, assembly will not exceed it. */
   bgm_duration_us?: number;
-  /** Timeline framerate numerator (default: 24). Use 30 for 29.97fps source material. */
+  /** Timeline framerate numerator (default: 24). Use 30000 with fpsDen=1001 for 29.97fps. */
   fpsNum?: number;
+  /** Timeline framerate denominator (default: 1). Use 1001 with fpsNum=30000 for 29.97fps. */
+  fpsDen?: number;
   /** Optional source map override for preview-manifest media locators. */
   sourceMapPath?: string;
   /** Optional compiler logger for non-fatal compile notes. */

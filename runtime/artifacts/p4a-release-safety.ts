@@ -23,6 +23,10 @@ import {
   isP4dSearchIndexEnabled,
   loadSearchIndexManifest,
 } from "./p4d-segment-search-index.js";
+import {
+  readResolvedPreferenceEntries,
+  resolvePreferenceMemoryPath,
+} from "./p3-preference-memory.js";
 
 export type ReleaseSafetyMode = "dry_run" | "report_only" | "enforce";
 export type ReleaseSafetyProducer = "/package" | "/render";
@@ -114,7 +118,7 @@ interface ArtifactInput {
   required: boolean;
 }
 
-const INPUTS: ArtifactInput[] = [
+const BASE_INPUTS: ArtifactInput[] = [
   { relPath: "05_timeline/timeline.json", schemaFile: "timeline-ir.schema.json", format: "json", required: true },
   { relPath: "06_review/review_report.yaml", schemaFile: "review-report.schema.json", format: "yaml", required: false },
   { relPath: "07_package/package_manifest.json", schemaFile: "package-manifest.schema.json", format: "json", required: false },
@@ -124,9 +128,20 @@ const INPUTS: ArtifactInput[] = [
   { relPath: "03_analysis/analysis_coverage_report.json", schemaFile: "analysis-coverage-report.schema.json", format: "json", required: false },
   { relPath: "03_analysis/audio_story_graph.json", schemaFile: "audio-story-graph.schema.json", format: "json", required: false },
   { relPath: "03_analysis/continuity_graph.json", schemaFile: "continuity-graph.schema.json", format: "json", required: false },
-  { relPath: "03_analysis/editorial_preference_memory.jsonl", schemaFile: "editorial-preference-memory-entry.schema.json", format: "jsonl", required: false },
   { relPath: "07_package/qa-report.json", schemaFile: "package-qa-report.schema.json", format: "json", required: false },
 ];
+
+function releaseSafetyInputs(projectDir: string): ArtifactInput[] {
+  return [
+    ...BASE_INPUTS,
+    {
+      relPath: resolvePreferenceMemoryPath(projectDir).relativePath,
+      schemaFile: "editorial-preference-memory-entry.schema.json",
+      format: "jsonl",
+      required: false,
+    },
+  ];
+}
 
 export function isP4aReleaseSafetyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return /^(1|true|yes|on)$/i.test(env.ENABLE_P4A_RELEASE_SAFETY ?? "");
@@ -159,7 +174,8 @@ export function buildReleaseSafetyReport(
 ): ReleaseSafetyReport {
   const projectDir = path.resolve(options.projectDir);
   const createdAt = options.createdAt ?? new Date().toISOString();
-  const artifacts = readArtifacts(projectDir);
+  const inputs = releaseSafetyInputs(projectDir);
+  const artifacts = readArtifacts(projectDir, inputs);
   const timeline = artifacts.get("05_timeline/timeline.json")?.data as Record<string, unknown> | undefined;
   const projectId = typeof timeline?.project_id === "string"
     ? timeline.project_id
@@ -170,7 +186,7 @@ export function buildReleaseSafetyReport(
 
   const checks: ReleaseSafetyCheck[] = [
     ...checkEditorialReview(projectDir, artifacts),
-    checkSchemaValidation(projectDir, artifacts),
+    checkSchemaValidation(projectDir, artifacts, inputs, projectId),
     checkTechnicalQa(projectDir, artifacts),
     ...checkDeliveryProfile(projectDir, artifacts),
     checkRights(projectDir, artifacts),
@@ -198,7 +214,7 @@ export function buildReleaseSafetyReport(
     waivers,
     provenance: {
       producer: options.producer,
-      inputs: INPUTS.map((input) => artifactRef(projectDir, input.relPath, input.required)),
+      inputs: inputs.map((input) => artifactRef(projectDir, input.relPath, input.required)),
       hash_policy: {
         algorithm: "sha256",
         canonicalization: "yaml-to-normalized-json-v1",
@@ -284,9 +300,9 @@ export function waiverMatchesCheck(waiver: ReleaseSafetyWaiver, check: ReleaseSa
   );
 }
 
-function readArtifacts(projectDir: string): Map<string, { data: unknown; hash: string }> {
+function readArtifacts(projectDir: string, inputs: ArtifactInput[]): Map<string, { data: unknown; hash: string }> {
   const artifacts = new Map<string, { data: unknown; hash: string }>();
-  for (const input of INPUTS) {
+  for (const input of inputs) {
     const filePath = path.join(projectDir, input.relPath);
     if (!fs.existsSync(filePath)) continue;
     try {
@@ -332,15 +348,24 @@ function checkEditorialReview(
 function checkSchemaValidation(
   projectDir: string,
   artifacts: Map<string, { data: unknown; hash: string }>,
+  inputs: ArtifactInput[],
+  expectedProjectId: string,
 ): ReleaseSafetyCheck {
   const failures: string[] = [];
-  for (const input of INPUTS) {
-    if (!input.schemaFile || input.format === "jsonl") continue;
+  for (const input of inputs) {
+    if (!input.schemaFile) continue;
     const artifact = artifacts.get(input.relPath);
     if (!artifact) continue;
     try {
-      const result = validateAgainstSchema(artifact.data, input.schemaFile);
-      if (!result.valid) failures.push(`${input.relPath}: ${result.errors.join("; ")}`);
+      if (input.format === "jsonl") {
+        const read = readResolvedPreferenceEntries(projectDir, expectedProjectId);
+        if (read.malformedLines.length > 0) {
+          failures.push(`${input.relPath}: ${read.malformedLines.map((line) => `line ${line.lineNumber}: ${line.error}`).join("; ")}`);
+        }
+      } else {
+        const result = validateAgainstSchema(artifact.data, input.schemaFile);
+        if (!result.valid) failures.push(`${input.relPath}: ${result.errors.join("; ")}`);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       failures.push(`${input.relPath}: schema validation unavailable: ${message}`);
@@ -352,7 +377,7 @@ function checkSchemaValidation(
     failures.length > 0 ? "fail" : "pass",
     "RSCHK_schema_validation",
     failures.length > 0 ? `schema validation warnings: ${failures.join(" | ")}` : "available artifacts passed schema validation",
-    INPUTS.map((input) => artifactRef(projectDir, input.relPath, input.required)),
+    inputs.map((input) => artifactRef(projectDir, input.relPath, input.required)),
   );
 }
 

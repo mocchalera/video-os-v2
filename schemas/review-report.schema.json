@@ -127,6 +127,7 @@
             "verified",
             "blocked",
             "unverified",
+            "not_applicable",
             "stale"
           ]
         },
@@ -168,6 +169,19 @@
         },
         "timeline_version": {
           "type": "string"
+        },
+        "source_inputs_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source_inputs_status": {
+          "type": "string",
+          "enum": ["verified", "live_only", "not_applicable"]
+        },
+        "source_input_warnings": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string" }
         },
         "render_meta_path": {
           "type": "string"

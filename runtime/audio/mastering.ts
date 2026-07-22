@@ -8,6 +8,7 @@
  */
 
 import { execFile } from "node:child_process";
+import * as fs from "node:fs";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -126,23 +127,22 @@ export function buildLoudnormPass2Args(
 /**
  * Helper: run ffmpeg with given args, returning stdout + stderr.
  */
-function execFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> {
+function execFfmpeg(
+  args: string[],
+  allowMeasurementOnError = false,
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(
       "ffmpeg",
       args,
       { maxBuffer: 50 * 1024 * 1024 },
       (err, stdout, stderr) => {
-        // Pass 1 writes to null output; ffmpeg may still exit 0
-        // with loudnorm output on stderr
-        if (err && !stderr) {
-          reject(err);
-          return;
-        }
         if (err) {
-          // For pass 1, ffmpeg writes measurement to stderr and may
-          // report a non-zero exit for -f null. Check if we got output.
-          resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+          if (allowMeasurementOnError && /"input_i"\s*:/.test(stderr ?? "")) {
+            resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+            return;
+          }
+          reject(new Error(`ffmpeg loudnorm failed: ${stderr || err.message}`));
           return;
         }
         resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
@@ -164,12 +164,15 @@ export async function masterAudio(
 ): Promise<{ measurement: LoudnormMeasurement }> {
   // Pass 1: Measurement
   const pass1Args = buildLoudnormPass1Args(inputPath, defaults);
-  const pass1Result = await execFfmpeg(pass1Args);
+  const pass1Result = await execFfmpeg(pass1Args, true);
   const measurement = parseLoudnormOutput(pass1Result.stderr);
 
   // Pass 2: Apply
   const pass2Args = buildLoudnormPass2Args(inputPath, outputPath, measurement, defaults);
   await execFfmpeg(pass2Args);
+  if (!fs.existsSync(outputPath)) {
+    throw new Error(`ffmpeg loudnorm did not produce output: ${outputPath}`);
+  }
 
   return { measurement };
 }

@@ -49,6 +49,20 @@ describe("parseArgs", () => {
       projectPath: "projects/demo",
       reuseVideoPath: "05_timeline/assembly.mp4",
       noAudio: false,
+      deferEndingFade: false,
+    });
+  });
+
+  it("accepts deferred ending fade for overlay-safe finishing", () => {
+    expect(parseArgs([
+      "node",
+      "render-rough-cut.ts",
+      "--project",
+      "projects/demo",
+      "--defer-ending-fade",
+    ])).toMatchObject({
+      projectPath: "projects/demo",
+      deferEndingFade: true,
     });
   });
 });
@@ -83,6 +97,57 @@ describe("clip video filters", () => {
 
     expect(filters).toMatch(/^setpts=PTS-STARTPTS,/);
     expect(filters).toContain("fade=t=out:st=8.5:d=1.5:color=black");
+  });
+
+  it("applies timeline zoom and position metadata before overlays are burned", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_reframed",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 120,
+      durationSec: 10,
+      timelineInFrame: 0,
+      timelineOutFrame: 240,
+      timelineDurationSec: 10,
+      sourceRangeDurationSec: 10,
+      metadata: {
+        zoom: 1.15,
+        position: { x: -135, y: -55 },
+      },
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 30);
+
+    expect(filters).toContain("scale=2208:1242:force_original_aspect_ratio=increase");
+    expect(filters).toContain(
+      "crop=1920:1080:max(0\\,min(iw-1920\\,(iw-1920)/2--135)):" +
+        "max(0\\,min(ih-1080\\,(ih-1080)/2--55))",
+    );
+    expect(filters).not.toContain("pad=1920:1080");
+  });
+
+  it("can defer the ending fade until after captions are burned", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_ending_deferred",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 120,
+      durationSec: 10,
+      timelineInFrame: 0,
+      timelineOutFrame: 300,
+      timelineDurationSec: 10,
+      sourceRangeDurationSec: 10,
+      metadata: {
+        ending_treatment: {
+          video_fade_color: "black",
+          video_fade_out_frames: 30,
+        },
+      },
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 30, { applyEndingFade: false });
+
+    expect(filters).not.toContain("fade=t=out");
   });
 });
 
@@ -181,7 +246,15 @@ describe("timeline clip extraction", () => {
           {
             clips: [
               { clip_id: "late", asset_id: "AST_003", src_in_us: 3_000_000, src_out_us: 4_000_000, timeline_in_frame: 48, timeline_duration_frames: 24 },
-              { clip_id: "first-v1", asset_id: "AST_001", src_in_us: 0, src_out_us: 1_000_000, timeline_in_frame: 0, timeline_duration_frames: 24 },
+              {
+                clip_id: "first-v1",
+                asset_id: "AST_001",
+                src_in_us: 0,
+                src_out_us: 1_000_000,
+                timeline_in_frame: 0,
+                timeline_duration_frames: 24,
+                metadata: { zoom: 1.15, position: { x: -135, y: -55 } },
+              },
             ],
           },
           {
@@ -206,6 +279,10 @@ describe("timeline clip extraction", () => {
       "first-v2",
       "late",
     ]);
+    expect(extractVideoClips(timeline)[0].metadata).toEqual({
+      zoom: 1.15,
+      position: { x: -135, y: -55 },
+    });
   });
 
   it("extracts audio clips in timeline order and preserves audio policy", () => {
@@ -321,6 +398,42 @@ describe("timeline clip extraction", () => {
     );
 
     expect(renderClips[0].durationSec).toBe(5);
+  });
+
+  it("reads moving source postroll for a final video clip with ending treatment", () => {
+    const projectDir = createTempProject("render_clips_moving_postroll");
+    const sourcePath = path.join(projectDir, "source.mov");
+    fs.writeFileSync(sourcePath, "source");
+
+    const renderClips = buildRenderClips(
+      [{
+        clip_id: "final",
+        asset_id: "AST_001",
+        src_in_us: 10_000_000,
+        src_out_us: 20_000_000,
+        timeline_in_frame: 0,
+        timeline_duration_frames: 340,
+        metadata: {
+          ending_treatment: {
+            video_fade_color: "black",
+            video_fade_out_frames: 30,
+          },
+        },
+      }],
+      new Map([["AST_001", {
+        asset_id: "AST_001",
+        source_locator: sourcePath,
+        local_source_path: sourcePath,
+        link_path: "source.mov",
+      }]]),
+      30,
+      console.warn,
+      { allowEndingPostroll: true },
+    );
+
+    expect(renderClips[0].sourceRangeDurationSec).toBe(10);
+    expect(renderClips[0].timelineDurationSec).toBeCloseTo(11.333333, 6);
+    expect(renderClips[0].durationSec).toBeCloseTo(11.333333, 6);
   });
 
   it("keeps render duration aligned when adaptive trim shortens a source range", () => {
@@ -461,7 +574,7 @@ describe("timeline audio mixing", () => {
     expect(filter?.outputLabel).toBe("aout");
     expect(filter?.filterComplex).toContain("[1:a]atrim=start=0:duration=8,asetpts=PTS-STARTPTS[a_silent]");
     expect(filter?.filterComplex).toContain("[2:a]atrim=start=5:duration=2,asetpts=PTS-STARTPTS");
-    expect(filter?.filterComplex).toContain("[3:a]atrim=start=20:duration=3,asetpts=PTS-STARTPTS,volume=1.8000");
+    expect(filter?.filterComplex).toContain("[3:a]atrim=start=20:duration=3,asetpts=PTS-STARTPTS,volume=1.8");
     expect(filter?.filterComplex).toContain("adelay=2000|2000[a1]");
     expect(filter?.filterComplex).toContain("[a_silent][a0][a1]amix=inputs=3:duration=longest:dropout_transition=0:normalize=0");
     expect(filter?.filterComplex).toContain("atrim=start=0:duration=8[aout]");
@@ -757,6 +870,50 @@ describe("crossfade render planning", () => {
     };
 
     expect(findTimelineAudioVideoSyncIssues([videoClip], [mirroredAudioClip], 30)).toEqual([]);
+  });
+
+  it("accepts independent visual pre-roll and post-roll when source and timeline offsets match", () => {
+    const videoClip: RenderClip = {
+      ...renderClip("video_breathing", 12.533333, 267, 12.533333, 12.533333),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 178.976031,
+      timelineOutFrame: 643,
+    };
+    const audioClip: RenderClip = {
+      ...renderClip("audio_breathing", 12.033333, 273, 12.033333, 12.02),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 179.176031,
+      timelineOutFrame: 634,
+      role: "dialogue",
+    };
+
+    expect(findTimelineAudioVideoSyncIssues([videoClip], [audioClip], 30)).toEqual([]);
+  });
+
+  it("accepts a longer final video when the extra duration is moving ending postroll", () => {
+    const videoClip: RenderClip = {
+      ...renderClip("video_ending", 4.5, 560, 4.5, 3),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 18.872531,
+      metadata: {
+        ending_treatment: {
+          video_fade_color: "black",
+          video_fade_out_frames: 30,
+        },
+      },
+    };
+    const audioClip: RenderClip = {
+      ...renderClip("audio_ending", 3, 560, 3, 3),
+      assetId: "AST_TALK",
+      sourcePath: "/tmp/talk.mov",
+      startSec: 18.872531,
+      role: "dialogue",
+    };
+
+    expect(findTimelineAudioVideoSyncIssues([videoClip], [audioClip], 30)).toEqual([]);
   });
 });
 

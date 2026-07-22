@@ -1,5 +1,6 @@
 import { Composition, registerRoot } from "remotion";
 import type { TimelineIR } from "../../compiler/types.js";
+import type { VideoWebFontAsset } from "../../../editor/shared/font-contract.js";
 import { VideoTimeline } from "./VideoTimeline.js";
 import { timelineToCompositionProps } from "./timeline-to-props.js";
 
@@ -7,6 +8,8 @@ export interface VideoTimelineCompositionInput {
   [key: string]: unknown;
   timeline: TimelineIR;
   sourceMap: Record<string, string>;
+  stillAssetIds?: string[];
+  fontAsset?: VideoWebFontAsset;
 }
 
 const emptyTimeline: TimelineIR = {
@@ -56,7 +59,7 @@ export const CompositionRoot = () => {
       height={compositionProps.height}
       defaultProps={compositionProps.defaultProps}
       calculateMetadata={({ props }) => {
-        const resolved = timelineToCompositionProps(props.timeline, props.sourceMap);
+        const resolved = timelineToCompositionProps(props.timeline, props.sourceMap, undefined, props.stillAssetIds ?? []);
         return {
           durationInFrames: resolved.durationInFrames,
           fps: resolved.fps,

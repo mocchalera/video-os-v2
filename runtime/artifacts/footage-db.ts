@@ -20,6 +20,7 @@ export interface FootageDbStatus {
 }
 
 export const FOOTAGE_DB_REL_PATH = "03_analysis/search/footage.db";
+export const EDITORIAL_OBSERVATION_MATERIALIZATION_REVISION = "eye-010b-v1";
 
 export function footageDbPath(projectDir: string): string {
   return path.join(projectDir, FOOTAGE_DB_REL_PATH);
@@ -104,6 +105,13 @@ export function searchFootageDbStaleReasons(projectDir: string): string[] {
           reasons.push(`${row.rel_path}: db=${row.hash} current=${current}`);
         }
       }
+      const meta = readMeta(db);
+      if (segmentsContainEditorialObservation(projectDir)
+        && meta.editorial_observation_materialization_revision !== EDITORIAL_OBSERVATION_MATERIALIZATION_REVISION) {
+        reasons.push(
+          `editorial observation materialization revision: db=${meta.editorial_observation_materialization_revision ?? "missing"} current=${EDITORIAL_OBSERVATION_MATERIALIZATION_REVISION}`,
+        );
+      }
     } finally {
       db.close();
     }
@@ -115,6 +123,26 @@ export function searchFootageDbStaleReasons(projectDir: string): string[] {
     reasons.push("03_analysis/segments.json mtime is newer than footage.db");
   }
   return Array.from(new Set(reasons));
+}
+
+function segmentsContainEditorialObservation(projectDir: string): boolean {
+  const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+  if (!fs.existsSync(segmentsPath)) return false;
+  try {
+    const document = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+    const items = Array.isArray(document.items)
+      ? document.items
+      : Array.isArray(document.segments)
+        ? document.segments
+        : [];
+    return items.some((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+      const observation = (item as Record<string, unknown>).editorial_observation;
+      return observation != null && typeof observation === "object" && !Array.isArray(observation);
+    });
+  } catch {
+    return false;
+  }
 }
 
 function readMeta(db: Database.Database): Record<string, string> {

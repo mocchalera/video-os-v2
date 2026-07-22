@@ -32,7 +32,27 @@
       "type": "object",
       "properties": {
         "final_video": { "type": "string" },
-        "final_mix": { "type": "string" }
+        "final_mix": { "type": "string" },
+        "audio_mix_report": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "source_inputs_freshness": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["fresh", "stale"] },
+        "reason": { "type": "string" },
+        "source_inputs_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "attestation_status": {
+          "type": "string",
+          "enum": ["verified", "live_only", "not_applicable"]
+        },
+        "warnings": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string" }
+        }
       },
       "additionalProperties": false
     }
@@ -54,6 +74,12 @@
       "properties": {
         "caption_max_density": { "type": "number" },
         "dialogue_occupancy_ratio": { "type": "number" },
+        "dialogue_outside_expected_ms": { "type": "number", "minimum": 0 },
+        "dialogue_first_signal_ms": { "type": "number", "minimum": 0 },
+        "dialogue_last_signal_ms": { "type": "number", "minimum": 0 },
+        "expected_dialogue_start_ms": { "type": "number", "minimum": 0 },
+        "expected_dialogue_end_ms": { "type": "number", "minimum": 0 },
+        "av_duration_delta_ms": { "type": "number", "minimum": 0 },
         "av_drift_ms": { "type": "number" },
         "integrated_lufs": { "type": "number" },
         "true_peak_dbtp": { "type": "number" },

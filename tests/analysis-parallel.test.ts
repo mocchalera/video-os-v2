@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { AssetItem } from "../runtime/connectors/ffprobe.js";
 import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type {
@@ -6,8 +8,28 @@ import type {
   VlmPolicy,
 } from "../runtime/connectors/gemini-vlm.js";
 import {
+  computePromptHash,
+  VLM_CONNECTOR_VERSION,
+} from "../runtime/connectors/gemini-vlm.js";
+import {
+  hydrateCachedVlmSegments,
   runParallelVlmAnalysis,
 } from "../runtime/pipeline/vlm-analysis.js";
+import { buildGapReport } from "../runtime/pipeline/stages/gap-report.js";
+
+const SOURCE_FIXTURE = path.join(import.meta.dirname, "fixtures/media/test-clip-5s.mp4");
+const FRAME_OUTPUT_DIR = path.join(import.meta.dirname, "_tmp_editorial_eye_parallel");
+
+afterAll(() => {
+  fs.rmSync(FRAME_OUTPUT_DIR, { recursive: true, force: true });
+});
+
+function groundingOptions(assets: AssetItem[]) {
+  return {
+    sourceFileMap: new Map(assets.map((asset) => [asset.asset_id, SOURCE_FIXTURE])),
+    outputDir: FRAME_OUTPUT_DIR,
+  };
+}
 
 const samplingPolicy: SamplingPolicy = {
   static: { sample_fps: 0.5 },
@@ -22,7 +44,7 @@ const vlmPolicy: VlmPolicy = {
   model_snapshot: "gemini-2.0-flash-202603",
   input_mode: "frame_bundle_plus_text_context",
   response_format: "json_schema_v1",
-  prompt_template_id: "m2-segment-v2",
+  prompt_template_id: "m2-segment-grounded-v3",
   max_frame_width_px: 1024,
   segment_visual_token_budget_max: 8192,
   segment_visual_output_tokens_max: 512,
@@ -89,6 +111,39 @@ function successResponse(summary: string) {
 }
 
 describe("runParallelVlmAnalysis", () => {
+  it("rejects text-only cached VLM output that has no grounded frame provenance", () => {
+    const current = makeSegment("AST_CACHE", "");
+    const cached = makeSegment("AST_CACHE", "");
+    cached.summary = "text-only cached summary";
+    cached.tags = ["cached"];
+    cached.quality_flags = ["blurry"];
+    const ungroundedProvenance = {
+      stage: "vlm",
+      method: "gemini_frame_bundle",
+      connector_version: VLM_CONNECTOR_VERSION,
+      policy_hash: "policy",
+      request_hash: "old-text-only",
+      model_snapshot: vlmPolicy.model_snapshot,
+      prompt_template_id: "m2-segment-grounded-v3",
+      prompt_hash: computePromptHash(),
+      response_format: vlmPolicy.response_format,
+    };
+    cached.provenance.summary = ungroundedProvenance;
+    cached.provenance.tags = ungroundedProvenance;
+    cached.provenance.quality_flags = ungroundedProvenance;
+
+    const hydrated = hydrateCachedVlmSegments({
+      currentSegments: [current],
+      cachedSegments: [cached],
+      vlmPolicy,
+      policyHash: "policy",
+    });
+
+    expect(hydrated.size).toBe(0);
+    expect(current.summary).toBe("");
+    expect(current.tags).toEqual([]);
+  });
+
   it("limits live VLM calls while skipping cached assets", async () => {
     const assets = [
       makeAsset("AST_001", "A.mov"),
@@ -121,6 +176,7 @@ describe("runParallelVlmAnalysis", () => {
           statuses.push(`${event.assetId}:${event.status}`);
         },
       },
+      ...groundingOptions(assets),
       vlmFn: async () => {
         callCount += 1;
         inFlight += 1;
@@ -159,6 +215,7 @@ describe("runParallelVlmAnalysis", () => {
       sleepFn: async (delayMs) => {
         delays.push(delayMs);
       },
+      ...groundingOptions([makeAsset("AST_001", "retry.mov")]),
       vlmFn: async () => {
         attempts += 1;
         if (attempts < 3) {
@@ -199,6 +256,7 @@ describe("runParallelVlmAnalysis", () => {
           failures.push(failure.assetId);
         },
       },
+      ...groundingOptions(assets),
       vlmFn: async (_framePaths, prompt) => {
         if (prompt.includes("beta transcript")) {
           throw new Error("Gemini API error 500: provider error");
@@ -215,5 +273,98 @@ describe("runParallelVlmAnalysis", () => {
     expect(failures).toEqual(["AST_002"]);
     expect(result.shards.filter((shard) => shard.result.success)).toHaveLength(2);
     expect(result.shards.filter((shard) => !shard.result.success)).toHaveLength(1);
+  });
+
+  it("grounds every mock input in an absolute non-empty frame extracted by real ffmpeg", async () => {
+    const assets = [makeAsset("AST_REAL", "fixture.mp4")];
+    const received: string[][] = [];
+
+    const result = await runParallelVlmAnalysis({
+      assets,
+      segments: [makeSegment("AST_REAL", "visual fixture")],
+      vlmPolicy,
+      samplingPolicy,
+      minSegmentDurationUs: 750_000,
+      ...groundingOptions(assets),
+      vlmFn: async (framePaths) => {
+        received.push(framePaths);
+        return successResponse("grounded");
+      },
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0].length).toBeGreaterThan(0);
+    for (const framePath of received[0]) {
+      expect(path.isAbsolute(framePath)).toBe(true);
+      expect(fs.statSync(framePath).size).toBeGreaterThan(0);
+    }
+    expect(result.shards[0].result.frame_grounding?.frame_count).toBe(received[0].length);
+    expect(result.shards[0].result.frame_grounding?.sample_timestamps_us).toHaveLength(
+      received[0].length,
+    );
+  });
+
+  it("reuses only verified non-empty frames from the versioned cache", async () => {
+    const assets = [makeAsset("AST_CACHE_REAL", "fixture.mp4")];
+    const baseOptions = {
+      assets,
+      segments: [makeSegment("AST_CACHE_REAL", "cache fixture")],
+      vlmPolicy,
+      samplingPolicy,
+      minSegmentDurationUs: 750_000,
+      ...groundingOptions(assets),
+    };
+    await runParallelVlmAnalysis({
+      ...baseOptions,
+      vlmFn: async () => successResponse("initial"),
+    });
+
+    const cached = await runParallelVlmAnalysis({
+      ...baseOptions,
+      frameExecFileImpl: (_command, _args, _options, callback) => {
+        callback(new Error("ffmpeg should not run for verified cache"), "", "");
+      },
+      vlmFn: async () => successResponse("cached"),
+    });
+    const grounding = cached.shards[0].result.frame_grounding;
+    expect(grounding?.frame_count).toBeGreaterThan(0);
+    expect(grounding?.frame_cache_hits).toBe(grounding?.frame_count);
+    expect(grounding?.frame_extraction_failures).toBeUndefined();
+  });
+
+  it("does not call VLM when extraction yields zero frames and emits a VLM gap", async () => {
+    const asset = makeAsset("AST_MISSING", "missing.mp4");
+    const segment = makeSegment("AST_MISSING", "must not become text-only");
+    let callCount = 0;
+    const result = await runParallelVlmAnalysis({
+      assets: [asset],
+      segments: [segment],
+      vlmPolicy,
+      samplingPolicy,
+      minSegmentDurationUs: 750_000,
+      sourceFileMap: new Map([[asset.asset_id, path.join(FRAME_OUTPUT_DIR, "missing.mp4")]]),
+      outputDir: FRAME_OUTPUT_DIR,
+      vlmFn: async () => {
+        callCount += 1;
+        return successResponse("should not run");
+      },
+    });
+
+    expect(callCount).toBe(0);
+    expect(result.shards[0].result.success).toBe(false);
+    expect(result.shards[0].result.error).toContain("vlm_frame_extraction_failed");
+    expect(result.shards[0].result.frame_grounding?.frame_count).toBe(0);
+
+    const gapReport = buildGapReport(
+      [asset],
+      new Map([[asset.asset_id, [segment]]]),
+      new Map(),
+      new Map(),
+      undefined,
+      result.shards,
+    );
+    expect(gapReport.entries.some((entry) =>
+      entry.stage === "vlm" && entry.issue.includes("vlm_frame_extraction_failed")
+    )).toBe(true);
   });
 });

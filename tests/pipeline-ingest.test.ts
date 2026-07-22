@@ -7,6 +7,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
 import { runPipeline, type PipelineResult } from "../runtime/pipeline/ingest.js";
+import type { VisualQualityMeasurements } from "../runtime/connectors/ffmpeg-motion.js";
+import { sha256FileHex } from "../runtime/source-content-identity.js";
 
 const require_ = createRequire(import.meta.url);
 const Ajv2020 = require_("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -214,7 +216,7 @@ describe("Pipeline: full ingest → segment → derivatives", () => {
     }
   });
 
-  it("writes 02_media/source_map.json and media symlink", () => {
+  it("writes a project-relative source map and a byte-identical media symlink", async () => {
     const sourceMapPath = path.join(TMP_PROJECT, "02_media", "source_map.json");
     expect(fs.existsSync(sourceMapPath)).toBe(true);
 
@@ -222,12 +224,121 @@ describe("Pipeline: full ingest → segment → derivatives", () => {
       items: Array<{ local_source_path: string; link_path: string }>;
     };
     expect(sourceMap.items).toHaveLength(1);
+    expect(path.isAbsolute(sourceMap.items[0].local_source_path)).toBe(false);
+    expect(sourceMap.items[0].local_source_path).toBe(sourceMap.items[0].link_path);
 
     const linkPath = path.join(TMP_PROJECT, sourceMap.items[0].link_path);
     expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(true);
-    expect(fs.readlinkSync(linkPath)).toBe(sourceMap.items[0].local_source_path);
+    expect(await sha256FileHex(linkPath)).toBe(await sha256FileHex(TEST_CLIP));
   });
 });
+
+describe("Pipeline: merged editorial observation cache reuse", () => {
+  it("reuses final VLM evidence while replacing changed appraiser and unavailable deterministic generations", async () => {
+    const tmpDir = path.join(import.meta.dirname, "_tmp_editorial_observation_full_cache");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    let vlmCalls = 0;
+    const vlmFn = async () => {
+      vlmCalls += 1;
+      return {
+        rawJson: JSON.stringify({
+          summary: "A person moves through a wide outdoor frame.",
+          tags: ["person", "outdoor"],
+          interest_points: [],
+          quality_flags: [],
+          confidence: { summary: 0.9, tags: 0.9, quality_flags: 0.9 },
+          editorial_observation: {
+            visual_tags: ["person", "outdoor"],
+            motion_type: "subtle",
+            camera_motion_direction: "unknown",
+            subject_motion_direction: "right",
+            shot_scale: "wide",
+            composition_anchor: "left",
+            screen_side: "left",
+            gaze_direction: "not_applicable",
+            camera_axis: "unknown",
+            dominant_subject_type: "person",
+            dominant_colors: ["green"],
+            confidence: { tags: 0.9, motion: 0.8, framing: 0.8, direction: 0.7, appearance: 0.8 },
+          },
+        }),
+      };
+    };
+    const firstMeasurement = editorialMeasurement(0.8, 0.4);
+    try {
+      const first = await runPipeline({
+        sourceFiles: [TEST_CLIP], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipPeak: true, skipMediaLink: true,
+        vlmFn,
+        appraiserModel: "appraiser-generation-1",
+        appraiserFn: async () => ({
+          visual_quality: { composition_score: 0.8, light_quality: 0.8, focus_sharpness: 0.8, subject_prominence: 0.8 },
+          extracted_text: [{ text: "OLD TITLE", language: "en", confidence: 0.9 }],
+          place_hint: { name: null, category: "unknown", confidence: 0, evidence: [] },
+          aesthetic_notes: [],
+        }),
+        visualQualityAnalyzeFn: async () => firstMeasurement,
+      });
+      const firstObservation = first.segmentsJson.items[0].editorial_observation!;
+      const firstVlmCalls = vlmCalls;
+      const firstAppraiserRefs = firstObservation.evidence.filter((item) => item.producer === "appraiser").map((item) => item.evidence_ref);
+      const firstMeasurementRefs = firstObservation.evidence.filter((item) => item.producer === "deterministic_measurement").map((item) => item.evidence_ref);
+      expect(firstObservation.text_presence).toBe("present");
+      expect(firstObservation.motion_type).toBe("rapid");
+      expect(firstObservation.avg_luma).toBe(0.4);
+
+      const second = await runPipeline({
+        sourceFiles: [TEST_CLIP], projectDir: tmpDir, repoRoot: REPO_ROOT,
+        skipStt: true, skipPeak: true, skipMediaLink: true,
+        vlmFn,
+        appraiserModel: "appraiser-generation-2",
+        appraiserFn: async () => ({
+          visual_quality: { composition_score: 0.7, light_quality: 0.7, focus_sharpness: 0.7, subject_prominence: 0.7 },
+          extracted_text: [],
+          place_hint: { name: null, category: "unknown", confidence: 0, evidence: [] },
+          aesthetic_notes: [],
+        }),
+        visualQualityAnalyzeFn: async () => {
+          throw new Error("simulated_visual_measurement_unavailable");
+        },
+      });
+      const finalObservation = second.segmentsJson.items[0].editorial_observation!;
+      expect(vlmCalls).toBe(firstVlmCalls);
+      expect(finalObservation.text_presence).toBe("unknown");
+      expect(finalObservation.motion_type).toBe("subtle");
+      expect(finalObservation.avg_luma).toBeUndefined();
+      expect(finalObservation.confidence.motion?.score).toBe(0.8);
+      expect(finalObservation.confidence.motion?.evidence_refs.every((ref) => ref.startsWith("vlm:"))).toBe(true);
+      expect(finalObservation.provenance.producers.find((item) => item.producer === "grounded_vlm")?.cache_decision).toBe("accepted");
+      expect(finalObservation.producer_snapshots?.grounded_vlm?.producer.cache_decision).toBe("accepted");
+      expect(finalObservation.evidence.some((item) => firstAppraiserRefs.includes(item.evidence_ref))).toBe(false);
+      expect(finalObservation.evidence.some((item) => firstMeasurementRefs.includes(item.evidence_ref))).toBe(false);
+      expect(finalObservation.provenance.producers.filter((item) => item.producer === "appraiser")).toHaveLength(1);
+      expect(finalObservation.provenance.producers.find((item) => item.producer === "appraiser")?.model).toBe("appraiser-generation-2");
+      expect(finalObservation.provenance.producers.filter((item) => item.producer === "deterministic_measurement")).toHaveLength(1);
+      expect(finalObservation.warnings.join(" ")).toContain("simulated_visual_measurement_unavailable");
+      const { validateSegments } = createValidator();
+      expect(validateSegments(second.segmentsJson)).toBe(true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+function editorialMeasurement(motion: number, avgLuma: number): VisualQualityMeasurements {
+  return {
+    measured: true,
+    connector_version: "ffmpeg-motion-test",
+    method: "ffmpeg_sampled_signals",
+    sample_fps: 2,
+    max_width: 160,
+    duration_us: 5_000_000,
+    metrics_measured: { shake: true, sharpness: true, exposure: true },
+    shake: { measured: true, score: motion, sample_count: 4, bins: [], average_energy: motion, peak_energy: motion, peak_timestamp_us: 2_500_000 },
+    sharpness: { measured: true, sharpness_score: 0.8, blur_score: 0.2, method: "blurdetect", sample_count: 4 },
+    exposure: { measured: true, exposure_score: 0.8, black_clip_ratio: 0, white_clip_ratio: 0, avg_luma: avgLuma, underexposed: false, overexposed: false, sample_count: 4 },
+  };
+}
 
 // ── Determinism Test ───────────────────────────────────────────────
 
@@ -535,6 +646,9 @@ describe("Pipeline: VLM peak detection writes peak_analysis to segments", () => 
         (s) => s.peak_analysis !== undefined,
       );
       expect(anyPeak).toBe(false);
+      expect(result.segmentsJson.items.every(
+        (segment) => segment.editorial_observation !== undefined,
+      )).toBe(true);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -104,6 +104,19 @@ describe("Skill Activation", () => {
     expect(active).toContain("silence_beat");
   });
 
+  it("keeps an explicit empty skill list empty", () => {
+    const bp = makeBlueprint({ active_editing_skills: [] });
+    const active = activateSkills(
+      bp,
+      [makeCandidate()],
+      undefined,
+      { id: "generic", skill_suppressions: [], skill_enforcements: [] },
+      SKILLS_DIR,
+    );
+
+    expect(active).toEqual([]);
+  });
+
   it("applies policy suppressions", () => {
     const bp = makeBlueprint({
       active_editing_skills: ["smash_cut_energy", "build_to_peak"],

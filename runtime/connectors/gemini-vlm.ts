@@ -12,14 +12,19 @@
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { computeRequestHash } from "./ffprobe.js";
+import type {
+  ObservationGroupConfidence,
+  ObservationValues,
+} from "../pipeline/stages/editorial-observation.js";
 
 // ── Constants ──────────────────────────────────────────────────────
 
-export const VLM_CONNECTOR_VERSION = "gemini-vlm-v2.0.0";
+export const VLM_CONNECTOR_VERSION = "gemini-vlm-v3.0.0";
 
 /** Canonical prompt template for M2 segment enrichment. */
-export const PROMPT_TEMPLATE_ID = "m2-segment-v2";
+export const PROMPT_TEMPLATE_ID = "m2-segment-grounded-v3";
 
 const PROMPT_TEMPLATE = `Analyze the following video segment frames. Return a JSON object with:
 - "summary": a specific sentence about the visible action. Name the subject's posture/motion, objects held, and background features. Be concrete, not generic.
@@ -27,6 +32,15 @@ const PROMPT_TEMPLATE = `Analyze the following video segment frames. Return a JS
 - "interest_points": array of notable moments, each with "frame_us" (microsecond timestamp), "label" (short description), "confidence" (0-1)
 - "quality_flags": array of quality issues detected (from vocabulary: "underexposed", "overexposed", "blurry", "shaky", "noisy", "interlaced", "letterboxed", "pillarboxed")
 - "confidence": object with "summary" (0-1), "tags" (0-1), "quality_flags" (0-1)
+- "editorial_observation": genre-neutral visible facts with "visual_tags", "motion_type", "camera_motion_direction", "subject_motion_direction", "shot_scale", "composition_anchor", "screen_side", "gaze_direction", "camera_axis", "dominant_subject_type", "dominant_colors", and "text_presence". Use only the documented enum values; use "unknown" or "not_applicable" rather than guessing. Include group confidence numbers for "tags", "motion", "framing", "direction", "appearance", and "text".
+  - motion_type: static|subtle|continuous|intermittent|rapid|mixed|unknown|not_applicable
+  - camera_motion_direction and subject_motion_direction: left|right|up|down|toward_camera|away_from_camera|mixed|unknown|not_applicable
+  - shot_scale: extreme_wide|wide|medium_wide|medium|medium_close_up|close_up|extreme_close_up|insert|unknown|not_applicable
+  - composition_anchor and screen_side: left|center|right|balanced|multiple|full_frame|unknown|not_applicable (screen_side does not use balanced)
+  - gaze_direction: screen_left|screen_right|camera|away|up|down|mixed|unknown|not_applicable
+  - camera_axis: axis_left|axis_right|on_axis|establishing|unknown|not_applicable
+  - dominant_subject_type: person|group|animal|object|landscape|architecture|text_graphic|mixed|unknown|not_applicable
+  - text_presence: present|absent|unknown|not_applicable
 - "visual_quality": object with:
   - "scores": object with 0-1 numbers for "light_quality", "subject_prominence", "emotional_expression", "composition_score", "motion_quality"
   - "labels": object with string arrays for "lighting_style", "composition_tags", "expression_tags", "motion_tags"
@@ -34,16 +48,16 @@ const PROMPT_TEMPLATE = `Analyze the following video segment frames. Return a JS
 visual_quality score rubric anchors:
 - light_quality: 0.9=golden hour/expressive lighting, 0.5=flat even light, 0.1=severely under/overexposed
 - subject_prominence: 0.9=subject sharp and dominant, 0.5=visible but not prominent, 0.1=absent/lost in background
-- emotional_expression: 0.9=clear strong emotion visible, 0.5=neutral expression, 0.1=no face/no readable expression
+- emotional_expression: 0.9=clear strong emotion visible, 0.5=neutral or no face/not applicable, 0.1=a visible intended expression is unreadable
 - composition_score: 0.9=strong balance/geometry/framing, 0.5=functional framing, 0.1=chaotic/unintentional
-- motion_quality: 0.9=decisive beautiful motion, 0.5=ordinary movement, 0.1=static or shaky
+- motion_quality: 0.9=intentional effective motion/stillness, 0.5=ordinary or not applicable, 0.1=unwanted/incoherent motion. It is an intent-relative appraisal, not a motion amount; a static landscape or title card is not low quality merely for being still.
 
 Respond ONLY with valid JSON, no markdown fences or explanation.`;
 
 const REPAIR_PROMPT = `The previous response was not valid JSON. Please respond with ONLY a valid JSON object matching the schema described earlier. No markdown, no explanation.`;
 
 /** Compute SHA-256 hash of the normalized prompt template + schema version. */
-export function computePromptHash(schemaVersion: string = "2.0.0"): string {
+export function computePromptHash(schemaVersion: string = "3.0.0"): string {
   const normalized = PROMPT_TEMPLATE.trim().replace(/\s+/g, " ");
   return createHash("sha256")
     .update(normalized + "|" + schemaVersion)
@@ -101,6 +115,7 @@ export interface VlmRawResponse {
     quality_flags?: number;
   };
   visual_quality?: unknown;
+  editorial_observation?: unknown;
 }
 
 export interface VlmVisualQuality {
@@ -135,7 +150,16 @@ export interface VlmNormalizedOutput {
     quality_flags: number;
   };
   visual_quality?: VlmVisualQuality;
+  editorial_observation?: {
+    values: ObservationValues;
+    confidence: Partial<Record<keyof ObservationConfidenceMap, number>>;
+  };
 }
+
+type ObservationConfidenceMap = Record<
+  "tags" | "motion" | "framing" | "direction" | "appearance" | "text",
+  ObservationGroupConfidence
+>;
 
 /** Result of a VLM enrichment call for one segment. */
 export interface VlmEnrichmentResult {
@@ -145,6 +169,26 @@ export interface VlmEnrichmentResult {
   prompt_hash: string;
   model_alias: string;
   model_snapshot: string;
+  frame_grounding?: VlmFrameGrounding;
+}
+
+export interface VlmFrameGrounding {
+  frame_count: number;
+  verified_frame_paths?: string[];
+  sample_timestamps_us: number[];
+  requested_sample_timestamps_us: number[];
+  frame_cache_version: string;
+  frame_producer_version: string;
+  frame_cache_hits: number;
+  frame_content_sha256?: string[];
+  asset_source_content_sha256?: string;
+  source_content_sha256?: string;
+  segment_src_in_us?: number;
+  segment_src_out_us?: number;
+  cache_identity?: string;
+  cache_decision?: "accepted" | "refreshed" | "miss";
+  cache_decision_reasons?: string[];
+  frame_extraction_failures?: string[];
 }
 
 /**
@@ -406,6 +450,42 @@ function normalizeVisualQuality(raw: unknown): VlmVisualQuality | undefined {
   };
 }
 
+const OBSERVATION_ENUMS = {
+  motion_type: ["static", "subtle", "continuous", "intermittent", "rapid", "mixed", "unknown", "not_applicable"],
+  camera_motion_direction: ["left", "right", "up", "down", "toward_camera", "away_from_camera", "mixed", "unknown", "not_applicable"],
+  subject_motion_direction: ["left", "right", "up", "down", "toward_camera", "away_from_camera", "mixed", "unknown", "not_applicable"],
+  shot_scale: ["extreme_wide", "wide", "medium_wide", "medium", "medium_close_up", "close_up", "extreme_close_up", "insert", "unknown", "not_applicable"],
+  composition_anchor: ["left", "center", "right", "balanced", "multiple", "full_frame", "unknown", "not_applicable"],
+  screen_side: ["left", "center", "right", "multiple", "full_frame", "unknown", "not_applicable"],
+  gaze_direction: ["screen_left", "screen_right", "camera", "away", "up", "down", "mixed", "unknown", "not_applicable"],
+  camera_axis: ["axis_left", "axis_right", "on_axis", "establishing", "unknown", "not_applicable"],
+  dominant_subject_type: ["person", "group", "animal", "object", "landscape", "architecture", "text_graphic", "mixed", "unknown", "not_applicable"],
+  text_presence: ["present", "absent", "unknown", "not_applicable"],
+} as const;
+
+function normalizeEditorialObservation(raw: unknown): VlmNormalizedOutput["editorial_observation"] {
+  if (!isRecord(raw)) return undefined;
+  const values: Record<string, unknown> = {};
+  if (Array.isArray(raw.visual_tags)) values.visual_tags = normalizeTags(raw.visual_tags);
+  if (Array.isArray(raw.dominant_colors)) values.dominant_colors = normalizeTags(raw.dominant_colors);
+  for (const [field, allowed] of Object.entries(OBSERVATION_ENUMS)) {
+    if (!Object.prototype.hasOwnProperty.call(raw, field)) continue;
+    const value = raw[field];
+    values[field] = typeof value === "string" && (allowed as readonly string[]).includes(value)
+      ? value
+      : "unknown";
+  }
+  const confidenceRaw = isRecord(raw.confidence) ? raw.confidence : {};
+  const confidence: Record<string, number> = {};
+  for (const group of ["tags", "motion", "framing", "direction", "appearance", "text"] as const) {
+    const value = confidenceRaw[group];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      confidence[group] = clampScore(value);
+    }
+  }
+  return { values: values as ObservationValues, confidence };
+}
+
 /**
  * Normalize the full VLM response into a clean output.
  */
@@ -443,6 +523,7 @@ export function normalizeVlmOutput(
   };
 
   const visualQuality = normalizeVisualQuality(raw.visual_quality);
+  const editorialObservation = normalizeEditorialObservation(raw.editorial_observation);
 
   return {
     summary,
@@ -451,6 +532,7 @@ export function normalizeVlmOutput(
     quality_flags: qualityFlags,
     confidence,
     ...(visualQuality ? { visual_quality: visualQuality } : {}),
+    ...(editorialObservation ? { editorial_observation: editorialObservation } : {}),
   };
 }
 
@@ -626,6 +708,22 @@ export function guessAssetRole(
  */
 export function createGeminiVlmFn(): VlmFn {
   return async (framePaths, prompt, options) => {
+    const invalidPaths = framePaths.filter((framePath) => {
+      if (!path.isAbsolute(framePath)) return true;
+      try {
+        const stat = fs.statSync(framePath);
+        return !stat.isFile() || stat.size <= 0;
+      } catch {
+        return true;
+      }
+    });
+    if (framePaths.length === 0) {
+      throw new Error("grounded_vlm_requires_at_least_one_image");
+    }
+    if (invalidPaths.length > 0) {
+      throw new Error(`grounded_vlm_invalid_image_paths:${invalidPaths.join(",")}`);
+    }
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY environment variable is required");
@@ -636,14 +734,12 @@ export function createGeminiVlmFn(): VlmFn {
 
     // Add frame images as inline_data
     for (const framePath of framePaths) {
-      if (fs.existsSync(framePath)) {
-        const imageData = fs.readFileSync(framePath);
-        const base64 = imageData.toString("base64");
-        const mimeType = framePath.endsWith(".png") ? "image/png" : "image/jpeg";
-        parts.push({
-          inline_data: { mime_type: mimeType, data: base64 },
-        });
-      }
+      const imageData = fs.readFileSync(framePath);
+      const base64 = imageData.toString("base64");
+      const mimeType = framePath.endsWith(".png") ? "image/png" : "image/jpeg";
+      parts.push({
+        inline_data: { mime_type: mimeType, data: base64 },
+      });
     }
 
     // Add text prompt
@@ -694,6 +790,8 @@ export function computeVlmRequestHash(params: {
   model_snapshot: string;
   prompt_hash: string;
   frame_count: number;
+  sample_timestamps_us?: number[];
+  frame_cache_version?: string;
 }): string {
   return computeRequestHash(params as unknown as Record<string, unknown>);
 }

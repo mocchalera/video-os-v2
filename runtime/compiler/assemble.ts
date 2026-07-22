@@ -12,6 +12,7 @@
 import type {
   AssembledTimeline,
   BriefAudioPolicy,
+  Candidate,
   ContinuityReorderEvent,
   ContinuityRepeatPolicy,
   CraftDirective,
@@ -23,10 +24,18 @@ import type {
   ScoredCandidate,
   ScoringParams,
   TimelineClip,
+  StillDurationPolicy,
   Track,
   TrackLayout,
 } from "./types.js";
+import { resolveStillImageHold } from "../artifacts/still-image-policy.js";
+import { isStillImageClip, setStillImageHoldFrames } from "./still-image.js";
 import { getCandidateRef } from "./candidate-ref.js";
+import {
+  candidateSupportsVisual,
+  inferAudioRole,
+  isAudioOnlyCandidate,
+} from "../artifacts/source-media-capabilities.js";
 
 export const MIN_RHYTHM_CLIP_DURATION_SEC = 0.5;
 
@@ -46,6 +55,7 @@ export interface AssembleOptions {
   /** Treat each beat's candidate_plan as an exact authored sequence contract. */
   exactCandidatePlanOrder?: boolean;
   log?: (message: string) => void;
+  stillDurationPolicy?: StillDurationPolicy;
 }
 
 export function assemble(
@@ -60,6 +70,11 @@ export function assemble(
   const isGuide = durationPolicy?.mode === "guide";
   const layout = options?.trackLayout ?? "single";
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
+  const hasImageCandidate = [...rankedTable.values()].some((ranked) =>
+    ranked.some((entry) => entry.candidate.media_kind === "image"));
+  if (hasImageCandidate && !options?.stillDurationPolicy) {
+    throw new Error("still_image_duration_policy_missing");
+  }
   const v1Clips: TimelineClip[] = []; // primary narrative (hero)
   const v2Clips: TimelineClip[] = []; // support / inserts
   const a1Clips: TimelineClip[] = []; // dialogue / nat sound
@@ -102,13 +117,49 @@ export function assemble(
     }
 
     const beatBudget = beatBudgetFrames.get(beat.beat_id) ?? beat.target_duration_frames;
-    const beatCandidates = rankedTable.get(beat.beat_id) ?? [];
+    const mappedBeatCandidates = (rankedTable.get(beat.beat_id) ?? []).map((scored) => {
+      const plan = beat.candidate_plan;
+      const candidateRef = getCandidateRef(scored.candidate);
+      if (scored.candidate.media_kind !== "image" || !plan?.still_image ||
+        (plan.primary_candidate_ref !== candidateRef && plan.primary_candidate_ref !== scored.candidate.segment_id)) {
+        return scored;
+      }
+      return {
+        ...scored,
+        candidate: {
+          ...scored.candidate,
+          still_image: { ...scored.candidate.still_image, ...plan.still_image },
+        },
+      };
+    });
+    const beatCandidates = mappedBeatCandidates.filter((scored) => {
+      if (scored.candidate.media_kind !== "image") return true;
+      const minimum = resolveStillImageHold(
+        scored.candidate,
+        options!.stillDurationPolicy!,
+        options!.stillDurationPolicy!.max_hold_frames,
+      ).min_hold_frames;
+      return beatBudget >= minimum;
+    });
+    const hadUnplaceableStill = mappedBeatCandidates.some((candidate) =>
+      candidate.candidate.media_kind === "image" && !beatCandidates.includes(candidate)
+    );
+    if (hadUnplaceableStill && !beatCandidates.some((candidate) => candidateSupportsVisual(candidate.candidate))) {
+      const minimum = Math.min(...mappedBeatCandidates
+        .filter((candidate) => candidate.candidate.media_kind === "image")
+        .map((candidate) => resolveStillImageHold(
+          candidate.candidate,
+          options!.stillDurationPolicy!,
+          options!.stillDurationPolicy!.max_hold_frames,
+        ).min_hold_frames));
+      throw new Error(`still_image_hold_cannot_fit_beat: beat_id=${beat.beat_id} available_frames=${beatBudget} min_hold_frames=${minimum}`);
+    }
 
     // Add beat boundary marker
     markers.push({
       frame: currentFrame,
       kind: "beat",
-      label: `${beat.beat_id}: ${beat.label}`,
+      label: `${beat.beat_id}: ${beat.viewer_label ?? beat.label}`,
     });
 
     if (beatBudget <= 0) {
@@ -116,7 +167,50 @@ export function assemble(
     }
 
     // Collect candidates by role for this beat, applying adjacency penalty
-    const byRole = groupByRole(beatCandidates);
+    const byRole = groupByRole(beatCandidates.filter((item) => candidateSupportsVisual(item.candidate)));
+    const audioOnlyCandidates = exactCandidatePlanOrder
+      ? orderCandidatesByCandidatePlan(
+          beatCandidates.filter((item) => isAudioOnlyCandidate(item.candidate)),
+          beat.candidate_plan,
+        )
+      : candidatesForCurrentBeat(
+          beatCandidates.filter((item) => isAudioOnlyCandidate(item.candidate)),
+          beat.beat_id,
+          reservedCandidateOwner,
+        );
+    const routedAudioCandidates = exactCandidatePlanOrder || isGuide
+      ? pickAvailable(audioOnlyCandidates, usedClips, null, 0, clusterContinuity)
+      : (() => {
+          const best = pickBest(audioOnlyCandidates, usedClips, null, 0);
+          return best ? [best] : [];
+        })();
+    let audioFrame = currentFrame;
+    const audioBeatEndFrame = currentFrame + beatBudget;
+    for (const scored of routedAudioCandidates) {
+      if (audioFrame >= audioBeatEndFrame) break;
+      const clip = makeClip(
+        scored,
+        beat.beat_id,
+        audioFrame,
+        audioBeatEndFrame - audioFrame,
+        ++clipCounter,
+        { segment_ids: [], candidate_refs: [] },
+       usPerFrame,
+        options?.stillDurationPolicy,
+     );
+      clip.audio_role = scored.candidate.audio_role ?? inferAudioRole(scored.candidate);
+      const target = clip.audio_role === "dialogue"
+        ? a1Clips
+        : clip.audio_role === "music"
+          ? a2Clips
+          : a3Clips;
+      if (placeClipWithinCap(target, clip, maxDurationFrames)) {
+        usedClips.add(clipUsageKey(scored.candidate));
+        audioFrame += clip.timeline_duration_frames;
+      } else {
+        durationCapDroppedClips += 1;
+      }
+    }
 
     if (layout === "single") {
       const visualCandidates = exactCandidatePlanOrder
@@ -149,8 +243,9 @@ export function assemble(
           beatEndFrame - v1Frame,
           ++clipCounter,
           { segment_ids: [], candidate_refs: [] },
-          usPerFrame,
-        );
+         usPerFrame,
+          options?.stillDurationPolicy,
+       );
         const placed = placeClipWithinCap(v1Clips, clip, maxDurationFrames);
         usedClips.add(clipUsageKey(visualClip.candidate));
         if (!placed) {
@@ -168,7 +263,9 @@ export function assemble(
       );
       if (!exactCandidatePlanOrder && !v1HasDialogueForBeat) {
         const dialogueCandidates = candidatesForCurrentBeat(
-          byRole.get("dialogue") ?? [],
+          (byRole.get("dialogue") ?? []).filter((candidate) =>
+            candidateSupportsAuthoredDialogueAudio(candidate.candidate)
+          ),
           beat.beat_id,
           reservedCandidateOwner,
         );
@@ -197,8 +294,9 @@ export function assemble(
             beatBudget,
             ++clipCounter,
             { segment_ids: [], candidate_refs: [] },
-            usPerFrame,
-          );
+           usPerFrame,
+            options?.stillDurationPolicy,
+         );
           if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, sc);
             usedClips.add(clipUsageKey(sc.candidate));
@@ -209,6 +307,13 @@ export function assemble(
         }
       }
     } else {
+      const visualDialogueCandidates = candidatesForCurrentBeat(
+        (byRole.get("dialogue") ?? []).filter((candidate) =>
+          !candidateSupportsAuthoredDialogueAudio(candidate.candidate)
+        ),
+        beat.beat_id,
+        reservedCandidateOwner,
+      );
       // V1: hero clips (always pick best 1)
       const heroCandidates = candidatesForCurrentBeat(
         byRole.get("hero") ?? [],
@@ -229,8 +334,9 @@ export function assemble(
           beatBudget,
           ++clipCounter,
           getRunnersUp(heroCandidates, heroClip, usedClips),
-          usPerFrame,
-        );
+         usPerFrame,
+          options?.stillDurationPolicy,
+       );
         if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
           registerClipCluster(clusterByClipId, clip, heroClip);
           usedClips.add(clipUsageKey(heroClip.candidate));
@@ -238,12 +344,42 @@ export function assemble(
         } else {
           durationCapDroppedClips += 1;
         }
+      } else {
+        // A visual-only dialogue candidate (notably a still image) cannot be
+        // authored onto A1. Preserve it as the primary visual when no hero is
+        // available instead of fabricating an audio clip.
+        const visualDialogue = pickBest(
+          visualDialogueCandidates,
+          usedClips,
+          prevV1Asset,
+          params.adjacency_penalty,
+        );
+        if (visualDialogue) {
+          const clip = makeClip(
+            visualDialogue,
+            beat.beat_id,
+            currentFrame,
+            beatBudget,
+            ++clipCounter,
+            getRunnersUp(visualDialogueCandidates, visualDialogue, usedClips),
+            usPerFrame,
+            options?.stillDurationPolicy,
+          );
+          if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
+            registerClipCluster(clusterByClipId, clip, visualDialogue);
+            usedClips.add(clipUsageKey(visualDialogue.candidate));
+            prevV1Asset = visualDialogue.candidate.asset_id;
+          } else {
+            durationCapDroppedClips += 1;
+          }
+        }
       }
 
       // V2: support + texture clips
       const supportCandidates = [
         ...(byRole.get("support") ?? []),
         ...(byRole.get("texture") ?? []),
+        ...visualDialogueCandidates,
       ];
       // Re-sort after merging (stable sort)
       supportCandidates.sort((a, b) => {
@@ -284,8 +420,9 @@ export function assemble(
             beatEndFrame - v2Frame,
             ++clipCounter,
             { segment_ids: [], candidate_refs: [] },
-            usPerFrame,
-          );
+           usPerFrame,
+            options?.stillDurationPolicy,
+         );
           if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, sc);
             usedClips.add(clipUsageKey(sc.candidate));
@@ -312,8 +449,9 @@ export function assemble(
             beatBudget,
             ++clipCounter,
             getRunnersUp(availableSupportCandidates, supportClip, usedClips),
-            usPerFrame,
-          );
+           usPerFrame,
+            options?.stillDurationPolicy,
+         );
           if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, supportClip);
             usedClips.add(clipUsageKey(supportClip.candidate));
@@ -331,7 +469,9 @@ export function assemble(
       if (isGuide) {
         // Guide mode: place ALL available dialogue clips
         const dialogueCandidates = candidatesForCurrentBeat(
-          byRole.get("dialogue") ?? [],
+          (byRole.get("dialogue") ?? []).filter((candidate) =>
+            candidateSupportsAuthoredDialogueAudio(candidate.candidate)
+          ),
           beat.beat_id,
           reservedCandidateOwner,
         );
@@ -350,8 +490,9 @@ export function assemble(
             beatBudget,
             ++clipCounter,
             { segment_ids: [], candidate_refs: [] },
-            usPerFrame,
-          );
+           usPerFrame,
+            options?.stillDurationPolicy,
+         );
           if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, sc);
             usedClips.add(clipUsageKey(sc.candidate));
@@ -362,7 +503,9 @@ export function assemble(
         }
       } else {
         const dialogueCandidates = candidatesForCurrentBeat(
-          byRole.get("dialogue") ?? [],
+          (byRole.get("dialogue") ?? []).filter((candidate) =>
+            candidateSupportsAuthoredDialogueAudio(candidate.candidate)
+          ),
           beat.beat_id,
           reservedCandidateOwner,
         );
@@ -380,8 +523,9 @@ export function assemble(
             beatBudget,
             ++clipCounter,
             getRunnersUp(dialogueCandidates, dialogueClip, usedClips),
-            usPerFrame,
-          );
+           usPerFrame,
+            options?.stillDurationPolicy,
+         );
           if (placeClipWithinCap(a1Clips, clip, maxDurationFrames)) {
             registerClipCluster(clusterByClipId, clip, dialogueClip);
             usedClips.add(clipUsageKey(dialogueClip.candidate));
@@ -413,8 +557,9 @@ export function assemble(
           beatBudget,
           ++clipCounter,
           getRunnersUp(transitionCandidates, transitionClip, usedClips),
-          usPerFrame,
-        );
+         usPerFrame,
+          options?.stillDurationPolicy,
+       );
         if (placeClipWithinCap(v2Clips, clip, maxDurationFrames)) {
           registerClipCluster(clusterByClipId, clip, transitionClip);
           usedClips.add(clipUsageKey(transitionClip.candidate));
@@ -430,6 +575,9 @@ export function assemble(
       : undefined;
     applyBeatCraftTiming(v1Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
     applyBeatCraftTiming(v2Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
+    applyBeatCraftTiming(a1Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
+    applyBeatCraftTiming(a2Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
+    applyBeatCraftTiming(a3Clips, beat.craft, beat.beat_id, fpsNum / fpsDen, craftMaxEndFrame);
 
     // Frame advancement
     if (isGuide) {
@@ -468,6 +616,7 @@ export function assemble(
       clipCounter + 1,
       usPerFrame,
       maxDurationFrames,
+      options?.stillDurationPolicy,
     );
     durationCapDroppedClips += fillResult.droppedClips;
     clipCounter = fillResult.clipCounter;
@@ -492,32 +641,30 @@ export function assemble(
 
     for (const sc of unused) {
       if (maxDurationFrames != null && currentFrame >= maxDurationFrames) break;
-      const sourceDurationUs = sc.candidate.src_out_us - sc.candidate.src_in_us;
-      const sourceDurationFrames = Math.ceil(sourceDurationUs / usPerFrame);
-
-      const clip: TimelineClip = {
-        clip_id: `CLP_${String(++clipCounter).padStart(4, "0")}`,
-        segment_id: sc.candidate.segment_id,
-        asset_id: sc.candidate.asset_id,
-        src_in_us: sc.candidate.src_in_us,
-        src_out_us: sc.candidate.src_out_us,
-        timeline_in_frame: currentFrame,
-        timeline_duration_frames: sourceDurationFrames,
-        role: sc.candidate.role as TimelineClip["role"],
-        motivation: sc.candidate.why_it_matches,
-        beat_id: lastBeatId,
-        fallback_segment_ids: [],
-        confidence: sc.candidate.confidence,
-        quality_flags: sc.candidate.quality_flags ?? [],
-        candidate_ref: getCandidateRef(sc.candidate),
-        fallback_candidate_refs: [],
-      };
+      const availableFrames = maxDurationFrames == null
+        ? Number.MAX_SAFE_INTEGER
+        : maxDurationFrames - currentFrame;
+      const clip = makeClip(
+        sc,
+        lastBeatId,
+        currentFrame,
+        availableFrames,
+        ++clipCounter,
+        { segment_ids: [], candidate_refs: [] },
+        usPerFrame,
+        options?.stillDurationPolicy,
+      );
 
       usedClips.add(clipUsageKey(sc.candidate));
-      const targetTrack = sc.candidate.role === "dialogue" ? a1Clips : v2Clips;
+      const audioRole = sc.candidate.audio_role ?? inferAudioRole(sc.candidate);
+      const targetTrack = isAudioOnlyCandidate(sc.candidate)
+        ? audioRole === "dialogue" ? a1Clips : audioRole === "music" ? a2Clips : a3Clips
+        : sc.candidate.role === "dialogue" && candidateSupportsAuthoredDialogueAudio(sc.candidate)
+          ? a1Clips
+          : v2Clips;
       if (placeClipWithinCap(targetTrack, clip, maxDurationFrames)) {
         registerClipCluster(clusterByClipId, clip, sc);
-        currentFrame += sourceDurationFrames;
+        currentFrame += clip.timeline_duration_frames;
       } else {
         durationCapDroppedClips += 1;
       }
@@ -541,13 +688,15 @@ export function assemble(
   // For keepsake / event-recap profiles, reorder clips by source timestamp
   // (asset_id + src_in_us) instead of editorial score order.
   if (options?.timelineOrder === "chronological") {
-    reorderChronological(v1Clips, v2Clips, a1Clips, markers, options.beatOrder);
+    reorderChronological(v1Clips, v2Clips, a1Clips, a2Clips, a3Clips, markers, options.beatOrder);
   }
 
   if (maxDurationFrames != null) {
     durationCapDroppedClips += dropClipsBeyondCap(v1Clips, maxDurationFrames);
     durationCapDroppedClips += dropClipsBeyondCap(v2Clips, maxDurationFrames);
     durationCapDroppedClips += dropClipsBeyondCap(a1Clips, maxDurationFrames);
+    durationCapDroppedClips += dropClipsBeyondCap(a2Clips, maxDurationFrames);
+    durationCapDroppedClips += dropClipsBeyondCap(a3Clips, maxDurationFrames);
   }
 
   if (options?.audioPolicy !== "bgm_only") {
@@ -561,18 +710,22 @@ export function assemble(
   }
 
   if (options?.bgmAssetId && options.audioPolicy !== "original_only") {
-    const totalVideoFrames = Math.max(
+    const totalProgramFrames = Math.max(
       0,
-      ...[...v1Clips, ...v2Clips].map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames),
+      ...(
+        v1Clips.length + v2Clips.length > 0
+          ? [...v1Clips, ...v2Clips]
+          : [...a1Clips, ...a2Clips, ...a3Clips]
+      ).map((clip) => clip.timeline_in_frame + clip.timeline_duration_frames),
     );
     a2Clips.push({
       clip_id: "ACL_BGM_0001",
       segment_id: options.bgmSegmentId ?? `${normalized.project_id}:bgm`,
       asset_id: options.bgmAssetId,
       src_in_us: 0,
-      src_out_us: Math.round((options.bgmDurationSec ?? totalVideoFrames / (fpsNum / fpsDen)) * 1_000_000),
+      src_out_us: Math.round((options.bgmDurationSec ?? totalProgramFrames / (fpsNum / fpsDen)) * 1_000_000),
       timeline_in_frame: 0,
-      timeline_duration_frames: totalVideoFrames,
+      timeline_duration_frames: totalProgramFrames,
       role: "bgm",
       motivation: "background music bed",
       beat_id: "music01",
@@ -581,6 +734,7 @@ export function assemble(
       quality_flags: [],
       audio_policy: {
         mode: options.audioPolicy ?? "ducking",
+        gain_unit: "linear",
         duck_music_db: -18,
         bgm_gain: 0.25,
         a1_loudnorm: options.a1Loudnorm ?? true,
@@ -601,7 +755,7 @@ export function assemble(
   const audio: Track[] = [
     { track_id: "A1", kind: "audio", clips: a1Clips },
     { track_id: "A2", kind: "audio", clips: a2Clips },
-    { track_id: "A3", kind: "audio", clips: [] }, // Texture/room tone: M1 empty
+    { track_id: "A3", kind: "audio", clips: a3Clips },
   ];
 
   return { tracks: { video, audio }, markers };
@@ -618,6 +772,7 @@ function fillSingleLayoutGuideBeats(
   startClipCounter: number,
   usPerFrame: number,
   maxDurationFrames?: number,
+  stillDurationPolicy?: StillDurationPolicy,
 ): { droppedClips: number; clipCounter: number } {
   const unused = buildUnusedCandidatePool(rankedTable, usedClips);
   if (unused.length === 0) return { droppedClips: 0, clipCounter: startClipCounter - 1 };
@@ -649,6 +804,7 @@ function fillSingleLayoutGuideBeats(
         ++clipCounter,
         { segment_ids: [], candidate_refs: [] },
         usPerFrame,
+        stillDurationPolicy,
       );
       usedClips.add(clipUsageKey(sc.candidate));
       if (placeClipWithinCap(v1Clips, clip, maxDurationFrames)) {
@@ -671,7 +827,7 @@ function buildUnusedCandidatePool(
   for (const [, scored] of rankedTable) {
     for (const sc of scored) {
       const key = clipUsageKey(sc.candidate);
-      if (!V1_FIRST_ROLE_PRIORITY.has(sc.candidate.role)) continue;
+      if (!V1_FIRST_ROLE_PRIORITY.has(sc.candidate.role) || !candidateSupportsVisual(sc.candidate)) continue;
       if (usedClips.has(key)) continue;
       const current = unusedByKey.get(key);
       if (
@@ -789,11 +945,14 @@ function applyDurationMultipliers(
 ): void {
   if (clips.length === 0) return;
   const targetDurations = clips.map((clip, index) => {
+    if (isStillImageClip(clip)) return clip.timeline_duration_frames;
     const multiplier = multipliers[index] ?? 1;
     return Math.max(1, Math.round(clip.timeline_duration_frames * multiplier));
   });
   const targetTotal = targetDurations.reduce((sum, duration) => sum + duration, 0);
-  const durations = targetDurations.map((duration) => Math.max(minDurationFrames, duration));
+  const durations = targetDurations.map((duration, index) =>
+    isStillImageClip(clips[index]) ? duration : Math.max(minDurationFrames, duration)
+  );
   let extraFrames = durations.reduce((sum, duration) => sum + duration, 0) - targetTotal;
 
   if (extraFrames > 0) {
@@ -813,7 +972,7 @@ function applyDurationMultipliers(
   let frame = clips[0].timeline_in_frame;
   for (let i = 0; i < clips.length; i += 1) {
     clips[i].timeline_in_frame = frame;
-    clips[i].timeline_duration_frames = durations[i];
+    setStillImageHoldFrames(clips[i], durations[i], isStillImageClip(clips[i]) ? "beat_budget" : "none");
     frame += durations[i];
   }
 }
@@ -825,9 +984,9 @@ function applyBreathRhythm(clips: TimelineClip[], fps: number): void {
 
   for (let i = 0; i < clips.length; i += 1) {
     const shouldHoldLast = clips.length <= 3 && i === clips.length - 1;
-    const duration = clips[i].timeline_duration_frames + (shouldHoldLast ? breathFrames : 0);
+    const duration = clips[i].timeline_duration_frames + (shouldHoldLast && !isStillImageClip(clips[i]) ? breathFrames : 0);
     clips[i].timeline_in_frame = frame;
-    clips[i].timeline_duration_frames = Math.max(1, duration);
+    setStillImageHoldFrames(clips[i], Math.max(1, duration), isStillImageClip(clips[i]) ? clips[i].still_image!.policy_clamp : "none");
     frame += clips[i].timeline_duration_frames;
     if (clips.length > 3 && (i + 1) % 4 === 0 && i < clips.length - 1) {
       frame += breathFrames;
@@ -851,18 +1010,29 @@ function capBeatClipsToMaxEnd(clips: TimelineClip[], maxEndFrame: number | undef
   let overflow = durations.reduce((sum, duration) => sum + duration, 0) - availableFrames;
   if (overflow > 0) {
     for (let index = durations.length - 1; index >= 0 && overflow > 0; index -= 1) {
-      const reducible = durations[index] - 1;
+      const floor = isStillImageClip(ordered[index])
+        ? ordered[index].still_image!.min_hold_frames
+        : 1;
+      const reducible = durations[index] - floor;
       const reduction = Math.min(reducible, overflow);
       durations[index] -= reduction;
       overflow -= reduction;
     }
   }
 
+  if (overflow > 0) {
+    throw new Error(`still_image_hold_cannot_fit_cap:remaining_overflow_frames=${overflow}`);
+  }
+
   let frame = firstFrame;
   for (let index = 0; index < ordered.length; index += 1) {
     ordered[index].timeline_in_frame = frame;
-    ordered[index].timeline_duration_frames = durations[index];
-    frame += durations[index];
+    const clip = ordered[index];
+    const next = isStillImageClip(clip)
+      ? Math.max(clip.still_image!.min_hold_frames, Math.min(durations[index], clip.still_image!.max_hold_frames))
+      : durations[index];
+    setStillImageHoldFrames(clip, next, isStillImageClip(clip) && next !== clip.still_image!.hold_frames ? "duration_cap" : "none");
+    frame += clip.timeline_duration_frames;
   }
 }
 
@@ -1275,12 +1445,43 @@ function reorderChronological(
   v1Clips: TimelineClip[],
   v2Clips: TimelineClip[],
   a1Clips: TimelineClip[],
+  a2Clips: TimelineClip[],
+  a3Clips: TimelineClip[],
   markers: Marker[],
   beatOrder: string[] = [],
 ): void {
   const allVideoClips = [...v1Clips, ...v2Clips];
-  if (allVideoClips.length <= 1) return;
   const beatIndex = new Map(beatOrder.map((beatId, index) => [beatId, index]));
+
+  if (allVideoClips.length === 0) {
+    const programAudio = [...a1Clips, ...a2Clips, ...a3Clips];
+    programAudio.sort((a, b) => {
+      const beatCmp = (beatIndex.get(a.beat_id) ?? Number.MAX_SAFE_INTEGER) -
+        (beatIndex.get(b.beat_id) ?? Number.MAX_SAFE_INTEGER);
+      if (beatCmp !== 0) return beatCmp;
+      return a.asset_id.localeCompare(b.asset_id) || a.src_in_us - b.src_in_us || a.clip_id.localeCompare(b.clip_id);
+    });
+    let frame = 0;
+    const beatPositionMap = new Map<string, number>();
+    for (const clip of programAudio) {
+      clip.timeline_in_frame = frame;
+      if (!beatPositionMap.has(clip.beat_id)) beatPositionMap.set(clip.beat_id, frame);
+      frame += clip.timeline_duration_frames;
+    }
+    for (const clips of [a1Clips, a2Clips, a3Clips]) clips.sort((left, right) =>
+      left.timeline_in_frame - right.timeline_in_frame || left.clip_id.localeCompare(right.clip_id)
+    );
+    for (const marker of markers) {
+      if (marker.kind !== "beat") continue;
+      const beatId = marker.label.split(":")[0].trim();
+      const newFrame = beatPositionMap.get(beatId);
+      if (newFrame != null) marker.frame = newFrame;
+    }
+    markers.sort((a, b) => a.frame - b.frame);
+    return;
+  }
+
+  if (allVideoClips.length <= 1) return;
 
   // Sort final visual clips by resolved beat chronology first. Source timestamp
   // remains the fallback for generic chronological projects without beat order.
@@ -1314,7 +1515,7 @@ function reorderChronological(
 
   // Reorder A1 clips to follow the new beat positions when audio was authored
   // before this pass. Generated nat sound is added after chronological reorder.
-  for (const clips of [a1Clips]) {
+  for (const clips of [a1Clips, a2Clips, a3Clips]) {
     clips.sort((a, b) => {
       const posA = beatPositionMap.get(a.beat_id) ?? 0;
       const posB = beatPositionMap.get(b.beat_id) ?? 0;
@@ -1359,6 +1560,14 @@ function groupByRole(
   return groups;
 }
 
+function candidateSupportsAuthoredDialogueAudio(candidate: Candidate): boolean {
+  if (candidate.media_kind === "image") return false;
+  if (candidate.source_capabilities) return candidate.source_capabilities.has_audio === true;
+  // Legacy candidates predate source capability materialization. Preserve the
+  // historical A1 route only for an explicitly authored dialogue role.
+  return candidate.role === "dialogue";
+}
+
 const V1_FIRST_ROLE_PRIORITY = new Map([
   ["hero", 0],
   ["dialogue", 1],
@@ -1374,7 +1583,7 @@ function getV1FirstCandidates(
     ...(byRole.get("dialogue") ?? []),
     ...(byRole.get("support") ?? []),
     ...(byRole.get("texture") ?? []),
-  ].sort(compareV1FirstCandidates);
+  ].filter((candidate) => candidateSupportsVisual(candidate.candidate)).sort(compareV1FirstCandidates);
 }
 
 function orderCandidatesByCandidatePlan(
@@ -1584,8 +1793,33 @@ function makeClip(
   clipNum: number,
   fallbacks: { segment_ids: string[]; candidate_refs: string[] },
   usPerFrame: number,
+  stillDurationPolicy?: StillDurationPolicy,
 ): TimelineClip {
   const c = scored.candidate;
+  if (c.media_kind === "image") {
+    if (!stillDurationPolicy) throw new Error("still_image_duration_policy_missing");
+    const stillImage = resolveStillImageHold(c, stillDurationPolicy, beatDurationFrames);
+    return {
+      clip_id: `CLP_${String(clipNum).padStart(4, "0")}`,
+      segment_id: c.segment_id,
+      asset_id: c.asset_id,
+      src_in_us: c.src_in_us,
+      src_out_us: c.src_out_us,
+      timeline_in_frame: timelineInFrame,
+      timeline_duration_frames: stillImage.hold_frames,
+      role: c.role as TimelineClip["role"],
+      motivation: c.why_it_matches,
+      beat_id: beatId,
+      fallback_segment_ids: fallbacks.segment_ids,
+      confidence: c.confidence,
+      quality_flags: c.quality_flags ?? [],
+      media_kind: "image",
+      source_capabilities: c.source_capabilities ? { ...c.source_capabilities } : { has_video: true, has_audio: false },
+      still_image: stillImage,
+      candidate_ref: getCandidateRef(c),
+      fallback_candidate_refs: fallbacks.candidate_refs,
+    };
+  }
   const sourceDurationUs = c.src_out_us - c.src_in_us;
   const sourceDurationFrames = Math.ceil(sourceDurationUs / usPerFrame);
   const trimPreferredFrames = c.trim_hint?.preferred_duration_us
@@ -1611,6 +1845,9 @@ function makeClip(
     fallback_segment_ids: fallbacks.segment_ids,
     confidence: c.confidence,
     quality_flags: c.quality_flags ?? [],
+    ...(c.media_kind ? { media_kind: c.media_kind } : {}),
+    ...(c.source_capabilities ? { source_capabilities: { ...c.source_capabilities } } : {}),
+    ...(c.audio_role ? { audio_role: c.audio_role } : {}),
     candidate_ref: getCandidateRef(c),
     fallback_candidate_refs: fallbacks.candidate_refs,
   };
@@ -1627,6 +1864,8 @@ function addOriginalAudioForVideoClips(
   let clipCounter = startClipCounter;
 
   for (const videoClip of videoClips) {
+    if (videoClip.media_kind === "image") continue;
+    if (videoClip.source_capabilities?.has_audio === false) continue;
     const key = clipPlacementUsageKey(videoClip);
     if (existing.has(key)) continue;
     if (hasPrimaryAudioOverlap(videoClip, a1Clips)) continue;
@@ -1639,6 +1878,7 @@ function addOriginalAudioForVideoClips(
       confidence: Math.max(videoClip.confidence, 0.9),
       audio_policy: {
         mode: audioPolicy,
+        gain_unit: "linear",
         preserve_nat_sound: true,
         nat_gain: audioPolicy === "original_only" ? 1 : 1.8,
         a1_loudnorm: a1Loudnorm,

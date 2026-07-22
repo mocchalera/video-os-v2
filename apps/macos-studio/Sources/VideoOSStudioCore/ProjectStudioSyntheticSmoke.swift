@@ -36,6 +36,7 @@ public struct ProjectStudioSyntheticSmokeResult: Equatable, Sendable {
 
 public enum ProjectStudioSyntheticSmoke {
     public typealias SyntheticBuilder = @Sendable (_ projectURL: URL, _ durationSeconds: Double) throws -> ProjectSyntheticMediaBuildResult
+    public typealias PreflightReader = @Sendable (_ repositoryRoot: URL, _ projectURL: URL) -> ProjectPackagePreflightStatus
     public typealias RenderRunner = @Sendable (_ plan: ProjectRenderRunPlan) throws -> ProjectRenderRunResult
     public typealias EditorPacketExporter = @Sendable (_ repositoryRoot: URL, _ projectURL: URL) throws -> ProjectEditorPacketResult
 
@@ -45,6 +46,9 @@ public enum ProjectStudioSyntheticSmoke {
             durationSeconds: durationSeconds,
             syntheticBuilder: { projectURL, seconds in
                 ProjectSyntheticMediaBuilder.build(projectURL: projectURL, durationSeconds: seconds, force: true)
+            },
+            preflightReader: { root, projectURL in
+                ProjectPackagePreflightRunner.status(repositoryRoot: root, projectURL: projectURL)
             },
             renderRunner: { plan in
                 try ProjectRenderRunner.run(plan: plan)
@@ -59,6 +63,9 @@ public enum ProjectStudioSyntheticSmoke {
         repositoryRoot: URL,
         durationSeconds: Double = 1,
         syntheticBuilder: SyntheticBuilder,
+        preflightReader: PreflightReader = { root, projectURL in
+            ProjectPackagePreflightRunner.status(repositoryRoot: root, projectURL: projectURL)
+        },
         renderRunner: RenderRunner,
         editorPacketExporter: EditorPacketExporter
     ) throws -> ProjectStudioSyntheticSmokeResult {
@@ -73,10 +80,12 @@ public enum ProjectStudioSyntheticSmoke {
             throw ProjectStudioSyntheticSmokeError.syntheticFinalMissing
         }
 
+        let preflight = preflightReader(repositoryRoot, projectURL)
         let renderPlan = ProjectRenderRunPlanner.plan(
             repositoryRoot: repositoryRoot,
             projectURL: projectURL,
-            options: ProjectRenderRunOptions(suppliedFinalURL: suppliedFinalURL)
+            options: ProjectRenderRunOptions(suppliedFinalURL: suppliedFinalURL),
+            preflightStatus: preflight
         )
         let renderResult = try renderRunner(renderPlan)
         try ensureSyntheticFinalAudio(projectURL: projectURL)
@@ -86,7 +95,12 @@ public enum ProjectStudioSyntheticSmoke {
         let indexSummary = try ProjectSQLiteIndex.rebuild(projectURL: projectURL)
         let indexStatus = ProjectSQLiteIndex.status(projectURL: projectURL)
         let packetVerification = ProjectEditorPacketVerificationStatusReader.status(projectURL: projectURL)
-        let studioStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        let studioStatus = ProjectStudioReadinessStatusReader.status(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            preflightStatus: preflight,
+            packageVerificationStatus: renderResult.status.verificationStatus
+        )
 
         return ProjectStudioSyntheticSmokeResult(
             projectURL: projectURL,

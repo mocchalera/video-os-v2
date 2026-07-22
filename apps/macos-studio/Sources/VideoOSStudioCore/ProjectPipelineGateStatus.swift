@@ -64,11 +64,19 @@ public struct ProjectPipelineGateStatus: Equatable, Sendable {
 }
 
 public enum ProjectPipelineGateStatusReader {
-    public static func status(repositoryRoot: URL, projectURL: URL) -> ProjectPipelineGateStatus {
+    public static func status(
+        repositoryRoot: URL,
+        projectURL: URL,
+        preflightStatus: ProjectPackagePreflightStatus = ProjectPackagePreflightRunner.pending()
+    ) -> ProjectPipelineGateStatus {
         let stateURL = projectURL.appendingPathComponent("project_state.yaml")
         let stateText = try? String(contentsOf: stateURL, encoding: .utf8)
         let review = ProjectReviewArtifactStatusReader.status(projectURL: projectURL)
-        let renderPlan = ProjectRenderRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        let renderPlan = ProjectRenderRunPlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            preflightStatus: preflightStatus
+        )
 
         return ProjectPipelineGateStatus(
             projectURL: projectURL,

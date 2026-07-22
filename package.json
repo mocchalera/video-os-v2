@@ -1,6 +1,6 @@
 {
   "name": "video-os-v2-spec",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -25,16 +25,24 @@
     "typecheck": "tsc --noEmit",
     "typecheck:editor": "npm --prefix editor run typecheck",
     "verify:repo": "tsx scripts/check-repo-hygiene.ts",
+    "generate:skill-contracts": "tsx scripts/generate-agent-skill-contracts.ts",
+    "verify:skill-contracts": "tsx scripts/generate-agent-skill-contracts.ts --check",
+    "generate:studio-contracts": "tsx scripts/generate-macos-studio-contract-fixture.ts",
+    "verify:studio-contracts": "tsx scripts/generate-macos-studio-contract-fixture.ts --check",
     "verify:agents": "python3 scripts/generate_agents.py && git diff --exit-code -- .claude/agents .codex/agents && test -z \"$(git ls-files --others --exclude-standard -- .claude/agents .codex/agents)\"",
     "verify": "tsx scripts/verify.ts",
     "build": "tsc",
     "package": "tsx scripts/package.ts",
+    "publication-preflight": "tsx scripts/publication-preflight.ts",
+    "render-route": "tsx scripts/render-route.ts",
     "preview": "tsx scripts/preview-segment.ts",
     "promo-finish": "tsx scripts/render-promo-cut.ts",
     "setup:embedding-model": "tsx scripts/setup-embedding-model.ts",
     "export:premiere": "tsx scripts/export-premiere-xml.ts",
     "regen:premiere": "tsx scripts/regen-premiere-xml.ts",
-    "marlin:evaluate": "tsx scripts/marlin-evaluate.ts"
+    "marlin:evaluate": "tsx scripts/marlin-evaluate.ts",
+    "spike:hyperframes": "tsx scripts/hyperframes-phase0-spike.ts",
+    "verify:font": "tsx scripts/verify-bundled-font.ts"
   },
   "dependencies": {
     "@remotion/bundler": "4.0.452",
@@ -55,6 +63,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "hyperframes": "0.7.60",
     "tsx": "^4.19.0",
     "vitest": "^3.0.0"
   }

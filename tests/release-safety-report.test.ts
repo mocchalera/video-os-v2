@@ -16,6 +16,10 @@ import {
   type ReleaseSafetyReport,
 } from "../runtime/artifacts/p4a-release-safety.js";
 import { runStatus } from "../runtime/commands/status.js";
+import {
+  EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH,
+  EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH,
+} from "../runtime/artifacts/p3-preference-memory.js";
 
 const require_ = createRequire(import.meta.url);
 const Ajv2020 = require_("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -164,6 +168,26 @@ function makeProject(): string {
   return projectDir;
 }
 
+function writePreferenceMemory(projectDir: string, relativePath: string, projectId = "p4a-runtime", raw?: string): string {
+  const filePath = path.join(projectDir, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, raw ?? `${JSON.stringify({
+    version: "1.0.0",
+    project_id: projectId,
+    entry_id: `EPM_${projectId.replace(/[^A-Za-z0-9_-]/g, "_")}`,
+    created_at: "2026-04-26T00:00:00Z",
+    actor: { type: "human", id: "operator" },
+    source_event: { event_type: "operator_command", event_ref: "test" },
+    preference_type: "pacing",
+    value: { kind: "enum", data: "tight" },
+    scope: "project",
+    confidence: { score: 1, source: "operator", status: "ready" },
+    status: "active",
+    provenance: { producer: "operator-command", inputs: [], hash_policy: {} },
+  })}\n`, "utf-8");
+  return filePath;
+}
+
 afterEach(() => {
   delete process.env.ENABLE_P4A_RELEASE_SAFETY;
   delete process.env.ENABLE_P4B_DELIVERY_PROFILES;
@@ -174,6 +198,44 @@ afterEach(() => {
 });
 
 describe("P4a release_safety_report", () => {
+  it("reports and validates canonical preference memory, with legacy-only fallback and canonical precedence", () => {
+    const canonicalProject = makeProject();
+    const canonicalPath = writePreferenceMemory(canonicalProject, EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH);
+    const canonicalReport = buildReleaseSafetyReport({ projectDir: canonicalProject, producer: "/package" });
+    expect(canonicalReport.provenance.inputs.find((ref) => ref.path === canonicalPath)?.hash).toMatch(/^sha256:/);
+    expect(canonicalReport.checks.find((check) => check.check_id === "RSCHK_schema_validation")?.message).not.toContain(EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH);
+
+    const legacyProject = makeProject();
+    const legacyPath = writePreferenceMemory(legacyProject, EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH);
+    const legacyReport = buildReleaseSafetyReport({ projectDir: legacyProject, producer: "/package" });
+    expect(legacyReport.provenance.inputs.find((ref) => ref.path === legacyPath)?.hash).toMatch(/^sha256:/);
+    expect(legacyReport.checks.find((check) => check.check_id === "RSCHK_schema_validation")?.message).not.toContain(EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH);
+
+    const bothProject = makeProject();
+    const bothCanonicalPath = writePreferenceMemory(bothProject, EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH);
+    const bothLegacyPath = writePreferenceMemory(bothProject, EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH, "p4a-runtime", "malformed\n");
+    const bothReport = buildReleaseSafetyReport({ projectDir: bothProject, producer: "/package" });
+    expect(bothReport.provenance.inputs.some((ref) => ref.path === bothCanonicalPath && ref.hash)).toBe(true);
+    expect(bothReport.provenance.inputs.some((ref) => ref.path === bothLegacyPath)).toBe(false);
+    expect(bothReport.checks.find((check) => check.check_id === "RSCHK_schema_validation")?.message).not.toContain("editorial_preference_memory.jsonl");
+  });
+
+  it.each([
+    ["malformed", "malformed\n"],
+    ["cross-project", undefined],
+  ])("surfaces %s canonical preference memory as a schema validation failure", (kind, raw) => {
+    const projectDir = makeProject();
+    writePreferenceMemory(
+      projectDir,
+      EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH,
+      kind === "cross-project" ? "another-project" : "p4a-runtime",
+      raw,
+    );
+    const report = buildReleaseSafetyReport({ projectDir, producer: "/package" });
+    const schemaCheck = report.checks.find((check) => check.check_id === "RSCHK_schema_validation");
+    expect(schemaCheck?.status).toBe("fail");
+    expect(schemaCheck?.message).toContain(kind === "cross-project" ? "does not match" : "line 1");
+  });
   it.each([
     "valid_dry_run_missing_inputs.yaml",
     "valid_report_only_blocker.yaml",

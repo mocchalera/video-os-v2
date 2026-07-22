@@ -97,6 +97,50 @@ describe("Script Engine Phase A: Frame", () => {
       "hook", "setup", "experience", "experience", "experience", "closing",
     ]);
   });
+
+  it("adds a byte-stable insufficient-signal diagnostic for the generic fallback", () => {
+    const input: FrameInput = {
+      projectId: "test-proj",
+      createdAt: "2026-03-22T00:00:00Z",
+      storyPromise: "Show the available material clearly",
+      hookAngle: "Use the strongest grounded image",
+      closingIntent: "Close without a genre-specific flourish",
+      resolutionInput: {
+        briefEditorial: { allow_inference: true },
+        editorialSummary: { dominant_visual_mode: "mixed" },
+      },
+      beatCount: 4,
+      profilesDir: PROFILES_DIR,
+      policiesDir: POLICIES_DIR,
+    };
+
+    const first = buildMessageFrame(input).frame;
+    const second = buildMessageFrame(input).frame;
+
+    expect(first.diagnostics).toEqual([{
+      code: "EDITORIAL_PROFILE_INSUFFICIENT_SIGNAL",
+      severity: "warning",
+      message: "Editorial profile inference had insufficient signal; using the conservative generic fallback.",
+      resolved_profile: "generic-editorial",
+    }]);
+    expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+  });
+
+  it("does not add the insufficient-signal diagnostic for a known profile", () => {
+    const { frame } = buildMessageFrame({
+      projectId: "test-proj",
+      createdAt: "2026-03-22T00:00:00Z",
+      storyPromise: "Test",
+      hookAngle: "Test",
+      closingIntent: "Test",
+      resolutionInput: { briefEditorial: { profile_hint: "product-demo" } },
+      beatCount: 4,
+      profilesDir: PROFILES_DIR,
+      policiesDir: POLICIES_DIR,
+    });
+
+    expect("diagnostics" in frame).toBe(false);
+  });
 });
 
 describe("Script Engine Phase B: Read", () => {

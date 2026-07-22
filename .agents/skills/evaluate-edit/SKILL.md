@@ -28,6 +28,29 @@ npm run eval -- --all --min-score 80
 ```
 - exit 0 なら回帰なし。exit 1 なら下がったプロジェクトの Markdown レポート（`reports/eval/`）を読み、どのメトリクスが落ちたか特定する。
 - スコア低下が**意図した改善**なら、人間に再承認を依頼してゴールデンを更新する。意図しない低下なら変更をロールバックまたは修正する。
+- 字幕タイミングを変更した場合は構造スコアだけで終わらせず、次も回帰対象にする:
+  - 通常字幕は許容lead（既定2フレーム）を超えて音声より先に出ていない
+  - protected revealの本文がanchor onsetより前のcueに含まれていない
+  - word timingのない発話途中anchorが文字数比例で推測されず、`unresolved_reveal_anchor` で止まる
+  - `speech_sync` のインタビュー、講義、長尺字幕は過剰先行だけが直り、音声後へ一律遅延されていない
+- BGM／音声ミキサーを変更した場合は、ジャンル別の演出評価と分けて次の制作契約を回帰対象にする:
+  - 通常BGMがレビュー済みライブラリ／BGM Pack由来で、手続き生成は明示的な `simple_sound` に限定される
+  - BGM入力を基準 -23 LUFSへ正規化してからeditorial gainを適用する
+  - ducking detectorはA1 clip占有区間ではなくdialogue waveformを使う
+  - `audio-mix-report.json` が存在し、BGMありでは `waveform_sidechain_v1`、なしでは `dialogue_only_mastering_v1` を記録する
+  - 最終実測が -17〜-15 LUFS、true peak -1.5 dBTP以下に収まる
+  - source trimが`adelay`より前、全体尺trimが`amix`より後にあり、同一branchに
+    `adelay=...,atrim=start=0`が生成されない
+  - 総尺差が1フレーム未満でも`raw_dialogue.wav`の信号配置がtimeline window外なら
+    `dialogue_timeline_alignment_valid`がfailする
+  - VFR素材の同期補正は選択済み映像フレームを固定し、測定残差を音声側で補正する
+- short-social / content element / handoffを変更した場合は、次の横断契約も対象テストで確認する:
+  - hook/titleのコピー上限と日本語の折返しが一致し、座布団やsafe areaからはみ出さない
+  - CTA要求時は登録済みfull-frame `cta-card` が終盤35%に2秒以上ある
+  - `audio_policy` が納品物ごとに明示され、BGM要求時はtimelineにmusic clipがある
+  - cold openが「両方」「双方」「どちらも」など未解決のantecedentで始まらない
+  - Studioのsource fallbackでtimeline字幕が見え、完成previewでは二重表示されない
+  - editor packetへcaption sidecarとcaption approvalが同梱される
 
 ### B. LLM ステージ（select-clips / build-blueprint）の変更評価
 1. ゴールデンの凍結入力を candidate プロジェクトへコピーする:

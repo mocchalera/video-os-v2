@@ -1,7 +1,7 @@
 # M3.5 Design Review: Human Handoff Round-Trip
 
 対象:
-- [milestone-3.5-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md)
+- [milestone-3.5-design.md](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md)
 
 レビュー観点:
 - Gate 8-11 整合
@@ -20,9 +20,9 @@
 ### FATAL 1: import 側の stable ID 一意性条件が未定義で、split / duplicate edit で round-trip が壊れる
 
 根拠:
-- 設計は `exchange_clip_id` を import の primary key にしているが、1 対 1 対応しか定義していない。[docs/milestone-3.5-design.md:308](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L308) [docs/milestone-3.5-design.md:311](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L311)
-- mapping 優先順位は「どの imported clip がどの base clip に対応するか」しか書いておらず、同じ `exchange_clip_id` を持つ imported item が複数ある場合の扱いがない。[docs/milestone-3.5-design.md:475](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L475) [docs/milestone-3.5-design.md:489](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L489)
-- unmapped classification に `duplicate_stable_id` / `split_clip` / `inserted_clip` がなく、曖昧な one-to-many を Gate 9 で止める contract が不足している。[docs/milestone-3.5-design.md:685](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L685) [docs/milestone-3.5-design.md:700](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L700)
+- 設計は `exchange_clip_id` を import の primary key にしているが、1 対 1 対応しか定義していない。[docs/milestone-3.5-design.md:308](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L308) [docs/milestone-3.5-design.md:311](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L311)
+- mapping 優先順位は「どの imported clip がどの base clip に対応するか」しか書いておらず、同じ `exchange_clip_id` を持つ imported item が複数ある場合の扱いがない。[docs/milestone-3.5-design.md:475](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L475) [docs/milestone-3.5-design.md:489](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L489)
+- unmapped classification に `duplicate_stable_id` / `split_clip` / `inserted_clip` がなく、曖昧な one-to-many を Gate 9 で止める contract が不足している。[docs/milestone-3.5-design.md:685](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L685) [docs/milestone-3.5-design.md:700](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L700)
 
 影響:
 - 人間が NLE で blade/split/duplicate を行った場合、stable ID が保持されても importer が一意に追跡できず、差分が collapse する。
@@ -39,7 +39,7 @@
 ### WARNING 1: `reorder` / `track_move` 検出条件が ripple shift と global track reorder を誤検出する
 
 根拠:
-- `reorder` は「same track かつ clip ordinal または `timeline_in_frame` が変化」で検出する設計だが、上流 clip の trim で downstream clip の `timeline_in_frame` は自然に変わる。[docs/milestone-3.5-design.md:565](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L565) [docs/milestone-3.5-design.md:573](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L573)
+- `reorder` は「same track かつ clip ordinal または `timeline_in_frame` が変化」で検出する設計だが、上流 clip の trim で downstream clip の `timeline_in_frame` は自然に変わる。[docs/milestone-3.5-design.md:565](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L565) [docs/milestone-3.5-design.md:573](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L573)
 - `track_move` は `track ordinal` 変化でも検出するが、Blackmagic の Resolve 18.5 guide は「track hierarchy を入れ替えても absolute track number は変わらず、割当先だけが変わる」と説明しており、track order と clip の移動は別概念である。出典: <https://documents.blackmagicdesign.com/SupportNotes/DaVinci_Resolve_18.5_New_Features_Guide.pdf>
 
 影響:
@@ -56,8 +56,8 @@
 ### WARNING 2: Gate 10 の source-of-truth 宣言が export 時 manifest に押し込まれており、決定タイミングと artifact がずれている
 
 根拠:
-- `handoff_manifest.yaml` は export 時に作る ledger と定義され、その sample でも `source_of_truth_intent` を持つ。[docs/milestone-3.5-design.md:397](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L397) [docs/milestone-3.5-design.md:446](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L446)
-- 一方 Gate 10 は「final path に入る前」に `engine_render | nle_finishing` を宣言すると書いており、意思決定は import/diff 後である。[docs/milestone-3.5-design.md:826](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L826) [docs/milestone-3.5-design.md:838](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L838)
+- `handoff_manifest.yaml` は export 時に作る ledger と定義され、その sample でも `source_of_truth_intent` を持つ。[docs/milestone-3.5-design.md:397](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L397) [docs/milestone-3.5-design.md:446](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L446)
+- 一方 Gate 10 は「final path に入る前」に `engine_render | nle_finishing` を宣言すると書いており、意思決定は import/diff 後である。[docs/milestone-3.5-design.md:826](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L826) [docs/milestone-3.5-design.md:838](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L838)
 
 影響:
 - export 時の intent と post-import の final decision が同じ artifact に混在する。
@@ -72,9 +72,9 @@
 ### WARNING 3: Resolve v1 capability profile が実機エビデンスより先に roundtrip 面を広く宣言している
 
 根拠:
-- Resolve v1 profile は `enable_disable`, `track_move`, `simple_transition`, `marker_note` まで `roundtrip` としている。[docs/milestone-3.5-design.md:730](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L730) [docs/milestone-3.5-design.md:750](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L750)
+- Resolve v1 profile は `enable_disable`, `track_move`, `simple_transition`, `marker_note` まで `roundtrip` としている。[docs/milestone-3.5-design.md:730](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L730) [docs/milestone-3.5-design.md:750](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L750)
 - しかし Blackmagic の公開資料で確認できるのは OTIO timeline import/export の存在と、Resolve 19 で OTIO import に custom import options が追加されたことまでで、metadata retention や transition/marker/disable の round-trip 保証までは文書化されていない。出典: <https://documents.blackmagicdesign.com/SupportNotes/DaVinci_Resolve_18.5_New_Features_Guide.pdf> <https://documents.blackmagicdesign.com/jp/SupportNotes/DaVinci_Resolve_19_New_Features_Guide.pdf>
-- manual smoke の acceptance も `trim / reorder / disable` にしか触れておらず、profile が roundtrip としている全 surface を受け入れ条件にしていない。[docs/milestone-3.5-design.md:996](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L996) [docs/milestone-3.5-design.md:1000](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L1000)
+- manual smoke の acceptance も `trim / reorder / disable` にしか触れておらず、profile が roundtrip としている全 surface を受け入れ条件にしていない。[docs/milestone-3.5-design.md:996](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L996) [docs/milestone-3.5-design.md:1000](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L1000)
 
 影響:
 - capability profile が product contract ではなく希望的 target になっている。
@@ -89,9 +89,9 @@
 ### WARNING 4: Python subprocess bridge の versioning / error contract が不足しており、determinism 要件を支えきれない
 
 根拠:
-- 設計は「same OTIO bridge version なら deterministic」としているが、その version をどこに保存するかが shape にない。[docs/milestone-3.5-design.md:68](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L68) [docs/milestone-3.5-design.md:906](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L906)
-- bridge の責務境界はあるが、command envelope、exit code、stderr、timeout、version mismatch policy が書かれていない。[docs/milestone-3.5-design.md:235](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L235) [docs/milestone-3.5-design.md:258](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L258) [docs/milestone-3.5-design.md:924](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L924)
-- Phase 1 の deliverable に OTIO bridge command contract はあるが、本文に契約 shape がない。[docs/milestone-3.5-design.md:1017](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L1017) [docs/milestone-3.5-design.md:1025](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L1025)
+- 設計は「same OTIO bridge version なら deterministic」としているが、その version をどこに保存するかが shape にない。[docs/milestone-3.5-design.md:68](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L68) [docs/milestone-3.5-design.md:906](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L906)
+- bridge の責務境界はあるが、command envelope、exit code、stderr、timeout、version mismatch policy が書かれていない。[docs/milestone-3.5-design.md:235](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L235) [docs/milestone-3.5-design.md:258](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L258) [docs/milestone-3.5-design.md:924](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L924)
+- Phase 1 の deliverable に OTIO bridge command contract はあるが、本文に契約 shape がない。[docs/milestone-3.5-design.md:1017](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L1017) [docs/milestone-3.5-design.md:1025](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L1025)
 
 影響:
 - export/import の再現性と障害切り分けが artifact だけでは追えない。
@@ -111,9 +111,9 @@
 ### WARNING 5: `marker_note` の再入線が current M3 patch contract と一致していない
 
 根拠:
-- M3.5 は `marker_note` で timeline marker 追加、clip-attached marker 追加、note text 追加を first-class に扱う。[docs/milestone-3.5-design.md:606](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L606) [docs/milestone-3.5-design.md:615](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L615)
-- しかし M3 への戻し方では `add_marker` / `add_note` proposal に落とすとしか書かれていない。[docs/milestone-3.5-design.md:817](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L817) [docs/milestone-3.5-design.md:820](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L820)
-- 実際の M3 patch contract は timeline-level marker 追加しか表現できず、clip anchor や note body の専用 field を持たない。[schemas/review-patch.schema.json](/Users/mocchalera/Dev/video-os-v2-spec/schemas/review-patch.schema.json) [runtime/compiler/patch.ts:382](/Users/mocchalera/Dev/video-os-v2-spec/runtime/compiler/patch.ts#L382)
+- M3.5 は `marker_note` で timeline marker 追加、clip-attached marker 追加、note text 追加を first-class に扱う。[docs/milestone-3.5-design.md:606](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L606) [docs/milestone-3.5-design.md:615](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L615)
+- しかし M3 への戻し方では `add_marker` / `add_note` proposal に落とすとしか書かれていない。[docs/milestone-3.5-design.md:817](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L817) [docs/milestone-3.5-design.md:820](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L820)
+- 実際の M3 patch contract は timeline-level marker 追加しか表現できず、clip anchor や note body の専用 field を持たない。[schemas/review-patch.schema.json](/Users/operator/Dev/video-os-v2-spec/schemas/review-patch.schema.json) [runtime/compiler/patch.ts:382](/Users/operator/Dev/video-os-v2-spec/runtime/compiler/patch.ts#L382)
 
 影響:
 - clip-attached marker / note を M3 loop に戻すと、anchor 情報を落として timeline marker に平坦化する。
@@ -128,8 +128,8 @@
 ### WARNING 6: recompile ループの state / approval invalidation が設計本文で明示されていない
 
 根拠:
-- M3.5 の loop は「diff -> agent proposal -> deterministic compile -> preview update」まで書かれているが、どの command が draft artifact を書き、どの時点で `approval_record` を stale にし、state を `timeline_drafted` / `critique_ready` に戻すかが書かれていない。[docs/milestone-3.5-design.md:790](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L790) [docs/milestone-3.5-design.md:824](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L824)
-- M3 既存設計では timeline/review artifact 変更時に approval を stale にし state を戻すのが必須 contract である。[docs/milestone-3-design.md:602](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3-design.md#L602) [docs/milestone-3-design.md:636](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3-design.md#L636)
+- M3.5 の loop は「diff -> agent proposal -> deterministic compile -> preview update」まで書かれているが、どの command が draft artifact を書き、どの時点で `approval_record` を stale にし、state を `timeline_drafted` / `critique_ready` に戻すかが書かれていない。[docs/milestone-3.5-design.md:790](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L790) [docs/milestone-3.5-design.md:824](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L824)
+- M3 既存設計では timeline/review artifact 変更時に approval を stale にし state を戻すのが必須 contract である。[docs/milestone-3-design.md:602](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3-design.md#L602) [docs/milestone-3-design.md:636](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3-design.md#L636)
 
 影響:
 - 実装者が `approved` state のまま proposal/compile を進める誤実装をしやすい。
@@ -145,9 +145,9 @@
 ### NOTE 1: Gate 8-11 は設計書には入ったが、中心契約の `ARCHITECTURE.md` はまだ 1-7 のまま
 
 根拠:
-- roadmap は gates 8-11 を central gate として定義している。[docs/roadmap.md:53](/Users/mocchalera/Dev/video-os-v2-spec/docs/roadmap.md#L53) [docs/roadmap.md:64](/Users/mocchalera/Dev/video-os-v2-spec/docs/roadmap.md#L64)
-- M3.5 設計も Gate 8-11 を追加している。[docs/milestone-3.5-design.md:183](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L183) [docs/milestone-3.5-design.md:191](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L191)
-- しかし `ARCHITECTURE.md` 本文はまだ gates 1-7 のみで止まっている。[ARCHITECTURE.md:223](/Users/mocchalera/Dev/video-os-v2-spec/ARCHITECTURE.md#L223) [ARCHITECTURE.md:231](/Users/mocchalera/Dev/video-os-v2-spec/ARCHITECTURE.md#L231)
+- roadmap は gates 8-11 を central gate として定義している。[docs/roadmap.md:53](/Users/operator/Dev/video-os-v2-spec/docs/roadmap.md#L53) [docs/roadmap.md:64](/Users/operator/Dev/video-os-v2-spec/docs/roadmap.md#L64)
+- M3.5 設計も Gate 8-11 を追加している。[docs/milestone-3.5-design.md:183](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L183) [docs/milestone-3.5-design.md:191](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L191)
+- しかし `ARCHITECTURE.md` 本文はまだ gates 1-7 のみで止まっている。[ARCHITECTURE.md:223](/Users/operator/Dev/video-os-v2-spec/ARCHITECTURE.md#L223) [ARCHITECTURE.md:231](/Users/operator/Dev/video-os-v2-spec/ARCHITECTURE.md#L231)
 
 推奨修正:
 - 実装前に `ARCHITECTURE.md` へ gates 8-11 を昇格し、OTIO exchange boundary と合わせて central contract を一本化する。
@@ -155,8 +155,8 @@
 ### NOTE 2: `roundtrip_import_report.yaml` の sample shape が本文 NFR と完全には一致していない
 
 根拠:
-- Reliability/Auditability では `base_timeline.hash` を保持して誤った base への import を拒否するとしている。[docs/milestone-3.5-design.md:912](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L912) [docs/milestone-3.5-design.md:917](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L917)
-- しかし sample の `roundtrip_import_report.yaml` には `base_timeline` block がない。[docs/milestone-3.5-design.md:497](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L497) [docs/milestone-3.5-design.md:526](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L526)
+- Reliability/Auditability では `base_timeline.hash` を保持して誤った base への import を拒否するとしている。[docs/milestone-3.5-design.md:912](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L912) [docs/milestone-3.5-design.md:917](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L917)
+- しかし sample の `roundtrip_import_report.yaml` には `base_timeline` block がない。[docs/milestone-3.5-design.md:497](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L497) [docs/milestone-3.5-design.md:526](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L526)
 
 推奨修正:
 - report sample/schema に `base_timeline.version`, `base_timeline.hash`, `bridge_version` を追加する。
@@ -164,8 +164,8 @@
 ### NOTE 3: M3 `/export` と M3.5 handoff export の責務分離自体は明確で、この方針は維持すべき
 
 根拠:
-- M3 では `/export` は review bundle に限定されている。[docs/milestone-3-design.md:121](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3-design.md#L121) [docs/milestone-3-design.md:661](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3-design.md#L661)
-- M3.5 でも `runtime/commands/export.ts` と `runtime/handoff/*` を分ける設計になっている。[docs/milestone-3.5-design.md:120](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L120) [docs/milestone-3.5-design.md:137](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L137)
+- M3 では `/export` は review bundle に限定されている。[docs/milestone-3-design.md:121](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3-design.md#L121) [docs/milestone-3-design.md:661](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3-design.md#L661)
+- M3.5 でも `runtime/commands/export.ts` と `runtime/handoff/*` を分ける設計になっている。[docs/milestone-3.5-design.md:120](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L120) [docs/milestone-3.5-design.md:137](/Users/operator/Dev/video-os-v2-spec/docs/milestone-3.5-design.md#L137)
 
 推奨修正:
 - command 名と help 文でもこの境界を固定し、M3 `/export` に OTIO handoff 意味を混ぜない。

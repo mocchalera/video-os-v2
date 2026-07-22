@@ -40,9 +40,10 @@ export function applyCutBreathTreatment(
     return { extendedCuts: 0, totalExtendedFrames: 0, fadedCuts: 0 };
   }
 
-  const primaryVideoTrack = timeline.tracks.video.find((track) => track.track_id === "V1")
-    ?? timeline.tracks.video[0];
-  if (!primaryVideoTrack || primaryVideoTrack.clips.length < 2) {
+  const primaryTrack = timeline.tracks.video.find((track) => track.track_id === "V1")
+    ?? timeline.tracks.video[0]
+    ?? timeline.tracks.audio.find((track) => track.track_id === "A1" && track.clips.some((clip) => clip.motivation !== "original clip audio"));
+  if (!primaryTrack || primaryTrack.clips.length < 2) {
     return { extendedCuts: 0, totalExtendedFrames: 0, fadedCuts: 0 };
   }
 
@@ -52,7 +53,8 @@ export function applyCutBreathTreatment(
   let totalExtendedFrames = 0;
   let fadedCuts = 0;
 
-  const ordered = primaryVideoTrack.clips
+  const ordered = primaryTrack.clips
+    .filter((clip) => clip.media_kind !== "image" && clip.motivation !== "original clip audio" && (primaryTrack.kind === "video" || clip.role === "dialogue" || clip.audio_role === "dialogue"))
     .slice()
     .sort((left, right) => left.timeline_in_frame - right.timeline_in_frame || left.clip_id.localeCompare(right.clip_id));
 
@@ -172,6 +174,7 @@ function findMirroredAudio(timeline: TimelineIR, videoClip: ClipOutput): ClipOut
   return timeline.tracks.audio
     .flatMap((track) => track.clips)
     .filter((clip) =>
+      clip.clip_id !== videoClip.clip_id &&
       clip.asset_id === videoClip.asset_id &&
       clip.segment_id === videoClip.segment_id &&
       clip.timeline_in_frame === videoClip.timeline_in_frame &&

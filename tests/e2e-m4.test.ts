@@ -194,6 +194,7 @@ function createM4Project(
   const tmpDir = path.resolve(`test-fixtures-m4-${name}-${Date.now()}`);
   copyDirSync(path.resolve(SAMPLE_PROJECT), tmpDir);
   tempDirs.push(tmpDir);
+  materializeTimelineSources(tmpDir);
 
   const sourceOfTruth = opts?.sourceOfTruth ?? "engine_render";
   const currentState = opts?.currentState ?? "approved";
@@ -243,6 +244,43 @@ function createM4Project(
   });
 
   return tmpDir;
+}
+
+function materializeTimelineSources(projectDir: string): void {
+  const timeline = JSON.parse(fs.readFileSync(
+    path.join(projectDir, "05_timeline/timeline.json"),
+    "utf8",
+  )) as {
+    tracks?: {
+      video?: Array<{ clips?: Array<{ asset_id?: string }> }>;
+      audio?: Array<{ clips?: Array<{ asset_id?: string }> }>;
+    };
+    audio_mix?: { bgm_asset_id?: string };
+  };
+  const assetIds = new Set([
+    ...(timeline.tracks?.video ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+    ...(timeline.tracks?.audio ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+    timeline.audio_mix?.bgm_asset_id,
+  ].filter((value): value is string => typeof value === "string"));
+  const mediaDir = path.join(projectDir, "02_media");
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const items = [...assetIds].sort().map((assetId) => {
+    const sourcePath = path.join(mediaDir, `${assetId}.bin`);
+    fs.writeFileSync(sourcePath, `source:${assetId}`);
+    return {
+      asset_id: assetId,
+      source_locator: sourcePath,
+      local_source_path: sourcePath,
+      link_path: `02_media/${assetId}.bin`,
+    };
+  });
+  fs.writeFileSync(path.join(mediaDir, "source_map.json"), JSON.stringify({
+    version: "1",
+    project_id: "sample-mountain-reset",
+    media_dir: "02_media",
+    generated_at: "2026-07-22T00:00:00Z",
+    items,
+  }));
 }
 
 /**

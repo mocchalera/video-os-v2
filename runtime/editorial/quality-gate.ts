@@ -11,6 +11,7 @@ import type {
 } from "../artifacts/types.js";
 import type { VisualQualityMeasurements } from "../connectors/ffmpeg-motion.js";
 import { loadDefaults, resolvePolicy } from "../policy-resolver.js";
+import { isAudioOnlyCandidate } from "../artifacts/source-media-capabilities.js";
 
 export const QUALITY_GATE_POLICY_NAME = "analysis-defaults.quality_gate";
 
@@ -141,6 +142,17 @@ export function applyQualityGateToSelects(
 }
 
 export function evaluateQualityGate(ctx: EvaluationContext): QualityGateRecord {
+  if (isAudioOnlyCandidate(ctx.candidate)) {
+    return {
+      ...(ctx.candidate.candidate_id ? { candidate_id: ctx.candidate.candidate_id } : {}),
+      segment_id: ctx.candidate.segment_id,
+      decision: "not_applicable",
+      confidence: "not_applicable",
+      reasons: ["visual_quality_not_applicable_audio_only"],
+      measurements: {},
+      thresholds: ctx.thresholds,
+    };
+  }
   const measurement = ctx.segment?.visual_quality_measurements;
   const measurements = collectMeasurements(ctx.segment);
   const issues = collectIssues(ctx, measurements);
@@ -295,6 +307,7 @@ function attachQualityGate(candidate: Candidate, record: QualityGateRecord): Can
 }
 
 function qualityGateFlags(record: QualityGateRecord): string[] {
+  if (record.decision === "not_applicable") return [];
   if (record.decision === "reject") return ["quality_gate_reject"];
   if (record.decision === "warn") return ["quality_gate_warn"];
   if (record.decision === "unmeasured") return ["quality_gate_unmeasured", "quality_confidence_low"];
@@ -420,10 +433,13 @@ function qualityFlags(candidate: Candidate, segment: QualityGateSegment | undefi
 }
 
 function countDecisions(records: QualityGateRecord[]): SelectsQualityGateSummary["counts"] {
-  const counts = { reject: 0, warn: 0, pass: 0, unmeasured: 0 };
+  const counts: SelectsQualityGateSummary["counts"] = { reject: 0, warn: 0, pass: 0, unmeasured: 0 };
+  let notApplicable = 0;
   for (const record of records) {
-    counts[record.decision] += 1;
+    if (record.decision === "not_applicable") notApplicable += 1;
+    else counts[record.decision] += 1;
   }
+  if (notApplicable > 0) counts.not_applicable = notApplicable;
   return counts;
 }
 

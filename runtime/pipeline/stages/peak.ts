@@ -6,6 +6,7 @@
  */
 
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import type { DerivativeResults } from "../../connectors/ffmpeg-derivatives.js";
 import type { SegmentItem } from "../../connectors/ffmpeg-segmenter.js";
@@ -23,9 +24,20 @@ import {
   shouldRunPrecision,
   fusePeakConfidence,
   buildPeakAnalysis,
+  computePrecisionPromptHash,
+  PEAK_DETECTOR_VERSION,
+  PRECISION_PROMPT_TEMPLATE_ID,
 } from "../../connectors/vlm-peak-detector.js";
 import type { VlmFn } from "../../connectors/gemini-vlm.js";
 import { atomicWriteJson } from "./_util.js";
+import {
+  extractGroundedFrames,
+  GROUNDED_FRAME_CACHE_VERSION,
+  GROUNDED_FRAME_PRODUCER_VERSION,
+  inspectGroundedFrameCache,
+  isVerifiedImagePath,
+} from "./grounded-frames.js";
+import { SourceContentIdentityCache } from "../../source-content-identity.js";
 import type { AssetsJson, SegmentsJson } from "../pipeline-types.js";
 
 export interface DegradedPeakSignals {
@@ -47,6 +59,17 @@ export interface PeakShard {
   error?: string;
 }
 
+export const PEAK_PROVENANCE_SCHEMA_VERSION = "peak-provenance-v2";
+
+export interface PeakCacheContext {
+  policyHash?: string;
+  sourceIdentityCache?: SourceContentIdentityCache;
+}
+
+export function computePeakCachePolicyHash(policy: PeakDetectionPolicy): string {
+  return hashJson(policy);
+}
+
 /**
  * Stage 11: peak.map — per-asset coarse pass + per-segment refine/precision.
  * Uses the same VlmFn as VLM enrichment.
@@ -55,14 +78,20 @@ export async function peakMap(
   assetsJson: AssetsJson,
   segmentsJson: SegmentsJson,
   derivativeResults: Map<string, DerivativeResults>,
+  sourceFileMap: Map<string, string>,
   vlmFn: VlmFn,
   policy: PeakDetectionPolicy,
   outputDir: string,
   contentHint?: string,
+  cacheContext: PeakCacheContext = {},
 ): Promise<PeakShard[]> {
   const shards: PeakShard[] = [];
+  const sourceIdentityCache = cacheContext.sourceIdentityCache ?? new SourceContentIdentityCache();
+  const policyHash = cacheContext.policyHash ?? computePeakCachePolicyHash(policy);
 
   for (const asset of assetsJson.items) {
+    if (asset.media_kind === "image") continue;
+    if (asset.audio_stream && !asset.video_stream) continue;
     const derivs = derivativeResults.get(asset.asset_id);
     if (!derivs || derivs.contactSheets.length === 0) continue;
 
@@ -81,7 +110,16 @@ export async function peakMap(
       rep_frame_us: t.rep_frame_us,
     }));
 
-    const absImagePath = path.join(outputDir, overviewCS.image_path);
+    const absImagePath = path.resolve(outputDir, overviewCS.image_path);
+    if (!isVerifiedImagePath(absImagePath)) {
+      for (const segment of assetSegments) {
+        shards.push({
+          segment_id: segment.segment_id,
+          error: `coarse_frame_missing_or_empty:${absImagePath}`,
+        });
+      }
+      continue;
+    }
 
     // Build transcript context from segment excerpts
     const transcriptContext = assetSegments
@@ -102,8 +140,18 @@ export async function peakMap(
         : transcriptContext,
     }, policy);
 
-    if (!coarseResult.success || coarseResult.candidates.length === 0) {
+    if (!coarseResult.success) {
       console.warn(`[peak] Coarse pass failed or no candidates for ${asset.asset_id}: ${coarseResult.error ?? "no candidates"}`);
+      for (const segment of assetSegments) {
+        shards.push({
+          segment_id: segment.segment_id,
+          error: `coarse_vlm_failed:${coarseResult.error ?? "unknown"}`,
+        });
+      }
+      continue;
+    }
+    if (coarseResult.candidates.length === 0) {
+      console.warn(`[peak] Coarse pass produced no candidates for ${asset.asset_id}`);
       continue;
     }
 
@@ -126,8 +174,18 @@ export async function peakMap(
       if (!seg) continue;
 
       const filmstripPath = seg.filmstrip_path
-        ? path.join(outputDir, seg.filmstrip_path)
+        ? path.resolve(outputDir, seg.filmstrip_path)
         : undefined;
+      const refineImagePath = filmstripPath && isVerifiedImagePath(filmstripPath)
+        ? filmstripPath
+        : absImagePath;
+      if (!isVerifiedImagePath(refineImagePath)) {
+        shards.push({
+          segment_id: seg.segment_id,
+          error: `refine_frame_missing_or_empty:${refineImagePath}`,
+        });
+        continue;
+      }
 
       // Generate tile map for filmstrip (or synthetic if no filmstrip)
       const filmstripTileMap = generateFilmstripTileMap(seg.src_in_us, seg.src_out_us);
@@ -136,7 +194,7 @@ export async function peakMap(
       const refineResult = await runRefinePass(vlmFn, {
         segment_id: seg.segment_id,
         segment_type: seg.segment_type ?? "general",
-        filmstrip_path: filmstripPath ?? absImagePath,
+        filmstrip_path: refineImagePath,
         src_in_us: seg.src_in_us,
         src_out_us: seg.src_out_us,
         tile_map: filmstripTileMap,
@@ -164,6 +222,12 @@ export async function peakMap(
       // Pass 3: Precision (conditional)
       let precisionPeakMoment = undefined;
       let precisionRecommendedInOut = undefined;
+      let precisionFrameCount = 0;
+      let precisionSampleTimestampsUs: number[] = [];
+      let precisionRequestedSampleTimestampsUs: number[] = [];
+      let precisionCacheHits = 0;
+      let precisionFrameExtractionFailures: string[] = [];
+      const precisionFailures: string[] = [];
 
       if (
         refineResult.needs_precision &&
@@ -176,20 +240,49 @@ export async function peakMap(
         )
       ) {
         console.log(`[peak] Precision pass: ${seg.segment_id}`);
-        // Use filmstrip tile map timestamps as frame paths (synthetic)
-        const precisionResult = await runPrecisionPass(vlmFn, {
-          segment_id: seg.segment_id,
-          segment_type: seg.segment_type ?? "general",
-          frame_paths: filmstripTileMap.map((t) => `frame_${t.frame_us}.jpg`),
-          frame_timestamps_us: filmstripTileMap.map((t) => t.frame_us),
-          window_start_us: seg.src_in_us,
-          window_end_us: seg.src_out_us,
-          refine_peak_timestamp_us: refineResult.peak_moment.timestamp_us,
-        }, policy);
+        const precisionFrames = await extractGroundedFrames({
+          sourcePath: sourceFileMap.get(asset.asset_id),
+          outputDir,
+          namespace: "peak_precision_frames",
+          assetId: asset.asset_id,
+          segmentId: seg.segment_id,
+          segmentStartUs: seg.src_in_us,
+          segmentEndUs: seg.src_out_us,
+          timestampsUs: filmstripTileMap.map((tile) => tile.frame_us),
+          sourceIdentityCache,
+        });
+        precisionFrameCount = precisionFrames.framePaths.length;
+        precisionSampleTimestampsUs = precisionFrames.sampleTimestampsUs;
+        precisionRequestedSampleTimestampsUs = precisionFrames.requestedSampleTimestampsUs;
+        precisionCacheHits = precisionFrames.cacheHits;
+        precisionFrameExtractionFailures = precisionFrames.failures;
 
-        if (precisionResult.success) {
-          precisionPeakMoment = precisionResult.peak_moment;
-          precisionRecommendedInOut = precisionResult.recommended_in_out;
+        if (precisionFrames.framePaths.length === 0) {
+          precisionFailures.push(
+            `precision_frame_extraction_failed:${precisionFrames.failures.join(";") || "no_verified_frames"}`,
+          );
+        } else {
+          if (precisionFrames.failures.length > 0) {
+            precisionFailures.push(
+              `precision_frame_extraction_partial:${precisionFrames.failures.join(";")}`,
+            );
+          }
+          const precisionResult = await runPrecisionPass(vlmFn, {
+            segment_id: seg.segment_id,
+            segment_type: seg.segment_type ?? "general",
+            frame_paths: precisionFrames.framePaths,
+            frame_timestamps_us: precisionFrames.sampleTimestampsUs,
+            window_start_us: seg.src_in_us,
+            window_end_us: seg.src_out_us,
+            refine_peak_timestamp_us: refineResult.peak_moment.timestamp_us,
+          }, policy);
+
+          if (precisionResult.success) {
+            precisionPeakMoment = precisionResult.peak_moment;
+            precisionRecommendedInOut = precisionResult.recommended_in_out;
+          } else {
+            precisionFailures.push(`precision_vlm_failed:${precisionResult.error ?? "unknown"}`);
+          }
         }
       }
 
@@ -227,8 +320,61 @@ export async function peakMap(
         },
         precisionMode: policy.peak_precision_mode,
       });
+      peakAnalysis.provenance.coarse_frame_count = 1;
+      peakAnalysis.provenance.refine_frame_count = 1;
+      peakAnalysis.provenance.precision_frame_count = precisionFrameCount;
+      peakAnalysis.provenance.precision_sample_timestamps_us = precisionSampleTimestampsUs;
+      peakAnalysis.provenance.precision_requested_sample_timestamps_us =
+        precisionRequestedSampleTimestampsUs;
+      peakAnalysis.provenance.frame_cache_version = GROUNDED_FRAME_CACHE_VERSION;
+      peakAnalysis.provenance.frame_producer_version = GROUNDED_FRAME_PRODUCER_VERSION;
+      peakAnalysis.provenance.precision_frame_cache_hits = precisionCacheHits;
+      const sourceContentSha256 = tryResolveSourceContentSha256(
+        sourceFileMap.get(asset.asset_id),
+        sourceIdentityCache,
+      );
+      if (sourceContentSha256) {
+        peakAnalysis.provenance.source_content_sha256 = sourceContentSha256;
+      }
+      peakAnalysis.provenance.segment_src_in_us = seg.src_in_us;
+      peakAnalysis.provenance.segment_src_out_us = seg.src_out_us;
+      peakAnalysis.provenance.policy_hash = policyHash;
+      peakAnalysis.provenance.model_alias = policy.model_alias;
+      peakAnalysis.provenance.precision_prompt_template_id = PRECISION_PROMPT_TEMPLATE_ID;
+      peakAnalysis.provenance.precision_prompt_hash = computePrecisionPromptHash();
+      peakAnalysis.provenance.detector_version = PEAK_DETECTOR_VERSION;
+      peakAnalysis.provenance.provenance_schema_version = PEAK_PROVENANCE_SCHEMA_VERSION;
+      if (sourceContentSha256) {
+        peakAnalysis.provenance.cache_identity = computePeakCacheIdentity(
+          seg,
+          sourceContentSha256,
+          precisionRequestedSampleTimestampsUs,
+          policyHash,
+          policy,
+        );
+      }
+      peakAnalysis.provenance.cache_decision = precisionCacheHits === precisionRequestedSampleTimestampsUs.length &&
+          precisionRequestedSampleTimestampsUs.length > 0
+        ? "accepted"
+        : "refreshed";
+      peakAnalysis.provenance.cache_decision_reasons = precisionRequestedSampleTimestampsUs.length === 0
+        ? ["precision_not_requested"]
+        : precisionCacheHits === precisionRequestedSampleTimestampsUs.length
+        ? ["cache_identity_match", "verified_frame_cache_match"]
+        : ["precision_frame_cache_refreshed"];
+      if (precisionFrameExtractionFailures.length > 0) {
+        peakAnalysis.provenance.precision_frame_extraction_failures =
+          precisionFrameExtractionFailures;
+      }
+      if (precisionFailures.length > 0) {
+        peakAnalysis.provenance.precision_failure_reason = precisionFailures.join(";");
+      }
 
-      shards.push({ segment_id: seg.segment_id, peak_analysis: peakAnalysis });
+      shards.push({
+        segment_id: seg.segment_id,
+        peak_analysis: peakAnalysis,
+        ...(precisionFailures.length > 0 ? { error: precisionFailures.join(";") } : {}),
+      });
     }
   }
 
@@ -244,6 +390,8 @@ export async function degradedPeakMap(
   console.log("[peak:fallback] Running degraded peak detection (motion/audio/transcript heuristics)...");
 
   for (const asset of assetsJson.items) {
+    if (asset.media_kind === "image") continue;
+    if (asset.audio_stream && !asset.video_stream) continue;
     const sourcePath = sourceFileMap.get(asset.asset_id);
     const assetSegments = segmentsJson.items.filter((s) => s.asset_id === asset.asset_id);
     if (assetSegments.length === 0) continue;
@@ -293,6 +441,82 @@ export async function degradedPeakMap(
 
   console.log(`[peak:fallback] Degraded peak detection: ${shards.length}/${segmentsJson.items.length} segments labeled`);
   return shards;
+}
+
+export function peakClaimsVisualPrecision(segment: SegmentItem): boolean {
+  return Boolean(
+    segment.peak_analysis?.peak_moments.some((moment) => moment.source_pass === "precision_dense_frames") ||
+      segment.peak_analysis?.recommended_in_out?.source_pass === "precision_dense_frames",
+  );
+}
+
+export function inspectPeakPrecisionCache(
+  segment: SegmentItem,
+  options: {
+    sourcePath: string | undefined;
+    sourceContentSha256: string | undefined;
+    outputDir: string;
+    policyHash: string;
+    policy: PeakDetectionPolicy;
+    sourceIdentityCache?: SourceContentIdentityCache;
+  },
+): { accepted: boolean; reasons: string[] } {
+  if (!peakClaimsVisualPrecision(segment)) return { accepted: true, reasons: ["no_visual_precision_claim"] };
+  const provenance = segment.peak_analysis?.provenance;
+  if (!provenance) return { accepted: false, reasons: ["precision_provenance_missing"] };
+  const reasons: string[] = [];
+  const requestedTimestampsUs = generateFilmstripTileMap(segment.src_in_us, segment.src_out_us)
+    .map((tile) => tile.frame_us);
+  if (!options.sourceContentSha256 || provenance.source_content_sha256 !== options.sourceContentSha256) {
+    reasons.push("source_content_mismatch");
+  }
+  if (provenance.segment_src_in_us !== segment.src_in_us || provenance.segment_src_out_us !== segment.src_out_us) {
+    reasons.push("segment_range_mismatch");
+  }
+  if (provenance.frame_cache_version !== GROUNDED_FRAME_CACHE_VERSION) reasons.push("frame_cache_revision_mismatch");
+  if (provenance.frame_producer_version !== GROUNDED_FRAME_PRODUCER_VERSION) reasons.push("frame_producer_revision_mismatch");
+  if (typeof provenance.precision_frame_count !== "number" || provenance.precision_frame_count < 1) {
+    reasons.push("verified_precision_frame_count_missing");
+  }
+  if (!sameNumbers(provenance.precision_sample_timestamps_us, provenance.precision_frame_count)) {
+    reasons.push("verified_precision_frame_timestamps_mismatch");
+  }
+  if (!sameExactNumbers(provenance.precision_requested_sample_timestamps_us, requestedTimestampsUs)) {
+    reasons.push("requested_timestamps_mismatch");
+  }
+  if (provenance.policy_hash !== options.policyHash) reasons.push("policy_hash_mismatch");
+  if (provenance.model_alias !== options.policy.model_alias) reasons.push("model_alias_mismatch");
+  if (provenance.precision_prompt_template_id !== PRECISION_PROMPT_TEMPLATE_ID ||
+      provenance.precision_prompt_hash !== computePrecisionPromptHash()) {
+    reasons.push("precision_prompt_mismatch");
+  }
+  if (provenance.detector_version !== PEAK_DETECTOR_VERSION) reasons.push("detector_revision_mismatch");
+  if (provenance.provenance_schema_version !== PEAK_PROVENANCE_SCHEMA_VERSION) reasons.push("provenance_schema_mismatch");
+  if (options.sourceContentSha256) {
+    const expectedIdentity = computePeakCacheIdentity(
+      segment,
+      options.sourceContentSha256,
+      requestedTimestampsUs,
+      options.policyHash,
+      options.policy,
+    );
+    if (provenance.cache_identity !== expectedIdentity) reasons.push("cache_identity_mismatch");
+  }
+  const frameInspection = inspectGroundedFrameCache({
+    sourcePath: options.sourcePath,
+    outputDir: options.outputDir,
+    namespace: "peak_precision_frames",
+    assetId: segment.asset_id,
+    segmentId: segment.segment_id,
+    segmentStartUs: segment.src_in_us,
+    segmentEndUs: segment.src_out_us,
+    timestampsUs: requestedTimestampsUs,
+    requiredTimestampsUs: provenance.precision_sample_timestamps_us ?? [],
+    sourceContentSha256: options.sourceContentSha256,
+    sourceIdentityCache: options.sourceIdentityCache,
+  });
+  if (!frameInspection.accepted) reasons.push(...frameInspection.reasons);
+  return { accepted: reasons.length === 0, reasons: [...new Set(reasons)] };
 }
 
 export function derivePeakSignalsForSegment(
@@ -402,6 +626,55 @@ function execFilePromise(
 
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function computePeakCacheIdentity(
+  segment: SegmentItem,
+  sourceContentSha256: string,
+  requestedTimestampsUs: number[],
+  policyHash: string,
+  policy: PeakDetectionPolicy,
+): string {
+  return createHash("sha256").update(JSON.stringify({
+    source_content_sha256: sourceContentSha256,
+    segment_id: segment.segment_id,
+    segment_src_in_us: segment.src_in_us,
+    segment_src_out_us: segment.src_out_us,
+    requested_sample_timestamps_us: requestedTimestampsUs,
+    policy_hash: policyHash,
+    model_alias: policy.model_alias,
+    precision_prompt_template_id: PRECISION_PROMPT_TEMPLATE_ID,
+    precision_prompt_hash: computePrecisionPromptHash(),
+    detector_version: PEAK_DETECTOR_VERSION,
+    provenance_schema_version: PEAK_PROVENANCE_SCHEMA_VERSION,
+    frame_cache_version: GROUNDED_FRAME_CACHE_VERSION,
+    frame_producer_version: GROUNDED_FRAME_PRODUCER_VERSION,
+  })).digest("hex");
+}
+
+function tryResolveSourceContentSha256(
+  sourcePath: string | undefined,
+  cache: SourceContentIdentityCache,
+): string | undefined {
+  if (!sourcePath) return undefined;
+  try {
+    return cache.resolve(sourcePath).sha256;
+  } catch {
+    return undefined;
+  }
+}
+
+function hashJson(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function sameNumbers(values: number[] | undefined, count: number | undefined): boolean {
+  return Array.isArray(values) && typeof count === "number" && values.length === count;
+}
+
+function sameExactNumbers(values: number[] | undefined, expected: number[]): boolean {
+  return Array.isArray(values) && values.length === expected.length &&
+    values.every((value, index) => value === expected[index]);
 }
 
 /**

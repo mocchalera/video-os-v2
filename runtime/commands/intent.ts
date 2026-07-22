@@ -15,7 +15,6 @@
  * LLM agent is injectable for testability.
  */
 
-import * as path from "node:path";
 import {
   initCommand,
   isCommandError,
@@ -26,9 +25,9 @@ import {
 } from "./shared.js";
 import type { ProjectState } from "../state/reconcile.js";
 import {
-  readPreferenceEntries,
   resolveActivePreference,
   type EditorialPreferenceMemoryEntry,
+  readResolvedPreferenceEntries,
   type PreferenceType,
 } from "../artifacts/p3-preference-memory.js";
 import { isP3ContinuityPreferenceEnabled } from "../artifacts/p3-continuity-graph.js";
@@ -164,7 +163,7 @@ export async function runIntent(
     projectId,
     currentState: previousState,
     editorialPreferenceMemory: isP3ContinuityPreferenceEnabled()
-      ? preloadProjectPreferences(absDir)
+      ? preloadProjectPreferences(absDir, projectId)
       : undefined,
   });
 
@@ -241,18 +240,24 @@ export async function runIntent(
   };
 }
 
-function preloadProjectPreferences(projectDir: string): IntentAgentContext["editorialPreferenceMemory"] {
-  const preferencePath = path.join(projectDir, "00_project/editorial_preference_memory.jsonl");
-  const entries = readPreferenceEntries(preferencePath).entries.map((item) => item.entry);
+export function preloadProjectPreferences(
+  projectDir: string,
+  expectedProjectId?: string,
+): IntentAgentContext["editorialPreferenceMemory"] {
+  const entries = readResolvedPreferenceEntries(projectDir, expectedProjectId).entries.map((item) => item.entry);
   const activeProjectPreferences = ([
     "pacing",
     "chronology",
     "transition_style",
     "repetition_tolerance",
+    "bgm_loudness",
     "caption_density",
     "delivery_preference",
   ] as PreferenceType[])
-    .map((type) => resolveActivePreference(entries.filter((entry) => entry.scope === "project"), type).active)
+    .map((type) => resolveActivePreference(
+      entries.filter((entry) => entry.scope === "project" && (entry.scope_ref === undefined || entry.scope_ref === expectedProjectId)),
+      type,
+    ).active)
     .filter((entry): entry is EditorialPreferenceMemoryEntry => Boolean(entry));
   return { activeProjectPreferences };
 }

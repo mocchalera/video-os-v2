@@ -53,14 +53,17 @@ export function loadVisualCache(
   let db: Database.Database | undefined;
   try {
     db = new Database(dbPath, { readonly: true, fileMustExist: true });
-    if (!tableExists(db, "segment_embeddings") || !tableExists(db, "embedding_models")) {
+    const embeddings = tableExists(db, "segment_embeddings") && tableExists(db, "embedding_models")
+      ? loadVisualEmbeddings(db, ids)
+      : new Map<string, Float32Array>();
+    const metadata = loadSegmentMetadata(db, ids);
+    if (embeddings.size === 0 &&
+        metadata.timestamps.size === 0 &&
+        metadata.assetIds.size === 0 &&
+        metadata.sourceInUs.size === 0 &&
+        metadata.cameras.size === 0) {
       return null;
     }
-
-    const embeddings = loadVisualEmbeddings(db, ids);
-    if (embeddings.size === 0) return null;
-
-    const metadata = loadSegmentMetadata(db, ids);
     return {
       embeddings,
       timestamps: metadata.timestamps,

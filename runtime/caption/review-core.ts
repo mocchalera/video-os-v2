@@ -15,6 +15,7 @@ export type CaptionReviewIssueCode =
   | "density_violation"
   | "low_timing_confidence"
   | "timing_fallback"
+  | "unresolved_reveal_anchor"
   | "invalid_timing"
   | "overlap"
   | "flagged";
@@ -184,7 +185,12 @@ export function buildCaptionReviewQueue(
   options: CaptionReviewOptions = {},
 ): CaptionReviewQueueItem[] {
   const entries = draft.speech_captions.map(toReviewedEntry);
-  validateEntries(entries, draft.caption_policy.language, options);
+  validateEntries(
+    entries,
+    draft.caption_policy.language,
+    draft.caption_policy.styling_class,
+    options,
+  );
   return entries
     .map((entry) => ({
       caption_id: entry.caption_id,
@@ -240,7 +246,12 @@ export function applyCaptionReviewPatch(
   entries.sort((a, b) => a.timeline_in_frame - b.timeline_in_frame ||
     a.caption_id.localeCompare(b.caption_id));
   for (const entry of entries) entry.text_hash = computeCaptionTextHash(entry.text);
-  validateEntries(entries, draft.caption_policy.language, options);
+  validateEntries(
+    entries,
+    draft.caption_policy.language,
+    draft.caption_policy.styling_class,
+    options,
+  );
 
   return {
     success: true,
@@ -399,10 +410,11 @@ function applyOperation(
 function validateEntries(
   entries: ReviewedCaptionEntry[],
   language: string,
+  stylingClass: string,
   options: CaptionReviewOptions,
 ): void {
   const fps = options.fps ?? 24;
-  const policy = getLayoutPolicy(language);
+  const policy = getLayoutPolicy(language, stylingClass);
   const protectedTerms = options.protectedTerms ?? [];
   for (const entry of entries) {
     const issues: CaptionReviewIssue[] = [];
@@ -438,6 +450,14 @@ function validateEntries(
     }
     if (entry.timing && entry.timing.confidence < 0.75) {
       addIssue(issues, "low_timing_confidence", "warn", `timing confidenceが${entry.timing.confidence}です`);
+    }
+    if (entry.reveal_timing?.status === "unresolved") {
+      addIssue(
+        issues,
+        "unresolved_reveal_anchor",
+        "block",
+        `情報解禁アンカー ${entry.reveal_timing.anchor_id} の音声時刻を精密に解決できません`,
+      );
     }
     if (entry.review.state === "flagged") {
       addIssue(issues, "flagged", "block", entry.review.note || "人間レビューで要確認に設定されています");

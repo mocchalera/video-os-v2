@@ -4,10 +4,10 @@ QAループの偽装合格を廃止しました。設計は additive な `visual
 
 主な変更は以下です。
 
-- レンダー欠如/skip/Marlin不可用時は [qa-loop.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/qa-loop.ts:313) で `score: 0`, `visual_qa: "blocked"` の Marlin QA レポートを作成。
-- `VOS_MARLIN_MOCK` 由来のQAは [marlin-qa.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/marlin-qa.ts:106) で検出し、[mock: true / visual_qa: "unverified"](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/marlin-qa.ts:299) として合格扱いしない。
-- 合否判定の共通判定を [marlin-qa-types.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/marlin-qa-types.ts:10) に追加。旧 `Marlin QA skipped` + `score:100` placeholder も後方互換で blocked 扱いにしました。
-- QA改善レポートは blocked/unverified/mock の場合 [overall_qa_score: 0](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/qa-improvement-report.ts:43) にし、[qa-issue-detector.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/eval/qa-issue-detector.ts:129) で非fixable issueを出すため `no_issues` に見えません。
+- レンダー欠如/skip/Marlin不可用時は [qa-loop.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/qa-loop.ts:313) で `score: 0`, `visual_qa: "blocked"` の Marlin QA レポートを作成。
+- `VOS_MARLIN_MOCK` 由来のQAは [marlin-qa.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/marlin-qa.ts:106) で検出し、[mock: true / visual_qa: "unverified"](/Users/operator/Dev/video-os-v2-spec/runtime/eval/marlin-qa.ts:299) として合格扱いしない。
+- 合否判定の共通判定を [marlin-qa-types.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/marlin-qa-types.ts:10) に追加。旧 `Marlin QA skipped` + `score:100` placeholder も後方互換で blocked 扱いにしました。
+- QA改善レポートは blocked/unverified/mock の場合 [overall_qa_score: 0](/Users/operator/Dev/video-os-v2-spec/runtime/eval/qa-improvement-report.ts:43) にし、[qa-issue-detector.ts](/Users/operator/Dev/video-os-v2-spec/runtime/eval/qa-issue-detector.ts:129) で非fixable issueを出すため `no_issues` に見えません。
 - スキーマファイル変更は不要でした。TypeScript契約上は任意フィールド追加のみで、既存成果物は読めます。
 
 ## Evidence

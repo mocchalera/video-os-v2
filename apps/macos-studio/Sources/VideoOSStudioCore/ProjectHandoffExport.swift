@@ -125,6 +125,8 @@ public struct ProjectEditorPacketVerificationStatus: Equatable, Sendable {
     public let previewMediaIncluded: Bool
     public let finalMediaIncluded: Bool
     public let finalAudioIncluded: Bool
+    public let captionSidecarIncluded: Bool
+    public let captionApprovalIncluded: Bool
 
     public var missingFileCount: Int {
         missingFiles.count
@@ -566,13 +568,13 @@ public enum ProjectEditorPacketExporter {
             "- Media relinks: \(plan.handoffPlan.mediaMissingCount)",
             "- Source map: \(plan.handoffPlan.sourceMapReadinessLabel) (\(plan.handoffPlan.sourceMapCoverageLabel))",
             "- Temporary source map: \(plan.handoffPlan.usesTemporarySourceMap ? "yes" : "no")",
-            "- Preview/final media: \(plan.mediaIncludedCount)",
+            "- Preview/final media and caption assets: \(plan.mediaIncludedCount)",
             "- Clip notes: \(annotations?.notes.count ?? 0)",
             ""
         ]
 
         if !plan.mediaSources.isEmpty {
-            lines.append("## Included Media")
+            lines.append("## Included Assets")
             lines.append("")
             for media in plan.mediaSources {
                 lines.append("- \(media.kind): \(media.packetRelativePath)")
@@ -697,7 +699,43 @@ public enum ProjectEditorPacketExporter {
         }
 
         appendDirectoryMedia(projectURL.appendingPathComponent("09_output"), kind: "final_media", seen: &seen, sources: &sources)
+        appendCaptionAssets(projectURL: projectURL, seen: &seen, sources: &sources)
         return sources
+    }
+
+    private static func appendCaptionAssets(
+        projectURL: URL,
+        seen: inout Set<String>,
+        sources: inout [ProjectEditorPacketMediaSource]
+    ) {
+        let fileManager = FileManager.default
+        let captionsDirectory = projectURL.appendingPathComponent("07_package/captions")
+        if let urls = try? fileManager.contentsOfDirectory(
+            at: captionsDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for url in urls.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                guard ["srt", "vtt", "ass"].contains(url.pathExtension.lowercased()) else { continue }
+                let standardized = url.standardizedFileURL
+                guard seen.insert(standardized.path).inserted else { continue }
+                sources.append(ProjectEditorPacketMediaSource(
+                    kind: "caption_sidecar",
+                    sourceURL: standardized,
+                    packetRelativePath: "captions/\(standardized.lastPathComponent)"
+                ))
+            }
+        }
+
+        let approval = projectURL.appendingPathComponent("07_package/caption_approval.json").standardizedFileURL
+        if fileManager.fileExists(atPath: approval.path), seen.insert(approval.path).inserted {
+            sources.append(ProjectEditorPacketMediaSource(
+                kind: "caption_approval",
+                sourceURL: approval,
+                packetRelativePath: "captions/caption_approval.json"
+            ))
+        }
     }
 
     private static func appendDirectoryMedia(
@@ -770,7 +808,9 @@ public enum ProjectEditorPacketVerificationStatusReader {
             mediaFileCount: mediaEntries.count,
             previewMediaIncluded: files.contains { $0.kind == "preview_media" },
             finalMediaIncluded: files.contains { $0.kind == "final_media" },
-            finalAudioIncluded: files.contains { $0.kind == "final_audio" }
+            finalAudioIncluded: files.contains { $0.kind == "final_audio" },
+            captionSidecarIncluded: files.contains { $0.kind == "caption_sidecar" },
+            captionApprovalIncluded: files.contains { $0.kind == "caption_approval" }
         )
     }
 

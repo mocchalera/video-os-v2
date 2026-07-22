@@ -4,12 +4,18 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { computeNormalizedJsonHash } from "./p1-manifest-coverage.js";
-import { footageDbPath } from "./footage-db.js";
+import {
+  EDITORIAL_OBSERVATION_MATERIALIZATION_REVISION,
+  footageDbPath,
+} from "./footage-db.js";
 import {
   extractAudioLevels,
   extractCameraMotion,
+  extractEditorialObservation,
   extractSceneShotTake,
   extractShotScale,
+  type EditorialObservationExtraction,
+  type EditorialObservationField,
 } from "./footage-metadata-extractor.js";
 import {
   SEMANTIC_EMBEDDING_DTYPE,
@@ -170,6 +176,7 @@ interface SegmentBuildRecord {
   extractedTextFlat: string;
   placeText: string;
   aestheticNotesFlat: string;
+  editorialObservation: EditorialObservationExtraction;
 }
 
 interface PopulationResult {
@@ -879,6 +886,7 @@ export async function buildFootageDb(options: BuildFootageDbOptions): Promise<Bu
       schema_version: SCHEMA_VERSION,
       artifact_version: ARTIFACT_VERSION,
       metadata_schema_version: "1",
+      editorial_observation_materialization_revision: EDITORIAL_OBSERVATION_MATERIALIZATION_REVISION,
       project_id: inputs.projectId,
       created_at: indexedAt,
       builder: "scripts/build-footage-db.ts",
@@ -2840,7 +2848,11 @@ function segmentBuildRecord(
     .filter((event) => overlaps(nonNegativeInteger(event.start_us) ?? 0, nonNegativeInteger(event.end_us) ?? 0, srcInUs, srcOutUs))
     .map((event) => stringValue(event.description))
     .filter(Boolean);
-  const tags = uniqueStrings([...arrayStrings(segment.tags), ...arrayStrings(segment.visual_tags)]);
+  const editorialObservation = extractEditorialObservation(segment.editorial_observation);
+  const tags = uniqueStrings([
+    ...arrayStrings(segment.tags),
+    ...observationStringArray(editorialObservation, "visual_tags"),
+  ]);
   const assetTags = arrayStrings(asset.tags);
   return {
     segment,
@@ -2860,6 +2872,7 @@ function segmentBuildRecord(
     extractedTextFlat: extractedTextFlat(appraisal.extracted_text),
     placeText: placeText(recordValue(appraisal.place_hint)),
     aestheticNotesFlat: arrayStrings(appraisal.aesthetic_notes).join(" "),
+    editorialObservation,
   };
 }
 
@@ -2905,6 +2918,7 @@ function embeddingTextBundles(
     ...record.tags,
     ...record.qualityLabels,
     ...record.qualityFlags,
+    ...record.editorialObservation.index_terms,
   ].join(" ");
   const transcript = [record.transcript.text, record.transcriptExcerpt].join(" ");
   const scene = [
@@ -2992,35 +3006,167 @@ function segmentVisualProfileRow(segmentId: string, record: SegmentBuildRecord):
   ].join(" ");
   const motion = extractCameraMotion(description);
   const shotScale = extractShotScale(description);
+  const observation = record.editorialObservation;
   const quality = recordValue(record.segment.visual_quality);
   const qualityLabelsRecord = recordValue(quality.labels);
   return {
     segment_id: segmentId,
     camera_motion_description: motion.camera_motion_description,
     camera_motion_type: motion.camera_motion_type,
-    camera_motion_direction: motion.camera_motion_direction,
+    camera_motion_direction: canonicalMotionDirection(observation, "camera_motion_direction") ?? motion.camera_motion_direction,
     camera_stability: motion.camera_stability,
     motion_energy: scoreOrNull(recordValue(record.segment.peak_analysis).motion_energy),
     camera_motion_energy: scoreOrNull(recordValue(record.segment.peak_analysis).camera_motion_energy),
-    shot_scale: shotScale,
-    composition_anchor: compositionAnchor(description),
-    subject_screen_side: dominantSubjectPosition(description),
-    dominant_subject_type: dominantSubjectType(description),
-    subject_movement_direction: subjectMovementDirection(description),
+    shot_scale: canonicalShotScale(observation) ?? shotScale,
+    composition_anchor: canonicalCompositionAnchor(observation) ?? compositionAnchor(description),
+    subject_screen_side: canonicalScreenSide(observation) ?? dominantSubjectPosition(description),
+    dominant_subject_type: canonicalDominantSubjectType(observation) ?? dominantSubjectType(description),
+    subject_movement_direction: canonicalMotionDirection(observation, "subject_motion_direction") ?? subjectMovementDirection(description),
     exposure_label: exposureLabel(description, record.qualityFlags),
     color_temperature: colorTemperature(description, record.qualityLabels),
     contrast_label: contrastLabel(description, record.qualityLabels),
     saturation_label: saturationLabel(description, record.qualityLabels),
-    dominant_colors_json: jsonArray(qualityLabelsRecord.dominant_colors ?? quality.dominant_colors),
+    dominant_colors_json: JSON.stringify(
+      observationHasField(observation, "dominant_colors")
+        ? observationStringArray(observation, "dominant_colors")
+        : arrayStrings(qualityLabelsRecord.dominant_colors ?? quality.dominant_colors),
+    ),
     sampled_frame_count: nonNegativeInteger(quality.sampled_frame_count) ?? 0,
     depth_of_field: depthOfField(description),
-    motion_confidence: motion.motion_confidence,
-    scale_confidence: shotScale === "unknown" ? null : 0.55,
-    subject_confidence: dominantSubjectPosition(description) === "unknown" ? null : 0.45,
-    color_confidence: hasColorCue(description, record.qualityLabels, record.qualityFlags) ? 0.45 : null,
+    motion_confidence: observationFieldConfidence(observation, "camera_motion_direction") ?? motion.motion_confidence,
+    scale_confidence: observationFieldConfidence(observation, "shot_scale") ?? (shotScale === "unknown" ? null : 0.55),
+    subject_confidence: observationFieldConfidence(
+      observation,
+      "dominant_subject_type",
+      "screen_side",
+      "composition_anchor",
+      "subject_motion_direction",
+    ) ?? (dominantSubjectPosition(description) === "unknown" ? null : 0.45),
+    color_confidence: observationFieldConfidence(observation, "dominant_colors")
+      ?? (hasColorCue(description, record.qualityLabels, record.qualityFlags) ? 0.45 : null),
     depth_confidence: depthOfField(description) === "unknown" ? null : 0.45,
-    extraction_source_json: JSON.stringify({ motion: "marlin_phrase_parser", shot_scale: "marlin_phrase_parser" }),
-    evidence_json: JSON.stringify([...motion.evidence, ...record.qualityFlags, ...record.qualityLabels]),
+    extraction_source_json: JSON.stringify(visualProfileExtractionSources(observation)),
+    evidence_json: JSON.stringify([
+      ...observation.evidence_terms,
+      ...observation.evidence_refs.map((ref) => `editorial_observation.evidence_ref=${ref}`),
+      ...motion.evidence,
+      ...record.qualityFlags,
+      ...record.qualityLabels,
+    ]),
+  };
+}
+
+function observationHasField(observation: EditorialObservationExtraction, field: EditorialObservationField): boolean {
+  return Object.prototype.hasOwnProperty.call(observation.values, field);
+}
+
+function observationString(
+  observation: EditorialObservationExtraction,
+  field: EditorialObservationField,
+): string | undefined {
+  const value = observation.values[field];
+  return typeof value === "string" ? value : undefined;
+}
+
+function observationStringArray(
+  observation: EditorialObservationExtraction,
+  field: "visual_tags" | "dominant_colors",
+): string[] {
+  const value = observation.values[field];
+  return Array.isArray(value) ? value : [];
+}
+
+function observationFieldConfidence(
+  observation: EditorialObservationExtraction,
+  ...fields: EditorialObservationField[]
+): number | null {
+  for (const field of fields) {
+    if (!observationHasField(observation, field)) continue;
+    const confidence = observation.field_confidence[field];
+    return confidence ?? null;
+  }
+  return null;
+}
+
+function canonicalMotionDirection(
+  observation: EditorialObservationExtraction,
+  field: "camera_motion_direction" | "subject_motion_direction",
+): string | null {
+  if (!observationHasField(observation, field)) return null;
+  const value = observationString(observation, field);
+  return ({
+    left: "rtl",
+    right: "ltr",
+    up: "up",
+    down: "down",
+    toward_camera: "toward_camera",
+    away_from_camera: "away_camera",
+    mixed: "mixed",
+    unknown: "unknown",
+    not_applicable: "unknown",
+  } as Record<string, string>)[value ?? ""] ?? "unknown";
+}
+
+function canonicalShotScale(observation: EditorialObservationExtraction): string | null {
+  if (!observationHasField(observation, "shot_scale")) return null;
+  const value = observationString(observation, "shot_scale");
+  return ({
+    extreme_wide: "extreme_wide",
+    wide: "wide",
+    medium_wide: "medium_wide",
+    medium: "medium",
+    medium_close_up: "medium_close",
+    close_up: "close",
+    extreme_close_up: "extreme_close",
+    insert: "detail",
+    unknown: "unknown",
+    not_applicable: "unknown",
+  } as Record<string, string>)[value ?? ""] ?? "unknown";
+}
+
+function canonicalCompositionAnchor(observation: EditorialObservationExtraction): string | null {
+  if (!observationHasField(observation, "composition_anchor")) return null;
+  const value = observationString(observation, "composition_anchor");
+  return value === "left" || value === "center" || value === "right" ? value : "unknown";
+}
+
+function canonicalScreenSide(observation: EditorialObservationExtraction): string | null {
+  if (!observationHasField(observation, "screen_side")) return null;
+  const value = observationString(observation, "screen_side");
+  if (value === "left" || value === "center" || value === "right") return value;
+  if (value === "multiple") return "mixed";
+  return "unknown";
+}
+
+function canonicalDominantSubjectType(observation: EditorialObservationExtraction): string | null {
+  if (!observationHasField(observation, "dominant_subject_type")) return null;
+  const value = observationString(observation, "dominant_subject_type");
+  if (value === "person" || value === "group" || value === "object") return value;
+  if (value === "landscape") return "environment";
+  return "unknown";
+}
+
+function visualProfileExtractionSources(observation: EditorialObservationExtraction): JsonRecord {
+  const fields = Object.fromEntries(Object.entries(observation.values).map(([field, value]) => [field, {
+    source: "editorial_observation",
+    exact_value: value,
+    confidence: observation.field_confidence[field as EditorialObservationField] ?? null,
+    evidence_refs: observation.field_evidence_refs[field as EditorialObservationField] ?? [],
+  }]));
+  return {
+    motion: observationHasField(observation, "camera_motion_direction")
+      ? "editorial_observation"
+      : "marlin_phrase_parser",
+    shot_scale: observationHasField(observation, "shot_scale")
+      ? "editorial_observation"
+      : "marlin_phrase_parser",
+    ...(observation.present ? {
+      editorial_observation: {
+        values: observation.values,
+        fields,
+        evidence_refs: observation.evidence_refs,
+      },
+    } : {}),
   };
 }
 
@@ -3129,6 +3275,7 @@ function metadataFtsRow(
   return {
     segment_id: stringValue(visualProfile.segment_id),
     cinematography: searchFieldText([
+      ...record.editorialObservation.index_terms,
       stringValue(visualProfile.camera_motion_description),
       stringValue(visualProfile.camera_motion_type),
       stringValue(visualProfile.camera_motion_direction),

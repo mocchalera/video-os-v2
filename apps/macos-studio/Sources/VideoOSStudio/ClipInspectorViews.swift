@@ -48,6 +48,8 @@ struct ClipInspectorPanel: View {
                     LabeledContent("長さ", value: "\(clip.timelineDurationFrames)フレーム / \(formatSeconds(timeline.sequence.framesToSeconds(clip.timelineDurationFrames)))")
                 }
 
+                InterviewFinishInspectorSection(model: model)
+
                 Section("編集意図") {
                     Text(clip.motivation)
                         .textSelection(.enabled)
@@ -156,6 +158,150 @@ struct ClipInspectorPanel: View {
         let remainder = whole % 60
         let fraction = Int((safeSeconds - Double(whole)) * 10)
         return "\(minutes):\(String(format: "%02d", remainder)).\(fraction)"
+    }
+}
+
+private struct InterviewFinishInspectorSection: View {
+    @ObservedObject var model: StudioViewModel
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("音声MA（動画全体）", selection: $model.interviewAudioFinishPreset) {
+                    Text("会話を整える").tag("dialogue-clean")
+                    Text("音量のみ").tag("loudness-only")
+                    Text("なし").tag("none")
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("ClipInspector.InterviewAudioPreset")
+
+                HStack {
+                    Text("-16 LUFS / -1.5 dBTP")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        model.queueInterviewAudioFinish()
+                    } label: {
+                        Label("MAを保留", systemImage: "waveform.badge.plus")
+                    }
+                    .accessibilityIdentifier("ClipInspector.QueueInterviewMA")
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 12) {
+                metricSlider(
+                    title: "ズーム",
+                    value: $model.interviewFinishZoom,
+                    range: 1 ... 1.35,
+                    step: 0.01,
+                    valueLabel: String(format: "%.2fx", model.interviewFinishZoom),
+                    accessibilityID: "ClipInspector.InterviewZoom"
+                )
+
+                metricSlider(
+                    title: "水平パン",
+                    value: $model.interviewFinishPositionX,
+                    range: -model.interviewMaximumPanX ... model.interviewMaximumPanX,
+                    step: 1,
+                    valueLabel: String(format: "%+.0f px", model.interviewFinishPositionX),
+                    accessibilityID: "ClipInspector.InterviewPanX"
+                )
+
+                metricSlider(
+                    title: "垂直パン",
+                    value: $model.interviewFinishPositionY,
+                    range: -model.interviewMaximumPanY ... model.interviewMaximumPanY,
+                    step: 1,
+                    valueLabel: String(format: "%+.0f px", model.interviewFinishPositionY),
+                    accessibilityID: "ClipInspector.InterviewPanY"
+                )
+            }
+            .disabled(!model.canFinishSelectedInterviewClip || model.isAnalyzingInterviewReframe)
+            .onChange(of: model.interviewFinishZoom) { _, _ in
+                model.clampInterviewFinishPosition()
+            }
+
+            if let proposal = model.interviewReframeProposal {
+                HStack(spacing: 8) {
+                    Label("AI画角", systemImage: "viewfinder.circle.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.blue)
+                    Text("顔 \(proposal.faceSampleCount)/\(proposal.analyzedSampleCount)・手振り \(proposal.gestureSampleCount)・信頼度 \(proposal.confidence.formatted(.number.precision(.fractionLength(2))))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .help(proposal.reason)
+                .accessibilityIdentifier("ClipInspector.InterviewProposalSummary")
+            }
+
+            HStack {
+                Button {
+                    model.analyzeSelectedInterviewReframe()
+                } label: {
+                    Label(
+                        model.isAnalyzingInterviewReframe ? "解析中" : "自動画角を提案",
+                        systemImage: model.isAnalyzingInterviewReframe ? "hourglass" : "person.crop.rectangle"
+                    )
+                }
+                .disabled(!model.canFinishSelectedInterviewClip || model.isAnalyzingInterviewReframe)
+                .accessibilityIdentifier("ClipInspector.AnalyzeInterviewReframe")
+
+                Button {
+                    model.resetSelectedInterviewFraming()
+                } label: {
+                    Label("リセット", systemImage: "arrow.counterclockwise")
+                }
+                .disabled(model.isAnalyzingInterviewReframe)
+                .accessibilityIdentifier("ClipInspector.ResetInterviewReframe")
+
+                Spacer()
+
+                Button {
+                    model.queueSelectedInterviewVisualTransform()
+                } label: {
+                    Label("画角を保留", systemImage: "rectangle.and.pencil.and.ellipsis")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!model.canFinishSelectedInterviewClip || model.isAnalyzingInterviewReframe)
+                .accessibilityIdentifier("ClipInspector.QueueInterviewReframe")
+            }
+
+            Text(model.interviewFinishStatus)
+                .font(.caption)
+                .foregroundStyle(model.interviewFinishStatus.contains("失敗") ? .red : .secondary)
+                .accessibilityIdentifier("ClipInspector.InterviewFinishStatus")
+        } header: {
+            Label("インタビュー仕上げ", systemImage: "viewfinder")
+        } footer: {
+            Text("画角はViewerへ即時プレビューされ、保存時はReview Patchとして履歴・取り消し対象になります。")
+        }
+    }
+
+    private func metricSlider(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        valueLabel: String,
+        accessibilityID: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(valueLabel)
+                    .font(.caption.monospacedDigit().weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range, step: step)
+                .accessibilityLabel(title)
+                .accessibilityValue(valueLabel)
+                .accessibilityIdentifier(accessibilityID)
+        }
     }
 }
 

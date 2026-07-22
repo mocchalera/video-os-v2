@@ -17,6 +17,7 @@ import { validateProject } from "./validate-schemas.js";
 import { ProgressTracker } from "../runtime/progress.js";
 import { generateTimelineOverview } from "../runtime/preview/timeline-overview.js";
 import { confirmBriefDefaults } from "../runtime/brief-confirmation.js";
+import { inferExistingTimelineFps } from "../runtime/compiler/existing-timeline.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -74,12 +75,13 @@ export function parseArgs(argv: string[] = process.argv): CompileTimelineArgs {
 export async function runCompileTimeline(options: CompileTimelineArgs): Promise<void> {
   const {
     projectPath,
-    fpsNum,
+    fpsNum: requestedFpsNum,
     sourceMapPath,
     skipPreview,
     skipConfirmations,
     forceConfirmations,
   } = options;
+  const fpsNum = requestedFpsNum ?? inferExistingTimelineFps(projectPath);
   const pt = new ProgressTracker(projectPath, "compile", skipPreview ? 3 : 4);
 
   // Pre-compile validation: check Gate 1

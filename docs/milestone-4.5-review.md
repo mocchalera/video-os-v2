@@ -21,7 +21,7 @@
 - 現行 `selects_candidates` contract には stable な `candidate_id` がなく、candidate は実質 `segment_id + src_in_us + src_out_us` でしか区別できません。`schemas/selects-candidates.schema.json:41-156`
 - compiler 実装も fallback 解決を `segment_id` 単位でしか行っていません。`runtime/compiler/types.ts:137-151` `runtime/compiler/resolve.ts:21-25` `runtime/compiler/resolve.ts:118-133`
 - 一方 M4.5 設計は `script_draft.yaml` に `beat-to-candidate assignment` と `backup map` を持たせ、Phase D で backup 差し替えと `missing_beats` 記録を行い、さらに adaptive trim で同一 long segment から別 window を切り出す前提です。`docs/milestone-4.5-design.md:247-277` `docs/milestone-4.5-design.md:648-669`
-- 旧 Script Engine 側はこの問題を `candidate_id` / `material_unit_id` で解いていました。`/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/rules/narrative-design.md:131-179`
+- 旧 Script Engine 側はこの問題を `candidate_id` / `material_unit_id` で解いていました。`/Users/operator/Dev/video-edit-agent/docs/inventory-ja/rules/narrative-design.md:131-179`
 
 なぜ致命的か:
 
@@ -41,7 +41,7 @@
 
 - 設計は 18 skill を `normalize -> score -> assemble -> resolve -> export` に additive 統合すると宣言しています。`docs/milestone-4.5-design.md:11-23` `docs/milestone-4.5-design.md:397-463`
 - しかし現行 compiler は beat ごとに最大 1 本の hero / support / dialogue / transition を選ぶ線形 assembly で、thread / subbeat / overlap / transition spec / within-beat sequence を持ちません。`runtime/compiler/types.ts:93-165` `runtime/compiler/assemble.ts:16-158`
-- 旧 skill の中には、明示的に audio overlap や multi-clip compression や interleave を要求するものがあります。`/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/editing-skills/j-cut-lead-in.md:41-51` `/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/editing-skills/l-cut-reaction-hold.md:42-54` `/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/editing-skills/montage-compress.md:24-52` `/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/editing-skills/crosscut-suspense.md:24-51`
+- 旧 skill の中には、明示的に audio overlap や multi-clip compression や interleave を要求するものがあります。`/Users/operator/Dev/video-edit-agent/docs/inventory-ja/editing-skills/j-cut-lead-in.md:41-51` `/Users/operator/Dev/video-edit-agent/docs/inventory-ja/editing-skills/l-cut-reaction-hold.md:42-54` `/Users/operator/Dev/video-edit-agent/docs/inventory-ja/editing-skills/montage-compress.md:24-52` `/Users/operator/Dev/video-edit-agent/docs/inventory-ja/editing-skills/crosscut-suspense.md:24-51`
 - しかも roadmap では `audio_overlap_sec` は「引き継がない」と明記されています。`docs/roadmap.md:301-305`
 
 なぜ致命的か:
@@ -72,7 +72,7 @@
 
 - 推論条件は `16:9`, `LP embed`, `short persuasive loop`, `strong hook need`, `credibility-first` などの structured signal を前提にしています。`docs/milestone-4.5-design.md:544-576`
 - しかし現行 `creative_brief` で machine-readable なのは `project.format` と `runtime_target_sec` 程度で、提案されている additive field も `profile_hint` / `policy_hint` / `allow_inference` のみです。`schemas/creative-brief.schema.json:27-56` `docs/milestone-4.5-design.md:533-538`
-- 旧 profile の差分は `platform`, `aspect_ratio`, `caption`, `qa_policy`, `narrative_lock` など複数面にまたがっています。`/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/profiles/interview-highlight.md:19-122` `/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/profiles/lp-testimonial.md:20-61`
+- 旧 profile の差分は `platform`, `aspect_ratio`, `caption`, `qa_policy`, `narrative_lock` など複数面にまたがっています。`/Users/operator/Dev/video-edit-agent/docs/inventory-ja/profiles/interview-highlight.md:19-122` `/Users/operator/Dev/video-edit-agent/docs/inventory-ja/profiles/lp-testimonial.md:20-61`
 
 懸念:
 
@@ -127,7 +127,7 @@
 根拠:
 
 - Phase D は `story continuity`, `emotion_gradient`, `causal_connectivity`, `source_fidelity` を deterministic に計算するとしています。`docs/milestone-4.5-design.md:264-285` `docs/milestone-4.5-design.md:373-395`
-- 旧 `quality-judgment` は LLM ベース審査で、ここを deterministic に落とす具体 proxy はまだ書かれていません。`/Users/mocchalera/Dev/video-edit-agent/docs/inventory-ja/skills/quality-judgment.md:5-44`
+- 旧 `quality-judgment` は LLM ベース審査で、ここを deterministic に落とす具体 proxy はまだ書かれていません。`/Users/operator/Dev/video-edit-agent/docs/inventory-ja/skills/quality-judgment.md:5-44`
 
 懸念:
 

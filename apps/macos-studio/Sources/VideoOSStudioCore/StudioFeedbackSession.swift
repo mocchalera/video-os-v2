@@ -63,7 +63,7 @@ public final class StudioFeedbackSession: ObservableObject {
         approvedClipIDs.remove(clipID)
         removePendingOps(
             targetClipID: clipID,
-            opNames: ["replace_segment", "trim_segment", "move_segment", "split_segment", "change_audio_policy"]
+            opNames: ["replace_segment", "trim_segment", "move_segment", "split_segment", "change_audio_policy", "change_visual_transform"]
         )
         pendingOps.removeAll { op in
             op.opName == "set_transition" && op.referencedClipIDs.contains(clipID)
@@ -97,7 +97,7 @@ public final class StudioFeedbackSession: ObservableObject {
             approvedClipIDs.remove(clipID)
             removePendingOps(
                 targetClipID: clipID,
-                opNames: ["replace_segment", "trim_segment", "move_segment", "split_segment", "change_audio_policy"]
+                opNames: ["replace_segment", "trim_segment", "move_segment", "split_segment", "change_audio_policy", "change_visual_transform"]
             )
         }
         pendingOps.removeAll { op in
@@ -247,6 +247,23 @@ public final class StudioFeedbackSession: ObservableObject {
         pendingOps.contains {
             $0.opName == "split_segment" && $0.targetClipID == clipID
         }
+    }
+
+    public func pendingVisualTransform(for clipID: String) -> ReviewVisualTransform? {
+        for op in pendingOps.reversed() {
+            guard case let .changeVisualTransform(targetClipID, transform, _, _) = op,
+                  targetClipID == clipID else { continue }
+            return transform
+        }
+        return nil
+    }
+
+    public var pendingAudioFinish: ReviewAudioFinish? {
+        for op in pendingOps.reversed() {
+            guard case let .changeAudioFinish(audioFinish, _) = op else { continue }
+            return audioFinish
+        }
+        return nil
     }
 
     public func pendingTrimBounds(for clipID: String) -> (sourceInUS: Int, sourceOutUS: Int)? {

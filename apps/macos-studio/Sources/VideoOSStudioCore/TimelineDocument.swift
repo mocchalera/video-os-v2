@@ -493,6 +493,11 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
         return audioSelection(in: Array(tracks.audio.reversed()), atFrame: normalizedFrame)
     }
 
+    public func captionSelection(atFrame frame: Int) -> TimelineClipSelection? {
+        let normalizedFrame = max(0, min(frame, totalFrames))
+        return selection(in: Array(tracks.resolvedCaptionTracks.reversed()), atFrame: normalizedFrame)
+    }
+
     private func selection(in orderedTracks: [TimelineTrack], atFrame frame: Int) -> TimelineClipSelection? {
         for track in orderedTracks {
             if let clip = track.clips

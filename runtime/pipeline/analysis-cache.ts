@@ -1,7 +1,7 @@
 /**
  * Analysis cache — avoid redundant VLM/STT calls for unchanged source files.
  *
- * Cache key: SHA-256(first 1 MB of file content + file size + duration_us)
+ * Cache key: SHA-256(full source-content SHA-256 + file size + duration_us)
  * Manifest:  projects/<id>/03_analysis/cache_manifest.json
  *
  * Per roadmap-v2.1.md §M2-1
@@ -10,10 +10,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-
-// ── Constants ──────────────────────────────────────────────────────
-
-const CACHE_CHUNK_SIZE = 1 * 1024 * 1024; // 1 MB
+import { sha256FileHex } from "../source-content-identity.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -22,12 +19,13 @@ export interface CacheManifestEntry {
   asset_id: string;
   cached_at: string;
   source_path: string;
+  source_content_sha256?: string;
 }
 
 // ── Hash ───────────────────────────────────────────────────────────
 
 /**
- * Compute cache hash: SHA-256(first 1 MB content + fileSize + durationUs).
+ * Compute cache hash from the full source-content identity.
  *
  * Path is intentionally excluded so file moves do not invalidate the cache.
  */
@@ -35,21 +33,13 @@ export function computeCacheHash(
   filePath: string,
   fileSize: number,
   durationUs: number,
+  sourceContentSha256: string = sha256FileHex(filePath),
 ): string {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const chunkSize = Math.min(CACHE_CHUNK_SIZE, fileSize);
-    const buffer = Buffer.alloc(chunkSize);
-    fs.readSync(fd, buffer, 0, chunkSize, 0);
-
-    const hash = createHash("sha256");
-    hash.update(buffer);
-    hash.update(String(fileSize));
-    hash.update(String(durationUs));
-    return hash.digest("hex");
-  } finally {
-    fs.closeSync(fd);
-  }
+  const hash = createHash("sha256");
+  hash.update(sourceContentSha256);
+  hash.update(String(fileSize));
+  hash.update(String(durationUs));
+  return hash.digest("hex");
 }
 
 // ── Manifest CRUD ──────────────────────────────────────────────────

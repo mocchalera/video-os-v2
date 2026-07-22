@@ -1,7 +1,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { computeNormalizedJsonHash } from "./p1-manifest-coverage.js";
-import { computePreferenceMemoryHash } from "./p3-preference-memory.js";
+import {
+  computePreferenceMemoryHash,
+  EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH,
+  readResolvedPreferenceEntries,
+  resolvePreferenceMemoryPath,
+} from "./p3-preference-memory.js";
 import { validateAgainstSchema } from "../commands/shared.js";
 import type { ReleaseSafetyCheck } from "./p4a-release-safety.js";
 
@@ -108,7 +113,7 @@ const INPUT_PATHS = {
   segments_hash: "03_analysis/segments.json",
   audio_story_graph_hash: "03_analysis/audio_story_graph.json",
   continuity_graph_hash: "03_analysis/continuity_graph.json",
-  editorial_preference_memory_hash: "03_analysis/editorial_preference_memory.jsonl",
+  editorial_preference_memory_hash: EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH,
   coverage_report_hash: "03_analysis/analysis_coverage_report.json",
 } as const;
 
@@ -175,6 +180,7 @@ export function loadTextIndex(
 }
 
 export function currentSearchIndexInputHashes(projectDir: string): SearchIndexInputs {
+  const expectedProjectId = currentProjectId(projectDir);
   return {
     source_media_manifest_hash: canonicalJsonFileHash(path.join(projectDir, INPUT_PATHS.source_media_manifest_hash)) ?? ZERO_HASH,
     assets_hash: canonicalJsonFileHash(path.join(projectDir, INPUT_PATHS.assets_hash)) ?? ZERO_HASH,
@@ -182,7 +188,7 @@ export function currentSearchIndexInputHashes(projectDir: string): SearchIndexIn
     transcripts_hashes: transcriptHashes(projectDir),
     audio_story_graph_hash: canonicalJsonFileHash(path.join(projectDir, INPUT_PATHS.audio_story_graph_hash)),
     continuity_graph_hash: canonicalJsonFileHash(path.join(projectDir, INPUT_PATHS.continuity_graph_hash)),
-    editorial_preference_memory_hash: preferenceMemoryHash(path.join(projectDir, INPUT_PATHS.editorial_preference_memory_hash)),
+    editorial_preference_memory_hash: preferenceMemoryHash(projectDir, expectedProjectId),
     coverage_report_hash: canonicalJsonFileHash(path.join(projectDir, INPUT_PATHS.coverage_report_hash)) ?? ZERO_HASH,
   };
 }
@@ -316,6 +322,7 @@ export function readSearchIndexStatus(projectDir: string): {
 }
 
 export function searchIndexInputRefs(projectDir: string, current: SearchIndexInputs): Array<{ path: string; hash: string; required: boolean }> {
+  const preferenceResolution = resolvePreferenceMemoryPath(projectDir);
   const refs: Array<{ path: string; hash: string | null; required: boolean }> = [
     { path: INPUT_PATHS.source_media_manifest_hash, hash: current.source_media_manifest_hash, required: true },
     { path: INPUT_PATHS.assets_hash, hash: current.assets_hash, required: true },
@@ -323,7 +330,7 @@ export function searchIndexInputRefs(projectDir: string, current: SearchIndexInp
     { path: INPUT_PATHS.coverage_report_hash, hash: current.coverage_report_hash, required: true },
     { path: INPUT_PATHS.audio_story_graph_hash, hash: current.audio_story_graph_hash, required: false },
     { path: INPUT_PATHS.continuity_graph_hash, hash: current.continuity_graph_hash, required: false },
-    { path: INPUT_PATHS.editorial_preference_memory_hash, hash: current.editorial_preference_memory_hash, required: false },
+    { path: preferenceResolution.relativePath, hash: current.editorial_preference_memory_hash, required: false },
   ];
   return refs
     .filter((ref): ref is { path: string; hash: string; required: boolean } => typeof ref.hash === "string")
@@ -362,13 +369,20 @@ function canonicalJsonFileHash(filePath: string): string | null {
   }
 }
 
-function preferenceMemoryHash(filePath: string): string | null {
-  if (!fs.existsSync(filePath)) return null;
+function preferenceMemoryHash(projectDir: string, expectedProjectId?: string): string | null {
+  const read = readResolvedPreferenceEntries(projectDir, expectedProjectId);
+  if (read.resolution.source === "absent") return null;
+  if (read.malformedLines.length > 0) return ZERO_HASH;
   try {
-    return computePreferenceMemoryHash(fs.readFileSync(filePath, "utf-8"));
+    return computePreferenceMemoryHash(fs.readFileSync(read.resolution.path, "utf-8"));
   } catch {
     return ZERO_HASH;
   }
+}
+
+function currentProjectId(projectDir: string): string | undefined {
+  const manifest = readJson(path.join(projectDir, INPUT_PATHS.source_media_manifest_hash));
+  return typeof manifest?.project_id === "string" ? manifest.project_id : undefined;
 }
 
 function readJson(filePath: string): Record<string, unknown> | null {

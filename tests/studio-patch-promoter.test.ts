@@ -307,12 +307,20 @@ describe("promoteStudioPatch", () => {
         "utf-8",
       );
 
+      const preferenceMemoryPath = path.join(projectDir, "00_project/editorial_preference_memory.jsonl");
+      const dryRunResult = promoteStudioPatchFiles(projectDir, patchPath, { dryRun: true });
+      expect(dryRunResult.applied_ops).toBe(1);
+      expect(fs.existsSync(preferenceMemoryPath)).toBe(false);
+
+      fs.mkdirSync(path.dirname(preferenceMemoryPath), { recursive: true });
+      fs.writeFileSync(preferenceMemoryPath, "pre-existing-memory-bytes\n");
       const result = promoteStudioPatchFiles(projectDir, patchPath);
       const promotedBlueprint = parseYaml(
         fs.readFileSync(path.join(projectDir, "04_plan", "edit_blueprint.yaml"), "utf-8"),
       ) as EditBlueprint;
 
       expect(result.applied_ops).toBe(1);
+      expect(fs.readFileSync(preferenceMemoryPath, "utf-8")).toBe("pre-existing-memory-bytes\n");
       expect(promotedBlueprint.beats[0].candidate_plan).toEqual({
         primary_candidate_ref: "SEG_R",
         fallback_candidate_refs: ["SEG_A", "SEG_B"],

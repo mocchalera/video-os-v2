@@ -19,14 +19,17 @@ import {
   checkCaptionDensity,
   checkCaptionAlignment,
   checkDialogueOccupancy,
+  checkDialogueTimelineAlignment,
   checkAvDrift,
   checkLoudnessTarget,
+  checkAudioMixPolicy,
   checkResolutionSpec,
   checkPackageCompleteness,
   buildQaReport,
   getRequiredChecks,
   type QaCheckResult,
 } from "../runtime/packaging/qa.js";
+import type { AudioMixReport } from "../runtime/audio/mixer.js";
 
 import {
   computePackagingProjectionHash,
@@ -198,6 +201,39 @@ describe("Gate 10", () => {
     expect(result.errors).toContain('review_report.visual_qa.status must be "verified", got "blocked"');
   });
 
+  it("accepts canonical audio-only visual QA as not applicable", () => {
+    const result = checkGate10(validProjectState(), {
+      visualQaApplicable: false,
+      reviewReport: {
+        visual_qa: {
+          status: "not_applicable",
+          reason: "audio_only_timeline",
+          min_score: 70,
+          issues: { total: 0, critical: 0, warning: 0, info: 0 },
+          issue_summaries: [],
+        },
+      },
+    });
+    expect(result.passed).toBe(true);
+  });
+
+  it("does not accept not_applicable for a mixed or video timeline", () => {
+    const result = checkGate10(validProjectState(), {
+      visualQaApplicable: true,
+      reviewReport: {
+        visual_qa: {
+          status: "not_applicable",
+          reason: "audio_only_timeline",
+          min_score: 70,
+          issues: { total: 0, critical: 0, warning: 0, info: 0 },
+          issue_summaries: [],
+        },
+      },
+    });
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain('review_report.visual_qa.status must be "verified", got "not_applicable"');
+  });
+
   it("fails when review_report contains unresolved fatal issues", () => {
     const result = checkGate10(validProjectState(), validGate10Options({
       reviewReport: {
@@ -287,6 +323,42 @@ describe("checkCaptionDensity", () => {
     expect(result.details).toContain("exceeds 6.0");
   });
 
+  it("allows speech-synchronous Japanese short-form captions up to 16 CPS", () => {
+    const captions = [
+      {
+        caption_id: "SC_SHORT",
+        text: "坂本｜プリキュアわかる？",
+        timeline_in_frame: 0,
+        timeline_duration_frames: 23,
+      },
+    ];
+    const result = checkCaptionDensity(
+      captions,
+      30,
+      "ja",
+      "single-layer-speaker-separated-bold-outline-safe-area-ja",
+    );
+    expect(result.passed).toBe(true);
+    expect(result.details).toContain("max: 11.74");
+  });
+
+  it("does not count a stacked speaker badge as subtitle body density", () => {
+    const captions = [{
+      caption_id: "SC_BADGE",
+      text: "坂本｜あと あれだよね",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 20,
+    }];
+    const result = checkCaptionDensity(
+      captions,
+      30,
+      "ja",
+      "bold-outline-speaker-separated-safe-area-ja",
+    );
+    expect(result.passed).toBe(true);
+    expect(result.details).toContain("max: 12.00");
+  });
+
   it("fail - overlapping captions", () => {
     const captions = [
       {
@@ -358,6 +430,21 @@ describe("checkDialogueOccupancy", () => {
     expect(result.passed).toBe(false);
     expect(result.details).toContain("0.500");
     expect(result.details).toContain("< 0.65");
+  });
+});
+
+describe("checkDialogueTimelineAlignment", () => {
+  it("passes when dialogue signal outside its timeline windows is under one frame", () => {
+    const result = checkDialogueTimelineAlignment(12, 1000 / 30);
+    expect(result.passed).toBe(true);
+    expect(result.name).toBe("dialogue_timeline_alignment_valid");
+  });
+
+  it("fails when an adelay/atrim regression moves dialogue to the file head", () => {
+    const result = checkDialogueTimelineAlignment(3330, 1000 / 30);
+    expect(result.passed).toBe(false);
+    expect(result.details).toContain("dialogue_signal_outside_timeline_windows");
+    expect(result.details).toContain("3330.00");
   });
 });
 
@@ -474,6 +561,7 @@ describe("checkPackageCompleteness", () => {
       "raw_video",
       "raw_dialogue",
       "final_mix",
+      "audio_mix_report",
       "srt_sidecar",
       "vtt_sidecar",
     ]);
@@ -492,6 +580,7 @@ describe("checkPackageCompleteness", () => {
       "qa_report",
       "raw_video",
       "raw_dialogue",
+      "audio_mix_report",
       // final_mix missing
     ]);
     const result = checkPackageCompleteness(
@@ -517,6 +606,130 @@ describe("checkPackageCompleteness", () => {
   });
 });
 
+// ── Audio Mix Policy Tests ───────────────────────────────────────
+
+function validAudioMixReport(hasBgm: boolean): AudioMixReport {
+  const measurement = {
+    input_i: "-20.00",
+    input_tp: "-3.00",
+    input_lra: "4.00",
+    input_thresh: "-30.00",
+    target_offset: "0.00",
+  };
+  if (!hasBgm) {
+    return {
+      version: "audio-mix-report/v1",
+      has_bgm: false,
+      strategy: "dialogue_only_mastering_v1",
+      final_mastering: {
+        loudness_target_lufs: -16,
+        lra_target: 7,
+        true_peak_target_dbtp: -1.5,
+        premaster_measurement: measurement,
+      },
+    };
+  }
+  return {
+    version: "audio-mix-report/v1",
+    has_bgm: true,
+    strategy: "waveform_sidechain_v1",
+    final_mastering: {
+      loudness_target_lufs: -16,
+      lra_target: 7,
+      true_peak_target_dbtp: -1.5,
+      premaster_measurement: measurement,
+    },
+    bgm_reference_mastering: {
+      loudness_target_lufs: -23,
+      lra_target: 7,
+      true_peak_target_dbtp: -2,
+      source_measurement: measurement,
+    },
+    sidechain: {
+      detector: "dialogue_waveform_rms",
+      threshold: 0.03,
+      ratio: 13,
+      attack_ms: 80,
+      release_ms: 180,
+      base_gain_db: -16,
+      requested_duck_gain_db: -24,
+    },
+  };
+}
+
+describe("checkAudioMixPolicy", () => {
+  it("accepts multiple timeline-owned music assets without external re-add evidence", () => {
+    const report: AudioMixReport = {
+      version: "audio-mix-report/v1",
+      has_bgm: true,
+      strategy: "timeline_embedded_bgm_mastering_v1",
+      bgm_ownership: { owner: "timeline_assembler", asset_ids: ["AST_A", "AST_B"] },
+      final_mastering: {
+        loudness_target_lufs: -16,
+        lra_target: 7,
+        true_peak_target_dbtp: -1.5,
+        premaster_measurement: {
+          input_i: "-18.00",
+          input_tp: "-3.00",
+          input_lra: "4.00",
+          input_thresh: "-28.00",
+          target_offset: "0.00",
+        },
+      },
+    };
+    expect(checkAudioMixPolicy(report, true).passed).toBe(true);
+  });
+
+  it("fails malformed timeline ownership evidence without throwing", () => {
+    const malformed = {
+      version: "audio-mix-report/v1",
+      has_bgm: true,
+      strategy: "timeline_embedded_bgm_mastering_v1",
+      bgm_ownership: { owner: "timeline_assembler" },
+      final_mastering: {
+        loudness_target_lufs: -16,
+        lra_target: 7,
+        true_peak_target_dbtp: -1.5,
+        premaster_measurement: {},
+      },
+    } as unknown as AudioMixReport;
+    expect(() => checkAudioMixPolicy(malformed, true)).not.toThrow();
+    expect(checkAudioMixPolicy(malformed, true).passed).toBe(false);
+  });
+  it("passes a reference-normalized waveform-sidechained BGM mix", () => {
+    expect(checkAudioMixPolicy(validAudioMixReport(true), true).passed).toBe(true);
+  });
+
+  it("enforces quieter dialogue-first gains only when requested", () => {
+    const loud = validAudioMixReport(true);
+    loud.sidechain!.base_gain_db = -4;
+    loud.sidechain!.requested_duck_gain_db = -12;
+    expect(checkAudioMixPolicy(loud, true).passed).toBe(true);
+    const social = checkAudioMixPolicy(loud, true, true);
+    expect(social.passed).toBe(false);
+    expect(social.details).toContain("dialogue-first BGM base gain");
+  });
+
+  it("fails when a BGM mix lacks waveform sidechain evidence", () => {
+    const report = validAudioMixReport(true);
+    delete report.sidechain;
+    const result = checkAudioMixPolicy(report, true);
+    expect(result.passed).toBe(false);
+    expect(result.details).toContain("dialogue waveform");
+  });
+
+  it("passes a final-mastered dialogue-only mix", () => {
+    expect(checkAudioMixPolicy(validAudioMixReport(false), false).passed).toBe(true);
+  });
+
+  it("fails closed when the report is missing", () => {
+    expect(checkAudioMixPolicy(null, true)).toMatchObject({
+      name: "audio_mix_policy_valid",
+      passed: false,
+    });
+  });
+});
+
 // ── Required Checks by Profile ────────────────────────────────────
 
 describe("getRequiredChecks", () => {
@@ -528,6 +741,8 @@ describe("getRequiredChecks", () => {
     // engine_render includes caption_density_valid and dialogue_occupancy_valid
     expect(engineChecks).toContain("caption_density_valid");
     expect(engineChecks).toContain("dialogue_occupancy_valid");
+    expect(engineChecks).toContain("dialogue_timeline_alignment_valid");
+    expect(engineChecks).toContain("audio_mix_policy_valid");
     // nle_finishing does not include those but has supplied_export_probe_valid
     expect(nleChecks).not.toContain("caption_density_valid");
     expect(nleChecks).toContain("supplied_export_probe_valid");

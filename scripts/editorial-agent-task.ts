@@ -15,10 +15,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { runCompileTimeline } from "./compile-timeline.js";
+import { parse as parseYaml } from "yaml";
 import { runEditorialPipeline } from "./editorial-pipeline.js";
-import { renderRoughCut } from "./render-rough-cut.js";
+import { runEditorialDownstream } from "./editorial-downstream.js";
 import {
   fineCutRefinement,
   parseFineCutRefinementResponse,
@@ -26,41 +25,40 @@ import {
   roughCutPlanning,
   type EditorialInteractivePrompt,
 } from "../runtime/agents/unified-editorial-agent.js";
-import { loadCreativeBrief, validateArtifact } from "../runtime/artifacts/loaders.js";
-import type { CreativeBrief, EditBlueprint, SelectsCandidates } from "../runtime/artifacts/types.js";
-import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
-import type { MarlinEventsArtifact } from "../runtime/connectors/marlin-types.js";
+import { validateArtifact } from "../runtime/artifacts/loaders.js";
+import type { EditBlueprint, SelectsCandidates } from "../runtime/artifacts/types.js";
 import { detectProjectBgm } from "../runtime/compiler/index.js";
-import { loadSourceMap } from "../runtime/media/source-map.js";
+import {
+  loadEditorialPlanningContext,
+  writeValidatedYamlArtifact,
+} from "../runtime/pipeline/editorial-context.js";
 import {
   extractCraftKeyFrames,
   extractRepresentativeFrames,
 } from "../runtime/pipeline/stages/craft-frames.js";
 
 const USAGE = [
-  "Usage: npx tsx scripts/editorial-agent-task.ts --project <dir> [--mode headless|interactive] [--skip-fine] [--skip-render]",
-  "       npx tsx scripts/editorial-agent-task.ts --project <dir> --mode interactive --rough-response <json> [--fine-response <json>]",
+  "Usage: npx tsx scripts/editorial-agent-task.ts --project <dir> [--mode headless|interactive] [--skip-fine] [--skip-render] [--skip-qa]",
+  "       npx tsx scripts/editorial-agent-task.ts --project <dir> --mode interactive --rough-response <json> [--fine-response <json>] [--skip-qa]",
 ].join("\n");
 
-interface EditorialAgentTaskArgs {
+export interface EditorialAgentTaskArgs {
   projectDir: string;
   mode: "headless" | "interactive";
   skipFine: boolean;
   skipRender: boolean;
+  skipQa: boolean;
   roughResponse?: string;
   fineResponse?: string;
 }
 
-interface SegmentsDoc {
-  items?: SegmentItem[];
-}
-
-function parseArgs(argv: string[] = process.argv): EditorialAgentTaskArgs {
+export function parseArgs(argv: string[] = process.argv): EditorialAgentTaskArgs {
   const args = argv.slice(2);
   let projectDir: string | undefined;
   let mode: "headless" | "interactive" = "headless";
   let skipFine = false;
   let skipRender = false;
+  let skipQa = false;
   let roughResponse: string | undefined;
   let fineResponse: string | undefined;
 
@@ -87,6 +85,10 @@ function parseArgs(argv: string[] = process.argv): EditorialAgentTaskArgs {
       skipRender = true;
       continue;
     }
+    if (arg === "--skip-qa") {
+      skipQa = true;
+      continue;
+    }
     if (arg === "--rough-response" && index + 1 < args.length) {
       roughResponse = path.resolve(args[++index]);
       continue;
@@ -109,49 +111,18 @@ function parseArgs(argv: string[] = process.argv): EditorialAgentTaskArgs {
     mode,
     skipFine,
     skipRender,
+    skipQa,
     ...(roughResponse ? { roughResponse } : {}),
     ...(fineResponse ? { fineResponse } : {}),
   };
-}
-
-function readJson<T>(filePath: string): T {
-  return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
 }
 
 function readYaml<T>(filePath: string): T {
   return parseYaml(fs.readFileSync(filePath, "utf-8")) as T;
 }
 
-function loadSegments(projectDir: string): SegmentItem[] {
-  const filePath = path.join(projectDir, "03_analysis", "segments.json");
-  if (!fs.existsSync(filePath)) throw new Error(`segments.json not found: ${filePath}`);
-  const doc = readJson<SegmentsDoc>(filePath);
-  if (!Array.isArray(doc.items)) throw new Error(`segments.json must contain an items array: ${filePath}`);
-  return doc.items;
-}
-
-function loadMarlinEvents(projectDir: string): MarlinEventsArtifact {
-  const filePath = path.join(projectDir, "03_analysis", "marlin_events.json");
-  if (!fs.existsSync(filePath)) throw new Error(`marlin_events.json not found: ${filePath}`);
-  return readJson<MarlinEventsArtifact>(filePath);
-}
-
 function planPath(projectDir: string, relativePath: string): string {
   return path.join(projectDir, "04_plan", relativePath);
-}
-
-function writeYamlArtifact(
-  projectDir: string,
-  relativePath: string,
-  data: unknown,
-  schemaFile: string,
-): void {
-  validateArtifact(data, schemaFile);
-  const filePath = path.join(projectDir, relativePath);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp.${process.pid}`;
-  fs.writeFileSync(tmp, stringifyYaml(data), "utf-8");
-  fs.renameSync(tmp, filePath);
 }
 
 function defaultTaskDir(projectDir: string): string {
@@ -207,42 +178,24 @@ function loadExistingPlan(projectDir: string): {
   return { selects, blueprint };
 }
 
-async function runCompile(projectDir: string): Promise<void> {
-  await runCompileTimeline({
-    projectPath: projectDir,
-    skipPreview: true,
-    skipConfirmations: true,
-  });
-}
+export type EditorialInteractiveTaskOutcome =
+  | "awaiting_rough_response"
+  | "awaiting_fine_response"
+  | "completed";
 
-async function runRender(projectDir: string): Promise<void> {
-  await renderRoughCut({
-    projectPath: projectDir,
-    noAudio: false,
-  });
-}
-
-async function runCompileAndMaybeRender(projectDir: string, skipRender: boolean): Promise<void> {
-  console.log("[editorial-agent] compile");
-  await runCompile(projectDir);
-  if (skipRender) {
-    console.log("[editorial-agent] render skipped");
-    return;
-  }
-  console.log("[editorial-agent] render");
-  await runRender(projectDir);
-}
-
-async function runInteractiveTask(args: EditorialAgentTaskArgs): Promise<void> {
-  const projectDir = path.resolve(args.projectDir);
+export async function runInteractiveTask(
+  args: EditorialAgentTaskArgs,
+): Promise<EditorialInteractiveTaskOutcome> {
+  const {
+    projectDir,
+    brief,
+    marlinEvents,
+    segments,
+    sourceMap,
+  } = loadEditorialPlanningContext(args.projectDir);
   const taskDir = defaultTaskDir(projectDir);
   const roughResponsePath = responsePath(taskDir, "rough", args.roughResponse);
   const fineResponsePath = responsePath(taskDir, "fine", args.fineResponse);
-  const briefPath = path.join(projectDir, "01_intent", "creative_brief.yaml");
-  const brief: CreativeBrief = loadCreativeBrief(briefPath);
-  const marlinEvents = loadMarlinEvents(projectDir);
-  const segments = loadSegments(projectDir);
-  const sourceMap = loadSourceMap(projectDir).entryMap;
   const bgm = await detectProjectBgm(projectDir, (message) => console.warn(message));
   const bgmDurationSec = bgm ? bgm.durationUs / 1_000_000 : null;
 
@@ -267,13 +220,13 @@ async function runInteractiveTask(args: EditorialAgentTaskArgs): Promise<void> {
       bgmDurationSec,
       projectDir,
     });
-    writeYamlArtifact(
+    writeValidatedYamlArtifact(
       projectDir,
       "04_plan/selects_candidates.yaml",
       plan.selects,
       "selects-candidates.schema.json",
     );
-    writeYamlArtifact(
+    writeValidatedYamlArtifact(
       projectDir,
       "04_plan/edit_blueprint.yaml",
       plan.blueprint,
@@ -293,12 +246,22 @@ async function runInteractiveTask(args: EditorialAgentTaskArgs): Promise<void> {
     const promptPath = writePromptPacket(taskDir, roughTask, roughResponsePath);
     console.log(`[editorial-agent] rough prompt written: ${promptPath}`);
     console.log(`[editorial-agent] read the listed frames, write JSON to: ${roughResponsePath}`);
-    return;
+    console.log("[editorial-agent] completion pending: rough response required; QA/status not run");
+    return "awaiting_rough_response";
   }
 
   if (args.skipFine) {
-    await runCompileAndMaybeRender(projectDir, args.skipRender);
-    return;
+    await runEditorialDownstream({
+      projectDir,
+      brief,
+      selects: plan.selects,
+      blueprint: plan.blueprint,
+      entrypoint: "editorial-agent-task",
+      skipRender: args.skipRender,
+      skipQa: args.skipQa,
+      logPrefix: "editorial-agent",
+    });
+    return "completed";
   }
 
   console.log("[editorial-agent] extracting fine-cut key frames");
@@ -324,7 +287,8 @@ async function runInteractiveTask(args: EditorialAgentTaskArgs): Promise<void> {
   if (!fineResponse) {
     console.log(`[editorial-agent] fine prompt written: ${finePromptPath}`);
     console.log(`[editorial-agent] read the listed key frames, write JSON to: ${fineResponsePath}`);
-    return;
+    console.log("[editorial-agent] completion pending: fine response required; QA/status not run");
+    return "awaiting_fine_response";
   }
 
   console.log("[editorial-agent] applying fine agent response");
@@ -336,20 +300,30 @@ async function runInteractiveTask(args: EditorialAgentTaskArgs): Promise<void> {
     keyFrames,
     bgmDurationSec,
   });
-  writeYamlArtifact(
+  writeValidatedYamlArtifact(
     projectDir,
     "04_plan/selects_candidates.yaml",
     plan.selects,
     "selects-candidates.schema.json",
   );
-  writeYamlArtifact(
+  writeValidatedYamlArtifact(
     projectDir,
     "04_plan/edit_blueprint.yaml",
     refinedBlueprint,
     "edit-blueprint.schema.json",
   );
 
-  await runCompileAndMaybeRender(projectDir, args.skipRender);
+  await runEditorialDownstream({
+    projectDir,
+    brief,
+    selects: plan.selects,
+    blueprint: refinedBlueprint,
+    entrypoint: "editorial-agent-task",
+    skipRender: args.skipRender,
+    skipQa: args.skipQa,
+    logPrefix: "editorial-agent",
+  });
+  return "completed";
 }
 
 export async function main(argv: string[] = process.argv): Promise<number> {
@@ -367,6 +341,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         projectDir: args.projectDir,
         skipFine: args.skipFine,
         skipRender: args.skipRender,
+        skipQa: args.skipQa,
       });
     } else {
       await runInteractiveTask(args);

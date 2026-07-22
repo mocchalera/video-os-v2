@@ -236,8 +236,9 @@ skill_score =
   space_3d  * axis_score.space_3d;
 ```
 
-軸スコアの元データは以下で固定する。ここで使う値はすべて `0..1` に正規化した
-`PairEvidence` field であり、未定義の prose 名は残さない。
+軸スコアの元データは以下で固定する。Murch 集約へ入れる値はすべて `0..1` に正規化する。
+ただし raw `energy_delta_score` は predicate と analysis のため signed `[-1, 1]` のまま保存し、
+Murch 集約時だけ専用 helper `normalizeSignedUnitInterval()` で `[0, 1]` へ変換する。
 
 | axis | v2 evidence |
 | --- | --- |
@@ -248,13 +249,15 @@ skill_score =
 | plane_2d | `shot_scale_continuity_score`, `composition_match_score` |
 | space_3d | `axis_consistency_score`, `axis_break_readiness_score` |
 
-P0 では `plane_2d` と `space_3d` の一部 signal が不足するため、
-未提供時は中立値 `0.5` を入れる。これにより P0 skill が過剰に axis 系へ寄らない。
+P0 では一部 signal が不足するため、未提供時は中立 placeholder を入れる。
+placeholder は `evidence_coverage` で `unknown | not_applicable | missing` と明示し、
+`known` な実測 neutral と区別する。これにより P0 skill が過剰に axis 系へ寄らず、
+同時に metric predicate が欠損由来 neutral を実測値として通さない。
 
 `resolveAxisScores(PairEvidence)` は compiler 内の pure helper として閉じる。
-P0 で中立値 `0.5` を許すのは `composition_match_score`,
-`axis_consistency_score`, `axis_break_readiness_score`, `shot_scale_continuity_score`
-だけであり、emotion / story / rhythm の signal 欠損を neutral で隠さない。
+中立 placeholder は集約を fail-open に保つためだけに使い、raw metric と coverage を
+必ず併記する。predicate は coverage が `known` の場合だけ raw metric を評価するため、
+emotion / story / rhythm の signal 欠損も neutral 実測としては扱われない。
 
 `effective_peak_type` は `resolveEffectivePeakType()` で閉じる。
 `effective_peak_strength_score = max(left_peak_strength_score, right_peak_strength_score)` とし、
@@ -392,6 +395,7 @@ export interface PairEvidence {
   composition_match_score: number;
   axis_consistency_score: number;
   axis_break_readiness_score: number;
+  /** signed [-1, 1]: right_energy - left_energy */
   energy_delta_score: number;
   outgoing_silence_ratio: number;
   outgoing_afterglow_score: number;
@@ -423,7 +427,7 @@ export interface PairEvidence {
 | `left_peak_strength_score` / `right_peak_strength_score` | left/right `selects.candidates[].editorial_signals.peak_strength_score`, fallback `segments.items[].peak_analysis.support_signals.fused_peak_score`, absent 時は `0` |
 | `effective_peak_strength_score` | deterministic helper `resolveEffectivePeakType()` で `max(left_peak_strength_score, right_peak_strength_score)` |
 | `effective_peak_type` | deterministic helper `resolveEffectivePeakType()` が winner side の type を返す |
-| `energy_delta_score` | deterministic helper `resolveEnergyDelta()` consuming left/right `peak_analysis.support_signals` と `editorial_signals.speech_intensity_score` |
+| `energy_delta_score` | deterministic helper consuming left/right canonical/candidate energy metadata。定義は `right_energy - left_energy`、domain は signed `[-1,1]`。equal=`0`、increase=`>0`、decrease=`<0` |
 | `outgoing_silence_ratio` | `selects.candidates[].editorial_signals.silence_ratio` |
 | `outgoing_afterglow_score` | `selects.candidates[].editorial_signals.afterglow_score` |
 | `incoming_reaction_score` | `selects.candidates[].editorial_signals.reaction_intensity_score` |
@@ -463,11 +467,13 @@ skill card の `when` / `avoid_when` は raw artifact path を直接読まず、
   - 同値 tie は `left` 優先、ただし type 未定義なら同値群の次順位で defined な type を使う
   - 両側とも type 未定義なら `effective_peak_type` は未設定とする
 - `resolveEmotionAxisScore()`
-  - `base_emotion_score = 0.45 * outgoing_afterglow_score + 0.35 * incoming_reaction_score + 0.20 * energy_delta_score`
+  - `energy_unit = normalizeSignedUnitInterval(energy_delta_score)`
+  - `base_emotion_score = 0.45 * outgoing_afterglow_score + 0.35 * incoming_reaction_score + 0.20 * energy_unit`
   - `peak_type_bonus` は `emotional_peak=0.20`, `action_peak=0.12`, `visual_peak=0.08`, unset=`0.0`
   - `emotion_axis_score = clamp01(base_emotion_score * (1 + effective_peak_strength_score * peak_type_bonus))`
 - `resolveAxisBreakReadiness()`
-  - `base = 0.50 * energy_delta_score + 0.30 * effective_peak_strength_score + 0.20 * Number(semantic_cluster_change)`
+  - `energy_unit = normalizeSignedUnitInterval(energy_delta_score)`
+  - `base = 0.50 * energy_unit + 0.30 * effective_peak_strength_score + 0.20 * Number(semantic_cluster_change)`
   - `type_multiplier` は `action_peak=1.00`, `emotional_peak=0.85`, `visual_peak=0.75`, unset=`0.70`
   - `duration_mode=strict` では最終値に `0.85` を掛け、`guide` ではそのまま使う
   - 返り値は `clamp01(base * type_multiplier * duration_mode_multiplier)` とする
@@ -508,6 +514,14 @@ v2 では二段階に分ける。
 `adjacency_analysis.json` は debug 用でも contract を固定し、
 少なくとも `selected_skill_id`, `selected_skill_score`, `min_score_threshold`,
 `below_threshold`, `degraded_from_skill_id` を pair ごとに保持する。
+新規 writer は additive な `selection_rationale` も常時出力し、active card ごとの
+`when` / `avoid_when` / viability gate / threshold 結果と、selected / fallback /
+craft override / visual override の reason code を stable order で保持する。
+schema 上は旧 artifact 互換のため `selection_rationale` を optional とする。
+`energy_delta_score` の意味が旧 `[0,1]`（equal=`0.5`）から signed `[-1,1]`
+（equal=`0`）へ変わるため、新writerは root `version="2"` を出力する。
+schema は既存 `version="1"` artifactも引き続きvalidateし、consumerはversionで
+energy domainを判別する。repo内にversion固定のruntime consumerは置かない。
 `selected_skill_*` は threshold 通過 skill が 1 件以上ある場合は最終採用 skill を指し、
 通過 skill が 0 件の場合は raw score 最大だが threshold 未達だった skill を指す。
 
@@ -559,7 +573,7 @@ O(adjacent_beats * K^2 * active_transition_skills)
 
 ```json
 {
-  "version": "1",
+  "version": "2",
   "project_id": "rokutaro-v3",
   "pairs": [
     {
@@ -1187,6 +1201,86 @@ manual / overnight fixture:
 - `transition-skills/*.json` に `min_score_threshold` が未記載の legacy card は loader が `0.3` を補完する
 - JSON card 不在の skill id は activation されていても compile では無効化し、warning marker を出す
 - legacy project は現行 path のまま compile 可能
+
+### 18.1 EYE-030 cut relation contract
+
+`ENABLE_EDITORIAL_EYE_RELATION_V1=on` の normal compile は、各 V1 隣接 pair の
+`adjacency_analysis.json.pairs[].cut_relation` に次を additive に保存する。
+
+- `relationship`: `continuous | intentional_contrast | risky_jump | unknown`
+- `confidence`: classifier の離散的な確信度。観測精度を装う小数の積み上げはしない
+- `coverage`: 比較可能、missing、unknown、not applicable、low confidence の axis 一覧
+- `reason_codes`: 順序と語彙が安定した判定理由
+- `explicit_intent_evidence`: relation分類に実際に使用したpair固有の意図とartifact内source ref。
+  入力されたがcontrast intentとして不適格だった値は保存しない
+- `signals`: 各 axis の raw left/right 値、raw coverage、source refs、confidence、評価
+
+classifier は `runtime/compiler/cut-relation.ts` の pure function であり、model、DB、network、
+filesystemを呼ばない。thresholdは `CUT_RELATION_THRESHOLDS` に集約し、初期値を次で固定する。
+
+| threshold | value | 意味 |
+| --- | ---: | --- |
+| `minimum_comparable_axes` | 4 | relationを断定できる最小比較axis数 |
+| `minimum_continuity_matches` | 3 | `continuous` に必要なvisual match数 |
+| `minimum_major_discontinuities` | 2 | `risky_jump` / `intentional_contrast` に必要な独立major break数 |
+| `minimum_observation_confidence` | 0.60 | confidenceが存在し、これ以上の観測だけを判定に使用 |
+| `luma_match_delta_max` | 0.12 | luma matchの最大差 |
+| `luma_major_jump_delta_min` | 0.35 | major luma jumpの最小差 |
+| `color_match_overlap_min` | 0.50 | dominant color matchの最小Jaccard overlap |
+| `color_major_jump_overlap_max` | 0.20 | major color jumpの最大overlap |
+| `tag_match_overlap_min` | 0.50 | visual tag matchの最小Jaccard overlap |
+| `tag_jump_overlap_max` | 0.20 | tag contrastの最大overlap。単独ではmajor breakにしない |
+| `visual_match_similarity_min` | 0.75 | embedding similarity matchの下限 |
+| `visual_low_similarity_max` | 0.35 | low similarityの上限。単独ではmajor breakにしない |
+
+分類規則は次の順で評価する。
+
+1. 比較可能axisが4未満なら `unknown`。
+2. major discontinuityが2軸以上あり、pair固有のexplicit intentもあれば
+   `intentional_contrast`。
+3. 同じ実測breakがありexplicit intentがなければ `risky_jump`。
+4. contrastがなくvisual matchが3軸以上なら `continuous`。
+5. それ以外は `unknown`。
+
+authored `beat.craft.transition_out` / `transition_in` のうち、contrast intentとして採用するのは
+当該pairの `hard_cut` / `dissolve` / `dip_to_black` だけである。`match_cut` はvisual continuity、
+`j_cut` / `l_cut` はaudio continuityの意図なので、重大breakを `intentional_contrast` と正当化しない。
+pure APIがpair固有の明示的人手annotationをcontrast intentとして認識する安定tokenは、完全一致の
+`intentional_contrast` だけである。`match_cut` / `keep_continuity` を含むその他すべてのhuman annotation
+intentはcontrast intentから除外する。`explicit_intent_evidence` に永続化するのはrelation分類に実際に
+使用したintentだけであり、不適格として除外した入力は保存しない。
+
+profile permissionである `allow_hard_cuts`、選択済skill、低similarity、candidate tagだけからintentを
+推論しない。選択済transition skillを入力に戻さないため、skill selectionとの循環も作らない。
+`ExplicitIntentEvidence.source` は現在 `beat_craft | human_annotation` だけをサポートし、pair固有producerの
+ないprofile policyは未サポートとする。
+
+`editorial_observation` 由来componentは、対応するcanonical confidence groupが両側に存在し、scoreが
+0.60以上の場合だけhard classificationに使用する。confidence欠落と閾値未満はcomponent単位で除外し、
+それぞれ別reason codeで可視化する。一部componentだけ有効な複合axisは有効componentのみで評価する。
+asset identity、story/beat境界、embedding pair scoreのようなdirect structural/pair metricはこのgroup
+confidence要件の対象外である。
+
+主要なresult reason code:
+
+| code | 意味 |
+| --- | --- |
+| `insufficient_comparable_axes` | coverage不足で断定しない |
+| `sufficient_continuity_evidence` | match数がcontinuous下限を満たした |
+| `no_major_unexplained_break` | 未説明contrastがない |
+| `major_discontinuity_detected` | 2つ以上のmajor breakが実測された |
+| `explicit_pair_intent_present` | source付きpair intentがある |
+| `measured_contrast_without_explicit_intent` | 実測breakにintentがなくrisky |
+| `explicit_intent_without_measured_contrast` | intentだけなのでcontrastを断定しない |
+| `non_contrast_intent_excluded` | continuity intentをcontrast判定から除外した |
+| `observation_confidence_missing` | 対応confidence group欠落のcomponentを除外した |
+| `observation_confidence_below_threshold` | confidence 0.60未満のcomponentを除外した |
+| `low_confidence_evidence_excluded` | confidence gateで除外したaxisがある |
+| `visual_similarity_only_insufficient` | low similarity単独なので断定しない |
+| `mixed_or_ambiguous_evidence` | coverageはあるが保守的な断定条件を満たさない |
+
+`adjacency_analysis` schemaはv1/v2のlegacy pairで `cut_relation` をoptionalのまま読み、
+新writerだけがEYE flag有効時にv2 pairへこのfieldを追加する。timeline IRには複製しない。
 
 ## 19. 受け入れ条件
 

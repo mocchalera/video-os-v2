@@ -75,7 +75,9 @@ public enum ProjectStudioGoalStatusReader {
     public static func status(
         repositoryRoot: URL,
         projectURL: URL,
-        marlinModelAccessStatus: ProjectMarlinModelAccessStatus? = nil
+        marlinModelAccessStatus: ProjectMarlinModelAccessStatus? = nil,
+        preflightStatus: ProjectPackagePreflightStatus = ProjectPackagePreflightRunner.pending(),
+        packageVerificationStatus: ProjectPackageVerificationStatus = ProjectPackageVerificationRunner.pending()
     ) -> ProjectStudioGoalStatus {
         let fileManager = FileManager.default
         let projectID = projectURL.lastPathComponent
@@ -87,15 +89,26 @@ public enum ProjectStudioGoalStatusReader {
 
         let library = ProjectLibraryReadinessStatusReader.status(projectURL: projectURL)
         let planning = ProjectPlanningStatusReader.status(projectURL: projectURL)
-        let pipeline = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        let pipeline = ProjectPipelineGateStatusReader.status(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            preflightStatus: preflightStatus
+        )
         let marlin = ProjectMarlinEvaluationStatusReader.status(projectURL: projectURL, repositoryRoot: repositoryRoot)
         let marlinDefault = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: repositoryRoot)
         let marlinModelAccess = marlinModelAccessStatus ?? ProjectMarlinModelAccessStatusReader.status(repositoryRoot: repositoryRoot)
         let representativePlan = ProjectMarlinRepresentativePlanReader.plan(repositoryRoot: repositoryRoot)
         let evidence = ProjectEvidenceStore.load(projectURL: projectURL)
         let handoff = ProjectEditorPacketExporter.plan(repositoryRoot: repositoryRoot, projectURL: projectURL, assets: evidence.assets)
-        let renderPackage = ProjectRenderPackageStatusReader.status(projectURL: projectURL)
-        let renderPlan = ProjectRenderRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        let renderPackage = ProjectRenderPackageStatusReader.status(
+            projectURL: projectURL,
+            verificationStatus: packageVerificationStatus
+        )
+        let renderPlan = ProjectRenderRunPlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            preflightStatus: preflightStatus
+        )
         let nativeEditorVisualQA = ProjectNativeEditorVisualQAStatusReader.status(repositoryRoot: repositoryRoot)
 
         let nativeSurfacesReady = packageSwiftExists && guiTargetExists && cliTargetExists && runScriptExists

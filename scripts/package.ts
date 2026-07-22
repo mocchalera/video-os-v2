@@ -30,14 +30,29 @@ import {
   type AssemblyResult,
 } from "../runtime/render/assembler.js";
 import {
+  resolveProjectRenderRoute,
+  type AssemblyEngineRequest,
+} from "../runtime/render/route-resolver.js";
+import {
   computeFileHash,
   readProjectState,
   type ProjectStateDoc,
 } from "../runtime/state/reconcile.js";
 import {
-  writeRenderFreshnessMetadata,
+  timelineHasVisualClips,
   type ReviewVisualQAGateReport,
 } from "../runtime/review/visual-qa.js";
+import {
+  assessRenderArtifactFreshness,
+  createSourceInputAttestation,
+  writeRenderFreshnessMetadata,
+  type SourceInputAttestationStatus,
+} from "../runtime/render/source-input-attestation.js";
+import { assessMusicAssetEligibility } from "../runtime/music/asset-eligibility.js";
+import {
+  verifyExistingPackage,
+  type PackageVerificationResult,
+} from "../runtime/packaging/package-verification.js";
 
 const USAGE = [
   "Usage: npx tsx scripts/package.ts <project-path> [options]",
@@ -49,8 +64,11 @@ const USAGE = [
   "  --skip-render                                    Skip the final render pipeline",
   "  --no-assembly                                    Do not auto-generate 05_timeline/assembly.mp4",
   "  --assembly-path <path>                           Use a supplied assembly.mp4 path",
+  "  --assembly-engine <auto|ffmpeg|remotion>         Select assembly engine (default: auto)",
   "  --supplied-final <path>                          Use a supplied final.mp4 for nle_finishing",
   "  --created-at <iso-date>                          Timestamp override",
+  "  --preflight-only                                 Evaluate Gate 10 without writing project artifacts",
+  "  --verify-existing                                Verify an existing package without writing project artifacts",
   "  --json                                           Print packageCommand result as JSON",
 ].join("\n");
 
@@ -61,8 +79,11 @@ export interface PackageCliArgs {
   skipRender: boolean;
   noAssembly: boolean;
   assemblyPath?: string;
+  assemblyEngine?: AssemblyEngineRequest;
   suppliedFinalPath?: string;
   createdAt?: string;
+  preflightOnly: boolean;
+  verifyExisting: boolean;
   json: boolean;
 }
 
@@ -73,6 +94,8 @@ export interface PackagePreflight {
   nextSteps: string[];
   sourceOfTruth?: SourceOfTruth;
   autonomyMode?: AutonomyMode;
+  projectId?: string;
+  currentState?: string;
   visualQaSummary: string;
 }
 
@@ -91,6 +114,9 @@ export interface AssemblyFreshness {
   timelineVersion?: string;
   assemblyHash?: string;
   metaPath?: string;
+  sourceInputsHash?: string;
+  sourceInputsStatus?: SourceInputAttestationStatus;
+  sourceInputWarnings?: string[];
 }
 
 export interface EnsureAssemblyResult {
@@ -101,14 +127,6 @@ export interface EnsureAssemblyResult {
   metaPath?: string;
 }
 
-interface RenderMeta {
-  timeline_hash?: string;
-  timeline_version?: string;
-  timeline_path?: string;
-  video_hash?: string;
-  video_path?: string;
-}
-
 export function parseArgs(argv: string[]): PackageCliArgs {
   const args = argv.slice(2);
   let projectDir = "";
@@ -117,8 +135,11 @@ export function parseArgs(argv: string[]): PackageCliArgs {
   let skipRender = false;
   let noAssembly = false;
   let assemblyPath: string | undefined;
+  let assemblyEngine: AssemblyEngineRequest | undefined;
   let suppliedFinalPath: string | undefined;
   let createdAt: string | undefined;
+  let preflightOnly = false;
+  let verifyExisting = false;
   let json = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -138,10 +159,16 @@ export function parseArgs(argv: string[]): PackageCliArgs {
       noAssembly = true;
     } else if ((arg === "--assembly-path" || arg === "--assembly") && i + 1 < args.length) {
       assemblyPath = args[++i];
+    } else if (arg === "--assembly-engine" && i + 1 < args.length) {
+      assemblyEngine = parseAssemblyEngine(args[++i]);
     } else if ((arg === "--supplied-final" || arg === "--supplied-final-path" || arg === "--final") && i + 1 < args.length) {
       suppliedFinalPath = args[++i];
     } else if (arg === "--created-at" && i + 1 < args.length) {
       createdAt = args[++i];
+    } else if (arg === "--preflight-only") {
+      preflightOnly = true;
+    } else if (arg === "--verify-existing") {
+      verifyExisting = true;
     } else if (arg === "--json") {
       json = true;
     } else if (arg.startsWith("-")) {
@@ -156,6 +183,15 @@ export function parseArgs(argv: string[]): PackageCliArgs {
   if (!projectDir) {
     throw new Error("<project-path> is required");
   }
+  if (assemblyPath && assemblyEngine) {
+    throw new Error("--assembly-path and --assembly-engine cannot be used together");
+  }
+  if (noAssembly && assemblyEngine) {
+    throw new Error("--no-assembly and --assembly-engine cannot be used together");
+  }
+  if (preflightOnly && verifyExisting) {
+    throw new Error("--preflight-only and --verify-existing cannot be used together");
+  }
 
   return {
     projectDir,
@@ -164,8 +200,11 @@ export function parseArgs(argv: string[]): PackageCliArgs {
     skipRender,
     noAssembly,
     assemblyPath,
+    assemblyEngine,
     suppliedFinalPath,
     createdAt,
+    preflightOnly,
+    verifyExisting,
     json,
   };
 }
@@ -204,6 +243,10 @@ export function buildPackagePreflight(
   }>(blueprintPath, issues);
   const captionApproval = readOptionalJson(path.join(absDir, "07_package", "caption_approval.json"));
   const musicCues = readOptionalJson(path.join(absDir, "07_package", "music_cues.json"));
+  const musicEligibility = assessMusicAssetEligibility(absDir, musicCues);
+  if (!musicEligibility.eligible && musicEligibility.message) {
+    issues.push(`music_cues BGM asset is not eligible: ${musicEligibility.message}`);
+  }
   const reviewReport = readReviewReport(absDir, issues);
   const visualQaSummary = summarizeVisualQA(reviewReport);
 
@@ -216,6 +259,7 @@ export function buildPackagePreflight(
       captionApproval,
       musicCues,
       reviewReport,
+      visualQaApplicable: timelineHasVisualClips(timelinePath),
     });
     issues.push(...gate.errors);
     sourceOfTruth = gate.source_of_truth ?? inferSourceOfTruth(doc, autonomyMode);
@@ -237,6 +281,8 @@ export function buildPackagePreflight(
     nextSteps: nextStepsForIssues(uniqueIssues),
     sourceOfTruth,
     autonomyMode,
+    ...(doc?.project_id ? { projectId: doc.project_id } : {}),
+    ...(doc?.current_state ? { currentState: doc.current_state } : {}),
     visualQaSummary,
   };
 }
@@ -273,88 +319,21 @@ export function assessAssemblyFreshness(
   projectDir: string,
   assemblyPath = defaultAssemblyPath(projectDir),
 ): AssemblyFreshness {
-  const absDir = path.resolve(projectDir);
-  const absAssembly = path.resolve(assemblyPath);
-  const timelinePath = path.join(absDir, "05_timeline", "timeline.json");
-
-  if (!fs.existsSync(timelinePath)) {
-    return {
-      status: "missing_timeline",
-      reason: "timeline_missing",
-      assemblyPath: absAssembly,
-      timelinePath,
-    };
-  }
-
-  const timeline = readJsonIfExists<{ version?: unknown }>(timelinePath);
-  const timelineVersion = typeof timeline?.version === "string" ? timeline.version : "1";
-  const timelineHash = computeFileHash(timelinePath);
-
-  if (!fs.existsSync(absAssembly)) {
-    return {
-      status: "missing",
-      reason: "assembly_missing",
-      assemblyPath: absAssembly,
-      timelinePath,
-      timelineHash,
-      timelineVersion,
-    };
-  }
-
-  const assemblyHash = computeFileHash(absAssembly);
-  const renderMeta = readRenderMeta(absAssembly);
-
-  if (renderMeta.meta?.timeline_hash && renderMeta.meta.timeline_hash !== timelineHash) {
-    return {
-      status: "stale",
-      reason: "render_timeline_hash_mismatch",
-      assemblyPath: absAssembly,
-      timelinePath,
-      timelineHash,
-      timelineVersion,
-      assemblyHash,
-      metaPath: renderMeta.path,
-    };
-  }
-
-  if (renderMeta.meta?.video_hash && renderMeta.meta.video_hash !== assemblyHash) {
-    return {
-      status: "stale",
-      reason: "render_video_hash_mismatch",
-      assemblyPath: absAssembly,
-      timelinePath,
-      timelineHash,
-      timelineVersion,
-      assemblyHash,
-      metaPath: renderMeta.path,
-    };
-  }
-
-  if (!renderMeta.meta?.timeline_hash) {
-    const assemblyStat = fs.statSync(absAssembly);
-    const timelineStat = fs.statSync(timelinePath);
-    if (assemblyStat.mtimeMs + 1 < timelineStat.mtimeMs) {
-      return {
-        status: "stale",
-        reason: "render_older_than_timeline",
-        assemblyPath: absAssembly,
-        timelinePath,
-        timelineHash,
-        timelineVersion,
-        assemblyHash,
-        metaPath: renderMeta.path,
-      };
-    }
-  }
-
+  const assessed = assessRenderArtifactFreshness(projectDir, assemblyPath);
   return {
-    status: "fresh",
-    assemblyPath: absAssembly,
-    timelinePath,
-    timelineHash,
-    timelineVersion,
-    assemblyHash,
-    metaPath: renderMeta.path,
+    status: assessed.status,
+    ...(assessed.reason
+      ? { reason: assessed.reason === "render_missing" ? "assembly_missing" : assessed.reason }
+      : {}),
+    assemblyPath: assessed.artifactPath,
+    timelinePath: assessed.timelinePath,
+    ...(assessed.timelineHash ? { timelineHash: assessed.timelineHash } : {}),
+    ...(assessed.timelineVersion ? { timelineVersion: assessed.timelineVersion } : {}),
+    ...(assessed.artifactHash ? { assemblyHash: assessed.artifactHash } : {}),
+    ...(assessed.metaPath ? { metaPath: assessed.metaPath } : {}),
+    ...(assessed.sourceInputsHash ? { sourceInputsHash: assessed.sourceInputsHash } : {}),
+    ...(assessed.sourceInputsStatus ? { sourceInputsStatus: assessed.sourceInputsStatus } : {}),
+    ...(assessed.sourceInputWarnings ? { sourceInputWarnings: assessed.sourceInputWarnings } : {}),
   };
 }
 
@@ -383,6 +362,9 @@ export async function ensureFreshAssembly(
   }
 
   const assemble = options.assembleTimelineToMp4Impl ?? assembleTimelineToMp4;
+  const sourceInputsBefore = createSourceInputAttestation(absDir, {
+    timelinePath: before.timelinePath,
+  });
   await assemble({
     projectDir: absDir,
     timelinePath: before.timelinePath,
@@ -390,6 +372,7 @@ export async function ensureFreshAssembly(
   });
   const metaPath = writeRenderFreshnessMetadata(absDir, assemblyPath, {
     createdAt: options.createdAt,
+    sourceInputsBefore,
   });
   const after = assessAssemblyFreshness(absDir, assemblyPath);
   if (after.status !== "fresh") {
@@ -429,8 +412,26 @@ export async function runPackageCli(argv: string[] = process.argv): Promise<numb
   }
 
   const absDir = path.resolve(args.projectDir);
-  const output = args.json ? console.error : console.log;
+  if (args.verifyExisting) {
+    const verification = verifyExistingPackage(absDir);
+    if (args.json) {
+      console.log(JSON.stringify(verification, null, 2));
+    } else {
+      console.log(formatPackageVerification(verification));
+    }
+    return verification.ready ? 0 : 1;
+  }
   const preflight = buildPackagePreflight(absDir, args);
+  if (args.preflightOnly) {
+    if (args.json) {
+      console.log(JSON.stringify(preflight, null, 2));
+    } else {
+      console.log(formatPreflightReport(preflight));
+    }
+    return preflight.ok ? 0 : 1;
+  }
+
+  const output = args.json ? console.error : console.log;
   output(formatPreflightReport(preflight));
   if (!preflight.ok) {
     return 1;
@@ -454,12 +455,23 @@ export async function runPackageCli(argv: string[] = process.argv): Promise<numb
       output(`[package] Assembly auto-generation disabled: ${defaultAssembly}`);
     } else {
       try {
-        const assembly = await ensureFreshAssembly(absDir, {
-          assemblyPath: defaultAssembly,
-          createdAt: args.createdAt,
-        });
-        options.assemblyPath = assembly.freshness.assemblyPath;
-        output(formatAssemblyResult(assembly));
+        const route = resolveProjectRenderRoute(absDir, args.assemblyEngine ?? "auto");
+        options.renderRouteDecision = route;
+        output(
+          `[package] Render route: assembly=${route.assembly_engine} ` +
+          `hyperframes=${route.hyperframes_overlay ? "on" : "off"} ` +
+          `style=${route.style_family}`,
+        );
+        if (route.assembly_engine === "remotion") {
+          options.assemblyEngine = "remotion";
+        } else {
+          const assembly = await ensureFreshAssembly(absDir, {
+            assemblyPath: defaultAssembly,
+            createdAt: args.createdAt,
+          });
+          options.assemblyPath = assembly.freshness.assemblyPath;
+          output(formatAssemblyResult(assembly));
+        }
       } catch (err) {
         console.error(`[package] Assembly generation failed: ${errorMessage(err)}`);
         console.error("- Run /review --render first if visual QA is stale or missing.");
@@ -481,6 +493,17 @@ export async function runPackageCli(argv: string[] = process.argv): Promise<numb
   return result.success ? 0 : 1;
 }
 
+export function formatPackageVerification(result: PackageVerificationResult): string {
+  const lines = [
+    `[package] Existing package: ${result.readinessLabel}`,
+    `Project: ${result.projectDir}`,
+  ];
+  for (const check of result.checks) {
+    lines.push(`- ${check.passed ? "PASS" : "FAIL"} ${check.name}: ${check.details}`);
+  }
+  return lines.join("\n");
+}
+
 function parseSourceOfTruth(value: string): SourceOfTruth {
   if (value === "engine_render" || value === "nle_finishing") {
     return value;
@@ -493,6 +516,13 @@ function parseAutonomyMode(value: string): AutonomyMode {
     return value;
   }
   throw new Error(`--autonomy-mode must be full or collaborative, got ${value}`);
+}
+
+function parseAssemblyEngine(value: string): AssemblyEngineRequest {
+  if (value === "auto" || value === "ffmpeg" || value === "remotion") {
+    return value;
+  }
+  throw new Error(`--assembly-engine must be auto, ffmpeg, or remotion, got ${value}`);
 }
 
 function readStateForPreflight(projectDir: string, issues: string[]): ProjectStateDoc | null {
@@ -638,17 +668,6 @@ function readJsonIfExists<T>(filePath: string): T | undefined {
   } catch {
     return undefined;
   }
-}
-
-function readRenderMeta(videoPath: string): { path?: string; meta?: RenderMeta } {
-  for (const candidate of [
-    path.join(path.dirname(videoPath), "render-report.json"),
-    path.join(path.dirname(videoPath), "render-meta.json"),
-  ]) {
-    const parsed = readJsonIfExists<RenderMeta>(candidate);
-    if (parsed) return { path: candidate, meta: parsed };
-  }
-  return {};
 }
 
 function resolveCliPath(inputPath: string, projectDir: string): string {

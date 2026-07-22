@@ -161,11 +161,13 @@ export function applyDialogueSemanticRepair(
   };
   if (!Number.isFinite(fps) || fps <= 0) return result;
 
-  const v1 = timeline.tracks.video.find((track) => track.track_id === "V1")
-    ?? timeline.tracks.video[0];
-  if (!v1) return result;
+  const primaryTrack = timeline.tracks.video.find((track) => track.track_id === "V1")
+    ?? timeline.tracks.video[0]
+    ?? timeline.tracks.audio.find((track) => track.track_id === "A1" && track.clips.some((clip) => clip.motivation !== "original clip audio"));
+  if (!primaryTrack) return result;
   const segmentById = new Map(segments.map((segment) => [segment.segment_id, segment]));
-  const ordered = v1.clips
+  const ordered = primaryTrack.clips
+    .filter((clip) => clip.motivation !== "original clip audio" && (primaryTrack.kind === "video" || clip.role === "dialogue" || clip.audio_role === "dialogue"))
     .slice()
     .sort((left, right) => left.timeline_in_frame - right.timeline_in_frame || left.clip_id.localeCompare(right.clip_id));
 
@@ -268,6 +270,7 @@ function nextSameAssetClip(
 
 function findMirroredAudio(timeline: AssembledTimeline, videoClip: TimelineClip): TimelineClip[] {
   return timeline.tracks.audio.flatMap((track) => track.clips).filter((clip) =>
+    clip.clip_id !== videoClip.clip_id &&
     clip.asset_id === videoClip.asset_id &&
     clip.segment_id === videoClip.segment_id &&
     clip.timeline_in_frame === videoClip.timeline_in_frame &&
@@ -299,6 +302,7 @@ function applyRepair(
   addedFrames: number,
 ): void {
   for (const clip of clips) {
+    if (clip.media_kind === "image") continue;
     clip.src_in_us = repair.src_in_us;
     clip.src_out_us = repair.src_out_us;
     clip.timeline_duration_frames += addedFrames;

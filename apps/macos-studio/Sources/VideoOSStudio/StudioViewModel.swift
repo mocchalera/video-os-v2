@@ -196,6 +196,8 @@ struct TimelineSourceCandidateDropPreview: Equatable {
 
 @MainActor
 final class StudioViewModel: ObservableObject {
+    private var renderRefreshGeneration = ProjectRenderRefreshGeneration()
+    private var activeRenderRefreshToken: ProjectRenderRefreshToken?
     enum AppServerStatus: String {
         case unchecked = "Unchecked"
         case checking = "Checking"
@@ -220,6 +222,8 @@ final class StudioViewModel: ObservableObject {
     @Published var selectedProjectID: ProjectSummary.ID? {
         didSet {
             if oldValue != selectedProjectID {
+                activeRenderRefreshToken = nil
+                isRunningRender = false
                 if oldValue != nil {
                     sourceMonitorAssetID = nil
                     timelineTransitionDurationPreview = nil
@@ -237,6 +241,8 @@ final class StudioViewModel: ObservableObject {
                         hasReview: project.hasReview
                     )
                 }
+                editorialPreferenceMemorySession.resetForProject(selectedProjectID)
+                isEditorialPreferenceMemoryPresented = false
             }
             publishAgentMenuCommandAvailability()
         }
@@ -262,6 +268,8 @@ final class StudioViewModel: ObservableObject {
     @Published var isCompilingRoughCut = false
     @Published var roughCutCompileActivity: RoughCutCompileActivity = .idle
     @Published var feedbackSession = StudioFeedbackSession()
+    let editorialPreferenceMemorySession = EditorialPreferenceMemorySession()
+    @Published var isEditorialPreferenceMemoryPresented = false
     @Published var qaDashboard: QADashboardDocument?
     @Published var changedClipIDs: [String] = []
     @Published var recentlyChangedClipIDs: Set<String> = []
@@ -348,6 +356,7 @@ final class StudioViewModel: ObservableObject {
     @Published var isSwapBrowserPresented = false
     @Published var isFootageSearchPresented = false
     @Published var isCaptionFinishingPresented = false
+    @Published var isBGMReviewPresented = false
     @Published var swapBrowserClip: TimelineClip?
     @Published var mediaPreviewSummary = ProjectMediaPreviewSummary(items: [])
     @Published var mediaSourceBinFilter: ProjectMediaSourceBinFilter = StudioViewModel.loadMediaSourceBinFilter() {
@@ -449,7 +458,11 @@ final class StudioViewModel: ObservableObject {
     @Published var editorPacketVerificationStatus = ProjectEditorPacketVerificationStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
     @Published var isExportingEditorPacket = false
     @Published var renderPackageStatus = ProjectRenderPackageStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
-    @Published var renderRunPlan = ProjectRenderRunPlanner.plan(repositoryRoot: URL(fileURLWithPath: "/"), projectURL: URL(fileURLWithPath: "/"))
+    @Published var renderRunPlan = ProjectRenderRunPlanner.plan(
+        repositoryRoot: URL(fileURLWithPath: "/"),
+        projectURL: URL(fileURLWithPath: "/"),
+        preflightStatus: ProjectPackagePreflightRunner.pending()
+    )
     @Published var renderRunStatus = "プロジェクトが選択されていません。"
     @Published var isRunningRender = false
     @Published var promoFinishStatus = ProjectPromoFinishStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
@@ -476,6 +489,13 @@ final class StudioViewModel: ObservableObject {
     @Published var editorAnnotationStatus = "プロジェクトが選択されていません。"
     @Published var selectedClipNoteDraft = ""
     @Published var selectedClipHandoffInstructionDraft = ""
+    @Published var interviewFinishZoom = 1.0
+    @Published var interviewFinishPositionX = 0.0
+    @Published var interviewFinishPositionY = 0.0
+    @Published var interviewAudioFinishPreset = "dialogue-clean"
+    @Published var interviewFinishStatus = "画角またはMAを調整すると、Review Patchへ保留できます。"
+    @Published var interviewReframeProposal: InterviewReframeProposal?
+    @Published var isAnalyzingInterviewReframe = false
     @Published var intentSummary = ProjectIntentSummaryReader.summary(projectURL: URL(fileURLWithPath: "/"))
     @Published var intentAlignmentStatus = ProjectIntentAlignmentStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
     @Published var reviewArtifactStatus = ProjectReviewArtifactStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
@@ -1645,6 +1665,37 @@ final class StudioViewModel: ObservableObject {
         )
     }
 
+    var canFinishSelectedInterviewClip: Bool {
+        selectedTimelineClip?.trackKind == .video && selectedMediaReference?.isPlayableVideo == true
+    }
+
+    var interviewMaximumPanX: Double {
+        let width = Double(timeline?.sequence.width ?? 1_920)
+        return max(1, width * max(0, interviewFinishZoom - 1) / 2 * 0.96)
+    }
+
+    var interviewMaximumPanY: Double {
+        let height = Double(timeline?.sequence.height ?? 1_080)
+        return max(1, height * max(0, interviewFinishZoom - 1) / 2 * 0.96)
+    }
+
+    var activeInterviewVisualTransformPreview: ReviewVisualTransform? {
+        guard let activeClipID = activeViewerSelection?.clip.id,
+              activeClipID == selectedTimelineClipID,
+              interviewFinishZoom > 1.0001
+                || abs(interviewFinishPositionX) > 0.1
+                || abs(interviewFinishPositionY) > 0.1 else {
+            return nil
+        }
+        return ReviewVisualTransform(
+            zoom: interviewFinishZoom,
+            position: .init(
+                x: min(interviewMaximumPanX, max(-interviewMaximumPanX, interviewFinishPositionX)),
+                y: min(interviewMaximumPanY, max(-interviewMaximumPanY, interviewFinishPositionY))
+            )
+        )
+    }
+
     var sourceMonitorMediaReference: ProjectMediaReference? {
         guard let project = selectedProject,
               let assetID = sourceMonitorAssetID,
@@ -1932,6 +1983,16 @@ final class StudioViewModel: ObservableObject {
 
     var activeViewerMediaReference: ProjectMediaReference? {
         sourceBinSkimMediaReference ?? sourceMonitorMediaReference ?? programMediaReference
+    }
+
+    var activeViewerCaptionText: String? {
+        guard sourceBinSkimMediaReference == nil,
+              sourceMonitorMediaReference == nil,
+              activeViewerMediaReference?.isTimelinePreview != true
+        else {
+            return nil
+        }
+        return activeViewerTimeline?.captionSelection(atFrame: activeViewerFrame)?.clip.captionText
     }
 
     var activeViewerAudioMediaReference: ProjectMediaReference? {
@@ -2433,11 +2494,17 @@ final class StudioViewModel: ObservableObject {
             : "Marlin実行環境はまだ準備できていません: \(localizedStudioLabel(marlinRuntimeStatus.readinessLabel))。"
     }
 
-    private func makeStudioGoalStatus(projectURL: URL) -> ProjectStudioGoalStatus {
+    private func makeStudioGoalStatus(
+        projectURL: URL,
+        preflightStatus: ProjectPackagePreflightStatus = ProjectPackagePreflightRunner.pending(),
+        packageVerificationStatus: ProjectPackageVerificationStatus? = nil
+    ) -> ProjectStudioGoalStatus {
         ProjectStudioGoalStatusReader.status(
             repositoryRoot: repositoryRoot,
             projectURL: projectURL,
-            marlinModelAccessStatus: marlinModelAccessStatus
+            marlinModelAccessStatus: marlinModelAccessStatus,
+            preflightStatus: preflightStatus,
+            packageVerificationStatus: packageVerificationStatus ?? renderPackageStatus.verificationStatus
         )
     }
 
@@ -2548,6 +2615,8 @@ final class StudioViewModel: ObservableObject {
             candidateDataSource = nil
             isSwapBrowserPresented = false
             isFootageSearchPresented = false
+            isCaptionFinishingPresented = false
+            isBGMReviewPresented = false
             swapBrowserClip = nil
             sourceMonitorAssetID = nil
             mediaPreviewSummary = ProjectMediaPreviewSummary(items: [])
@@ -2572,7 +2641,11 @@ final class StudioViewModel: ObservableObject {
             editorPacketVerificationStatus = ProjectEditorPacketVerificationStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
             isExportingEditorPacket = false
             renderPackageStatus = ProjectRenderPackageStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
-            renderRunPlan = ProjectRenderRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: URL(fileURLWithPath: "/"))
+            renderRunPlan = ProjectRenderRunPlanner.plan(
+                repositoryRoot: repositoryRoot,
+                projectURL: URL(fileURLWithPath: "/"),
+                preflightStatus: ProjectPackagePreflightRunner.pending()
+            )
             renderRunStatus = "プロジェクトが選択されていません。"
             isRunningRender = false
             promoFinishStatus = ProjectPromoFinishStatusReader.status(projectURL: URL(fileURLWithPath: "/"))
@@ -2664,10 +2737,13 @@ final class StudioViewModel: ObservableObject {
         editorPacketStatus = editorPacketPlan.map { localizedStudioLabel($0.readinessLabel) } ?? "編集者パケットはまだ確認されていません。"
         editorPacketVerificationStatus = ProjectEditorPacketVerificationStatusReader.status(projectURL: project.path)
         renderPackageStatus = ProjectRenderPackageStatusReader.status(projectURL: project.path)
-        renderRunPlan = ProjectRenderRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: project.path)
-        renderRunStatus = renderRunPlan.canRun
-            ? "最終動画を書き出せます。"
-            : "書き出しはまだ実行できません: \(localizedStudioLabel(renderRunPlan.readinessLabel))。"
+        renderRunPlan = ProjectRenderRunPlanner.plan(
+            repositoryRoot: repositoryRoot,
+            projectURL: project.path,
+            preflightStatus: ProjectPackagePreflightRunner.pending()
+        )
+        renderRunStatus = "Gate 10の実行可否を確認しています..."
+        refreshRenderRunPlan(projectID: project.id, projectURL: project.path)
         promoFinishStatus = ProjectPromoFinishStatusReader.status(projectURL: project.path)
         promoFinishRunPlan = ProjectPromoFinishRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: project.path)
         promoFinishRunStatus = promoFinishRunPlan.canRun
@@ -2753,6 +2829,64 @@ final class StudioViewModel: ObservableObject {
                 self.analysisRunStatus = plan.canRun
                     ? "リンク済み素材 \(plan.sourceCount) 件をローカル解析できます。"
                     : "素材解析はまだ実行できません: \(localizedStudioLabel(plan.readinessLabel))。"
+            }
+        }
+    }
+
+    private func refreshRenderRunPlan(
+        projectID: ProjectSummary.ID,
+        projectURL: URL
+    ) {
+        let root = repositoryRoot
+        let refreshToken = renderRefreshGeneration.issue(projectID: projectID)
+        Task.detached(priority: .utility) {
+            let preflight = ProjectPackagePreflightRunner.status(
+                repositoryRoot: root,
+                projectURL: projectURL
+            )
+            let packageVerification = ProjectPackageVerificationRunner.status(
+                repositoryRoot: root,
+                projectURL: projectURL
+            )
+            let packageStatus = ProjectRenderPackageStatusReader.status(
+                projectURL: projectURL,
+                expectedProjectID: preflight.projectID,
+                expectedSourceOfTruth: preflight.sourceOfTruth,
+                verificationStatus: packageVerification
+            )
+            let plan = ProjectRenderRunPlanner.plan(
+                repositoryRoot: root,
+                projectURL: projectURL,
+                preflightStatus: preflight
+            )
+            let pipeline = ProjectPipelineGateStatusReader.status(
+                repositoryRoot: root,
+                projectURL: projectURL,
+                preflightStatus: preflight
+            )
+            let readiness = ProjectStudioReadinessStatusReader.status(
+                repositoryRoot: root,
+                projectURL: projectURL,
+                preflightStatus: preflight,
+                packageVerificationStatus: packageVerification
+            )
+            await MainActor.run {
+                guard self.renderRefreshGeneration.isCurrent(
+                    refreshToken,
+                    selectedProjectID: self.selectedProjectID
+                ) else { return }
+                self.renderPackageStatus = packageStatus
+                self.renderRunPlan = plan
+                self.pipelineGateStatus = pipeline
+                self.studioReadinessStatus = readiness
+                self.studioGoalStatus = self.makeStudioGoalStatus(
+                    projectURL: projectURL,
+                    preflightStatus: preflight,
+                    packageVerificationStatus: packageVerification
+                )
+                self.renderRunStatus = plan.canRun
+                    ? "最終動画を書き出せます。"
+                    : "書き出しはまだ実行できません: \(localizedStudioLabel(plan.readinessLabel))。"
             }
         }
     }
@@ -3041,6 +3175,127 @@ final class StudioViewModel: ObservableObject {
         }
     }
 
+    func clampInterviewFinishPosition() {
+        interviewFinishPositionX = min(interviewMaximumPanX, max(-interviewMaximumPanX, interviewFinishPositionX))
+        interviewFinishPositionY = min(interviewMaximumPanY, max(-interviewMaximumPanY, interviewFinishPositionY))
+    }
+
+    func resetSelectedInterviewFraming() {
+        interviewFinishZoom = 1
+        interviewFinishPositionX = 0
+        interviewFinishPositionY = 0
+        interviewReframeProposal = nil
+        interviewFinishStatus = "画角をリセットしました。"
+    }
+
+    func queueSelectedInterviewVisualTransform() {
+        guard let timeline, let selection = selectedTimelineClip, selection.trackKind == .video else {
+            interviewFinishStatus = "画角を調整する動画クリップを選択してください。"
+            return
+        }
+        clampInterviewFinishPosition()
+        if feedbackSession.baseTimelineHash == nil || feedbackSession.baseTimelineVersion == nil {
+            feedbackSession.captureBaseline(from: timeline)
+        }
+        let confidence = interviewReframeProposal.map { proposal in
+            abs(proposal.zoom - interviewFinishZoom) < 0.001
+                && abs(proposal.positionX - interviewFinishPositionX) < 0.1
+                && abs(proposal.positionY - interviewFinishPositionY) < 0.1
+                ? proposal.confidence
+                : nil
+        } ?? nil
+        feedbackSession.addOp(.changeVisualTransform(
+            target_clip_id: selection.clip.id,
+            visual_transform: ReviewVisualTransform(
+                zoom: interviewFinishZoom,
+                position: .init(x: interviewFinishPositionX, y: interviewFinishPositionY)
+            ),
+            confidence: confidence,
+            reason: interviewReframeProposal?.reason ?? "Studioで人物の画面占有率と余白を調整"
+        ))
+        interviewFinishStatus = "\(selection.clip.id) の画角をReview Patchへ保留しました。"
+    }
+
+    func queueInterviewAudioFinish() {
+        guard let timeline else {
+            interviewFinishStatus = "MAを設定する前にタイムラインを生成してください。"
+            return
+        }
+        if feedbackSession.baseTimelineHash == nil || feedbackSession.baseTimelineVersion == nil {
+            feedbackSession.captureBaseline(from: timeline)
+        }
+        let audioFinish: ReviewAudioFinish
+        switch interviewAudioFinishPreset {
+        case "none":
+            audioFinish = ReviewAudioFinish(preset: "none")
+        case "loudness-only":
+            audioFinish = ReviewAudioFinish(
+                preset: "loudness-only",
+                loudness_target_lufs: -16,
+                true_peak_target_dbtp: -1.5
+            )
+        default:
+            audioFinish = ReviewAudioFinish(
+                preset: "dialogue-clean",
+                loudness_target_lufs: -16,
+                lra_target: 7,
+                true_peak_target_dbtp: -1.5,
+                codec_headroom_db: 0.3
+            )
+        }
+        feedbackSession.addOp(.changeAudioFinish(
+            audio_finish: audioFinish,
+            reason: "Studioインタビュー仕上げのMAプリセット"
+        ))
+        interviewFinishStatus = "動画全体のMA（\(interviewAudioFinishPreset)）をReview Patchへ保留しました。"
+    }
+
+    func analyzeSelectedInterviewReframe() {
+        guard let timeline,
+              let selection = selectedTimelineClip,
+              selection.trackKind == .video,
+              let media = selectedMediaReference,
+              let url = media.url,
+              media.exists,
+              media.isPlayableVideo else {
+            interviewFinishStatus = "自動画角を解析できる動画クリップを選択してください。"
+            return
+        }
+        let clipID = selection.clip.id
+        let sourceInUS = selection.clip.sourceInUS
+        let sourceOutUS = selection.clip.sourceOutUS
+        let outputWidth = timeline.sequence.width
+        let outputHeight = timeline.sequence.height
+        isAnalyzingInterviewReframe = true
+        interviewFinishStatus = "代表フレームから顔・目線・手振りを解析しています..."
+        Task {
+            do {
+                let proposal = try await InterviewAutoReframeAnalyzer.analyze(
+                    url: url,
+                    sourceInUS: sourceInUS,
+                    sourceOutUS: sourceOutUS,
+                    outputWidth: outputWidth,
+                    outputHeight: outputHeight
+                )
+                guard self.selectedTimelineClipID == clipID else {
+                    self.isAnalyzingInterviewReframe = false
+                    return
+                }
+                self.interviewReframeProposal = proposal
+                self.interviewFinishZoom = proposal.zoom
+                self.interviewFinishPositionX = proposal.positionX
+                self.interviewFinishPositionY = proposal.positionY
+                self.clampInterviewFinishPosition()
+                self.isAnalyzingInterviewReframe = false
+                self.interviewFinishStatus = "自動画角をプレビュー中です。確認後に『画角を保留』してください。"
+            } catch {
+                self.isAnalyzingInterviewReframe = false
+                self.interviewReframeProposal = nil
+                self.interviewFinishStatus = "自動画角の解析に失敗しました: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func setTimelineClipSelection(primary: TimelineClip.ID?, ids: Set<TimelineClip.ID>) {
         guard TimelineClipSelectionPublishing.shouldPublish(
             currentPrimaryID: selectedTimelineClipID,
@@ -3054,7 +3309,25 @@ final class StudioViewModel: ObservableObject {
         selectedTimelineClipID = primary
         isUpdatingTimelineClipSelection = false
         loadSelectedClipNoteDraft()
+        loadSelectedInterviewFinishDraft()
         publishAgentMenuCommandAvailability()
+    }
+
+    private func loadSelectedInterviewFinishDraft() {
+        guard let clipID = selectedTimelineClipID else {
+            resetSelectedInterviewFraming()
+            interviewFinishStatus = "動画クリップを選択すると、画角とMAを調整できます。"
+            return
+        }
+        let pending = feedbackSession.pendingVisualTransform(for: clipID)
+        interviewFinishZoom = pending?.zoom ?? 1
+        interviewFinishPositionX = pending?.position?.x ?? 0
+        interviewFinishPositionY = pending?.position?.y ?? 0
+        interviewReframeProposal = nil
+        clampInterviewFinishPosition()
+        interviewFinishStatus = pending == nil
+            ? "画角またはMAを調整すると、Review Patchへ保留できます。"
+            : "このクリップには保留中の画角調整があります。"
     }
 
     private func clearTimelineClipSelection() {
@@ -5178,7 +5451,11 @@ final class StudioViewModel: ObservableObject {
         reviewArtifactStatus = ProjectReviewArtifactStatusReader.status(projectURL: projectURL)
         qaDashboard = QADashboardDocument.load(projectURL: projectURL)
         pipelineGateStatus = ProjectPipelineGateStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
-        studioReadinessStatus = ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: projectURL)
+        studioReadinessStatus = ProjectStudioReadinessStatusReader.status(
+            repositoryRoot: repositoryRoot,
+            projectURL: projectURL,
+            packageVerificationStatus: renderPackageStatus.verificationStatus
+        )
         studioGoalStatus = makeStudioGoalStatus(projectURL: projectURL)
     }
 
@@ -5989,7 +6266,11 @@ final class StudioViewModel: ObservableObject {
             marlinPreferenceDecision = ProjectMarlinPreferenceDecisionReader.status(repositoryRoot: repositoryRoot)
             policyStatus = ProjectAnalysisPolicyStatusReader.status(repositoryRoot: repositoryRoot)
             studioReadinessStatus = selectedProject.map {
-                ProjectStudioReadinessStatusReader.status(repositoryRoot: repositoryRoot, projectURL: $0.path)
+                ProjectStudioReadinessStatusReader.status(
+                    repositoryRoot: repositoryRoot,
+                    projectURL: $0.path,
+                    packageVerificationStatus: renderPackageStatus.verificationStatus
+                )
             } ?? studioReadinessStatus
             studioGoalStatus = selectedProject.map {
                 makeStudioGoalStatus(projectURL: $0.path)
@@ -6152,7 +6433,13 @@ final class StudioViewModel: ObservableObject {
                 selectedTurnID = record.id
                 loadTimelineForSelection()
                 if let projectURL {
-                    renderPackageStatus = ProjectRenderPackageStatusReader.status(projectURL: projectURL)
+                    if let selectedProject,
+                       selectedProject.path.standardizedFileURL == projectURL.standardizedFileURL {
+                        refreshRenderRunPlan(
+                            projectID: selectedProject.id,
+                            projectURL: projectURL
+                        )
+                    }
                     editorPacketPlan = ProjectEditorPacketExporter.plan(repositoryRoot: repositoryRoot, projectURL: projectURL, assets: evidenceStore?.assets)
                     editorPacketStatus = editorPacketPlan?.readinessLabel ?? "編集者パケットは未確認です。"
                     editorPacketVerificationStatus = ProjectEditorPacketVerificationStatusReader.status(projectURL: projectURL)
@@ -6465,6 +6752,7 @@ final class StudioViewModel: ObservableObject {
                         return
                     }
                     self.feedbackSession.clearAll()
+                    self.resetSelectedInterviewFraming()
                     self.setTimelineTransitionSelection(nil)
                     self.feedbackSession.pruneHistory(projectURL: projectURL)
                     self.refresh()
@@ -6713,6 +7001,141 @@ final class StudioViewModel: ObservableObject {
             } catch {
                 self.roughCutCompileStatus = "Studio修正の計画反映に失敗しました: \(error)"
             }
+        }
+    }
+
+    var editorialPreferenceRememberReadiness: ProjectEditorialPreferenceMemoryPlan? {
+        guard let selectedProject else { return nil }
+        return ProjectEditorialPreferenceMemoryPlanner.rememberPlan(
+            repositoryRoot: repositoryRoot,
+            projectURL: selectedProject.path,
+            projectID: selectedProject.id,
+            actionID: "readiness-preview",
+            draft: editorialPreferenceMemorySession.rememberDraft
+        )
+    }
+
+    var editorialPreferenceRedactReadiness: ProjectEditorialPreferenceMemoryPlan? {
+        guard let selectedProject else { return nil }
+        return ProjectEditorialPreferenceMemoryPlanner.redactPlan(
+            repositoryRoot: repositoryRoot,
+            projectURL: selectedProject.path,
+            projectID: selectedProject.id,
+            actionID: "readiness-preview",
+            draft: editorialPreferenceMemorySession.redactDraft
+        )
+    }
+
+    func openEditorialPreferenceMemory() {
+        guard selectedProject != nil else {
+            editorialPreferenceMemorySession.statusMessage = "判断を記憶する前にプロジェクトを選択してください。"
+            return
+        }
+        isEditorialPreferenceMemoryPresented = true
+    }
+
+    func rememberEditorialPreference() {
+        guard let selectedProject, !editorialPreferenceMemorySession.isRunning else { return }
+        let actionID = editorialPreferenceMemorySession.prepareRememberActionID()
+        let plan = ProjectEditorialPreferenceMemoryPlanner.rememberPlan(
+            repositoryRoot: repositoryRoot,
+            projectURL: selectedProject.path,
+            projectID: selectedProject.id,
+            actionID: actionID,
+            draft: editorialPreferenceMemorySession.rememberDraft
+        )
+        guard plan.canRun else {
+            editorialPreferenceMemorySession.statusMessage = "判断を記憶できません: \(localizedPreferenceMemoryReadiness(plan.readinessLabel))。"
+            return
+        }
+        let projectID = selectedProject.id
+        editorialPreferenceMemorySession.isRunning = true
+        editorialPreferenceMemorySession.statusMessage = "確認した判断を記憶しています..."
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try ProjectEditorialPreferenceMemoryRunner.run(plan: plan)
+                }.value
+                guard self.selectedProjectID == projectID else { return }
+                self.editorialPreferenceMemorySession.isRunning = false
+                if result.succeeded, let output = result.output {
+                    self.editorialPreferenceMemorySession.markRememberSucceeded(actionID: actionID)
+                    let verb = output.status == "idempotent" ? "既存の同一操作を確認しました" : "判断を記憶しました"
+                    self.editorialPreferenceMemorySession.statusMessage = "\(verb): \(output.entry.entryID)。"
+                } else {
+                    let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+                    self.editorialPreferenceMemorySession.statusMessage = "判断の記憶に失敗しました: \(detail.isEmpty ? "writerの応答を解釈できませんでした" : detail)。同じaction IDで再試行できます。"
+                }
+            } catch {
+                guard self.selectedProjectID == projectID else { return }
+                self.editorialPreferenceMemorySession.isRunning = false
+                self.editorialPreferenceMemorySession.statusMessage = "判断の記憶に失敗しました: \(error)。同じaction IDで再試行できます。"
+            }
+        }
+    }
+
+    func redactEditorialPreference() {
+        guard let selectedProject, !editorialPreferenceMemorySession.isRunning else { return }
+        let actionID = editorialPreferenceMemorySession.prepareRedactActionID()
+        let plan = ProjectEditorialPreferenceMemoryPlanner.redactPlan(
+            repositoryRoot: repositoryRoot,
+            projectURL: selectedProject.path,
+            projectID: selectedProject.id,
+            actionID: actionID,
+            draft: editorialPreferenceMemorySession.redactDraft
+        )
+        guard plan.canRun else {
+            editorialPreferenceMemorySession.statusMessage = "記憶を取り消せません: \(localizedPreferenceMemoryReadiness(plan.readinessLabel))。"
+            return
+        }
+        let projectID = selectedProject.id
+        editorialPreferenceMemorySession.isRunning = true
+        editorialPreferenceMemorySession.statusMessage = "指定した記憶の取消を追記しています..."
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try ProjectEditorialPreferenceMemoryRunner.run(plan: plan)
+                }.value
+                guard self.selectedProjectID == projectID else { return }
+                self.editorialPreferenceMemorySession.isRunning = false
+                if result.succeeded, let output = result.output {
+                    self.editorialPreferenceMemorySession.markRedactSucceeded(actionID: actionID)
+                    let verb = output.status == "idempotent" ? "既存の同一取消を確認しました" : "記憶の取消を追記しました"
+                    self.editorialPreferenceMemorySession.statusMessage = "\(verb): \(output.entry.entryID)。過去行は変更していません。"
+                } else {
+                    let detail = result.stderr.isEmpty ? result.stdout : result.stderr
+                    self.editorialPreferenceMemorySession.statusMessage = "記憶の取消に失敗しました: \(detail.isEmpty ? "writerの応答を解釈できませんでした" : detail)。同じaction IDで再試行できます。"
+                }
+            } catch {
+                guard self.selectedProjectID == projectID else { return }
+                self.editorialPreferenceMemorySession.isRunning = false
+                self.editorialPreferenceMemorySession.statusMessage = "記憶の取消に失敗しました: \(error)。同じaction IDで再試行できます。"
+            }
+        }
+    }
+
+    func localizedPreferenceMemoryReadiness(_ reason: String) -> String {
+        switch reason {
+        case "repository root is missing": return "リポジトリrootが見つかりません"
+        case "project directory is missing": return "プロジェクトディレクトリが見つかりません"
+        case "project ID is required": return "project IDが必要です"
+        case "project state is missing": return "project_state.yamlが見つかりません"
+        case "project state project ID does not match": return "project_state.yamlのproject IDが一致しません"
+        case "editorial preference writer script is missing": return "明示writer scriptが見つかりません"
+        case "source artifact is missing": return "source成果物が見つかりません"
+        case "source artifact symlink escapes the project": return "sourceのsymlinkがプロジェクト外を指しています"
+        case "patch history index is missing or invalid": return "patch history indexが見つからないか不正です"
+        case "patch history project ID does not match": return "patch historyのproject IDが一致しません"
+        case "registered Studio patch is missing": return "登録済みStudio patchがありません"
+        case "latest Studio patch path is invalid": return "最新Studio patchのpathが不正です"
+        case "source outcome and artifact kind do not match": return "判断結果とsource成果物の組合せが不正です"
+        case "actor is required": return "actorを入力してください"
+        case "preference value is required": return "featureの値を入力してください"
+        case "preference type and value kind do not match": return "featureと値の型が一致しません"
+        case "scope reference is required": return "profile/seriesのscope参照を入力してください"
+        case "target entry ID is required": return "取消対象entry IDを入力してください"
+        case "redaction reason is required": return "取消理由を入力してください"
+        default: return reason
         }
     }
 
@@ -8089,7 +8512,8 @@ final class StudioViewModel: ObservableObject {
                     self.refreshLibraryReadiness(projectURL: selectedProject.path)
                     self.studioReadinessStatus = ProjectStudioReadinessStatusReader.status(
                         repositoryRoot: self.repositoryRoot,
-                        projectURL: selectedProject.path
+                        projectURL: selectedProject.path,
+                        packageVerificationStatus: self.renderPackageStatus.verificationStatus
                     )
                     self.studioGoalStatus = self.makeStudioGoalStatus(projectURL: selectedProject.path)
                     if result.succeeded, let indexSummary = result.indexSummary {
@@ -8165,7 +8589,8 @@ final class StudioViewModel: ObservableObject {
                         )
                         self.studioReadinessStatus = ProjectStudioReadinessStatusReader.status(
                             repositoryRoot: self.repositoryRoot,
-                            projectURL: selectedProject.path
+                            projectURL: selectedProject.path,
+                            packageVerificationStatus: self.renderPackageStatus.verificationStatus
                         )
                         self.studioGoalStatus = self.makeStudioGoalStatus(projectURL: selectedProject.path)
                     }
@@ -8314,28 +8739,135 @@ final class StudioViewModel: ObservableObject {
     }
 
     func runSelectedProjectRender() {
+        guard !isRunningRender else { return }
         guard let selectedProject else {
             renderRunStatus = "書き出す前にプロジェクトを選択してください。"
             return
         }
-
-        let plan = ProjectRenderRunPlanner.plan(repositoryRoot: repositoryRoot, projectURL: selectedProject.path)
-        renderRunPlan = plan
-        guard plan.canRun else {
-            renderRunStatus = "書き出しはまだ実行できません: \(localizedStudioLabel(plan.readinessLabel))。"
-            return
-        }
-
+        let projectID = selectedProject.id
+        let projectURL = selectedProject.path
+        let root = repositoryRoot
+        let refreshToken = renderRefreshGeneration.issue(projectID: projectID)
+        activeRenderRefreshToken = refreshToken
         isRunningRender = true
-        renderRunStatus = "最終動画を書き出し、パッケージを作成しています..."
+        renderRunStatus = "Gate 10を再確認しています..."
 
         Task.detached(priority: .userInitiated) {
+            let preflight = ProjectPackagePreflightRunner.status(
+                repositoryRoot: root,
+                projectURL: projectURL
+            )
+            let plan = ProjectRenderRunPlanner.plan(
+                repositoryRoot: root,
+                projectURL: projectURL,
+                preflightStatus: preflight
+            )
+            let packageVerification = ProjectPackageVerificationRunner.status(
+                repositoryRoot: root,
+                projectURL: projectURL
+            )
+            let pipeline = ProjectPipelineGateStatusReader.status(
+                repositoryRoot: root,
+                projectURL: projectURL,
+                preflightStatus: preflight
+            )
+            let readiness = ProjectStudioReadinessStatusReader.status(
+                repositoryRoot: root,
+                projectURL: projectURL,
+                preflightStatus: preflight,
+                packageVerificationStatus: packageVerification
+            )
+            let selectionIsCurrent = await MainActor.run {
+                self.renderRefreshGeneration.isCurrent(
+                    refreshToken,
+                    selectedProjectID: self.selectedProjectID
+                )
+            }
+            guard selectionIsCurrent else {
+                await MainActor.run {
+                    if self.activeRenderRefreshToken == refreshToken {
+                        self.activeRenderRefreshToken = nil
+                        self.isRunningRender = false
+                    }
+                }
+                return
+            }
+            guard plan.canRun else {
+                await MainActor.run {
+                    guard self.activeRenderRefreshToken == refreshToken else { return }
+                    self.activeRenderRefreshToken = nil
+                    self.isRunningRender = false
+                    guard self.renderRefreshGeneration.isCurrent(
+                        refreshToken,
+                        selectedProjectID: self.selectedProjectID
+                    ) else { return }
+                    self.renderPackageStatus = ProjectRenderPackageStatusReader.status(
+                        projectURL: projectURL,
+                        expectedProjectID: preflight.projectID,
+                        expectedSourceOfTruth: preflight.sourceOfTruth,
+                        verificationStatus: packageVerification
+                    )
+                    self.renderRunPlan = plan
+                    self.pipelineGateStatus = pipeline
+                    self.studioReadinessStatus = readiness
+                    self.studioGoalStatus = self.makeStudioGoalStatus(
+                        projectURL: projectURL,
+                        preflightStatus: preflight,
+                        packageVerificationStatus: packageVerification
+                    )
+                    self.renderRunStatus = "書き出しはまだ実行できません: \(localizedStudioLabel(plan.readinessLabel))。"
+                }
+                return
+            }
+            await MainActor.run {
+                self.renderRunPlan = plan
+                self.renderRunStatus = "最終動画を書き出し、パッケージを作成しています..."
+            }
             do {
                 let result = try ProjectRenderRunner.run(plan: plan)
+                let resultRefreshToken = await MainActor.run { () -> ProjectRenderRefreshToken? in
+                    guard self.activeRenderRefreshToken == refreshToken,
+                          self.selectedProjectID == projectID else { return nil }
+                    return self.renderRefreshGeneration.issue(projectID: projectID)
+                }
+                guard let resultRefreshToken else { return }
+                let refreshedPreflight = ProjectPackagePreflightRunner.status(
+                    repositoryRoot: root,
+                    projectURL: projectURL
+                )
+                let refreshedPlan = ProjectRenderRunPlanner.plan(
+                    repositoryRoot: root,
+                    projectURL: projectURL,
+                    preflightStatus: refreshedPreflight
+                )
+                let refreshedPipeline = ProjectPipelineGateStatusReader.status(
+                    repositoryRoot: root,
+                    projectURL: projectURL,
+                    preflightStatus: refreshedPreflight
+                )
+                let refreshedReadiness = ProjectStudioReadinessStatusReader.status(
+                    repositoryRoot: root,
+                    projectURL: projectURL,
+                    preflightStatus: refreshedPreflight,
+                    packageVerificationStatus: result.status.verificationStatus
+                )
                 await MainActor.run {
+                    guard self.activeRenderRefreshToken == refreshToken else { return }
+                    self.activeRenderRefreshToken = nil
                     self.isRunningRender = false
-                    self.renderPackageStatus = ProjectRenderPackageStatusReader.status(projectURL: selectedProject.path)
-                    self.renderRunPlan = ProjectRenderRunPlanner.plan(repositoryRoot: self.repositoryRoot, projectURL: selectedProject.path)
+                    guard self.renderRefreshGeneration.isCurrent(
+                        resultRefreshToken,
+                        selectedProjectID: self.selectedProjectID
+                    ) else { return }
+                    self.renderPackageStatus = result.status
+                    self.renderRunPlan = refreshedPlan
+                    self.pipelineGateStatus = refreshedPipeline
+                    self.studioReadinessStatus = refreshedReadiness
+                    self.studioGoalStatus = self.makeStudioGoalStatus(
+                        projectURL: projectURL,
+                        preflightStatus: refreshedPreflight,
+                        packageVerificationStatus: result.status.verificationStatus
+                    )
                     if result.succeeded {
                         self.renderRunStatus = "最終動画パッケージを作成しました。"
                     } else {
@@ -8344,7 +8876,13 @@ final class StudioViewModel: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                    guard self.activeRenderRefreshToken == refreshToken else { return }
+                    self.activeRenderRefreshToken = nil
                     self.isRunningRender = false
+                    guard self.renderRefreshGeneration.isCurrent(
+                        refreshToken,
+                        selectedProjectID: self.selectedProjectID
+                    ) else { return }
                     self.renderRunStatus = "書き出しに失敗しました: \(error)"
                 }
             }

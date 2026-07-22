@@ -43,6 +43,35 @@ final class StudioFeedbackSessionTests: XCTestCase {
         XCTAssertEqual(reason, "new")
     }
 
+    func testAddOpDeduplicatesInterviewFinishOperations() {
+        let session = StudioFeedbackSession()
+
+        session.addOp(.changeVisualTransform(
+            target_clip_id: "CLP_001",
+            visual_transform: ReviewVisualTransform(zoom: 1.1),
+            confidence: nil,
+            reason: "first"
+        ))
+        session.addOp(.changeVisualTransform(
+            target_clip_id: "CLP_001",
+            visual_transform: ReviewVisualTransform(zoom: 1.2, position: .init(x: -20, y: 8)),
+            confidence: 0.8,
+            reason: "latest"
+        ))
+        session.addOp(.changeAudioFinish(
+            audio_finish: ReviewAudioFinish(preset: "loudness-only"),
+            reason: "first"
+        ))
+        session.addOp(.changeAudioFinish(
+            audio_finish: ReviewAudioFinish(preset: "dialogue-clean"),
+            reason: "latest"
+        ))
+
+        XCTAssertEqual(session.pendingOps.map(\.opName), ["change_visual_transform", "change_audio_finish"])
+        XCTAssertEqual(session.pendingVisualTransform(for: "CLP_001")?.zoom, 1.2)
+        XCTAssertEqual(session.pendingAudioFinish?.preset, "dialogue-clean")
+    }
+
     func testDetectConflictsForRemoveAndReplaceOnSameClip() {
         let session = StudioFeedbackSession()
 
@@ -319,6 +348,8 @@ func assertCompilerPatchSchemaShape(
         "confidence",
         "evidence",
         "audio_policy",
+        "visual_transform",
+        "audio_finish",
         "beat_id",
         "role",
         "label",
@@ -333,6 +364,8 @@ func assertCompilerPatchSchemaShape(
         "insert_segment",
         "remove_segment",
         "change_audio_policy",
+        "change_visual_transform",
+        "change_audio_finish",
         "add_marker",
         "add_note"
     ]

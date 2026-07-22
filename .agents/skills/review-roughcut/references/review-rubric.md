@@ -101,6 +101,11 @@ craft の優先順位は Murch Rule of Six:
 - loudness は target 範囲内か
   - `07_package/qa-report.json` がある場合のみ `loudness_target_valid` を見る
   - `/review` preflight だけでは loudness は自動測定していないため、artifact がなければ未検証として扱う
+- 短尺SNSの finishing contract
+  - hook/title は80文字以内か。長い説明を小さく押し込まず、コピーを短くする
+  - brief がCTAを要求する場合、登録済み `vos:content.cta-card/v1` / `vos:overlay.cta-card` を終盤35%に2秒以上置く
+  - CTAは背景スライドに文字を足すだけで済ませず、背景から独立した全画面 treatment で可読性と期待アクションを分離する
+  - `audio_policy` が `ducking` / `bgm_only` なら、timeline に `bgm` / `music` clip が実在することを確認する。`original_only` は明示された場合だけ許容する
 
 技術系の目安:
 

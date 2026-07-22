@@ -77,6 +77,29 @@ describe("Caption timing separation", () => {
   });
 });
 
+describe("Short-form caption layout", () => {
+  it("uses a narrower Japanese line budget only for outlined vertical styles", () => {
+    expect(getLayoutPolicy("ja").maxCharsPerLine).toBe(20);
+    expect(
+      getLayoutPolicy(
+        "ja",
+        "single-layer-speaker-separated-bold-outline-safe-area-ja",
+      ).maxCharsPerLine,
+    ).toBe(13);
+  });
+
+  it("wraps outlined vertical captions before they can escape the safe area", () => {
+    const result = formatCaption(
+      "坂本｜今のプリキュア、何か知ってる？",
+      "ja",
+      [],
+      "single-layer-speaker-separated-bold-outline-safe-area-ja",
+    );
+    expect(result.lines).toHaveLength(2);
+    expect(result.lines.every((line) => [...line].length <= 13)).toBe(true);
+  });
+});
+
 function makeTimedCaption(id: string, start: number, duration: number): SpeechCaption {
   return {
     caption_id: id,

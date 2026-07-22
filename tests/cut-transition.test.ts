@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 const Ajv2020 = require("ajv/dist/2020") as new (
   opts?: Record<string, unknown>,
@@ -33,6 +34,7 @@ import {
   computeMurchScore,
   resolveShotScaleContinuity,
   resolveCadenceFit,
+  normalizeSignedUnitInterval,
 } from "../runtime/compiler/transition-skill-loader.js";
 import {
   adjacencyDecide,
@@ -43,6 +45,26 @@ import {
 
 const TRANSITION_SKILLS_DIR = path.resolve("runtime/editorial/transition-skills");
 const SCHEMAS_DIR = path.resolve("schemas");
+
+const coverage = (status: "known" | "unknown" | "not_applicable" | "missing") => ({
+  visual_tags: status,
+  motion_type: status,
+  shot_scale: status,
+  composition_anchor: status,
+  screen_side: status,
+  gaze_direction: status,
+  camera_axis: status,
+});
+
+const pairCoverage = (status: "known" | "unknown" | "not_applicable" | "missing") => ({
+  visual_tags: { left: status, right: status, pair: status },
+  motion_type: { left: status, right: status, pair: status },
+  shot_scale: { left: status, right: status, pair: status },
+  composition_anchor: { left: status, right: status, pair: status },
+  screen_side: { left: status, right: status, pair: status },
+  gaze_direction: { left: status, right: status, pair: status },
+  camera_axis: { left: status, right: status, pair: status },
+});
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -124,6 +146,28 @@ const makeBgm = (overrides: Partial<BgmAnalysis> = {}): BgmAnalysis => ({
   provenance: { detector: "test", sample_rate_hz: 48000 },
   ...overrides,
 });
+
+const makeTestCard = (overrides: Partial<TransitionSkillCard> = {}): TransitionSkillCard => ({
+  id: "test_card",
+  version: "1",
+  scope: "adjacent_pair",
+  phase: "p0",
+  intent: "test",
+  audience_effect: "test",
+  murch_weights: { emotion: 0, story: 0, rhythm: 0, eye_trace: 0, plane_2d: 0, space_3d: 0 },
+  min_score_threshold: 0,
+  when: {},
+  minimum_viable: [],
+  fallback_order: [{ kind: "hard_cut", lower_to: "transition", transition_type: "cut" }],
+  pipeline_effects: { transition_type: "cut" },
+  ...overrides,
+});
+
+function writeTestCard(card: TransitionSkillCard): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eye-021-card-"));
+  fs.writeFileSync(path.join(dir, `${card.id}.json`), JSON.stringify(card), "utf-8");
+  return dir;
+}
 
 // ── 1. Skill Card Schema Validation ─────────────────────────────────
 
@@ -277,6 +321,54 @@ describe("Predicate Evaluator", () => {
       all: [{ path: "nonexistent_field", op: "gte", value: 0.5 }],
     }, ev)).toBe(false);
   });
+
+  it("blocks an unknown metric predicate while allowing explicit coverage-path inspection", () => {
+    const evidenceCoverage = pairCoverage("known") as NonNullable<PairEvidence["evidence_coverage"]>;
+    evidenceCoverage.energy_delta_score = {
+      left: "unknown",
+      right: "unknown",
+      pair: "unknown",
+      source: { left: "canonical_metadata", right: "canonical_metadata" },
+    };
+    const evidence = makePairEvidence({ energy_delta_score: 0, evidence_coverage: evidenceCoverage });
+
+    expect(evaluatePredicateGroup({
+      all: [{ path: "energy_delta_score", op: "gte", value: 0 }],
+    }, evidence)).toBe(false);
+    expect(evaluatePredicateGroup({
+      all: [{ path: "evidence_coverage.energy_delta_score.pair", op: "eq", value: "unknown" }],
+    }, evidence)).toBe(true);
+  });
+
+  it("audits build_to_peak against signed equal, increase, and decrease energy", () => {
+    const card = loadTransitionSkillCards(TRANSITION_SKILLS_DIR).get("build_to_peak")!;
+    const base = {
+      effective_peak_strength_score: 0.8,
+      effective_peak_type: "action_peak" as const,
+      right_story_role: "experience" as const,
+    };
+
+    expect(evaluatePredicateGroup(card.when, makePairEvidence({ ...base, energy_delta_score: 0 }))).toBe(false);
+    expect(evaluatePredicateGroup(card.when, makePairEvidence({ ...base, energy_delta_score: 0.25 }))).toBe(true);
+    expect(evaluatePredicateGroup(card.minimum_viable[0].predicate, makePairEvidence({ ...base, energy_delta_score: -0.1 }))).toBe(false);
+    expect(evaluatePredicateGroup(card.avoid_when!, makePairEvidence({ ...base, energy_delta_score: -0.3 }))).toBe(true);
+  });
+
+  it("keeps every energy-bearing card threshold meaningful on the signed domain", () => {
+    const cards = loadTransitionSkillCards(TRANSITION_SKILLS_DIR);
+    const smash = cards.get("smash_cut_energy")!;
+    const crossfade = cards.get("crossfade_bridge")!;
+    const silence = cards.get("silence_beat")!;
+    const smashBase = { effective_peak_type: "action_peak" as const };
+
+    expect(evaluatePredicateGroup(smash.when, makePairEvidence({ ...smashBase, energy_delta_score: 0 }))).toBe(false);
+    expect(evaluatePredicateGroup(smash.when, makePairEvidence({ ...smashBase, energy_delta_score: 0.5 }))).toBe(true);
+    expect(evaluatePredicateGroup(smash.when, makePairEvidence({ ...smashBase, energy_delta_score: -0.5 }))).toBe(false);
+    expect(evaluatePredicateGroup(crossfade.avoid_when!, makePairEvidence({ energy_delta_score: 0 }))).toBe(false);
+    expect(evaluatePredicateGroup(crossfade.avoid_when!, makePairEvidence({ energy_delta_score: 0.6 }))).toBe(true);
+    expect(evaluatePredicateGroup(silence.avoid_when!, makePairEvidence({ energy_delta_score: 0 }))).toBe(false);
+    expect(evaluatePredicateGroup(silence.avoid_when!, makePairEvidence({ energy_delta_score: 0.6 }))).toBe(true);
+  });
 });
 
 // ── 5. resolveEffectivePeakType ─────────────────────────────────────
@@ -417,6 +509,22 @@ describe("Murch Axis Score Resolution", () => {
     }
   });
 
+  it.each([
+    [-1, 0],
+    [0, 0.5],
+    [1, 1],
+  ])("normalizes signed energy %s to unit interval %s", (signed, unit) => {
+    expect(normalizeSignedUnitInterval(signed)).toBe(unit);
+  });
+
+  it.each([-1, -0.4, 0, 0.4, 1])("keeps every Murch axis in [0,1] for signed energy %s", (energy) => {
+    const scores = resolveAxisScores(makePairEvidence({ energy_delta_score: energy }));
+    for (const score of Object.values(scores)) {
+      expect(score).toBeGreaterThanOrEqual(0);
+      expect(score).toBeLessThanOrEqual(1);
+    }
+  });
+
   it("computeMurchScore is weighted dot product", () => {
     const weights = { emotion: 1, story: 0, rhythm: 0, eye_trace: 0, plane_2d: 0, space_3d: 0 };
     const axes = { emotion: 0.7, story: 0.9, rhythm: 0.5, eye_trace: 0.3, plane_2d: 0.1, space_3d: 0.2 };
@@ -427,6 +535,37 @@ describe("Murch Axis Score Resolution", () => {
 // ── 7. Adjacency Analyzer ───────────────────────────────────────────
 
 describe("Adjacency Analyzer", () => {
+  it("does not fire topic-change, crossfade, or match-cut skills from missing tags", () => {
+    const { transitions, analysis } = adjacencyDecide({
+      track_id: "V1",
+      kind: "video",
+      clips: [
+        makeClip("01", { beat_id: "B01" }),
+        makeClip("02", { beat_id: "B02", timeline_in_frame: 72 }),
+      ],
+    }, {
+      activeEditingSkills: ["crossfade_bridge", "match_cut_bridge"],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [
+        makeCandidate({ segment_id: "SEG_01" }),
+        makeCandidate({ segment_id: "SEG_02" }),
+      ],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(transitions[0].transition_type).toBe("cut");
+    expect(transitions[0].applied_skill_id).toBeUndefined();
+    expect(analysis.pairs[0].evidence.semantic_cluster_change).toBe(false);
+    expect(analysis.pairs[0].evidence.evidence_coverage?.visual_tag_overlap_score?.pair).toBe("missing");
+    expect(analysis.pairs[0].selection_rationale?.outcome).toBe("no_eligible");
+    expect(analysis.pairs[0].selection_rationale?.active_cards.map(card => card.reason_code)).toEqual([
+      "when_failed",
+      "when_failed",
+    ]);
+  });
+
   it("produces transitions for adjacent V1 clip pairs", () => {
     const v1: Track = {
       track_id: "V1",
@@ -457,6 +596,22 @@ describe("Adjacency Analyzer", () => {
     expect(transitions[0].to_clip_id).toBe("clip_02");
     expect(transitions[1].from_clip_id).toBe("clip_02");
     expect(transitions[1].to_clip_id).toBe("clip_03");
+    expect(analysis.pairs[0].selection_rationale?.active_cards.map(card => card.skill_id)).toEqual([
+      "build_to_peak",
+      "crossfade_bridge",
+      "match_cut_bridge",
+      "silence_beat",
+      "smash_cut_energy",
+    ]);
+    for (const card of analysis.pairs[0].selection_rationale?.active_cards ?? []) {
+      expect(card).toEqual(expect.objectContaining({
+        when_passed: expect.any(Boolean),
+        avoid_matched: expect.any(Boolean),
+        viability_passed: expect.any(Boolean),
+        threshold_passed: expect.any(Boolean),
+        reason_code: expect.any(String),
+      }));
+    }
   });
 
   it("is deterministic — same input produces same output", () => {
@@ -648,6 +803,137 @@ describe("Adjacency Analyzer", () => {
     expect(analysis.pairs[0].selected_skill_id).toBe("match_cut_bridge");
     expect(transitions[0].applied_skill_id).toBe("match_cut_bridge");
     expect(transitions[0].transition_type).toBe("match_cut");
+  });
+
+  it.each([
+    {
+      label: "selected",
+      card: makeTestCard({ id: "selected_card" }),
+      outcome: "selected",
+      selectedSkillId: "selected_card",
+      appliedSkillId: "selected_card",
+      reasonCodes: ["threshold_qualified", "highest_score_selected"],
+    },
+    {
+      label: "below-threshold fallback",
+      card: makeTestCard({ id: "below_card", min_score_threshold: 0.8 }),
+      outcome: "below_threshold_fallback",
+      selectedSkillId: "below_card",
+      appliedSkillId: "fallback.hard_cut",
+      reasonCodes: ["no_card_met_threshold", "fallback_order_applied"],
+    },
+    {
+      label: "viability fallback",
+      card: makeTestCard({
+        id: "viability_card",
+        minimum_viable: [{
+          id: "same_asset_required",
+          predicate: { all: [{ path: "same_asset", op: "eq", value: true }] },
+          failure_reason: "same asset required",
+        }],
+      }),
+      outcome: "viability_fallback",
+      selectedSkillId: "viability_card",
+      appliedSkillId: "fallback.hard_cut",
+      reasonCodes: ["minimum_viable_failed", "fallback_order_applied"],
+    },
+    {
+      label: "no eligible",
+      card: makeTestCard({
+        id: "ineligible_card",
+        when: { all: [{ path: "same_asset", op: "eq", value: true }] },
+      }),
+      outcome: "no_eligible",
+      selectedSkillId: null,
+      appliedSkillId: null,
+      reasonCodes: ["no_eligible_card"],
+    },
+  ])("records deterministic rationale for $label", ({ card, outcome, selectedSkillId, appliedSkillId, reasonCodes }) => {
+    const dir = writeTestCard(card);
+    try {
+      const { analysis } = adjacencyDecide({
+        track_id: "V1",
+        kind: "video",
+        clips: [makeClip("01"), makeClip("02", { timeline_in_frame: 72 })],
+      }, {
+        activeEditingSkills: [card.id],
+        durationMode: "guide",
+        fpsNum: 24,
+        candidates: [],
+        beats: [makeBeat("B01"), makeBeat("B02")],
+        transitionSkillsDir: dir,
+      });
+
+      const pair = analysis.pairs[0];
+      expect(pair.selected_skill_id).toBe(selectedSkillId);
+      expect(pair.selection_rationale).toMatchObject({
+        outcome,
+        reason_codes: reasonCodes,
+        applied_skill_id: appliedSkillId,
+        active_cards: [{ skill_id: card.id }],
+      });
+      if (outcome.includes("fallback")) {
+        expect(pair.selected_skill_id).not.toBe(pair.selection_rationale?.applied_skill_id);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("records a craft override and the card outcome it replaced", () => {
+    const { analysis } = adjacencyDecide({
+      track_id: "V1",
+      kind: "video",
+      clips: [makeClip("01"), makeClip("02", { timeline_in_frame: 72 })],
+    }, {
+      activeEditingSkills: [],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [],
+      beats: [
+        makeBeat("B01", { craft: { transition_out: "dissolve" } }),
+        makeBeat("B02"),
+      ],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(analysis.pairs[0].selection_rationale).toMatchObject({
+      outcome: "craft_override",
+      reason_codes: ["craft_transition_override", "craft_transition:dissolve"],
+      applied_skill_id: "crossfade_bridge",
+      override: {
+        kind: "craft",
+        selected_skill_id: "crossfade_bridge",
+        replaced_outcome: "no_eligible",
+      },
+    });
+  });
+
+  it("does not claim a fallback was applied when the fallback order is exhausted", () => {
+    const card = makeTestCard({ id: "exhausted_card", min_score_threshold: 0.8, fallback_order: [] });
+    const dir = writeTestCard(card);
+    try {
+      const { analysis } = adjacencyDecide({
+        track_id: "V1",
+        kind: "video",
+        clips: [makeClip("01"), makeClip("02", { timeline_in_frame: 72 })],
+      }, {
+        activeEditingSkills: [card.id],
+        durationMode: "guide",
+        fpsNum: 24,
+        candidates: [],
+        beats: [makeBeat("B01"), makeBeat("B02")],
+        transitionSkillsDir: dir,
+      });
+
+      expect(analysis.pairs[0].selection_rationale).toMatchObject({
+        outcome: "below_threshold_fallback",
+        reason_codes: ["no_card_met_threshold", "fallback_order_exhausted"],
+        applied_skill_id: null,
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1003,11 +1289,62 @@ describe("Adjacency Analysis Schema", () => {
     };
     expect(validate(analysis)).toBe(true);
   });
+
+  it("validates new writer rationale while keeping legacy rationale optional", () => {
+    const { analysis } = adjacencyDecide({
+      track_id: "V1",
+      kind: "video",
+      clips: [makeClip("01"), makeClip("02", { timeline_in_frame: 72 })],
+    }, {
+      activeEditingSkills: [],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(analysis.version).toBe("2");
+    expect(analysis.pairs[0].selection_rationale).toBeDefined();
+    expect(analysis.pairs[0]).toMatchObject({
+      left_clip_id: "clip_01",
+      right_clip_id: "clip_02",
+    });
+    expect(validate(analysis), JSON.stringify(validate.errors)).toBe(true);
+  });
 });
 
 // ── 13. PairEvidence construction ───────────────────────────────────
 
 describe("buildPairEvidence", () => {
+  it("does not mutate candidate or segment evidence inputs", () => {
+    const leftCandidate = makeCandidate({
+      segment_id: "SEG_01",
+      editorial_signals: { visual_tags: ["shared"], speech_intensity_score: 0.2 },
+    });
+    const rightCandidate = makeCandidate({
+      segment_id: "SEG_02",
+      editorial_signals: { visual_tags: ["shared", "other"], speech_intensity_score: 0.8 },
+    });
+    const leftSegment = {
+      adjacency_features: { visual_tags: ["canonical"], motion_type: "continuous" as const },
+      coverage: coverage("known"),
+    };
+    const rightSegment = {
+      adjacency_features: { visual_tags: ["canonical"], motion_type: "continuous" as const },
+      coverage: coverage("known"),
+    };
+    const before = JSON.stringify({ leftCandidate, rightCandidate, leftSegment, rightSegment });
+
+    buildPairEvidence(
+      makeClip("01"), makeClip("02"),
+      leftCandidate, rightCandidate, undefined, undefined,
+      leftSegment, rightSegment, "guide",
+    );
+
+    expect(JSON.stringify({ leftCandidate, rightCandidate, leftSegment, rightSegment })).toBe(before);
+  });
+
   it("detects same_asset correctly", () => {
     const left = makeClip("01", { asset_id: "AST_SHARED" });
     const right = makeClip("02", { asset_id: "AST_SHARED" });
@@ -1076,7 +1413,7 @@ describe("buildPairEvidence", () => {
 
     const ev = buildPairEvidence(left, right, leftCand, rightCand, undefined, undefined, undefined, undefined, "guide");
 
-    expect(ev.energy_delta_score).toBeCloseTo(0.8, 5);
+    expect(ev.energy_delta_score).toBeCloseTo(0.6, 5);
   });
 
   it("prefers motion energy over peak strength when available", () => {
@@ -1093,7 +1430,97 @@ describe("buildPairEvidence", () => {
 
     const ev = buildPairEvidence(left, right, leftCand, rightCand, undefined, undefined, undefined, undefined, "guide");
 
-    expect(ev.energy_delta_score).toBeCloseTo(0.75, 5);
+    expect(ev.energy_delta_score).toBeCloseTo(0.5, 5);
+  });
+
+  it.each([
+    [0.4, 0.4, 0],
+    [0.2, 0.8, 0.6],
+    [0.8, 0.2, -0.6],
+  ])("stores signed right-left energy for left=%s right=%s", (leftEnergy, rightEnergy, expected) => {
+    const evidence = buildPairEvidence(
+      makeClip("01"),
+      makeClip("02"),
+      makeCandidate({ segment_id: "SEG_01", editorial_signals: { speech_intensity_score: leftEnergy } }),
+      makeCandidate({ segment_id: "SEG_02", editorial_signals: { speech_intensity_score: rightEnergy } }),
+      undefined, undefined, undefined, undefined, "guide",
+    );
+
+    expect(evidence.energy_delta_score).toBeCloseTo(expected, 5);
+    expect(evidence.evidence_coverage?.energy_delta_score).toMatchObject({
+      left: "known",
+      right: "known",
+      pair: "known",
+      source: { left: "candidate_metadata", right: "candidate_metadata" },
+    });
+  });
+
+  it("keeps missing tag evidence neutral but marks it missing without an EYE-020 index", () => {
+    const evidence = buildPairEvidence(
+      makeClip("01"), makeClip("02"),
+      undefined, undefined, undefined, undefined, undefined, undefined, "guide",
+    );
+
+    expect(evidence.visual_tag_overlap_score).toBe(0.5);
+    expect(evidence.semantic_cluster_change).toBe(false);
+    expect(evidence.evidence_coverage?.visual_tag_overlap_score).toMatchObject({
+      left: "missing",
+      right: "missing",
+      pair: "missing",
+      source: { left: "none", right: "none" },
+    });
+    expect(evidence.evidence_coverage?.semantic_cluster_change?.pair).toBe("missing");
+  });
+
+  it("marks one-sided tag evidence missing instead of measuring low overlap", () => {
+    const evidence = buildPairEvidence(
+      makeClip("01"), makeClip("02"),
+      makeCandidate({ segment_id: "SEG_01", editorial_signals: { visual_tags: ["person"] } }),
+      makeCandidate({ segment_id: "SEG_02" }),
+      undefined, undefined, undefined, undefined, "guide",
+    );
+
+    expect(evidence.visual_tag_overlap_score).toBe(0.5);
+    expect(evidence.evidence_coverage?.visual_tag_overlap_score?.pair).toBe("missing");
+    expect(evidence.semantic_cluster_change).toBe(false);
+  });
+
+  it("keeps explicit unknown status separate from its canonical metadata source", () => {
+    const unknownTags = {
+      adjacency_features: { visual_tags: [], motion_type: "unknown" as const },
+      coverage: { ...coverage("missing"), visual_tags: "unknown" as const },
+    };
+    const evidence = buildPairEvidence(
+      makeClip("01"), makeClip("02"),
+      makeCandidate({ segment_id: "SEG_01", editorial_signals: { visual_tags: ["must_not_fallback"] } }),
+      makeCandidate({ segment_id: "SEG_02", editorial_signals: { visual_tags: ["must_not_fallback"] } }),
+      undefined, undefined, unknownTags, unknownTags, "guide",
+    );
+
+    expect(evidence.visual_tag_overlap_score).toBe(0.5);
+    expect(evidence.evidence_coverage?.visual_tag_overlap_score).toMatchObject({
+      left: "unknown",
+      right: "unknown",
+      pair: "unknown",
+      source: { left: "canonical_metadata", right: "canonical_metadata" },
+    });
+    expect(evidence.semantic_cluster_change).toBe(false);
+  });
+
+  it("distinguishes known comparable neutral overlap from missing-derived neutral", () => {
+    const evidence = buildPairEvidence(
+      makeClip("01"), makeClip("02"),
+      makeCandidate({ segment_id: "SEG_01", editorial_signals: { visual_tags: ["shared"] } }),
+      makeCandidate({ segment_id: "SEG_02", editorial_signals: { visual_tags: ["shared", "other"] } }),
+      undefined, undefined, undefined, undefined, "guide",
+    );
+
+    expect(evidence.visual_tag_overlap_score).toBe(0.5);
+    expect(evidence.evidence_coverage?.visual_tag_overlap_score?.pair).toBe("known");
+    expect(evidence.evidence_coverage?.visual_tag_overlap_score?.source).toEqual({
+      left: "candidate_metadata",
+      right: "candidate_metadata",
+    });
   });
 
   it("infers b-roll story roles from beat order when captions are disabled", () => {
@@ -1139,6 +1566,178 @@ describe("buildPairEvidence", () => {
     expect(ev.composition_match_score).toBeLessThan(0.5);
     // They should NOT be the same value
     expect(ev.shot_scale_continuity_score).not.toBe(ev.composition_match_score);
+  });
+
+  it("ranks canonical close-up aliases without changing the stored values", () => {
+    expect(resolveShotScaleContinuity("close_up", "medium_close_up")).toBe(0.7);
+    expect(resolveShotScaleContinuity("extreme_close_up", "close_up")).toBe(0.7);
+  });
+
+  it("keeps insert coverage known while explaining its neutral continuity score", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const leftEvidence = {
+      adjacency_features: { visual_tags: [], motion_type: "static" as const, shot_scale: "insert" as const },
+      coverage: coverage("known"),
+    };
+    const rightEvidence = {
+      adjacency_features: { visual_tags: [], motion_type: "static" as const, shot_scale: "medium" as const },
+      coverage: coverage("known"),
+    };
+
+    const evidence = buildPairEvidence(left, right, undefined, undefined, undefined, undefined, leftEvidence, rightEvidence, "guide");
+
+    expect(evidence.shot_scale_continuity_score).toBe(0.5);
+    expect(evidence.evidence_coverage?.shot_scale.pair).toBe("known");
+    expect(evidence.evidence_diagnostics?.shot_scale_continuity).toBe("unsupported_shot_scale_rank:insert");
+  });
+
+  it("changes pair evidence when canonical observation metadata changes", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const leftEvidence = {
+      adjacency_features: { visual_tags: ["person"], motion_type: "continuous" as const, camera_axis: "axis_left" as const },
+      coverage: coverage("known"),
+    };
+    const matching = buildPairEvidence(left, right, undefined, undefined, undefined, undefined, leftEvidence, {
+      adjacency_features: { visual_tags: ["person"], motion_type: "continuous" as const, camera_axis: "axis_left" as const },
+      coverage: coverage("known"),
+    }, "guide");
+    const contrasting = buildPairEvidence(left, right, undefined, undefined, undefined, undefined, leftEvidence, {
+      adjacency_features: { visual_tags: ["landscape"], motion_type: "rapid" as const, camera_axis: "axis_right" as const },
+      coverage: coverage("known"),
+    }, "guide");
+
+    expect(matching.visual_tag_overlap_score).not.toBe(contrasting.visual_tag_overlap_score);
+    expect(matching.motion_continuity_score).not.toBe(contrasting.motion_continuity_score);
+  });
+
+  it("falls back to candidate tags when canonical tag coverage is missing", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const leftCandidate = makeCandidate({ segment_id: left.segment_id, editorial_signals: { visual_tags: ["shared"] } });
+    const rightCandidate = makeCandidate({ segment_id: right.segment_id, editorial_signals: { visual_tags: ["shared"] } });
+    const missingTags = {
+      adjacency_features: { visual_tags: [], motion_type: "unknown" as const },
+      coverage: coverage("missing"),
+    };
+
+    const evidence = buildPairEvidence(
+      left, right, leftCandidate, rightCandidate, undefined, undefined,
+      missingTags, missingTags, "guide", undefined,
+      { segmentEvidenceCoverageEnabled: true },
+    );
+
+    expect(evidence.visual_tag_overlap_score).toBe(1);
+    expect(evidence.evidence_coverage?.visual_tags).toEqual({ left: "known", right: "known", pair: "known" });
+  });
+
+  it("keeps canonical explicit empty tags authoritative over candidate tags", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const leftCandidate = makeCandidate({ segment_id: left.segment_id, editorial_signals: { visual_tags: ["shared"] } });
+    const rightCandidate = makeCandidate({ segment_id: right.segment_id, editorial_signals: { visual_tags: ["shared"] } });
+    const explicitEmpty = {
+      adjacency_features: { visual_tags: [], motion_type: "unknown" as const },
+      coverage: { ...coverage("missing"), visual_tags: "known" as const },
+    };
+
+    const evidence = buildPairEvidence(left, right, leftCandidate, rightCandidate, undefined, undefined, explicitEmpty, explicitEmpty, "guide");
+
+    expect(evidence.visual_tag_overlap_score).toBe(0.5);
+    expect(evidence.evidence_coverage?.visual_tags.pair).toBe("known");
+    expect(evidence.evidence_coverage?.visual_tag_overlap_score?.pair).toBe("not_applicable");
+  });
+});
+
+describe("editorial evidence coverage gates", () => {
+  it.each(["unknown", "missing", "not_applicable"] as const)(
+    "does not satisfy required score predicates when axis coverage is %s",
+    (status) => {
+      const evidence = makePairEvidence({
+        axis_consistency_score: 0.5,
+        motion_continuity_score: 0.5,
+        evidence_coverage: pairCoverage(status),
+      });
+
+      expect(evaluatePredicateGroup({ all: [{ path: "axis_consistency_score", op: "gte", value: 0.4 }] }, evidence)).toBe(false);
+      expect(evaluatePredicateGroup({ all: [{ path: "motion_continuity_score", op: "gte", value: 0.4 }] }, evidence)).toBe(false);
+    },
+  );
+
+  it("reports missing coverage for both absent index entries", () => {
+    const v1: Track = { track_id: "V1", kind: "video", clips: [makeClip("01"), makeClip("02", { timeline_in_frame: 72 })] };
+    const { analysis } = adjacencyDecide(v1, {
+      activeEditingSkills: [],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [],
+      beats: [makeBeat("B01"), makeBeat("B02")],
+      segmentEvidenceIndex: new Map(),
+      transitionSkillsDir: TRANSITION_SKILLS_DIR,
+    });
+
+    expect(analysis.pairs[0].evidence.evidence_coverage?.camera_axis).toEqual({
+      left: "missing", right: "missing", pair: "missing",
+    });
+    expect(analysis.pairs[0].evidence.axis_consistency_score).toBe(0.5);
+  });
+
+  it("does not let gaze-only coverage satisfy an axis consistency predicate", () => {
+    const gazeOnly = pairCoverage("missing");
+    gazeOnly.gaze_direction = { left: "known", right: "known", pair: "known" };
+    const evidence = makePairEvidence({
+      axis_consistency_score: 0.5,
+      evidence_coverage: gazeOnly,
+    });
+
+    expect(evaluatePredicateGroup({
+      all: [{ path: "axis_consistency_score", op: "gte", value: 0.4 }],
+    }, evidence)).toBe(false);
+  });
+
+  it("reports the missing side when only one index entry exists", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { timeline_in_frame: 72 });
+    const { analysis } = adjacencyDecide(
+      { track_id: "V1", kind: "video", clips: [left, right] },
+      {
+        activeEditingSkills: [],
+        durationMode: "guide",
+        fpsNum: 24,
+        candidates: [],
+        beats: [makeBeat("B01"), makeBeat("B02")],
+        segmentEvidenceIndex: new Map([[left.segment_id, {
+          adjacency_features: { visual_tags: ["measured"], motion_type: "continuous" },
+          coverage: coverage("known"),
+        }]]),
+        transitionSkillsDir: TRANSITION_SKILLS_DIR,
+      },
+    );
+
+    expect(analysis.pairs[0].evidence.evidence_coverage?.motion_type).toEqual({
+      left: "known", right: "missing", pair: "missing",
+    });
+  });
+
+  it("does not turn two explicit unknowns into high motion or axis agreement", () => {
+    const left = makeClip("01");
+    const right = makeClip("02", { asset_id: "AST_002" });
+    const unknown = {
+      adjacency_features: {
+        visual_tags: [],
+        motion_type: "unknown" as const,
+        screen_side: "unknown" as const,
+        gaze_direction: "unknown" as const,
+        camera_axis: "unknown" as const,
+      },
+      coverage: coverage("unknown"),
+    };
+    const evidence = buildPairEvidence(left, right, undefined, undefined, undefined, undefined, unknown, unknown, "guide");
+
+    expect(evidence.motion_continuity_score).toBe(0.5);
+    expect(evidence.axis_consistency_score).toBe(0.5);
+    expect(evidence.evidence_coverage?.motion_type.pair).toBe("unknown");
   });
 });
 

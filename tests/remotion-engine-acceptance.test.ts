@@ -100,12 +100,26 @@ describeIf("Remotion engine acceptance", () => {
     "produces a non-empty MP4 through produceAssembly with engine=remotion",
     async () => {
       const tempDir = createTempDir("vos-remotion-engine-acceptance-");
-      const sourcePath = path.join(tempDir, "source.mp4");
-      const timelinePath = path.join(tempDir, "timeline.json");
-      const outputPath = path.join(tempDir, "assembly.mp4");
+      const sourcePath = path.join(tempDir, "02_media/source.mp4");
+      const timelinePath = path.join(tempDir, "05_timeline/timeline.json");
+      const outputPath = path.join(tempDir, "05_timeline/assembly.mp4");
 
+      fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+      fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
       await createBlackSource(sourcePath);
       writeTimeline(timelinePath);
+      fs.writeFileSync(path.join(tempDir, "02_media/source_map.json"), JSON.stringify({
+        version: "1",
+        project_id: "remotion-engine-acceptance",
+        media_dir: "02_media",
+        generated_at: "2026-07-20T00:00:00.000Z",
+        items: [{
+          asset_id: "AST_BLACK",
+          source_locator: sourcePath,
+          local_source_path: sourcePath,
+          link_path: "02_media/source.mp4",
+        }],
+      }));
 
       const result = await produceAssembly({
         engine: "remotion",

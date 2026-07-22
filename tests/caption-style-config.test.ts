@@ -18,6 +18,8 @@ import {
 describe("caption style preset registry", () => {
   it("default preset suppresses auto-wrap (WrapStyle=2)", () => {
     expect(DEFAULT_CAPTION_STYLE_PRESET.wrapStyle).toBe(2);
+    expect(DEFAULT_CAPTION_STYLE_PRESET.fontId).toBe("noto-sans-jp");
+    expect(DEFAULT_CAPTION_STYLE_PRESET.fontFamily).toBe("Noto Sans JP");
   });
 
   it("registers the default and clean-lower-third presets", () => {
@@ -49,6 +51,38 @@ describe("caption style preset registry", () => {
       marginV1080: 48,
       wrapStyle: 2,
     });
+  });
+
+  it("resolves the approved SNS style to large outline-only subtitles", () => {
+    const preset = resolveCaptionStylePreset("single-layer-speaker-separated-safe-area-ja");
+    expect(preset.fontSizePx1080).toBeGreaterThanOrEqual(58);
+    expect(preset.outlinePx1080).toBeGreaterThanOrEqual(3.5);
+    expect(preset.shadowPx1080).toBe(0);
+    expect(preset.speakerSeparation).toMatchObject({
+      offscreenLabels: expect.arrayContaining(["AI"]),
+      offscreen: { alignment: "top_center" },
+      onscreen: { alignment: "bottom_center" },
+    });
+  });
+
+  it("supports the explicit bold-outline speaker-separated alias", () => {
+    const preset = resolveCaptionStylePreset(
+      "single-layer-speaker-separated-bold-outline-safe-area-ja",
+    );
+    expect(preset.presetId).toBe(
+      "single-layer-speaker-separated-bold-outline-safe-area-ja",
+    );
+    expect(preset.fontSizePx1080).toBe(50);
+    expect(preset.maxWidthRatio).toBe(0.9);
+    expect(preset.outlinePx1080).toBe(4.5);
+    expect(preset.fontWeight).toBe(900);
+    expect(preset.assFontFamily).toBe("VideoOS Noto Sans JP Black");
+    expect(preset.assSynthesizeBold).toBe(false);
+    expect(preset.speakerSeparation?.stackedLabel).toMatchObject({
+      fontSizePx1080: 19,
+      outlinePx1080: 1.5,
+    });
+    expect(preset.speakerSeparation?.offscreenLabels).toContain("AI");
   });
 
   it("falls back to default for unknown or undefined styling_class", () => {
@@ -89,7 +123,7 @@ describe("ASS document generation (burn-in)", () => {
     expect(ass).toContain("WrapStyle: 2");
     // Style row ends with ...,Alignment,MarginL,MarginR,MarginV,Encoding
     // clean-lower-third at 1080p: 60px, alignment 2, MarginL/R 96, MarginV 36
-    expect(ass).toMatch(/Style: Default,Arial,60,[^\n]*,2,96,96,36,1/);
+    expect(ass).toMatch(/Style: Default,Noto Sans JP,60,[^\n]*,2,96,96,36,1/);
     expect(ass).toContain(
       "Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,行1\\N行2",
     );
@@ -102,5 +136,75 @@ describe("ASS document generation (burn-in)", () => {
     expect(cues).toHaveLength(2);
     expect(cues[0]).toMatchObject({ startSec: 1, endSec: 3.5, text: "A\nB" });
     expect(cues[1]).toMatchObject({ startSec: 4, endSec: 5, text: "C" });
+  });
+
+  it("routes the approved dialogue-short preset to speaker-specific outline styles", () => {
+    const ass = buildAssDocument(
+      [
+        { startSec: 0, endSec: 1, text: "AI｜ビートを始める" },
+        { startSec: 1, endSec: 2, text: "坂本｜もっと本気で" },
+      ],
+      resolveCaptionStylePreset("single-layer-speaker-separated-safe-area-ja"),
+      { width: 1080, height: 1920, fps: 24 },
+    );
+
+    expect(ass).toMatch(/Style: Offscreen,Noto Sans JP,103,[^\n]*,8,65,65,389,1/);
+    expect(ass).toMatch(/Style: Onscreen,Noto Sans JP,103,[^\n]*,2,65,65,235,1/);
+    expect(ass).toContain("Dialogue: 0,0:00:00.00,0:00:01.00,Offscreen,,0,0,0,,AI｜ビートを始める");
+    expect(ass).toContain("Dialogue: 0,0:00:01.00,0:00:02.00,Onscreen,,0,0,0,,坂本｜もっと本気で");
+  });
+
+  it("renders the bold dialogue-short alias with stacked speaker labels", () => {
+    const ass = buildAssDocument(
+      [
+        { startSec: 0, endSec: 1, text: "AI｜ちょっと待って、今の\nプリキュアなんだっけ？" },
+        { startSec: 1, endSec: 2, text: "坂本｜今のプリキュア\n何か知ってる？" },
+      ],
+      resolveCaptionStylePreset(
+        "single-layer-speaker-separated-bold-outline-safe-area-ja",
+      ),
+      { width: 1080, height: 1920, fps: 30 },
+    );
+
+    expect(ass).toMatch(/Style: Offscreen,VideoOS Noto Sans JP Black,89,&H00FFFFFF/);
+    expect(ass).toMatch(/Style: Onscreen,VideoOS Noto Sans JP Black,89,&H00FFFFFF/);
+    expect(ass).toMatch(/Style: OffscreenLabel,VideoOS Noto Sans JP Black,34,&H00FFE76E/);
+    expect(ass).toMatch(/Style: OnscreenLabel,VideoOS Noto Sans JP Black,34,&H004FD6FF/);
+    expect(ass).toMatch(/Style: Offscreen,VideoOS Noto Sans JP Black,89,[^\n]*,0,0,0,0,100/);
+    expect(ass).toContain("OffscreenLabel,,0,0,0,,{\\an2\\pos(540,371)}AI");
+    expect(ass).toContain("OnscreenLabel,,0,0,0,,{\\an2\\pos(540,1464)}坂本");
+    expect(ass).toContain("Offscreen,,0,0,0,,ちょっと待って、今の\\Nプリキュアなんだっけ？");
+    expect(ass).toContain("Onscreen,,0,0,0,,今のプリキュア\\N何か知ってる？");
+    expect(ass).not.toContain("AI｜ちょっと待って");
+    expect(ass).not.toContain("坂本｜今のプリキュア");
+  });
+
+  it("animates social questions and protected reveals without moving cue timing", () => {
+    const ass = buildAssDocument(
+      [
+        { startSec: 1, endSec: 2, text: "坂本｜本当に知ってる？", semanticRole: "question" },
+        { startSec: 2, endSec: 3, text: "AI｜実は調べました", semanticRole: "reveal" },
+      ],
+      resolveCaptionStylePreset(
+        "single-layer-speaker-separated-bold-outline-safe-area-ja",
+      ),
+      { width: 1080, height: 1920, fps: 30 },
+    );
+
+    expect(ass).toContain(
+      "0:00:01.00,0:00:02.00,Onscreen,,0,0,0,,{\\fad(80,100)\\fscx105",
+    );
+    expect(ass).toContain(
+      "0:00:02.00,0:00:03.00,Offscreen,,0,0,0,,{\\fad(40,80)\\fscx115",
+    );
+  });
+
+  it("keeps semantic motion disabled for non-social caption presets", () => {
+    const ass = buildAssDocument(
+      [{ startSec: 1, endSec: 2, text: "本当に？", semanticRole: "question" }],
+      resolveCaptionStylePreset("clean-lower-third"),
+      { width: 1920, height: 1080, fps: 30 },
+    );
+    expect(ass).not.toContain("\\fscx105");
   });
 });

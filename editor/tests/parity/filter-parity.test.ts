@@ -99,6 +99,65 @@ describe("buildVideoClipFilter — effect chain placement", () => {
   });
 });
 
+describe("buildVideoClipFilter — safe zoom pan", () => {
+  it("pans inside zoom overscan without introducing a black pad", () => {
+    const filters = buildVideoClipFilter(
+      clip({
+        transform: {
+          mode: "cover",
+          anchor: "center",
+          zoom: 1.15,
+          position: { x: -144, y: -39 },
+        },
+      }),
+      SEQ,
+    );
+
+    expect(filters).toContain("scale=2208:1242:force_original_aspect_ratio=increase");
+    expect(filters).toContain(
+      "crop=1920:1080:max(0\\,min(iw-1920\\,(iw-1920)/2--144)):max(0\\,min(ih-1080\\,(ih-1080)/2--39))",
+    );
+    expect(filters.some((filter) => filter.startsWith("pad=2208:") || filter.includes(":black"))).toBe(false);
+  });
+
+  it("clamps a requested pan to the available zoom overscan", () => {
+    const filters = buildVideoClipFilter(
+      clip({
+        transform: {
+          mode: "cover",
+          anchor: "center",
+          zoom: 1.1,
+          position: { x: 500, y: -500 },
+        },
+      }),
+      SEQ,
+    );
+
+    expect(filters).toContain(
+      "crop=1920:1080:max(0\\,min(iw-1920\\,(iw-1920)/2-500)):max(0\\,min(ih-1080\\,(ih-1080)/2--500))",
+    );
+  });
+
+  it("centers a landscape source after force-increase scaling into portrait output", () => {
+    const filters = buildVideoClipFilter(
+      clip({
+        transform: {
+          mode: "cover",
+          anchor: "center",
+          zoom: 1.01,
+          position: { x: 0, y: 0 },
+        },
+      }),
+      { width: 1080, height: 1920 },
+    );
+
+    expect(filters).toContain("scale=1091:1939:force_original_aspect_ratio=increase");
+    expect(filters).toContain(
+      "crop=1080:1920:max(0\\,min(iw-1080\\,(iw-1080)/2-0)):max(0\\,min(ih-1920\\,(ih-1920)/2-0))",
+    );
+  });
+});
+
 describe("buildEffectFilter — supported types", () => {
   it("eq collapses multiple params into a single node", () => {
     const out = buildEffectFilter({

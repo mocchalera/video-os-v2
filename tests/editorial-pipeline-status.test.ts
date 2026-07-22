@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildEditorialPipelineStatus,
-  loadMarlinEvents,
 } from "../scripts/editorial-pipeline.js";
 import { validateArtifact } from "../runtime/artifacts/loaders.js";
+import {
+  loadEditorialPlanningContext,
+  loadMarlinEvents,
+} from "../runtime/pipeline/editorial-context.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,6 +29,19 @@ describe("editorial pipeline optional Marlin evidence", () => {
       items: [],
     });
     validateArtifact(events, "marlin-events.schema.json");
+  });
+
+  it("applies the shared media-kind preflight before either planning entrypoint runs", () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "editorial-guarded-context-"));
+    const analysisDir = path.join(projectDir, "03_analysis");
+    fs.mkdirSync(analysisDir, { recursive: true });
+    fs.writeFileSync(path.join(analysisDir, "assets.json"), JSON.stringify({
+      items: [{ asset_id: "AST-unsupported", media_kind: "unknown" }],
+    }));
+
+    expect(() => loadEditorialPlanningContext(projectDir)).toThrow(
+      "Planning is not supported for asset(s): AST-unsupported",
+    );
   });
 });
 
@@ -98,6 +114,7 @@ describe("editorial pipeline status artifact", () => {
         initial_score: 0.72,
         final_score: 0.86,
         warnings: ["marlin unavailable"],
+        visual_qa: { status: "not_applicable", reason: "audio_only_timeline" },
       },
     });
 
@@ -110,9 +127,24 @@ describe("editorial pipeline status artifact", () => {
       initial_score: 0.72,
       final_score: 0.86,
       warnings_count: 1,
+      visual_qa: { status: "not_applicable", reason: "audio_only_timeline" },
     });
     expect(status.final_render.status).toBe("not_requested");
     expect(status.package.status).toBe("not_requested");
     expect(status.blocking_issues).toEqual([]);
+  });
+
+  it("identifies status written by interactive completion", () => {
+    const status = buildEditorialPipelineStatus({
+      projectId: "demo",
+      entrypoint: "editorial-agent-task",
+      createdAt: "2026-07-22T00:00:00.000Z",
+      renderSkipped: false,
+      roughRenderExists: true,
+      qaStatus: "passed",
+    });
+
+    validateArtifact(status, "editorial-pipeline-status.schema.json");
+    expect(status.entrypoint).toBe("editorial-agent-task");
   });
 });

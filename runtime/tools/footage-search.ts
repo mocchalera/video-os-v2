@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { footageDbPath, readFootageDbStatus } from "../artifacts/footage-db.js";
 import { cjkSearchExpansions, normalizeSearchText } from "../artifacts/footage-db-builder.js";
+import { extractEditorialObservation } from "../artifacts/footage-metadata-extractor.js";
 import type { Qwen3VlEmbeddingClient } from "../connectors/qwen3vl-embedding-local.js";
 import type { ClapAudioEmbeddingClient } from "../connectors/clap-audio-local.js";
 import {
@@ -56,7 +57,19 @@ export interface FootageSearchFilters {
   camera_motion?: string;
   camera_motion_type?: string | string[];
   camera_motion_direction?: string | string[];
+  motion_type?: string | string[];
+  subject_motion_direction?: string | string[];
   shot_scale?: string;
+  composition_anchor?: string | string[];
+  screen_side?: string | string[];
+  gaze_direction?: string | string[];
+  camera_axis?: string | string[];
+  dominant_subject_type?: string | string[];
+  avg_luma_min?: number;
+  avg_luma_max?: number;
+  dominant_colors_any?: string[];
+  text_presence?: string | string[];
+  visual_tags_any?: string[];
   stability?: string;
   camera_stability?: string | string[];
   audio_role?: string | string[];
@@ -152,10 +165,16 @@ export interface FootageEvidenceRef {
     | "ocr"
     | "place_hint"
     | "aesthetic_note"
+    | "editorial_observation"
+    | "technical_measurement"
     | "peak"
     | "context_expansion";
   value: string;
   score?: number;
+  evidence_class?: "observable" | "technical" | "aesthetic_editorial";
+  matched?: boolean;
+  confidence?: number;
+  source_refs?: string[];
 }
 
 export interface FootageSearchResult {
@@ -205,6 +224,7 @@ export interface FootageSearchResult {
     dominant_subject_position?: string;
     usability?: string;
     has_dialogue?: boolean;
+    editorial_observation?: Record<string, string | number | string[]>;
   };
   evidence_refs: FootageEvidenceRef[];
 }
@@ -311,8 +331,12 @@ interface DbSearchRow {
   audio_confidence: number | null;
   visual_motion_confidence: number | null;
   visual_scale_confidence: number | null;
+  motion_energy: number | null;
+  camera_motion_energy: number | null;
   dominant_subject_position: string | null;
   usability: string | null;
+  visual_extraction_source_json: string;
+  visual_evidence_json: string;
 }
 
 interface EmbeddingVectorRow {
@@ -511,6 +535,10 @@ function baseSelect(metadata: MetadataAvailability): string {
       ${metadata.visualProfile ? "svp.subject_screen_side" : "NULL"} AS dominant_subject_position,
       ${metadata.visualProfile ? "svp.motion_confidence" : "NULL"} AS visual_motion_confidence,
       ${metadata.visualProfile ? "svp.scale_confidence" : "NULL"} AS visual_scale_confidence,
+      ${metadata.visualProfile ? "svp.motion_energy" : "NULL"} AS motion_energy,
+      ${metadata.visualProfile ? "svp.camera_motion_energy" : "NULL"} AS camera_motion_energy,
+      ${metadata.visualProfile ? "svp.extraction_source_json" : "'{}'"} AS visual_extraction_source_json,
+      ${metadata.visualProfile ? "svp.evidence_json" : "'[]'"} AS visual_evidence_json,
       ${metadata.audioProfile ? "sap.audio_role" : "NULL"} AS audio_role,
       ${metadata.audioProfile ? "sap.peak_dbfs" : "NULL"} AS peak_dbfs,
       ${metadata.audioProfile ? "sap.integrated_lufs" : "NULL"} AS integrated_lufs,
@@ -584,11 +612,13 @@ export async function searchFootage(
     return emptySearchResponse(absProjectDir, input, mode, status.status, warnings);
   }
 
-  if (status.status === "missing" || status.status === "malformed") {
+  if (status.status === "missing" || status.status === "stale" || status.status === "malformed") {
     return fallbackSearch(absProjectDir, input, mode, limit, [
       ...warnings,
       status.status === "missing"
         ? "footage DB missing; using segments.json fallback"
+        : status.status === "stale"
+          ? "footage DB stale; using segments.json fallback"
         : `footage DB malformed; using segments.json fallback: ${(status.errors ?? []).join("; ")}`,
     ]);
   }
@@ -1139,8 +1169,22 @@ function buildStructuredWhere(filters: FootageSearchFilters, metadata: MetadataA
   if (typeof filters.min_width === "number") addRangeFilter(clauses, params, metadata.assetTechnical, "atm.width", "min_width", ">=", filters.min_width);
   if (typeof filters.min_height === "number") addRangeFilter(clauses, params, metadata.assetTechnical, "atm.height", "min_height", ">=", filters.min_height);
   addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.camera_motion_type", "camera_motion_type", filters.camera_motion_type ?? filters.camera_motion);
-  addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.camera_motion_direction", "camera_motion_direction", filters.camera_motion_direction);
-  addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.shot_scale", "shot_scale", filters.shot_scale);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("camera_motion_direction", "svp.camera_motion_direction"), "camera_motion_direction", normalizeObservationFilter("camera_motion_direction", filters.camera_motion_direction));
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("motion_type"), "motion_type", filters.motion_type);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("subject_motion_direction", "svp.subject_movement_direction"), "subject_motion_direction", normalizeObservationFilter("subject_motion_direction", filters.subject_motion_direction));
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("shot_scale", "svp.shot_scale"), "shot_scale", normalizeObservationFilter("shot_scale", filters.shot_scale));
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("composition_anchor", "svp.composition_anchor"), "composition_anchor", filters.composition_anchor);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("screen_side", "svp.subject_screen_side"), "screen_side", filters.screen_side);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("gaze_direction"), "gaze_direction", filters.gaze_direction);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("camera_axis"), "camera_axis", filters.camera_axis);
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("dominant_subject_type", "svp.dominant_subject_type"), "dominant_subject_type", normalizeObservationFilter("dominant_subject_type", filters.dominant_subject_type));
+  addStringArrayFilter(clauses, params, metadata.visualProfile, canonicalVisualField("text_presence"), "text_presence", filters.text_presence);
+  if (typeof filters.avg_luma_min === "number") {
+    addRangeFilter(clauses, params, metadata.visualProfile, canonicalVisualField("avg_luma"), "avg_luma_min", ">=", filters.avg_luma_min);
+  }
+  if (typeof filters.avg_luma_max === "number") {
+    addRangeFilter(clauses, params, metadata.visualProfile, canonicalVisualField("avg_luma"), "avg_luma_max", "<=", filters.avg_luma_max);
+  }
   addStringArrayFilter(clauses, params, metadata.visualProfile, "svp.camera_stability", "camera_stability", filters.camera_stability ?? filters.stability);
   addStringArrayFilter(clauses, params, metadata.audioProfile, "sap.audio_role", "audio_role", filters.audio_role);
   if (typeof filters.peak_dbfs_max === "number") addRangeFilter(clauses, params, metadata.audioProfile, "sap.peak_dbfs", "peak_dbfs_max", "<=", filters.peak_dbfs_max);
@@ -1175,6 +1219,36 @@ function buildStructuredWhere(filters: FootageSearchFilters, metadata: MetadataA
     }).join(", ")})`);
   }
   return { sql: clauses.join(" AND "), params };
+}
+
+function canonicalVisualField(field: string, legacyColumn?: string): string {
+  const exact = `json_extract(svp.extraction_source_json, '$.editorial_observation.values.${field}')`;
+  if (!legacyColumn) return exact;
+  const legacy = field === "camera_motion_direction" || field === "subject_motion_direction"
+    ? `CASE ${legacyColumn} WHEN 'ltr' THEN 'right' WHEN 'rtl' THEN 'left' WHEN 'away_camera' THEN 'away_from_camera' ELSE ${legacyColumn} END`
+    : field === "shot_scale"
+      ? `CASE ${legacyColumn} WHEN 'medium_close' THEN 'medium_close_up' WHEN 'close' THEN 'close_up' WHEN 'extreme_close' THEN 'extreme_close_up' WHEN 'detail' THEN 'insert' ELSE ${legacyColumn} END`
+      : field === "dominant_subject_type"
+        ? `CASE ${legacyColumn} WHEN 'environment' THEN 'landscape' ELSE ${legacyColumn} END`
+        : legacyColumn;
+  return `COALESCE(${exact}, ${legacy})`;
+}
+
+function normalizeObservationFilter(
+  field: "camera_motion_direction" | "subject_motion_direction" | "shot_scale" | "dominant_subject_type",
+  value: string | string[] | undefined,
+): string[] | undefined {
+  if (value == null) return undefined;
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => {
+    if (field === "camera_motion_direction" || field === "subject_motion_direction") {
+      return ({ ltr: "right", rtl: "left", away_camera: "away_from_camera" } as Record<string, string>)[item] ?? item;
+    }
+    if (field === "shot_scale") {
+      return ({ medium_close: "medium_close_up", close: "close_up", extreme_close: "extreme_close_up", detail: "insert" } as Record<string, string>)[item] ?? item;
+    }
+    return item === "environment" ? "landscape" : item;
+  });
 }
 
 function loadRows(db: Database.Database, metadata: MetadataAvailability, where: BuiltWhere): DbSearchRow[] {
@@ -1896,6 +1970,8 @@ function applyPostFilters(rows: DbSearchRow[], filters: FootageSearchFilters): D
   const customTags = (filters.custom_tags_any ?? []).map((tag) => tag.toLowerCase());
   const excludeFlags = (filters.exclude_quality_flags ?? []).map((flag) => flag.toLowerCase());
   const noiseFlagsExclude = (filters.noise_flags_exclude ?? []).map((flag) => flag.toLowerCase());
+  const visualTags = (filters.visual_tags_any ?? []).map((tag) => tag.toLowerCase());
+  const dominantColors = (filters.dominant_colors_any ?? []).map((color) => color.toLowerCase());
   return rows.filter((row) => {
     if (includeTags.length > 0) {
       const tags = [...jsonStrings(row.tags_json), ...jsonStrings(row.asset_tags_json)].map((tag) => tag.toLowerCase());
@@ -1913,6 +1989,15 @@ function applyPostFilters(rows: DbSearchRow[], filters: FootageSearchFilters): D
     if (noiseFlagsExclude.length > 0) {
       const flags = jsonStrings(row.noise_flags_json).map((flag) => flag.toLowerCase());
       if (noiseFlagsExclude.some((flag) => flags.includes(flag))) return false;
+    }
+    const observation = rowEditorialObservation(row);
+    if (visualTags.length > 0) {
+      const values = observationStringArray(observation.visual_tags).map((tag) => tag.toLowerCase());
+      if (!visualTags.some((tag) => values.includes(tag))) return false;
+    }
+    if (dominantColors.length > 0) {
+      const values = observationStringArray(observation.dominant_colors).map((color) => color.toLowerCase());
+      if (!dominantColors.some((color) => values.includes(color))) return false;
     }
     return true;
   });
@@ -1977,6 +2062,10 @@ function rowToResult(
   if (metadata.shot_scale) reasonParts.push(`shot_scale=${metadata.shot_scale}`);
   if (metadata.usability) reasonParts.push(`usability=${metadata.usability}`);
   if (scoring.contextExpansions.length > 0) reasonParts.push(`context expansions: ${scoring.contextExpansions.join(",")}`);
+  const matchedEvidenceClasses = Array.from(new Set(evidence
+    .filter((ref) => ref.matched && ref.evidence_class)
+    .map((ref) => ref.evidence_class)));
+  if (matchedEvidenceClasses.length > 0) reasonParts.push(`evidence_class=${matchedEvidenceClasses.join(",")}`);
   const matchedFrame = scoring.embeddingMatches.find((match) => match.embedding_type.startsWith("visual_") && match.source_ref)?.source_ref;
 
   return {
@@ -2037,29 +2126,108 @@ function evidenceRefs(
     peak: number;
     marlinEvents: string[];
     contextExpansions: string[];
+    query: SearchFootageInput;
   },
   tags: string[],
   qualityFlags: string[],
 ): FootageEvidenceRef[] {
   const refs: FootageEvidenceRef[] = [];
-  if (row.summary) refs.push({ field: "summary", value: row.summary, score: scoring.semantic ?? scoring.lexical });
+  if (row.summary) refs.push({
+    field: "summary",
+    value: row.summary,
+    score: scoring.semantic ?? scoring.lexical,
+    matched: queryMatchesEvidence(scoring.query, row.summary),
+  });
   if (row.transcript_text || row.transcript_excerpt) {
-    refs.push({ field: "transcript", value: row.transcript_text || row.transcript_excerpt, score: scoring.lexical });
+    const value = row.transcript_text || row.transcript_excerpt;
+    refs.push({ field: "transcript", value, score: scoring.lexical, evidence_class: "observable", matched: queryMatchesEvidence(scoring.query, value) });
   }
-  for (const event of scoring.marlinEvents.slice(0, 3)) refs.push({ field: "marlin_event", value: event });
-  for (const tag of tags.slice(0, 6)) refs.push({ field: "tag", value: tag });
-  for (const flag of qualityFlags.slice(0, 6)) refs.push({ field: "quality_flag", value: flag });
+  for (const event of scoring.marlinEvents.slice(0, 3)) refs.push({ field: "marlin_event", value: event, evidence_class: "observable", matched: queryMatchesEvidence(scoring.query, event) });
+  for (const tag of tags.slice(0, 6)) refs.push({ field: "tag", value: tag, matched: queryMatchesEvidence(scoring.query, tag) });
+  for (const flag of qualityFlags.slice(0, 6)) refs.push({ field: "quality_flag", value: flag, evidence_class: "technical", matched: queryMatchesEvidence(scoring.query, flag) });
   for (const [field, value] of Object.entries(qualityValues(row))) {
-    if (value != null) refs.push({ field: "quality_score", value: `${field}=${value.toFixed(2)}`, score: value });
+    if (value != null) {
+      const evidenceValue = `${field}=${value.toFixed(2)}`;
+      refs.push({ field: "quality_score", value: evidenceValue, score: value, evidence_class: "aesthetic_editorial", matched: queryMatchesEvidence(scoring.query, evidenceValue) });
+    }
   }
-  if (row.extracted_text_flat) refs.push({ field: "ocr", value: row.extracted_text_flat });
+  for (const [field, value] of Object.entries({ motion_energy: row.motion_energy, camera_motion_energy: row.camera_motion_energy })) {
+    if (value != null) {
+      const evidenceValue = `${field}=${value}`;
+      refs.push({ field: "technical_measurement", value: evidenceValue, score: value, evidence_class: "technical", matched: queryMatchesEvidence(scoring.query, evidenceValue) });
+    }
+  }
+  refs.push(...editorialObservationEvidenceRefs(row, scoring.query));
+  if (row.extracted_text_flat) refs.push({ field: "ocr", value: row.extracted_text_flat, evidence_class: "observable", matched: queryMatchesEvidence(scoring.query, row.extracted_text_flat) });
   if (row.place_hint_name || row.place_hint_category) {
-    refs.push({ field: "place_hint", value: [row.place_hint_name, row.place_hint_category].filter(Boolean).join(" ") });
+    const value = [row.place_hint_name, row.place_hint_category].filter(Boolean).join(" ");
+    refs.push({ field: "place_hint", value, evidence_class: "aesthetic_editorial", matched: queryMatchesEvidence(scoring.query, value) });
   }
-  if (row.aesthetic_notes_flat) refs.push({ field: "aesthetic_note", value: row.aesthetic_notes_flat });
+  if (row.aesthetic_notes_flat) refs.push({ field: "aesthetic_note", value: row.aesthetic_notes_flat, evidence_class: "aesthetic_editorial", matched: queryMatchesEvidence(scoring.query, row.aesthetic_notes_flat) });
   if (row.peak_description) refs.push({ field: "peak", value: row.peak_description, score: row.peak_confidence ?? undefined });
   for (const term of scoring.contextExpansions) refs.push({ field: "context_expansion", value: term });
   return refs;
+}
+
+function editorialObservationEvidenceRefs(row: DbSearchRow, query: SearchFootageInput): FootageEvidenceRef[] {
+  const observation = rowEditorialObservation(row);
+  const source = parsedVisualExtractionSource(row);
+  const fields = recordValue(recordValue(source.editorial_observation).fields);
+  return Object.entries(observation).flatMap(([field, rawValue]) => {
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    const fieldMetadata = recordValue(fields[field]);
+    const confidence = scoreOrNull(fieldMetadata.confidence) ?? undefined;
+    const sourceRefs = arrayStrings(fieldMetadata.evidence_refs);
+    return values.map((value) => {
+      const evidenceValue = `${field}=${String(value)}`;
+      return {
+        field: "editorial_observation" as const,
+        value: evidenceValue,
+        evidence_class: "observable" as const,
+        matched: queryMatchesObservationField(query, field, value),
+        confidence,
+        source_refs: sourceRefs.length > 0 ? sourceRefs : undefined,
+      };
+    });
+  });
+}
+
+function parsedVisualExtractionSource(row: DbSearchRow): Record<string, unknown> {
+  try {
+    return recordValue(JSON.parse(row.visual_extraction_source_json) as unknown);
+  } catch {
+    return {};
+  }
+}
+
+function queryMatchesObservationField(query: SearchFootageInput, field: string, value: string | number): boolean {
+  const filters = query.filters ?? {};
+  if (value !== "unknown" && value !== "not_applicable"
+    && (queryMatchesEvidence(query, `${field}=${String(value)}`) || queryMatchesEvidence(query, String(value)))) return true;
+  if (field === "visual_tags") return (filters.visual_tags_any ?? filters.include_tags_any ?? []).includes(String(value));
+  if (field === "dominant_colors") return (filters.dominant_colors_any ?? []).includes(String(value));
+  if (field === "avg_luma") {
+    return (filters.avg_luma_min == null || Number(value) >= filters.avg_luma_min)
+      && (filters.avg_luma_max == null || Number(value) <= filters.avg_luma_max)
+      && (filters.avg_luma_min != null || filters.avg_luma_max != null);
+  }
+  if (field === "camera_motion_direction" || field === "subject_motion_direction" || field === "shot_scale" || field === "dominant_subject_type") {
+    const normalized = normalizeObservationFilter(
+      field as "camera_motion_direction" | "subject_motion_direction" | "shot_scale" | "dominant_subject_type",
+      filters[field as keyof FootageSearchFilters] as string | string[] | undefined,
+    );
+    return normalized?.includes(String(value)) ?? false;
+  }
+  const requested = filters[field as keyof FootageSearchFilters];
+  return Array.isArray(requested) ? requested.includes(String(value) as never) : requested === value;
+}
+
+function queryMatchesEvidence(query: SearchFootageInput, evidence: string): boolean {
+  const text = normalizeSearchText(query.text_match ?? query.query).toLowerCase();
+  if (!text) return false;
+  const tokens = text.split(/\s+/).filter((token) => token && !["and", "or", "not"].includes(token));
+  const haystack = normalizeSearchText(evidence).toLowerCase();
+  return tokens.length > 0 && tokens.every((token) => haystack.includes(token));
 }
 
 function finalScore(scores: {
@@ -2419,6 +2587,19 @@ function fallbackFilter(row: DbSearchRow, filters: FootageSearchFilters): boolea
   if (filters.has_text === false && fallbackHasText(row)) return false;
   if (filters.has_dialogue === true && !fallbackHasDialogue(row)) return false;
   if (filters.has_dialogue === false && fallbackHasDialogue(row)) return false;
+  const observation = rowEditorialObservation(row);
+  if (!matchesStringFilter(observation.camera_motion_direction, normalizeObservationFilter("camera_motion_direction", filters.camera_motion_direction))) return false;
+  if (!matchesStringFilter(observation.motion_type, filters.motion_type)) return false;
+  if (!matchesStringFilter(observation.subject_motion_direction, normalizeObservationFilter("subject_motion_direction", filters.subject_motion_direction))) return false;
+  if (!matchesStringFilter(observation.shot_scale, normalizeObservationFilter("shot_scale", filters.shot_scale))) return false;
+  if (!matchesStringFilter(observation.composition_anchor, filters.composition_anchor)) return false;
+  if (!matchesStringFilter(observation.screen_side, filters.screen_side)) return false;
+  if (!matchesStringFilter(observation.gaze_direction, filters.gaze_direction)) return false;
+  if (!matchesStringFilter(observation.camera_axis, filters.camera_axis)) return false;
+  if (!matchesStringFilter(observation.dominant_subject_type, normalizeObservationFilter("dominant_subject_type", filters.dominant_subject_type))) return false;
+  if (!matchesStringFilter(observation.text_presence, filters.text_presence)) return false;
+  if (filters.avg_luma_min != null && (typeof observation.avg_luma !== "number" || observation.avg_luma < filters.avg_luma_min)) return false;
+  if (filters.avg_luma_max != null && (typeof observation.avg_luma !== "number" || observation.avg_luma > filters.avg_luma_max)) return false;
   for (const field of QUALITY_FIELDS) {
     const min = filters.quality_min?.[field];
     if (typeof min === "number" && ((row[field] ?? -Infinity) < min)) return false;
@@ -2439,6 +2620,8 @@ function fallbackRow(
   const placeHint = recordValue(appraisal.place_hint);
   const transcriptText = stringValue(segment.transcript_excerpt);
   const extractedText = extractedTextFlat(appraisal.extracted_text);
+  const observation = extractEditorialObservation(segment.editorial_observation);
+  const observationValues = observation.values as Record<string, string | number | string[]>;
   return {
     segment_id: stringValue(segment.segment_id) || `SEG_${index + 1}`,
     asset_id: stringValue(segment.asset_id),
@@ -2449,7 +2632,7 @@ function fallbackRow(
     summary: stringValue(segment.summary),
     transcript_excerpt: transcriptText,
     transcript_text: transcriptText,
-    tags_json: JSON.stringify([...arrayStrings(segment.tags), ...arrayStrings(segment.visual_tags)]),
+    tags_json: JSON.stringify([...arrayStrings(segment.tags), ...observationStringArray(observationValues.visual_tags)]),
     quality_flags_json: JSON.stringify(arrayStrings(segment.quality_flags)),
     asset_tags_json: JSON.stringify(arrayStrings(asset.tags)),
     asset_quality_flags_json: JSON.stringify(arrayStrings(asset.quality_flags)),
@@ -2478,8 +2661,8 @@ function fallbackRow(
     peak_description: null,
     camera_motion: null,
     camera_motion_type: null,
-    camera_motion_direction: null,
-    shot_scale: null,
+    camera_motion_direction: legacyObservationDirection(observationValues.camera_motion_direction),
+    shot_scale: legacyObservationShotScale(observationValues.shot_scale),
     stability: null,
     camera_stability: null,
     audio_role: null,
@@ -2499,13 +2682,38 @@ function fallbackRow(
     audio_confidence: null,
     visual_motion_confidence: null,
     visual_scale_confidence: null,
+    motion_energy: null,
+    camera_motion_energy: null,
     dominant_subject_position: null,
     usability: null,
+    visual_extraction_source_json: JSON.stringify({
+      ...(observation.present ? {
+        editorial_observation: {
+          values: observation.values,
+          fields: Object.fromEntries(Object.entries(observation.values).map(([field, value]) => [field, {
+            source: "editorial_observation",
+            exact_value: value,
+            confidence: observation.field_confidence[field as keyof typeof observation.field_confidence] ?? null,
+            evidence_refs: observation.field_evidence_refs[field as keyof typeof observation.field_evidence_refs] ?? [],
+          }])),
+          evidence_refs: observation.evidence_refs,
+        },
+      } : {}),
+    }),
+    visual_evidence_json: JSON.stringify(observation.index_terms),
   };
 }
 
 function fallbackText(row: DbSearchRow): string {
-  return [row.summary, row.transcript_excerpt, ...jsonStrings(row.tags_json), ...jsonStrings(row.asset_tags_json)].join(" ");
+  return [
+    row.summary,
+    row.transcript_excerpt,
+    row.extracted_text_flat,
+    row.aesthetic_notes_flat,
+    ...jsonStrings(row.tags_json),
+    ...jsonStrings(row.asset_tags_json),
+    ...jsonStrings(row.visual_evidence_json),
+  ].join(" ");
 }
 
 function fallbackSegmentType(row: DbSearchRow): string | null {
@@ -2518,6 +2726,51 @@ function fallbackHasText(row: DbSearchRow): boolean {
 
 function fallbackHasDialogue(row: DbSearchRow): boolean {
   return row.has_dialogue === 1 || row.segment_type === "dialogue";
+}
+
+function rowEditorialObservation(row: DbSearchRow): Record<string, string | number | string[]> {
+  try {
+    const parsed = JSON.parse(row.visual_extraction_source_json) as Record<string, unknown>;
+    const observation = recordValue(parsed.editorial_observation);
+    const values = recordValue(observation.values);
+    return Object.fromEntries(Object.entries(values).filter(([, value]) =>
+      typeof value === "string" || typeof value === "number"
+      || (Array.isArray(value) && value.every((item) => typeof item === "string"))
+    )) as Record<string, string | number | string[]>;
+  } catch {
+    return {};
+  }
+}
+
+function observationStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function legacyObservationDirection(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return ({
+    left: "rtl",
+    right: "ltr",
+    away_from_camera: "away_camera",
+    not_applicable: "unknown",
+  } as Record<string, string>)[value] ?? value;
+}
+
+function legacyObservationShotScale(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return ({
+    medium_close_up: "medium_close",
+    close_up: "close",
+    extreme_close_up: "extreme_close",
+    insert: "detail",
+    not_applicable: "unknown",
+  } as Record<string, string>)[value] ?? value;
+}
+
+function matchesStringFilter(value: unknown, filter: string | string[] | undefined): boolean {
+  const requested = Array.isArray(filter) ? filter : filter ? [filter] : [];
+  if (requested.length === 0) return true;
+  return typeof value === "string" && requested.includes(value);
 }
 
 function resultMetadata(row: DbSearchRow): NonNullable<FootageSearchResult["metadata"]> {
@@ -2535,13 +2788,15 @@ function resultMetadata(row: DbSearchRow): NonNullable<FootageSearchResult["meta
   if (row.circle_take != null) metadata.circle_take = row.circle_take === 1;
   if (row.dominant_subject_position) metadata.dominant_subject_position = row.dominant_subject_position;
   if (row.usability) metadata.usability = row.usability;
+  const observation = rowEditorialObservation(row);
+  if (Object.keys(observation).length > 0) metadata.editorial_observation = observation;
   metadata.has_dialogue = fallbackHasDialogue(row);
   return metadata;
 }
 
 async function segmentTextForSimilarity(projectDir: string, segmentId: string): Promise<string> {
   const status = readFootageDbStatus(projectDir);
-  if (status.exists && status.status !== "malformed") {
+  if (status.exists && status.status === "ready") {
     const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
     try {
       const row = db.prepare(`
@@ -2594,8 +2849,6 @@ function requestedMetadataFilters(filters: FootageSearchFilters): string[] {
   if (filters.min_height != null) names.push("min_height");
   if (filters.camera_motion) names.push("camera_motion");
   if (filters.camera_motion_type) names.push("camera_motion_type");
-  if (filters.camera_motion_direction) names.push("camera_motion_direction");
-  if (filters.shot_scale) names.push("shot_scale");
   if (filters.stability) names.push("stability");
   if (filters.camera_stability) names.push("camera_stability");
   if (filters.audio_role) names.push("audio_role");
@@ -2630,7 +2883,15 @@ function appendMissingIndexedDataWarnings(
   if ((filters.place_hint_name || filters.place_hint_category) && !db.prepare("SELECT 1 FROM visual_appraisal WHERE place_hint_name IS NOT NULL OR place_hint_category IS NOT NULL LIMIT 1").get()) {
     warnings.push("place_hint filter requested, but no place_hint values are indexed");
   }
-  const visualFilterRequested = Boolean(filters.camera_motion || filters.camera_motion_type || filters.camera_motion_direction || filters.shot_scale || filters.stability || filters.camera_stability);
+  const visualFilterRequested = Boolean(
+    filters.camera_motion || filters.camera_motion_type || filters.camera_motion_direction
+    || filters.motion_type || filters.subject_motion_direction || filters.shot_scale
+    || filters.composition_anchor || filters.screen_side || filters.gaze_direction
+    || filters.camera_axis || filters.dominant_subject_type || filters.avg_luma_min != null
+    || filters.avg_luma_max != null || filters.dominant_colors_any?.length
+    || filters.text_presence || filters.visual_tags_any?.length
+    || filters.stability || filters.camera_stability
+  );
   const audioFilterRequested = Boolean(filters.audio_role || filters.has_music != null || filters.has_ambient != null || filters.peak_dbfs_max != null || filters.integrated_lufs_min != null || filters.integrated_lufs_max != null || filters.silence_ratio_min != null || filters.silence_ratio_max != null || filters.noise_flags_exclude?.length);
   const loggingFilterRequested = Boolean(filters.scene_number || filters.shot_number || filters.take_number || filters.circle_take != null || filters.best_take != null || filters.custom_tags_any?.length);
   const technicalFilterRequested = Boolean(filters.video_codec || filters.recording_format || filters.frame_rate_mode || filters.min_width != null || filters.min_height != null || filters.color_primaries || filters.color_transfer || filters.reel_name || filters.card_id || filters.camera_id);

@@ -62,6 +62,11 @@ metadata:
 - 配信プラットフォーム
 - アスペクト比
 
+#### Phase 6: 複数納品物の分離（複数尺・複数比率の場合は必須）
+- 長尺と短尺、横型と縦型で `audio_policy`、CTA、字幕量、冒頭 hook を個別に確認する
+- 「BGMなし」など1本への判断を、別尺・別プラットフォームへ暗黙に継承しない
+- runtime、delivery、audio、CTA のいずれかが異なる納品物は、原則として納品物ごとの brief を作る。共通 brief を使う場合も variant ごとの差分を明記する
+
 **質問のルール:**
 - 1回の質問は最大3つまで。質問攻めにしない
 - ユーザーの最初の説明で明らかな項目はスキップしてよい
@@ -79,6 +84,7 @@ metadata:
 - `emotion_curve`, `must_have`, `must_avoid`
 - `autonomy.mode`, `autonomy.may_decide`, `autonomy.must_ask`
 - `resolved_assumptions`
+- 短尺SNSでは `audio_policy` を必ず明示する。CTAが目的に含まれる場合は、表示文言と期待アクションを `must_have` に明記する
 
 ### Step 4: unresolved_blockers.yaml を作成する
 - ヒアリングで解決できなかった疑問を blocker として記録

@@ -28,6 +28,7 @@ export interface Sequence {
 }
 
 export interface AudioPolicy {
+  gain_unit?: 'linear' | 'db';
   duck_music_db?: number;
   nat_gain?: number;
   nat_sound_gain?: number;
@@ -98,6 +99,7 @@ export interface Transition {
 }
 
 export interface AudioMix {
+  gain_unit?: 'linear' | 'db';
   nat_sound_gain?: number;
   bgm_gain?: number;
   duck_music_db?: number;

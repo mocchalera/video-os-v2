@@ -27,9 +27,27 @@ see [DEPRECATED.md](DEPRECATED.md).
 ## Runtime and CLI ownership
 
 `runtime/pipeline/plan.ts` is the canonical stage vocabulary and planning
-surface. `runtime/pipeline/executor.ts` owns project initialization, analysis,
-footage-DB execution, editorial-pipeline delegation, progress, and failure
-reporting. `scripts/full-pipeline.ts` is a thin CLI adapter over that runtime.
+surface. It also owns the explicit mapping from canonical artifact stages to
+legacy progress/timing stages and the separately typed public `--from` resume
+vocabulary. Progress history and CLI compatibility therefore retain values such
+as `visual-quality`, `embeddings`, and `QA` without making those values canonical
+artifact-stage names. `runtime/pipeline/executor.ts` owns project initialization,
+analysis, footage-DB execution, editorial-pipeline delegation, progress, and
+failure reporting. `scripts/full-pipeline.ts` is a thin CLI adapter over that runtime.
+`runtime/pipeline/phase-executor.ts` owns ordered phase execution, stop-on-failure,
+and completed-phase accounting shared by the public script executor and the
+command/state-machine full-pipeline. Each orchestrator retains its own resume,
+review, package, dependency-injection, and failure-reporting policy.
+`runtime/pipeline/editorial-context.ts` owns the guarded planning context shared
+by `scripts/editorial-pipeline.ts` and `scripts/editorial-agent-task.ts`, so
+headless and interactive planning apply the same media-kind/still-grounding
+preflight and optional-Marlin fallback. After planning completes,
+`scripts/editorial-downstream.ts` is their shared compile/render/QA/status
+runner; interactive prompt emission remains an explicit pending state until the
+required response is supplied. `scripts/editorial-stages.ts` provides the
+in-process compile/render adapters, so neither orchestrator shells out to a
+second CLI process. Status artifacts identify whether completion came from
+`editorial-pipeline` or `editorial-agent-task`.
 The supported default is:
 
 ```sh
@@ -94,7 +112,11 @@ These layers have distinct ownership:
   requirements before those effects are used.
 - Agent workflow skills in `.agents/skills/` govern how an agent operates the
   repository. They are not editorial compiler skills and do not replace
-  canonical artifacts.
+  canonical artifacts. The top-level orchestration contract lives in
+  `runtime/pipeline/full-pipeline-contract.ts`; it generates
+  `.agents/skills/agent-skill-contracts.json` and the public CLI help. Contract
+  tests bind the `full-pipeline` Skill to executable commands, flags, resume
+  values, prerequisite references, and produced-artifact boundaries.
 
 `runtime/editorial/matrix.yaml` is a compatibility inventory, but executable
 profile defaults and the resolver are the current runtime authority. A matrix

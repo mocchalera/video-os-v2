@@ -169,6 +169,49 @@ patch でできること:
 }
 ```
 
+### 「声を聞きやすくして」「MAして」
+
+基本:
+
+- `change_audio_finish`
+
+会話中心の素材は `dialogue-clean`、既に整音済みなら
+`loudness-only` を使う。これはタイムライン全体の処理なので
+`target_clip_id` は指定しない。
+
+```json
+{
+  "op": "change_audio_finish",
+  "audio_finish": {
+    "preset": "dialogue-clean",
+    "loudness_target_lufs": -16,
+    "true_peak_target_dbtp": -1.5
+  },
+  "reason": "Improve dialogue clarity and normalize delivery loudness"
+}
+```
+
+### 「人物を大きく」「画角を整えて」
+
+基本:
+
+- `change_visual_transform`
+
+対象はvideo clip。字幕や質問カードを焼いた後の動画へcropしない。
+`position` は出力pixelで、負のxは映像を左へ、負のyは上へ動かす。
+
+```json
+{
+  "op": "change_visual_transform",
+  "target_clip_id": "CLP_0004",
+  "visual_transform": {
+    "zoom": 1.15,
+    "position": { "x": -144, "y": -39 }
+  },
+  "reason": "Increase portrait presence while preserving look room"
+}
+```
+
 ### 「テンポを上げて」
 
 基本:

@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  DEFAULT_GOLDEN_SUITE_PROJECTS,
   resolveSuiteBriefAlignmentOptions,
   runGoldenEvalSuite,
   type EvalSuiteSummary,
@@ -107,14 +106,28 @@ function visualQA(status: ReviewVisualQA["status"], score?: number, reason?: str
 }
 
 describe("golden eval suite", () => {
-  it("includes the operator-approved AX-1 testimonial pair in the default suite", () => {
-    expect(DEFAULT_GOLDEN_SUITE_PROJECTS).toEqual([
-      "fumoto-growth",
-      "togakushi-camp",
-      "ena-promo",
-      "ax1-komatsu-testimonial-d4892",
-      "ax1-female-testimonial-d4892",
-    ]);
+  it("discovers approved checkout-local projects for the default suite", async () => {
+    const repo = makeRepo();
+    try {
+      makeProject(repo, "approved-local", {
+        approved: true,
+        brief: true,
+        selects: true,
+        blueprint: true,
+        timeline: true,
+      });
+      const result = await runGoldenEvalSuite({
+        repoRoot: repo,
+        write: false,
+        evaluateStructure: async () => evalReport("approved-local", 80),
+        evaluateBrief: async () => briefReport("approved-local", 0.8, "deterministic-only"),
+      });
+
+      expect(result.summary.projects_requested).toEqual(["approved-local"]);
+      expect(result.summary.projects[0].project_id).toBe("approved-local");
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 
   it("keeps the brief-alignment judge opt-in for reproducible suite runs", () => {
@@ -238,6 +251,38 @@ describe("golden eval suite", () => {
 
       expect(observedWriteReport).toBe(false);
       expect(result.status).toBe("verified");
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("marks canonical audio-only visual QA not applicable without calling Marlin", async () => {
+    const repo = makeRepo();
+    try {
+      const projectDir = makeProject(repo, "audio-only", { brief: true, timeline: true });
+      write(path.join(projectDir, "05_timeline/timeline.json"), JSON.stringify({
+        version: "1",
+        tracks: {
+          video: [{ track_id: "V1", clips: [] }],
+          audio: [{ track_id: "A1", clips: [{ clip_id: "ACL_1" }] }],
+        },
+      }));
+      let calls = 0;
+      const result = await evaluateReviewVisualQA(projectDir, {
+        repoRoot: repo,
+        runMarlinQAImpl: async () => {
+          calls += 1;
+          throw new Error("must not run");
+        },
+      });
+
+      expect(calls).toBe(0);
+      expect(result).toMatchObject({
+        status: "not_applicable",
+        reason: "audio_only_timeline",
+        issues: { total: 0 },
+      });
+      expect(result.score).toBeUndefined();
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }

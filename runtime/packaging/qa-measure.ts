@@ -9,7 +9,17 @@ export interface PrecomputedQaMetrics {
   audioDurationMs?: number;
   dialogueWindowMs?: number;
   observedNonSilentMs?: number;
+  dialogueOutsideExpectedMs?: number;
+  dialogueFirstSignalMs?: number;
+  dialogueLastSignalMs?: number;
+  expectedDialogueStartMs?: number;
+  expectedDialogueEndMs?: number;
   videoFrame?: QaVideoFrameMetadata;
+}
+
+export interface TimeWindowMs {
+  start_ms: number;
+  end_ms: number;
 }
 
 export interface QaVideoFrameMetadata {
@@ -31,12 +41,20 @@ export interface QaMeasurements {
   video_duration_ms: number;
   audio_duration_ms: number;
   dialogue_window_ms: number;
+  /** Stream duration parity only. This is not a content lip-sync measurement. */
+  av_duration_delta_ms?: number;
+  /** Backward-compatible alias for av_duration_delta_ms. */
   av_drift_ms: number;
   loudness_integrated: number;
   loudness_true_peak: number;
   dialogue_occupancy: number;
   observed_non_silent_ms: number;
   silence_total_ms: number;
+  dialogue_outside_expected_ms?: number;
+  dialogue_first_signal_ms?: number;
+  dialogue_last_signal_ms?: number;
+  expected_dialogue_start_ms?: number;
+  expected_dialogue_end_ms?: number;
   video_frame?: QaVideoFrameMetadata;
   video_frame_probe_error?: string;
 }
@@ -49,6 +67,10 @@ export interface QaMeasurementWarning {
 export interface MeasureQaMediaOptions {
   videoPath: string;
   audioPath?: string;
+  /** Dialogue-only timeline-aligned stem. Use this instead of a BGM-bearing final mix for timing QA. */
+  dialoguePath?: string;
+  expectedDialogueWindowsMs?: TimeWindowMs[];
+  videoOnly?: boolean;
   outputPath: string;
   createdAt?: string;
 }
@@ -57,6 +79,88 @@ const SILENCE_NOISE_DB = -35;
 const SILENCE_DURATION_S = 0.35;
 const AV_DRIFT_WARNING_MS = 100;
 const LOW_LOUDNESS_WARNING_LUFS = -23;
+
+function mergeWindows(windows: TimeWindowMs[], durationMs: number): TimeWindowMs[] {
+  const normalized = windows
+    .map((window) => ({
+      start_ms: Math.max(0, Math.min(durationMs, window.start_ms)),
+      end_ms: Math.max(0, Math.min(durationMs, window.end_ms)),
+    }))
+    .filter((window) => window.end_ms > window.start_ms)
+    .sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms);
+
+  const merged: TimeWindowMs[] = [];
+  for (const window of normalized) {
+    const previous = merged.at(-1);
+    if (!previous || window.start_ms > previous.end_ms) {
+      merged.push({ ...window });
+      continue;
+    }
+    previous.end_ms = Math.max(previous.end_ms, window.end_ms);
+  }
+  return merged;
+}
+
+function windowsDurationMs(windows: TimeWindowMs[]): number {
+  return windows.reduce((total, window) => total + window.end_ms - window.start_ms, 0);
+}
+
+function overlapDurationMs(left: TimeWindowMs[], right: TimeWindowMs[]): number {
+  let total = 0;
+  for (const a of left) {
+    for (const b of right) {
+      total += Math.max(0, Math.min(a.end_ms, b.end_ms) - Math.max(a.start_ms, b.start_ms));
+    }
+  }
+  return total;
+}
+
+/**
+ * Convert ffmpeg silencedetect output into non-silent intervals. This makes
+ * placement QA independent from total stream duration: a dialogue stem can be
+ * the correct length while every utterance is shifted to the wrong time.
+ */
+export function parseNonSilentIntervals(
+  stderr: string,
+  durationMs: number,
+): TimeWindowMs[] {
+  const silenceWindows: TimeWindowMs[] = [];
+  let currentSilenceStartMs: number | null = null;
+
+  for (const line of stderr.split(/\r?\n/)) {
+    const silenceStartMatch = line.match(/silence_start:\s*([\d.e+-]+)/);
+    if (silenceStartMatch) {
+      currentSilenceStartMs = Math.round(parseFloat(silenceStartMatch[1]) * 1000);
+    }
+
+    const silenceEndMatch = line.match(/silence_end:\s*([\d.e+-]+)/);
+    if (silenceEndMatch && currentSilenceStartMs != null) {
+      silenceWindows.push({
+        start_ms: currentSilenceStartMs,
+        end_ms: Math.round(parseFloat(silenceEndMatch[1]) * 1000),
+      });
+      currentSilenceStartMs = null;
+    }
+  }
+
+  if (currentSilenceStartMs != null) {
+    silenceWindows.push({ start_ms: currentSilenceStartMs, end_ms: durationMs });
+  }
+
+  const mergedSilence = mergeWindows(silenceWindows, durationMs);
+  const signalWindows: TimeWindowMs[] = [];
+  let cursorMs = 0;
+  for (const silence of mergedSilence) {
+    if (silence.start_ms > cursorMs) {
+      signalWindows.push({ start_ms: cursorMs, end_ms: silence.start_ms });
+    }
+    cursorMs = Math.max(cursorMs, silence.end_ms);
+  }
+  if (cursorMs < durationMs) {
+    signalWindows.push({ start_ms: cursorMs, end_ms: durationMs });
+  }
+  return signalWindows;
+}
 
 function execFilePromise(
   cmd: string,
@@ -264,10 +368,17 @@ async function measureLoudness(
 async function measureDialogueOccupancy(
   inputPath: string,
   audioDurationMs: number,
+  expectedWindowsMs?: TimeWindowMs[],
 ): Promise<{
+  dialogueWindowMs: number;
   dialogueOccupancy: number;
   observedNonSilentMs: number;
   silenceTotalMs: number;
+  dialogueOutsideExpectedMs?: number;
+  dialogueFirstSignalMs?: number;
+  dialogueLastSignalMs?: number;
+  expectedDialogueStartMs?: number;
+  expectedDialogueEndMs?: number;
 }> {
   const { stderr } = await execFilePromise("ffmpeg", [
     "-hide_banner",
@@ -279,36 +390,38 @@ async function measureDialogueOccupancy(
     "-",
   ], { timeout: 120_000 });
 
-  let currentSilenceStartMs: number | null = null;
-  let silenceTotalMs = 0;
-
-  for (const line of stderr.split(/\r?\n/)) {
-    const silenceStartMatch = line.match(/silence_start:\s*([\d.e+-]+)/);
-    if (silenceStartMatch) {
-      currentSilenceStartMs = Math.round(parseFloat(silenceStartMatch[1]) * 1000);
-    }
-
-    const silenceEndMatch = line.match(/silence_end:\s*([\d.e+-]+)/);
-    if (silenceEndMatch && currentSilenceStartMs != null) {
-      const silenceEndMs = Math.round(parseFloat(silenceEndMatch[1]) * 1000);
-      silenceTotalMs += Math.max(0, silenceEndMs - currentSilenceStartMs);
-      currentSilenceStartMs = null;
-    }
-  }
-
-  if (currentSilenceStartMs != null) {
-    silenceTotalMs += Math.max(0, audioDurationMs - currentSilenceStartMs);
-  }
-
-  const observedNonSilentMs = Math.max(0, audioDurationMs - silenceTotalMs);
-  const dialogueOccupancy = audioDurationMs > 0
-    ? round(observedNonSilentMs / audioDurationMs, 6)
+  const signalWindows = parseNonSilentIntervals(stderr, audioDurationMs);
+  const totalSignalMs = windowsDurationMs(signalWindows);
+  const expectedWindows = expectedWindowsMs?.length
+    ? mergeWindows(expectedWindowsMs, audioDurationMs)
+    : [];
+  const dialogueWindowMs = expectedWindows.length > 0
+    ? windowsDurationMs(expectedWindows)
+    : audioDurationMs;
+  const observedNonSilentMs = expectedWindows.length > 0
+    ? overlapDurationMs(signalWindows, expectedWindows)
+    : totalSignalMs;
+  const silenceTotalMs = Math.max(0, dialogueWindowMs - observedNonSilentMs);
+  const dialogueOccupancy = dialogueWindowMs > 0
+    ? round(observedNonSilentMs / dialogueWindowMs, 6)
     : 0;
+  const firstSignal = signalWindows.at(0);
+  const lastSignal = signalWindows.at(-1);
+  const firstExpected = expectedWindows.at(0);
+  const lastExpected = expectedWindows.at(-1);
 
   return {
+    dialogueWindowMs,
     dialogueOccupancy,
     observedNonSilentMs,
     silenceTotalMs,
+    ...(expectedWindows.length > 0 ? {
+      dialogueOutsideExpectedMs: Math.max(0, totalSignalMs - observedNonSilentMs),
+      expectedDialogueStartMs: firstExpected?.start_ms,
+      expectedDialogueEndMs: lastExpected?.end_ms,
+    } : {}),
+    ...(firstSignal ? { dialogueFirstSignalMs: firstSignal.start_ms } : {}),
+    ...(lastSignal ? { dialogueLastSignalMs: lastSignal.end_ms } : {}),
   };
 }
 
@@ -337,12 +450,28 @@ export function buildQaMeasurementsFromPrecomputed(
     video_duration_ms: videoDurationMs,
     audio_duration_ms: audioDurationMs,
     dialogue_window_ms: dialogueWindowMs,
+    av_duration_delta_ms: Math.abs(videoDurationMs - audioDurationMs),
     av_drift_ms: Math.abs(videoDurationMs - audioDurationMs),
     loudness_integrated: metrics.integratedLufs ?? 0,
     loudness_true_peak: metrics.truePeakDbtp ?? 0,
     dialogue_occupancy: dialogueOccupancy,
     observed_non_silent_ms: observedNonSilentMs,
     silence_total_ms: silenceTotalMs,
+    ...(metrics.dialogueOutsideExpectedMs != null
+      ? { dialogue_outside_expected_ms: metrics.dialogueOutsideExpectedMs }
+      : {}),
+    ...(metrics.dialogueFirstSignalMs != null
+      ? { dialogue_first_signal_ms: metrics.dialogueFirstSignalMs }
+      : {}),
+    ...(metrics.dialogueLastSignalMs != null
+      ? { dialogue_last_signal_ms: metrics.dialogueLastSignalMs }
+      : {}),
+    ...(metrics.expectedDialogueStartMs != null
+      ? { expected_dialogue_start_ms: metrics.expectedDialogueStartMs }
+      : {}),
+    ...(metrics.expectedDialogueEndMs != null
+      ? { expected_dialogue_end_ms: metrics.expectedDialogueEndMs }
+      : {}),
     ...(metrics.videoFrame ? { video_frame: metrics.videoFrame } : {}),
   };
 }
@@ -351,17 +480,25 @@ export async function measureQaMedia(
   options: MeasureQaMediaOptions,
 ): Promise<QaMeasurements> {
   const videoPath = path.resolve(options.videoPath);
-  const audioPath = path.resolve(options.audioPath ?? options.videoPath);
+  const audioPath = options.videoOnly
+    ? undefined
+    : path.resolve(options.audioPath ?? options.videoPath);
 
   if (!fs.existsSync(videoPath)) {
     throw new Error(`QA measurement video source not found: ${videoPath}`);
   }
-  if (!fs.existsSync(audioPath)) {
+  if (audioPath && !fs.existsSync(audioPath)) {
     throw new Error(`QA measurement audio source not found: ${audioPath}`);
+  }
+  const dialoguePath = options.dialoguePath
+    ? path.resolve(options.dialoguePath)
+    : audioPath;
+  if (dialoguePath && !fs.existsSync(dialoguePath)) {
+    throw new Error(`QA measurement dialogue source not found: ${dialoguePath}`);
   }
 
   const videoDurationMs = await probeDurationMs(videoPath, "v:0");
-  const audioDurationMs = await probeDurationMs(audioPath, "a:0");
+  const audioDurationMs = audioPath ? await probeDurationMs(audioPath, "a:0") : 0;
   let videoFrame: QaVideoFrameMetadata | undefined;
   let videoFrameProbeError: string | undefined;
   try {
@@ -369,24 +506,48 @@ export async function measureQaMedia(
   } catch (err) {
     videoFrameProbeError = err instanceof Error ? err.message : String(err);
   }
-  const loudness = await measureLoudness(audioPath);
-  const occupancy = await measureDialogueOccupancy(audioPath, audioDurationMs);
+  const loudness = audioPath
+    ? await measureLoudness(audioPath)
+    : { integratedLufs: 0, truePeakDbtp: 0 };
+  const occupancy = dialoguePath
+    ? await measureDialogueOccupancy(
+        dialoguePath,
+        audioDurationMs,
+        options.expectedDialogueWindowsMs,
+      )
+    : { dialogueWindowMs: 0, dialogueOccupancy: 0, observedNonSilentMs: 0, silenceTotalMs: 0 };
 
   const measurements: QaMeasurements = {
     version: "1.0.0",
     measured_at: options.createdAt ?? new Date().toISOString(),
     measurement_source: "media_probe",
     video_path: videoPath,
-    audio_path: audioPath,
+    ...(audioPath ? { audio_path: audioPath } : {}),
     video_duration_ms: videoDurationMs,
     audio_duration_ms: audioDurationMs,
-    dialogue_window_ms: audioDurationMs,
-    av_drift_ms: Math.abs(videoDurationMs - audioDurationMs),
+    dialogue_window_ms: occupancy.dialogueWindowMs,
+    av_duration_delta_ms: audioPath ? Math.abs(videoDurationMs - audioDurationMs) : 0,
+    av_drift_ms: audioPath ? Math.abs(videoDurationMs - audioDurationMs) : 0,
     loudness_integrated: loudness.integratedLufs,
     loudness_true_peak: loudness.truePeakDbtp,
     dialogue_occupancy: occupancy.dialogueOccupancy,
     observed_non_silent_ms: occupancy.observedNonSilentMs,
     silence_total_ms: occupancy.silenceTotalMs,
+    ...(occupancy.dialogueOutsideExpectedMs != null
+      ? { dialogue_outside_expected_ms: occupancy.dialogueOutsideExpectedMs }
+      : {}),
+    ...(occupancy.dialogueFirstSignalMs != null
+      ? { dialogue_first_signal_ms: occupancy.dialogueFirstSignalMs }
+      : {}),
+    ...(occupancy.dialogueLastSignalMs != null
+      ? { dialogue_last_signal_ms: occupancy.dialogueLastSignalMs }
+      : {}),
+    ...(occupancy.expectedDialogueStartMs != null
+      ? { expected_dialogue_start_ms: occupancy.expectedDialogueStartMs }
+      : {}),
+    ...(occupancy.expectedDialogueEndMs != null
+      ? { expected_dialogue_end_ms: occupancy.expectedDialogueEndMs }
+      : {}),
     ...(videoFrame ? { video_frame: videoFrame } : {}),
     ...(videoFrameProbeError ? { video_frame_probe_error: videoFrameProbeError } : {}),
   };
@@ -396,14 +557,15 @@ export async function measureQaMedia(
 }
 
 export function collectQaMeasurementWarnings(
-  measurements: Pick<QaMeasurements, "av_drift_ms" | "loudness_integrated">,
+  measurements: Pick<QaMeasurements, "av_duration_delta_ms" | "av_drift_ms" | "loudness_integrated">,
 ): QaMeasurementWarning[] {
   const warnings: QaMeasurementWarning[] = [];
+  const durationDeltaMs = measurements.av_duration_delta_ms ?? measurements.av_drift_ms;
 
-  if (measurements.av_drift_ms >= AV_DRIFT_WARNING_MS) {
+  if (durationDeltaMs >= AV_DRIFT_WARNING_MS) {
     warnings.push({
       code: "AV_DRIFT_WARNING",
-      message: `A/V drift ${measurements.av_drift_ms}ms exceeds ${AV_DRIFT_WARNING_MS}ms warning threshold`,
+      message: `A/V stream duration delta ${durationDeltaMs}ms exceeds ${AV_DRIFT_WARNING_MS}ms warning threshold`,
     });
   }
 

@@ -34,6 +34,7 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
               confidence: 0.94,
               quality_flags: [],
               audio_policy: {
+                gain_unit: 'db',
                 nat_gain: 0,
                 nat_sound_gain: -6,
                 duck_music_db: -16,
@@ -105,6 +106,7 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
               confidence: 0.95,
               quality_flags: [],
               audio_policy: {
+                gain_unit: 'db',
                 nat_gain: 0,
                 duck_music_db: -18,
                 fade_in_frames: 2,
@@ -125,6 +127,7 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
               confidence: 0.81,
               quality_flags: [],
               audio_policy: {
+                gain_unit: 'db',
                 nat_sound_gain: -4,
                 duck_music_db: -12,
               },
@@ -143,6 +146,7 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
               confidence: 0.86,
               quality_flags: [],
               audio_policy: {
+                gain_unit: 'db',
                 nat_sound_gain: -10,
                 fade_in_frames: 6,
                 fade_out_frames: 6,
@@ -162,6 +166,7 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
               confidence: 0.93,
               quality_flags: [],
               audio_policy: {
+                gain_unit: 'linear',
                 nat_gain: 1.5,
                 duck_music_db: -20,
                 fade_in_frames: 3,
@@ -187,6 +192,7 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
               confidence: 1,
               quality_flags: [],
               audio_policy: {
+                gain_unit: 'db',
                 bgm_gain: -18,
                 duck_music_db: -18,
                 bgm_fade_in_frames: 12,
@@ -204,6 +210,7 @@ function makeTimeline(projectId: string, name: string): TimelineIR {
       { frame: 396, kind: 'beat', label: 'b04: close' },
     ],
     audio_mix: {
+      gain_unit: 'db',
       bgm_gain: -18,
       duck_music_db: -18,
       strategy: 'dialogue_ducked_bgm',

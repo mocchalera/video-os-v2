@@ -20,8 +20,11 @@ export interface SegmentsJson {
 export interface GapEntry {
   stage: string;
   asset_id: string;
+  source_id?: string;
   issue: string;
   severity: "warning" | "error";
+  consumer_impact?: string;
+  affected_capabilities?: string[];
   segment_id?: string;
   blocking?: boolean;
   retriable?: boolean;

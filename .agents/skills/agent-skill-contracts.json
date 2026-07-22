@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "runtime/pipeline/full-pipeline-contract.ts",
+  "skills": {
+    "full-pipeline": {
+      "skillPath": ".agents/skills/full-pipeline/SKILL.md",
+      "commands": [
+        {
+          "invocation": "npm run full-pipeline -- --project <project-id> --source-dir <source-dir>",
+          "packageScript": "full-pipeline",
+          "entrypoint": "scripts/full-pipeline.ts"
+        },
+        {
+          "invocation": "npx tsx scripts/analyze.ts",
+          "entrypoint": "scripts/analyze.ts"
+        },
+        {
+          "invocation": "npx tsx scripts/editorial-agent-task.ts",
+          "entrypoint": "scripts/editorial-agent-task.ts"
+        },
+        {
+          "invocation": "npx tsx scripts/compile-timeline.ts",
+          "entrypoint": "scripts/compile-timeline.ts"
+        },
+        {
+          "invocation": "npm run render-route",
+          "packageScript": "render-route",
+          "entrypoint": "scripts/render-route.ts"
+        },
+        {
+          "invocation": "npm run package",
+          "packageScript": "package",
+          "entrypoint": "scripts/package.ts"
+        }
+      ],
+      "flags": [
+        "--project",
+        "--source-dir",
+        "--content-hint",
+        "--from",
+        "--skip-analyze",
+        "--skip-footage-db",
+        "--skip-render",
+        "--skip-qa",
+        "--no-qwen3vl",
+        "--no-clap-audio",
+        "--help"
+      ],
+      "resumeStages": [
+        "ingest",
+        "stt",
+        "marlin",
+        "visual-quality",
+        "peak",
+        "embeddings",
+        "triage",
+        "blueprint",
+        "compile",
+        "render",
+        "QA"
+      ],
+      "prerequisiteReferences": [
+        "references/gate-conditions.md",
+        "references/recovery-playbook.md"
+      ],
+      "producedArtifacts": [
+        "01_intent/*",
+        "03_analysis/*",
+        "04_plan/*",
+        "05_timeline/*",
+        "06_review/*",
+        "07_package/*",
+        "09_output/rough-cut.mp4"
+      ]
+    }
+  }
+}

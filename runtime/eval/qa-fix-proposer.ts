@@ -7,6 +7,19 @@ import {
 } from "../tools/footage-search.js";
 import type { QAIssue } from "./qa-issue-detector.js";
 import { primaryVideoClips } from "./qa-issue-detector.js";
+import {
+  buildReplacementSnapshot,
+  defaultDiscoveryContract,
+  existingEligibleCandidate,
+  replacementIsExcluded,
+  resolveCanonicalReplacement,
+  normalizeQASnapshotString,
+  isQASnapshotSafeIdentifier,
+  QA_FIX_SNAPSHOT_LIMITS,
+  type CanonicalReplacement,
+  type QADiscoveryContract,
+  type QAReplacementSnapshot,
+} from "./qa-source-discovery.js";
 
 export type QAFixType = "swap" | "reorder" | "trim" | "insert" | "remove";
 export type QAFixRisk = "low" | "medium" | "high";
@@ -24,6 +37,7 @@ export interface QAFix {
     search_score: number;
     matched_frame_path?: string;
     reason: string;
+    snapshot?: QAReplacementSnapshot;
   };
   expected_improvement: number;
   risk: QAFixRisk;
@@ -40,12 +54,14 @@ export interface ProposeFixesOptions {
   minQualityScore?: number;
   searchLimit?: number;
   search?: QAFixSearchFn;
+  discovery?: QADiscoveryContract;
 }
 
 interface ReplacementChoice {
   result: FootageSearchResult;
-  candidate: Candidate;
+  candidate?: Candidate;
   qualityScore: number;
+  canonical?: CanonicalReplacement;
 }
 
 const DEFAULT_MAX_FIXES = 5;
@@ -65,6 +81,8 @@ export async function proposeFixes(
   const searchLimit = opts.searchLimit ?? DEFAULT_SEARCH_LIMIT;
   const maxFixes = opts.maxFixes ?? DEFAULT_MAX_FIXES;
   const minImprovement = opts.minImprovement ?? DEFAULT_MIN_IMPROVEMENT;
+  const discovery = opts.discovery ?? defaultDiscoveryContract(selects.project_id, minQualityScore);
+  if (timeline.project_id !== selects.project_id || selects.project_id !== discovery.projectId) return [];
 
   const proposed: QAFix[] = [];
   for (const issue of [...issues].filter((item) => item.fixable).sort(compareIssuesForProposal)) {
@@ -72,6 +90,7 @@ export async function proposeFixes(
       search,
       minQualityScore,
       searchLimit,
+      discovery,
     });
     if (!fix) continue;
     if (fix.expected_improvement < minImprovement) continue;
@@ -99,7 +118,7 @@ async function proposeFixForIssue(
   timeline: TimelineIR,
   selects: SelectsCandidates,
   projectDir: string,
-  options: Required<Pick<ProposeFixesOptions, "search" | "minQualityScore" | "searchLimit">>,
+  options: Required<Pick<ProposeFixesOptions, "search" | "minQualityScore" | "searchLimit" | "discovery">>,
 ): Promise<QAFix | null> {
   if (issue.type === "continuity") {
     return proposeContinuityFix(issue, timeline, selects, projectDir, options);
@@ -126,32 +145,51 @@ async function proposeSearchFix(
   timeline: TimelineIR,
   selects: SelectsCandidates,
   projectDir: string,
-  options: Required<Pick<ProposeFixesOptions, "search" | "minQualityScore" | "searchLimit">>,
+  options: Required<Pick<ProposeFixesOptions, "search" | "minQualityScore" | "searchLimit" | "discovery">>,
 ): Promise<QAFix | null> {
   const targetClip = targetClipForIssue(issue, timeline);
   if (!targetClip) return null;
+  const targetBeatId = issue.beat_id ?? targetClip.beat_id;
+  if (targetBeatId !== targetClip.beat_id) return null;
+  if (!isQASnapshotSafeIdentifier(targetClip.clip_id) || !isQASnapshotSafeIdentifier(targetBeatId)) return null;
   const excluded = timelineSegmentIds(timeline);
   const input = searchInputForIssue(issue, targetClip, searchMode, excluded, options);
   const response = await options.search(projectDir, input);
   const replacement = issue.type === "variety"
-    ? chooseVarietyReplacement(response.results, timeline, selects, excluded, options.minQualityScore)
-    : chooseReplacement(response.results, selects, excluded, options.minQualityScore);
+    ? chooseVarietyReplacement(response.results, timeline, selects, projectDir, targetBeatId, options.discovery)
+    : chooseReplacement(response.results, timeline, selects, projectDir, targetBeatId, options.discovery);
   if (!replacement) return null;
 
   const risk = classifyRisk(fixType, issue, targetClip, replacement.candidate);
   const expected = expectedReplacementImprovement(issue, replacement, selects, targetClip, fixType);
+  const reason = normalizeQASnapshotString(
+    replacement.result.match_reason || issue.description,
+    QA_FIX_SNAPSHOT_LIMITS.reason_chars,
+  );
   return {
     issue_id: issue.issue_id,
     issue,
     fix_type: fixType,
     target_clip_id: targetClip.clip_id,
-    target_beat_id: issue.beat_id ?? targetClip.beat_id,
+    target_beat_id: targetBeatId,
     replacement: {
       segment_id: replacement.result.segment_id,
       search_mode: searchMode,
       search_score: round3(scoreForResult(replacement.result)),
       ...(replacement.result.key_frame_path ? { matched_frame_path: replacement.result.key_frame_path } : {}),
-      reason: replacement.result.match_reason || issue.description,
+      reason,
+      ...(replacement.canonical ? {
+        snapshot: buildReplacementSnapshot({
+          canonical: replacement.canonical,
+          result: replacement.result,
+          contract: options.discovery,
+          targetClipId: targetClip.clip_id,
+          targetBeatId,
+          searchMode,
+          searchScore: scoreForResult(replacement.result),
+          reason,
+        }),
+      } : {}),
     },
     expected_improvement: expected,
     risk,
@@ -163,7 +201,7 @@ async function proposeContinuityFix(
   timeline: TimelineIR,
   selects: SelectsCandidates,
   projectDir: string,
-  options: Required<Pick<ProposeFixesOptions, "search" | "minQualityScore" | "searchLimit">>,
+  options: Required<Pick<ProposeFixesOptions, "search" | "minQualityScore" | "searchLimit" | "discovery">>,
 ): Promise<QAFix | null> {
   const leftClip = issue.adjacent_clip_ids?.before
     ? clipById(timeline, issue.adjacent_clip_ids.before)
@@ -172,6 +210,9 @@ async function proposeContinuityFix(
     ? clipById(timeline, issue.adjacent_clip_ids.after)
     : undefined;
   if (!leftClip || !rightClip) return null;
+  const targetBeatId = issue.beat_id ?? leftClip.beat_id;
+  if (targetBeatId !== leftClip.beat_id) return null;
+  if (!isQASnapshotSafeIdentifier(leftClip.clip_id) || !isQASnapshotSafeIdentifier(targetBeatId)) return null;
 
   const excluded = timelineSegmentIds(timeline);
   const baseInput = {
@@ -196,23 +237,39 @@ async function proposeContinuityFix(
   ]);
 
   const merged = mergeBridgeResults(leftResponse.results, rightResponse.results);
-  const replacement = chooseReplacement(merged, selects, excluded, options.minQualityScore);
+  const replacement = chooseReplacement(merged, timeline, selects, projectDir, targetBeatId, options.discovery);
   if (!replacement) return null;
 
   const risk = classifyRisk("insert", issue, leftClip, replacement.candidate);
   const expected = expectedReplacementImprovement(issue, replacement, selects, leftClip, "insert");
+  const reason = normalizeQASnapshotString(
+    replacement.result.match_reason || `Bridge visual continuity between ${leftClip.clip_id} and ${rightClip.clip_id}`,
+    QA_FIX_SNAPSHOT_LIMITS.reason_chars,
+  );
   return {
     issue_id: issue.issue_id,
     issue,
     fix_type: "insert",
     target_clip_id: leftClip.clip_id,
-    target_beat_id: issue.beat_id ?? leftClip.beat_id,
+    target_beat_id: targetBeatId,
     replacement: {
       segment_id: replacement.result.segment_id,
       search_mode: "visual",
       search_score: round3(scoreForResult(replacement.result)),
       ...(replacement.result.key_frame_path ? { matched_frame_path: replacement.result.key_frame_path } : {}),
-      reason: replacement.result.match_reason || `Bridge visual continuity between ${leftClip.clip_id} and ${rightClip.clip_id}`,
+      reason,
+      ...(replacement.canonical ? {
+        snapshot: buildReplacementSnapshot({
+          canonical: replacement.canonical,
+          result: replacement.result,
+          contract: options.discovery,
+          targetClipId: leftClip.clip_id,
+          targetBeatId,
+          searchMode: "visual",
+          searchScore: scoreForResult(replacement.result),
+          reason,
+        }),
+      } : {}),
     },
     expected_improvement: expected,
     risk,
@@ -273,24 +330,24 @@ function searchInputForIssue(
 
 function chooseReplacement(
   results: FootageSearchResult[],
+  timeline: TimelineIR,
   selects: SelectsCandidates,
-  excludedSegmentIds: string[],
-  minQualityScore: number,
+  projectDir: string,
+  targetBeatId: string,
+  discovery: QADiscoveryContract,
 ): ReplacementChoice | null {
-  const excluded = new Set(excludedSegmentIds);
-  const candidateBySegment = new Map(
-    selects.candidates
-      .filter((candidate) => candidate.role !== "reject")
-      .map((candidate) => [candidate.segment_id, candidate]),
-  );
-
   for (const result of [...results].sort(compareResults)) {
-    if (excluded.has(result.segment_id)) continue;
-    const candidate = candidateBySegment.get(result.segment_id);
-    if (!candidate) continue;
-    const qualityScore = qualityScoreForResult(result, candidate);
-    if (qualityScore < minQualityScore) continue;
-    return { result, candidate, qualityScore };
+    if (!validSearchScore(result)) continue;
+    if (replacementIsExcluded(result.segment_id, timeline, selects, discovery)) continue;
+    const candidate = existingEligibleCandidate(selects, result.segment_id, targetBeatId);
+    if (candidate) {
+      const qualityScore = qualityScoreForResult(result, candidate);
+      if (qualityScore < discovery.minQualityScore) continue;
+      return { result, candidate, qualityScore };
+    }
+    const canonical = resolveCanonicalReplacement(projectDir, result.segment_id, discovery);
+    if (!canonical || !searchResultMatchesCanonical(result, canonical)) continue;
+    return { result, qualityScore: canonical.qualityScore, canonical };
   }
   return null;
 }
@@ -299,26 +356,24 @@ function chooseVarietyReplacement(
   results: FootageSearchResult[],
   timeline: TimelineIR,
   selects: SelectsCandidates,
-  excludedSegmentIds: string[],
-  minQualityScore: number,
+  projectDir: string,
+  targetBeatId: string,
+  discovery: QADiscoveryContract,
 ): ReplacementChoice | null {
-  const excluded = new Set(excludedSegmentIds);
   const selectedAssetIds = new Set(primaryVideoClips(timeline).map((clip) => clip.asset_id));
   const selectedClusters = selectedSemanticClusters(timeline, selects);
-  const candidateBySegment = new Map(
-    selects.candidates
-      .filter((candidate) => candidate.role !== "reject")
-      .map((candidate) => [candidate.segment_id, candidate]),
-  );
   const choices = results.flatMap((result) => {
-    if (excluded.has(result.segment_id)) return [];
-    const candidate = candidateBySegment.get(result.segment_id);
-    if (!candidate) return [];
-    const qualityScore = qualityScoreForResult(result, candidate);
-    if (qualityScore < minQualityScore) return [];
+    if (!validSearchScore(result)) return [];
+    if (replacementIsExcluded(result.segment_id, timeline, selects, discovery)) return [];
+    const candidate = existingEligibleCandidate(selects, result.segment_id, targetBeatId);
+    const canonical = candidate ? undefined : resolveCanonicalReplacement(projectDir, result.segment_id, discovery) ?? undefined;
+    if (!candidate && (!canonical || !searchResultMatchesCanonical(result, canonical))) return [];
+    const qualityScore = candidate ? qualityScoreForResult(result, candidate) : canonical!.qualityScore;
+    if (qualityScore < discovery.minQualityScore) return [];
     return [{
       result,
       candidate,
+      canonical,
       qualityScore,
       noveltyScore: visualNoveltyScore(result, candidate, selectedAssetIds, selectedClusters),
     }];
@@ -390,11 +445,11 @@ function selectedSemanticClusters(timeline: TimelineIR, selects: SelectsCandidat
 
 function visualNoveltyScore(
   result: FootageSearchResult,
-  candidate: Candidate,
+  candidate: Candidate | undefined,
   selectedAssetIds: Set<string>,
   selectedClusters: Set<string>,
 ): number {
-  const cluster = candidate.editorial_signals?.semantic_cluster_id;
+  const cluster = candidate?.editorial_signals?.semantic_cluster_id;
   const qwenSimilarity = typeof result.scores.qwen_visual === "number" ? clamp01(result.scores.qwen_visual) : undefined;
   return clamp01(
     (selectedAssetIds.has(result.asset_id) ? 0 : 0.45)
@@ -450,6 +505,17 @@ function qualityScoreForResult(result: FootageSearchResult, candidate: Candidate
     return clamp01(candidate.confidence);
   }
   return clamp01(scoreForResult(result));
+}
+
+function searchResultMatchesCanonical(result: FootageSearchResult, canonical: CanonicalReplacement): boolean {
+  return result.asset_id === canonical.segment.asset_id
+    && result.src_in_us === canonical.segment.src_in_us
+    && result.src_out_us === canonical.segment.src_out_us;
+}
+
+function validSearchScore(result: FootageSearchResult): boolean {
+  const score = scoreForResult(result);
+  return Number.isFinite(score) && score >= 0 && score <= 1;
 }
 
 function compareFixes(left: QAFix, right: QAFix): number {

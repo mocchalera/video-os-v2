@@ -13,10 +13,10 @@
 
 根拠:
 
-- `/caption` は `draftOnly` でない限り、その場で `finishApprovalAndProjection()` に進み、`caption_draft.json` から即 `caption_approval.json` を生成する。[[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L205)] [[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L250)] [[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L265)]
-- しかも `critique_ready` も allowed state に入っている一方、approval 生成自体には state gate が無い。`approved` かどうかを見ているのは timeline 反映だけで、approval artifact の作成は止まらない。[[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L92)] [[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L324)]
-- 設計は `caption_draft.json` を `ready_for_human_approval` と判定できる場合でも、人間承認が入るまで `caption_approval.json` を生成してはいけないとしている。[[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L512)] [[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L526)]
-- M4 既存契約でも editorial approval は operator が確定する 2 段階 workflow で固定されている。[[milestone-4-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/milestone-4-design.md#L661)]
+- `/caption` は `draftOnly` でない限り、その場で `finishApprovalAndProjection()` に進み、`caption_draft.json` から即 `caption_approval.json` を生成する。[[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L205)] [[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L250)] [[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L265)]
+- しかも `critique_ready` も allowed state に入っている一方、approval 生成自体には state gate が無い。`approved` かどうかを見ているのは timeline 反映だけで、approval artifact の作成は止まらない。[[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L92)] [[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L324)]
+- 設計は `caption_draft.json` を `ready_for_human_approval` と判定できる場合でも、人間承認が入るまで `caption_approval.json` を生成してはいけないとしている。[[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L512)] [[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L526)]
+- M4 既存契約でも editorial approval は operator が確定する 2 段階 workflow で固定されている。[[milestone-4-design.md](/Users/operator/Dev/video-os-v2-spec/docs/milestone-4-design.md#L661)]
 
 影響:
 
@@ -34,10 +34,10 @@
 
 根拠:
 
-- 設計は `/caption` を `source -> editorial -> timing -> validation -> draft projection -> approval projection` に再編し、`timing_confidence` と `source_word_refs` を `caption_draft.json` / `caption_approval.json` に保持する前提である。[[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L288)] [[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L399)] [[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L512)]
-- しかし `captionCommand()` には timing phase が存在せず、`word-remap.ts` も import されていない。実装は `generateCaptionSource()` の後に editorial と approval へ直行する。[[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L156)] [[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L186)] [[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L209)]
-- `CaptionDraftEntry` には `timing` metadata がなく、`caption-approval` schema にも `editorial` / `timing` を保持する欄が無い。approved 後に provenance を保持する契約にも未達である。[[editorial.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/editorial.ts#L53)] [[caption-approval.schema.json](/Users/mocchalera/Dev/video-os-v2-spec/schemas/caption-approval.schema.json#L49)]
-- `remapWithWordTimestamps()` も caption text と word sequence を照合せず、参照 transcript item 上の全 word の最小 start / 最大 end を採るだけなので、1 item が複数 caption に割れたケースでは全 caption が同じ広い span になる。[[word-remap.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/word-remap.ts#L68)] [[word-remap.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/word-remap.ts#L92)]
+- 設計は `/caption` を `source -> editorial -> timing -> validation -> draft projection -> approval projection` に再編し、`timing_confidence` と `source_word_refs` を `caption_draft.json` / `caption_approval.json` に保持する前提である。[[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L288)] [[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L399)] [[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L512)]
+- しかし `captionCommand()` には timing phase が存在せず、`word-remap.ts` も import されていない。実装は `generateCaptionSource()` の後に editorial と approval へ直行する。[[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L156)] [[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L186)] [[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L209)]
+- `CaptionDraftEntry` には `timing` metadata がなく、`caption-approval` schema にも `editorial` / `timing` を保持する欄が無い。approved 後に provenance を保持する契約にも未達である。[[editorial.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/editorial.ts#L53)] [[caption-approval.schema.json](/Users/operator/Dev/video-os-v2-spec/schemas/caption-approval.schema.json#L49)]
+- `remapWithWordTimestamps()` も caption text と word sequence を照合せず、参照 transcript item 上の全 word の最小 start / 最大 end を採るだけなので、1 item が複数 caption に割れたケースでは全 caption が同じ広い span になる。[[word-remap.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/word-remap.ts#L68)] [[word-remap.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/word-remap.ts#L92)]
 
 影響:
 
@@ -55,9 +55,9 @@
 
 根拠:
 
-- `runBlueprint()` が iterative path に入る条件は `options?.iterativeEngine !== false` に加えて `!!phases` であり、`phases` を渡さない限り legacy single-pass agent にフォールバックする。[[blueprint.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L367)] [[blueprint.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L484)]
-- 既存の command/e2e test はすべて `runBlueprint(tmpDir, agent)` の 2 引数呼び出しで、iterative phases を一度も渡していない。[[commands.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/commands.test.ts#L1252)] [[e2e-m3.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/e2e-m3.test.ts#L420)]
-- `runtime/script/{frame,read,draft,evaluate}.ts` は unit test されているが、`/blueprint` command path には接続されていない。[[m45-script-engine.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/m45-script-engine.test.ts#L1)]
+- `runBlueprint()` が iterative path に入る条件は `options?.iterativeEngine !== false` に加えて `!!phases` であり、`phases` を渡さない限り legacy single-pass agent にフォールバックする。[[blueprint.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L367)] [[blueprint.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L484)]
+- 既存の command/e2e test はすべて `runBlueprint(tmpDir, agent)` の 2 引数呼び出しで、iterative phases を一度も渡していない。[[commands.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/commands.test.ts#L1252)] [[e2e-m3.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/e2e-m3.test.ts#L420)]
+- `runtime/script/{frame,read,draft,evaluate}.ts` は unit test されているが、`/blueprint` command path には接続されていない。[[m45-script-engine.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/m45-script-engine.test.ts#L1)]
 
 影響:
 
@@ -75,10 +75,10 @@
 
 根拠:
 
-- `line-breaker.ts` 自体は `20/42 chars` と `6/15 CPS` を持つが、`captionCommand()` は `generateCaptionSource()` に `autoLineBreak: true` を渡していない。[[line-breaker.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/line-breaker.ts#L27)] [[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L160)]
-- `segmenter.ts` の density calibration は依然として `ja fail=10.0`, `en fail=4.5 WPS` で、設計の `6.0 / 15.0 CPS` と一致していない。[[segmenter.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/segmenter.ts#L69)] [[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L452)]
-- `buildPassthroughDraft()` は layout / density / alignment / timing を一切見ずに `ready_for_human_approval` を返す。`runEditorial()` 側も `degraded_count` しか見ていない。[[caption.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/caption.ts#L347)] [[editorial.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/editorial.ts#L303)]
-- packaging QA も旧 hard-coded `10.0 CPS / 4.5 WPS` のままで、設計書が求める policy-driven threshold に更新されていない。[[qa.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/packaging/qa.ts#L40)] [[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L492)]
+- `line-breaker.ts` 自体は `20/42 chars` と `6/15 CPS` を持つが、`captionCommand()` は `generateCaptionSource()` に `autoLineBreak: true` を渡していない。[[line-breaker.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/line-breaker.ts#L27)] [[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L160)]
+- `segmenter.ts` の density calibration は依然として `ja fail=10.0`, `en fail=4.5 WPS` で、設計の `6.0 / 15.0 CPS` と一致していない。[[segmenter.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/segmenter.ts#L69)] [[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L452)]
+- `buildPassthroughDraft()` は layout / density / alignment / timing を一切見ずに `ready_for_human_approval` を返す。`runEditorial()` 側も `degraded_count` しか見ていない。[[caption.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/caption.ts#L347)] [[editorial.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/editorial.ts#L303)]
+- packaging QA も旧 hard-coded `10.0 CPS / 4.5 WPS` のままで、設計書が求める policy-driven threshold に更新されていない。[[qa.ts](/Users/operator/Dev/video-os-v2-spec/runtime/packaging/qa.ts#L40)] [[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L492)]
 
 影響:
 
@@ -94,8 +94,8 @@
 
 根拠:
 
-- space-separated acronym rejoin は `A B` のような通常の英字列も無条件で結合する。実際に `Plan A B test` は `Plan AB test`、`Grade A I think` は `Grade AI think` になる。原因は単純な `[A-Z]` 連結 regex で、文脈や glossary を見ていないため。[[cleanup.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/cleanup.ts#L26)]
-- stray punctuation 削除は punctuation の両側に whitespace を要求するため、`hello .world` や `こんにちは 。さようなら` のような片側だけ空白のノイズを落とせない。[[cleanup.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/caption/cleanup.ts#L45)]
+- space-separated acronym rejoin は `A B` のような通常の英字列も無条件で結合する。実際に `Plan A B test` は `Plan AB test`、`Grade A I think` は `Grade AI think` になる。原因は単純な `[A-Z]` 連結 regex で、文脈や glossary を見ていないため。[[cleanup.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/cleanup.ts#L26)]
+- stray punctuation 削除は punctuation の両側に whitespace を要求するため、`hello .world` や `こんにちは 。さようなら` のような片側だけ空白のノイズを落とせない。[[cleanup.ts](/Users/operator/Dev/video-os-v2-spec/runtime/caption/cleanup.ts#L45)]
 
 影響:
 
@@ -111,9 +111,9 @@
 
 根拠:
 
-- 新規 `caption-narrative-improvement.test.ts` の narrative 部分は `validateConfirmedPreferences()` しか見ておらず、`runBlueprint()` の iterative path を通していない。[[caption-narrative-improvement.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/caption-narrative-improvement.test.ts#L357)]
-- 同テストの caption artifact 分離も plain object assertion に留まり、`/caption` command の actual handoff を検証していない。[[caption-narrative-improvement.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/caption-narrative-improvement.test.ts#L633)]
-- 既存 E2E はむしろ legacy behavior を固定しており、`captionCommand()` が即 `caption_approval.json` を作ることを成功条件にしている。[[e2e-m4.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/e2e-m4.test.ts#L219)] [[e2e-m4.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/e2e-m4.test.ts#L440)]
+- 新規 `caption-narrative-improvement.test.ts` の narrative 部分は `validateConfirmedPreferences()` しか見ておらず、`runBlueprint()` の iterative path を通していない。[[caption-narrative-improvement.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/caption-narrative-improvement.test.ts#L357)]
+- 同テストの caption artifact 分離も plain object assertion に留まり、`/caption` command の actual handoff を検証していない。[[caption-narrative-improvement.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/caption-narrative-improvement.test.ts#L633)]
+- 既存 E2E はむしろ legacy behavior を固定しており、`captionCommand()` が即 `caption_approval.json` を作ることを成功条件にしている。[[e2e-m4.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/e2e-m4.test.ts#L219)] [[e2e-m4.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/e2e-m4.test.ts#L440)]
 
 影響:
 
@@ -135,8 +135,8 @@
 
 根拠:
 
-- `script_evaluation.yaml` の書き込みは success path のあとにしか実行されない。[[blueprint.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L464)]
-- human decline / max iteration failure はその前に return するため、設計書が要求する `confirmation_status`, `decline_reason`, `loop_summary` が残らない。[[blueprint.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L392)] [[caption-narrative-improvement-design.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L709)]
+- `script_evaluation.yaml` の書き込みは success path のあとにしか実行されない。[[blueprint.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L464)]
+- human decline / max iteration failure はその前に return するため、設計書が要求する `confirmation_status`, `decline_reason`, `loop_summary` が残らない。[[blueprint.ts](/Users/operator/Dev/video-os-v2-spec/runtime/commands/blueprint.ts#L392)] [[caption-narrative-improvement-design.md](/Users/operator/Dev/video-os-v2-spec/docs/caption-narrative-improvement-design.md#L709)]
 
 影響:
 

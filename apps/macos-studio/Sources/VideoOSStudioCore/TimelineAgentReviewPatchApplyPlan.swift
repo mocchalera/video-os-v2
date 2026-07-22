@@ -271,7 +271,7 @@ public struct TimelineAgentReviewPatchApplyPlan: Equatable, Sendable {
                     : TimelineTransition.stableID(trackID: trackID, fromClipID: fromClipID, toClipID: toClipID)
                 focusFrame = document.clipSelection(for: fromClipID)?.clip.timelineOutFrame ?? focusFrame
 
-            case .insertSegment, .changeAudioPolicy, .addMarker, .addNote:
+            case .insertSegment, .changeAudioPolicy, .changeVisualTransform, .changeAudioFinish, .addMarker, .addNote:
                 blockedReasons.append("\(operation.opName) はまだTimeline表示への直接反映に対応していません。")
             }
         }
@@ -368,7 +368,7 @@ private extension ReviewPatchOperation {
         switch self {
         case .replaceSegment, .trimSegment, .moveSegment, .splitSegment, .removeSegment, .setTransition:
             return true
-        case .insertSegment, .changeAudioPolicy, .addMarker, .addNote:
+        case .insertSegment, .changeAudioPolicy, .changeVisualTransform, .changeAudioFinish, .addMarker, .addNote:
             return false
         }
     }

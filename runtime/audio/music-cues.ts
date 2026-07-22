@@ -57,8 +57,56 @@ export interface MusicCuesDoc {
   version: string;
   project_id: string;
   base_timeline_version: string;
+  /** Explicit operator intent. Missing social talking-head work defaults dialogue-first. */
+  mix_profile?: "dialogue_first" | "balanced" | "music_forward";
   music_asset: MusicAsset;
   cues: MusicCue[];
+}
+
+export interface AppliedMusicMixProfile {
+  doc: MusicCuesDoc;
+  profile: "dialogue_first" | "balanced" | "music_forward";
+  adjusted: boolean;
+}
+
+/**
+ * Apply a conservative speech-first ceiling only to social talking-head work.
+ * Explicit balanced/music-forward intent remains authoritative, and quieter
+ * operator-authored values are never raised.
+ */
+export function applyMusicMixProfile(
+  doc: MusicCuesDoc,
+  genre: string | undefined,
+): AppliedMusicMixProfile {
+  const profile = doc.mix_profile
+    ?? (genre === "social_talking_head" ? "dialogue_first" : "balanced");
+  if (profile !== "dialogue_first") {
+    return { doc, profile, adjusted: false };
+  }
+
+  let adjusted = false;
+  const cues = doc.cues.map((cue) => {
+    const ducking: DuckingParams = {
+      ...cue.ducking,
+      base_gain_db: Math.min(cue.ducking.base_gain_db, -10),
+      duck_gain_db: Math.min(cue.ducking.duck_gain_db, -18),
+      attack_ms: Math.max(cue.ducking.attack_ms, 20),
+      release_ms: Math.max(cue.ducking.release_ms, 280),
+    };
+    adjusted ||= (
+      ducking.base_gain_db !== cue.ducking.base_gain_db
+      || ducking.duck_gain_db !== cue.ducking.duck_gain_db
+      || ducking.attack_ms !== cue.ducking.attack_ms
+      || ducking.release_ms !== cue.ducking.release_ms
+    );
+    return { ...cue, ducking };
+  });
+
+  return {
+    doc: { ...doc, mix_profile: profile, cues },
+    profile,
+    adjusted,
+  };
 }
 
 export interface BeatGridAnalysis {

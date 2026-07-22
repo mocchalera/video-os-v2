@@ -134,7 +134,7 @@ describe("scene continuity ordering", () => {
     ]);
   });
 
-  it("preserves existing order when embeddings are unavailable", () => {
+  it("uses timestamp metadata when embeddings are unavailable", () => {
     const clips = [
       clip("A", { segment_id: "SEG_A" }),
       clip("C", { segment_id: "SEG_C", timeline_in_frame: 10 }),
@@ -151,13 +151,63 @@ describe("scene continuity ordering", () => {
 
     expect(orderClipsBySceneContinuity(clips, visualCache).map((item) => item.segment_id)).toEqual([
       "SEG_A",
-      "SEG_C",
       "SEG_B",
+      "SEG_C",
     ]);
   });
 });
 
 describe("compile visual cache", () => {
+  it("loads and applies scene metadata without embeddings", () => {
+    const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "compiler-metadata-cache-"));
+    tempDirs.push(projectDir);
+    fs.mkdirSync(path.join(projectDir, "03_analysis", "search"), { recursive: true });
+    const db = new Database(path.join(projectDir, "03_analysis", "search", "footage.db"));
+    try {
+      db.exec(`
+        CREATE TABLE segments (
+          segment_id TEXT PRIMARY KEY,
+          asset_id TEXT NOT NULL,
+          src_in_us INTEGER NOT NULL
+        );
+        CREATE TABLE assets (
+          asset_id TEXT PRIMARY KEY,
+          filename TEXT NOT NULL,
+          shooting_date TEXT,
+          shooting_time TEXT,
+          camera_type TEXT
+        );
+      `);
+      db.prepare("INSERT INTO assets VALUES (?, ?, ?, ?, ?)").run("AST_SHARED", "shared.mov", null, null, "cam-a");
+      db.prepare("INSERT INTO segments VALUES (?, ?, ?)").run("SEG_A", "AST_SHARED", 2_000_000);
+      db.prepare("INSERT INTO segments VALUES (?, ?, ?)").run("SEG_B", "AST_SHARED", 1_000_000);
+    } finally {
+      db.close();
+    }
+
+    const loaded = loadVisualCache(projectDir, ["SEG_A", "SEG_B"]);
+    expect(loaded?.embeddings.size).toBe(0);
+    expect(loaded?.assetIds.size).toBe(2);
+    expect(orderClipsBySceneContinuity([
+      clip("A", { segment_id: "SEG_A", asset_id: "AST_SHARED", src_in_us: 2_000_000 }),
+      clip("B", { segment_id: "SEG_B", asset_id: "AST_SHARED", src_in_us: 1_000_000, timeline_in_frame: 10 }),
+    ], loaded).map(item => item.segment_id)).toEqual(["SEG_B", "SEG_A"]);
+
+    const { analysis } = adjacencyDecide(track([
+      clip("A", { segment_id: "SEG_A" }),
+      clip("B", { segment_id: "SEG_B", timeline_in_frame: 10 }),
+    ]), {
+      activeEditingSkills: [],
+      durationMode: "guide",
+      fpsNum: 24,
+      candidates: [candidate("SEG_A"), candidate("SEG_B")],
+      beats: [beat("b01")],
+      visualEmbeddings: loaded?.embeddings,
+    });
+    expect(analysis.pairs[0].evidence.visual_coherence_score).toBeUndefined();
+    expect(analysis.pairs[0].evidence.visual_transition_hint).toBeUndefined();
+  });
+
   it("loads Qwen visual embeddings and metadata only for requested placed segments", () => {
     const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "compiler-visual-cache-"));
     tempDirs.push(projectDir);
@@ -280,6 +330,12 @@ describe("visual coherence adjacency", () => {
     expect(low.transitions[0].applied_skill_id).toBe("visual.dissolve");
     expect(low.analysis.pairs[0].evidence.visual_coherence_score).toBe(0);
     expect(low.analysis.pairs[0].evidence.visual_transition_hint).toBe("dissolve");
+    expect(low.analysis.pairs[0].selection_rationale).toMatchObject({
+      outcome: "visual_override",
+      reason_codes: ["visual_coherence_override", "visual_hint:dissolve"],
+      applied_skill_id: "visual.dissolve",
+      override: { kind: "visual", selected_skill_id: "visual.dissolve", replaced_outcome: "no_eligible" },
+    });
 
     const high = adjacencyDecide(track([
       clip("A", { segment_id: "SEG_A" }),
@@ -300,6 +356,7 @@ describe("visual coherence adjacency", () => {
     expect(high.transitions[0].applied_skill_id).toBe("visual.hard_cut");
     expect(high.analysis.pairs[0].evidence.visual_coherence_score).toBe(1);
     expect(high.analysis.pairs[0].evidence.visual_transition_hint).toBe("hard_cut");
+    expect(high.analysis.pairs[0].selection_rationale?.outcome).toBe("visual_override");
   });
 });
 

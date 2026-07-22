@@ -14,16 +14,16 @@ fail-open は、ffmpeg 不在や解析失敗時に `measured:false`、`metrics_m
 ## Evidence — 変更ファイル一覧、テストコマンドと結果件数、性能の目安
 
 変更ファイル:
-- [runtime/connectors/ffmpeg-motion.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/connectors/ffmpeg-motion.ts)
-- [runtime/pipeline/stages/visual-quality.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/pipeline/stages/visual-quality.ts)
-- [runtime/pipeline/ingest.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/pipeline/ingest.ts)
-- [runtime/pipeline/stages/peak.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/pipeline/stages/peak.ts)
-- [runtime/connectors/ffmpeg-segmenter.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/connectors/ffmpeg-segmenter.ts)
-- [runtime/connectors/vlm-peak-detector.ts](/Users/mocchalera/Dev/video-os-v2-spec/runtime/connectors/vlm-peak-detector.ts)
-- [schemas/segments.schema.json](/Users/mocchalera/Dev/video-os-v2-spec/schemas/segments.schema.json)
-- [tests/ffmpeg-motion.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/ffmpeg-motion.test.ts)
-- [tests/peak-detection.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/peak-detection.test.ts)
-- [tests/pipeline-ingest.test.ts](/Users/mocchalera/Dev/video-os-v2-spec/tests/pipeline-ingest.test.ts)
+- [runtime/connectors/ffmpeg-motion.ts](/Users/operator/Dev/video-os-v2-spec/runtime/connectors/ffmpeg-motion.ts)
+- [runtime/pipeline/stages/visual-quality.ts](/Users/operator/Dev/video-os-v2-spec/runtime/pipeline/stages/visual-quality.ts)
+- [runtime/pipeline/ingest.ts](/Users/operator/Dev/video-os-v2-spec/runtime/pipeline/ingest.ts)
+- [runtime/pipeline/stages/peak.ts](/Users/operator/Dev/video-os-v2-spec/runtime/pipeline/stages/peak.ts)
+- [runtime/connectors/ffmpeg-segmenter.ts](/Users/operator/Dev/video-os-v2-spec/runtime/connectors/ffmpeg-segmenter.ts)
+- [runtime/connectors/vlm-peak-detector.ts](/Users/operator/Dev/video-os-v2-spec/runtime/connectors/vlm-peak-detector.ts)
+- [schemas/segments.schema.json](/Users/operator/Dev/video-os-v2-spec/schemas/segments.schema.json)
+- [tests/ffmpeg-motion.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/ffmpeg-motion.test.ts)
+- [tests/peak-detection.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/peak-detection.test.ts)
+- [tests/pipeline-ingest.test.ts](/Users/operator/Dev/video-os-v2-spec/tests/pipeline-ingest.test.ts)
 
 検証:
 - `npx tsc --noEmit`: passed

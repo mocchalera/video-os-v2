@@ -20,7 +20,7 @@ export const CANONICAL_PIPELINE_STAGES = [
 
 export type CanonicalPipelineStage = typeof CANONICAL_PIPELINE_STAGES[number];
 
-export const FULL_PIPELINE_TIMING_STAGE_ORDER = [
+export const FULL_PIPELINE_RESUME_STAGE_ORDER = [
   "ingest",
   "stt",
   "marlin",
@@ -33,6 +33,45 @@ export const FULL_PIPELINE_TIMING_STAGE_ORDER = [
   "render",
   "QA",
 ] as const satisfies readonly PipelineTimingStage[];
+
+export type FullPipelineResumeStage = typeof FULL_PIPELINE_RESUME_STAGE_ORDER[number];
+
+/**
+ * Compatibility alias for callers that used the historical timing-stage name.
+ * New resume/CLI code should use FULL_PIPELINE_RESUME_STAGE_ORDER instead.
+ */
+export const FULL_PIPELINE_TIMING_STAGE_ORDER = FULL_PIPELINE_RESUME_STAGE_ORDER;
+
+export interface CanonicalStageObservability {
+  timingStages: readonly PipelineTimingStage[];
+  resumeStage: FullPipelineResumeStage | null;
+}
+
+/**
+ * Canonical artifact stages and progress/resume stages intentionally differ.
+ * Keep every fold explicit so observability and CLI vocabulary cannot drift
+ * silently from the artifact-oriented pipeline model.
+ */
+export const CANONICAL_STAGE_OBSERVABILITY = {
+  ingest: { timingStages: ["ingest"], resumeStage: "ingest" },
+  analyze: {
+    timingStages: ["ingest", "stt", "marlin", "visual-quality", "peak"],
+    resumeStage: "ingest",
+  },
+  stt: { timingStages: ["stt"], resumeStage: "stt" },
+  marlin: { timingStages: ["marlin"], resumeStage: "marlin" },
+  visualQuality: { timingStages: ["visual-quality"], resumeStage: "visual-quality" },
+  peak: { timingStages: ["peak"], resumeStage: "peak" },
+  embeddings: { timingStages: ["embeddings"], resumeStage: "embeddings" },
+  footageDb: { timingStages: ["embeddings"], resumeStage: "embeddings" },
+  triage: { timingStages: ["triage"], resumeStage: "triage" },
+  blueprint: { timingStages: ["blueprint"], resumeStage: "blueprint" },
+  compile: { timingStages: ["compile"], resumeStage: "compile" },
+  review: { timingStages: ["QA"], resumeStage: "QA" },
+  render: { timingStages: ["render"], resumeStage: "render" },
+  qa: { timingStages: ["QA"], resumeStage: "QA" },
+  package: { timingStages: [], resumeStage: null },
+} as const satisfies Record<CanonicalPipelineStage, CanonicalStageObservability>;
 
 export const FULL_PIPELINE_PHASE_ORDER = [
   "analyze",
@@ -53,7 +92,7 @@ export interface AnalyzeTimingStageOptions {
 }
 
 export interface ScriptFullPipelinePlanOptions {
-  from?: PipelineTimingStage;
+  from?: FullPipelineResumeStage;
   skipAnalyze?: boolean;
   skipFootageDb?: boolean;
   skipRender?: boolean;
@@ -72,8 +111,13 @@ export interface FullPipelineCommandPlanOptions {
   analyze?: AnalyzeTimingStageOptions;
 }
 
+export function isFullPipelineResumeStage(value: string | undefined): value is FullPipelineResumeStage {
+  return includesString(FULL_PIPELINE_RESUME_STAGE_ORDER, value);
+}
+
+/** @deprecated Use isFullPipelineResumeStage for public resume values. */
 export function isFullPipelineTimingStage(value: string | undefined): value is PipelineTimingStage {
-  return includesString(FULL_PIPELINE_TIMING_STAGE_ORDER, value);
+  return isFullPipelineResumeStage(value);
 }
 
 export function isFullPipelinePhase(value: string | undefined): value is FullPipelinePhase {
@@ -91,8 +135,8 @@ export function buildAnalyzeTimingStages(options?: AnalyzeTimingStageOptions): P
 }
 
 export function buildScriptFullPipelineTimingStages(options: ScriptFullPipelinePlanOptions): PipelineTimingStage[] {
-  const fromIndex = options.from ? FULL_PIPELINE_TIMING_STAGE_ORDER.indexOf(options.from) : 0;
-  return FULL_PIPELINE_TIMING_STAGE_ORDER.filter((stage, index) => {
+  const fromIndex = options.from ? FULL_PIPELINE_RESUME_STAGE_ORDER.indexOf(options.from) : 0;
+  return FULL_PIPELINE_RESUME_STAGE_ORDER.filter((stage, index) => {
     if (index < fromIndex) return false;
     if (options.skipAnalyze && isAnalyzeTimingStage(stage)) return false;
     if (options.skipFootageDb && stage === "embeddings") return false;
@@ -159,8 +203,8 @@ function isAnalyzeTimingStage(stage: PipelineTimingStage): boolean {
     stage === "peak";
 }
 
-function stageIndex(stage: PipelineTimingStage): number {
-  return FULL_PIPELINE_TIMING_STAGE_ORDER.indexOf(stage);
+function stageIndex(stage: FullPipelineResumeStage): number {
+  return FULL_PIPELINE_RESUME_STAGE_ORDER.indexOf(stage);
 }
 
 function includesString<TValue extends string>(

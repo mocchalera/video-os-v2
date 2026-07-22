@@ -25,7 +25,7 @@ Result: pass. The re-rendered output is no longer truncated to the prior 39.875s
 Render stdout:
 
 ```text
-Rendered rough cut: /Users/mocchalera/Dev/video-os-v2-spec/projects/lively-talk-pv/09_output/rough-cut.mp4
+Rendered rough cut: /Users/operator/Dev/video-os-v2-spec/projects/lively-talk-pv/09_output/rough-cut.mp4
   Clips: 21
   Crossfades: 1
   Duration: 46.3s
@@ -90,7 +90,7 @@ Pre-run file on disk in this verification pass:
 Render stdout:
 
 ```text
-Rendered rough cut: /Users/mocchalera/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4
+Rendered rough cut: /Users/operator/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4
   Clips: 19
   Crossfades: 15
   Duration: 57.1s

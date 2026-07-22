@@ -7,10 +7,13 @@ import {
 
 const PRESET_IDS = [
   "vos:overlay.title-card",
+  "vos:overlay.hook-title",
+  "vos:overlay.cta-card",
   "vos:overlay.lower-third",
   "vos:overlay.chapter-kicker",
   "vos:overlay.location-tag",
   "vos:overlay.credit",
+  "vos:overlay.emphasis-word",
 ] as const;
 
 describe("Remotion overlay preset registry", () => {
@@ -21,13 +24,17 @@ describe("Remotion overlay preset registry", () => {
     expect(preset?.id).toBe("vos:overlay.title-card");
   });
 
+  it("keeps legacy unnamespaced authoring compatible", () => {
+    expect(resolveOverlayPreset("title-card")?.id).toBe("vos:overlay.title-card");
+  });
+
   it("returns null for unknown and legacy styling classes", () => {
     expect(resolveOverlayPreset("vos:overlay.unknown")).toBeNull();
     expect(resolveOverlayPreset("default")).toBeNull();
   });
 
-  it("contains the five vos:overlay.* presets with render functions", () => {
-    expect(overlayPresets.size).toBe(5);
+  it("contains the registered vos:overlay.* presets with render functions", () => {
+    expect(overlayPresets.size).toBe(8);
 
     for (const id of PRESET_IDS) {
       const preset = resolveOverlayPreset(id);

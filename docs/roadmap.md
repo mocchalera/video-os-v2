@@ -202,8 +202,8 @@ full finishing まで含むなら NLE を source of truth にする one-way hand
 - 参考: HarnessGG/studio の project contract 設計
 
 **実素材で E2E**:
-- rokutaro-bicycle `/Users/mocchalera/Downloads/麓太朗自転車`（成長記録ムービー）
-- AX-1 D4887 `/Users/mocchalera/Downloads/AX-1_参加者の声/D4887.MP4`（インタビュー）
+- rokutaro-bicycle `/Users/operator/Downloads/麓太朗自転車`（成長記録ムービー）
+- AX-1 D4887 `/Users/operator/Downloads/AX-1_参加者の声/D4887.MP4`（インタビュー）
 
 ### Milestone 3.5: Human Handoff Round-Trip
 

@@ -46,10 +46,20 @@ export function buildProjectAudioStoryGraph(
   const analysisDir = path.join(projectDir, "03_analysis");
   const assets = readJsonIfExists<AssetsLike>(path.join(analysisDir, "assets.json"));
   const projectId = assets?.project_id ?? path.basename(projectDir);
-  const transcripts = readTranscriptDocuments(path.join(analysisDir, "transcripts"));
-  const audioEvents = readJsonIfExists(path.join(analysisDir, "audio_events.json"));
-  const bgmAnalysis = readJsonIfExists(path.join(analysisDir, "bgm_analysis.json"));
   const manifest = readSourceManifest(projectDir, projectId, assets);
+  const currentAssetIds = new Set(((manifest as { items?: Array<{ asset_id?: string }> }).items ?? [])
+    .map((item) => item.asset_id)
+    .filter((assetId): assetId is string => !!assetId));
+  const transcripts = readTranscriptDocuments(path.join(analysisDir, "transcripts"))
+    .filter((item) => currentAssetIds.has(readAssetId(item)));
+  const audioEvents = filterAudioEvents(
+    readJsonIfExists(path.join(analysisDir, "audio_events.json")),
+    currentAssetIds,
+  );
+  const bgmAnalysis = filterBgmAnalysis(
+    readJsonIfExists(path.join(analysisDir, "bgm_analysis.json")),
+    currentAssetIds,
+  );
   const coverageReport = readCoverageReport(projectDir, projectId, manifest, transcripts, audioEvents, bgmAnalysis);
   const previous = readAudioStoryGraph(projectDir);
 
@@ -107,9 +117,12 @@ function readTranscriptDocuments(transcriptDir: string): unknown[] {
 }
 
 function readSourceManifest(projectDir: string, projectId: string, assets: AssetsLike | null): SourceMediaManifest | { source_media_manifest_hash: string; items: Array<{ asset_id?: string }> } {
-  const manifestPath = path.join(projectDir, "03_analysis/source_media_manifest.json");
-  const manifest = readJsonIfExists<SourceMediaManifest>(manifestPath);
-  if (manifest) return manifest;
+  const canonicalPath = path.join(projectDir, "02_media/source_media_manifest.json");
+  const canonical = readJsonIfExists<SourceMediaManifest>(canonicalPath);
+  if (canonical) return canonical;
+  const legacyPath = path.join(projectDir, "03_analysis/source_media_manifest.json");
+  const legacy = readJsonIfExists<SourceMediaManifest>(legacyPath);
+  if (legacy) return legacy;
 
   const items = (assets?.items ?? []).map((asset) => ({
     asset_id: asset.asset_id,
@@ -181,4 +194,23 @@ function hasMusicEvidence(value: unknown): boolean {
 function readJsonIfExists<T = unknown>(filePath: string): T | null {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf-8")) as T;
+}
+
+function readAssetId(value: unknown): string {
+  return value && typeof value === "object" && typeof (value as { asset_id?: unknown }).asset_id === "string"
+    ? (value as { asset_id: string }).asset_id
+    : "";
+}
+
+function filterAudioEvents(value: unknown | null, currentAssetIds: Set<string>): unknown | null {
+  if (!value || typeof value !== "object") return value;
+  const artifact = value as { items?: Array<{ asset_id?: string }> };
+  if (!Array.isArray(artifact.items)) return value;
+  return { ...artifact, items: artifact.items.filter((item) => !!item.asset_id && currentAssetIds.has(item.asset_id)) };
+}
+
+function filterBgmAnalysis(value: unknown | null, currentAssetIds: Set<string>): unknown | null {
+  if (!value || typeof value !== "object") return value;
+  const assetId = (value as { music_asset?: { asset_id?: string } }).music_asset?.asset_id;
+  return assetId && (currentAssetIds.has(assetId) || assetId.startsWith("BGM_")) ? value : null;
 }

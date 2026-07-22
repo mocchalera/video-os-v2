@@ -15,11 +15,11 @@ import type { VlmFn, VlmCallResult } from "./gemini-vlm.js";
 
 // ── Constants ──────────────────────────────────────────────────────
 
-export const PEAK_DETECTOR_VERSION = "peak-detector-v1.0.0";
+export const PEAK_DETECTOR_VERSION = "peak-detector-v2.0.0";
 
 export const COARSE_PROMPT_TEMPLATE_ID = "m2-asset-peak-coarse-v2";
 export const REFINE_PROMPT_TEMPLATE_ID = "m2-segment-peak-refine-v2";
-export const PRECISION_PROMPT_TEMPLATE_ID = "m2-segment-peak-precision-v1";
+export const PRECISION_PROMPT_TEMPLATE_ID = "m2-segment-peak-precision-grounded-v2";
 export const FUSION_VERSION = "peak-fusion-v1";
 export const SUPPORT_SIGNAL_VERSION = "motion-v1";
 
@@ -184,6 +184,28 @@ export interface PeakAnalysisProvenance {
   precision_mode: string;
   fusion_version: string;
   support_signal_version: string;
+  coarse_frame_count?: number;
+  refine_frame_count?: number;
+  precision_frame_count?: number;
+  precision_sample_timestamps_us?: number[];
+  precision_requested_sample_timestamps_us?: number[];
+  frame_cache_version?: string;
+  frame_producer_version?: string;
+  precision_frame_cache_hits?: number;
+  precision_frame_extraction_failures?: string[];
+  precision_failure_reason?: string;
+  source_content_sha256?: string;
+  segment_src_in_us?: number;
+  segment_src_out_us?: number;
+  cache_identity?: string;
+  cache_decision?: string;
+  cache_decision_reasons?: string[];
+  policy_hash?: string;
+  model_alias?: string;
+  precision_prompt_template_id?: string;
+  precision_prompt_hash?: string;
+  detector_version?: string;
+  provenance_schema_version?: string;
 }
 
 export interface PeakAnalysis {

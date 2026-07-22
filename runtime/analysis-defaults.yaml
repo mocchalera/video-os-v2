@@ -13,6 +13,12 @@ classification:
     motion_score_max: 0.15
   general: {}
 
+image_sequence:
+  frame_rate:
+    fps_num: 24
+    fps_den: 1
+  minimum_frame_count: 2
+
 sampling:
   static:
     sample_fps: 0.5
@@ -34,7 +40,7 @@ vlm:
   model_snapshot: "required_for_canonical_runs"
   input_mode: frame_bundle_plus_text_context
   response_format: json_schema_v1
-  prompt_template_id: m2-segment-v2
+  prompt_template_id: m2-segment-grounded-v3
   max_frame_width_px: 1024
   segment_visual_token_budget_max: 8192
   segment_visual_output_tokens_max: 512

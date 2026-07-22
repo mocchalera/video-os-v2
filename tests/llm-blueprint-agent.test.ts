@@ -2,7 +2,8 @@ import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createLlmBlueprintAgent } from "../runtime/agents/llm-blueprint-agent.js";
+import { applySourceMediaContract, buildCandidateIndex, createLlmBlueprintAgent } from "../runtime/agents/llm-blueprint-agent.js";
+import type { EditBlueprint } from "../runtime/artifacts/types.js";
 import type { LlmCompleter } from "../runtime/agents/llm-triage-agent.js";
 import type { BlueprintAgentContext } from "../runtime/commands/blueprint.js";
 
@@ -215,6 +216,31 @@ function codexJsonl(text: string): string {
 }
 
 describe("createLlmBlueprintAgent", () => {
+  it("removes visual craft only when the mixed beat primary candidate is audio", () => {
+    const selects = selectsContent();
+    selects.source_media = { mode: "mixed", media_kinds: ["audio", "video"], visual_candidate_count: 1, audio_only_candidate_count: 1 };
+    const candidates = selects.candidates as Array<Record<string, unknown>>;
+    candidates[0].media_kind = "video";
+    candidates[0].source_capabilities = { has_video: true, has_audio: true };
+    candidates[1].media_kind = "audio";
+    candidates[1].source_capabilities = { has_video: false, has_audio: true };
+    const blueprint = {
+      version: "1", project_id: "test-project", sequence_goals: ["test"],
+      beats: [
+        { id: "b01", label: "visual", target_duration_frames: 24, required_roles: ["hero"], candidate_plan: { primary_candidate_ref: "cand_hook", fallback_candidate_refs: ["cand_close"] }, craft: { in_point: "cut_on_action", transition_out: "dissolve", rhythm: "steady" } },
+        { id: "b02", label: "audio", target_duration_frames: 24, required_roles: ["support"], candidate_plan: { primary_candidate_ref: "cand_close", fallback_candidate_refs: [] }, craft: { in_point: "cut_on_action", transition_out: "dissolve", rhythm: "breath" } },
+      ],
+      pacing: {}, music_policy: {}, caption_policy: {}, dialogue_policy: {}, transition_policy: {},
+      ending_policy: { should_feel: "resolved", final_visual_strategy: "invented motion", video_fade_out_sec: 1, video_fade_color: "black" },
+      rejection_rules: [], timeline_order: "editorial", track_layout: "single",
+    } as unknown as EditBlueprint;
+    applySourceMediaContract(blueprint, selects.source_media as never, buildCandidateIndex(selects));
+
+    expect(blueprint.beats[0].craft).toMatchObject({ in_point: "cut_on_action", transition_out: "dissolve" });
+    expect(blueprint.beats[1].craft).toEqual({ rhythm: "breath" });
+    expect(blueprint.ending_policy).toMatchObject({ final_visual_strategy: "black canvas for audio-only render", video_fade_out_sec: 0, video_fade_color: "none" });
+  });
+
   it("returns a schema-valid EditBlueprint from a mocked JSON response", async () => {
     let prompt = "";
     const agent = createLlmBlueprintAgent({
@@ -260,6 +286,16 @@ describe("createLlmBlueprintAgent", () => {
     expect(prompt).toContain("質問テロップに頼らず主語または指示対象");
     expect(prompt).toContain("ASR item の端は意味上の文境界とは限りません");
     expect(prompt).toContain("cut_tail_hold_sec は言い切った後の呼吸・ルームトーン専用");
+    expect(prompt).toContain("推薦文だけを単独で切り出さないでください");
+    expect(prompt).toContain("最低1.5秒の動く元素材");
+    expect(prompt).toContain("speech caption の単一レイヤー");
+    expect(result.blueprint.ending_policy).toMatchObject({
+      final_hold_min_frames: 12,
+      tail_hold_sec: 1.5,
+      audio_fade_out_sec: 1,
+      video_fade_out_sec: 1,
+      video_fade_color: "black",
+    });
 
     const validate = createValidator("edit-blueprint.schema.json");
     expect(validate(result.blueprint), JSON.stringify(validate.errors, null, 2)).toBe(true);
@@ -314,6 +350,56 @@ describe("createLlmBlueprintAgent", () => {
     expect(result.blueprint.beats[0].candidate_plan).toEqual({
       primary_candidate_ref: "cand_close",
       fallback_candidate_refs: [],
+    });
+  });
+
+  it("promotes a semantically complete dialogue fallback over a fragment primary", async () => {
+    const dialogueSelects = {
+      version: "1",
+      project_id: "test-project",
+      candidates: [
+        {
+          candidate_id: "cand_fragment",
+          segment_id: "SEG_FRAGMENT",
+          asset_id: "AST_001",
+          role: "dialogue",
+          transcript_excerpt: "判断できないと思いますけど",
+          eligible_beats: ["b01"],
+          evidence: [],
+          motif_tags: [],
+        },
+        {
+          candidate_id: "cand_complete",
+          segment_id: "SEG_COMPLETE",
+          asset_id: "AST_001",
+          role: "dialogue",
+          transcript_excerpt: "経営者の理解が浅いと、担当者の提案を正しく判断できないと思います",
+          eligible_beats: ["b01"],
+          evidence: [],
+          motif_tags: [],
+        },
+      ],
+    };
+    const agent = createLlmBlueprintAgent({
+      llm: async () => validBlueprintResponse({
+        beats: [{
+          id: "b01",
+          label: "reason",
+          target_duration_frames: 240,
+          required_roles: ["dialogue"],
+          candidate_plan: {
+            primary_candidate_ref: "cand_fragment",
+            fallback_candidate_refs: ["cand_complete"],
+          },
+        }],
+      }),
+    });
+
+    const result = await agent.run(context({ selectsContent: dialogueSelects }));
+
+    expect(result.blueprint.beats[0].candidate_plan).toEqual({
+      primary_candidate_ref: "cand_complete",
+      fallback_candidate_refs: ["cand_fragment"],
     });
   });
 

@@ -178,6 +178,23 @@ private let allOperationFixtures: [ReviewPatchOperation] = [
         ],
         reason: "protect dialogue"
     ),
+    .changeVisualTransform(
+        target_clip_id: "CLP_006",
+        visual_transform: ReviewVisualTransform(
+            zoom: 1.15,
+            position: .init(x: -144, y: -39)
+        ),
+        confidence: 0.91,
+        reason: "balance interview portrait"
+    ),
+    .changeAudioFinish(
+        audio_finish: ReviewAudioFinish(
+            preset: "dialogue-clean",
+            loudness_target_lufs: -16,
+            true_peak_target_dbtp: -1.5
+        ),
+        reason: "master interview dialogue"
+    ),
     .addMarker(
         frame: 120,
         label: "review note",

@@ -47,6 +47,9 @@
         "$ref": "#/$defs/candidate"
       }
     },
+    "source_media": {
+      "$ref": "#/$defs/sourceMediaSummary"
+    },
     "editorial_summary": {
       "oneOf": [
         {
@@ -282,6 +285,17 @@
           "minimum": 0,
           "maximum": 1
         },
+        "media_kind": {
+          "type": "string",
+          "enum": ["video", "audio", "image", "sequence", "unknown"]
+        },
+        "source_capabilities": {
+          "$ref": "#/$defs/sourceCapabilities"
+        },
+        "audio_role": {
+          "type": "string",
+          "enum": ["dialogue", "music", "nat_sound", "ambient"]
+        },
         "audio_story_refs": {
           "type": "array",
           "items": {
@@ -418,15 +432,31 @@
           },
           "additionalProperties": false
         },
+        "still_image": {
+          "type": "object",
+          "properties": {
+            "hold_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "min_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "max_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "motion_mode": { "type": "string", "enum": ["static", "subtle_ken_burns"] },
+            "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+            "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+          },
+          "additionalProperties": false
+        },
         "quality_confidence": {
           "type": "string",
-          "enum": ["measured", "partial", "appraiser", "low"]
+          "enum": ["measured", "partial", "appraiser", "low", "not_applicable"]
         },
         "quality_gate": {
           "$ref": "#/$defs/qualityGateRecord"
         }
       },
       "allOf": [
+        {
+          "if": { "required": ["still_image"] },
+          "then": { "required": ["media_kind"], "properties": { "media_kind": { "const": "image" } } }
+        },
         {
           "if": {
             "properties": {
@@ -461,6 +491,7 @@
             "warn": { "type": "integer", "minimum": 0 },
             "pass": { "type": "integer", "minimum": 0 },
             "unmeasured": { "type": "integer", "minimum": 0 }
+            ,"not_applicable": { "type": "integer", "minimum": 0 }
           },
           "additionalProperties": false
         },
@@ -468,6 +499,30 @@
           "type": "array",
           "items": { "$ref": "#/$defs/qualityGateRecord" }
         }
+      },
+      "additionalProperties": false
+    },
+    "sourceCapabilities": {
+      "type": "object",
+      "required": ["has_video", "has_audio"],
+      "properties": {
+        "has_video": { "type": "boolean" },
+        "has_audio": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "sourceMediaSummary": {
+      "type": "object",
+      "required": ["mode", "media_kinds", "visual_candidate_count", "audio_only_candidate_count"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["video", "audio_only", "mixed"] },
+        "media_kinds": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["video", "audio", "image", "sequence", "unknown"] },
+          "uniqueItems": true
+        },
+        "visual_candidate_count": { "type": "integer", "minimum": 0 },
+        "audio_only_candidate_count": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false
     },
@@ -603,11 +658,11 @@
         "segment_id": { "type": "string", "minLength": 1 },
         "decision": {
           "type": "string",
-          "enum": ["reject", "warn", "pass", "unmeasured"]
+          "enum": ["reject", "warn", "pass", "unmeasured", "not_applicable"]
         },
         "confidence": {
           "type": "string",
-          "enum": ["measured", "partial", "appraiser", "low"]
+          "enum": ["measured", "partial", "appraiser", "low", "not_applicable"]
         },
         "reasons": {
           "type": "array",

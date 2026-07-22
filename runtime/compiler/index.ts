@@ -35,7 +35,28 @@ import { loadSourceMap } from "../media/source-map.js";
 import { extractDurationUs, runFfprobe } from "../connectors/ffprobe.js";
 import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
 import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
+import { resolveStillDurationPolicy, resolveStillImageHold } from "../artifacts/still-image-policy.js";
+import {
+  assertStillImageCandidateGrounding,
+  assertStillImageSegmentGrounding,
+  readValidatedStillImageFrames,
+} from "../artifacts/still-image-grounding.js";
+import { assertImageSequenceCandidateGrounding } from "../artifacts/image-sequence-grounding.js";
+import {
+  assertCandidatePlanningMediaKindsSupported,
+  assertProjectPlanningMediaKindsSupported,
+  readAuthoritativeAssetMediaCapabilities,
+} from "../artifacts/source-media-capabilities.js";
+import { resolveProfileAndPolicy } from "../editorial/policy-resolver.js";
+import { assertStillImageTimelineTruthForTimeline, setStillImageHoldFrames } from "./still-image.js";
+import { loadSegmentEditorialEvidence } from "../artifacts/segment-editorial-evidence.js";
 import { getCandidateRef } from "./candidate-ref.js";
+import {
+  hasVisualProgram,
+  isAuthoredProgramAudio,
+  primaryContentClips,
+  primarySequentialClips,
+} from "./primary-content.js";
 import {
   applyCutBeatQuantize,
   isSpeechProtectedBeatBoundary,
@@ -78,6 +99,13 @@ export type { ReviewPatch, PatchResult, PatchError, PatchOperation } from "./pat
 export type { ResolutionReport } from "./resolve.js";
 
 export const MIN_RENDERABLE_FRAMES = 12;
+
+export function isEditorialEyeRelationV1Enabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const value = env.ENABLE_EDITORIAL_EYE_RELATION_V1?.trim().toLowerCase();
+  return value === "true" || value === "1" || value === "yes" || value === "on";
+}
 
 export interface CompileResult {
   timeline: TimelineIR;
@@ -438,14 +466,26 @@ function assertExactCandidatePlanAgreement(
     return candidate ? getCandidateRef(candidate) : `missing:${ref}`;
   };
 
-  const expected = blueprint.beats.flatMap((beat) => [
+  const expectedPlacements = blueprint.beats.flatMap((beat, beatIndex) => [
     beat.candidate_plan?.primary_candidate_ref,
     ...(beat.candidate_plan?.fallback_candidate_refs ?? []),
   ]
     .filter((ref): ref is string => typeof ref === "string" && ref.length > 0)
-    .map(canonicalRef));
-  const v1 = assembled.tracks.video.find((track) => track.track_id === "V1");
-  const actual = (v1?.clips ?? []).map((clip) => {
+    .map((ref, planIndex) => ({ ref: canonicalRef(ref), beatId: beat.id, beatIndex, planIndex })));
+  const expected = expectedPlacements.map((placement) => placement.ref);
+  const placementOrder = new Map(expectedPlacements.map((placement, index) =>
+    [`${placement.beatId}:${placement.ref}`, index]
+  ));
+  const actual = [
+    ...assembled.tracks.video.flatMap((track) => track.clips),
+    ...assembled.tracks.audio.flatMap((track) => track.clips).filter(isAuthoredProgramAudio),
+  ].sort((left, right) => {
+    const leftRef = canonicalRef(left.candidate_ref ?? left.segment_id);
+    const rightRef = canonicalRef(right.candidate_ref ?? right.segment_id);
+    return (placementOrder.get(`${left.beat_id}:${leftRef}`) ?? Number.MAX_SAFE_INTEGER) -
+      (placementOrder.get(`${right.beat_id}:${rightRef}`) ?? Number.MAX_SAFE_INTEGER) ||
+      left.timeline_in_frame - right.timeline_in_frame || left.clip_id.localeCompare(right.clip_id);
+  }).map((clip) => {
     if (clip.candidate_ref) return canonicalRef(clip.candidate_ref);
     return canonicalRef(clip.segment_id);
   });
@@ -471,23 +511,45 @@ export function compactGuideSingleTrackGaps(
   assembled: AssembledTimeline,
   beats: NormalizedBeat[] = [],
 ): void {
-  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
-  if (!v1Track || v1Track.clips.length <= 1) {
+  const primaryClips = primarySequentialClips(assembled);
+  if (primaryClips.length <= 1) {
     syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
     alignBeatMarkersToPrimaryTrack(assembled, beats);
+    alignAuthoredAudioToBeatMarkers(assembled);
     return;
   }
 
-  const ordered = [...v1Track.clips].sort(compareTimelineClips);
+  const ordered = [...primaryClips].sort(compareTimelineClips);
   let cursor = 0;
   for (const clip of ordered) {
     clip.timeline_in_frame = cursor;
     cursor += Math.max(0, clip.timeline_duration_frames);
   }
-  v1Track.clips.splice(0, v1Track.clips.length, ...ordered);
+  if (hasVisualProgram(assembled)) {
+    const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1") ?? assembled.tracks.video[0];
+    v1Track?.clips.splice(0, v1Track.clips.length, ...ordered);
+  }
 
   syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
   alignBeatMarkersToPrimaryTrack(assembled, beats);
+  alignAuthoredAudioToBeatMarkers(assembled);
+}
+
+function alignAuthoredAudioToBeatMarkers(assembled: AssembledTimeline): void {
+  if (!hasVisualProgram(assembled)) return;
+  const markerByBeat = new Map(assembled.markers
+    .filter((marker) => marker.kind === "beat")
+    .map((marker) => [marker.label.split(":")[0]?.trim(), marker.frame]));
+  for (const track of assembled.tracks.audio) {
+    const cursorByBeat = new Map<string, number>();
+    for (const clip of track.clips.filter(isAuthoredProgramAudio).sort(compareTimelineClips)) {
+      const start = cursorByBeat.get(clip.beat_id) ?? markerByBeat.get(clip.beat_id);
+      if (start === undefined) continue;
+      clip.timeline_in_frame = start;
+      cursorByBeat.set(clip.beat_id, start + clip.timeline_duration_frames);
+    }
+    track.clips.sort(compareTimelineClips);
+  }
 }
 
 function compareTimelineClips(left: TimelineClip, right: TimelineClip): number {
@@ -548,6 +610,7 @@ export function removeOverlappingGeneratedAudioMirrors(assembled: AssembledTimel
 
 export function selectUtteranceSnapClips(assembled: AssembledTimeline): TimelineClip[] {
   const audioClips = assembled.tracks.audio.flatMap((track) => track.clips);
+  if (!hasVisualProgram(assembled)) return audioClips.filter(isAuthoredProgramAudio);
   const audioSourceKeys = new Set(audioClips.map((clip) => sourceRangeKey(clip)));
   const syncedVideoClips = assembled.tracks.video
     .flatMap((track) => track.clips)
@@ -565,12 +628,12 @@ function alignBeatMarkersToPrimaryTrack(
   assembled: AssembledTimeline,
   beats: NormalizedBeat[] = [],
 ): void {
-  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
-  if (!v1Track) return;
+  const primaryClips = primarySequentialClips(assembled);
+  if (primaryClips.length === 0) return;
 
   const beatIds = new Set(beats.map((beat) => beat.beat_id));
   const firstFrameByBeat = new Map<string, number>();
-  for (const clip of [...v1Track.clips].sort(compareTimelineClips)) {
+  for (const clip of [...primaryClips].sort(compareTimelineClips)) {
     if (!firstFrameByBeat.has(clip.beat_id)) {
       firstFrameByBeat.set(clip.beat_id, clip.timeline_in_frame);
     }
@@ -788,14 +851,15 @@ export function dropUnintentionalMicroClips(
     droppedAudioClipIds: [],
     minRenderableFrames,
   };
-  const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
-  if (!v1Track) return result;
+  const visualProgram = hasVisualProgram(assembled);
+  const primaryClips = primarySequentialClips(assembled);
+  if (primaryClips.length === 0) return result;
 
   const beatCraftById = new Map(
     (options.beats ?? []).map((beat) => [beat.beat_id, beat.craft]),
   );
   const droppedV1Clips: TimelineClip[] = [];
-  for (const clip of v1Track.clips) {
+  for (const clip of primaryClips) {
     if (clip.timeline_duration_frames >= minRenderableFrames) continue;
     if (options.preserveAuthoredCandidatePlan && clip.candidate_ref) {
       annotateAuthoredShortClip(clip);
@@ -819,15 +883,17 @@ export function dropUnintentionalMicroClips(
     })),
   );
 
-  v1Track.clips.splice(
-    0,
-    v1Track.clips.length,
-    ...v1Track.clips.filter((clip) => !droppedClipIds.has(clip.clip_id)),
-  );
+  for (const track of visualProgram ? assembled.tracks.video : assembled.tracks.audio) {
+    track.clips.splice(
+      0,
+      track.clips.length,
+      ...track.clips.filter((clip) => !droppedClipIds.has(clip.clip_id)),
+    );
+  }
 
   for (const track of assembled.tracks.audio) {
     const kept = track.clips.filter((clip) => {
-      const shouldDrop = isGeneratedAudioMirror(clip) && droppedMirrorKeys.has(audioMirrorKey(clip));
+      const shouldDrop = visualProgram && isGeneratedAudioMirror(clip) && droppedMirrorKeys.has(audioMirrorKey(clip));
       if (shouldDrop) result.droppedAudioClipIds.push(clip.clip_id);
       return !shouldDrop;
     });
@@ -954,8 +1020,9 @@ function retimeTimelineAfterRemovingSpans(
       const nextEnd = retimeFrameAfterRemovingSpans(end, spans);
       const nextDuration = nextEnd - nextStart;
       if (nextDuration <= 0) continue;
+      if (clip.media_kind === "image" && clip.still_image && nextDuration < clip.still_image.min_hold_frames) continue;
       clip.timeline_in_frame = nextStart;
-      clip.timeline_duration_frames = nextDuration;
+      setStillImageHoldFrames(clip, nextDuration, clip.media_kind === "image" ? "duration_cap" : "none");
       kept.push(clip);
     }
     if (kept.length !== track.clips.length) {
@@ -986,6 +1053,8 @@ function retimeFrameAfterRemovingSpans(
 
 export function compile(opts: CompileOptions): CompileResult {
   const projectPath = path.resolve(opts.projectPath);
+  assertProjectPlanningMediaKindsSupported(projectPath);
+  assertStillImageSegmentGrounding(projectPath);
   const repoRoot = opts.repoRoot
     ? path.resolve(opts.repoRoot)
     : findRepoRoot(projectPath);
@@ -1000,17 +1069,51 @@ export function compile(opts: CompileOptions): CompileResult {
   const brief = readYaml<CreativeBrief>(briefPath);
   const blueprint = opts.blueprintOverride ?? readYaml<EditBlueprint>(blueprintPath);
   const selects = readYaml<SelectsCandidates>(selectsPath);
+  const authoritativeCapabilities = readAuthoritativeAssetMediaCapabilities(projectPath);
+  const groundedStillFrames = readValidatedStillImageFrames(projectPath);
+  for (const candidate of selects.candidates) {
+    const capability = authoritativeCapabilities.get(candidate.asset_id);
+    if (capability) {
+      candidate.media_kind = capability.media_kind;
+      candidate.source_capabilities = { ...capability.source_capabilities };
+    }
+    if (groundedStillFrames.has(candidate.asset_id)) {
+      candidate.media_kind = "image";
+      candidate.source_capabilities = { has_video: true, has_audio: false };
+    }
+  }
+  assertCandidatePlanningMediaKindsSupported(selects.candidates);
+  assertStillImageCandidateGrounding(projectPath, selects.candidates);
+  assertImageSequenceCandidateGrounding(projectPath, selects.candidates);
   materializePeakSignalsFromSegments(projectPath, selects);
   const defaults = readYaml<CompilerDefaults>(defaultsPath);
   const continuityPolicy = resolveContinuityPolicy(defaults.continuity);
   const beatSyncConfig = resolveBeatSyncConfig(defaults);
   const continuityReorders: ContinuityReorderEvent[] = [];
 
+  const fpsNum = opts.fpsNum ?? 24;
+  const fpsDen = opts.fpsDen ?? 1;
+  const hasImageCandidates = selects.candidates.some((candidate) => candidate.media_kind === "image");
+  const profileResolution = hasImageCandidates ? resolveProfileAndPolicy({
+    briefEditorial: brief.editorial,
+    editorialSummary: selects.editorial_summary,
+    runtimeTargetSec: brief.project.runtime_target_sec,
+  }) : undefined;
+  const stillDurationPolicy = !hasImageCandidates
+    ? undefined
+    : blueprint.still_duration_policy?.fps_num === fpsNum &&
+    blueprint.still_duration_policy.fps_den === fpsDen
+    ? blueprint.still_duration_policy
+    : resolveStillDurationPolicy(brief, profileResolution?.profileDefaults, fpsNum, fpsDen);
+  if (stillDurationPolicy) blueprint.still_duration_policy = stillDurationPolicy;
+
   // ── Phase 0.5: Resolve Duration Policy ──────────────────────────
   // Compute material total duration for guide+no-target case.
   const materialTotalSec = selects.candidates
     .filter((c) => c.role !== "reject")
-    .reduce((sum, c) => sum + (c.src_out_us - c.src_in_us) / 1_000_000, 0);
+    .reduce((sum, c) => sum + (c.media_kind === "image"
+      ? resolveStillImageHold(c, stillDurationPolicy!, stillDurationPolicy!.max_hold_frames).hold_frames * fpsDen / fpsNum
+      : (c.src_out_us - c.src_in_us) / 1_000_000), 0);
 
   const durationPolicy = resolveDurationPolicyFromBlueprint(
     blueprint,
@@ -1043,8 +1146,6 @@ export function compile(opts: CompileOptions): CompileResult {
 
   // Use fps from compile options if provided, otherwise default to 24fps.
   // For source material at 30fps, pass fpsNum: 30 via compile options.
-  const fpsNum = opts.fpsNum ?? 24;
-  const fpsDen = 1;
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const bgmDurationUs = resolveBgmDurationUs(opts, blueprint);
   const maxDurationFrames = bgmDurationUs
@@ -1074,6 +1175,7 @@ export function compile(opts: CompileOptions): CompileResult {
     activeSkills,
     durationPolicy,
     bgmScoringContext,
+    stillDurationPolicy,
   );
 
   // ── Phase 2.5: Resolve Timeline Order & Output Dimensions ────────
@@ -1104,6 +1206,7 @@ export function compile(opts: CompileOptions): CompileResult {
     continuityReorders,
     exactCandidatePlanOrder,
     log: opts.log,
+    stillDurationPolicy,
   });
   const visualCache: CompileVisualCache | null = loadVisualCache(
     projectPath,
@@ -1123,12 +1226,13 @@ export function compile(opts: CompileOptions): CompileResult {
     ...assembled.tracks.audio.flatMap((t) => t.clips),
   ];
   const visualAssembledClips = assembled.tracks.video.flatMap((t) => t.clips);
+  const trimmableAssembledClips = allAssembledClips.filter((clip) => clip.media_kind !== "image");
   const marlinEvents = loadProjectMarlinEvents(projectPath);
   // A human golden exact plan already contains operator-authored source
   // windows. Marlin may evaluate those placements, but must not rewrite them.
   const clipTrimPlans = marlinEvents && !exactCandidatePlanOrder
     ? planClipTrims(
-        candidatesForAssembledClips(selects.candidates, allAssembledClips),
+        candidatesForAssembledClips(selects.candidates, trimmableAssembledClips),
         loadProjectSegments(projectPath),
         marlinEvents,
         brief,
@@ -1137,14 +1241,14 @@ export function compile(opts: CompileOptions): CompileResult {
       ).filter(isMarlinEventClipTrimPlan)
     : [];
   applyClipTrimPlansToCandidates(selects.candidates, clipTrimPlans);
-  applyAdaptiveTrim(allAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame, clipTrimPlans);
+  applyAdaptiveTrim(trimmableAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame, clipTrimPlans);
   const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
   if (v1Track) {
     compactTrimmedClipsWithinBeats(v1Track.clips, normalized.beats, assembled.markers);
   }
 
   // ── Phase 3.5b: Duration Adjustment (strict mode) ───────────────
-  applyDurationAdjust(assembled, normalized.beats, selects.candidates, durationPolicy, fpsNum, fpsDen);
+  applyDurationAdjust(assembled, normalized.beats, selects.candidates, durationPolicy, fpsNum, fpsDen, stillDurationPolicy);
 
   // ── Phase 3.5c: Utterance-boundary snap ──────────────────────────
   // When a snapping skill is active, or a talking-head project explicitly asks
@@ -1212,12 +1316,16 @@ export function compile(opts: CompileOptions): CompileResult {
   // Only runs when active editing skills are available.
 
   let adjacencyTransitions: import("./transition-types.js").TimelineTransition[] = [];
+  const segmentEvidenceIndex = isEditorialEyeRelationV1Enabled()
+    ? loadSegmentEditorialEvidence(projectPath, opts.log ?? console.warn)
+    : undefined;
 
   const shouldAnalyzeTransitions =
     activeSkills.length > 0 ||
     hasCraftTransitions(normalized.beats) ||
     Boolean(blueprint.transition_policy) ||
-    (visualCache?.embeddings.size ?? 0) > 0;
+    (visualCache?.embeddings.size ?? 0) > 0 ||
+    segmentEvidenceIndex !== undefined;
 
   if (shouldAnalyzeTransitions && assembled.tracks.video.length > 0) {
     const v1Track = assembled.tracks.video[0];
@@ -1230,7 +1338,10 @@ export function compile(opts: CompileOptions): CompileResult {
         captionPolicySource: blueprint.caption_policy?.source,
         candidates: selects.candidates,
         beats: normalized.beats,
-        visualEmbeddings: visualCache?.embeddings,
+        segmentEvidenceIndex,
+        visualEmbeddings: visualCache && visualCache.embeddings.size > 0
+          ? visualCache.embeddings
+          : undefined,
         transitionSkillsDir: opts.repoRoot
           ? path.join(opts.repoRoot, "runtime/editorial/transition-skills")
           : undefined,
@@ -1252,7 +1363,8 @@ export function compile(opts: CompileOptions): CompileResult {
           const left = clipMap.get(tr.from_clip_id);
           const right = clipMap.get(tr.to_clip_id);
           if (left && right) {
-            const committed = isSpeechProtectedBeatBoundary(left, right)
+            const committed = left.media_kind === "image" || right.media_kind === "image" ||
+              isSpeechProtectedBeatBoundary(left, right)
               ? false
               : applyBeatSnap(left, right, snapDelta, fpsNum, MIN_RENDERABLE_FRAMES);
             if (!committed) {
@@ -1325,6 +1437,8 @@ export function compile(opts: CompileOptions): CompileResult {
 
   // ── Phase 5: Export ───────────────────────────────────────────────
 
+  assertStillImageTimelineTruthForTimeline(assembled);
+
   const createdAt = opts.createdAt;
 
   let timelineIR = buildTimelineIR(assembled, {
@@ -1340,6 +1454,7 @@ export function compile(opts: CompileOptions): CompileResult {
     durationPolicy,
     audioPolicy,
     captionPolicy,
+    stillDurationPolicy,
     transitions: adjacencyTransitions.length > 0 ? adjacencyTransitions : undefined,
     width: outputDims.width,
     height: outputDims.height,
@@ -1478,6 +1593,8 @@ export function compile(opts: CompileOptions): CompileResult {
       endingTreatment.extendedFrames,
     );
   }
+
+  assertStillImageTimelineTruthForTimeline(timelineIR);
 
   const outputPath = writeTimeline(timelineIR, projectPath);
   const otioPath = exportOtio(timelineIR, projectPath);

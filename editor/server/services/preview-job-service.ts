@@ -32,6 +32,13 @@ import {
 import { buildAssDocument, parseSrtCues } from "../../shared/caption-style-tokens.js";
 import { INTERMEDIATE_X264, x264Args } from "../../shared/encode-profiles.js";
 import { dialogueCutFadeSec } from "../../shared/dialogue-cut-fade.js";
+import { canonicalLinearGainFilter } from "../../shared/audio-gain.js";
+import { resolvePreviewBundledFontsDir } from "./font-assets.js";
+import {
+  CanonicalRenderInputError,
+  resolveCanonicalRenderInputs,
+} from "../../../runtime/render/canonical-render-input.js";
+import type { TimelineIR } from "../../../runtime/compiler/types.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -132,10 +139,11 @@ function buildPreviewClipAudioFilters(
   dialogueCutFadeEnabled: boolean,
 ): string[] {
   const filters: string[] = [];
-  const gainDb = audioClip?.gainDb;
-  if (gainDb !== null && gainDb !== undefined && gainDb !== 0) {
-    filters.push(`volume=${gainDb}dB`);
-  }
+  const gainLinear = audioClip?.gainLinear;
+  const gainFilter = gainLinear === null || gainLinear === undefined
+    ? undefined
+    : canonicalLinearGainFilter(gainLinear);
+  if (gainFilter) filters.push(gainFilter);
 
   const fadeSec = audioClip && !isBgmAudio(audioClip.role, audioClip.trackId)
     ? dialogueCutFadeSec(durationSec, dialogueCutFadeEnabled)
@@ -361,6 +369,7 @@ function timelineFrameToVideoSec(
   fps: number,
   overlapsSec?: number[],
 ): number | null {
+  if (videoClips.length === 0) return frame / fps;
   let videoOffsetSec = 0;
   for (let i = 0; i < videoClips.length; i++) {
     const clip = videoClips[i];
@@ -448,11 +457,93 @@ export function previewOutputFrameRateArgs(fps: number): string[] {
   return ["-r", value, "-fps_mode", "cfr"];
 }
 
-export function previewTimelineDurationFrames(videoClips: RenderVideoClip[]): number {
-  return videoClips.reduce(
+export function previewTimelineDurationFrames(
+  videoClips: RenderVideoClip[],
+  audioClips: RenderAudioClip[] = [],
+): number {
+  return [...videoClips, ...audioClips].reduce(
     (maxOut, clip) => Math.max(maxOut, clip.timelineInFrame + clip.durationFrames),
     0,
   );
+}
+
+export function isMirroredTimelineAudioClip(
+  audioClip: RenderAudioClip,
+  videoClips: RenderVideoClip[],
+): boolean {
+  return videoClips.some((videoClip) =>
+    videoClip.assetId === audioClip.assetId &&
+    videoClip.timelineInFrame === audioClip.timelineInFrame &&
+    videoClip.durationFrames === audioClip.durationFrames &&
+    videoClip.sourceInSec === audioClip.sourceInSec &&
+    videoClip.sourceOutSec === audioClip.sourceOutSec
+  );
+}
+
+export function previewBgmFadeOutStartSec(
+  timelineDurationFrames: number,
+  fps: number,
+  fadeOutFrames: number,
+): number {
+  return Math.max(0, (timelineDurationFrames - fadeOutFrames) / fps);
+}
+
+export function timelineOwnsBgmAsset(clips: RenderAudioClip[], assetId: string): boolean {
+  return clips.some((clip) =>
+    clip.assetId === assetId && isBgmAudio(clip.role, clip.trackId)
+  );
+}
+
+export function buildAdditionalTimelineAudioMixArgs(
+  rawAudioPath: string,
+  outputPath: string,
+  clips: RenderAudioClip[],
+  fps: number,
+  totalDurationSec: number,
+): string[] {
+  const filterSteps: string[] = [];
+  const originalLabels = ["[0:a]"];
+  const bgmLabels: string[] = [];
+  clips.forEach((clip, index) => {
+    const label = `extra${index}`;
+    const durationSec = clip.durationFrames / fps;
+    const gainFilter = canonicalLinearGainFilter(clip.gainLinear);
+    const filters = [
+      `atrim=start=${clip.sourceInSec.toFixed(6)}:duration=${durationSec.toFixed(6)}`,
+      "asetpts=PTS-STARTPTS",
+      ...(gainFilter ? [gainFilter] : []),
+      ...(clip.fadeInFrames > 0 ? [`afade=t=in:st=0:d=${(clip.fadeInFrames / fps).toFixed(6)}`] : []),
+      ...(clip.fadeOutFrames > 0 ? [`afade=t=out:st=${Math.max(0, durationSec - clip.fadeOutFrames / fps).toFixed(6)}:d=${(clip.fadeOutFrames / fps).toFixed(6)}`] : []),
+      `adelay=${Math.round((clip.timelineInFrame / fps) * 1000)}|${Math.round((clip.timelineInFrame / fps) * 1000)}`,
+      "aresample=48000",
+      "aformat=channel_layouts=stereo",
+    ];
+    filterSteps.push(`[${index + 1}:a]${filters.join(",")}[${label}]`);
+    (isBgmAudio(clip.role, clip.trackId) ? bgmLabels : originalLabels).push(`[${label}]`);
+  });
+  const mixGroup = (labels: string[], output: string) => {
+    if (labels.length === 1) {
+      filterSteps.push(`${labels[0]}anull[${output}]`);
+    } else {
+      filterSteps.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0:normalize=0[${output}]`);
+    }
+  };
+  mixGroup(originalLabels, "orig");
+  if (bgmLabels.length > 0) {
+    mixGroup(bgmLabels, "bgm");
+    filterSteps.push("[orig]asplit=2[origout][sc]");
+    filterSteps.push("[bgm][sc]sidechaincompress=threshold=0.05:ratio=4:attack=20:release=400:makeup=1:detection=rms[ducked]");
+    filterSteps.push(`[origout][ducked]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,atrim=duration=${totalDurationSec.toFixed(6)}[aout]`);
+  } else {
+    filterSteps.push(`[orig]atrim=duration=${totalDurationSec.toFixed(6)}[aout]`);
+  }
+  return [
+    "-y", "-i", rawAudioPath,
+    ...clips.flatMap((clip) => ["-i", clip.sourcePath]),
+    "-filter_complex", filterSteps.join(";"),
+    "-map", "[aout]", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
+    outputPath,
+  ];
 }
 
 /**
@@ -468,6 +559,28 @@ function isExactPreviewEnabled(): boolean {
   const v = process.env.PROGRAM_MONITOR_EXACT_PREVIEW;
   if (v === undefined) return true;
   return !["0", "false", "no", "off"].includes(v.toLowerCase());
+}
+
+export function authoritativeStillInRenderSpec(projectDir: string, renderSpec: RenderSpec): boolean {
+  const timeline = {
+    sequence: { fps_num: Math.round(renderSpec.sequence.fps * 1000), fps_den: 1000 },
+    tracks: {
+      video: [{ track_id: "V1", kind: "video", clips: renderSpec.video.clips.map((clip) => ({
+        asset_id: clip.assetId,
+        clip_id: clip.clipId,
+      })) }],
+      audio: [],
+    },
+  } as unknown as TimelineIR;
+  try {
+    return resolveCanonicalRenderInputs(timeline, { projectDir, includeAudio: false }).imageAssetIds.size > 0;
+  } catch (error) {
+    // An invalid/missing derived identity is itself authoritative image truth
+    // and must fail before this non-canonical renderer creates artifacts.
+    if (error instanceof CanonicalRenderInputError && error.assetId &&
+      renderSpec.video.clips.some((clip) => clip.assetId === error.assetId)) return true;
+    throw error;
+  }
 }
 
 // ── Service ──────────────────────────────────────────────────────────
@@ -703,6 +816,22 @@ export class PreviewJobService {
       return idleState;
     }
 
+    // EYE-070C2B: this RenderSpec-only service cannot prove C1 normalized
+    // still identity. The canonical timeline preview path supports images;
+    // this independent entrypoint fails before filesystem/ffmpeg side effects.
+    if (authoritativeStillInRenderSpec(projectDir, renderSpec)) {
+      const unsupported: PreviewJobState = {
+        status: "error",
+        timelineRevision: renderSpec.timelineRevision,
+        renderSpecHash: renderSpec.renderSpecHash,
+        previewUrl: null,
+        warnings: [...(renderSpec.warnings ?? []), "Use canonical timeline preview for still images"],
+        error: "exact_preview_still_requires_canonical_timeline",
+      };
+      this.states.set(projectId, unsupported);
+      return unsupported;
+    }
+
     // Cancel any in-flight job for this project
     const existing = this.jobs.get(projectId);
     if (existing) {
@@ -830,14 +959,26 @@ export class PreviewJobService {
       fs.mkdirSync(tmpDir, { recursive: true });
 
       const videoClips = spec.video.clips;
-      if (videoClips.length === 0) {
-        throw new Error("No video clips in RenderSpec");
+      const unresolvedSources = (spec.warnings ?? []).filter((warning) =>
+        warning.startsWith("Missing source for asset ") ||
+        warning.startsWith("Missing audio source for asset ") ||
+        warning.startsWith("Missing BGM source for asset ")
+      );
+      if (unresolvedSources.length > 0) {
+        throw new Error(`RenderSpec has unresolved required sources: ${unresolvedSources.join("; ")}`);
+      }
+      if (videoClips.length === 0 && spec.audio.dialogueClips.length === 0) {
+        throw new Error("No video or audio clips in RenderSpec");
       }
 
       const clipPaths: string[] = [];
       // Merge build-time warnings from RenderSpec with runtime warnings
       const warnings: string[] = [...(spec.warnings ?? [])];
       const { width, height, fps } = spec.sequence;
+      const timelineDurationFrames = previewTimelineDurationFrames(
+        videoClips,
+        spec.audio.dialogueClips,
+      );
 
       // ── Phase 4: Resolve transitions (before clip rendering — the
       // transition path renders straight from sources in one generation) ──
@@ -858,7 +999,8 @@ export class PreviewJobService {
           durationSec: clip.sourceOutSec - clip.sourceInSec,
           videoFilter: buildVideoClipFilterString(clip, { width, height }),
           hasAudio: sourceHasAudio,
-          gainDb: audioClip?.gainDb,
+          gainDb: audioClip?.gainDb ?? null,
+          gainLinear: audioClip?.gainLinear ?? null,
           audioRole: audioClip?.role,
           audioTrackId: audioClip?.trackId,
         });
@@ -869,7 +1011,7 @@ export class PreviewJobService {
       );
       const gapAwareChain = buildGapAwareTransitionChainInputs(
         audioExtendedInputs,
-        { fps, width, height },
+        { fps, width, height, totalFrames: timelineDurationFrames },
       );
       const chainTransitionIndexes = transitionIndexes.flatMap((t) => {
         const fromIndex = gapAwareChain.clipIndexToChainIndex.get(t.fromIndex);
@@ -1031,35 +1173,53 @@ export class PreviewJobService {
         job.activeChild = null;
       }
 
+      const independentAudioClips = spec.audio.dialogueClips.filter(
+        (clip) => !isMirroredTimelineAudioClip(clip, videoClips),
+      );
+      let masterInputPath = audioRawPath;
+      if (independentAudioClips.length > 0) {
+        const timelineAudioPath = path.join(tmpDir, "audio_timeline_mixed.wav");
+        const mixExec = execFileWithChild("ffmpeg", buildAdditionalTimelineAudioMixArgs(
+          audioRawPath,
+          timelineAudioPath,
+          independentAudioClips,
+          fps,
+          timelineDurationFrames / fps,
+        ));
+        job.activeChild = mixExec.child;
+        await mixExec.promise;
+        job.activeChild = null;
+        masterInputPath = timelineAudioPath;
+      }
+
       if (job.aborted) { if (this.jobs.get(projectId) === job) this.jobs.delete(projectId); return; }
 
       // Mix BGM if present
-      let masterInputPath = audioRawPath;
-      if (spec.audio.bgm) {
+      const bgmAlreadyOnTimeline = spec.audio.bgm
+        ? timelineOwnsBgmAsset(spec.audio.dialogueClips, spec.audio.bgm.assetId)
+        : false;
+      if (spec.audio.bgm && !bgmAlreadyOnTimeline) {
         const bgmMixedPath = path.join(tmpDir, "audio_bgm_mixed.wav");
         const bgm = spec.audio.bgm;
 
-        // Compute total video duration for fade-out position
-        let totalDurSec = clipDurationsSec.reduce((sum, d) => sum + d, 0);
-        if (overlapsSec) {
-          for (let oi = 1; oi < overlapsSec.length; oi++) {
-            totalDurSec -= overlapsSec[oi];
-          }
-        }
-
         // Build BGM filter: gain + optional fade in/out
         const bgmFilters: string[] = [];
-        bgmFilters.push(`volume=${bgm.gainDb}dB`);
+        const bgmGainFilter = canonicalLinearGainFilter(bgm.gainLinear);
+        if (bgmGainFilter) bgmFilters.push(bgmGainFilter);
         if (bgm.fadeInFrames > 0) {
           const fadeInSec = bgm.fadeInFrames / fps;
           bgmFilters.push(`afade=t=in:d=${fadeInSec.toFixed(4)}`);
         }
         if (bgm.fadeOutFrames > 0) {
           const fadeOutSec = bgm.fadeOutFrames / fps;
-          const fadeOutStart = Math.max(0, totalDurSec - fadeOutSec);
+          const fadeOutStart = previewBgmFadeOutStartSec(
+            timelineDurationFrames,
+            fps,
+            bgm.fadeOutFrames,
+          );
           bgmFilters.push(`afade=t=out:st=${fadeOutStart.toFixed(4)}:d=${fadeOutSec.toFixed(4)}`);
         }
-        const bgmFilterStr = bgmFilters.join(",");
+        const bgmFilterStr = bgmFilters.join(",") || "anull";
 
         // Build filter_complex — with or without ducking
         let filterComplex: string;
@@ -1079,7 +1239,7 @@ export class PreviewJobService {
 
         const bgmExec = execFileWithChild("ffmpeg", [
           "-y",
-          "-i", audioRawPath,
+          "-i", masterInputPath,
           "-i", bgm.sourcePath,
           "-filter_complex", filterComplex,
           "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2",
@@ -1106,7 +1266,7 @@ export class PreviewJobService {
 
       // ── Final assembly: video + mastered audio + optional subtitles ──
       const hasCaptions = spec.text.speechCaptions.length > 0;
-      const outputDurationFrames = previewTimelineDurationFrames(videoClips);
+      const outputDurationFrames = timelineDurationFrames;
       const outputDurationSec = outputDurationFrames / fps;
       const finalArgs: string[] = ["-y", "-i", concatPath];
 
@@ -1143,9 +1303,13 @@ export class PreviewJobService {
           .replace(/\\/g, "\\\\")
           .replace(/:/g, "\\:")
           .replace(/'/g, "'\\''");
+        const escapedFontsDir = resolvePreviewBundledFontsDir()
+          .replace(/\\/g, "\\\\")
+          .replace(/:/g, "\\:")
+          .replace(/'/g, "'\\''");
 
         finalArgs.push(
-          "-vf", `subtitles='${escapedAss}'`,
+          "-vf", `subtitles=filename='${escapedAss}':fontsdir='${escapedFontsDir}'`,
           // Caption burn is the only re-encode of the artifact — it must use
           // the same profile as the final path's burn.
           ...x264Args(INTERMEDIATE_X264),

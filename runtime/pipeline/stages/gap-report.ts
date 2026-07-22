@@ -11,6 +11,7 @@ import type { VlmShard } from "./vlm.js";
 import type { PeakShard } from "./peak.js";
 import type { IngestShard } from "./ingest-map.js";
 import type { GapEntry, GapReport } from "../pipeline-types.js";
+import type { SourceLedger } from "../../artifacts/source-ledger.js";
 
 export function buildGapReport(
   assets: AssetItem[],
@@ -20,18 +21,39 @@ export function buildGapReport(
   sttResults?: Map<string, AssetSttResult>,
   vlmShards?: VlmShard[],
   peakShards?: PeakShard[],
+  sourceLedger?: SourceLedger,
 ): GapReport {
   const entries: GapEntry[] = [];
+
+  for (const item of sourceLedger?.items ?? []) {
+    if (item.status === "ready") continue;
+    entries.push({
+      stage: item.stage,
+      asset_id: item.canonical_asset_id ?? item.source_id,
+      source_id: item.source_id,
+      issue: `source_${item.status}: ${item.reason ?? "no reason recorded"}; consumer_impact=${item.consumer_impact}`,
+      severity: item.status === "failed" ? "error" : "warning",
+      blocking: item.consumer_impact === "planning_block" || item.status === "failed",
+      retriable: item.status === "failed",
+      consumer_impact: item.consumer_impact,
+    });
+  }
 
   for (const asset of assets) {
     // Report detector failures with stderr summaries
     const failures = detectorFailures.get(asset.asset_id);
     if (failures && failures.length > 0) {
+      const audioFallback = !asset.video_stream && !!asset.audio_stream && (segmentShards.get(asset.asset_id)?.length ?? 0) > 0;
       entries.push({
         stage: "segment",
         asset_id: asset.asset_id,
         issue: `detector_failure: ${failures.join("; ")}`,
-        severity: "error",
+        severity: audioFallback ? "warning" : "error",
+        ...(audioFallback ? {
+          blocking: false,
+          retriable: true,
+          consumer_impact: "planning_warn" as const,
+        } : {}),
       });
     }
 
@@ -130,6 +152,7 @@ export function buildGapReport(
 export function buildManifestEntries(
   shards: IngestShard[],
   hashMap: Map<string, string>,
+  sourceContentHashMap?: Map<string, string>,
 ): CacheManifestEntry[] {
   const now = new Date().toISOString();
   return shards.map((shard) => ({
@@ -137,5 +160,8 @@ export function buildManifestEntries(
     asset_id: shard.asset.asset_id,
     cached_at: now,
     source_path: shard.sourceFile,
+    ...(sourceContentHashMap?.get(shard.asset.asset_id)
+      ? { source_content_sha256: sourceContentHashMap.get(shard.asset.asset_id) }
+      : {}),
   }));
 }

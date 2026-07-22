@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 
 import {
   resolveProjectRoot,
@@ -32,6 +33,7 @@ import {
   type HumanNotes,
 } from "../runtime/commands/review.js";
 import {
+  buildDefaultPhases,
   runBlueprint,
   type BlueprintAgent,
   type BlueprintAgentResult,
@@ -39,6 +41,15 @@ import {
   type UncertaintyRegister,
 } from "../runtime/commands/blueprint.js";
 import type { MarlinQAReport } from "../runtime/eval/marlin-qa-types.js";
+import {
+  createSourceInputAttestation,
+  writeRenderFreshnessMetadata,
+} from "../runtime/render/source-input-attestation.js";
+import { compile } from "../runtime/compiler/index.js";
+import { runPipeline } from "../runtime/pipeline/ingest.js";
+import { discoverRequestedSources } from "../runtime/media/source-discovery.js";
+import { runCompilePhase } from "../runtime/commands/compile.js";
+import { assembleTimelineToMp4 } from "../runtime/render/assembler.js";
 
 // ── AJV setup for schema validation in tests ─────────────────────
 
@@ -172,6 +183,79 @@ function createMinimalProject(
 
   tempDirs.push(tmpDir);
   return tmpDir;
+}
+
+async function makeGroundedPlanningAgent(projectDir: string, mode: "pure" | "mixed" | "sequence"): Promise<TriageAgent> {
+  fs.rmSync(path.join(projectDir, "03_analysis"), { recursive: true, force: true });
+  const sourceDir = path.join(projectDir, "test-source-media");
+  fs.mkdirSync(sourceDir, { recursive: true });
+  const sources: string[] = [];
+  if (mode === "sequence") {
+    execFileSync("ffmpeg", [
+      "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=64x48:r=24:d=2",
+      "-frames:v", "48", path.join(sourceDir, "shot_%04d.png"),
+    ]);
+    sources.push(sourceDir);
+  } else {
+    const image = path.join(sourceDir, "still.jpg");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=64x48", "-frames:v", "1", image]);
+    sources.push(image);
+  }
+  if (mode === "mixed") {
+    const video = path.join(sourceDir, "video.mp4");
+    const audio = path.join(sourceDir, "audio.wav");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=s=64x48:d=1", "-pix_fmt", "yuv420p", video]);
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", audio]);
+    sources.push(video, audio);
+  }
+  await runPipeline({
+    sourceFiles: sources,
+    sourceDiscovery: discoverRequestedSources(sources),
+    projectDir,
+    repoRoot: path.resolve("."),
+    vlmFn: async () => ({ rawJson: JSON.stringify({
+      summary: "Grounded visual source.", tags: ["grounded"], interest_points: [], quality_flags: [],
+      confidence: { summary: 0.9, tags: 0.9, quality_flags: 0.9 },
+      editorial_observation: {
+        visual_tags: ["grounded"], motion_type: "static", camera_motion_direction: "left",
+        subject_motion_direction: "right", shot_scale: "wide", composition_anchor: "center",
+        screen_side: "center", gaze_direction: "not_applicable", camera_axis: "unknown",
+        dominant_subject_type: "object", dominant_colors: ["blue"], text_presence: "absent",
+        confidence: { tags: 0.9, motion: 0.9, framing: 0.9, direction: 0.9, appearance: 0.9, text: 0.9 },
+      },
+    }) }),
+    skipStt: true, skipMarlin: true, skipAppraiser: true, skipBgmAnalysis: true,
+  });
+  const assets = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/assets.json"), "utf8")) as any;
+  const segments = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/segments.json"), "utf8")) as any;
+
+  return {
+    async run(ctx) {
+      const kinds = new Map(assets.items.map((asset: any) => [asset.asset_id, asset.media_kind]));
+      return {
+        confirmed: true,
+        selects: {
+          version: "1", project_id: ctx.projectId,
+          candidates: segments.items.map((segment: any, index: number) => {
+            const mediaKind = kinds.get(segment.asset_id);
+            const visual = mediaKind !== "audio";
+            return {
+              candidate_id: `C_${index}`, segment_id: segment.segment_id, asset_id: segment.asset_id,
+              src_in_us: segment.src_in_us, src_out_us: segment.src_out_us,
+              role: index === 0 ? "hero" : mediaKind === "audio" ? "dialogue" : "support",
+              why_it_matches: visual
+                ? "grounded candidate for the summit rescue sequence"
+                : "grounded audio candidate",
+              evidence: visual ? ["summit rescue sequence"] : ["grounded source"],
+              risks: [], confidence: 0.9,
+              media_kind: mediaKind,
+              ...(mediaKind === "image" ? { still_image: { hold_duration_sec: 3 } } : {}),
+            };
+          }),
+        } as any,
+      };
+    },
+  };
 }
 
 afterAll(() => {
@@ -887,6 +971,230 @@ describe("/intent command", () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe("/triage command", () => {
+  it("rejects ungrounded project and candidate sequence claims", async () => {
+    const projectBlocked = createMinimalProject("triage-sequence-project", {
+      withBrief: true, withAnalysis: true, state: "intent_locked",
+    });
+    const assetsPath = path.join(projectBlocked, "03_analysis/assets.json");
+    const assets = JSON.parse(fs.readFileSync(assetsPath, "utf8"));
+    assets.items[0].media_kind = "sequence";
+    fs.writeFileSync(assetsPath, JSON.stringify(assets));
+    const projectStatePath = path.join(projectBlocked, "project_state.yaml");
+    const projectStateBefore = fs.readFileSync(projectStatePath);
+    const progressPath = path.join(projectBlocked, "progress.json");
+    expect(fs.existsSync(progressPath)).toBe(false);
+    await expect(runTriage(projectBlocked, createMockTriageAgent()))
+      .rejects.toThrow(/AST_001:source_map_entry_missing/);
+    expect(fs.readFileSync(projectStatePath)).toEqual(projectStateBefore);
+    expect(fs.existsSync(progressPath)).toBe(false);
+
+    const candidateBlocked = createMinimalProject("triage-sequence-candidate", {
+      withBrief: true, withAnalysis: true, state: "intent_locked",
+    });
+    const selects = makeMockSelects("test-project");
+    selects.candidates[0].asset_id = "AST_SEQUENCE_INJECTED";
+    (selects.candidates[0] as any).media_kind = "sequence";
+    await expect(runTriage(candidateBlocked, createMockTriageAgent({ selects } as never)))
+      .rejects.toThrow(/AST_SEQUENCE_INJECTED:image_sequence_identity_missing/);
+  });
+
+  it("rejects an unknown image candidate after materialization", async () => {
+    const projectDir = createMinimalProject("triage-unknown-image-candidate", {
+      withBrief: true, withAnalysis: true, state: "intent_locked", autonomyMode: "full",
+    });
+    const selects = makeMockSelects("test-project");
+    selects.candidates[0].asset_id = "AST_UNKNOWN_IMAGE";
+    (selects.candidates[0] as any).media_kind = "image";
+
+    await expect(runTriage(projectDir, createMockTriageAgent({ selects } as never)))
+      .rejects.toThrow(/AST_UNKNOWN_IMAGE:candidate_image_asset_not_grounded/);
+    expect(fs.existsSync(path.join(projectDir, "04_plan/selects_candidates.yaml"))).toBe(false);
+  });
+
+  it("canonicalizes an agent-mislabeled video candidate before image grounding", async () => {
+    const projectDir = createMinimalProject("triage-canonical-video-kind", {
+      withBrief: true, withAnalysis: true, state: "intent_locked", autonomyMode: "full",
+    });
+    const groundedAgent = await makeGroundedPlanningAgent(projectDir, "mixed");
+    writeProjectState(projectDir, {
+      version: 1,
+      project_id: "test-project",
+      current_state: "media_analyzed",
+      history: [],
+    });
+    const mislabeledAgent: TriageAgent = {
+      async run(ctx) {
+        const result = await groundedAgent.run(ctx);
+        const video = result.selects.candidates.find((candidate) => candidate.media_kind === "video");
+        expect(video).toBeDefined();
+        if (video) video.media_kind = "image";
+        return result;
+      },
+    };
+
+    const result = await runTriage(projectDir, mislabeledAgent);
+    expect(result.success, JSON.stringify(result, null, 2)).toBe(true);
+    const persisted = parseYaml(
+      fs.readFileSync(path.join(projectDir, "04_plan/selects_candidates.yaml"), "utf8"),
+    ) as any;
+    const persistedVideo = persisted.candidates.find((candidate: any) => candidate.media_kind === "video");
+    expect(persistedVideo).toBeDefined();
+    expect(persistedVideo.still_image).toBeUndefined();
+  }, 30_000);
+
+  it.each(["pure", "mixed", "sequence"] as const)("runs grounded %s media triage -> blueprint -> compile", async (mode) => {
+    const projectDir = createMinimalProject(`still-e2e-${mode}`, {
+      withBrief: true, withAnalysis: true, state: "intent_locked", autonomyMode: "full",
+    });
+    const triageAgent = await makeGroundedPlanningAgent(projectDir, mode);
+    const briefPath = path.join(projectDir, "01_intent/creative_brief.yaml");
+    const groundedBrief = parseYaml(fs.readFileSync(briefPath, "utf8")) as any;
+    groundedBrief.project.id = "test-project";
+    fs.writeFileSync(briefPath, stringifyYaml(groundedBrief));
+    writeProjectState(projectDir, { version: 1, project_id: "test-project", current_state: "media_analyzed", history: [] });
+    const preflightStatus = runStatus(projectDir);
+    expect(preflightStatus.gates?.analysis_gate, JSON.stringify(preflightStatus, null, 2)).toBe("ready");
+    const triageResult = await runTriage(projectDir, triageAgent);
+    expect(triageResult.success, JSON.stringify(triageResult, null, 2)).toBe(true);
+    const persistedSelects = parseYaml(fs.readFileSync(path.join(projectDir, "04_plan/selects_candidates.yaml"), "utf8")) as any;
+    expect(persistedSelects.candidates.some((candidate: any) =>
+      candidate.media_kind === (mode === "sequence" ? "sequence" : "image")
+    )).toBe(true);
+    if (mode === "mixed") {
+      expect(persistedSelects.candidates.map((candidate: any) => candidate.media_kind)).toEqual(
+        expect.arrayContaining(["image", "video", "audio"]),
+      );
+    }
+
+    const blueprint = makeMockBlueprint("test-project") as any;
+    blueprint.beats = mode === "pure"
+      ? [{ id: "B01", label: "Still hold", purpose: "grounded image", target_duration_frames: 72, required_roles: ["hero"] }]
+      : mode === "sequence"
+        ? [{ id: "B01", label: "Sequence", purpose: "grounded motion", target_duration_frames: 48, required_roles: ["hero"] }]
+      : [
+          { id: "B01", label: "Still hold", purpose: "grounded image", target_duration_frames: 72, required_roles: ["hero"] },
+          { id: "B02", label: "Video", purpose: "mixed video", target_duration_frames: 24, required_roles: ["support"] },
+          { id: "B03", label: "Audio", purpose: "mixed audio", target_duration_frames: 24, required_roles: ["dialogue"] },
+        ];
+    blueprint.duration_policy = {
+      mode: "guide", source: "global_default", target_source: "material_total", target_duration_sec: mode === "pure" ? 3 : mode === "sequence" ? 2 : 5,
+      min_duration_sec: 0, max_duration_sec: null, hard_gate: false, protect_vlm_peaks: true,
+    };
+    const blueprintResult = await runBlueprint(
+      projectDir,
+      createMockBlueprintAgent({ blueprint }),
+      { iterativeEngine: false, skipCraftReview: true, skipCraftFrames: true },
+    );
+    expect(blueprintResult.success, JSON.stringify(blueprintResult, null, 2)).toBe(true);
+    const selectsPath = path.join(projectDir, "04_plan/selects_candidates.yaml");
+    const tamperedSelects = parseYaml(fs.readFileSync(selectsPath, "utf8")) as any;
+    const tamperedImage = tamperedSelects.candidates.find((candidate: any) => candidate.still_image);
+    if (mode !== "sequence") {
+      expect(tamperedImage).toBeDefined();
+      if (mode === "pure") delete tamperedImage.media_kind;
+      else tamperedImage.media_kind = "video";
+    }
+    fs.writeFileSync(selectsPath, stringifyYaml(tamperedSelects));
+    const compiled = compile({
+      projectPath: projectDir, repoRoot: path.resolve("."), createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    const imageClip = compiled.timeline.tracks.video.flatMap((track) => track.clips)
+      .find((clip) => clip.media_kind === "image");
+    if (mode === "sequence") {
+      const sequenceClip = compiled.timeline.tracks.video.flatMap((track) => track.clips)
+        .find((clip) => clip.media_kind === "sequence");
+      expect(sequenceClip).toMatchObject({ src_in_us: 0, src_out_us: 2_000_000, timeline_duration_frames: 48 });
+    } else {
+      expect(imageClip).toMatchObject({ src_in_us: 0, src_out_us: 1 });
+      expect(imageClip?.timeline_duration_frames).toBe(imageClip?.still_image?.hold_frames);
+      expect(compiled.timeline.provenance.still_duration_policy).toBeDefined();
+    }
+    const imageAssetId = imageClip?.asset_id;
+    const audioClips = compiled.timeline.tracks.audio.flatMap((track) => track.clips);
+    if (mode === "pure" || mode === "sequence") expect(audioClips).toHaveLength(0);
+    expect(audioClips.filter((clip) => clip.asset_id === imageAssetId)).toHaveLength(0);
+
+    const renderedPath = path.join(projectDir, "05_timeline", `command-chain-${mode}.mp4`);
+    await assembleTimelineToMp4({
+      projectDir,
+      timelinePath: path.join(projectDir, "05_timeline/timeline.json"),
+      outputPath: renderedPath,
+      includeAudio: mode === "mixed",
+    });
+    const renderedStreams = JSON.parse(execFileSync("ffprobe", [
+      "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", renderedPath,
+    ], { encoding: "utf8" })).streams.map((stream: any) => stream.codec_type);
+    expect(renderedStreams).toContain("video");
+    if (mode === "pure" || mode === "sequence") expect(renderedStreams).toEqual(["video"]);
+    if (mode === "mixed") {
+      expect(compiled.timeline.tracks.video.flatMap((track) => track.clips).map((clip) => clip.media_kind))
+        .toEqual(expect.arrayContaining(["image", "video"]));
+      expect(renderedStreams).toContain("audio");
+    }
+
+    if (mode === "pure") {
+      fs.writeFileSync(selectsPath, stringifyYaml(persistedSelects));
+      const expectedHold = Math.round(3 * 30000 / 1001);
+      const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+      const existingTimeline = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
+      existingTimeline.sequence.fps_num = 30000;
+      existingTimeline.sequence.fps_den = 1001;
+      fs.writeFileSync(timelinePath, JSON.stringify(existingTimeline));
+      const blueprintPath = path.join(projectDir, "04_plan/edit_blueprint.yaml");
+      const persistedBlueprint = parseYaml(fs.readFileSync(blueprintPath, "utf8")) as any;
+      persistedBlueprint.project_id = "test-project";
+      persistedBlueprint.beats[0].target_duration_frames = expectedHold;
+      fs.writeFileSync(blueprintPath, stringifyYaml(persistedBlueprint));
+
+      const recompiled = await runCompilePhase(projectDir, { createdAt: "2026-01-01T00:00:00.000Z" });
+      const recompiledArtifact = JSON.parse(fs.readFileSync(timelinePath, "utf8"));
+      expect(recompiledArtifact.project_id, JSON.stringify(recompiledArtifact, null, 2)).toBe("test-project");
+      expect(recompiled.success, JSON.stringify(recompiled, null, 2)).toBe(true);
+      expect(recompiled.compileResult?.timeline.sequence).toMatchObject({ fps_num: 30000, fps_den: 1001 });
+      const recompiledImage = recompiled.compileResult?.timeline.tracks.video.flatMap((track) => track.clips)
+        .find((clip) => clip.media_kind === "image");
+      expect(recompiledImage?.timeline_duration_frames).toBe(expectedHold);
+      expect(recompiledImage?.still_image?.hold_frames).toBe(expectedHold);
+      expect(recompiled.compileResult?.timeline.provenance.still_duration_policy).toMatchObject({
+        fps_num: 30000,
+        fps_den: 1001,
+        default_hold_frames: expectedHold,
+      });
+
+      // Adversarial compound stripping must fail closed from the registered
+      // still locator/filename truth rather than compiling the 0..1us identity
+      // interval as a one-frame legacy video.
+      const assetsPath = path.join(projectDir, "03_analysis/assets.json");
+      const assets = JSON.parse(fs.readFileSync(assetsPath, "utf8"));
+      const strippedAsset = assets.items.find((asset: any) => asset.asset_id === imageAssetId);
+      delete strippedAsset.media_kind;
+      delete strippedAsset.still_image;
+      delete strippedAsset.duration_semantics;
+      delete strippedAsset.frame_rate_mode;
+      fs.writeFileSync(assetsPath, JSON.stringify(assets));
+      const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+      const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf8"));
+      const strippedSegment = segments.items.find((segment: any) => segment.asset_id === imageAssetId);
+      delete strippedSegment.media_kind;
+      delete strippedSegment.source_interval;
+      if (strippedSegment.provenance) delete strippedSegment.provenance.boundary;
+      fs.writeFileSync(segmentsPath, JSON.stringify(segments));
+      const strippedSelects = parseYaml(fs.readFileSync(selectsPath, "utf8")) as any;
+      const strippedCandidate = strippedSelects.candidates.find((candidate: any) => candidate.asset_id === imageAssetId);
+      delete strippedCandidate.media_kind;
+      delete strippedCandidate.still_image;
+      fs.writeFileSync(selectsPath, stringifyYaml(strippedSelects));
+      const sourceMapPath = path.join(projectDir, "02_media/source_map.json");
+      const sourceMap = JSON.parse(fs.readFileSync(sourceMapPath, "utf8"));
+      const strippedSource = sourceMap.items.find((entry: any) => entry.asset_id === imageAssetId);
+      delete strippedSource.media_kind;
+      fs.writeFileSync(sourceMapPath, JSON.stringify(sourceMap));
+      expect(() => compile({
+        projectPath: projectDir, repoRoot: path.resolve("."), createdAt: "2026-01-01T00:00:00.000Z",
+      })).toThrow(/still_image_grounding_invalid/);
+    }
+  }, 30_000);
+
   it("produces valid selects_candidates.yaml and transitions to selects_ready", async () => {
     const tmpDir = createMinimalProject("triage-ok", {
       withBrief: true,
@@ -1372,6 +1680,154 @@ describe("integration: intent → triage pipeline", () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe("/blueprint command", () => {
+  it("rejects ungrounded project and candidate sequence claims", async () => {
+    const projectBlocked = createMinimalProject("blueprint-sequence-project", {
+      withBrief: true, withAnalysis: true, withSelects: true, state: "selects_ready",
+    });
+    const assetsPath = path.join(projectBlocked, "03_analysis/assets.json");
+    const assets = JSON.parse(fs.readFileSync(assetsPath, "utf8"));
+    assets.items[0].media_kind = "sequence";
+    fs.writeFileSync(assetsPath, JSON.stringify(assets));
+    const projectStatePath = path.join(projectBlocked, "project_state.yaml");
+    const projectStateBefore = fs.readFileSync(projectStatePath);
+    const progressPath = path.join(projectBlocked, "progress.json");
+    const progressBefore = Buffer.from('{"sentinel":"preserve-me"}\n');
+    fs.writeFileSync(progressPath, progressBefore);
+    await expect(runBlueprint(projectBlocked, createMockBlueprintAgent(), { iterativeEngine: false }))
+      .rejects.toThrow(/AST_001:source_map_entry_missing/);
+    expect(fs.readFileSync(projectStatePath)).toEqual(projectStateBefore);
+    expect(fs.readFileSync(progressPath)).toEqual(progressBefore);
+
+    const candidateBlocked = createMinimalProject("blueprint-sequence-candidate", {
+      withBrief: true, withAnalysis: true, withSelects: true, state: "selects_ready",
+    });
+    const selectsPath = path.join(candidateBlocked, "04_plan/selects_candidates.yaml");
+    const selects = parseYaml(fs.readFileSync(selectsPath, "utf8")) as any;
+    selects.candidates[0].asset_id = "AST_SEQUENCE_INJECTED";
+    selects.candidates[0].media_kind = "sequence";
+    fs.writeFileSync(selectsPath, stringifyYaml(selects));
+    const candidateProjectStatePath = path.join(candidateBlocked, "project_state.yaml");
+    const candidateProjectStateBefore = fs.readFileSync(candidateProjectStatePath);
+    const candidateProgressPath = path.join(candidateBlocked, "progress.json");
+    expect(fs.existsSync(candidateProgressPath)).toBe(false);
+    await expect(runBlueprint(candidateBlocked, createMockBlueprintAgent(), { iterativeEngine: false }))
+      .rejects.toThrow(/AST_SEQUENCE_INJECTED:image_sequence_identity_missing/);
+    expect(fs.readFileSync(candidateProjectStatePath)).toEqual(candidateProjectStateBefore);
+    expect(fs.existsSync(candidateProgressPath)).toBe(false);
+  });
+
+  it("preserves nested explicit profile and policy hints in the default planner frame", async () => {
+    const tmpDir = createMinimalProject("blueprint-explicit-editorial-frame");
+    const briefContent = {
+      project: { runtime_target_sec: 60 },
+      editorial: {
+        profile_hint: "product-demo",
+        policy_hint: "tutorial",
+        allow_inference: false,
+      },
+    };
+    const selectsContent = {
+      candidates: [],
+      editorial_summary: { dominant_visual_mode: "mixed" },
+    };
+    const phases = buildDefaultPhases(
+      tmpDir,
+      "test-project",
+      selectsContent,
+      briefContent,
+      "full",
+    );
+
+    const frame = await phases.frame({
+      projectDir: tmpDir,
+      projectId: "test-project",
+      autonomyMode: "full",
+      briefContent,
+      blockersContent: {},
+      selectsContent,
+      styleContent: null,
+    });
+
+    expect(frame.resolvedProfile).toEqual({
+      id: "product-demo",
+      source: "explicit_hint",
+      rationale: 'profile_hint="product-demo" from creative brief',
+    });
+    expect(frame.resolvedPolicy).toEqual({
+      id: "tutorial",
+      source: "explicit_hint",
+      rationale: 'policy_hint="tutorial" from creative brief',
+    });
+    expect(frame.diagnostics).toBeUndefined();
+  });
+
+  it("persists the nested-editorial generic fallback through the iterative planner", async () => {
+    const tmpDir = createMinimalProject("blueprint-generic-editorial", {
+      withBrief: true,
+      withAnalysis: true,
+      withSelects: true,
+      autonomyMode: "full",
+      state: "selects_ready",
+    });
+    const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
+    const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as Record<string, unknown>;
+    brief.editorial = {
+      aspect_ratio: "16:9",
+      allow_inference: false,
+    };
+    fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
+
+    const selectsPath = path.join(tmpDir, "04_plan/selects_candidates.yaml");
+    const selects = parseYaml(fs.readFileSync(selectsPath, "utf-8")) as {
+      candidates: Array<{ candidate_id?: string }>;
+      [key: string]: unknown;
+    };
+    const firstCandidate = selects.candidates[0];
+    firstCandidate.candidate_id = "cand_generic_001";
+    selects.editorial_summary = {
+      dominant_visual_mode: "mixed",
+      speaker_topology: "unknown",
+      motion_profile: "low",
+      transcript_density: "sparse",
+    };
+    selects.beats = [{
+      beat_id: "B1",
+      label: "Grounded opening",
+      target_duration_frames: 72,
+      required_roles: ["hero"],
+      preferred_roles: [],
+      purpose: "Open on the strongest grounded image",
+    }];
+    fs.writeFileSync(selectsPath, stringifyYaml(selects), "utf-8");
+    fs.writeFileSync(
+      path.join(tmpDir, "04_plan/edit_blueprint.yaml"),
+      stringifyYaml(makeMockBlueprint("test-project")),
+      "utf-8",
+    );
+
+    const result = await runBlueprint(
+      tmpDir,
+      createMockBlueprintAgent(),
+      { maxIterations: 1, skipCraftReview: true },
+    );
+
+    expect(result.success, JSON.stringify(result, null, 2)).toBe(true);
+    expect(result.blueprint?.resolved_profile?.id).toBe("generic-editorial");
+    expect(result.blueprint?.resolved_policy?.id).toBe("generic");
+    expect(result.blueprint?.active_editing_skills).toEqual([]);
+    expect(result.blueprint?.resolved_profile?.id).not.toBe("interview-highlight");
+
+    const evaluation = parseYaml(fs.readFileSync(
+      path.join(tmpDir, "04_plan/script_evaluation.yaml"),
+      "utf-8",
+    )) as { warnings?: string[] };
+    expect(evaluation.warnings).toContain(
+      "EDITORIAL_PROFILE_INSUFFICIENT_SIGNAL [warning]: " +
+      "Editorial profile inference had insufficient signal; using the conservative generic fallback. " +
+      "resolved_profile=generic-editorial",
+    );
+  });
+
   it("autonomy:full → no confirmed_preferences interview, blueprint generated", async () => {
     const tmpDir = createMinimalProject("blueprint-full", {
       withBrief: true,
@@ -2050,9 +2506,41 @@ function makeMockMarlinQAReport(
 }
 
 function writeFreshReviewRender(projectDir: string): void {
+  const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+    tracks?: { video?: Array<{ clips?: Array<{ asset_id?: string }> }>; audio?: Array<{ clips?: Array<{ asset_id?: string }> }> };
+    audio_mix?: { bgm_asset_id?: string };
+  };
+  const assetIds = new Set([
+    ...(timeline.tracks?.video ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+    ...(timeline.tracks?.audio ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+    timeline.audio_mix?.bgm_asset_id,
+  ].filter((value): value is string => typeof value === "string"));
+  const mediaDir = path.join(projectDir, "02_media");
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const items = [...assetIds].sort().map((assetId) => {
+    const sourcePath = path.join(mediaDir, `${assetId}.bin`);
+    fs.writeFileSync(sourcePath, `source:${assetId}`);
+    return {
+      asset_id: assetId,
+      source_locator: sourcePath,
+      local_source_path: sourcePath,
+      link_path: `02_media/${assetId}.bin`,
+    };
+  });
+  fs.writeFileSync(path.join(mediaDir, "source_map.json"), JSON.stringify({
+    version: "1",
+    project_id: "sample-mountain-reset",
+    media_dir: "02_media",
+    generated_at: "2026-07-20T00:00:00.000Z",
+    items,
+  }));
   const outputPath = path.join(projectDir, "09_output/rough-cut.mp4");
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, "mock-render", "utf-8");
+  writeRenderFreshnessMetadata(projectDir, outputPath, {
+    sourceInputsBefore: createSourceInputAttestation(projectDir),
+  });
 }
 
 function visualQATestOptions(
@@ -2345,15 +2833,16 @@ describe("/review command", () => {
       expect(readProjectState(tmpDir)!.approval_record).toBeUndefined();
     });
 
-    it("does not approve when rendered video is stale against timeline", async () => {
+    it("does not approve when rendered video timeline hash is stale", async () => {
       const tmpDir = createReviewReadyProject("visual-stale");
       const agent = createMockReviewAgent({
         report: makeMockApprovedReport("sample-mountain-reset"),
       });
       writeFreshReviewRender(tmpDir);
       const timelinePath = path.join(tmpDir, "05_timeline/timeline.json");
-      const future = new Date(Date.now() + 10_000);
-      fs.utimesSync(timelinePath, future, future);
+      const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+      timeline.metadata = { ...(timeline.metadata ?? {}), test_stale: true };
+      fs.writeFileSync(timelinePath, JSON.stringify(timeline));
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
@@ -2371,7 +2860,7 @@ describe("/review command", () => {
       expect(result.newState).toBe("critique_ready");
       expect(result.report?.summary_judgment.status).toBe("blocked");
       expect(result.report?.visual_qa?.status).toBe("stale");
-      expect(result.report?.visual_qa?.reason).toBe("render_older_than_timeline");
+      expect(result.report?.visual_qa?.reason).toBe("render_timeline_hash_mismatch");
     });
 
     it("allows approved review with explicit unverified visual QA waiver", async () => {

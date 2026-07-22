@@ -17,6 +17,7 @@ import {
 } from "../runtime/caption/segmenter.js";
 import { generateSrt } from "../runtime/render/pipeline.js";
 import { buildAssForceStyle, DEFAULT_CAPTION_STYLE_PRESET } from "../editor/shared/caption-style-tokens.js";
+import { resolveBundledFontPaths } from "../runtime/fonts/bundled-font.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -189,13 +190,16 @@ try {
 // Step 2: Burn captions with subtitles filter + loudnorm
 const finalPath = path.join(OUTPUT_DIR, "final_v003.mp4");
 const escapedSrt = srtPath.replace(/:/g, "\\:").replace(/\\/g, "\\\\");
+const escapedFontsDir = resolveBundledFontPaths().fontsDir
+  .replace(/:/g, "\\:")
+  .replace(/\\/g, "\\\\");
 
 try {
   console.log("  Step 2: Burning captions + loudnorm...");
   execFileSync("ffmpeg", [
     "-y",
     "-i", rawEditPath,
-    "-vf", `subtitles='${escapedSrt}':force_style='${buildAssForceStyle(DEFAULT_CAPTION_STYLE_PRESET, { width: seqWidth, height: seqHeight, fps })}'`,
+    "-vf", `subtitles=filename='${escapedSrt}':fontsdir='${escapedFontsDir}':force_style='${buildAssForceStyle(DEFAULT_CAPTION_STYLE_PRESET, { width: seqWidth, height: seqHeight, fps })}'`,
     "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
     "-c:v", "libx264", "-preset", "medium", "-crf", "18",
     "-c:a", "aac", "-b:a", "192k",

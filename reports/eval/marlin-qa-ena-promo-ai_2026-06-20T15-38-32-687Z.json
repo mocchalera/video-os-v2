@@ -1,7 +1,7 @@
 {
   "version": "1",
   "project_id": "ena-promo-ai",
-  "video_path": "/Users/mocchalera/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
+  "video_path": "/Users/operator/Dev/video-os-v2-spec/projects/ena-promo-ai/09_output/rough-cut.mp4",
   "video_duration_sec": 76.667,
   "overall_assessment": "Usable rough cut with revisions recommended: Marlin QA found 3 warnings.",
   "scene_descriptions": [

@@ -207,6 +207,7 @@ describe("footage database", () => {
       expect(db.prepare("SELECT COUNT(*) FROM segment_usability_profile").pluck().get()).toBe(2);
       expect(db.prepare("SELECT value FROM footage_db_meta WHERE key = 'artifact_version'").pluck().get()).toBe("footage-db-v1");
       expect(db.prepare("SELECT value FROM footage_db_meta WHERE key = 'metadata_schema_version'").pluck().get()).toBe("1");
+      expect(db.prepare("SELECT value FROM footage_db_meta WHERE key = 'editorial_observation_materialization_revision'").pluck().get()).toBe("eye-010b-v1");
       expect(db.prepare("SELECT video_codec, width, height, fps_num, fps_den, audio_streams_json FROM asset_technical_metadata WHERE asset_id = 'AST_food'").get()).toMatchObject({
         video_codec: "prores",
         width: 3840,
@@ -261,6 +262,261 @@ describe("footage database", () => {
     const english = await searchFootage(projectDir, { query: "栗 OR chestnut", mode: "text", explicitBoolean: true, limit: 3 });
     expect(english.rewritten_query?.fts_match).toContain("OR");
     expect(english.results[0]?.segment_id).toBe("SEG_food");
+  });
+
+  it("materializes canonical observation ahead of contradictory phrase parsing and normalizes filter vocabularies", async () => {
+    const projectDir = makeProject();
+    setEditorialObservation(projectDir, "SEG_food", {
+      visual_tags: ["graphic_match", "ember"],
+      motion_type: "continuous",
+      camera_motion_direction: "left",
+      subject_motion_direction: "right",
+      shot_scale: "medium_close_up",
+      composition_anchor: "balanced",
+      screen_side: "multiple",
+      gaze_direction: "screen_right",
+      camera_axis: "axis_left",
+      dominant_subject_type: "architecture",
+      avg_luma: 0.37,
+      dominant_colors: ["burnt_orange", "charcoal"],
+      text_presence: "present",
+    });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
+
+    const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
+    try {
+      const row = db.prepare(`
+        SELECT camera_motion_type, camera_motion_direction, subject_movement_direction, shot_scale,
+          composition_anchor, subject_screen_side, dominant_subject_type, dominant_colors_json,
+          motion_confidence, color_confidence, extraction_source_json, evidence_json
+        FROM segment_visual_profile WHERE segment_id = 'SEG_food'
+      `).get() as Record<string, unknown>;
+      expect(row).toMatchObject({
+        camera_motion_type: "pan",
+        camera_motion_direction: "rtl",
+        subject_movement_direction: "ltr",
+        shot_scale: "medium_close",
+        composition_anchor: "unknown",
+        subject_screen_side: "mixed",
+        dominant_subject_type: "unknown",
+        motion_confidence: 0.91,
+        color_confidence: 0.82,
+      });
+      expect(JSON.parse(row.dominant_colors_json as string)).toEqual(["burnt_orange", "charcoal"]);
+      const source = JSON.parse(row.extraction_source_json as string) as Record<string, unknown>;
+      expect(source).toMatchObject({
+        motion: "editorial_observation",
+        shot_scale: "editorial_observation",
+        editorial_observation: {
+          values: {
+            camera_motion_direction: "left",
+            shot_scale: "medium_close_up",
+            dominant_subject_type: "architecture",
+          },
+        },
+      });
+      expect(row.evidence_json).toContain("editorial_observation.avg_luma=0.37");
+    } finally {
+      db.close();
+    }
+
+    for (const direction of ["left", "rtl"]) {
+      const result = await searchFootage(projectDir, { query: "", mode: "structured", filters: { camera_motion_direction: direction } });
+      expect(result.results.map((item) => item.segment_id), direction).toContain("SEG_food");
+      expect(result.results[0]?.match_reason).toContain("evidence_class=observable");
+    }
+    for (const scale of ["medium_close_up", "medium_close"]) {
+      const result = await searchFootage(projectDir, { query: "", mode: "structured", filters: { shot_scale: scale } });
+      expect(result.results.map((item) => item.segment_id), scale).toContain("SEG_food");
+    }
+    for (const contradictedFilter of [
+      { camera_motion_direction: "ltr" },
+      { camera_motion_direction: "right" },
+      { shot_scale: "detail" },
+      { shot_scale: "insert" },
+    ]) {
+      const result = await searchFootage(projectDir, { query: "", mode: "structured", filters: contradictedFilter });
+      expect(result.results.map((item) => item.segment_id), JSON.stringify(contradictedFilter)).not.toContain("SEG_food");
+    }
+  });
+
+  it("keeps generic motion and luma confidence out of camera-motion and color columns", async () => {
+    const projectDir = makeProject();
+    setEditorialObservation(projectDir, "SEG_river", {
+      motion_type: "unknown",
+      avg_luma: 0.18,
+      shot_scale: "not_applicable",
+      text_presence: "unknown",
+    }, { motion: 0.99, appearance: 0.98, framing: 0.97 });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath } = await import("../runtime/artifacts/footage-db.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
+
+    const db = new Database(footageDbPath(projectDir), { readonly: true, fileMustExist: true });
+    try {
+      expect(db.prepare(`SELECT camera_motion_type, motion_confidence, shot_scale, scale_confidence, color_confidence
+        FROM segment_visual_profile WHERE segment_id = 'SEG_river'`).get()).toMatchObject({
+        camera_motion_type: "handheld",
+        motion_confidence: 0.6,
+        shot_scale: "unknown",
+        scale_confidence: 0.97,
+        color_confidence: null,
+      });
+    } finally {
+      db.close();
+    }
+    const unknown = await searchFootage(projectDir, { query: "unknown", mode: "text" });
+    const notApplicable = await searchFootage(projectDir, { query: "not_applicable", mode: "text" });
+    const unknownRiver = unknown.results.find((item) => item.segment_id === "SEG_river");
+    expect(unknownRiver?.evidence_refs).toContainEqual(expect.objectContaining({
+      field: "editorial_observation",
+      value: "motion_type=unknown",
+      matched: false,
+    }));
+    expect(unknownRiver?.match_reason).not.toContain("evidence_class=observable");
+    expect(notApplicable.results.map((item) => item.segment_id)).not.toContain("SEG_river");
+    const exact = await searchFootage(projectDir, { query: "", mode: "structured", filters: { shot_scale: "not_applicable" } });
+    expect(exact.results.map((item) => item.segment_id)).toContain("SEG_river");
+  });
+
+  it("searches canonical observation text and distinguishes observable from aesthetic evidence", async () => {
+    const projectDir = makeProject();
+    setEditorialObservation(projectDir, "SEG_food", {
+      visual_tags: ["silhouette_bridge"],
+      shot_scale: "close_up",
+      camera_motion_direction: "right",
+      dominant_colors: ["cobalt_blue"],
+      text_presence: "present",
+    });
+    updateSegment(projectDir, "SEG_food", {
+      visual_appraisal: {
+        frame_us: 2_000_000,
+        frame_path: "frames/SEG_food.jpg",
+        extracted_text: [],
+        aesthetic_notes: ["iridescent_mood"],
+      },
+    });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
+
+    const observable = await searchFootage(projectDir, { query: "cobalt_blue", mode: "text" });
+    expect(observable.results[0]?.segment_id).toBe("SEG_food");
+    expect(observable.results[0]?.match_reason).toContain("evidence_class=observable");
+    expect(observable.results[0]?.evidence_refs).toContainEqual(expect.objectContaining({
+      field: "editorial_observation",
+      value: "dominant_colors=cobalt_blue",
+      evidence_class: "observable",
+      matched: true,
+    }));
+
+    const aesthetic = await searchFootage(projectDir, { query: "iridescent_mood", mode: "text" });
+    expect(aesthetic.results[0]?.segment_id).toBe("SEG_food");
+    expect(aesthetic.results[0]?.match_reason).toContain("evidence_class=aesthetic_editorial");
+    expect(aesthetic.results[0]?.evidence_refs).toContainEqual(expect.objectContaining({
+      field: "aesthetic_note",
+      evidence_class: "aesthetic_editorial",
+      matched: true,
+    }));
+
+    const technical = await searchFootage(projectDir, { query: "shaky", mode: "text" });
+    expect(technical.results[0]?.segment_id).toBe("SEG_river");
+    expect(technical.results[0]?.match_reason).toMatch(/evidence_class=[^;]*technical/);
+    expect(technical.results[0]?.evidence_refs).toContainEqual(expect.objectContaining({
+      field: "quality_flag",
+      value: "shaky",
+      evidence_class: "technical",
+      matched: true,
+    }));
+  });
+
+  it("uses canonical observation in missing and stale DB fallback", async () => {
+    const projectDir = makeProject();
+    setEditorialObservation(projectDir, "SEG_food", { visual_tags: ["fallback_beacon"], camera_axis: "on_axis" });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+
+    const missing = await searchFootage(projectDir, { query: "fallback_beacon", mode: "text" });
+    expect(missing.db_status).toBe("fallback");
+    expect(missing.results[0]?.evidence_refs).toContainEqual(expect.objectContaining({
+      field: "editorial_observation",
+      value: "visual_tags=fallback_beacon",
+      evidence_class: "observable",
+      matched: true,
+    }));
+
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
+    setEditorialObservation(projectDir, "SEG_food", { visual_tags: ["new_stale_beacon"], camera_axis: "on_axis" });
+    const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+    const future = new Date(Date.now() + 10_000);
+    fs.utimesSync(segmentsPath, future, future);
+    const stale = await searchFootage(projectDir, { query: "new_stale_beacon", mode: "text" });
+    expect(stale.db_status).toBe("fallback");
+    expect(stale.warnings).toContain("footage DB stale; using segments.json fallback");
+    expect(stale.results[0]?.segment_id).toBe("SEG_food");
+  });
+
+  it("falls back when an observation-bearing DB lacks the materialization revision while old observation-free DBs stay ready", async () => {
+    const observationProject = makeProject();
+    setEditorialObservation(observationProject, "SEG_food", { visual_tags: ["revision_beacon"] });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { footageDbPath, readFootageDbStatus } = await import("../runtime/artifacts/footage-db.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+    await buildFootageDb({ projectDir: observationProject, embeddingPolicy: "skip", qwen3vlEnabled: false });
+    const observationDb = new Database(footageDbPath(observationProject));
+    try {
+      observationDb.prepare("DELETE FROM footage_db_meta WHERE key = 'editorial_observation_materialization_revision'").run();
+    } finally {
+      observationDb.close();
+    }
+
+    const staleStatus = readFootageDbStatus(observationProject);
+    expect(staleStatus.status).toBe("stale");
+    expect(staleStatus.stale_reasons).toContain(
+      "editorial observation materialization revision: db=missing current=eye-010b-v1",
+    );
+    const fallback = await searchFootage(observationProject, { query: "revision_beacon", mode: "text" });
+    expect(fallback.db_status).toBe("fallback");
+    expect(fallback.results[0]?.segment_id).toBe("SEG_food");
+
+    const legacyProject = makeProject();
+    updateSegment(legacyProject, "SEG_food", { editorial_observation: null });
+    await buildFootageDb({ projectDir: legacyProject, embeddingPolicy: "skip", qwen3vlEnabled: false });
+    const legacyDb = new Database(footageDbPath(legacyProject));
+    try {
+      legacyDb.prepare("DELETE FROM footage_db_meta WHERE key = 'editorial_observation_materialization_revision'").run();
+    } finally {
+      legacyDb.close();
+    }
+    expect(readFootageDbStatus(legacyProject).status).toBe("ready");
+  });
+
+  it("keeps has_text as OCR-or-transcript while text_presence filters screen text", async () => {
+    const projectDir = makeProject();
+    setEditorialObservation(projectDir, "SEG_food", { text_presence: "absent" });
+    const { buildFootageDb } = await import("../runtime/artifacts/footage-db-builder.js");
+    const { searchFootage } = await import("../runtime/tools/footage-search.js");
+
+    const fallback = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { asset_ids: ["AST_food"], has_text: true, text_presence: "absent" },
+    });
+    expect(fallback.db_status).toBe("fallback");
+    expect(fallback.results.map((item) => item.segment_id)).toEqual(["SEG_food"]);
+
+    await buildFootageDb({ projectDir, embeddingPolicy: "skip", qwen3vlEnabled: false });
+    const db = await searchFootage(projectDir, {
+      query: "",
+      mode: "structured",
+      filters: { asset_ids: ["AST_food"], has_text: true, text_presence: "absent" },
+    });
+    expect(db.db_status).toBe("ready");
+    expect(db.results.map((item) => item.segment_id)).toEqual(["SEG_food"]);
   });
 
   it("defaults embedding policy to auto", async () => {
@@ -1266,6 +1522,68 @@ function makeProject(): string {
   });
 
   return projectDir;
+}
+
+function setEditorialObservation(
+  projectDir: string,
+  segmentId: string,
+  values: Record<string, unknown>,
+  confidenceScores: Partial<Record<"tags" | "motion" | "framing" | "direction" | "appearance" | "text", number>> = {},
+): void {
+  const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+  const document = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as { items: Array<Record<string, unknown>> };
+  const segment = document.items.find((item) => item.segment_id === segmentId);
+  if (!segment) throw new Error(`missing segment ${segmentId}`);
+  const defaults = { tags: 0.88, motion: 0.87, framing: 0.86, direction: 0.91, appearance: 0.82, text: 0.84 };
+  const confidence = Object.fromEntries(Object.entries({ ...defaults, ...confidenceScores }).map(([group, score]) => [group, {
+    score,
+    evidence_refs: [`frame:${segmentId}:${group}`],
+  }]));
+  segment.editorial_observation = {
+    status: "ready",
+    ...values,
+    confidence,
+    evidence: Object.keys(values).map((field) => ({
+      evidence_ref: `frame:${segmentId}:${field}`,
+      producer: "grounded_vlm",
+      evidence_type: "verified_frame",
+      fields: [field],
+      frame_us: segment.rep_frame_us,
+      observed_value: values[field],
+    })),
+    warnings: [],
+    producer_snapshots: {
+      grounded_vlm: {
+        status: "ready",
+        values: {
+          camera_motion_direction: values.camera_motion_direction === "left" ? "right" : "left",
+          shot_scale: "insert",
+        },
+        confidence: {},
+        evidence: [],
+        producer: {
+          producer: "grounded_vlm",
+          producer_version: "ignored-snapshot",
+          actual_verified_frame_count: 1,
+          evidence_refs: ["ignored:snapshot"],
+        },
+      },
+    },
+    provenance: {
+      contract_version: "editorial-observation-v1",
+      asset_id: segment.asset_id,
+      segment_id: segment.segment_id,
+      segment_src_in_us: segment.src_in_us,
+      segment_src_out_us: segment.src_out_us,
+      producers: [{
+        producer: "grounded_vlm",
+        producer_version: "test-v1",
+        actual_verified_frame_count: 1,
+        evidence_refs: Object.keys(values).map((field) => `frame:${segmentId}:${field}`),
+      }],
+    },
+  };
+  fs.writeFileSync(segmentsPath, `${JSON.stringify(document, null, 2)}\n`, "utf-8");
 }
 
 function writeSourceMedia(projectDir: string): void {

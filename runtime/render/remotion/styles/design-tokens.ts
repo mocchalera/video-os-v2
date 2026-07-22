@@ -1,3 +1,5 @@
+import { videoFontFamilyStack } from "../../../../editor/shared/font-contract.js";
+
 export const remotionDesignTokens = {
   colors: {
     neutral: {
@@ -25,10 +27,8 @@ export const remotionDesignTokens = {
     },
   },
   fontFamilies: {
-    heading:
-      '"Helvetica Neue", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif',
-    body:
-      '"Helvetica Neue", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif',
+    heading: videoFontFamilyStack(),
+    body: videoFontFamilyStack(),
     mono:
       '"SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
   },

@@ -22,6 +22,8 @@ final class CaptionReviewDocumentTests: XCTestCase {
         )
 
         XCTAssertEqual(document.captionStyle, .default)
+        XCTAssertEqual(document.captionStyle.fontID, "noto-sans-jp")
+        XCTAssertEqual(document.captionStyle.fontFamily, "Noto Sans JP")
     }
 
     func testDecodesSharedCLIQueueContractAndSummaries() throws {
@@ -108,6 +110,7 @@ final class CaptionReviewDocumentTests: XCTestCase {
         XCTAssertEqual(document.items.count, 3)
         XCTAssertEqual(document.fps, 24)
         XCTAssertEqual(document.captionStyle.presetID, "longform-event")
+        XCTAssertEqual(document.captionStyle.fontID, "noto-sans-jp")
         XCTAssertEqual(document.captionStyle.fontSizePx1080, 56)
         XCTAssertTrue(document.canUndo)
         XCTAssertEqual(document.undoDepth, 3)

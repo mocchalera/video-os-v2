@@ -34,6 +34,12 @@ import {
   type FullPipelinePhase,
   type FullPipelineTarget,
 } from "../pipeline/plan.js";
+import {
+  executePipelinePhases,
+  failPipelinePhase,
+  type PipelinePhaseFailure,
+  type PipelinePhaseStep,
+} from "../pipeline/phase-executor.js";
 
 export type { FullPipelinePhase, FullPipelineTarget } from "../pipeline/plan.js";
 
@@ -74,6 +80,11 @@ export interface FullPipelineResult {
   render?: RenderCommandResult;
 }
 
+interface FullPipelinePhaseFailure {
+  error?: CommandError;
+  stage: PipelineTimingStage;
+}
+
 export async function runFullPipeline(
   projectDir: string,
   deps: FullPipelineDeps,
@@ -89,7 +100,6 @@ export async function runFullPipeline(
     };
   }
 
-  const completedPhases: FullPipelinePhase[] = [];
   const ownProgress = options?.stageProgress ? null : new PipelineStageProgressTracker({
     projectDir,
     entrypoint: "full-pipeline",
@@ -100,135 +110,34 @@ export async function runFullPipeline(
   const result: FullPipelineResult = {
     success: false,
     from,
-    completedPhases,
+    completedPhases: [],
   };
 
-  for (const phase of buildFullPipelineCommandPhases({ from, target })) {
-    if (phase === "analyze") {
-      const analyze = await runAnalyze(
+  const steps: Array<PipelinePhaseStep<FullPipelinePhase, FullPipelinePhaseFailure>> =
+    buildFullPipelineCommandPhases({ from, target }).map((phase) => ({
+      phase,
+      run: () => executeFullPipelinePhase(
+        phase,
         projectDir,
-        { ...(options?.analyze ?? { sourceFiles: [] }), stageProgress },
-        deps.analyzeRunner,
-      );
-      result.analyze = analyze;
-      if (!analyze.success) {
-        return finishFailure(projectDir, result, analyze.error, "ingest", ownProgress);
-      }
-      ownProgress?.refreshEstimates(readSegmentCount(projectDir));
-      completedPhases.push("analyze");
-      continue;
-    }
+        deps,
+        options,
+        result,
+        stageProgress,
+        ownProgress,
+      ),
+    }));
+  const execution = await executePipelinePhases(steps);
+  result.completedPhases.push(...execution.completedPhases);
 
-    if (phase === "triage") {
-      const stage = stageProgress?.beginStage("triage");
-      const intent = await ensureIntent(projectDir, deps.intentAgent);
-      if (intent) {
-        result.intent = intent;
-        if (!intent.success) {
-          stage?.fail(intent.error?.message ?? "intent failed");
-          return finishFailure(projectDir, result, intent.error, "triage", ownProgress);
-        }
-      }
-
-      const triage = await runTriage(projectDir, deps.triageAgent, options?.triage);
-      result.triage = triage;
-      if (!triage.success) {
-        stage?.fail(triage.error?.message ?? "triage failed");
-        return finishFailure(projectDir, result, triage.error, "triage", ownProgress);
-      }
-      stage?.complete();
-      completedPhases.push("triage");
-      continue;
-    }
-
-    if (phase === "blueprint") {
-      const stage = stageProgress?.beginStage("blueprint");
-      const intent = await ensureIntent(projectDir, deps.intentAgent);
-      if (intent) {
-        result.intent = intent;
-        if (!intent.success) {
-          stage?.fail(intent.error?.message ?? "intent failed");
-          return finishFailure(projectDir, result, intent.error, "blueprint", ownProgress);
-        }
-      }
-
-      const blueprint = await runBlueprint(
-        projectDir,
-        deps.blueprintAgent,
-        options?.blueprint,
-      );
-      result.blueprint = blueprint;
-      if (!blueprint.success) {
-        stage?.fail(blueprint.error?.message ?? "blueprint failed");
-        return finishFailure(projectDir, result, blueprint.error, "blueprint", ownProgress);
-      }
-      stage?.complete();
-      completedPhases.push("blueprint");
-      continue;
-    }
-
-    if (phase === "compile") {
-      const stage = stageProgress?.beginStage("compile");
-      const compile = await runCompilePhase(projectDir, options?.compile);
-      result.compile = compile;
-      if (!compile.success) {
-        stage?.fail(compile.error?.message ?? "compile failed");
-        return finishFailure(projectDir, result, compile.error, "compile", ownProgress);
-      }
-      stage?.complete();
-      completedPhases.push("compile");
-      continue;
-    }
-
-    if (phase === "review") {
-      const stage = stageProgress?.beginStage("QA");
-      const reviewOptions: ReviewCommandOptions = {
-        ...options?.review,
-        requireCompiledTimeline: true,
-      };
-
-      const review = await runReview(projectDir, deps.reviewAgent, reviewOptions);
-      result.review = review;
-      if (!review.success) {
-        stage?.fail(review.error?.message ?? "review failed");
-        return finishFailure(projectDir, result, review.error, "QA", ownProgress);
-      }
-      completedPhases.push("review");
-
-      if (review.patch && review.patch.operations.length > 0) {
-        const patchCompile = await runCompilePhase(projectDir, {
-          ...options?.compile,
-          reviewPatch: review.patch,
-        });
-        result.compile = patchCompile;
-        if (!patchCompile.success) {
-          stage?.fail(patchCompile.error?.message ?? "review patch compile failed");
-          return finishFailure(projectDir, result, patchCompile.error, "QA", ownProgress);
-        }
-
-        const rereview = await runReview(projectDir, deps.reviewAgent, reviewOptions);
-        result.review = rereview;
-        if (!rereview.success) {
-          stage?.fail(rereview.error?.message ?? "review failed");
-          return finishFailure(projectDir, result, rereview.error, "QA", ownProgress);
-        }
-      }
-
-      stage?.complete();
-      continue;
-    }
-
-    if (phase === "render") {
-      const stage = stageProgress?.beginStage("render");
-      const render = await runRender(projectDir, options?.render);
-      result.render = render;
-      if (!render.success) {
-        stage?.fail(render.error?.message ?? "render failed");
-        return finishFailure(projectDir, result, render.error, "render", ownProgress);
-      }
-      stage?.complete();
-      completedPhases.push("render");
-    }
+  if (!execution.success) {
+    const failure = execution.failure;
+    return finishFailure(
+      projectDir,
+      result,
+      failure?.error,
+      failure?.stage ?? "triage",
+      ownProgress,
+    );
   }
 
   ownProgress?.finish("completed");
@@ -237,6 +146,130 @@ export async function runFullPipeline(
     success: true,
     finalState: runStatus(projectDir).currentState,
   };
+}
+
+async function executeFullPipelinePhase(
+  phase: FullPipelinePhase,
+  projectDir: string,
+  deps: FullPipelineDeps,
+  options: FullPipelineOptions | undefined,
+  result: FullPipelineResult,
+  stageProgress: PipelineStageProgress | undefined,
+  ownProgress: PipelineStageProgressTracker | null,
+): Promise<void | PipelinePhaseFailure<FullPipelinePhaseFailure>> {
+  if (phase === "analyze") {
+    const analyze = await runAnalyze(
+      projectDir,
+      { ...(options?.analyze ?? { sourceFiles: [] }), stageProgress },
+      deps.analyzeRunner,
+    );
+    result.analyze = analyze;
+    if (!analyze.success) return failPipelinePhase({ error: analyze.error, stage: "ingest" });
+    ownProgress?.refreshEstimates(readSegmentCount(projectDir));
+    return;
+  }
+
+  if (phase === "triage") {
+    const stage = stageProgress?.beginStage("triage");
+    const intent = await ensureIntent(projectDir, deps.intentAgent);
+    if (intent) {
+      result.intent = intent;
+      if (!intent.success) {
+        stage?.fail(intent.error?.message ?? "intent failed");
+        return failPipelinePhase({ error: intent.error, stage: "triage" });
+      }
+    }
+    const triage = await runTriage(projectDir, deps.triageAgent, options?.triage);
+    result.triage = triage;
+    if (!triage.success) {
+      stage?.fail(triage.error?.message ?? "triage failed");
+      return failPipelinePhase({ error: triage.error, stage: "triage" });
+    }
+    stage?.complete();
+    return;
+  }
+
+  if (phase === "blueprint") {
+    const stage = stageProgress?.beginStage("blueprint");
+    const intent = await ensureIntent(projectDir, deps.intentAgent);
+    if (intent) {
+      result.intent = intent;
+      if (!intent.success) {
+        stage?.fail(intent.error?.message ?? "intent failed");
+        return failPipelinePhase({ error: intent.error, stage: "blueprint" });
+      }
+    }
+    const blueprint = await runBlueprint(projectDir, deps.blueprintAgent, options?.blueprint);
+    result.blueprint = blueprint;
+    if (!blueprint.success) {
+      stage?.fail(blueprint.error?.message ?? "blueprint failed");
+      return failPipelinePhase({ error: blueprint.error, stage: "blueprint" });
+    }
+    stage?.complete();
+    return;
+  }
+
+  if (phase === "compile") {
+    const stage = stageProgress?.beginStage("compile");
+    const compile = await runCompilePhase(projectDir, options?.compile);
+    result.compile = compile;
+    if (!compile.success) {
+      stage?.fail(compile.error?.message ?? "compile failed");
+      return failPipelinePhase({ error: compile.error, stage: "compile" });
+    }
+    stage?.complete();
+    return;
+  }
+
+  if (phase === "review") {
+    const stage = stageProgress?.beginStage("QA");
+    const reviewOptions: ReviewCommandOptions = {
+      ...options?.review,
+      requireCompiledTimeline: true,
+    };
+    const review = await runReview(projectDir, deps.reviewAgent, reviewOptions);
+    result.review = review;
+    if (!review.success) {
+      stage?.fail(review.error?.message ?? "review failed");
+      return failPipelinePhase({ error: review.error, stage: "QA" });
+    }
+
+    if (review.patch && review.patch.operations.length > 0) {
+      const patchCompile = await runCompilePhase(projectDir, {
+        ...options?.compile,
+        reviewPatch: review.patch,
+      });
+      result.compile = patchCompile;
+      if (!patchCompile.success) {
+        stage?.fail(patchCompile.error?.message ?? "review patch compile failed");
+        return failPipelinePhase(
+          { error: patchCompile.error, stage: "QA" },
+          { phaseCompleted: true },
+        );
+      }
+
+      const rereview = await runReview(projectDir, deps.reviewAgent, reviewOptions);
+      result.review = rereview;
+      if (!rereview.success) {
+        stage?.fail(rereview.error?.message ?? "review failed");
+        return failPipelinePhase(
+          { error: rereview.error, stage: "QA" },
+          { phaseCompleted: true },
+        );
+      }
+    }
+    stage?.complete();
+    return;
+  }
+
+  const stage = stageProgress?.beginStage("render");
+  const render = await runRender(projectDir, options?.render);
+  result.render = render;
+  if (!render.success) {
+    stage?.fail(render.error?.message ?? "render failed");
+    return failPipelinePhase({ error: render.error, stage: "render" });
+  }
+  stage?.complete();
 }
 
 function detectResumePhase(

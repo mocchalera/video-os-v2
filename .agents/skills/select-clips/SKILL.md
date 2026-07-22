@@ -49,6 +49,8 @@ metadata:
 - `must_avoid` に該当する素材は `role: reject` を優先する。単なる不採用ではなく、「避けるべき理由がある」と operator に分かる形で残す
 - 技術的に致命的な素材、対象外人物や秘匿情報が映る素材、同一シーンの劣後テイクは positive candidate から外す
 - 軽微な欠点は即 reject にせず、`risks` や `quality_flags` に残して候補として残してよい
+- 初見視聴者向けの hook / opening では、直前文脈がないと対象が分からない「両方」「双方」「どちらも」や、私的な前提説明へ依存する断片を単独採用しない。近接する antecedent を同じ候補窓に含めるか、別の自己完結した候補を優先する
+- 個人的な話題自体を一律 reject しない。brief の audience が cold audience で、商品価値への接続より内輪の前提理解が先に必要な場合だけ omit / risk / reject を選ぶ
 
 ### Step 4: peak-aware で in/out と trim_hint を決める
 

@@ -121,6 +121,30 @@ describe("dialogue semantic repair", () => {
       issues_after: [],
     });
   });
+
+  it("repairs authored A1 dialogue in a pure-audio timeline", () => {
+    const timeline = makeTimeline();
+    timeline.tracks.video = [];
+    for (const item of timeline.tracks.audio[0].clips) {
+      item.media_kind = "audio";
+      item.source_capabilities = { has_video: false, has_audio: true };
+      item.audio_role = "dialogue";
+      item.motivation = "authored audio selection";
+    }
+    const result = applyDialogueSemanticRepair(
+      timeline,
+      new Map([["AST_INTERVIEW", UTTERANCES]]),
+      [segment("SEG_INTERVIEW", "AST_INTERVIEW")],
+      24,
+    );
+    expect(result.repairedClips).toBe(1);
+    expect(timeline.tracks.audio[0].clips[0]).toMatchObject({
+      src_in_us: 0,
+      src_out_us: 6_000_000,
+      timeline_duration_frames: 144,
+    });
+    expect(timeline.tracks.audio[0].clips[1].timeline_in_frame).toBe(144);
+  });
 });
 
 function makeTimeline(): AssembledTimeline {

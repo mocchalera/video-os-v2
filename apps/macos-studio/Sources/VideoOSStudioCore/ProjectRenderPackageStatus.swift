@@ -11,28 +11,28 @@ public struct ProjectRenderPackageStatus: Equatable, Sendable {
     public let qaReportExists: Bool
     public let qaReportReadable: Bool
     public let qaPassed: Bool?
+    public let qaProjectID: String?
     public let qaSourceOfTruth: String?
     public let qaCheckCount: Int
     public let qaFailedCheckCount: Int
     public let packageManifestExists: Bool
     public let packageManifestReadable: Bool
+    public let manifestProjectID: String?
     public let manifestSourceOfTruth: String?
     public let manifestCreatedAt: String?
+    public let packageContractMatches: Bool
     public let publishedFinalVideoExists: Bool
     public let packageFinalVideoExists: Bool
     public let finalMixExists: Bool
+    public let verificationStatus: ProjectPackageVerificationStatus
 
     public var readinessLabel: String {
-        if qaReportExists, !qaReportReadable { return "qa report unreadable" }
-        if packageManifestExists, !packageManifestReadable { return "package manifest unreadable" }
-        if qaPassed == false { return "qa failed" }
-        if publishedFinalVideoExists, qaReportExists, packageManifestExists, qaPassed == true {
-            return "render packaged"
-        }
-        if packageManifestExists || qaReportExists || packageFinalVideoExists || finalMixExists || publishedFinalVideoExists {
-            return "package incomplete"
-        }
-        return "not rendered"
+        let anyArtifactExists = packageManifestExists || qaReportExists || packageFinalVideoExists
+            || finalMixExists || publishedFinalVideoExists
+        if !anyArtifactExists { return "not rendered" }
+        if !missingRequiredArtifacts.isEmpty { return "package incomplete" }
+        if verificationStatus.ready, !packageContractMatches { return "package contract mismatch" }
+        return verificationStatus.readinessLabel
     }
 
     public var missingRequiredArtifacts: [String] {
@@ -51,7 +51,12 @@ public struct ProjectRenderPackageStatus: Equatable, Sendable {
 }
 
 public enum ProjectRenderPackageStatusReader {
-    public static func status(projectURL: URL) -> ProjectRenderPackageStatus {
+    public static func status(
+        projectURL: URL,
+        expectedProjectID: String? = nil,
+        expectedSourceOfTruth: String? = nil,
+        verificationStatus: ProjectPackageVerificationStatus = ProjectPackageVerificationRunner.pending()
+    ) -> ProjectRenderPackageStatus {
         let packageURL = projectURL.appendingPathComponent("07_package")
         let qaReportURL = packageURL.appendingPathComponent("qa-report.json")
         let manifestURL = packageURL.appendingPathComponent("package_manifest.json")
@@ -61,9 +66,11 @@ public enum ProjectRenderPackageStatusReader {
         let fileManager = FileManager.default
 
         let qaReport = decode(ProjectPackageQAReport.self, from: qaReportURL)
-        let manifest = decode(ProjectPackageManifestSummary.self, from: manifestURL)
+        let manifest = decode(ProjectPackageManifest.self, from: manifestURL)
         let qaReportExists = fileManager.fileExists(atPath: qaReportURL.path)
         let manifestExists = fileManager.fileExists(atPath: manifestURL.path)
+        let identityMatches = (expectedProjectID == nil || verificationStatus.projectID == expectedProjectID)
+            && (expectedSourceOfTruth == nil || verificationStatus.sourceOfTruth == expectedSourceOfTruth)
 
         return ProjectRenderPackageStatus(
             projectURL: projectURL,
@@ -76,16 +83,20 @@ public enum ProjectRenderPackageStatusReader {
             qaReportExists: qaReportExists,
             qaReportReadable: qaReportExists ? qaReport != nil : false,
             qaPassed: qaReport?.passed,
-            qaSourceOfTruth: qaReport?.sourceOfTruth,
+            qaProjectID: qaReport?.projectID,
+            qaSourceOfTruth: qaReport?.sourceOfTruth.rawValue,
             qaCheckCount: qaReport?.checks.count ?? 0,
             qaFailedCheckCount: qaReport?.checks.filter { !$0.passed }.count ?? 0,
             packageManifestExists: manifestExists,
             packageManifestReadable: manifestExists ? manifest != nil : false,
-            manifestSourceOfTruth: manifest?.sourceOfTruth,
+            manifestProjectID: manifest?.projectID,
+            manifestSourceOfTruth: manifest?.sourceOfTruth.rawValue,
             manifestCreatedAt: manifest?.createdAt,
+            packageContractMatches: verificationStatus.ready && identityMatches,
             publishedFinalVideoExists: fileManager.fileExists(atPath: publishedFinalVideoURL.path),
             packageFinalVideoExists: fileManager.fileExists(atPath: packageFinalVideoURL.path),
-            finalMixExists: fileManager.fileExists(atPath: finalMixURL.path)
+            finalMixExists: fileManager.fileExists(atPath: finalMixURL.path),
+            verificationStatus: verificationStatus
         )
     }
 
@@ -93,31 +104,79 @@ public enum ProjectRenderPackageStatusReader {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
     }
+
 }
 
 private struct ProjectPackageQAReport: Decodable {
     struct Check: Decodable {
         let name: String
         let passed: Bool
+        let details: String
     }
 
+    let version: String
+    let projectID: String
+    let sourceOfTruth: ProjectPackageSourceOfTruth
+    let qaProfile: ProjectPackageSourceOfTruth
     let passed: Bool
-    let sourceOfTruth: String
     let checks: [Check]
 
     enum CodingKeys: String, CodingKey {
+        case version
+        case projectID = "project_id"
+        case qaProfile = "qa_profile"
         case passed
         case sourceOfTruth = "source_of_truth"
         case checks
     }
 }
 
-private struct ProjectPackageManifestSummary: Decodable {
-    let sourceOfTruth: String
+private enum ProjectPackageSourceOfTruth: String, Decodable {
+    case engineRender = "engine_render"
+    case nleFinishing = "nle_finishing"
+}
+
+private struct ProjectPackageManifest: Decodable {
+    struct ArtifactReference: Decodable {
+        let path: String
+        let sha256: String
+    }
+
+    struct Artifacts: Decodable {
+        let finalVideo: ArtifactReference
+        let qaReport: ArtifactReference
+
+        enum CodingKeys: String, CodingKey {
+            case finalVideo = "final_video"
+            case qaReport = "qa_report"
+        }
+    }
+
+    struct Provenance: Decodable {
+        let editorialTimelineHash: String
+
+        enum CodingKeys: String, CodingKey {
+            case editorialTimelineHash = "editorial_timeline_hash"
+        }
+    }
+
+    let version: String
+    let projectID: String
+    let sourceOfTruth: ProjectPackageSourceOfTruth
+    let baseTimelineVersion: String
+    let packagingProjectionHash: String
     let createdAt: String
+    let artifacts: Artifacts
+    let provenance: Provenance
 
     enum CodingKeys: String, CodingKey {
+        case version
+        case projectID = "project_id"
         case sourceOfTruth = "source_of_truth"
+        case baseTimelineVersion = "base_timeline_version"
+        case packagingProjectionHash = "packaging_projection_hash"
         case createdAt = "created_at"
+        case artifacts
+        case provenance
     }
 }

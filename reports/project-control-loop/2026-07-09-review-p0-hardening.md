@@ -43,7 +43,7 @@ Commands run locally:
 ```text
 export PATH="$HOME/.nvm/versions/node/v22.23.1/bin:$PATH"
 which node
-=> /Users/mocchalera/.nvm/versions/node/v22.23.1/bin/node
+=> /Users/operator/.nvm/versions/node/v22.23.1/bin/node
 node -v
 => v22.23.1
 npm -v
@@ -71,6 +71,6 @@ git diff --check
 Environment note:
 
 ```text
-The login shell still resolves bare node to /Users/mocchalera/.local/bin/node
+The login shell still resolves bare node to /Users/operator/.local/bin/node
 v24.8.0, so verification pinned PATH to the nvm Node 22 binary explicitly.
 ```

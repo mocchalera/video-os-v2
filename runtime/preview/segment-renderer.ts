@@ -10,6 +10,14 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { LoadedSourceMap } from "../media/source-map.js";
+import { assertTimelineRenderSupported } from "../render/media-kind-guard.js";
+import {
+  materializeVerifiedStillSnapshots,
+  resolveCanonicalRenderInputs,
+  type CanonicalRenderInputSet,
+} from "../render/canonical-render-input.js";
+import { assertSourceInputsUnchanged, createSourceInputAttestation } from "../render/source-input-attestation.js";
+import { buildStillVideoArgs } from "../render/assembler.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -21,6 +29,8 @@ export interface PreviewClip {
   timeline_in_frame: number;
   timeline_duration_frames: number;
   beat_id: string;
+  media_kind?: string;
+  still_image?: { fit_mode?: "contain" | "cover"; background?: string };
 }
 
 export interface PreviewSegmentOptions {
@@ -33,6 +43,7 @@ export interface PreviewSegmentOptions {
   firstNSec?: number;
   /** Output file path override */
   outputPath?: string;
+  execFileImpl?: typeof execFile;
 }
 
 export interface PreviewSegmentResult {
@@ -59,6 +70,8 @@ interface TimelineData {
         timeline_in_frame: number;
         timeline_duration_frames: number;
         beat_id: string;
+        media_kind?: string;
+        still_image?: { fit_mode?: "contain" | "cover"; background?: string };
       }>;
     }>;
   };
@@ -70,9 +83,10 @@ interface TimelineData {
 function execFilePromise(
   cmd: string,
   args: string[],
+  execFileImpl: typeof execFile = execFile,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 100 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFileImpl(cmd, args, { maxBuffer: 100 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) return reject(err);
       resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
     });
@@ -98,6 +112,8 @@ export function extractVideoClips(timeline: TimelineData): PreviewClip[] {
       timeline_in_frame: clip.timeline_in_frame,
       timeline_duration_frames: clip.timeline_duration_frames,
       beat_id: clip.beat_id,
+      ...(clip.media_kind ? { media_kind: clip.media_kind } : {}),
+      ...(clip.still_image ? { still_image: clip.still_image } : {}),
     });
   }
 
@@ -119,6 +135,7 @@ export function filterByDuration(
   maxSec: number,
   fpsNum: number,
   fpsDen: number,
+  imageAssetIds: ReadonlySet<string> = new Set(),
 ): PreviewClip[] {
   const fps = fpsNum / fpsDen;
   const maxFrame = Math.ceil(maxSec * fps);
@@ -133,7 +150,9 @@ export function filterByDuration(
     return {
       ...c,
       timeline_duration_frames: trimmedDuration,
-      src_out_us: c.src_in_us + Math.round(srcDurationUs * ratio),
+      src_out_us: imageAssetIds.has(c.asset_id) || c.media_kind === "image" || c.still_image
+        ? c.src_out_us
+        : c.src_in_us + Math.round(srcDurationUs * ratio),
     };
   });
 }
@@ -144,7 +163,10 @@ export function filterByDuration(
 export function resolveSourcePath(
   sourceMap: LoadedSourceMap,
   assetId: string,
+  canonicalInputs?: CanonicalRenderInputSet,
 ): string | undefined {
+  const canonical = canonicalInputs?.byAssetId.get(assetId);
+  if (canonical) return canonical.renderInputPath;
   const entry = sourceMap.entryMap.get(assetId);
   if (!entry) return undefined;
 
@@ -242,6 +264,24 @@ export async function renderPreviewSegment(
   const timeline: TimelineData = JSON.parse(
     fs.readFileSync(opts.timelinePath, "utf-8"),
   );
+  assertTimelineRenderSupported(timeline, {
+    projectDir: opts.projectDir,
+    timelinePath: opts.timelinePath,
+    sourceLocators: opts.sourceMap,
+  });
+  const canonicalInputs = materializeVerifiedStillSnapshots(
+    resolveCanonicalRenderInputs(timeline as never, {
+      projectDir: opts.projectDir,
+      timelinePath: opts.timelinePath,
+    }),
+  );
+  try {
+  const sourceInputsBefore = canonicalInputs.imageAssetIds.size > 0 || canonicalInputs.sequenceAssetIds.size > 0
+    ? createSourceInputAttestation(opts.projectDir, {
+        timelinePath: opts.timelinePath,
+        includeAudio: false,
+      })
+    : undefined;
 
   const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
   let clips = extractVideoClips(timeline);
@@ -259,6 +299,7 @@ export async function renderPreviewSegment(
       opts.firstNSec,
       timeline.sequence.fps_num,
       timeline.sequence.fps_den,
+      canonicalInputs.imageAssetIds,
     );
     if (clips.length === 0) {
       throw new Error(`No clips within the first ${opts.firstNSec} seconds`);
@@ -281,7 +322,7 @@ export async function renderPreviewSegment(
     // Extract each clip
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i];
-      const sourcePath = resolveSourcePath(opts.sourceMap, clip.asset_id);
+      const sourcePath = resolveSourcePath(opts.sourceMap, clip.asset_id, canonicalInputs);
       if (!sourcePath) {
         throw new Error(
           `Source file not found for asset ${clip.asset_id}. ` +
@@ -295,14 +336,16 @@ export async function renderPreviewSegment(
         timeline.sequence.fps_num,
         timeline.sequence.fps_den,
       );
-      const args = buildClipExtractArgs(
-        sourcePath,
-        clip.src_in_us,
-        clip.src_out_us,
-        clipOutPath,
-        targetDurationSec,
-      );
-      await execFilePromise("ffmpeg", args);
+      const isStill = canonicalInputs.imageAssetIds.has(clip.asset_id);
+      const args = isStill
+        ? buildStillVideoArgs(
+            sourcePath, clipOutPath, clip.timeline_duration_frames,
+            timeline.sequence.width, timeline.sequence.height,
+            `${timeline.sequence.fps_num}/${timeline.sequence.fps_den}`,
+            clip.still_image?.fit_mode ?? "contain", clip.still_image?.background ?? "black",
+          )
+        : buildClipExtractArgs(sourcePath, clip.src_in_us, clip.src_out_us, clipOutPath, targetDurationSec);
+      await execFilePromise("ffmpeg", args, opts.execFileImpl);
       clipPaths.push(clipOutPath);
     }
 
@@ -322,13 +365,23 @@ export async function renderPreviewSegment(
         "-i", concatFilePath,
         "-c", "copy",
         outputPath,
-      ]);
+      ], opts.execFileImpl);
     }
 
     // Compute total duration
     const totalFrames = clips.reduce((sum, c) => sum + c.timeline_duration_frames, 0);
     const durationSec = totalFrames / fps;
 
+    if (sourceInputsBefore) try {
+      const sourceInputsAfter = createSourceInputAttestation(opts.projectDir, {
+        timelinePath: opts.timelinePath,
+        includeAudio: false,
+      });
+      assertSourceInputsUnchanged(sourceInputsBefore, sourceInputsAfter);
+    } catch (error) {
+      fs.rmSync(outputPath, { force: true });
+      throw error;
+    }
     return {
       outputPath,
       clipCount: clips.length,
@@ -337,5 +390,8 @@ export async function renderPreviewSegment(
   } finally {
     // Clean up temp directory
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+  } finally {
+    canonicalInputs.dispose();
   }
 }

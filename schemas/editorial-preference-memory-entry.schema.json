@@ -55,6 +55,7 @@
       }
     },
     "scope": { "type": "string", "enum": ["project", "series", "profile", "delivery", "temporary"] },
+    "scope_ref": { "type": "string", "minLength": 1, "maxLength": 256 },
     "confidence": { "$ref": "https://example.com/schemas/analysis-common.schema.json#/$defs/confidence-record" },
     "status": { "type": "string", "enum": ["active", "superseded", "rejected", "expired", "redacted"] },
     "supersedes_entry_id": { "type": ["string", "null"], "pattern": "^EPM_[A-Za-z0-9_-]+$" },

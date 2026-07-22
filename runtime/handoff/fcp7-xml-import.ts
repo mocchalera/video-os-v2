@@ -19,7 +19,7 @@ import type {
   AudioPolicy,
   TimelineTransitionOutput,
 } from "../compiler/types.js";
-import { linearGainToDb } from "./fcp7-xml-export.js";
+import { linearGainToDb } from "../../editor/shared/audio-gain.js";
 
 // ── Public Types ─────────────────────────────────────────────────────
 
@@ -944,6 +944,7 @@ function buildAudioPolicy(
 
   const policy: AudioPolicy = origPolicy ? { ...origPolicy } : {};
 
+  if (hasNewGain || hasLegacyGain) policy.gain_unit = "db";
   if (hasNewGain) {
     const gainDb = Math.round(linearGainToDb(clip.audioGainLinear!) * 100) / 100;
     if (isBgm) {

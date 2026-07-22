@@ -42,7 +42,8 @@
           "type": "string",
           "enum": ["transcript", "authored", "none"]
         },
-        "styling_class": { "type": "string", "minLength": 1 }
+        "styling_class": { "type": "string", "minLength": 1 },
+        "semantic_timing": { "$ref": "#/$defs/captionSemanticTimingPolicy" }
       },
       "additionalProperties": false
     },
@@ -76,7 +77,52 @@
           "enum": ["transcript", "authored"]
         },
         "styling_class": { "type": "string" },
-        "metrics": { "$ref": "#/$defs/captionMetrics" }
+        "metrics": { "$ref": "#/$defs/captionMetrics" },
+        "reveal_timing": { "$ref": "#/$defs/captionRevealMetadata" }
+      },
+      "additionalProperties": false
+    },
+    "captionSemanticTimingPolicy": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["off", "speech_sync", "protect_reveals"] },
+        "ordinary_lead_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "audio_first_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "anchors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/captionRevealAnchor" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "captionRevealAnchor": {
+      "type": "object",
+      "required": ["anchor_id", "role", "anchor_text"],
+      "properties": {
+        "anchor_id": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["punchline", "surprise", "reaction", "payoff"] },
+        "anchor_text": { "type": "string", "minLength": 1 },
+        "segment_id": { "type": "string", "minLength": 1 },
+        "transcript_item_id": { "type": "string", "minLength": 1 },
+        "timeline_frame": { "type": "integer", "minimum": 0 },
+        "source_start_us": { "type": "integer", "minimum": 0 },
+        "audio_first_frames": { "type": "integer", "minimum": 0, "maximum": 6 }
+      },
+      "additionalProperties": false
+    },
+    "captionRevealMetadata": {
+      "type": "object",
+      "required": ["anchor_id", "role", "anchor_text", "status", "source", "audio_first_frames", "original_timeline_in_frame"],
+      "properties": {
+        "anchor_id": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["punchline", "surprise", "reaction", "payoff"] },
+        "anchor_text": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["protected", "setup_only", "unresolved"] },
+        "source": { "enum": ["word_timing", "transcript_item_onset", "explicit_source_time", "explicit_timeline_frame", "unresolved"] },
+        "anchor_frame": { "type": "integer", "minimum": 0 },
+        "audio_first_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "original_timeline_in_frame": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false
     },

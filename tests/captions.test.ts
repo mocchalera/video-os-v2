@@ -51,6 +51,8 @@ describe("auto milestone captions", () => {
       expect(filter).toContain("drawtext=");
       expect(filter).toContain("補助輪外した");
       expect(filter).toContain("between(t,");
+      expect(filter).toContain(":fontfile='");
+      expect(filter).toContain("NotoSansJP-Variable.ttf");
     } finally {
       fs.rmSync(projectDir, { recursive: true, force: true });
     }

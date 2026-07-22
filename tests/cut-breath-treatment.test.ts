@@ -4,6 +4,22 @@ import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { ClipOutput, TimelineIR } from "../runtime/compiler/types.js";
 
 describe("cut breath treatment", () => {
+  it("treats authored A1 dialogue as primary content without treating it as its own mirror", () => {
+    const timeline = makeTimeline();
+    timeline.tracks.video = [];
+    for (const clip of timeline.tracks.audio[0].clips) {
+      clip.media_kind = "audio";
+      clip.source_capabilities = { has_video: false, has_audio: true };
+      clip.audio_role = "dialogue";
+      clip.motivation = "authored audio selection";
+    }
+    const result = applyCutBreathTreatment(timeline, { preserve_natural_breath: true, cut_tail_hold_sec: 0.35 },
+      [segment("SEG_1", "AST_1"), segment("SEG_2", "AST_2")], new Map(), 30);
+    expect(result.extendedCuts).toBe(1);
+    expect(timeline.tracks.audio[0].clips[0].timeline_duration_frames).toBe(281);
+    expect(timeline.tracks.audio[0].clips[1].timeline_in_frame).toBe(281);
+  });
+
   it("retains only room tone before the next utterance and fades that shortened tail", () => {
     const timeline = makeTimeline();
     const result = applyCutBreathTreatment(

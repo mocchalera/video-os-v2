@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 import type { Candidate as SelectCandidate } from "../../artifacts/types.js";
 import type { MarlinEvent, MarlinEventsArtifact } from "../../connectors/marlin-types.js";
 import type { MediaSourceMapEntry } from "../../media/source-map.js";
+import { readAssetMediaCapabilities } from "../../artifacts/source-media-capabilities.js";
+import { readValidatedStillImageFrames } from "../../artifacts/still-image-grounding.js";
 
 const execFileAsync = promisify(execFile);
 const IN_OUT_OFFSET_US = 500_000;
@@ -204,9 +206,25 @@ export async function extractCraftKeyFrames(
 ): Promise<Map<string, KeyFrame[]>> {
   const absProjectDir = path.resolve(projectDir);
   const result = new Map<string, KeyFrame[]>();
+  const capabilities = readAssetMediaCapabilities(absProjectDir);
+  const stillFrames = new Map([...readValidatedStillImageFrames(absProjectDir)].map(([assetId, relative]) => [assetId, path.resolve(absProjectDir, relative)]));
 
   for (const candidate of candidates) {
     if (!isUsableCandidate(candidate)) continue;
+    if (candidate.source_capabilities?.has_video === false ||
+      capabilities.get(candidate.asset_id)?.source_capabilities.has_video === false) {
+      result.set(candidate.segment_id, []);
+      continue;
+    }
+    const normalizedStill = stillFrames.get(candidate.asset_id);
+    if (normalizedStill) {
+      result.set(candidate.segment_id, [{ timestamp_us: 0, path: toPosixRelative(absProjectDir, normalizedStill), label: "still", source: "uniform" }]);
+      continue;
+    }
+    if (capabilities.get(candidate.asset_id)?.media_kind === "image") {
+      result.set(candidate.segment_id, []);
+      continue;
+    }
 
     const sourceEntry = sourceMap.get(candidate.asset_id);
     if (!sourceEntry) {
@@ -284,9 +302,18 @@ export async function extractRepresentativeFrames(
 ): Promise<Map<string, string>> {
   const absProjectDir = path.resolve(projectDir);
   const result = new Map<string, string>();
+  const capabilities = readAssetMediaCapabilities(absProjectDir);
+  const stillFrames = new Map([...readValidatedStillImageFrames(absProjectDir)].map(([assetId, relative]) => [assetId, path.resolve(absProjectDir, relative)]));
   const assetIds = [...new Set(segments.map((segment) => segment.asset_id).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 
   for (const assetId of assetIds) {
+    if (capabilities.get(assetId)?.source_capabilities.has_video === false) continue;
+    const normalizedStill = stillFrames.get(assetId);
+    if (normalizedStill) {
+      result.set(assetId, toPosixRelative(absProjectDir, normalizedStill));
+      continue;
+    }
+    if (capabilities.get(assetId)?.media_kind === "image") continue;
     const sourceEntry = sourceMap.get(assetId);
     const timestampUs = representativeTimestampUs(assetId, segments, marlinEvents);
     if (!sourceEntry || timestampUs === undefined) continue;

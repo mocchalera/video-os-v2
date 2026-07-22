@@ -14,9 +14,15 @@ import {
   isP4dSearchIndexEnabled,
   loadSearchIndexManifest,
   materializeSearchHash,
+  searchIndexInputRefs,
   searchIndexStaleReasons,
   validateTextIndexAssetRefs,
 } from "../runtime/artifacts/p4d-segment-search-index.js";
+import {
+  computePreferenceMemoryHash,
+  EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH,
+  EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH,
+} from "../runtime/artifacts/p3-preference-memory.js";
 import { writeProjectState } from "../runtime/state/reconcile.js";
 
 const require_ = createRequire(import.meta.url);
@@ -193,6 +199,27 @@ function copyFixture(projectDir: string, fixtureName: string): Record<string, un
   return manifest;
 }
 
+function writePreferenceMemory(projectDir: string, relativePath: string, entryId: string, projectId = "p4d-runtime"): string {
+  const raw = `${JSON.stringify({
+    version: "1.0.0",
+    project_id: projectId,
+    entry_id: entryId,
+    created_at: "2026-04-27T00:00:00Z",
+    actor: { type: "human", id: "operator" },
+    source_event: { event_type: "operator_command", event_ref: "test" },
+    preference_type: "pacing",
+    value: { kind: "enum", data: entryId },
+    scope: "project",
+    confidence: { score: 1, source: "operator", status: "ready" },
+    status: "active",
+    provenance: { producer: "operator-command", inputs: [], hash_policy: {} },
+  })}\n`;
+  const filePath = path.join(projectDir, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, raw, "utf-8");
+  return raw;
+}
+
 describe("P4d segment search index schemas", () => {
   it.each([
     "valid_minimal.json",
@@ -282,6 +309,52 @@ describe("P4d segment search index schemas", () => {
 });
 
 describe("P4d search index runtime integration", () => {
+  it("hashes and references the resolved preference path with canonical precedence", () => {
+    const canonicalProject = makeProject("p4d-canonical-preference");
+    const canonicalRaw = writePreferenceMemory(canonicalProject, EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH, "EPM_canonical");
+    const canonicalInputs = currentSearchIndexInputHashes(canonicalProject);
+    expect(canonicalInputs.editorial_preference_memory_hash).toBe(computePreferenceMemoryHash(canonicalRaw));
+    expect(searchIndexInputRefs(canonicalProject, canonicalInputs)).toContainEqual({
+      path: EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH,
+      hash: computePreferenceMemoryHash(canonicalRaw),
+      required: false,
+    });
+
+    const legacyProject = makeProject("p4d-legacy-preference");
+    const legacyRaw = writePreferenceMemory(legacyProject, EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH, "EPM_legacy");
+    const legacyInputs = currentSearchIndexInputHashes(legacyProject);
+    expect(legacyInputs.editorial_preference_memory_hash).toBe(computePreferenceMemoryHash(legacyRaw));
+    expect(searchIndexInputRefs(legacyProject, legacyInputs).some((ref) => ref.path === EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH)).toBe(true);
+
+    const bothProject = makeProject("p4d-both-preference");
+    const bothCanonicalRaw = writePreferenceMemory(bothProject, EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH, "EPM_both_canonical");
+    writePreferenceMemory(bothProject, EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH, "EPM_both_legacy");
+    const bothInputs = currentSearchIndexInputHashes(bothProject);
+    expect(bothInputs.editorial_preference_memory_hash).toBe(computePreferenceMemoryHash(bothCanonicalRaw));
+    expect(searchIndexInputRefs(bothProject, bothInputs).some((ref) => ref.path === EDITORIAL_PREFERENCE_MEMORY_LEGACY_REL_PATH)).toBe(false);
+  });
+
+  it.each([
+    ["malformed", "not-json\n"],
+    ["cross-project", null],
+  ])("uses ZERO_HASH at the resolved canonical ref for %s preference memory", (kind, malformedRaw) => {
+    const projectDir = makeProject(`p4d-${kind}-preference`);
+    if (malformedRaw) {
+      const filePath = path.join(projectDir, EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, malformedRaw, "utf-8");
+    } else {
+      writePreferenceMemory(projectDir, EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH, "EPM_poison", "another-project");
+    }
+    const inputs = currentSearchIndexInputHashes(projectDir);
+    const zeroHash = `sha256:${"0".repeat(64)}`;
+    expect(inputs.editorial_preference_memory_hash).toBe(zeroHash);
+    expect(searchIndexInputRefs(projectDir, inputs)).toContainEqual({
+      path: EDITORIAL_PREFERENCE_MEMORY_CANONICAL_REL_PATH,
+      hash: zeroHash,
+      required: false,
+    });
+  });
   it("detects stale manifest inputs against current canonical artifact hashes", () => {
     const projectDir = makeProject();
     process.env.ENABLE_P4D_SEARCH_INDEX = "true";

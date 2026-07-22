@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { SelectsCandidates, TimelineIR } from "../runtime/artifacts/types.js";
 import type {
   FootageSearchResponse,
@@ -10,6 +13,69 @@ import {
   type QAFixSearchFn,
 } from "../runtime/eval/qa-fix-proposer.js";
 import type { QAIssue } from "../runtime/eval/qa-issue-detector.js";
+import { QA_FIX_SNAPSHOT_LIMITS } from "../runtime/eval/qa-source-discovery.js";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function canonicalProject(): { projectDir: string; sourcePath: string } {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "qa-proposer-canonical-"));
+  tempDirs.push(projectDir);
+  const sourcePath = path.join(projectDir, "source.mov");
+  fs.writeFileSync(sourcePath, "media");
+  writeJson(path.join(projectDir, "03_analysis", "segments.json"), {
+    project_id: "qa-fixture",
+    artifact_version: "1",
+    items: [canonicalSegment("SEG_EXT")],
+  });
+  writeJson(path.join(projectDir, "03_analysis", "assets.json"), {
+    project_id: "qa-fixture",
+    artifact_version: "1",
+    items: [{ asset_id: "AST_SEG_EXT", source_locator: "source.mov" }],
+  });
+  return { projectDir, sourcePath };
+}
+
+function canonicalSegment(segmentId: string) {
+  return {
+    segment_id: segmentId,
+    asset_id: `AST_${segmentId}`,
+    src_in_us: 1_000_000,
+    src_out_us: 7_000_000,
+    summary: "canonical summary",
+    transcript_excerpt: "canonical transcript",
+    quality_flags: ["clean"],
+    tags: ["bridge", "exterior"],
+    visual_quality: { scores: { composition_score: 0.8, motion_quality: 0.9 } },
+    editorial_observation: {
+      evidence: [{ evidence_ref: "OBS_EXT", artifact_ref: "03_analysis/frames/SEG_EXT.jpg" }],
+    },
+  };
+}
+
+function writeJson(filePath: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
+}
+
+function collectStrings(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStrings);
+  if (value && typeof value === "object") return Object.values(value).flatMap(collectStrings);
+  return [];
+}
+
+function isAbsoluteLike(value: string): boolean {
+  return path.posix.isAbsolute(value)
+    || path.win32.isAbsolute(value)
+    || /^file:\/\//iu.test(value)
+    || /(?:^|\s)\/(?:[^\s]+)/u.test(value)
+    || /(?:^|\s)[A-Za-z]:\\(?:[^\s]+)/u.test(value)
+    || /(?:^|\s)\\\\(?:[^\s]+)/u.test(value);
+}
 
 function timeline(
   clips: Array<{
@@ -156,6 +222,126 @@ function searchReturning(results: FootageSearchResult[]): { search: QAFixSearchF
 }
 
 describe("proposeFixes", () => {
+  it("deterministically proposes an external canonical segment with a bounded auditable snapshot", async () => {
+    const { projectDir } = canonicalProject();
+    const externalResult = {
+      ...result("SEG_EXT"),
+      asset_id: "AST_SEG_EXT",
+      src_in_us: 1_000_000,
+      src_out_us: 7_000_000,
+      match_reason: "r".repeat(QA_FIX_SNAPSHOT_LIMITS.reason_chars + 20),
+      evidence_refs: [
+        { field: "summary" as const, value: "/tmp/private/frame.jpg", source_refs: ["/tmp/private/source.mov", "03_analysis/search.json"] },
+        { field: "tag" as const, value: "C:\\private\\frame.jpg", source_refs: ["file:///private/source.mov", "\\\\server\\share\\source.mov"] },
+      ],
+    };
+    const { search } = searchReturning([externalResult]);
+    const issues = [issue()];
+    const currentTimeline = timeline([{ clip_id: "CLP_A", segment_id: "SEG_A", start: 0 }]);
+    const currentSelects = selects([]);
+    const first = await proposeFixes(issues, currentTimeline, currentSelects, projectDir, { search });
+    const second = await proposeFixes(issues, currentTimeline, currentSelects, projectDir, { search });
+
+    expect(first).toEqual(second);
+    expect(first[0].replacement?.snapshot).toMatchObject({
+      project_id: "qa-fixture",
+      segment: { segment_id: "SEG_EXT", asset_id: "AST_SEG_EXT", src_in_us: 1_000_000, src_out_us: 7_000_000 },
+      target: { clip_id: "CLP_A", beat_id: "b1" },
+      quality: {
+        score: 0.85,
+        fields: ["composition_score", "motion_quality"],
+        scores: { composition_score: 0.8, motion_quality: 0.9 },
+        source: "segments.visual_quality.scores",
+      },
+      canonical_source_ref: "03_analysis/segments.json#SEG_EXT",
+      asset_source_ref: "03_analysis/assets.json#AST_SEG_EXT",
+    });
+    expect(first[0].replacement?.snapshot?.search.reason).toHaveLength(QA_FIX_SNAPSHOT_LIMITS.reason_chars);
+    expect(first[0].replacement?.snapshot?.canonical_evidence_refs).toContain("OBS_EXT");
+    expect(JSON.stringify(first[0].replacement?.snapshot)).not.toContain("/tmp/private");
+    const snapshotStrings = collectStrings(first[0].replacement?.snapshot);
+    expect(snapshotStrings.some(isAbsoluteLike)).toBe(false);
+    expect(() => JSON.stringify(first[0])).not.toThrow();
+  });
+
+  it("rejects every unsafe external discovery gate without proposing", async () => {
+    const cases: Array<{ name: string; mutate: (ctx: { projectDir: string; sourcePath: string; tl: TimelineIR; s: SelectsCandidates; iss: QAIssue; discovery: { projectId: string; minQualityScore: number; iterationExcludedSegmentIds?: string[] } }) => void }> = [
+      { name: "missing segment", mutate: ({ projectDir }) => writeJson(path.join(projectDir, "03_analysis", "segments.json"), { project_id: "qa-fixture", artifact_version: "1", items: [] }) },
+      { name: "project mismatch", mutate: ({ projectDir }) => writeJson(path.join(projectDir, "03_analysis", "segments.json"), { project_id: "other", artifact_version: "1", items: [canonicalSegment("SEG_EXT")] }) },
+      { name: "assets project mismatch", mutate: ({ projectDir }) => writeJson(path.join(projectDir, "03_analysis", "assets.json"), { project_id: "other", artifact_version: "1", items: [{ asset_id: "AST_SEG_EXT", source_locator: "source.mov" }] }) },
+      { name: "invalid range", mutate: ({ projectDir }) => writeJson(path.join(projectDir, "03_analysis", "segments.json"), { project_id: "qa-fixture", artifact_version: "1", items: [{ ...canonicalSegment("SEG_EXT"), src_out_us: 1_000_000 }] }) },
+      { name: "no quality", mutate: ({ projectDir }) => writeJson(path.join(projectDir, "03_analysis", "segments.json"), { project_id: "qa-fixture", artifact_version: "1", items: [{ ...canonicalSegment("SEG_EXT"), visual_quality: undefined }] }) },
+      { name: "invalid quality", mutate: ({ projectDir }) => writeJson(path.join(projectDir, "03_analysis", "segments.json"), { project_id: "qa-fixture", artifact_version: "1", items: [{ ...canonicalSegment("SEG_EXT"), visual_quality: { scores: { composition_score: 100 } } }] }) },
+      { name: "subthreshold", mutate: ({ projectDir }) => writeJson(path.join(projectDir, "03_analysis", "segments.json"), { project_id: "qa-fixture", artifact_version: "1", items: [{ ...canonicalSegment("SEG_EXT"), visual_quality: { scores: { composition_score: 0.49 } } }] }) },
+      { name: "missing source", mutate: ({ sourcePath }) => fs.unlinkSync(sourcePath) },
+      { name: "source is directory", mutate: ({ sourcePath }) => { fs.unlinkSync(sourcePath); fs.mkdirSync(sourcePath); } },
+      { name: "beat mismatch", mutate: ({ iss }) => { iss.beat_id = "b2"; } },
+      { name: "used", mutate: ({ tl }) => { tl.tracks.video[0].clips.push({ ...tl.tracks.video[0].clips[0], clip_id: "CLP_EXT", segment_id: "SEG_EXT", asset_id: "AST_SEG_EXT", timeline_in_frame: 96 }); } },
+      { name: "reject", mutate: ({ s }) => { s.candidates.push({ ...candidate("SEG_EXT", 0.9), role: "reject" }); } },
+      { name: "iteration duplicate", mutate: ({ discovery }) => { discovery.iterationExcludedSegmentIds = ["SEG_EXT"]; } },
+    ];
+
+    for (const testCase of cases) {
+      const { projectDir, sourcePath } = canonicalProject();
+      const tl = timeline([{ clip_id: "CLP_A", segment_id: "SEG_A", start: 0 }]);
+      const s = selects([]);
+      const iss = issue();
+      const discovery = { projectId: "qa-fixture", minQualityScore: 0.5 };
+      testCase.mutate({ projectDir, sourcePath, tl, s, iss, discovery });
+      const externalResult = { ...result("SEG_EXT"), asset_id: "AST_SEG_EXT", src_in_us: 1_000_000, src_out_us: 7_000_000 };
+      const { search } = searchReturning([externalResult]);
+      expect(await proposeFixes([iss], tl, s, projectDir, { search, discovery }), testCase.name).toEqual([]);
+    }
+  });
+
+  it("rejects malformed or cross-project source maps without assets fallback", async () => {
+    for (const sourceMap of ["{", JSON.stringify({ version: "1", project_id: "other", media_dir: "02_media", generated_at: new Date(0).toISOString(), items: [] })]) {
+      const { projectDir } = canonicalProject();
+      const sourceMapPath = path.join(projectDir, "02_media", "source_map.json");
+      fs.mkdirSync(path.dirname(sourceMapPath), { recursive: true });
+      fs.writeFileSync(sourceMapPath, sourceMap);
+      const externalResult = { ...result("SEG_EXT"), asset_id: "AST_SEG_EXT", src_in_us: 1_000_000, src_out_us: 7_000_000 };
+      const { search } = searchReturning([externalResult]);
+      expect(await proposeFixes([issue()], timeline([{ clip_id: "CLP_A", segment_id: "SEG_A", start: 0 }]), selects([]), projectDir, { search })).toEqual([]);
+    }
+  });
+
+  it("keeps legacy candidates without eligible_beats compatible but rejects artifact project mismatch", async () => {
+    const s = selects(["SEG_R"]);
+    delete s.candidates.find((item) => item.segment_id === "SEG_R")?.eligible_beats;
+    const { search } = searchReturning([result("SEG_R")]);
+    expect(await proposeFixes([issue()], timeline([{ clip_id: "CLP_A", segment_id: "SEG_A", start: 0 }]), s, "/tmp/project", { search })).toHaveLength(1);
+    const mismatched = timeline([{ clip_id: "CLP_A", segment_id: "SEG_A", start: 0 }]);
+    mismatched.project_id = "other";
+    expect(await proposeFixes([issue()], mismatched, s, "/tmp/project", { search })).toEqual([]);
+  });
+
+  it("rejects external results whose asset or source range differs from canonical", async () => {
+    for (const mismatch of [
+      { asset_id: "AST_WRONG" },
+      { src_in_us: 2_000_000 },
+      { src_out_us: 8_000_000 },
+    ]) {
+      const { projectDir } = canonicalProject();
+      const externalResult = { ...result("SEG_EXT"), asset_id: "AST_SEG_EXT", src_in_us: 1_000_000, src_out_us: 7_000_000, ...mismatch };
+      const { search } = searchReturning([externalResult]);
+      expect(await proposeFixes([issue()], timeline([{ clip_id: "CLP_A", segment_id: "SEG_A", start: 0 }]), selects([]), projectDir, { search })).toEqual([]);
+    }
+  });
+
+  it("rejects an existing candidate explicitly ineligible for the target beat", async () => {
+    const s = selects(["SEG_R"]);
+    s.candidates.find((item) => item.segment_id === "SEG_R")!.eligible_beats = ["b2"];
+    const { search } = searchReturning([result("SEG_R")]);
+    expect(await proposeFixes(
+      [issue()],
+      timeline([{ clip_id: "CLP_A", segment_id: "SEG_A", start: 0 }]),
+      s,
+      "/tmp/project",
+      { search },
+    )).toEqual([]);
+  });
+
   it("proposes a swap by searching with the visual anchor of the target clip", async () => {
     const { search, calls } = searchReturning([result("SEG_R")]);
 

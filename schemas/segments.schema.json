@@ -49,6 +49,17 @@
         },
         "duration_us": { "type": "integer", "minimum": 0 },
         "rep_frame_us": { "type": "integer", "minimum": 0 },
+        "source_interval": {
+          "type": "object",
+          "required": ["semantics", "physical_duration_us", "editing_hold_duration_us"],
+          "additionalProperties": false,
+          "properties": {
+            "semantics": { "type": "string", "enum": ["physical_media_interval", "schema_compatible_single_frame_interval"] },
+            "physical_duration_us": { "type": "integer", "minimum": 0 },
+            "schema_compatibility_epsilon_us": { "type": "integer", "minimum": 1 },
+            "editing_hold_duration_us": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
         "segment_type": {
           "type": "string",
           "enum": ["dialogue", "music_driven", "action", "static", "general"]
@@ -117,7 +128,162 @@
         "visual_quality": { "$ref": "#/$defs/visual-quality" },
         "visual_quality_measurements": { "$ref": "#/$defs/visual-quality-measurements" },
         "visual_appraisal": { "$ref": "#/$defs/visual-appraisal" },
+        "editorial_observation": { "$ref": "#/$defs/editorial-observation" },
         "peak_analysis": { "$ref": "#/$defs/peak-analysis" }
+      }
+    },
+    "editorial-observation": {
+      "type": "object",
+      "required": ["status", "confidence", "evidence", "warnings", "provenance"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "partial", "skipped"] },
+        "visual_tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "motion_type": { "$ref": "#/$defs/motion-type" },
+        "camera_motion_direction": { "$ref": "#/$defs/motion-direction" },
+        "subject_motion_direction": { "$ref": "#/$defs/motion-direction" },
+        "shot_scale": { "type": "string", "enum": ["extreme_wide", "wide", "medium_wide", "medium", "medium_close_up", "close_up", "extreme_close_up", "insert", "unknown", "not_applicable"] },
+        "composition_anchor": { "type": "string", "enum": ["left", "center", "right", "balanced", "multiple", "full_frame", "unknown", "not_applicable"] },
+        "screen_side": { "type": "string", "enum": ["left", "center", "right", "multiple", "full_frame", "unknown", "not_applicable"] },
+        "gaze_direction": { "type": "string", "enum": ["screen_left", "screen_right", "camera", "away", "up", "down", "mixed", "unknown", "not_applicable"] },
+        "camera_axis": { "type": "string", "enum": ["axis_left", "axis_right", "on_axis", "establishing", "unknown", "not_applicable"] },
+        "dominant_subject_type": { "type": "string", "enum": ["person", "group", "animal", "object", "landscape", "architecture", "text_graphic", "mixed", "unknown", "not_applicable"] },
+        "avg_luma": { "type": "number", "minimum": 0, "maximum": 1 },
+        "dominant_colors": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "text_presence": { "type": "string", "enum": ["present", "absent", "unknown", "not_applicable"] },
+        "confidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tags": { "$ref": "#/$defs/observation-confidence" },
+            "motion": { "$ref": "#/$defs/observation-confidence" },
+            "framing": { "$ref": "#/$defs/observation-confidence" },
+            "direction": { "$ref": "#/$defs/observation-confidence" },
+            "appearance": { "$ref": "#/$defs/observation-confidence" },
+            "text": { "$ref": "#/$defs/observation-confidence" }
+          }
+        },
+        "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/observation-evidence" } },
+        "warnings": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "producer_snapshots": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "grounded_vlm": { "$ref": "#/$defs/observation-producer-snapshot" },
+            "deterministic_measurement": { "$ref": "#/$defs/observation-producer-snapshot" },
+            "appraiser": { "$ref": "#/$defs/observation-producer-snapshot" },
+            "media_kind_router": { "$ref": "#/$defs/observation-producer-snapshot" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["contract_version", "asset_id", "segment_id", "segment_src_in_us", "segment_src_out_us", "producers"],
+          "additionalProperties": false,
+          "properties": {
+            "contract_version": { "type": "string", "minLength": 1 },
+            "asset_id": { "type": "string", "minLength": 1 },
+            "segment_id": { "type": "string", "minLength": 1 },
+            "segment_src_in_us": { "type": "integer", "minimum": 0 },
+            "segment_src_out_us": { "type": "integer", "minimum": 0 },
+            "producers": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/observation-producer" } }
+          }
+        }
+      }
+    },
+    "motion-type": {
+      "type": "string",
+      "enum": ["static", "subtle", "continuous", "intermittent", "rapid", "mixed", "unknown", "not_applicable"]
+    },
+    "motion-direction": {
+      "type": "string",
+      "enum": ["left", "right", "up", "down", "toward_camera", "away_from_camera", "mixed", "unknown", "not_applicable"]
+    },
+    "observation-confidence": {
+      "type": "object",
+      "required": ["score", "evidence_refs"],
+      "additionalProperties": false,
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    },
+    "observation-evidence": {
+      "type": "object",
+      "required": ["evidence_ref", "producer", "evidence_type", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "evidence_ref": { "type": "string", "minLength": 1 },
+        "producer": { "type": "string", "enum": ["grounded_vlm", "deterministic_measurement", "appraiser", "media_kind_router"] },
+        "evidence_type": { "type": "string", "enum": ["verified_frame", "deterministic_measurement", "appraiser_frame", "producer_gap", "applicability"] },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/observation-field" }, "uniqueItems": true },
+        "artifact_ref": { "type": "string", "minLength": 1 },
+        "frame_us": { "type": "integer", "minimum": 0 },
+        "observed_value": { "oneOf": [{ "type": "string" }, { "type": "number" }, { "type": "array", "items": { "type": "string" } }] },
+        "warning": { "type": "string", "minLength": 1 }
+      }
+    },
+    "observation-field": {
+      "type": "string",
+      "enum": ["visual_tags", "motion_type", "camera_motion_direction", "subject_motion_direction", "shot_scale", "composition_anchor", "screen_side", "gaze_direction", "camera_axis", "dominant_subject_type", "avg_luma", "dominant_colors", "text_presence"]
+    },
+    "observation-producer": {
+      "type": "object",
+      "required": ["producer", "producer_version", "actual_verified_frame_count", "evidence_refs"],
+      "additionalProperties": false,
+      "properties": {
+        "producer": { "type": "string", "enum": ["grounded_vlm", "deterministic_measurement", "appraiser", "media_kind_router"] },
+        "producer_version": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "runtime": { "type": "string", "minLength": 1 },
+        "prompt_hash": { "type": "string", "minLength": 1 },
+        "actual_verified_frame_count": { "type": "integer", "minimum": 0 },
+        "evidence_refs": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "source_content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "cache_identity": { "type": "string", "minLength": 1 },
+        "cache_decision": { "type": "string", "minLength": 1 }
+      }
+    },
+    "observation-producer-snapshot": {
+      "type": "object",
+      "required": ["status", "evidence", "producer"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "partial", "skipped"] },
+        "values": { "$ref": "#/$defs/observation-values" },
+        "confidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tags": { "$ref": "#/$defs/observation-confidence" },
+            "motion": { "$ref": "#/$defs/observation-confidence" },
+            "framing": { "$ref": "#/$defs/observation-confidence" },
+            "direction": { "$ref": "#/$defs/observation-confidence" },
+            "appearance": { "$ref": "#/$defs/observation-confidence" },
+            "text": { "$ref": "#/$defs/observation-confidence" }
+          }
+        },
+        "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/observation-evidence" } },
+        "warnings": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "producer": { "$ref": "#/$defs/observation-producer" }
+      }
+    },
+    "observation-values": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "visual_tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "motion_type": { "$ref": "#/$defs/motion-type" },
+        "camera_motion_direction": { "$ref": "#/$defs/motion-direction" },
+        "subject_motion_direction": { "$ref": "#/$defs/motion-direction" },
+        "shot_scale": { "type": "string", "enum": ["extreme_wide", "wide", "medium_wide", "medium", "medium_close_up", "close_up", "extreme_close_up", "insert", "unknown", "not_applicable"] },
+        "composition_anchor": { "type": "string", "enum": ["left", "center", "right", "balanced", "multiple", "full_frame", "unknown", "not_applicable"] },
+        "screen_side": { "type": "string", "enum": ["left", "center", "right", "multiple", "full_frame", "unknown", "not_applicable"] },
+        "gaze_direction": { "type": "string", "enum": ["screen_left", "screen_right", "camera", "away", "up", "down", "mixed", "unknown", "not_applicable"] },
+        "camera_axis": { "type": "string", "enum": ["axis_left", "axis_right", "on_axis", "establishing", "unknown", "not_applicable"] },
+        "dominant_subject_type": { "type": "string", "enum": ["person", "group", "animal", "object", "landscape", "architecture", "text_graphic", "mixed", "unknown", "not_applicable"] },
+        "avg_luma": { "type": "number", "minimum": 0, "maximum": 1 },
+        "dominant_colors": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "text_presence": { "type": "string", "enum": ["present", "absent", "unknown", "not_applicable"] }
       }
     },
     "visual-appraisal": {
@@ -260,7 +426,7 @@
       "properties": {
         "measured": { "type": "boolean" },
         "connector_version": { "type": "string", "minLength": 1 },
-        "method": { "type": "string", "enum": ["ffmpeg_sampled_signals"] },
+        "method": { "type": "string", "enum": ["ffmpeg_sampled_signals", "ffmpeg_single_frame_signals"] },
         "sample_fps": { "type": "number", "exclusiveMinimum": 0 },
         "max_width": { "type": "integer", "minimum": 16 },
         "duration_us": { "type": "integer", "minimum": 0 },
@@ -431,7 +597,41 @@
             "refine_prompt_template_id": { "type": "string" },
             "precision_mode": { "type": "string" },
             "fusion_version": { "type": "string" },
-            "support_signal_version": { "type": "string" }
+            "support_signal_version": { "type": "string" },
+            "coarse_frame_count": { "type": "integer", "minimum": 0 },
+            "refine_frame_count": { "type": "integer", "minimum": 0 },
+            "precision_frame_count": { "type": "integer", "minimum": 0 },
+            "precision_sample_timestamps_us": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 }
+            },
+            "precision_requested_sample_timestamps_us": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 }
+            },
+            "frame_cache_version": { "type": "string", "minLength": 1 },
+            "frame_producer_version": { "type": "string", "minLength": 1 },
+            "precision_frame_cache_hits": { "type": "integer", "minimum": 0 },
+            "precision_frame_extraction_failures": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "precision_failure_reason": { "type": "string", "minLength": 1 },
+            "source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "segment_src_in_us": { "type": "integer", "minimum": 0 },
+            "segment_src_out_us": { "type": "integer", "minimum": 0 },
+            "cache_identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "cache_decision": { "type": "string", "enum": ["accepted", "refreshed", "miss"] },
+            "cache_decision_reasons": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "policy_hash": { "type": "string", "minLength": 1 },
+            "model_alias": { "type": "string", "minLength": 1 },
+            "precision_prompt_template_id": { "type": "string", "minLength": 1 },
+            "precision_prompt_hash": { "type": "string", "minLength": 1 },
+            "detector_version": { "type": "string", "minLength": 1 },
+            "provenance_schema_version": { "type": "string", "minLength": 1 }
           }
         }
       }

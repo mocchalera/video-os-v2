@@ -389,6 +389,7 @@ function renderQueue(
       fps: metadata.fps,
       caption_style: {
         preset_id: metadata.captionStyle.presetId,
+        font_id: metadata.captionStyle.fontId,
         font_family: metadata.captionStyle.fontFamily,
         font_weight: metadata.captionStyle.fontWeight,
         font_size_px_1080: metadata.captionStyle.fontSizePx1080,

@@ -10,7 +10,11 @@ final class ProjectPipelineGateStatusTests: XCTestCase {
             patchOperations: 2
         )
 
-        let status = ProjectPipelineGateStatusReader.status(repositoryRoot: root, projectURL: project)
+        let status = ProjectPipelineGateStatusReader.status(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight("current_state is critique_ready")
+        )
 
         XCTAssertEqual(status.readinessLabel, "needs revision pass")
         XCTAssertEqual(status.currentState, "critique_ready")
@@ -28,7 +32,11 @@ final class ProjectPipelineGateStatusTests: XCTestCase {
             patchOperations: 0
         )
 
-        let status = ProjectPipelineGateStatusReader.status(repositoryRoot: root, projectURL: project)
+        let status = ProjectPipelineGateStatusReader.status(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: readyPreflight()
+        )
 
         XCTAssertEqual(status.readinessLabel, "ready to render")
         XCTAssertTrue(status.renderCanRun)
@@ -43,7 +51,11 @@ final class ProjectPipelineGateStatusTests: XCTestCase {
             patchOperations: 1
         )
 
-        let status = ProjectPipelineGateStatusReader.status(repositoryRoot: root, projectURL: project)
+        let status = ProjectPipelineGateStatusReader.status(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: readyPreflight()
+        )
 
         XCTAssertTrue(status.renderCanRun)
         XCTAssertEqual(status.readinessLabel, "needs revision pass")
@@ -59,10 +71,29 @@ final class ProjectPipelineGateStatusTests: XCTestCase {
             timeline: false
         )
 
-        let status = ProjectPipelineGateStatusReader.status(repositoryRoot: root, projectURL: project)
+        let status = ProjectPipelineGateStatusReader.status(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: blockedPreflight("timeline is missing")
+        )
 
         XCTAssertEqual(status.readinessLabel, "needs compile")
         XCTAssertEqual(status.nextAction, "Compile the rough cut before review or render.")
+    }
+
+    private func readyPreflight() -> ProjectPackagePreflightStatus {
+        ProjectPackagePreflightStatus(
+            ok: true,
+            sourceOfTruth: "engine_render",
+            autonomyMode: "full",
+            projectID: "demo",
+            currentState: "approved",
+            visualQaSummary: "verified"
+        )
+    }
+
+    private func blockedPreflight(_ issue: String) -> ProjectPackagePreflightStatus {
+        ProjectPackagePreflightStatus(ok: false, issues: [issue])
     }
 
     private func temporaryPipelineProject(

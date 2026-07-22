@@ -47,7 +47,7 @@ export interface TextOverlayInput {
 // Defaults
 // ---------------------------------------------------------------------------
 
-const DEFAULT_STYLING_CLASS = "title-card";
+const DEFAULT_STYLING_CLASS = "vos:overlay.title-card";
 const DEFAULT_WRITING_MODE: TextOverlay["writing_mode"] = "horizontal_tb";
 const DEFAULT_ANCHOR: TextOverlay["anchor"] = "bottom_center";
 

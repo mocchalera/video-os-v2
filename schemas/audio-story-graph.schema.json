@@ -63,6 +63,17 @@
       "type": "object",
       "required": ["node_id", "node_type", "asset_id", "start_us", "end_us", "refs", "confidence"],
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "asset_id": { "pattern": "^BGM_" } },
+            "required": ["asset_id"]
+          },
+          "then": {
+            "properties": { "node_type": { "const": "music_section" } }
+          }
+        }
+      ],
       "properties": {
         "node_id": { "type": "string", "pattern": "^(ASG|UTTREF|SPKREF|AEREF|BGMREF)_[A-Za-z0-9_-]+$" },
         "node_type": {
@@ -80,7 +91,7 @@
             "emotion_drop"
           ]
         },
-        "asset_id": { "type": "string", "pattern": "^AST_[A-Za-z0-9_-]+$" },
+        "asset_id": { "type": "string", "pattern": "^(AST|BGM)_[A-Za-z0-9_-]+$" },
         "start_us": { "type": "integer", "minimum": 0 },
         "end_us": { "type": "integer", "minimum": 0 },
         "text": { "type": ["string", "null"] },

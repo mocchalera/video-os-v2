@@ -145,6 +145,18 @@
       "type": "boolean",
       "description": "When true, normalize the original audio stem before ducking so family voices and ambient sound remain audible. Defaults may come from the selected profile."
     },
+    "still_image_intent": {
+      "type": "object",
+      "properties": {
+        "min_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "default_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "max_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
+        "motion_mode": { "type": "string", "enum": ["static", "subtle_ken_burns"] },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+        "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+      },
+      "additionalProperties": false
+    },
     "must_have": {
       "type": "array",
       "minItems": 1,

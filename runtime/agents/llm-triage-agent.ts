@@ -11,6 +11,12 @@ import {
 import { classifyTranscriptQuality } from "../analysis/transcript-quality.js";
 import { loadCreativeBrief } from "../artifacts/loaders.js";
 import type { CreativeBrief, EditorialSummary } from "../artifacts/types.js";
+import {
+  assertProjectPlanningMediaKindsSupported,
+  inferAudioRole,
+  readAssetMediaCapabilities,
+  type AssetMediaCapability,
+} from "../artifacts/source-media-capabilities.js";
 import type { GeminiInlineImageInput } from "../connectors/gemini-json.js";
 import {
   completeEditorialJson,
@@ -22,6 +28,7 @@ import {
 } from "../connectors/editorial-llm.js";
 import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
 import { contextKnowledgePromptPayload } from "../context-knowledge.js";
+import { shortFormRetentionPromptLines } from "../editorial/short-form-retention.js";
 import { parseLlmResponse } from "./llm-json.js";
 import type {
   SelectCandidate,
@@ -30,6 +37,7 @@ import type {
   TriageAgentContext,
   TriageCoverageFeedback,
 } from "../commands/triage.js";
+import { sanitizeStillBackground } from "../artifacts/still-image-policy.js";
 
 export type LlmImagePart = GeminiInlineImageInput;
 export type LlmCompleter = (prompt: string, images?: LlmImagePart[]) => Promise<string>;
@@ -106,6 +114,10 @@ export interface CompactSegmentEvidence {
   extracted_text?: string[];
   place_hint?: string;
   aesthetic_notes?: string[];
+  media_kind?: AssetMediaCapability["media_kind"];
+  source_capabilities?: AssetMediaCapability["source_capabilities"];
+  audio_events?: string[];
+  audio_story?: string[];
 }
 
 export interface TriageFilmstripImageRef {
@@ -468,6 +480,7 @@ function hasMarlinSceneEvidence(segments: CompactSegmentEvidence[]): boolean {
 }
 
 export function loadCompactSegmentEvidence(projectDir: string): CompactSegmentEvidence[] {
+  assertProjectPlanningMediaKindsSupported(projectDir);
   const segmentsPath = path.join(projectDir, SEGMENTS_REL);
   if (!fs.existsSync(segmentsPath)) {
     throw new Error(`segments.json not found: ${segmentsPath}`);
@@ -486,13 +499,71 @@ export function loadCompactSegmentEvidence(projectDir: string): CompactSegmentEv
     throw new Error(`segments.json has no valid segment evidence: ${segmentsPath}`);
   }
   const qualityHints = loadMarlinCameraMotionStartHints(projectDir);
+  const capabilities = readAssetMediaCapabilities(projectDir);
+  const audioEvents = loadWindowedAudioEvidence(projectDir, "audio_events.json", "items", (item) => {
+    const type = stringValue(item.type);
+    const label = stringValue(item.label);
+    return [type, label].filter(Boolean).join(": ");
+  });
+  const audioStory = loadWindowedAudioEvidence(projectDir, "audio_story_graph.json", "nodes", (item) => {
+    const type = stringValue(item.node_type);
+    const role = stringValue(item.story_role);
+    const text = stringValue(item.text);
+    return [type, role, text].filter(Boolean).join(": ");
+  });
   return applyMarlinCameraMotionQualityHints(segments, qualityHints).map((segment) => {
-    if (!segment.filmstrip_path) return segment;
+    const capability = capabilities.get(segment.asset_id);
+    const audioOnly = capability?.media_kind === "audio";
     return {
       ...segment,
-      filmstrip_path: resolveFilmstripPath(projectDir, segment.filmstrip_path),
+      ...(capability ? capability : {}),
+      ...(audioOnly && segment.transcript === UNRELIABLE_TRANSCRIPT_TEXT ? { transcript: "" } : {}),
+      ...(audioOnly ? { filmstrip_path: undefined, visual_quality: undefined, extracted_text: undefined, place_hint: undefined, aesthetic_notes: undefined } : {}),
+      ...(!audioOnly && segment.filmstrip_path
+        ? { filmstrip_path: resolveFilmstripPath(projectDir, segment.filmstrip_path) }
+        : {}),
+      ...(audioEvents.get(segment.segment_id)?.length ? { audio_events: audioEvents.get(segment.segment_id) } : {}),
+      ...(audioStory.get(segment.segment_id)?.length ? { audio_story: audioStory.get(segment.segment_id) } : {}),
     };
   });
+}
+
+function loadWindowedAudioEvidence(
+  projectDir: string,
+  filename: string,
+  arrayKey: string,
+  describe: (item: Record<string, unknown>) => string,
+): Map<string, string[]> {
+  const output = new Map<string, string[]>();
+  const filePath = path.join(projectDir, ANALYSIS_REL, filename);
+  const segmentsPath = path.join(projectDir, SEGMENTS_REL);
+  if (!fs.existsSync(filePath) || !fs.existsSync(segmentsPath)) return output;
+  try {
+    const artifact = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    const segmentDoc = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as { items?: unknown };
+    const items = Array.isArray(artifact[arrayKey]) ? artifact[arrayKey] as unknown[] : [];
+    const segments = Array.isArray(segmentDoc.items) ? segmentDoc.items : [];
+    for (const rawSegment of segments) {
+      if (!isRecord(rawSegment)) continue;
+      const segmentId = stringValue(rawSegment.segment_id);
+      const assetId = stringValue(rawSegment.asset_id);
+      const start = integerValue(rawSegment.src_in_us);
+      const end = integerValue(rawSegment.src_out_us);
+      if (!segmentId || !assetId || start === undefined || end === undefined) continue;
+      const descriptions = items.flatMap((rawItem) => {
+        if (!isRecord(rawItem) || stringValue(rawItem.asset_id) !== assetId) return [];
+        const itemStart = integerValue(rawItem.start_us);
+        const itemEnd = integerValue(rawItem.end_us);
+        if (itemStart === undefined || itemEnd === undefined || itemStart >= end || itemEnd <= start) return [];
+        const description = describe(rawItem);
+        return description ? [description] : [];
+      });
+      if (descriptions.length > 0) output.set(segmentId, uniqueStrings(descriptions));
+    }
+  } catch {
+    return new Map();
+  }
+  return output;
 }
 
 function briefMustHave(brief: CreativeBrief): string[] {
@@ -515,10 +586,12 @@ function buildCoverageFeedbackPreamble(feedback: TriageCoverageFeedback | undefi
   return [...lines, ""];
 }
 
-function buildFilmstripPromptLines(refs: TriageFilmstripImageRef[] | undefined): string[] {
+function buildFilmstripPromptLines(refs: TriageFilmstripImageRef[] | undefined, includesAudioOnly = false): string[] {
   if (!refs || refs.length === 0) {
     return [
-      "No filmstrip images are attached for this request. Use the text evidence: scene_report, summary, tags, extracted_text, place_hint, aesthetic_notes, peaks, and transcript quality flags.",
+      includesAudioOnly
+        ? "No filmstrip images are attached. Audio-only segments have no visual evidence; use only transcript, audio_events, audio_story, non-visual summary, and audio quality flags for them."
+        : "No filmstrip images are attached for this request. Use the text evidence: scene_report, summary, tags, extracted_text, place_hint, aesthetic_notes, peaks, and transcript quality flags.",
     ];
   }
   return [
@@ -529,6 +602,13 @@ function buildFilmstripPromptLines(refs: TriageFilmstripImageRef[] | undefined):
     "## Attached filmstrip images",
     JSON.stringify(refs, null, 2),
   ];
+}
+
+function hasAudioOnlyEvidence(segments: CompactSegmentEvidence[]): boolean {
+  return segments.some((segment) =>
+    segment.media_kind === "audio" ||
+    (segment.source_capabilities?.has_audio === true && segment.source_capabilities.has_video === false)
+  );
 }
 
 function buildBatchPromptLines(batch: TriageBatchInfo | undefined): string[] {
@@ -542,6 +622,8 @@ function buildBatchPromptLines(batch: TriageBatchInfo | undefined): string[] {
 
 export function buildLlmTriagePrompt(input: TriagePromptInput): string {
   const contextKnowledge = contextKnowledgePromptPayload(input.brief);
+  const retentionLines = shortFormRetentionPromptLines(input.brief);
+  const includesAudioOnly = hasAudioOnlyEvidence(input.segments);
   const briefPayload = {
     project_id: input.brief.project_id,
     title: input.brief.project.title,
@@ -559,8 +641,10 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
   return [
     ...buildCoverageFeedbackPreamble(input.coverageFeedback),
     "You are the footage-triager for Video OS. Select source segments for a rough-cut candidate board.",
-    "Work from the creative brief and the segment evidence only. Prefer visual evidence over unreliable transcript text.",
-    ...buildFilmstripPromptLines(input.filmstripImages),
+    includesAudioOnly
+      ? "Work from the creative brief and the segment evidence only. For audio-only sources, use transcript, audio_events, and audio_story evidence; never invent a frame, subject, composition, motion, face, place, or other visual claim."
+      : "Work from the creative brief and the segment evidence only. Prefer visual evidence over unreliable transcript text.",
+    ...buildFilmstripPromptLines(input.filmstripImages, includesAudioOnly),
     "",
     ...buildBatchPromptLines(input.batch),
     "",
@@ -575,6 +659,10 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- Respect the emotion curve and source chronology unless the brief clearly asks for editorial reordering.",
     "- Include a clear opening and a clear ending.",
     "- Maintain enough breadth across assets, visual modes, and story beats for the target runtime.",
+    ...(includesAudioOnly ? [
+      "- Audio-only segments are first-class candidates. Do not reject or omit them because filmstrip, visual_quality, or visual tags are absent.",
+      "- For audio-only evidence, role=dialogue is appropriate for speech; texture/support can represent ambience or natural sound. Ground why_it_matches and evidence in transcript/audio events/audio story nodes only.",
+    ] : []),
     "- Use `place_hint` to identify location-specific content for the brief.",
     "- Use `extracted_text` to identify signage, menus, or labels relevant to the brief.",
     "- Use `aesthetic_notes` to prefer visually strong clips.",
@@ -587,6 +675,8 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     `- If quality_flags include '${MARLIN_CAMERA_MOTION_START_FLAG}' or confidence_penalty is present, lower confidence because source-start camera setup/motion often contains unusable shake.`,
     "- IMPORTANT: You must select candidates. An empty candidates array is never acceptable. These segments are the only available footage — choose the best from what exists, not against an ideal.",
     "",
+    ...retentionLines,
+    ...(retentionLines.length > 0 ? [""] : []),
     "## Output",
     "Respond with JSON only. Markdown code fences are tolerated, but do not add prose outside JSON.",
     "Use only segment_id, asset_id, src_in_us, and src_out_us values that appear in the segment evidence.",
@@ -597,7 +687,11 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- Include motif_tags with specific visual themes relevant to the brief, not generic tags.",
     "- If segment peak evidence exists (has_peak=true), populate editorial_signals.peak_type and peak_strength_score.",
     "- Include trim_hint.preferred_duration_us when you have a clear sense of how long this clip should be used.",
-    "- Evidence must include at least one specific visual observation and one brief-alignment justification. Avoid generic-only evidence like 'outdoor_scene' or 'person_standing' — add what makes this specific clip valuable.",
+    "- For media_kind=image, still_image.hold_duration_sec/min_hold_sec/max_hold_sec are seconds. motion_mode=static is the only executable C2A truth; subtle_ken_burns remains pending EYE-070C2B.",
+    "- still_image.background is a color only: black, white, transparent, #RRGGBB, or #RRGGBBAA. Never provide a path, URL, url(), gradient, or function.",
+    includesAudioOnly
+      ? "- Evidence must include a specific grounded media observation plus a brief-alignment justification. Visual candidates require a visual observation; audio-only candidates require transcript/audio-event/audio-story evidence and must contain no visual claim."
+      : "- Evidence must include at least one specific visual observation and one brief-alignment justification. Avoid generic-only evidence like 'outdoor_scene' or 'person_standing' — add what makes this specific clip valuable.",
     "- selection_notes must include notes about intended emotional progression across candidates.",
     "- selection_notes must note the intended pacing approach (fast montage / slow holds / mixed).",
   ].join("\n");
@@ -710,6 +804,20 @@ function sanitizeTrimHint(value: unknown): SelectCandidate["trim_hint"] | undefi
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+function sanitizeStillImageIntent(value: unknown): SelectCandidate["still_image"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const out: NonNullable<SelectCandidate["still_image"]> = {};
+  for (const key of ["hold_duration_sec", "min_hold_sec", "max_hold_sec"] as const) {
+    const duration = numberValue(value[key]);
+    if (duration !== undefined && duration > 0) out[key] = duration;
+  }
+  if (value.motion_mode === "static" || value.motion_mode === "subtle_ken_burns") out.motion_mode = value.motion_mode;
+  if (value.fit_mode === "contain" || value.fit_mode === "cover") out.fit_mode = value.fit_mode;
+  const background = sanitizeStillBackground(value.background);
+  if (background) out.background = background;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function selectsFromLlmResponse(
   parsed: Record<string, unknown>,
   projectId: string,
@@ -738,24 +846,35 @@ export function selectsFromLlmResponse(
       src_in_us: segment.src_in_us,
       src_out_us: segment.src_out_us,
       role,
-      why_it_matches: stringValue(item.why_it_matches) ?? segment.summary,
+      why_it_matches: isAudioOnlySegment(segment)
+        ? audioGroundedDescription(segment)
+        : stringValue(item.why_it_matches) ?? segment.summary,
       risks: uniqueStrings([...stringArray(item.risks), ...(segment.quality_flags ?? [])]),
       confidence: clamp01(clamp01(item.confidence, 0.5) - (segment.confidence_penalty ?? 0), 0.5),
     };
+    if (segment.media_kind) candidate.media_kind = segment.media_kind;
+    if (segment.source_capabilities) candidate.source_capabilities = { ...segment.source_capabilities };
     if (segment.transcript) candidate.transcript_excerpt = segment.transcript;
+    if (isAudioOnlySegment(segment)) candidate.audio_role = inferAudioRole(candidate);
+    if (segment.media_kind === "image") {
+      const stillImage = sanitizeStillImageIntent(item.still_image);
+      if (stillImage) candidate.still_image = stillImage;
+    }
     const semanticRank = sanitizeSemanticRank(item.semantic_rank);
     if (semanticRank !== undefined) candidate.semantic_rank = semanticRank;
-    const evidence = stringArray(item.evidence);
+    const evidence = isAudioOnlySegment(segment) ? audioGroundedEvidence(segment) : stringArray(item.evidence);
     if (evidence.length > 0) candidate.evidence = evidence;
     const eligibleBeats = stringArray(item.eligible_beats);
     if (eligibleBeats.length > 0) candidate.eligible_beats = eligibleBeats;
     const storyRole = normalizeStoryRole(item.story_role);
     if (storyRole) candidate.story_role = storyRole;
-    const motifTags = stringArray(item.motif_tags);
+    const motifTags = isAudioOnlySegment(segment)
+      ? uniqueStrings([...(segment.audio_events ?? []), ...(segment.audio_story ?? [])]).map(normalizeAudioTag).filter(Boolean).slice(0, 8)
+      : stringArray(item.motif_tags);
     if (motifTags.length > 0) candidate.motif_tags = motifTags;
-    const editorialSignals = sanitizeEditorialSignals(item.editorial_signals);
+    const editorialSignals = isAudioOnlySegment(segment) ? undefined : sanitizeEditorialSignals(item.editorial_signals);
     if (editorialSignals) candidate.editorial_signals = editorialSignals;
-    const peakSignals = sanitizePeakSignals(item.peak_signals);
+    const peakSignals = isAudioOnlySegment(segment) ? undefined : sanitizePeakSignals(item.peak_signals);
     if (peakSignals) (candidate as SelectCandidate & { peak_signals?: typeof peakSignals }).peak_signals = peakSignals;
     const trimHint = sanitizeTrimHint(item.trim_hint);
     if (trimHint) candidate.trim_hint = trimHint;
@@ -841,6 +960,34 @@ function validateTriageJson(parsed: Record<string, unknown>): void {
   }
 }
 
+function isAudioOnlySegment(segment: CompactSegmentEvidence): boolean {
+  return segment.media_kind === "audio" || (
+    segment.source_capabilities?.has_audio === true && segment.source_capabilities.has_video === false
+  );
+}
+
+function audioGroundedEvidence(segment: CompactSegmentEvidence): string[] {
+  return uniqueStrings([
+    ...(segment.transcript ? [`Transcript: ${segment.transcript}`] : []),
+    ...(segment.audio_events ?? []).map((value) => `Audio event: ${value}`),
+    ...(segment.audio_story ?? []).map((value) => `Audio story: ${value}`),
+    ...(!segment.transcript && !(segment.audio_events?.length) && !(segment.audio_story?.length) && segment.summary
+      ? [`Audio segment summary: ${segment.summary}`]
+      : []),
+  ]);
+}
+
+function audioGroundedDescription(segment: CompactSegmentEvidence): string {
+  const evidence = audioGroundedEvidence(segment);
+  return evidence.length > 0
+    ? evidence.join("; ")
+    : "Audio-only segment retained as source-grounded program audio; no transcript or semantic audio event is available.";
+}
+
+function normalizeAudioTag(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
 function storyRoleForIndex(index: number, total: number): NonNullable<SelectCandidate["story_role"]> {
   if (index === 0) return "hook";
   if (index === total - 1) return "closing";
@@ -872,29 +1019,39 @@ function deterministicSelects(
   });
   const candidates = ranked.map((segment, index): SelectCandidate => {
     const storyRole = storyRoleForIndex(index, ranked.length);
-    return {
+    const candidate: SelectCandidate = {
       segment_id: segment.segment_id,
       asset_id: segment.asset_id,
       src_in_us: segment.src_in_us,
       src_out_us: segment.src_out_us,
       role: deterministicRoleForSegment(segment, index),
       story_role: storyRole,
-      why_it_matches: segment.summary || "Deterministic fallback selected this valid segment.",
+      why_it_matches: isAudioOnlySegment(segment)
+        ? audioGroundedDescription(segment)
+        : segment.summary || "Deterministic fallback selected this valid segment.",
       risks: segment.quality_flags ?? [],
       confidence: clamp01(0.72 - (segment.confidence_penalty ?? 0), 0.5),
       semantic_rank: index + 1,
-      evidence: [
-        segment.scene_report ? `Marlin scene: ${segment.scene_report}` : `Summary: ${segment.summary}`,
-        segment.peak.has_peak
-          ? `Peak evidence: ${segment.peak.types.join(", ") || "detected"}`
-          : "No peak evidence available.",
-      ],
+      evidence: isAudioOnlySegment(segment)
+        ? audioGroundedEvidence(segment)
+        : [
+            segment.scene_report ? `Marlin scene: ${segment.scene_report}` : `Summary: ${segment.summary}`,
+            segment.peak.has_peak
+              ? `Peak evidence: ${segment.peak.types.join(", ") || "detected"}`
+              : "No peak evidence available.",
+          ],
       eligible_beats: [storyRole],
-      motif_tags: uniqueStrings([...segment.tags, storyRole]).slice(0, 8),
+      motif_tags: isAudioOnlySegment(segment)
+        ? uniqueStrings([...(segment.audio_events ?? []), ...(segment.audio_story ?? []), storyRole]).map(normalizeAudioTag).filter(Boolean).slice(0, 8)
+        : uniqueStrings([...segment.tags, storyRole]).slice(0, 8),
       trim_hint: {
         preferred_duration_us: Math.max(1, Math.min(segment.src_out_us - segment.src_in_us, 3_000_000)),
       },
+      ...(segment.media_kind ? { media_kind: segment.media_kind } : {}),
+      ...(segment.source_capabilities ? { source_capabilities: { ...segment.source_capabilities } } : {}),
     };
+    if (isAudioOnlySegment(segment)) candidate.audio_role = inferAudioRole(candidate);
+    return candidate;
   });
   return {
     version: "1",
@@ -905,9 +1062,9 @@ function deterministicSelects(
       "Pacing approach: mixed, preserving peaks and source order where possible.",
     ],
     editorial_summary: {
-      dominant_visual_mode: "mixed",
+      dominant_visual_mode: hasAudioOnlyEvidence(segments) && segments.every(isAudioOnlySegment) ? "unknown" : "mixed",
       speaker_topology: "unknown",
-      motion_profile: "medium",
+      motion_profile: hasAudioOnlyEvidence(segments) && segments.every(isAudioOnlySegment) ? "unknown" : "medium",
       transcript_density: "sparse",
     },
     candidates,

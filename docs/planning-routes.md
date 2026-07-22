@@ -16,7 +16,14 @@ For Cockpit or repo-side interactive work, use the agent wrapper:
 npx tsx scripts/editorial-agent-task.ts --project <projectDir>
 ```
 
-`scripts/editorial-agent-task.ts` wraps the same rough/fine planning model used by `scripts/editorial-pipeline.ts`; it exists for headless or interactive agent handoff.
+`scripts/editorial-agent-task.ts` wraps the same rough/fine planning model used by
+`scripts/editorial-pipeline.ts`; it exists for headless or interactive agent
+handoff. In interactive mode, writing a rough/fine prompt is an explicit pending
+state: QA and `06_review/editorial_pipeline_status.json` are not updated until
+the required response is supplied. After the response is applied, interactive
+mode rejoins the same compile/render/QA/status runner as headless mode. QA runs
+by default; `--skip-qa` records a blocking `QA_SKIPPED` status rather than
+silently treating compile/render as completion.
 
 `editorial.profile_hint: longform-event` is a canonical specialized branch inside `scripts/editorial-pipeline.ts` and therefore also inside `npm run full-pipeline`. It replaces the rough/fine LLM pass with deterministic transcript reduction and chapter allocation, then rejoins the shared compile/render/QA stages. See `docs/longform-event-mode.md`.
 

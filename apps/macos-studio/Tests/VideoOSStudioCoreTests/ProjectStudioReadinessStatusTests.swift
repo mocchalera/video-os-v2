@@ -6,7 +6,18 @@ final class ProjectStudioReadinessStatusTests: XCTestCase {
         let (root, project) = try temporaryStudioProject("videoos-studio-empty")
         try "{}".write(to: root.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
 
-        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+        let status = ProjectStudioReadinessStatusReader.status(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: ProjectPackagePreflightStatus(
+                ok: true,
+                sourceOfTruth: "engine_render",
+                autonomyMode: "full",
+                projectID: "demo",
+                currentState: "approved",
+                visualQaSummary: "verified"
+            )
+        )
 
         XCTAssertEqual(status.readinessLabel, "needs ingest")
         XCTAssertEqual(status.scoreLabel, "1/9")
@@ -137,7 +148,18 @@ final class ProjectStudioReadinessStatusTests: XCTestCase {
             patchOperations: 0
         )
 
-        let status = ProjectStudioReadinessStatusReader.status(repositoryRoot: root, projectURL: project)
+        let status = ProjectStudioReadinessStatusReader.status(
+            repositoryRoot: root,
+            projectURL: project,
+            preflightStatus: ProjectPackagePreflightStatus(
+                ok: true,
+                sourceOfTruth: "engine_render",
+                autonomyMode: "full",
+                projectID: "demo",
+                currentState: "approved",
+                visualQaSummary: "verified"
+            )
+        )
 
         XCTAssertEqual(status.readinessLabel, "studio ready")
         XCTAssertEqual(status.scoreLabel, "9/9")

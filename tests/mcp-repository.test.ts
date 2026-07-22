@@ -13,6 +13,25 @@ import * as path from "node:path";
 // ── Gap Projection Tests ────────────────────────────────────────────
 
 describe("Gap Projection: projectAnalysisGaps", () => {
+  it("keeps source-ledger unsupported identity and consumer impact visible", () => {
+    const report: GapReport = {
+      version: "1",
+      entries: [{
+        stage: "capability",
+        asset_id: "SRC_AAAAAAAAAAAAAAAA",
+        source_id: "SRC_AAAAAAAAAAAAAAAA",
+        severity: "warning",
+        blocking: true,
+        consumer_impact: "planning_block",
+        issue: "source_unsupported: audio lane unavailable; consumer_impact=planning_block",
+      }],
+    };
+    expect(projectAnalysisGaps(report)).toEqual([
+      "warning/capability/SRC_AAAAAAAAAAAAAAAA: source_unsupported: audio lane unavailable; consumer_impact=planning_block",
+    ]);
+    expect(deriveQcStatus(report, 1)).toBe("partial");
+    expect(deriveQcStatus(report, 0)).toBe("blocked");
+  });
   it("returns empty array for empty gap report", () => {
     const report: GapReport = { version: "1", entries: [] };
     expect(projectAnalysisGaps(report)).toEqual([]);

@@ -347,7 +347,7 @@ describe("Appraiser pipeline stage", () => {
       light_quality: 0.71,
       subject_prominence: 0.64,
       composition_score: 0.82,
-      motion_quality: 0.42,
+      motion_quality: 0.2,
     });
     expect(segment.visual_quality?.score_measurements).toMatchObject({
       emotional_expression: {
@@ -355,8 +355,8 @@ describe("Appraiser pipeline stage", () => {
         reason: "not_measured_by_single_frame_appraiser",
       },
       motion_quality: {
-        measured: true,
-        source: "visual_quality_measurements.shake.average_energy",
+        measured: false,
+        reason: "intent_relative_quality_not_inferred_from_motion_amount",
       },
     });
     const confidence = segment.confidence as Record<string, { source: string }>;
@@ -417,7 +417,7 @@ describe("Appraiser pipeline stage", () => {
       runtime: "codex_exec",
       role: "appraiser",
     });
-    expect(segment.visual_quality?.scores?.motion_quality).toBe(0.37);
+    expect(segment.visual_quality?.scores?.motion_quality).toBeUndefined();
     expect(segment.provenance.visual_appraisal?.runtime).toBe("codex_exec");
   });
 

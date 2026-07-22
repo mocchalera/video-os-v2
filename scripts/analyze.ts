@@ -15,7 +15,7 @@ dotenvConfig(); // fallback: .env
 
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import { runPipeline } from "../runtime/pipeline/ingest.js";
+import { runPipeline, SourceReadinessError } from "../runtime/pipeline/ingest.js";
 import { createGeminiVlmFn } from "../runtime/connectors/gemini-vlm.js";
 import { DEFAULT_APPRAISER_MODEL } from "../runtime/connectors/gemini-appraiser.js";
 import { availableEditorialLlmRuntimes } from "../runtime/connectors/editorial-llm.js";
@@ -31,6 +31,12 @@ import {
   type VlmProgressReporter,
 } from "../runtime/pipeline/vlm-analysis.js";
 import { runPreflight } from "./preflight.js";
+import {
+  normalizeSourceLocators,
+  type SourceDiscoveryResult,
+} from "../runtime/media/source-discovery.js";
+import { persistAnalyzeReadinessArtifacts } from "../runtime/commands/analyze.js";
+import { readProjectState } from "../runtime/state/reconcile.js";
 
 // ── Arg Parsing ────────────────────────────────────────────────────
 
@@ -197,7 +203,8 @@ function formatDuration(durationMs: number): string {
 
 // ── Main ───────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function main(argv: string[] = process.argv): Promise<number> {
+  const repoRoot = path.resolve(import.meta.dirname, "..");
   const {
     sourceFiles,
     projectDir,
@@ -217,27 +224,43 @@ async function main(): Promise<void> {
     concurrency,
     noCache,
     clearCache,
-  } = parseArgs(process.argv);
+  } = parseArgs(argv);
+  const absoluteProjectDir = path.resolve(projectDir);
+  const normalizedSourceFiles = normalizeSourceLocators(sourceFiles, process.cwd());
+  const projectId = readCliProjectId(absoluteProjectDir);
 
   // ── Pre-flight checks ──────────────────────────────────────────
+  let sourceDiscovery: SourceDiscoveryResult | undefined;
   if (!skipPreflight && !vlmOnly) {
-    // Use the directory of the first source file as the source folder
-    const sourceFolder = path.dirname(path.resolve(sourceFiles[0]));
     console.log("[analyze] Running pre-flight checks...");
-    const preflight = runPreflight(sourceFolder);
+    const preflight = runPreflight(normalizedSourceFiles);
+    sourceDiscovery = preflight.discovery;
     for (const check of preflight.checks) {
       const icon = check.status === "pass" ? "✓" : check.status === "warn" ? "⚠" : "✗";
       console.log(`  ${icon} ${check.name}: ${check.detail}`);
     }
     if (!preflight.ok) {
+      persistAnalyzeReadinessArtifacts(
+        absoluteProjectDir,
+        projectId,
+        preflight.discovery,
+        undefined,
+        {
+          stage: "preflight",
+          reason: `preflight_failed:${preflight.checks
+            .filter((check) => check.status === "fail")
+            .map((check) => `${check.name}:${check.detail}`)
+            .join(" | ")}`,
+        },
+      );
       console.error("[analyze] Pre-flight failed. Fix the issues above or use --skip-preflight.");
-      process.exit(1);
+      return 1;
     }
     console.log("[analyze] Pre-flight passed.\n");
   }
 
-  console.log(`[analyze] Project: ${path.resolve(projectDir)}`);
-  console.log(`[analyze] Sources: ${sourceFiles.join(", ")}`);
+  console.log(`[analyze] Project: ${absoluteProjectDir}`);
+  console.log(`[analyze] Sources: ${normalizedSourceFiles.join(", ")}`);
   if (vlmOnly) console.log("[analyze] Mode: VLM only");
   if (skipStt) console.log("[analyze] STT: skipped");
   if (!skipStt && sttStrategy !== "full") console.log(`[analyze] STT strategy: ${sttStrategy}`);
@@ -278,16 +301,18 @@ async function main(): Promise<void> {
   }
 
   let marlinFn: MarlinFn | undefined;
-  if (!vlmOnly && !skipMarlin && shouldRunMarlinAnalysis(projectDir)) {
+  if (!vlmOnly && !skipMarlin && shouldRunMarlinAnalysis(projectDir, repoRoot)) {
     console.log("[analyze] Marlin: running before VLM as scene reporter");
-    marlinFn = createMarlinFnFromEnvironment(projectDir);
+    marlinFn = createMarlinFnFromEnvironment(projectDir, repoRoot);
   }
 
   let result: Awaited<ReturnType<typeof runPipeline>>;
   try {
     result = await runPipeline({
-      sourceFiles,
-      projectDir,
+      sourceFiles: normalizedSourceFiles,
+      projectDir: absoluteProjectDir,
+      projectId,
+      repoRoot,
       skipStt,
       skipVlm,
       skipDiarize,
@@ -297,8 +322,8 @@ async function main(): Promise<void> {
       vlmOnly,
       vlmFn,
       marlinFn,
-      marlinModel: marlinFn ? marlinModelFromEnvironment(projectDir) : undefined,
-      marlinQueries: marlinFn ? marlinQueriesFromEnvironment(projectDir) : undefined,
+      marlinModel: marlinFn ? marlinModelFromEnvironment(projectDir, repoRoot) : undefined,
+      marlinQueries: marlinFn ? marlinQueriesFromEnvironment(projectDir, repoRoot) : undefined,
       sttLanguageOverride: language,
       sttProvider,
       sttStrategy,
@@ -308,7 +333,14 @@ async function main(): Promise<void> {
       vlmProgressReporter: createVlmProgressReporter(),
       noCache,
       clearCache,
+      sourceDiscovery,
     });
+  } catch (error) {
+    if (error instanceof SourceReadinessError) {
+      console.error(`[analyze] Source readiness failed: ${error.message}`);
+      return 1;
+    }
+    throw error;
   } finally {
     await marlinFn?.close?.();
   }
@@ -333,7 +365,7 @@ async function main(): Promise<void> {
       result.vlmSummary.failedAssets.length === result.vlmSummary.analyzedAssets &&
       result.vlmSummary.cachedAssets === 0;
     if (allLiveAssetsFailed) {
-      process.exitCode = 1;
+      return 1;
     }
   }
 
@@ -354,6 +386,15 @@ async function main(): Promise<void> {
   if (result.mediaSourceMapPath) {
     console.log(`  Media links: ${result.mediaSourceMap?.items.length ?? 0} mapped`);
     console.log(`  Source map: ${result.mediaSourceMapPath}`);
+  }
+  return 0;
+}
+
+function readCliProjectId(projectDir: string): string {
+  try {
+    return readProjectState(projectDir)?.project_id || path.basename(projectDir);
+  } catch {
+    return path.basename(projectDir);
   }
 }
 
@@ -378,9 +419,11 @@ const isMain = process.argv[1]
   : false;
 
 if (isMain) {
-  main().catch((err) => {
+  main().then((code) => {
+    process.exitCode = code;
+  }).catch((err) => {
     console.error("[analyze] Fatal error:", err);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }
 

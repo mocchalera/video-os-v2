@@ -12,6 +12,10 @@ import {
   type AssemblyResult,
   type ExecFileLike,
 } from "./assembler.js";
+import { DEFAULT_VIDEO_FONT } from "../../editor/shared/font-contract.js";
+import { resolveBundledFontPaths } from "../fonts/bundled-font.js";
+import { assertTimelineRenderSupported } from "./media-kind-guard.js";
+import { assertSourceInputsUnchanged, createSourceInputAttestation } from "./source-input-attestation.js";
 
 const DEFAULT_CAPTION_MAX_CHARS = 26;
 const DEFAULT_MIN_CAPTION_FRAMES = 8;
@@ -92,6 +96,7 @@ export interface PromoFinalizeFfmpegArgsOptions {
   fontsDir?: string;
   videoCodec?: string;
   audioCodec?: string;
+  hasAudio?: boolean;
 }
 
 export interface PromoFinishOptions {
@@ -331,7 +336,7 @@ export function buildAssSubtitleFile(
   styleOptions: AssSubtitleStyleOptions = {},
 ): string {
   const style = {
-    fontName: styleOptions.fontName ?? "Hiragino Sans",
+    fontName: styleOptions.fontName ?? DEFAULT_VIDEO_FONT.family,
     fontSize: styleOptions.fontSize ?? 66,
     bold: styleOptions.bold ?? true,
     outline: styleOptions.outline ?? 6,
@@ -369,13 +374,21 @@ export function buildAssSubtitleFile(
 export function buildPromoFinalizeFfmpegArgs(options: PromoFinalizeFfmpegArgsOptions): string[] {
   const fadeSec = Math.max(0, options.fadeSec ?? DEFAULT_ENDING_FADE_SEC);
   const fadeStart = Math.max(0, options.durationSec - fadeSec);
-  const fontsDir = options.fontsDir ?? "/System/Library/Fonts";
+  const fontsDir = options.fontsDir ?? resolveBundledFontPaths().fontsDir;
   const subtitleFilter = `subtitles=filename='${escapeFfmpegFilterValue(options.assPath)}':fontsdir='${escapeFfmpegFilterValue(fontsDir)}'`;
   const videoFilters = [
     subtitleFilter,
     `fade=t=out:st=${formatFilterNumber(fadeStart)}:d=${formatFilterNumber(fadeSec)}`,
   ];
   const audioFilters = [`afade=t=out:st=${formatFilterNumber(fadeStart)}:d=${formatFilterNumber(fadeSec)}`];
+  if (options.hasAudio === false) {
+    return [
+      "-y", "-i", options.inputPath,
+      "-vf", videoFilters.join(","),
+      "-an", "-c:v", options.videoCodec ?? "libx264", "-preset", "medium", "-crf", "18",
+      "-movflags", "+faststart", options.outputPath,
+    ];
+  }
   return [
     "-y",
     "-i",
@@ -413,10 +426,15 @@ export async function finishPromoCut(options: PromoFinishOptions): Promise<Promo
   const execFileImpl = options.execFileImpl ?? execFile;
   const assembleImpl = options.assembleTimelineToMp4Impl ?? assembleTimelineToMp4;
 
+  const timeline = cloneTimeline(readTimeline(timelinePath));
+  assertTimelineRenderSupported(timeline, { projectDir, timelinePath });
+  const sourceInputsBefore = createSourceInputAttestation(projectDir, { timelinePath });
+  const hasTimelineAudio = timeline.tracks.audio.some((track) => track.clips.length > 0) ||
+    typeof timeline.audio_mix?.bgm_asset_id === "string";
+
   fs.mkdirSync(workDir, { recursive: true });
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
-  const timeline = cloneTimeline(readTimeline(timelinePath));
   const tailSummary = extendFinalClipTail(timeline, projectDir, {
     tailSec: options.endingTailSec ?? DEFAULT_ENDING_TAIL_SEC,
   });
@@ -457,7 +475,15 @@ export async function finishPromoCut(options: PromoFinishOptions): Promise<Promo
     durationSec,
     fadeSec: options.endingFadeSec ?? DEFAULT_ENDING_FADE_SEC,
     fontsDir: options.fontsDir,
+    hasAudio: hasTimelineAudio,
   }));
+  try {
+    const sourceInputsAfter = createSourceInputAttestation(projectDir, { timelinePath });
+    assertSourceInputsUnchanged(sourceInputsBefore, sourceInputsAfter);
+  } catch (error) {
+    fs.rmSync(outputPath, { force: true });
+    throw error;
+  }
 
   return {
     outputPath,

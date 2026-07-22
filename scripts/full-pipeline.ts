@@ -7,11 +7,15 @@
  */
 
 import { pathToFileURL } from "node:url";
-import type { PipelineTimingStage } from "../runtime/progress.js";
 import {
-  FULL_PIPELINE_TIMING_STAGE_ORDER,
-  isFullPipelineTimingStage,
+  FULL_PIPELINE_RESUME_STAGE_ORDER,
+  isFullPipelineResumeStage,
+  type FullPipelineResumeStage,
 } from "../runtime/pipeline/plan.js";
+import {
+  FULL_PIPELINE_CLI_OPTIONS,
+  type FullPipelineCliOptionContract,
+} from "../runtime/pipeline/full-pipeline-contract.js";
 import { runProjectPipeline, type ProjectPipelineOptions } from "../runtime/pipeline/executor.js";
 import { initProject } from "./init-project.js";
 import { runEditorialPipeline } from "./editorial-pipeline.js";
@@ -19,23 +23,21 @@ import { runEditorialPipeline } from "./editorial-pipeline.js";
 const USAGE = `Usage: npm run full-pipeline -- --project <project-id|project-dir> [options]
 
 Options:
-  --source-dir <path>       Source footage directory. Required when creating a new project.
-  --content-hint <text>     Context hint for VLM analysis.
-  --from <stage>            Resume hint: ingest|stt|marlin|visual-quality|peak|embeddings|triage|blueprint|compile|render|QA.
-  --skip-analyze            Start from existing 03_analysis artifacts.
-  --skip-footage-db         Skip 03_analysis/search/footage.db rebuild.
-  --skip-render             Run planning/compile but do not render rough-cut.mp4.
-  --skip-qa                 Skip QA improvement loop.
-  --no-qwen3vl              Disable Qwen3-VL embeddings.
-  --no-clap-audio           Disable CLAP audio embeddings.
+${FULL_PIPELINE_CLI_OPTIONS.map(formatOptionHelp).join("\n")}
 `;
+
+function formatOptionHelp(option: FullPipelineCliOptionContract): string {
+  const flags = [option.flag, ...(option.aliases ?? [])].join(", ");
+  const syntax = `${flags}${option.value ? ` ${option.value}` : ""}`;
+  return `  ${syntax.padEnd(42)} ${option.description}`;
+}
 
 export function parseArgs(argv: string[]): ProjectPipelineOptions {
   const args = argv.slice(2);
   let project = "";
   let sourceDir: string | undefined;
   let contentHint: string | undefined;
-  let from: PipelineTimingStage | undefined;
+  let from: FullPipelineResumeStage | undefined;
   let skipAnalyze = false;
   let skipFootageDb = false;
   let skipRender = false;
@@ -63,7 +65,7 @@ export function parseArgs(argv: string[]): ProjectPipelineOptions {
       continue;
     }
     if (arg === "--from") {
-      if (!isFullPipelineTimingStage(value)) throw new Error(`--from must be one of: ${FULL_PIPELINE_TIMING_STAGE_ORDER.join(", ")}`);
+      if (!isFullPipelineResumeStage(value)) throw new Error(`--from must be one of: ${FULL_PIPELINE_RESUME_STAGE_ORDER.join(", ")}`);
       from = value;
       index += 1;
       continue;

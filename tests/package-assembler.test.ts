@@ -4,6 +4,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { computeFileHash, reconcile } from "../runtime/state/reconcile.js";
+import {
+  createSourceInputAttestation,
+  writeRenderFreshnessMetadata,
+} from "../runtime/render/source-input-attestation.js";
 
 const { assembleMock, renderMock, measureQaMediaMock, matchingVideoFrame } = vi.hoisted(() => ({
   assembleMock: vi.fn(),
@@ -112,6 +116,34 @@ function createTempProject(): string {
   fs.writeFileSync(blueprintPath, stringifyYaml(blueprint), "utf-8");
 
   const timelinePath = path.join(tmpDir, "05_timeline/timeline.json");
+  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+    tracks?: { video?: Array<{ clips?: Array<{ asset_id?: string }> }>; audio?: Array<{ clips?: Array<{ asset_id?: string }> }> };
+    audio_mix?: { bgm_asset_id?: string };
+  };
+  const sourceIds = new Set([
+    ...(timeline.tracks?.video ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+    ...(timeline.tracks?.audio ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+    timeline.audio_mix?.bgm_asset_id,
+  ].filter((value): value is string => typeof value === "string"));
+  const mediaDir = path.join(tmpDir, "02_media");
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const sourceItems = [...sourceIds].sort().map((assetId) => {
+    const sourcePath = path.join(mediaDir, `${assetId}.bin`);
+    fs.writeFileSync(sourcePath, `source:${assetId}`);
+    return {
+      asset_id: assetId,
+      source_locator: sourcePath,
+      local_source_path: sourcePath,
+      link_path: `02_media/${assetId}.bin`,
+    };
+  });
+  fs.writeFileSync(path.join(mediaDir, "source_map.json"), JSON.stringify({
+    version: "1",
+    project_id: "sample-mountain-reset",
+    media_dir: "02_media",
+    generated_at: "2026-07-20T00:00:00.000Z",
+    items: sourceItems,
+  }));
   const reviewReportPath = path.join(tmpDir, "06_review/review_report.yaml");
   const reviewPatchPath = path.join(tmpDir, "06_review/review_patch.json");
   const reviewReport = parseYaml(fs.readFileSync(reviewReportPath, "utf-8")) as Record<string, unknown>;
@@ -170,11 +202,30 @@ function stubRenderOutputs(projectDir: string, assemblyPath: string) {
   const rawDialoguePath = path.join(outputDir, "audio", "raw_dialogue.wav");
   const finalMixPath = path.join(outputDir, "audio", "final_mix.wav");
   const finalVideoPath = path.join(outputDir, "video", "final.mp4");
+  const audioMixReportPath = path.join(outputDir, "logs", "audio-mix-report.json");
 
   for (const filePath of [assemblyPath, rawVideoPath, rawDialoguePath, finalMixPath, finalVideoPath]) {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, "stub", "utf-8");
   }
+  fs.mkdirSync(path.dirname(audioMixReportPath), { recursive: true });
+  fs.writeFileSync(audioMixReportPath, JSON.stringify({
+    version: "audio-mix-report/v1",
+    has_bgm: false,
+    strategy: "dialogue_only_mastering_v1",
+    final_mastering: {
+      loudness_target_lufs: -16,
+      lra_target: 7,
+      true_peak_target_dbtp: -1.5,
+      premaster_measurement: {
+        input_i: "-20.00",
+        input_tp: "-3.00",
+        input_lra: "4.00",
+        input_thresh: "-30.00",
+        target_offset: "0.00",
+      },
+    },
+  }), "utf-8");
 
   return {
     assemblyPath,
@@ -184,14 +235,80 @@ function stubRenderOutputs(projectDir: string, assemblyPath: string) {
     finalVideoPath,
     sidecarPaths: [] as string[],
     logs: {},
+    audioMixReportPath,
   };
 }
 
+function stampFreshAssembly(projectDir: string, assemblyPath: string): void {
+  writeRenderFreshnessMetadata(projectDir, assemblyPath, {
+    sourceInputsBefore: createSourceInputAttestation(projectDir),
+  });
+}
+
 describe("package command assembler wiring", () => {
+  it("keeps skipRender contract truthful for timeline-embedded A2 music", async () => {
+    const projectDir = createTempProject();
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+    timeline.tracks.audio.push({
+      track_id: "A2",
+      kind: "audio",
+      clips: [{
+        ...timeline.tracks.audio[0].clips[0],
+        clip_id: "ACL_EMBEDDED_BGM",
+        asset_id: "AST_BGM_EMBEDDED",
+        role: "music",
+      }],
+    });
+    fs.writeFileSync(timelinePath, `${JSON.stringify(timeline, null, 2)}\n`, "utf-8");
+    const sourceMapPath = path.join(projectDir, "02_media/source_map.json");
+    const sourceMap = JSON.parse(fs.readFileSync(sourceMapPath, "utf-8")) as {
+      items: Array<Record<string, unknown>>;
+    };
+    const bgmSourcePath = path.join(projectDir, "02_media/AST_BGM_EMBEDDED.bin");
+    fs.writeFileSync(bgmSourcePath, "source:AST_BGM_EMBEDDED");
+    sourceMap.items.push({
+      asset_id: "AST_BGM_EMBEDDED",
+      source_locator: bgmSourcePath,
+      local_source_path: bgmSourcePath,
+      link_path: "02_media/AST_BGM_EMBEDDED.bin",
+    });
+    fs.writeFileSync(sourceMapPath, JSON.stringify(sourceMap));
+    const statePath = path.join(projectDir, "project_state.yaml");
+    const state = parseYaml(fs.readFileSync(statePath, "utf-8")) as any;
+    state.approval_record.artifact_versions.timeline_version = computeFileHash(timelinePath);
+    state.approval_record.artifact_versions.editorial_timeline_hash = computeFileHash(timelinePath);
+    fs.writeFileSync(statePath, stringifyYaml(state), "utf-8");
+
+    const result = await packageCommand(projectDir, {
+      skipRender: true,
+      precomputedMetrics: {
+        integratedLufs: -16,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 28_000,
+        audioDurationMs: 28_000,
+        dialogueWindowMs: 10_000,
+        observedNonSilentMs: 8_500,
+        videoFrame: matchingVideoFrame,
+      },
+    });
+
+    expect(result.success, result.error?.message).toBe(true);
+    expect(JSON.parse(fs.readFileSync(
+      path.join(projectDir, "07_package/logs/audio-mix-report.json"),
+      "utf-8",
+    ))).toMatchObject({
+      has_bgm: true,
+      strategy: "timeline_embedded_bgm_mastering_v1",
+      bgm_ownership: { owner: "timeline_assembler", asset_ids: ["AST_BGM_EMBEDDED"] },
+    });
+  });
+
   it("refreshes outputs when the project is already packaged", async () => {
     const projectDir = createTempProject();
     const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
     fs.writeFileSync(assemblyPath, "existing-assembly", "utf-8");
+    stampFreshAssembly(projectDir, assemblyPath);
 
     renderMock.mockImplementation(async ({ assemblyPath: renderAssemblyPath }: { assemblyPath: string }) =>
       stubRenderOutputs(projectDir, renderAssemblyPath)
@@ -264,6 +381,7 @@ describe("package command assembler wiring", () => {
     const projectDir = createTempProject();
     const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
     fs.writeFileSync(assemblyPath, "existing-assembly", "utf-8");
+    stampFreshAssembly(projectDir, assemblyPath);
 
     renderMock.mockImplementation(async ({ assemblyPath: renderAssemblyPath }: { assemblyPath: string }) =>
       stubRenderOutputs(projectDir, renderAssemblyPath)
@@ -288,5 +406,122 @@ describe("package command assembler wiring", () => {
     }));
     expect(result.deliverablePath).toBe(path.join(projectDir, "09_output", "final.mp4"));
     expect(fs.existsSync(path.join(projectDir, "09_output", "final.mp4"))).toBe(true);
+  });
+
+  it("rejects an explicit runtime package assembly shortcut without source freshness metadata", async () => {
+    const projectDir = createTempProject();
+    const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
+    fs.writeFileSync(assemblyPath, "legacy-assembly", "utf-8");
+
+    const result = await packageCommand(projectDir, {
+      assemblyPath,
+      precomputedMetrics: {
+        integratedLufs: -16.0,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 28000,
+        audioDurationMs: 28000,
+        dialogueWindowMs: 10000,
+        observedNonSilentMs: 8500,
+        videoFrame: matchingVideoFrame,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toContain("source_inputs_unverifiable");
+    expect(renderMock).not.toHaveBeenCalled();
+  });
+
+  it("auto-renders a default assembly after a used source is replaced", async () => {
+    const projectDir = createTempProject();
+    const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
+    fs.writeFileSync(assemblyPath, "existing-assembly", "utf-8");
+    stampFreshAssembly(projectDir, assemblyPath);
+    const sourceMap = JSON.parse(fs.readFileSync(path.join(projectDir, "02_media/source_map.json"), "utf-8"));
+    const sourcePath = sourceMap.items[0].source_locator as string;
+    const original = fs.readFileSync(sourcePath, "utf-8");
+    fs.writeFileSync(sourcePath, original.toUpperCase());
+
+    assembleMock.mockImplementation(async ({ outputPath }: { outputPath: string }) => {
+      fs.writeFileSync(outputPath, "rerendered-assembly");
+      return { outputPath, videoSegmentCount: 1, audioClipCount: 0 };
+    });
+    renderMock.mockImplementation(async ({ assemblyPath: renderAssemblyPath }: { assemblyPath: string }) =>
+      stubRenderOutputs(projectDir, renderAssemblyPath)
+    );
+    const result = await packageCommand(projectDir, {
+      precomputedMetrics: {
+        integratedLufs: -16,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 28000,
+        audioDurationMs: 28000,
+        dialogueWindowMs: 10000,
+        observedNonSilentMs: 8500,
+        videoFrame: matchingVideoFrame,
+      },
+    });
+
+    expect(result.success, result.error?.message).toBe(true);
+    expect(assembleMock).toHaveBeenCalledTimes(1);
+    expect(result.qaReport?.source_inputs_freshness).toMatchObject({ status: "fresh" });
+    expect(result.packageManifest?.provenance.source_inputs_hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("fails runtime packaging when a source changes inside assembly rendering", async () => {
+    const projectDir = createTempProject();
+    const sourceMap = JSON.parse(fs.readFileSync(path.join(projectDir, "02_media/source_map.json"), "utf-8"));
+    const sourcePath = sourceMap.items[0].source_locator as string;
+    assembleMock.mockImplementation(async ({ outputPath }: { outputPath: string }) => {
+      fs.writeFileSync(outputPath, "partial-assembly");
+      const original = fs.readFileSync(sourcePath, "utf-8");
+      fs.writeFileSync(sourcePath, original.toUpperCase());
+      return { outputPath, videoSegmentCount: 1, audioClipCount: 0 };
+    });
+
+    const result = await packageCommand(projectDir, {
+      precomputedMetrics: {
+        integratedLufs: -16,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 28000,
+        audioDurationMs: 28000,
+        dialogueWindowMs: 10000,
+        observedNonSilentMs: 8500,
+        videoFrame: matchingVideoFrame,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toContain("source_changed_during_render");
+    expect(renderMock).not.toHaveBeenCalled();
+  });
+
+  it("routes an explicit Remotion engine through the render pipeline without FFmpeg preassembly", async () => {
+    const projectDir = createTempProject();
+    const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
+
+    renderMock.mockImplementation(async ({ assemblyOutputPath }: { assemblyOutputPath: string }) =>
+      stubRenderOutputs(projectDir, assemblyOutputPath)
+    );
+
+    const result = await packageCommand(projectDir, {
+      assemblyEngine: "remotion",
+      precomputedMetrics: {
+        integratedLufs: -16.0,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 28000,
+        audioDurationMs: 28000,
+        dialogueWindowMs: 10000,
+        observedNonSilentMs: 8500,
+        videoFrame: matchingVideoFrame,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(assembleMock).not.toHaveBeenCalled();
+    expect(renderMock).toHaveBeenCalledWith(expect.objectContaining({
+      assemblyPath: undefined,
+      assemblyEngine: "remotion",
+      assemblyOutputPath: assemblyPath,
+      sourceMap: expect.any(Object),
+    }));
   });
 });

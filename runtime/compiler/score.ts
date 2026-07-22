@@ -11,11 +11,13 @@ import type {
   RankedCandidateTable,
   ScoredCandidate,
   ScoringParams,
+  StillDurationPolicy,
 } from "./types.js";
 import { getSkillScoreAdjustment } from "../editorial/skill-registry.js";
 import type { BgmSection } from "./transition-types.js";
 import type { BeatEvent } from "../media/bgm-analyzer.js";
 import { getCandidateRef } from "./candidate-ref.js";
+import { resolveStillImageHold } from "../artifacts/still-image-policy.js";
 
 // ── BGM-aware scoring context ───────────────────────────────────────
 
@@ -103,6 +105,7 @@ export function scoreCandidates(
   activeSkills?: string[],
   durationPolicy?: DurationPolicy,
   bgmContext?: BgmScoringContext,
+  stillDurationPolicy?: StillDurationPolicy,
 ): RankedCandidateTable {
   const usPerFrame = (1_000_000 * fpsDen) / fpsNum;
   const nonReject = candidates.filter((c) => c.role !== "reject");
@@ -209,6 +212,7 @@ export function scoreCandidates(
         bgmContext,
         planPriority,
         computeBeatMatchAdjustment(candidate, beat),
+        stillDurationPolicy,
       );
       scored.push(entry);
     }
@@ -238,6 +242,7 @@ function scoreCandidate(
   bgmContext?: BgmScoringContext,
   planPriority?: "primary" | "fallback",
   beatMatchAdjustment?: BeatMatchAdjustment,
+  stillDurationPolicy?: StillDurationPolicy,
 ): ScoredCandidate {
   // 1. Semantic rank score: higher rank (lower number) → higher score
   //    Normalize: 1.0 for rank 1, decaying. Use 1 / rank.
@@ -249,9 +254,20 @@ function scoreCandidate(
   const qualityPenalty = flagCount * params.quality_flag_penalty;
 
   // 3. Duration fit: how well the candidate's duration matches the beat's target
-  const candidateDurationUs = candidate.src_out_us - candidate.src_in_us;
-  const candidateDurationFrames = candidateDurationUs / usPerFrame;
   const targetFrames = beat.target_duration_frames;
+  const scoreCandidateStill = {
+    still_image: planPriority === "primary"
+      ? beat.candidate_plan?.still_image ?? candidate.still_image
+      : candidate.still_image,
+  };
+  const unconstrainedStill = candidate.media_kind === "image" && stillDurationPolicy
+    ? resolveStillImageHold(scoreCandidateStill, stillDurationPolicy, stillDurationPolicy.max_hold_frames)
+    : undefined;
+  const candidateDurationFrames = unconstrainedStill
+    ? targetFrames < unconstrainedStill.min_hold_frames
+      ? unconstrainedStill.min_hold_frames
+      : resolveStillImageHold(scoreCandidateStill, stillDurationPolicy!, targetFrames).hold_frames
+    : (candidate.src_out_us - candidate.src_in_us) / usPerFrame;
   const durationDiff = Math.abs(candidateDurationFrames - targetFrames);
 
   let durationFitScore: number;
@@ -296,7 +312,7 @@ function scoreCandidate(
 
   // 8. BGM downbeat proximity bonus + chorus-peak priority
   const bgmBonus = bgmContext
-    ? computeBgmBonus(candidate, beat, bgmContext, usPerFrame)
+    ? computeBgmBonus(candidate, beat, bgmContext, usPerFrame, candidateDurationFrames)
     : 0;
 
   // 8.5. Beat plan and explicit eligible-beat matching.
@@ -419,6 +435,7 @@ export function computeBgmBonus(
   beat: NormalizedBeat,
   bgm: BgmScoringContext,
   usPerFrame: number,
+  resolvedDurationFrames?: number,
 ): number {
   let bonus = 0;
 
@@ -429,9 +446,10 @@ export function computeBgmBonus(
   // don't have the exact timeline_in_frame here, we approximate using
   // the candidate's source timing against downbeat grid.
   if (bgm.downbeats_sec.length > 0) {
-    // Use the candidate's duration midpoint as a proxy for when it plays
-    const candidateMidUs = (candidate.src_in_us + candidate.src_out_us) / 2;
-    const candidateDurationSec = (candidate.src_out_us - candidate.src_in_us) / 1_000_000;
+    const durationFrames = resolvedDurationFrames ?? (candidate.media_kind === "image"
+      ? beat.target_duration_frames
+      : (candidate.src_out_us - candidate.src_in_us) / usPerFrame);
+    const candidateDurationSec = durationFrames * usPerFrame / 1_000_000;
 
     // Find the nearest downbeat to the beat's target duration
     // (in practice, the assembler will snap to downbeats, but scoring

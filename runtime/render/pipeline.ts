@@ -10,6 +10,9 @@
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { assertTimelineRenderSupported } from "./media-kind-guard.js";
+import { resolveCanonicalRenderInputs } from "./canonical-render-input.js";
+import { assessRenderArtifactFreshness } from "./source-input-attestation.js";
 
 // FATAL-1 (Phase 5 review R1): both preview and final must serialize the
 // video filter graph through the same shared builder so the byte-identical
@@ -26,12 +29,23 @@ import {
   buildAssDocument,
   parseSrtCues,
   resolveCaptionStylePreset,
+  type AssCaptionCue,
 } from "../../editor/shared/caption-style-tokens.js";
 import {
   produceAssembly,
   resolveAssemblyEngine,
 } from "./assembly-orchestrator.js";
 import type { AssemblyEngine } from "./assembly-orchestrator.js";
+import { resolveBundledFontPaths } from "../fonts/bundled-font.js";
+import { assessMusicAssetEligibility } from "../music/asset-eligibility.js";
+import { applyMusicMixProfile, type MusicCuesDoc } from "../audio/music-cues.js";
+import { timelineEmbeddedMusicAssetIds } from "../audio/timeline-music.js";
+import { renderHyperFramesContentOverlay } from "../content/hyperframes-renderer.js";
+import {
+  resolveProjectRenderRoute,
+  writeRenderRouteReceipt,
+  type RenderRouteDecision,
+} from "./route-resolver.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -49,6 +63,8 @@ export interface RenderPipelineOptions {
   assemblyOutputPath?: string;
   /** Optional bundle cache dir (Remotion) */
   bundleCacheDir?: string;
+  /** Pre-resolved capability route from the package entrypoint. */
+  renderRouteDecision?: RenderRouteDecision;
   captionPolicy: {
     language: string;
     delivery_mode: "burn_in" | "sidecar" | "both";
@@ -67,6 +83,8 @@ export interface RenderPipelineResult {
   finalVideoPath: string;
   sidecarPaths: string[];
   logs: Record<string, string>;
+  audioMixReportPath: string;
+  renderRouteReceiptPath: string;
 }
 
 export const FINAL_AUDIO_SAMPLE_RATE_HZ = 48_000;
@@ -294,7 +312,8 @@ async function fitVideoToTimeline(
 export async function demux(
   assemblyPath: string,
   outputDir: string,
-): Promise<{ rawVideoPath: string; rawDialoguePath: string }> {
+  includeAudio = true,
+): Promise<{ rawVideoPath: string; rawDialoguePath?: string }> {
   const videoDir = path.join(outputDir, "video");
   const audioDir = path.join(outputDir, "audio");
   ensureDir(videoDir);
@@ -312,6 +331,7 @@ export async function demux(
     rawVideoPath,
   ]);
 
+  if (!includeAudio) return { rawVideoPath };
   // Extract audio stream only as PCM WAV
   await execFilePromise("ffmpeg", [
     "-y",
@@ -336,6 +356,7 @@ export async function burnCaptions(
   outputPath: string,
   sequence?: { width: number; height: number; fps: number },
   stylingClass?: string,
+  canonicalCues?: AssCaptionCue[],
 ): Promise<string> {
   ensureDir(path.dirname(outputPath));
 
@@ -349,8 +370,8 @@ export async function burnCaptions(
   let subtitlePath = srtPath;
   if (sequence) {
     const preset = resolveCaptionStylePreset(stylingClass);
-    const srtContent = fs.readFileSync(srtPath, "utf-8");
-    const assContent = buildAssDocument(parseSrtCues(srtContent), preset, sequence);
+    const cues = canonicalCues ?? parseSrtCues(fs.readFileSync(srtPath, "utf-8"));
+    const assContent = buildAssDocument(cues, preset, sequence);
     subtitlePath = srtPath.replace(/\.srt$/i, "") + ".burn.ass";
     fs.writeFileSync(subtitlePath, assContent, "utf-8");
   }
@@ -359,8 +380,12 @@ export async function burnCaptions(
     .replace(/\\/g, "\\\\")
     .replace(/:/g, "\\:")
     .replace(/'/g, "'\\''");
+  const escapedFontsDir = resolveBundledFontPaths().fontsDir
+    .replace(/\\/g, "\\\\")
+    .replace(/:/g, "\\:")
+    .replace(/'/g, "'\\''");
 
-  const vf = `subtitles='${escapedSubtitlePath}'`;
+  const vf = `subtitles=filename='${escapedSubtitlePath}':fontsdir='${escapedFontsDir}'`;
 
   await execFilePromise("ffmpeg", [
     "-y",
@@ -372,6 +397,46 @@ export async function burnCaptions(
   ]);
 
   return outputPath;
+}
+
+interface ApprovedCaptionForBurn {
+  timeline_in_frame: number;
+  timeline_duration_frames: number;
+  text: string;
+  reveal_timing?: {
+    status?: string;
+    role?: string;
+  };
+}
+
+/**
+ * Keep visual emphasis on the same canonical frame as speech. A protected
+ * semantic reveal gets the stronger pop; ordinary questions get a lighter
+ * prompt. Text is never shifted earlier to make room for the animation.
+ */
+export function buildApprovedCaptionAssCues(
+  captions: ApprovedCaptionForBurn[],
+  fps: number,
+): AssCaptionCue[] {
+  return captions.map((caption) => {
+    const body = caption.text.includes("｜")
+      ? caption.text.slice(caption.text.indexOf("｜") + 1).trim()
+      : caption.text.trim();
+    const isProtectedReveal = caption.reveal_timing?.status === "protected"
+      && ["punchline", "surprise", "reaction", "payoff"].includes(
+        caption.reveal_timing?.role ?? "",
+      );
+    return {
+      startSec: caption.timeline_in_frame / fps,
+      endSec: (caption.timeline_in_frame + caption.timeline_duration_frames) / fps,
+      text: caption.text,
+      ...(isProtectedReveal
+        ? { semanticRole: "reveal" as const }
+        : /[?？][」』）】]?$/u.test(body)
+          ? { semanticRole: "question" as const }
+          : {}),
+    };
+  });
 }
 
 // ── Phase 3: SRT / VTT Generation ─────────────────────────────────
@@ -535,6 +600,37 @@ export async function finalMux(
   return outputPath;
 }
 
+export function buildAudioDurationNormalizationArgs(
+  inputPath: string,
+  outputPath: string,
+  durationSec: number,
+): string[] {
+  const duration = durationSec.toFixed(6);
+  return [
+    "-y",
+    "-i", inputPath,
+    "-af", `apad=pad_dur=${duration},atrim=duration=${duration}`,
+    "-ar", String(FINAL_AUDIO_SAMPLE_RATE_HZ),
+    "-c:a", "pcm_s24le",
+    outputPath,
+  ];
+}
+
+async function normalizeAudioDuration(
+  inputPath: string,
+  durationSec: number,
+): Promise<void> {
+  const outputPath = path.join(
+    path.dirname(inputPath),
+    `${path.basename(inputPath, path.extname(inputPath))}.duration-normalized.wav`,
+  );
+  await execFilePromise(
+    "ffmpeg",
+    buildAudioDurationNormalizationArgs(inputPath, outputPath, durationSec),
+  );
+  fs.renameSync(outputPath, inputPath);
+}
+
 // ── Full Pipeline Orchestration ────────────────────────────────────
 
 /**
@@ -551,7 +647,54 @@ export async function runRenderPipeline(
   opts: RenderPipelineOptions,
 ): Promise<RenderPipelineResult> {
   const { outputDir, captionPolicy, fps } = opts;
+  let hasCanonicalDerivedMedia = false;
+  let hasCanonicalStill = false;
+  if (opts.timelinePath && fs.existsSync(opts.timelinePath)) {
+    const timeline = JSON.parse(fs.readFileSync(opts.timelinePath, "utf8"));
+    assertTimelineRenderSupported(timeline, {
+      projectDir: opts.projectDir,
+      timelinePath: opts.timelinePath,
+      sourceLocators: opts.sourceMap,
+    });
+    const canonicalInputs = resolveCanonicalRenderInputs(timeline, {
+      projectDir: opts.projectDir,
+      timelinePath: opts.timelinePath,
+      sourceOverrides: opts.sourceMap,
+    });
+    hasCanonicalStill = canonicalInputs.imageAssetIds.size > 0;
+    hasCanonicalDerivedMedia = hasCanonicalStill || canonicalInputs.sequenceAssetIds.size > 0;
+  }
 
+  // Preserve legacy option/file validation precedence without invoking an
+  // assembler. The still-image guard then runs before output side effects or
+  // alternate-engine dispatch.
+  let resolvedEngine: AssemblyEngine | null = null;
+  if (opts.assemblyPath) {
+    if (!fs.existsSync(opts.assemblyPath)) {
+      throw new Error(`Assembly file not found: ${opts.assemblyPath}`);
+    }
+    if (hasCanonicalDerivedMedia) {
+      const projectDir = opts.projectDir ?? path.dirname(path.dirname(path.resolve(opts.timelinePath)));
+      const freshness = assessRenderArtifactFreshness(projectDir, opts.assemblyPath);
+      if (freshness.status !== "fresh") {
+        throw new Error(`${hasCanonicalStill ? "image" : "sequence"}_prebuilt_assembly_not_fresh:${freshness.reason ?? freshness.status}`);
+      }
+    }
+  } else {
+    resolvedEngine = resolveAssemblyEngine(opts.assemblyEngine);
+    if (!resolvedEngine) {
+      throw new Error(
+        "No assemblyPath provided and no assembly engine selected. " +
+          "Either pass opts.assemblyPath, set opts.assemblyEngine, or set " +
+          "VOS_RENDER_ENGINE to 'remotion' or 'ffmpeg'.",
+      );
+    }
+    if (!opts.timelinePath || !opts.sourceMap || !opts.assemblyOutputPath) {
+      throw new Error(
+        "Alternate assembly engine requires timelinePath, sourceMap, and assemblyOutputPath options.",
+      );
+    }
+  }
   // 1. Create output subdirs
   const videoDir = path.join(outputDir, "video");
   const audioDir = path.join(outputDir, "audio");
@@ -568,39 +711,72 @@ export async function runRenderPipeline(
   // 2. Verify or produce assembly path
   let assemblyPath: string;
   if (opts.assemblyPath) {
-    if (!fs.existsSync(opts.assemblyPath)) {
-      throw new Error(`Assembly file not found: ${opts.assemblyPath}`);
-    }
     assemblyPath = opts.assemblyPath;
   } else {
-    const engine = resolveAssemblyEngine(opts.assemblyEngine);
-    if (!engine) {
-      throw new Error(
-        "No assemblyPath provided and no assembly engine selected. " +
-          "Either pass opts.assemblyPath, set opts.assemblyEngine, or set " +
-          "VOS_RENDER_ENGINE to 'remotion' or 'ffmpeg'.",
-      );
-    }
-    if (!opts.timelinePath || !opts.sourceMap || !opts.assemblyOutputPath) {
-      throw new Error(
-        "Alternate assembly engine requires timelinePath, sourceMap, and assemblyOutputPath options.",
-      );
-    }
     const produced = await produceAssembly({
       timelinePath: opts.timelinePath,
-      sourceMap: opts.sourceMap,
-      outputPath: opts.assemblyOutputPath,
-      engine: opts.assemblyEngine,
+      sourceMap: opts.sourceMap!,
+      outputPath: opts.assemblyOutputPath!,
+      engine: resolvedEngine!,
       bundleCacheDir: opts.bundleCacheDir,
     });
     assemblyPath = produced.assemblyPath;
   }
 
+  // Preserve the established assembly-input error order above. Route
+  // inspection reads canonical artifacts and must not mask those diagnostics.
+  const routeDecision = opts.renderRouteDecision ?? resolveProjectRenderRoute(
+    opts.projectDir,
+    opts.assemblyEngine ?? "auto",
+  );
+  if (opts.assemblyPath && routeDecision.remotion_overlay_count > 0) {
+    throw new Error(
+      `Prebuilt assemblyPath cannot prove that ${routeDecision.remotion_overlay_count} ` +
+        "Remotion-owned overlay clip(s) were rendered. Use the auto/remotion assembly route.",
+    );
+  }
+
+  const baseAssemblyPath = assemblyPath;
+  let hyperframesReceiptPath: string | undefined;
+
+  // 2.5. Composite only HyperFrames-owned content elements. Remotion filters
+  // those clips out at its renderer boundary, so each overlay has one owner.
+  try {
+    const contentResult = await renderHyperFramesContentOverlay({
+      timelinePath: opts.timelinePath,
+      baseAssemblyPath: assemblyPath,
+      outputDir,
+    });
+    if (contentResult) {
+      assemblyPath = contentResult.compositePath;
+      logs["hyperframes"] = contentResult.receiptPath;
+      hyperframesReceiptPath = contentResult.receiptPath;
+    }
+  } catch (err) {
+    const logPath = writeLog(
+      logsDir,
+      "hyperframes",
+      `HyperFrames content render failed: ${String(err)}`,
+    );
+    logs["hyperframes"] = logPath;
+    throw new Error(`HyperFrames content render failed: ${String(err)}`);
+  }
+
+  const renderRouteReceiptPath = writeRenderRouteReceipt(outputDir, routeDecision, {
+    baseAssemblyPath,
+    effectiveAssemblyPath: assemblyPath,
+    hyperframesReceiptPath,
+  });
+  logs["render_route"] = renderRouteReceiptPath;
+
   // 3. Demux
   let rawVideoPath: string;
-  let rawDialoguePath: string;
+  const timelineForMix = JSON.parse(fs.readFileSync(opts.timelinePath, "utf-8"));
+  const hasTimelineAudio = (timelineForMix.tracks?.audio ?? []).some((track: { clips?: unknown[] }) => (track.clips?.length ?? 0) > 0) ||
+    typeof timelineForMix.audio_mix?.bgm_asset_id === "string";
+  let rawDialoguePath: string | undefined;
   try {
-    const demuxResult = await demux(assemblyPath, outputDir);
+    const demuxResult = await demux(assemblyPath, outputDir, hasTimelineAudio);
     rawVideoPath = demuxResult.rawVideoPath;
     rawDialoguePath = demuxResult.rawDialoguePath;
     logs["demux"] = writeLog(logsDir, "demux", "Demux completed successfully");
@@ -635,6 +811,10 @@ export async function runRenderPipeline(
     timeline_in_frame: number;
     timeline_duration_frames: number;
     text: string;
+    reveal_timing?: {
+      status?: string;
+      role?: string;
+    };
   }> = [];
 
   if (
@@ -679,12 +859,11 @@ export async function runRenderPipeline(
     (captionPolicy.delivery_mode === "burn_in" ||
       captionPolicy.delivery_mode === "both")
   ) {
-    // Ensure we have an SRT file for burn-in
-    let srtForBurn = path.join(captionsDir, "speech.approved.srt");
-    if (!fs.existsSync(srtForBurn)) {
-      const srtContent = generateSrt(approvedCaptions, fps);
-      fs.writeFileSync(srtForBurn, srtContent, "utf-8");
-    }
+    // Burn-in must always be regenerated from the canonical approval. Reusing
+    // an existing SRT can silently burn stale text after a caption-only re-edit.
+    const srtForBurn = path.join(captionsDir, "speech.approved.srt");
+    const srtContent = generateSrt(approvedCaptions, fps);
+    fs.writeFileSync(srtForBurn, srtContent, "utf-8");
 
     const captionedVideoPath = path.join(videoDir, "captioned_video.mp4");
     try {
@@ -695,6 +874,7 @@ export async function runRenderPipeline(
         captionedVideoPath,
         { width: seq.width, height: seq.height, fps },
         captionPolicy.styling_class,
+        buildApprovedCaptionAssCues(approvedCaptions, fps),
       );
       currentVideoPath = captionedVideoPath;
       logs["caption_burn"] = writeLog(
@@ -713,60 +893,152 @@ export async function runRenderPipeline(
     }
   }
 
-  // 6. Audio mix (dialogue + BGM -> final_mix.wav)
-  // In a full implementation this imports from ../audio/mixer.js
-  // For M4, we use the raw dialogue as the final mix if no music cues
-  let finalMixPath = path.join(audioDir, "final_mix.wav");
+  // 6. Audio mix (dialogue + optional BGM -> final_mix.wav). Both paths use
+  // the same mastering contract and emit machine-readable evidence for QA.
+  const finalMixPath = path.join(audioDir, "final_mix.wav");
+  const audioMixReportPath = path.join(logsDir, "audio-mix-report.json");
+  const embeddedBgmAssetIds = timelineEmbeddedMusicAssetIds(timelineForMix);
+
+  if (!hasTimelineAudio) {
+    const finalVideoPath = path.join(videoDir, "final.mp4");
+    fs.copyFileSync(currentVideoPath, finalVideoPath);
+    logs["audio_mix"] = writeLog(logsDir, "audio_mix", "not_applicable: timeline has no audio or BGM; no audio stream fabricated");
+    logs["final_mux"] = writeLog(logsDir, "final_mux", "Video-only final copied without fabricated audio");
+    return {
+      assemblyPath,
+      rawVideoPath,
+      rawDialoguePath: "",
+      finalMixPath: "",
+      finalVideoPath,
+      sidecarPaths,
+      logs,
+      audioMixReportPath: "",
+      renderRouteReceiptPath,
+    };
+  }
+  if (!rawDialoguePath) throw new Error("timeline_audio_expected_but_demux_missing");
 
   if (opts.musicCuesPath && fs.existsSync(opts.musicCuesPath)) {
     // With music cues: attempt to import and use the audio mixer
     try {
-      const { mixAudio } = await import("../audio/mixer.js");
-      const musicCuesDoc = JSON.parse(
+      const { mixAudio, extractSpeechIntervals } = await import("../audio/mixer.js");
+      const requestedMusicCuesDoc = JSON.parse(
         fs.readFileSync(opts.musicCuesPath, "utf-8"),
+      ) as MusicCuesDoc;
+      const effectiveMix = applyMusicMixProfile(requestedMusicCuesDoc, routeDecision.genre);
+      const musicCuesDoc = effectiveMix.doc;
+      const musicEligibility = assessMusicAssetEligibility(opts.projectDir, requestedMusicCuesDoc);
+      if (!musicEligibility.eligible) {
+        throw new Error(musicEligibility.message ?? "BGM asset is not eligible for rendering");
+      }
+      const musicAssetPath = musicCuesDoc?.music_asset?.path;
+      if (typeof musicAssetPath !== "string" || musicAssetPath.trim().length === 0) {
+        throw new Error("music_cues.music_asset.path is required for BGM mixing");
+      }
+      const bgmPath = path.isAbsolute(musicAssetPath)
+        ? musicAssetPath
+        : path.resolve(opts.projectDir, musicAssetPath);
+      if (!fs.existsSync(bgmPath)) {
+        throw new Error(`BGM audio file not found: ${bgmPath}`);
+      }
+      const a1Clips = Array.isArray(timelineForMix?.tracks?.audio)
+        ? (timelineForMix.tracks.audio.find(
+            (track: { track_id?: unknown }) => track?.track_id === "A1",
+          )?.clips ?? [])
+        : [];
+      const embeddedBgm = embeddedBgmAssetIds.includes(musicCuesDoc.music_asset.asset_id);
+      const mixResult = embeddedBgm
+        ? await mixAudio({
+            rawDialoguePath,
+            speechIntervals: extractSpeechIntervals(a1Clips, fps),
+            outputPath: finalMixPath,
+            fps,
+          })
+        : await mixAudio({
+            rawDialoguePath,
+            bgmPath,
+            musicCues: musicCuesDoc,
+            speechIntervals: extractSpeechIntervals(a1Clips, fps),
+            outputPath: finalMixPath,
+            fps,
+          });
+      if (embeddedBgm) {
+        mixResult.report.has_bgm = true;
+        mixResult.report.strategy = "timeline_embedded_bgm_mastering_v1";
+        mixResult.report.bgm_ownership = {
+          owner: "timeline_assembler",
+          asset_ids: embeddedBgmAssetIds,
+        };
+      }
+      fs.writeFileSync(
+        audioMixReportPath,
+        `${JSON.stringify(mixResult.report, null, 2)}\n`,
+        "utf-8",
       );
-      await mixAudio({
+      logs["audio_mix_report"] = audioMixReportPath;
+      logs["audio_mix"] = writeLog(
+        logsDir,
+        "audio_mix",
+        embeddedBgm
+          ? `Timeline-embedded BGM retained without re-adding asset ${musicCuesDoc.music_asset.asset_id}`
+          : `Audio mix with BGM completed successfully (profile=${effectiveMix.profile}, adjusted=${effectiveMix.adjusted})`,
+      );
+    } catch (err) {
+      logs["audio_mix"] = writeLog(
+        logsDir,
+        "audio_mix",
+        `Required BGM mix failed: ${String(err)}`,
+      );
+      throw new Error(`Required BGM mix failed: ${String(err)}`);
+    }
+  } else {
+    try {
+      const { mixAudio } = await import("../audio/mixer.js");
+      const mixResult = await mixAudio({
         rawDialoguePath,
-        musicCues: musicCuesDoc,
-        speechIntervals: [], // Populated by caller from A1 clips
+        speechIntervals: [],
         outputPath: finalMixPath,
         fps,
       });
+      if (embeddedBgmAssetIds.length > 0) {
+        mixResult.report.has_bgm = true;
+        mixResult.report.strategy = "timeline_embedded_bgm_mastering_v1";
+        mixResult.report.bgm_ownership = {
+          owner: "timeline_assembler",
+          asset_ids: embeddedBgmAssetIds,
+        };
+      }
+      fs.writeFileSync(
+        audioMixReportPath,
+        `${JSON.stringify(mixResult.report, null, 2)}\n`,
+        "utf-8",
+      );
+      logs["audio_mix_report"] = audioMixReportPath;
       logs["audio_mix"] = writeLog(
         logsDir,
         "audio_mix",
-        "Audio mix with BGM completed successfully",
+        embeddedBgmAssetIds.length > 0
+          ? `Timeline-embedded BGM retained without re-adding assets ${embeddedBgmAssetIds.join(",")}`
+          : "No music cues; raw dialogue mastered with shared loudnorm defaults",
       );
     } catch (err) {
-      // Fallback: copy raw dialogue as final mix
-      fs.copyFileSync(rawDialoguePath, finalMixPath);
       logs["audio_mix"] = writeLog(
         logsDir,
         "audio_mix",
-        `Audio mixer not available, using raw dialogue as final mix: ${String(err)}`,
+        `Required dialogue mastering failed: ${String(err)}`,
       );
+      throw new Error(`Required dialogue mastering failed: ${String(err)}`);
     }
-  } else {
-    // No music cues: master the raw dialogue directly. Skipping loudnorm
-    // here broke the playback contract — the exact preview is always
-    // mastered to the shared targets (-16 LUFS / LRA 7 / TP -1.5), so an
-    // unmastered final would not sound like what the operator approved.
-    try {
-      const { masterAudio } = await import("../audio/mastering.js");
-      await masterAudio(rawDialoguePath, finalMixPath);
-      logs["audio_mix"] = writeLog(
-        logsDir,
-        "audio_mix",
-        "No music cues; raw dialogue mastered with shared loudnorm defaults",
-      );
-    } catch (err) {
-      fs.copyFileSync(rawDialoguePath, finalMixPath);
-      logs["audio_mix"] = writeLog(
-        logsDir,
-        "audio_mix",
-        `Mastering unavailable, using raw dialogue as final mix: ${String(err)}`,
-      );
-    }
+  }
+
+  const timelineAudioDurationSec = readTimelineDurationSeconds(opts.timelinePath);
+  if (timelineAudioDurationSec !== undefined) {
+    await normalizeAudioDuration(finalMixPath, timelineAudioDurationSec);
+    logs["audio_duration"] = writeLog(
+      logsDir,
+      "audio_duration",
+      `Final mix normalized to timeline duration ${timelineAudioDurationSec.toFixed(6)}s`,
+    );
   }
 
   // 7. Final mux
@@ -808,5 +1080,7 @@ export async function runRenderPipeline(
     finalVideoPath,
     sidecarPaths,
     logs,
+    audioMixReportPath,
+    renderRouteReceiptPath,
   };
 }

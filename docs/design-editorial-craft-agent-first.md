@@ -4,7 +4,7 @@
 > Status: Draft
 > Scope: Design and implementation plan for a text-first editorial craft agent in the planning loop
 > Non-goal: No runtime, schema, MCP, or project artifact changes in this document task
-> Related: [docs/design-three-agent-vlm-architecture.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/design-three-agent-vlm-architecture.md), [docs/design-brief-alignment-eval.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/design-brief-alignment-eval.md), [docs/improvement-plan-brief-alignment.md](/Users/mocchalera/Dev/video-os-v2-spec/docs/improvement-plan-brief-alignment.md)
+> Related: [docs/design-three-agent-vlm-architecture.md](/Users/operator/Dev/video-os-v2-spec/docs/design-three-agent-vlm-architecture.md), [docs/design-brief-alignment-eval.md](/Users/operator/Dev/video-os-v2-spec/docs/design-brief-alignment-eval.md), [docs/improvement-plan-brief-alignment.md](/Users/operator/Dev/video-os-v2-spec/docs/improvement-plan-brief-alignment.md)
 
 ## 1. Problem
 

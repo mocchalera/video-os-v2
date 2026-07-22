@@ -155,6 +155,7 @@ export function projectCaptionsToTimeline(
           transcript_item_ids: sc.transcript_item_ids,
           source: sc.source,
           metrics: sc.metrics,
+          ...(sc.reveal_timing ? { reveal_timing: sc.reveal_timing } : {}),
         },
       },
     };

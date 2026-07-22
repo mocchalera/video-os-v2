@@ -8,6 +8,22 @@ import type { QualityGateSegment } from "../runtime/editorial/quality-gate.js";
 import type { VisualQualityMeasurements } from "../runtime/connectors/ffmpeg-motion.js";
 
 describe("quality gate", () => {
+  it("marks audio-only visual quality not applicable without degrading it", () => {
+    const result = applyQualityGateToSelects(selects([candidate("SEG_AUDIO", {
+      media_kind: "audio",
+      source_capabilities: { has_video: false, has_audio: true },
+      quality_flags: ["preexisting_audio_flag"],
+    })]), []);
+
+    expect(result.candidates[0].quality_gate).toMatchObject({
+      decision: "not_applicable",
+      confidence: "not_applicable",
+      reasons: ["visual_quality_not_applicable_audio_only"],
+    });
+    expect(result.candidates[0].quality_flags).toEqual(["preexisting_audio_flag"]);
+    expect(result.quality_gate?.counts).toEqual({ reject: 0, warn: 0, pass: 0, unmeasured: 0, not_applicable: 1 });
+  });
+
   it("rejects obvious measured shake, blur, black crush, and blown highlights", () => {
     const rejects = [
       ["SEG_SHAKE", measurement({ shake: 0.9 })],

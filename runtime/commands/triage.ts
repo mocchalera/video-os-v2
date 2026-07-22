@@ -18,11 +18,25 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  assertStillImageCandidateGrounding,
+  assertStillImageSegmentGrounding,
+} from "../artifacts/still-image-grounding.js";
+import {
+  assertImageSequenceCandidateGrounding,
+  assertImageSequenceGrounding,
+} from "../artifacts/image-sequence-grounding.js";
+import {
+  assertCandidatePlanningMediaKindsSupported,
+  assertProjectPlanningMediaKindsSupported,
+  MediaKindPlanningBlockedError,
+} from "../artifacts/source-media-capabilities.js";
 import { parse as parseYaml } from "yaml";
 import {
   initCommand,
   isCommandError,
   draftAndPromote,
+  resolveProjectRoot,
   transitionState,
   type CommandError,
   type DraftFile,
@@ -87,6 +101,7 @@ import {
   buildLongformSelectsFromProject,
   isLongformEventBrief,
 } from "../editorial/longform-event.js";
+import { materializeCandidateMediaCapabilities } from "../artifacts/candidate-media-materialization.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -142,6 +157,9 @@ export interface SelectCandidate {
   why_it_matches: string;
   risks: string[];
   confidence: number;
+  media_kind?: ArtifactSelectsCandidates["candidates"][number]["media_kind"];
+  source_capabilities?: ArtifactSelectsCandidates["candidates"][number]["source_capabilities"];
+  audio_role?: ArtifactSelectsCandidates["candidates"][number]["audio_role"];
   audio_story_refs?: AudioStoryRef[];
   continuity_refs?: ContinuityRef[];
   semantic_rank?: number;
@@ -159,6 +177,7 @@ export interface SelectCandidate {
   semantic_dedupe_key?: string;
   editorial_signals?: EditorialSignals;
   trim_hint?: TrimHint;
+  still_image?: ArtifactSelectsCandidates["candidates"][number]["still_image"];
   quality_confidence?: "measured" | "partial" | "appraiser" | "low";
   quality_gate?: ArtifactSelectsCandidates["candidates"][number]["quality_gate"];
 }
@@ -190,6 +209,7 @@ export interface SelectsCandidates {
   analysis_artifact_version?: string;
   selection_notes?: string[];
   candidates: SelectCandidate[];
+  source_media?: ArtifactSelectsCandidates["source_media"];
   editorial_summary?: EditorialSummary;
   coverage?: SelectsCoverageSummary;
   provenance?: {
@@ -494,6 +514,7 @@ async function materializePostQualityCoverage(
     selectionCoverageConfig: ReturnType<typeof loadSelectionCoverageConfig>;
   },
 ): Promise<SelectsCoverageSummary> {
+  materializeCandidateMediaCapabilities(options.projectDir, agentResult.selects, options.enrichmentSegments);
   canonicalizeSelects(agentResult.selects, options.projectId);
   if (options.enrichmentSegments.length > 0 && hasCandidateArray(agentResult.selects)) {
     const enrichedSelects = enrichSelectsFromAnalysis(
@@ -558,12 +579,33 @@ export async function runTriage(
   agent: TriageAgent,
   options?: { analysisOverride?: boolean },
 ): Promise<TriageCommandResult> {
-  const pt = new ProgressTracker(projectDir, "triage", 4);
+  const preflightProjectDir = resolveProjectRoot(projectDir);
+  // These grounding checks are read-only and must precede ProgressTracker and
+  // initCommand because both persist command state immediately.
+  assertStillImageSegmentGrounding(preflightProjectDir);
+  assertImageSequenceGrounding(preflightProjectDir);
+
+  const pt = new ProgressTracker(preflightProjectDir, "triage", 4);
   // 1. Init command (reconcile + state check)
-  const ctx = initCommand(projectDir, "/triage", ALLOWED_STATES);
+  const ctx = initCommand(preflightProjectDir, "/triage", ALLOWED_STATES);
   if (isCommandError(ctx)) {
-    // Special case: if state check failed because we're at intent_locked,
-    // we might need to check analysis gate more carefully
+    // A planning-only media kind can keep analysis coverage partial, which in
+    // turn prevents reconciliation from advancing to media_analyzed. Preserve
+    // the more specific downstream capability block in that case.
+    try {
+      assertProjectPlanningMediaKindsSupported(projectDir);
+    } catch (error) {
+      if (!(error instanceof MediaKindPlanningBlockedError)) throw error;
+      pt.block("gate", error.message);
+      return {
+        success: false,
+        error: {
+          code: "GATE_CHECK_FAILED",
+          message: error.message,
+          details: { consumer_impact: "planning_block", reason: "media_kind_not_plannable", asset_ids: error.assetIds },
+        },
+      };
+    }
     pt.fail("init", ctx.message);
     return { success: false, error: ctx };
   }
@@ -573,6 +615,23 @@ export async function runTriage(
   const previousState = doc.current_state;
   const projectId = doc.project_id || "";
   const gates = reconcileResult.gates;
+  try {
+    assertProjectPlanningMediaKindsSupported(absDir);
+  } catch (error) {
+    if (!(error instanceof MediaKindPlanningBlockedError)) throw error;
+    pt.block("gate", error.message);
+    return {
+      success: false,
+      error: {
+        code: "GATE_CHECK_FAILED",
+        message: error.message,
+        details: { consumer_impact: "planning_block", reason: "media_kind_not_plannable", asset_ids: error.assetIds },
+      },
+      previousState,
+    };
+  }
+  assertStillImageSegmentGrounding(absDir);
+
 
   // 2. Analysis gate check
   if (gates.analysis_gate === "blocked") {
@@ -665,27 +724,42 @@ export async function runTriage(
       };
     }
   } else {
-    const selectionResult = await runHardCoverageSelection(
-      agent,
-      {
-        projectDir: absDir,
-        projectId,
-        currentState: previousState,
-        analysisGate: gates.analysis_gate,
-      },
-      {
-        projectId,
-        brief: coverageBrief,
-        projectDir: absDir,
-        enrichmentSegments,
-        coverageSegments,
-        clusterAssets: enrichmentAssets,
-        qualityGateConfig,
-        selectionCoverageConfig,
-        maxRetries: HARD_COVERAGE_MAX_RETRIES,
-        log: (message) => console.log(message),
-      },
-    );
+    let selectionResult: HardCoverageSelectionResult;
+    try {
+      selectionResult = await runHardCoverageSelection(
+        agent,
+        {
+          projectDir: absDir,
+          projectId,
+          currentState: previousState,
+          analysisGate: gates.analysis_gate,
+        },
+        {
+          projectId,
+          brief: coverageBrief,
+          projectDir: absDir,
+          enrichmentSegments,
+          coverageSegments,
+          clusterAssets: enrichmentAssets,
+          qualityGateConfig,
+          selectionCoverageConfig,
+          maxRetries: HARD_COVERAGE_MAX_RETRIES,
+          log: (message) => console.log(message),
+        },
+      );
+    } catch (error) {
+      if (!(error instanceof MediaKindPlanningBlockedError)) throw error;
+      pt.block("gate", error.message);
+      return {
+        success: false,
+        error: {
+          code: "GATE_CHECK_FAILED",
+          message: error.message,
+          details: { consumer_impact: "planning_block", reason: "media_kind_not_plannable", asset_ids: error.assetIds },
+        },
+        previousState,
+      };
+    }
     agentResult = selectionResult.result;
     selectionPassed = selectionResult.passed;
     if (!selectionPassed) {
@@ -710,6 +784,27 @@ export async function runTriage(
         message: "Human declined candidate board approval",
       },
     };
+  }
+
+  materializeCandidateMediaCapabilities(absDir, agentResult.selects, enrichmentSegments);
+  if (Array.isArray(agentResult.selects.candidates)) {
+    try {
+      assertCandidatePlanningMediaKindsSupported(agentResult.selects.candidates);
+    } catch (error) {
+      if (!(error instanceof MediaKindPlanningBlockedError)) throw error;
+      pt.block("gate", error.message);
+      return {
+        success: false,
+        error: {
+          code: "GATE_CHECK_FAILED",
+          message: error.message,
+          details: { consumer_impact: "planning_block", reason: "media_kind_not_plannable", asset_ids: error.assetIds },
+        },
+        previousState,
+      };
+    }
+    assertStillImageCandidateGrounding(absDir, agentResult.selects.candidates);
+    assertImageSequenceCandidateGrounding(absDir, agentResult.selects.candidates);
   }
 
   // 5.5 Deterministic analysis signals, quality gate, and hard coverage were

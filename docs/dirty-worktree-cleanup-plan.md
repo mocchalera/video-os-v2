@@ -1,7 +1,7 @@
 # Dirty Worktree Cleanup Plan
 
 作成日: 2026-04-27
-対象: `/Users/mocchalera/Dev/video-os-v2-spec`
+対象: `/Users/operator/Dev/video-os-v2-spec`
 
 ## 調査方針
 
@@ -482,7 +482,7 @@ Risk:
 
 Files:
 
-- `scripts/render-ax1-promo.ts`: AX-1 participant voice promo の standalone render script。local source `/Users/mocchalera/Downloads/AX-1_参加者の声/D4887.MP4` を参照し、`09_output/ax1_promo_v5` を生成する例。
+- `scripts/render-ax1-promo.ts`: AX-1 participant voice promo の standalone render script。local source `/Users/operator/Downloads/AX-1_参加者の声/D4887.MP4` を参照し、`09_output/ax1_promo_v5` を生成する例。
 - `scripts/regen-ax1-captions.ts`: shared caption style token を使って force_style を生成するよう変更。
 
 推定意図:

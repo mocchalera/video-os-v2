@@ -38,6 +38,31 @@ describe("buildQAReport", () => {
     expect(report.brief_alignment_scores["blueprint.intent_message_alignment"]).toBe(0.7);
     expect(report.brief_alignment_scores.intent_message_alignment).toBe(0.2);
   });
+
+  it("adds backward-compatible fix dispositions and canonical timeline hash", () => {
+    const item = issue("QAISSUE_DISPOSITION", true);
+    const dispositions = ["proposed", "applied", "rolled_back", "skipped", "rejected"] as const;
+    const report = buildQAReport(
+      3,
+      [item],
+      dispositions.map((disposition) => ({
+        ...fixFor(item),
+        issue_id: `${item.issue_id}_${disposition}`,
+        disposition,
+        disposition_reason: `${disposition} fixture`,
+      })),
+      marlinReport(),
+      briefReport(),
+      {
+        evaluationStatus: "available",
+        timelineHash: "a".repeat(64),
+      },
+    );
+
+    expect(report.fixes.map((fix) => fix.disposition)).toEqual(dispositions);
+    expect(report.evaluation_status).toBe("available");
+    expect(report.timeline_hash).toBe("a".repeat(64));
+  });
 });
 
 function issue(issueID: string, fixable: boolean): QAIssue {

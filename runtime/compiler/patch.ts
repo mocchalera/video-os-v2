@@ -4,6 +4,7 @@
 // Deterministic: same patch + same timeline = same output.
 
 import { resolve, type ResolutionReport } from "./resolve.js";
+import type { AudioFinishPolicy } from "../audio/dialogue-finishing.js";
 import type {
   AssembledTimeline,
   AudioPolicy,
@@ -16,6 +17,8 @@ import type {
   TimelineIR,
   TrackOutput,
 } from "./types.js";
+import { candidateSupportsVisual, inferAudioRole, isAudioOnlyCandidate } from "../artifacts/source-media-capabilities.js";
+import { assertStillImageTimelineTruthForTimeline } from "./still-image.js";
 
 // ── Patch document types ────────────────────────────────────────────
 
@@ -28,6 +31,8 @@ export type PatchOpType =
   | "insert_segment"
   | "remove_segment"
   | "change_audio_policy"
+  | "change_visual_transform"
+  | "change_audio_finish"
   | "add_marker"
   | "add_note";
 
@@ -51,6 +56,12 @@ export interface PatchOperation {
   confidence?: number;
   evidence?: string[];
   audio_policy?: AudioPolicy;
+  visual_transform?: {
+    zoom?: number;
+    crop?: { x: number; y: number; width: number; height: number };
+    position?: { x: number; y: number };
+  };
+  audio_finish?: AudioFinishPolicy;
   beat_id?: string;
   role?: string;
   label?: string;
@@ -256,6 +267,14 @@ function getTargetTrackId(role: string): string {
   }
 }
 
+function candidateSupportsTrack(candidate: Candidate, trackKind: TrackOutput["kind"]): boolean {
+  if (trackKind === "video") return candidateSupportsVisual(candidate);
+  if (candidate.source_capabilities) return candidate.source_capabilities.has_audio === true;
+  // Legacy selects predate source capabilities. Preserve the established
+  // dialogue/music-to-audio route only when the semantic intent is explicit.
+  return candidate.role === "dialogue" || candidate.audio_role === "music";
+}
+
 // ── Patch applicator ────────────────────────────────────────────────
 
 export function applyPatch(
@@ -310,7 +329,7 @@ export function applyPatch(
 
   for (let i = 0; i < patch.operations.length; i++) {
     const op = patch.operations[i];
-    const err = applyOp(patched, op, candidateMap, i);
+    const err = applyOp(patched, op, candidateMap, i, targetDurationFrames);
     if (err) {
       errors.push(err);
     } else {
@@ -320,6 +339,7 @@ export function applyPatch(
 
   // 5. Re-run Phase 4 constraint resolution with blueprint target
   const resolution = reRunPhase4(patched, candidates, targetDurationFrames, durationPolicy, fpsNum, fpsDen);
+  assertStillImageTimelineTruthForTimeline(patched);
 
   // 6. Increment version
   const currentVersion = parseInt(patched.version, 10);
@@ -335,6 +355,7 @@ function applyOp(
   op: PatchOperation,
   candidateMap: Map<string, Candidate>,
   index: number,
+  targetDurationFrames?: number,
 ): PatchError | null {
   switch (op.op) {
     case "replace_segment":
@@ -342,7 +363,7 @@ function applyOp(
     case "trim_segment":
       return opTrimSegment(timeline, op, index);
     case "move_segment":
-      return opMoveSegment(timeline, op, index);
+      return opMoveSegment(timeline, op, index, targetDurationFrames);
     case "split_segment":
       return opSplitSegment(timeline, op, index);
     case "set_transition":
@@ -353,6 +374,10 @@ function applyOp(
       return opRemoveSegment(timeline, op, index);
     case "change_audio_policy":
       return opChangeAudioPolicy(timeline, op, index);
+    case "change_visual_transform":
+      return opChangeVisualTransform(timeline, op, index);
+    case "change_audio_finish":
+      return opChangeAudioFinish(timeline, op, index);
     case "add_marker":
       return opAddMarker(timeline, op, index, "review");
     case "add_note":
@@ -386,6 +411,17 @@ function opReplaceSegment(
   if (!candidate) {
     return { op_index: index, op: op.op, message: `Candidate not found for segment: ${op.with_segment_id}` };
   }
+  if (found.clip.media_kind === "image" || candidate.media_kind === "image") {
+    return { op_index: index, op: op.op, message: "Still-image replacement is not supported; preserve source identity and recompile from selects." };
+  }
+  const candidateIsAudioOnly = isAudioOnlyCandidate(candidate);
+  if (!candidateSupportsTrack(candidate, found.track.kind)) {
+    return {
+      op_index: index,
+      op: op.op,
+      message: `Cannot replace ${found.track.kind} clip ${op.target_clip_id} with candidate ${candidate.segment_id}: source lacks ${found.track.kind} capability`,
+    };
+  }
   const sourceInUS = op.new_src_in_us ?? candidate.src_in_us;
   const sourceOutUS = op.new_src_out_us ?? candidate.src_out_us;
   if (sourceInUS < candidate.src_in_us || sourceOutUS > candidate.src_out_us || sourceOutUS <= sourceInUS) {
@@ -397,6 +433,9 @@ function opReplaceSegment(
   }
 
   const clip = found.clip;
+  if (clip.media_kind === "image") {
+    return { op_index: index, op: op.op, message: "Still-image source ranges are immutable; adjust hold duration with move_segment.new_duration_frames." };
+  }
   clip.segment_id = candidate.segment_id;
   clip.asset_id = candidate.asset_id;
   clip.src_in_us = sourceInUS;
@@ -405,6 +444,9 @@ function opReplaceSegment(
   clip.quality_flags = candidate.quality_flags ?? [];
   clip.candidate_ref = op.with_candidate_ref ?? candidate.candidate_id ?? candidate.segment_id;
   clip.fallback_candidate_refs = [];
+  clip.media_kind = candidate.media_kind;
+  clip.source_capabilities = candidate.source_capabilities ? { ...candidate.source_capabilities } : undefined;
+  clip.audio_role = candidateIsAudioOnly ? (candidate.audio_role ?? inferAudioRole(candidate)) : candidate.audio_role;
   clip.motivation = `[patch] ${op.reason}`;
   if (candidate.role !== "reject") {
     clip.role = candidate.role;
@@ -428,6 +470,9 @@ function opTrimSegment(
   }
 
   const clip = found.clip;
+  if (clip.media_kind === "image") {
+    return { op_index: index, op: op.op, message: "Still-image source ranges are immutable; adjust hold duration with move_segment.new_duration_frames." };
+  }
   if (op.new_src_in_us !== undefined) clip.src_in_us = op.new_src_in_us;
   if (op.new_src_out_us !== undefined) clip.src_out_us = op.new_src_out_us;
   clip.motivation = `[patch:trim] ${op.reason}`;
@@ -439,6 +484,7 @@ function opMoveSegment(
   timeline: TimelineIR,
   op: PatchOperation,
   index: number,
+  targetDurationFrames?: number,
 ): PatchError | null {
   if (!op.target_clip_id) {
     return { op_index: index, op: op.op, message: "Missing target_clip_id" };
@@ -451,11 +497,56 @@ function opMoveSegment(
 
   const clip = found.clip;
   const originalTrack = found.track;
-  if (op.new_timeline_in_frame !== undefined) {
-    clip.timeline_in_frame = op.new_timeline_in_frame;
+  const nextStart = op.new_timeline_in_frame ?? clip.timeline_in_frame;
+  const nextDuration = op.new_duration_frames ?? clip.timeline_duration_frames;
+  const requestedTrack = op.target_track_id && op.target_track_id !== originalTrack.track_id
+    ? findTrack(timeline, op.target_track_id)
+    : originalTrack;
+  if (requestedTrack && requestedTrack.kind !== originalTrack.kind) {
+    return {
+      op_index: index,
+      op: op.op,
+      message: `Target track ${requestedTrack.track_id} is ${requestedTrack.kind}, expected ${originalTrack.kind}`,
+    };
   }
   if (op.new_duration_frames !== undefined) {
+    if (clip.media_kind === "image") {
+      if (!clip.still_image) return { op_index: index, op: op.op, message: "Still-image metadata is missing." };
+      if (op.new_duration_frames < clip.still_image.min_hold_frames || op.new_duration_frames > clip.still_image.max_hold_frames) {
+        return { op_index: index, op: op.op, message: `Still-image hold must be within ${clip.still_image.min_hold_frames}-${clip.still_image.max_hold_frames} frames.` };
+      }
+    }
+  }
+  if (clip.media_kind === "image") {
+    const range = stillImageBeatRange(timeline, clip, targetDurationFrames);
+    if (nextStart < range.start) {
+      return {
+        op_index: index,
+        op: op.op,
+        message: `Still-image hold start ${nextStart} precedes beat boundary ${range.start}.`,
+      };
+    }
+    if (range.end !== undefined && nextStart + nextDuration > range.end) {
+      return {
+        op_index: index,
+        op: op.op,
+        message: `Still-image hold end ${nextStart + nextDuration} exceeds beat boundary ${range.end}.`,
+      };
+    }
+    const overlapTrack = requestedTrack;
+    if (overlapTrack?.clips.some((other) => other.clip_id !== clip.clip_id &&
+      nextStart < other.timeline_in_frame + other.timeline_duration_frames &&
+      nextStart + nextDuration > other.timeline_in_frame)) {
+      return { op_index: index, op: op.op, message: "Still-image move overlaps another clip on the target track." };
+    }
+  }
+  if (op.new_timeline_in_frame !== undefined) clip.timeline_in_frame = op.new_timeline_in_frame;
+  if (op.new_duration_frames !== undefined) {
     clip.timeline_duration_frames = op.new_duration_frames;
+    if (clip.media_kind === "image") {
+      clip.still_image!.hold_frames = op.new_duration_frames;
+      clip.still_image!.policy_clamp = "none";
+    }
   }
   clip.motivation = `[patch:move] ${op.reason}`;
 
@@ -476,6 +567,29 @@ function opMoveSegment(
   return null;
 }
 
+function stillImageBeatRange(
+  timeline: TimelineIR,
+  clip: ClipOutput,
+  targetDurationFrames?: number,
+): { start: number; end?: number } {
+  const beatMarkers = timeline.markers
+    .filter((marker) => marker.kind === "beat")
+    .sort((a, b) => a.frame - b.frame);
+  const namedIndex = beatMarkers.findIndex((marker) =>
+    marker.label === clip.beat_id || marker.label.startsWith(`${clip.beat_id}:`));
+  const owningIndex = namedIndex >= 0
+    ? namedIndex
+    : beatMarkers.reduce((index, marker, markerIndex) =>
+        marker.frame <= clip.timeline_in_frame ? markerIndex : index, -1);
+  const start = owningIndex >= 0 ? beatMarkers[owningIndex].frame : 0;
+  const end = owningIndex >= 0 && owningIndex + 1 < beatMarkers.length
+    ? beatMarkers[owningIndex + 1].frame
+    : typeof targetDurationFrames === "number" && targetDurationFrames > 0
+      ? targetDurationFrames
+      : undefined;
+  return { start, ...(end !== undefined ? { end } : {}) };
+}
+
 function opSplitSegment(
   timeline: TimelineIR,
   op: PatchOperation,
@@ -494,6 +608,9 @@ function opSplitSegment(
   }
 
   const clip = found.clip;
+  if (clip.media_kind === "image") {
+    return { op_index: index, op: op.op, message: "Still-image clips cannot be split because their 0..1 source identity range is immutable." };
+  }
   const splitFrame = op.new_timeline_in_frame;
   const clipOutFrame = clip.timeline_in_frame + clip.timeline_duration_frames;
   if (splitFrame <= clip.timeline_in_frame || splitFrame >= clipOutFrame) {
@@ -674,10 +791,17 @@ function opInsertSegment(
   if (!candidate) {
     return { op_index: index, op: op.op, message: `Candidate not found for segment: ${op.with_segment_id}` };
   }
+  if (candidate.media_kind === "image") {
+    return { op_index: index, op: op.op, message: "Still-image insertion requires selects/blueprint hold resolution; recompile from selects." };
+  }
 
   const role = op.role ?? (candidate.role === "reject" ? "support" : candidate.role);
-  const targetKind = role === "dialogue" || role === "music" ? "audio" : "video";
-  const targetTrackId = op.target_track_id ?? getTargetTrackId(role);
+  const candidateIsAudioOnly = isAudioOnlyCandidate(candidate);
+  const audioRole = candidate.audio_role ?? inferAudioRole(candidate);
+  const targetKind = candidateIsAudioOnly || role === "dialogue" || role === "music" ? "audio" : "video";
+  const targetTrackId = op.target_track_id ?? (candidateIsAudioOnly
+    ? audioRole === "dialogue" ? "A1" : audioRole === "music" ? "A2" : "A3"
+    : getTargetTrackId(role));
   const existingTargetTrack = findTrack(timeline, targetTrackId);
   if (existingTargetTrack && existingTargetTrack.kind !== targetKind) {
     return {
@@ -687,6 +811,13 @@ function opInsertSegment(
     };
   }
   const track = existingTargetTrack ?? findOrCreateTrackByKind(timeline, targetKind, targetTrackId);
+  if (!candidateSupportsTrack(candidate, track.kind)) {
+    return {
+      op_index: index,
+      op: op.op,
+      message: `Cannot insert candidate ${candidate.segment_id} on ${track.kind} track ${track.track_id}: source lacks ${track.kind} capability`,
+    };
+  }
   const sourceInUS = op.new_src_in_us ?? candidate.src_in_us;
   const sourceOutUS = op.new_src_out_us ?? candidate.src_out_us;
   if (sourceInUS < candidate.src_in_us || sourceOutUS > candidate.src_out_us || sourceOutUS <= sourceInUS) {
@@ -711,6 +842,9 @@ function opInsertSegment(
     fallback_segment_ids: [],
     confidence: candidate.confidence,
     quality_flags: candidate.quality_flags ?? [],
+    media_kind: candidate.media_kind,
+    source_capabilities: candidate.source_capabilities ? { ...candidate.source_capabilities } : undefined,
+    audio_role: candidateIsAudioOnly ? audioRole : candidate.audio_role,
   };
 
   track.clips.push(newClip);
@@ -737,7 +871,6 @@ function opRemoveSegment(
   if (!found) {
     return { op_index: index, op: op.op, message: `Clip not found: ${op.target_clip_id}` };
   }
-
   found.track.clips.splice(found.clipIndex, 1);
   removeTransitionsForClip(timeline, op.target_clip_id);
   return null;
@@ -756,11 +889,64 @@ function opChangeAudioPolicy(
   if (!found) {
     return { op_index: index, op: op.op, message: `Clip not found: ${op.target_clip_id}` };
   }
+  if (found.clip.media_kind === "image") {
+    return { op_index: index, op: op.op, message: "Still images have no audio policy and cannot fabricate audio." };
+  }
 
   if (op.audio_policy) {
     found.clip.audio_policy = op.audio_policy;
   }
 
+  return null;
+}
+
+function opChangeVisualTransform(
+  timeline: TimelineIR,
+  op: PatchOperation,
+  index: number,
+): PatchError | null {
+  if (!op.target_clip_id) {
+    return { op_index: index, op: op.op, message: "Missing target_clip_id" };
+  }
+  const found = findClip(timeline, op.target_clip_id);
+  if (!found) {
+    return { op_index: index, op: op.op, message: `Clip not found: ${op.target_clip_id}` };
+  }
+  if (found.track.kind !== "video") {
+    return { op_index: index, op: op.op, message: "Visual transforms require a video clip" };
+  }
+  if (found.clip.media_kind === "image") {
+    return { op_index: index, op: op.op, message: "Still-image visual transforms are pending EYE-070C2B; C2A is static-only." };
+  }
+  const transform = op.visual_transform;
+  if (!transform || Object.keys(transform).length === 0) {
+    return { op_index: index, op: op.op, message: "Missing visual_transform" };
+  }
+  found.clip.metadata = {
+    ...(found.clip.metadata ?? {}),
+    ...(transform.zoom !== undefined ? { zoom: transform.zoom } : {}),
+    ...(transform.crop !== undefined ? { crop: transform.crop } : {}),
+    ...(transform.position !== undefined ? { position: transform.position } : {}),
+    interview_finish: {
+      reason: op.reason,
+      ...(op.confidence !== undefined ? { confidence: op.confidence } : {}),
+    },
+  };
+  return null;
+}
+
+function opChangeAudioFinish(
+  timeline: TimelineIR,
+  op: PatchOperation,
+  index: number,
+): PatchError | null {
+  if (!op.audio_finish) {
+    return { op_index: index, op: op.op, message: "Missing audio_finish" };
+  }
+  timeline.metadata = {
+    ...(timeline.metadata ?? {}),
+    audio_finish: op.audio_finish,
+  };
   return null;
 }
 
@@ -837,5 +1023,11 @@ function reRunPhase4(
     target = maxFrame;
   }
 
-  return resolve(assembled, target, candidates, durationPolicy, fpsNum, fpsDen);
+  // Phase 4 only repairs constraints. It must never synthesize an image from a
+  // fallback candidate because that route has neither the blueprint's resolved
+  // hold policy nor a legal 0..1 still source identity. Image insertion remains
+  // a selects -> compile operation; existing image clips are preserved in-place
+  // by resolve's still-specific skip rules.
+  const phase4Candidates = candidates.filter((candidate) => candidate.media_kind !== "image");
+  return resolve(assembled, target, phase4Candidates, durationPolicy, fpsNum, fpsDen);
 }

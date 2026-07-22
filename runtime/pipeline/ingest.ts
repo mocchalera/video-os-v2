@@ -10,9 +10,8 @@
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { QualityThresholds, SegmentItem } from "../connectors/ffmpeg-segmenter.js";
+import type { QualityThresholds } from "../connectors/ffmpeg-segmenter.js";
 import { computePolicyHash, getFfmpegVersion, type AssetItem } from "../connectors/ffprobe.js";
-import type { ContactSheetManifest, DerivativeResults } from "../connectors/ffmpeg-derivatives.js";
 import type { AssetSttResult } from "../connectors/openai-stt.js";
 import type { VlmFn, VlmPolicy, SamplingPolicy } from "../connectors/gemini-vlm.js";
 import type { DiarizeOptions, DiarizeTurn } from "../connectors/pyannote-diarizer.js";
@@ -22,8 +21,7 @@ import { DEFAULT_PEAK_POLICY } from "../connectors/vlm-peak-detector.js";
 import type { MarlinFn, MarlinModelRecord } from "../connectors/marlin-types.js";
 import { resolvePolicy } from "../policy-resolver.js";
 import { generateDisplayNames, type DisplayNameInput } from "./display-name.js";
-import { createMediaLinks, loadSourceMap, type MediaSourceMapDoc } from "../media/source-map.js";
-import { runProjectBgmAnalysis } from "../media/bgm-analyzer.js";
+import { createMediaLinks, type MediaSourceMapDoc } from "../media/source-map.js";
 import type { PipelineStageProgress, ProgressTracker } from "../progress.js";
 import {
   type CacheManifestEntry,
@@ -33,24 +31,62 @@ import {
   clearCacheManifest,
   lookupCache,
 } from "./analysis-cache.js";
+import { SourceContentIdentityCache } from "../source-content-identity.js";
 
 // ── Stage imports ──────────────────────────────────────────────────
 import { atomicWriteJson, atomicWriteYaml, readJsonIfExists } from "./stages/_util.js";
-import { ingestMap, ingestReduce, type IngestShard } from "./stages/ingest-map.js";
+import { ingestMapWithFailures, ingestReduce, type IngestShard } from "./stages/ingest-map.js";
 import { segmentMap, segmentReduce } from "./stages/segment.js";
 import { derivativesMap, derivativesReduce } from "./stages/derivatives.js";
 import { resolveTranscribeFn, sttMap, sttReduce } from "./stages/stt.js";
-import { hydrateCachedVlmSegments, runParallelVlmAnalysis, vlmReduce, type VlmShard, type VlmAssetRunSummary, type VlmProgressReporter } from "./stages/vlm.js";
+import { computeVlmCachePolicyHash, hydrateCachedVlmSegments, runParallelVlmAnalysis, vlmReduce, type VlmShard, type VlmAssetRunSummary, type VlmProgressReporter } from "./stages/vlm.js";
 import { DEFAULT_APPRAISER_CONCURRENCY, runAppraiserStage, type AppraiserFn } from "./stages/appraiser.js";
-import { runVisualQualityMeasurementStage } from "./stages/visual-quality.js";
-import { degradedPeakMap, peakMap, peakReduce, type PeakShard } from "./stages/peak.js";
+import { runVisualQualityMeasurementStage, type VisualQualityAnalyzeFn } from "./stages/visual-quality.js";
+import {
+  degradedPeakMap,
+  computePeakCachePolicyHash,
+  inspectPeakPrecisionCache,
+  peakClaimsVisualPrecision,
+  peakMap,
+  peakReduce,
+  type PeakShard,
+} from "./stages/peak.js";
 import { buildGapReport, buildManifestEntries } from "./stages/gap-report.js";
-import { runMarlinAnalysis } from "./stages/marlin.js";
+import {
+  appendMarlinGap,
+  buildAnalysisReadiness,
+  initialMarlinReadiness,
+  runMarlinStage,
+  type AnalysisReadiness,
+} from "./ingest-marlin.js";
+import { restoreSourceFileMap } from "./source-file-map.js";
+import {
+  buildManifestEntriesFromExistingAssets,
+  groupSegmentsByAsset,
+  loadExistingDerivativeResults,
+  preserveVlmOnlySegmentFields,
+} from "./analysis-artifact-restoration.js";
+import { discoverRequestedSources, normalizeSourceLocators } from "../media/source-discovery.js";
+import type { SourceDiscoveryResult } from "../media/source-discovery.js";
+import { groupImageSequenceRequests, resolveImageSequencePolicy } from "../media/image-sequence.js";
+import { ingestImageSequence } from "../connectors/image-sequence-ingest.js";
+import {
+  buildSourceLedger,
+  type SourceLedger,
+  type SourceIngestOutcome,
+} from "../artifacts/source-ledger.js";
+import type { AnalysisCoverageReport, SourceMediaManifest } from "../artifacts/p1-manifest-coverage.js";
+import { readProjectState } from "../state/reconcile.js";
+import { SourceReadinessError, persistSourceReadinessArtifacts } from "./source-readiness.js";
+import { finalizeAudioAnalysisArtifacts, isExplicitAudioOnly } from "./audio-analysis-artifacts.js";
+import { cleanupAnalysisSourceArtifacts } from "./analysis-artifact-cleanup.js";
 
 // ── Re-exports for backward compatibility ──────────────────────────
 export type { AssetsJson, SegmentsJson, GapEntry, GapReport } from "./pipeline-types.js";
 export type { PeakShard } from "./stages/peak.js";
+export type { AnalysisStageReadiness, AnalysisReadiness } from "./ingest-marlin.js";
 export { resolveTranscribeFn } from "./stages/stt.js";
+export { SourceReadinessError } from "./source-readiness.js";
 import type { AssetsJson, SegmentsJson, GapReport, GapEntry } from "./pipeline-types.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -58,6 +94,7 @@ import type { AssetsJson, SegmentsJson, GapReport, GapEntry } from "./pipeline-t
 export interface PipelineOptions {
   sourceFiles: string[];
   projectDir: string;
+  projectId?: string;
   repoRoot?: string;
   transcribeFn?: TranscribeFn;
   vlmFn?: VlmFn;
@@ -66,6 +103,7 @@ export interface PipelineOptions {
   marlinQueries?: string[];
   appraiserFn?: AppraiserFn;
   appraiserModel?: string;
+  visualQualityAnalyzeFn?: VisualQualityAnalyzeFn;
   skipStt?: boolean;
   skipVlm?: boolean;
   skipAppraiser?: boolean;
@@ -78,6 +116,8 @@ export interface PipelineOptions {
   contentHint?: string;
   skipMediaLink?: boolean;
   skipBgmAnalysis?: boolean;
+  /** Explicit editorial role assignment. Arbitrary audio sources are never auto-BGM. */
+  bgmSourceFiles?: string[];
   vlmConcurrency?: number;
   vlmProgressReporter?: VlmProgressReporter;
   noCache?: boolean;
@@ -86,6 +126,8 @@ export interface PipelineOptions {
   stageProgress?: PipelineStageProgress;
   vlmOnly?: boolean;
   sttStrategy?: SttStrategy;
+  sourceDiscovery?: SourceDiscoveryResult;
+  sourceIdentityCache?: SourceContentIdentityCache;
 }
 
 export interface PipelineResult {
@@ -96,6 +138,10 @@ export interface PipelineResult {
   mediaSourceMap?: MediaSourceMapDoc;
   mediaSourceMapPath?: string;
   vlmSummary?: VlmAssetRunSummary;
+  sourceLedger?: SourceLedger;
+  sourceMediaManifest?: SourceMediaManifest;
+  analysisCoverageReport?: AnalysisCoverageReport;
+  analysisReadiness: AnalysisReadiness;
 }
 
 const DEFAULT_PEAK_STAGE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -124,8 +170,8 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   }
   const useCache = !opts.noCache;
   const manifest: CacheManifestEntry[] = useCache ? loadCacheManifest(manifestPath) : [];
-  const existingAssetsJson = readJsonIfExists<AssetsJson>(assetsPath);
-  const existingSegmentsJson = readJsonIfExists<SegmentsJson>(segmentsPath);
+  const existingAssetsJson = readCanonicalJsonIfExists<AssetsJson>(assetsPath);
+  const existingSegmentsJson = readCanonicalJsonIfExists<SegmentsJson>(segmentsPath);
   const sttStrategy: SttStrategy = opts.skipStt ? "skip" : opts.sttStrategy ?? "full";
   const effectiveSkipStt = sttStrategy === "skip" || !!opts.vlmOnly;
 
@@ -142,11 +188,49 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   const policyHash = computePolicyHash(policy);
   const thresholds = (policy as Record<string, unknown>)["quality_thresholds"] as QualityThresholds;
   const ffmpegVersion = await getFfmpegVersion();
-  const sourceFiles = opts.sourceFiles.map((f) => path.resolve(absProjectDir, f));
-  const projectId = path.basename(absProjectDir);
+  const normalizedSourceLocators = normalizeSourceLocators(opts.sourceFiles, absProjectDir);
+  const discovery = opts.vlmOnly
+    ? opts.sourceDiscovery
+    : opts.sourceDiscovery ?? discoverRequestedSources(normalizedSourceLocators);
+  const imageSequenceGrouping = discovery
+    ? groupImageSequenceRequests(discovery, resolveImageSequencePolicy(policy))
+    : { groups: [], member_group_by_canonical_path: new Map() };
+  const imageSequenceMemberPaths = new Set(imageSequenceGrouping.member_group_by_canonical_path.keys());
+  const sourceFiles = discovery
+    ? [...new Set(discovery.requests
+      .filter((request) => request.disposition === "candidate")
+      .flatMap((request) => request.canonical_path ? [request.canonical_path] : []))]
+    : normalizedSourceLocators.filter((locator) => !locator.startsWith("external://"));
+  const projectId = opts.projectId ?? readPipelineProjectId(absProjectDir);
   const pt = opts.progressTracker;
   const stageProgress = opts.stageProgress;
   const shouldRunMarlinStage = Boolean(opts.marlinFn) && !opts.skipMarlin && !opts.vlmOnly;
+  let marlinReadiness = initialMarlinReadiness(opts);
+  const sourceIdentityCache = opts.sourceIdentityCache ?? new SourceContentIdentityCache();
+  for (const request of discovery?.requests ?? []) {
+    if (!request.canonical_path || !request.content_hash || request.size_bytes === null || !request.mtime) continue;
+    sourceIdentityCache.prime({
+      absolutePath: request.canonical_path,
+      sha256: request.content_hash.replace(/^sha256:/, ""),
+      sizeBytes: request.size_bytes,
+      mtimeMs: request.mtime_ms ?? new Date(request.mtime).getTime(),
+    });
+  }
+
+  if (!opts.vlmOnly && normalizedSourceLocators.length === 0) {
+    const emptyDiscovery = discoverRequestedSources([]);
+    const sourceLedger = buildSourceLedger(projectId, emptyDiscovery, new Map(), undefined, absProjectDir);
+    persistSourceReadinessArtifacts({
+      projectDir: absProjectDir,
+      projectId,
+      ledger: sourceLedger,
+      assets: [],
+      assetsPath,
+      segmentsPath,
+      gapReportPath,
+    });
+    throw new SourceReadinessError("No requested source inputs were provided.", sourceLedger);
+  }
 
   if (opts.vlmOnly) {
     return runVlmOnlyPipeline(
@@ -164,6 +248,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       existingAssetsJson,
       existingSegmentsJson,
       sourceFiles,
+      sourceIdentityCache,
       pt,
     );
   }
@@ -180,10 +265,113 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
 
   // ── Stage 1: Ingest ──
   const ingestProgress = stageProgress?.beginStage("ingest");
+  if (!discovery) throw new Error("Source discovery is required outside --vlm-only mode.");
   let allIngestShards: IngestShard[];
+  let sourceLedger: SourceLedger;
+  let sourceMediaManifest: SourceMediaManifest;
+  let analysisCoverageReport: AnalysisCoverageReport;
   try {
     console.log("[pipeline] Stage 1/12 ingest.map starting");
-    allIngestShards = await ingestMap(sourceFiles, { projectRoot: absProjectDir, policyHash, ffmpegVersion });
+    const ingestPaths = [...new Set(discovery.requests
+      .filter((request) =>
+        request.disposition === "candidate" &&
+        !request.canonical_request_source_id &&
+        (!request.canonical_path || !imageSequenceMemberPaths.has(path.resolve(request.canonical_path)))
+      )
+      .flatMap((request) => request.canonical_path ? [request.canonical_path] : []))];
+    const ingestSourceFacts = new Map(discovery.requests.flatMap((request) =>
+      request.canonical_path && request.disposition === "candidate"
+        ? [[request.canonical_path, {
+          mediaKind: request.media_kind,
+          ...(request.content_hash?.startsWith("sha256:")
+            ? { contentSha256: request.content_hash.slice("sha256:".length) }
+            : {}),
+          ...(request.size_bytes !== null ? { sizeBytes: request.size_bytes } : {}),
+          ...(request.mtime_ms !== null ? { mtimeMs: request.mtime_ms } : {}),
+        }] as const]
+        : []
+    ));
+    const ingestResult = await ingestMapWithFailures(ingestPaths, {
+      projectRoot: absProjectDir,
+      policyHash,
+      ffmpegVersion,
+      sourceFacts: ingestSourceFacts,
+    });
+    allIngestShards = ingestResult.shards;
+    const sequenceOutcomes = new Map<string, SourceIngestOutcome>();
+    for (const group of imageSequenceGrouping.groups) {
+      if (group.status === "failed") {
+        for (const frame of group.frames) {
+          sequenceOutcomes.set(path.resolve(frame.canonical_path), {
+            canonicalPath: path.resolve(frame.canonical_path),
+            mediaKind: "sequence",
+            error: group.reason ?? "image_sequence_group_failed",
+          });
+        }
+        continue;
+      }
+      try {
+        const sequence = await ingestImageSequence(group, {
+          projectRoot: absProjectDir,
+          policyHash,
+          ffmpegVersion,
+        });
+        allIngestShards.push(sequence);
+        for (const frame of group.frames) {
+          sequenceOutcomes.set(path.resolve(frame.canonical_path), {
+            canonicalPath: path.resolve(frame.canonical_path),
+            asset: sequence.asset,
+          });
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        for (const frame of group.frames) {
+          sequenceOutcomes.set(path.resolve(frame.canonical_path), {
+            canonicalPath: path.resolve(frame.canonical_path),
+            mediaKind: "sequence",
+            error: reason,
+          });
+        }
+      }
+    }
+    cleanupAnalysisSourceArtifacts({
+      projectDir: absProjectDir,
+      currentImageSequenceGroupIds: new Set(imageSequenceGrouping.groups
+        .filter((group) => group.status === "candidate")
+        .map((group) => group.group_id)),
+      currentStillAssetIds: new Set(allIngestShards
+        .filter((shard) => shard.asset.media_kind === "image")
+        .map((shard) => shard.asset.asset_id)),
+    });
+    const outcomes = new Map<string, SourceIngestOutcome>();
+    for (const shard of ingestResult.shards) outcomes.set(path.resolve(shard.sourceFile), { canonicalPath: path.resolve(shard.sourceFile), asset: shard.asset });
+    for (const failure of ingestResult.failures) outcomes.set(path.resolve(failure.sourceFile), { canonicalPath: path.resolve(failure.sourceFile), error: failure.reason });
+    for (const [sourcePath, outcome] of sequenceOutcomes) outcomes.set(sourcePath, outcome);
+    sourceLedger = buildSourceLedger(projectId, discovery, outcomes, undefined, absProjectDir);
+    const readinessArtifacts = persistSourceReadinessArtifacts({
+      projectDir: absProjectDir,
+      projectId,
+      ledger: sourceLedger,
+      assets: allIngestShards.map((shard) => shard.asset),
+      assetsPath,
+      segmentsPath,
+      gapReportPath,
+      writeEmptyAnalysis: false,
+    });
+    sourceMediaManifest = readinessArtifacts.manifest;
+    analysisCoverageReport = readinessArtifacts.coverage;
+    if (sourceLedger.summary.ready === 0) {
+      persistSourceReadinessArtifacts({
+        projectDir: absProjectDir,
+        projectId,
+        ledger: sourceLedger,
+        assets: [],
+        assetsPath,
+        segmentsPath,
+        gapReportPath,
+      });
+      throw new SourceReadinessError("No requested source was ready for analysis.", sourceLedger);
+    }
     pt?.advance();
   } catch (error) {
     ingestProgress?.fail(error);
@@ -191,38 +379,59 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   }
 
   // ── Cache Check ──
-  const { cacheHitIds, cacheHashMap, cachedAssetItems, cachedSegmentItems, newIngestShards } =
-    checkCache(allIngestShards, useCache, manifest, existingAssetsJson, existingSegmentsJson);
+  const { cacheHitIds, cacheHashMap, sourceContentHashMap, cachedAssetItems, cachedSegmentItems, newIngestShards } =
+    checkCache(allIngestShards, useCache, manifest, existingAssetsJson, existingSegmentsJson, sourceIdentityCache);
 
   // ── All cached — short-circuit ──
   if (newIngestShards.length === 0 && cacheHitIds.size > 0) {
     ingestProgress?.complete();
-    const cachedResult = finalizeCached(allIngestShards, cachedAssetItems, cachedSegmentItems, cacheHashMap,
+    const allSourceFileMap = new Map<string, string>();
+    for (const shard of allIngestShards) {
+      allSourceFileMap.set(shard.asset.asset_id, shard.sourceFile);
+    }
+    const cachedResult = finalizeCached(allIngestShards, cachedAssetItems, cachedSegmentItems, cacheHashMap, sourceContentHashMap,
       projectId, assetsPath, segmentsPath, gapReportPath, manifestPath, outputDir,
-      absProjectDir, sourceFiles, opts, pt);
+      absProjectDir, sourceFiles, opts, pt, imageSequenceGrouping.groups);
     if (shouldRunMarlinStage) {
       const marlinProgress = stageProgress?.beginStage("marlin");
-      try {
-        const refreshedSegments = await runMarlinStage(opts, projectId, absProjectDir, sourceFiles, segmentsPath);
-        if (refreshedSegments) {
-          cachedResult.segmentsJson = refreshedSegments;
-        }
-        marlinProgress?.complete();
-      } catch (error) {
-        marlinProgress?.fail(error);
-        throw error;
+      const marlinResult = await runMarlinStage(
+        opts, projectId, absProjectDir, visualSourceFiles(cachedResult.assetsJson, allSourceFileMap), segmentsPath,
+        sourceIdentityCache, expectedSourceHashes(allIngestShards, sourceContentHashMap),
+      );
+      marlinReadiness = marlinResult.readiness;
+      if (marlinResult.segmentsJson) {
+        cachedResult.segmentsJson = marlinResult.segmentsJson;
+      }
+      if (marlinReadiness.status === "partial") {
+        pt?.recordError("marlin", marlinReadiness.reason ?? "marlin_worker_failure", true);
+      }
+      marlinProgress?.complete();
+    }
+    let cachedVlmShards: VlmShard[] | undefined;
+    if (!opts.skipVlm) {
+      console.log("[pipeline] Stage 9-10/12 cached VLM compatibility check starting");
+      const result = await runVlmStage(
+        opts,
+        policy,
+        cachedResult.assetsJson,
+        cachedResult.segmentsJson,
+        existingSegmentsJson,
+        allSourceFileMap,
+        outputDir,
+        policyHash,
+        segmentsPath,
+        assetsPath,
+        sourceIdentityCache,
+      );
+      if (result) {
+        cachedResult.assetsJson = result.assets;
+        cachedResult.segmentsJson = result.segments;
+        cachedResult.vlmSummary = result.vlmSummary;
+        cachedVlmShards = result.vlmShards;
       }
     }
-    const allSourceFileMap = new Map<string, string>();
-    for (const shard of allIngestShards) allSourceFileMap.set(shard.asset.asset_id, shard.sourceFile);
     const visualQualityProgress = stageProgress?.beginStage("visual-quality");
     try {
-      cachedResult.segmentsJson = await runVisualQualityPipelineStage(
-        cachedResult.segmentsJson,
-        allSourceFileMap,
-        segmentsPath,
-        policyHash,
-      );
       if (!opts.skipAppraiser) {
         cachedResult.segmentsJson = await runAppraiserPipelineStage(
           opts,
@@ -231,13 +440,70 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
           outputDir,
           segmentsPath,
           policyHash,
+          visualAssetIds(cachedResult.assetsJson),
         );
       }
+      cachedResult.segmentsJson = await runVisualQualityPipelineStage(
+        cachedResult.segmentsJson,
+        allSourceFileMap,
+        segmentsPath,
+        policyHash,
+        cachedResult.assetsJson,
+        opts.visualQualityAnalyzeFn,
+        visualAssetIds(cachedResult.assetsJson),
+      );
       visualQualityProgress?.complete();
     } catch (error) {
       visualQualityProgress?.fail(error);
       throw error;
     }
+    const cachedPeakShards = await revalidateCachedPrecisionPeaks({
+      opts,
+      policy,
+      assetsJson: cachedResult.assetsJson,
+      segmentsJson: cachedResult.segmentsJson,
+      sourceFileMap: allSourceFileMap,
+      outputDir,
+      segmentsPath,
+      sourceIdentityCache,
+    });
+    cachedResult.gapReport = buildGapReport(
+      [],
+      new Map(),
+      new Map(),
+      new Map(),
+      undefined,
+      cachedVlmShards,
+      cachedPeakShards,
+      sourceLedger,
+    );
+    appendMarlinGap(cachedResult.gapReport, projectId, marlinReadiness);
+    atomicWriteYaml(gapReportPath, cachedResult.gapReport);
+    analysisCoverageReport = await finalizeAudioAnalysisArtifacts({
+      projectDir: absProjectDir,
+      projectId,
+      manifest: sourceMediaManifest,
+      ledger: sourceLedger,
+      assetsJson: cachedResult.assetsJson,
+      segmentsJson: cachedResult.segmentsJson,
+      sourceFileMap: allSourceFileMap,
+      thresholds,
+      policyHash,
+      ffmpegVersion,
+      sttAttempted: false,
+      sttSkipReason: effectiveSkipStt ? "stt skipped by request" : "stt not attempted on cached run",
+      vlmShards: cachedVlmShards,
+      peakShards: cachedPeakShards,
+      bgmSourceFiles: opts.bgmSourceFiles,
+      skipBgmAnalysis: opts.skipBgmAnalysis,
+      skipVlm: opts.skipVlm,
+      vlmProviderAvailable: Boolean(opts.vlmFn),
+      skipPeak: opts.skipPeak,
+    });
+    cachedResult.sourceLedger = sourceLedger;
+    cachedResult.sourceMediaManifest = sourceMediaManifest;
+    cachedResult.analysisCoverageReport = analysisCoverageReport;
+    cachedResult.analysisReadiness = buildAnalysisReadiness(marlinReadiness);
     return cachedResult;
   }
 
@@ -301,20 +567,39 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     }
   }
 
+  // Complete the current requested/ready source set before Marlin. New-source
+  // STT results stay in place while cached assets/segments are added exactly
+  // once, so Marlin and every downstream stage observe the same canonical set.
+  if (cacheHitIds.size > 0) {
+    assetsJson.items.push(...cachedAssetItems);
+    assetsJson.items.sort((a, b) => a.asset_id.localeCompare(b.asset_id));
+    segmentsJson.items.push(...cachedSegmentItems);
+    segmentsJson.items.sort((a, b) => a.asset_id !== b.asset_id ? a.asset_id.localeCompare(b.asset_id) : a.src_in_us - b.src_in_us);
+    for (const shard of allIngestShards) {
+      if (cacheHitIds.has(shard.asset.asset_id)) sourceFileMap.set(shard.asset.asset_id, shard.sourceFile);
+    }
+    atomicWriteJson(assetsPath, assetsJson);
+    atomicWriteJson(segmentsPath, segmentsJson);
+  }
+
   // ── Stage 8.5: Marlin reporter ──
   if (shouldRunMarlinStage) {
     const marlinProgress = stageProgress?.beginStage("marlin");
-    try {
-      const refreshedSegments = await runMarlinStage(opts, projectId, absProjectDir, sourceFiles, segmentsPath);
-      if (refreshedSegments) {
-        segmentsJson = refreshedSegments;
-      }
-      pt?.advance("marlin_events.json");
-      marlinProgress?.complete();
-    } catch (error) {
-      marlinProgress?.fail(error);
-      throw error;
+    const marlinResult = await runMarlinStage(
+      opts, projectId, absProjectDir, visualSourceFiles(assetsJson, sourceFileMap), segmentsPath,
+      sourceIdentityCache, expectedSourceHashes(allIngestShards, sourceContentHashMap),
+    );
+    marlinReadiness = marlinResult.readiness;
+    if (marlinResult.segmentsJson) {
+      segmentsJson = marlinResult.segmentsJson;
     }
+    if (marlinReadiness.status === "partial") {
+      pt?.advance();
+      pt?.recordError("marlin", marlinReadiness.reason ?? "marlin_worker_failure", true);
+    } else {
+      pt?.advance("marlin_events.json");
+    }
+    marlinProgress?.complete();
   }
 
   let vlmShards: VlmShard[] | undefined;
@@ -325,7 +610,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     if (!opts.skipVlm) {
       console.log("[pipeline] Stage 9-10/12 VLM starting");
       const result = await runVlmStage(opts, policy, assetsJson, segmentsJson, existingSegmentsJson,
-        policyHash, segmentsPath, assetsPath);
+        sourceFileMap, outputDir, policyHash, segmentsPath, assetsPath, sourceIdentityCache);
       if (result) { assetsJson = result.assets; segmentsJson = result.segments; vlmShards = result.vlmShards; vlmSummary = result.vlmSummary; }
       pt?.advance();
     }
@@ -339,6 +624,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
         outputDir,
         segmentsPath,
         policyHash,
+        visualAssetIds(assetsJson),
       );
       pt?.advance("segments.json");
     }
@@ -348,6 +634,9 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       sourceFileMap,
       segmentsPath,
       policyHash,
+      assetsJson,
+      opts.visualQualityAnalyzeFn,
+      visualAssetIds(assetsJson),
     );
     pt?.advance("segments.json");
     visualQualityProgress?.complete();
@@ -366,7 +655,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
       const timeoutMs = readPeakTimeoutMs();
       try {
         peakShards = await withTimeout(
-          peakMap(assetsJson, segmentsJson, derivativeResults, opts.vlmFn, peakPolicy ?? DEFAULT_PEAK_POLICY, outputDir, opts.contentHint),
+          peakMap(assetsJson, segmentsJson, derivativeResults, sourceFileMap, opts.vlmFn, peakPolicy ?? DEFAULT_PEAK_POLICY, outputDir, opts.contentHint, { policyHash: computePeakCachePolicyHash(peakPolicy ?? DEFAULT_PEAK_POLICY), sourceIdentityCache }),
           timeoutMs,
           `peak detection timed out after ${timeoutMs}ms`,
         );
@@ -401,16 +690,20 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
     }
   }
 
-  // ── Merge cached data ──
+  // ── Revalidate cached peak data ──
   if (cacheHitIds.size > 0) {
-    assetsJson.items.push(...cachedAssetItems);
-    assetsJson.items.sort((a, b) => a.asset_id.localeCompare(b.asset_id));
-    segmentsJson.items.push(...cachedSegmentItems);
-    segmentsJson.items.sort((a, b) => a.asset_id !== b.asset_id ? a.asset_id.localeCompare(b.asset_id) : a.src_in_us - b.src_in_us);
-    atomicWriteJson(assetsPath, assetsJson);
-    atomicWriteJson(segmentsPath, segmentsJson);
-    for (const shard of allIngestShards) {
-      if (cacheHitIds.has(shard.asset.asset_id)) sourceFileMap.set(shard.asset.asset_id, shard.sourceFile);
+    const cachedPeakShards = await revalidateCachedPrecisionPeaks({
+      opts,
+      policy,
+      assetsJson,
+      segmentsJson,
+      sourceFileMap,
+      outputDir,
+      segmentsPath,
+      sourceIdentityCache,
+    });
+    if (cachedPeakShards.length > 0) {
+      peakShards = [...(peakShards ?? []), ...cachedPeakShards];
     }
   }
 
@@ -427,30 +720,92 @@ export async function runPipeline(opts: PipelineOptions): Promise<PipelineResult
   // ── Gap report ──
   console.log("[pipeline] Stage gap-report starting");
   const newAssetItems = assetsJson.items.filter((a) => !cacheHitIds.has(a.asset_id));
-  const gapReport = buildGapReport(newAssetItems, segmentShards, derivativeResults, segMapResult.detectorFailures, sttResults, vlmShards, peakShards);
+  const gapReport = buildGapReport(newAssetItems, segmentShards, derivativeResults, segMapResult.detectorFailures, sttResults, vlmShards, peakShards, sourceLedger);
   if (sttSkippedAssetIds.size > 0) {
     gapReport.entries = gapReport.entries.filter((entry) =>
       !(entry.stage === "stt" && entry.issue === "stt_not_attempted" && sttSkippedAssetIds.has(entry.asset_id))
     );
   }
   gapReport.entries.push(...diarizeGapEntries);
+  appendMarlinGap(gapReport, projectId, marlinReadiness);
   atomicWriteYaml(gapReportPath, gapReport);
 
   // ── Media links + BGM ──
   console.log("[pipeline] Stage media-links/BGM starting");
   let mediaSourceMap: MediaSourceMapDoc | undefined;
   let mediaSourceMapPath: string | undefined;
-  if (!opts.skipBgmAnalysis) { runProjectBgmAnalysis({ sourceFiles, projectDir: absProjectDir, projectId }); }
   if (!opts.skipMediaLink) {
-    const mediaLinks = createMediaLinks({ projectPath: absProjectDir, projectId, assets: assetsJson.items, sourceFileMap });
+    const mediaLinks = createMediaLinks({
+      projectPath: absProjectDir,
+      projectId,
+      assets: assetsJson.items,
+      sourceFileMap,
+      imageSequenceGroupsByAssetId: matchImageSequenceGroups(assetsJson.items, imageSequenceGrouping.groups),
+    });
     mediaSourceMap = mediaLinks.doc; mediaSourceMapPath = mediaLinks.sourceMapPath;
     for (const warning of mediaLinks.warnings) console.warn(`[pipeline] ${warning}`);
   }
 
-  saveCacheManifest(manifestPath, buildManifestEntries(allIngestShards, cacheHashMap));
+  analysisCoverageReport = await finalizeAudioAnalysisArtifacts({
+    projectDir: absProjectDir,
+    projectId,
+    manifest: sourceMediaManifest,
+    ledger: sourceLedger,
+    assetsJson,
+    segmentsJson,
+    sourceFileMap,
+    thresholds,
+    policyHash,
+    ffmpegVersion,
+    sttAttempted: !effectiveSkipStt,
+    sttSkipReason: effectiveSkipStt ? "stt skipped by request" : undefined,
+    sttResults,
+    sttSkippedAssetIds,
+    vlmShards,
+    peakShards,
+    bgmSourceFiles: opts.bgmSourceFiles,
+    skipBgmAnalysis: opts.skipBgmAnalysis,
+    skipVlm: opts.skipVlm,
+    vlmProviderAvailable: Boolean(opts.vlmFn),
+    skipPeak: opts.skipPeak,
+  });
+
+  saveCacheManifest(manifestPath, buildManifestEntries(allIngestShards, cacheHashMap, sourceContentHashMap));
   pt?.complete(["assets.json", "segments.json", "gap_report.yaml"]);
 
-  return { assetsJson, segmentsJson, gapReport, outputDir, mediaSourceMap, mediaSourceMapPath, vlmSummary };
+  return {
+    assetsJson,
+    segmentsJson,
+    gapReport,
+    outputDir,
+    mediaSourceMap,
+    mediaSourceMapPath,
+    vlmSummary,
+    sourceLedger,
+    sourceMediaManifest,
+    analysisCoverageReport,
+    analysisReadiness: buildAnalysisReadiness(marlinReadiness),
+  };
+}
+
+function readPipelineProjectId(projectDir: string): string {
+  try {
+    return readProjectState(projectDir)?.project_id || path.basename(projectDir);
+  } catch {
+    return path.basename(projectDir);
+  }
+}
+
+function visualAssetIds(assetsJson: AssetsJson): Set<string> {
+  return new Set(assetsJson.items.filter((asset) => !isExplicitAudioOnly(asset)).map((asset) => asset.asset_id));
+}
+
+function visualSourceFiles(assetsJson: AssetsJson, sourceFileMap: Map<string, string>): string[] {
+  return assetsJson.items.flatMap((asset) => {
+    if (!asset.video_stream || asset.media_kind === "image") return [];
+    const sourcePath = sourceFileMap.get(asset.asset_id);
+    return sourcePath ? [sourcePath] : [];
+  });
 }
 
 function readPeakTimeoutMs(): number {
@@ -490,6 +845,7 @@ async function runVlmOnlyPipeline(
   existingAssetsJson: AssetsJson | undefined,
   existingSegmentsJson: SegmentsJson | undefined,
   sourceFiles: string[],
+  sourceIdentityCache: SourceContentIdentityCache,
   pt: ProgressTracker | undefined,
 ): Promise<PipelineResult> {
   const missing = [
@@ -514,7 +870,7 @@ async function runVlmOnlyPipeline(
     console.log("[pipeline] Stage 9-10/12 VLM starting (--vlm-only, cache ignored)");
     const beforeVlm = cloneJson(segmentsJson);
     const result = await runVlmStage(opts, policy, assetsJson, segmentsJson, undefined,
-      policyHash, segmentsPath, assetsPath);
+      sourceFileMap, outputDir, policyHash, segmentsPath, assetsPath, sourceIdentityCache);
     if (result) {
       assetsJson = result.assets;
       segmentsJson = preserveVlmOnlySegmentFields(result.segments, beforeVlm);
@@ -534,6 +890,7 @@ async function runVlmOnlyPipeline(
       outputDir,
       segmentsPath,
       policyHash,
+      visualAssetIds(assetsJson),
     );
     pt?.advance("segments.json");
   }
@@ -543,6 +900,9 @@ async function runVlmOnlyPipeline(
     sourceFileMap,
     segmentsPath,
     policyHash,
+    assetsJson,
+    opts.visualQualityAnalyzeFn,
+    visualAssetIds(assetsJson),
   );
   pt?.advance("segments.json");
 
@@ -553,7 +913,7 @@ async function runVlmOnlyPipeline(
     const timeoutMs = readPeakTimeoutMs();
     try {
       peakShards = await withTimeout(
-        peakMap(assetsJson, segmentsJson, derivativeResults, opts.vlmFn, peakPolicy ?? DEFAULT_PEAK_POLICY, outputDir, opts.contentHint),
+        peakMap(assetsJson, segmentsJson, derivativeResults, sourceFileMap, opts.vlmFn, peakPolicy ?? DEFAULT_PEAK_POLICY, outputDir, opts.contentHint, { policyHash: computePeakCachePolicyHash(peakPolicy ?? DEFAULT_PEAK_POLICY), sourceIdentityCache }),
         timeoutMs,
         `peak detection timed out after ${timeoutMs}ms`,
       );
@@ -587,13 +947,118 @@ async function runVlmOnlyPipeline(
     peakShards,
   );
   atomicWriteYaml(gapReportPath, gapReport);
-  saveCacheManifest(manifestPath, buildManifestEntriesFromExistingAssets(assetsJson.items, sourceFileMap, manifest));
+  saveCacheManifest(manifestPath, buildManifestEntriesFromExistingAssets(assetsJson.items, sourceFileMap, manifest, sourceIdentityCache));
   pt?.complete(["segments.json", "gap_report.yaml", "cache_manifest.json"]);
 
-  return { assetsJson, segmentsJson, gapReport, outputDir, vlmSummary };
+  return {
+    assetsJson,
+    segmentsJson,
+    gapReport,
+    outputDir,
+    vlmSummary,
+    analysisReadiness: buildAnalysisReadiness(initialMarlinReadiness(opts)),
+  };
 }
 
 // ── Private Helpers ────────────────────────────────────────────────
+
+function readCanonicalJsonIfExists<T>(filePath: string): T | undefined {
+  try {
+    return readJsonIfExists<T>(filePath);
+  } catch (error) {
+    throw new Error(
+      `canonical_artifact_corrupt:${filePath}:${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+async function revalidateCachedPrecisionPeaks(options: {
+  opts: PipelineOptions;
+  policy: Record<string, unknown>;
+  assetsJson: AssetsJson;
+  segmentsJson: SegmentsJson;
+  sourceFileMap: Map<string, string>;
+  outputDir: string;
+  segmentsPath: string;
+  sourceIdentityCache: SourceContentIdentityCache;
+}): Promise<PeakShard[]> {
+  const peakPolicy = (options.policy as Record<string, unknown>)["peak_detection"] as PeakDetectionPolicy | undefined
+    ?? DEFAULT_PEAK_POLICY;
+  const peakPolicyHash = computePeakCachePolicyHash(peakPolicy);
+  const invalid = options.segmentsJson.items.flatMap((segment) => {
+    if (!peakClaimsVisualPrecision(segment)) return [];
+    const sourcePath = options.sourceFileMap.get(segment.asset_id);
+    let sourceContentSha256: string | undefined;
+    try {
+      sourceContentSha256 = sourcePath
+        ? options.sourceIdentityCache.resolve(sourcePath).sha256
+        : undefined;
+    } catch {
+      sourceContentSha256 = undefined;
+    }
+    const inspection = inspectPeakPrecisionCache(segment, {
+      sourcePath,
+      sourceContentSha256,
+      outputDir: options.outputDir,
+      policyHash: peakPolicyHash,
+      policy: peakPolicy,
+      sourceIdentityCache: options.sourceIdentityCache,
+    });
+    return inspection.accepted ? [] : [{ segment, reasons: inspection.reasons }];
+  });
+  if (invalid.length === 0) return [];
+
+  const fallbackGaps = new Map<string, PeakShard>();
+  for (const { segment, reasons } of invalid) {
+    delete segment.peak_analysis;
+    fallbackGaps.set(segment.segment_id, {
+      segment_id: segment.segment_id,
+      error: `ungrounded_precision_cache_invalidated:${reasons.join(",")}`,
+    });
+  }
+  atomicWriteJson(options.segmentsPath, options.segmentsJson);
+
+  if (options.opts.skipPeak || options.opts.skipVlm || !options.opts.vlmFn) {
+    return [...fallbackGaps.values()];
+  }
+
+  const invalidAssetIds = new Set(invalid.map(({ segment }) => segment.asset_id));
+  const invalidSegmentIds = new Set(invalid.map(({ segment }) => segment.segment_id));
+  const assetsJson: AssetsJson = {
+    ...options.assetsJson,
+    items: options.assetsJson.items.filter((asset) => invalidAssetIds.has(asset.asset_id)),
+  };
+  const segmentsJson: SegmentsJson = {
+    ...options.segmentsJson,
+    items: options.segmentsJson.items.filter((segment) => invalidSegmentIds.has(segment.segment_id)),
+  };
+  const derivatives = loadExistingDerivativeResults(assetsJson, segmentsJson, options.outputDir);
+  let refreshed: PeakShard[];
+  try {
+    refreshed = await peakMap(
+      assetsJson,
+      segmentsJson,
+      derivatives,
+      options.sourceFileMap,
+      options.opts.vlmFn,
+      peakPolicy,
+      options.outputDir,
+      options.opts.contentHint,
+      { policyHash: peakPolicyHash, sourceIdentityCache: options.sourceIdentityCache },
+    );
+  } catch (error) {
+    console.warn(`[pipeline] Cached precision peak reanalysis degraded: ${error instanceof Error ? error.message : String(error)}`);
+    return [...fallbackGaps.values()];
+  }
+
+  for (const shard of refreshed) {
+    const target = options.segmentsJson.items.find((segment) => segment.segment_id === shard.segment_id);
+    if (target && shard.peak_analysis) target.peak_analysis = shard.peak_analysis;
+    fallbackGaps.set(shard.segment_id, shard);
+  }
+  atomicWriteJson(options.segmentsPath, options.segmentsJson);
+  return [...fallbackGaps.values()];
+}
 
 function checkCache(
   allIngestShards: IngestShard[],
@@ -601,15 +1066,18 @@ function checkCache(
   manifest: CacheManifestEntry[],
   existingAssetsJson: AssetsJson | undefined,
   existingSegmentsJson: SegmentsJson | undefined,
+  sourceIdentityCache: SourceContentIdentityCache,
 ) {
   const cacheHitIds = new Set<string>();
   const cacheHashMap = new Map<string, string>();
+  const sourceContentHashMap = new Map<string, string>();
 
   for (const shard of allIngestShards) {
     const absPath = path.resolve(shard.sourceFile);
-    const stat = fs.statSync(absPath);
-    const hash = computeCacheHash(absPath, stat.size, shard.asset.duration_us);
+    const identity = sourceIdentityCache.resolve(absPath);
+    const hash = computeCacheHash(absPath, identity.sizeBytes, shard.asset.duration_us, identity.sha256);
     cacheHashMap.set(shard.asset.asset_id, hash);
+    sourceContentHashMap.set(shard.asset.asset_id, identity.sha256);
 
     if (useCache && manifest.length > 0) {
       const entry = lookupCache(manifest, hash);
@@ -625,193 +1093,7 @@ function checkCache(
   const newIngestShards = allIngestShards.filter((s) => !cacheHitIds.has(s.asset.asset_id));
   if (cacheHitIds.size > 0) console.log(`[cache] ${cacheHitIds.size} cached, ${newIngestShards.length} new`);
 
-  return { cacheHitIds, cacheHashMap, cachedAssetItems, cachedSegmentItems, newIngestShards };
-}
-
-function restoreSourceFileMap(
-  absProjectDir: string,
-  assetsJson: AssetsJson,
-  sourceFiles: string[],
-): Map<string, string> {
-  const sourceMap = loadSourceMap(absProjectDir);
-  const sourceFilesByBasename = new Map<string, string>();
-  for (const file of sourceFiles) {
-    if (!sourceFilesByBasename.has(path.basename(file))) {
-      sourceFilesByBasename.set(path.basename(file), file);
-    }
-  }
-
-  const result = new Map<string, string>();
-  for (const asset of assetsJson.items) {
-    const entry = sourceMap.entryMap.get(asset.asset_id);
-    const candidates = uniqueStrings([
-      entry?.local_source_path,
-      entry?.source_locator,
-      asset.source_locator ? resolveProjectPath(absProjectDir, asset.source_locator) : undefined,
-      sourceFilesByBasename.get(asset.filename),
-      resolveProjectPath(absProjectDir, asset.filename),
-      resolveProjectPath(absProjectDir, path.join("00_sources", asset.filename)),
-      resolveProjectPath(absProjectDir, path.join("02_media", asset.filename)),
-    ]);
-    const existing = candidates.find((candidate) => fs.existsSync(candidate));
-    const selected = existing ?? candidates[0];
-    if (selected) {
-      result.set(asset.asset_id, selected);
-    }
-    if (!existing) {
-      console.warn(`[pipeline] --vlm-only: source file not found for ${asset.asset_id}; source-dependent fallbacks may be skipped`);
-    }
-  }
-  return result;
-}
-
-function loadExistingDerivativeResults(
-  assetsJson: AssetsJson,
-  segmentsJson: SegmentsJson,
-  outputDir: string,
-): Map<string, DerivativeResults> {
-  const result = new Map<string, DerivativeResults>();
-  const segmentsByAsset = groupSegmentsByAsset(segmentsJson.items);
-
-  for (const asset of assetsJson.items) {
-    const contactSheets: ContactSheetManifest[] = [];
-    for (const contactSheetId of asset.contact_sheet_ids ?? []) {
-      const manifestPath = path.join(outputDir, "contact_sheets", `${contactSheetId}.json`);
-      const manifest = readJsonIfExists<ContactSheetManifest>(manifestPath);
-      if (!manifest) {
-        console.warn(`[pipeline] --vlm-only: missing contact sheet manifest ${manifestPath}; peak detection may skip ${asset.asset_id}`);
-        continue;
-      }
-      if (!derivativeRelPathExists(outputDir, manifest.image_path)) {
-        console.warn(`[pipeline] --vlm-only: missing contact sheet image ${manifest.image_path}; peak detection may skip ${asset.asset_id}`);
-        continue;
-      }
-      contactSheets.push(manifest);
-    }
-
-    const posterPath = readExistingDerivativePath(outputDir, asset.poster_path, `${asset.asset_id} poster`);
-    const waveformPath = readExistingDerivativePath(outputDir, asset.waveform_path, `${asset.asset_id} waveform`);
-    const filmstripPaths = new Map<string, string>();
-    for (const segment of segmentsByAsset.get(asset.asset_id) ?? []) {
-      if (!segment.filmstrip_path) continue;
-      if (!derivativeRelPathExists(outputDir, segment.filmstrip_path)) {
-        console.warn(`[pipeline] --vlm-only: missing filmstrip ${segment.filmstrip_path}; peak detection may use contact sheet fallback`);
-        continue;
-      }
-      filmstripPaths.set(segment.segment_id, segment.filmstrip_path);
-    }
-
-    result.set(asset.asset_id, {
-      contactSheets,
-      posterPath,
-      filmstripPaths,
-      waveformPath,
-    });
-  }
-
-  return result;
-}
-
-function preserveVlmOnlySegmentFields(
-  nextSegmentsJson: SegmentsJson,
-  originalSegmentsJson: SegmentsJson,
-): SegmentsJson {
-  const originalById = new Map(
-    originalSegmentsJson.items.map((segment) => [segment.segment_id, segment]),
-  );
-  return {
-    ...nextSegmentsJson,
-    items: nextSegmentsJson.items.map((segment) => {
-      const original = originalById.get(segment.segment_id);
-      if (!original) return segment;
-      return {
-        ...original,
-        summary: segment.summary,
-        tags: segment.tags,
-        confidence: segment.confidence,
-        provenance: segment.provenance,
-        ...((segment as unknown as Record<string, unknown>).visual_quality ? { visual_quality: (segment as unknown as Record<string, unknown>).visual_quality } : {}),
-        ...(segment.visual_quality_measurements ? { visual_quality_measurements: segment.visual_quality_measurements } : {}),
-      };
-    }),
-  };
-}
-
-function groupSegmentsByAsset(segments: SegmentItem[]): Map<string, SegmentItem[]> {
-  const grouped = new Map<string, SegmentItem[]>();
-  for (const segment of segments) {
-    const current = grouped.get(segment.asset_id);
-    if (current) {
-      current.push(segment);
-    } else {
-      grouped.set(segment.asset_id, [segment]);
-    }
-  }
-  return grouped;
-}
-
-function buildManifestEntriesFromExistingAssets(
-  assets: AssetItem[],
-  sourceFileMap: Map<string, string>,
-  previousManifest: CacheManifestEntry[],
-): CacheManifestEntry[] {
-  const now = new Date().toISOString();
-  const previousByAssetId = new Map(previousManifest.map((entry) => [entry.asset_id, entry]));
-  const entries: CacheManifestEntry[] = [];
-
-  for (const asset of assets) {
-    const sourcePath = sourceFileMap.get(asset.asset_id);
-    if (sourcePath && fs.existsSync(sourcePath)) {
-      const stat = fs.statSync(sourcePath);
-      entries.push({
-        hash: computeCacheHash(sourcePath, stat.size, asset.duration_us),
-        asset_id: asset.asset_id,
-        cached_at: now,
-        source_path: sourcePath,
-      });
-      continue;
-    }
-
-    const previous = previousByAssetId.get(asset.asset_id);
-    if (previous) {
-      entries.push({ ...previous, cached_at: now });
-    } else {
-      console.warn(`[cache] --vlm-only: cache manifest entry skipped for ${asset.asset_id}; source file unavailable`);
-    }
-  }
-
-  return entries;
-}
-
-function readExistingDerivativePath(
-  outputDir: string,
-  relPath: string | undefined,
-  label: string,
-): string | null {
-  if (!relPath) return null;
-  if (derivativeRelPathExists(outputDir, relPath)) return relPath;
-  console.warn(`[pipeline] --vlm-only: missing ${label} derivative ${relPath}`);
-  return null;
-}
-
-function derivativeRelPathExists(outputDir: string, relPath: string | undefined): boolean {
-  if (!relPath) return false;
-  return fs.existsSync(path.isAbsolute(relPath) ? relPath : path.join(outputDir, relPath));
-}
-
-function resolveProjectPath(absProjectDir: string, value: string): string {
-  return path.isAbsolute(value) ? value : path.resolve(absProjectDir, value);
-}
-
-function uniqueStrings(values: Array<string | undefined>): string[] {
-  const result: string[] = [];
-  const seen = new Set<string>();
-  for (const value of values) {
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
-  }
-  return result;
+  return { cacheHitIds, cacheHashMap, sourceContentHashMap, cachedAssetItems, cachedSegmentItems, newIngestShards };
 }
 
 function cloneJson<T>(value: T): T {
@@ -823,10 +1105,12 @@ function finalizeCached(
   cachedAssetItems: import("../connectors/ffprobe.js").AssetItem[],
   cachedSegmentItems: import("../connectors/ffmpeg-segmenter.js").SegmentItem[],
   cacheHashMap: Map<string, string>,
+  sourceContentHashMap: Map<string, string>,
   projectId: string, assetsPath: string, segmentsPath: string,
   gapReportPath: string, manifestPath: string, outputDir: string,
   absProjectDir: string, sourceFiles: string[],
   opts: PipelineOptions, pt: ProgressTracker | undefined,
+  imageSequenceGroups: ReturnType<typeof groupImageSequenceRequests>["groups"],
 ): PipelineResult {
   const assetsJson: AssetsJson = { project_id: projectId, artifact_version: "2.0.0",
     items: [...cachedAssetItems].sort((a, b) => a.asset_id.localeCompare(b.asset_id)) };
@@ -841,15 +1125,40 @@ function finalizeCached(
 
   let mediaSourceMap: MediaSourceMapDoc | undefined;
   let mediaSourceMapPath: string | undefined;
-  if (!opts.skipBgmAnalysis) { runProjectBgmAnalysis({ sourceFiles, projectDir: absProjectDir, projectId }); }
   if (!opts.skipMediaLink) {
-    const mediaLinks = createMediaLinks({ projectPath: absProjectDir, projectId, assets: assetsJson.items, sourceFileMap: allSourceFileMap });
+    const mediaLinks = createMediaLinks({
+      projectPath: absProjectDir,
+      projectId,
+      assets: assetsJson.items,
+      sourceFileMap: allSourceFileMap,
+      imageSequenceGroupsByAssetId: matchImageSequenceGroups(assetsJson.items, imageSequenceGroups),
+    });
     mediaSourceMap = mediaLinks.doc; mediaSourceMapPath = mediaLinks.sourceMapPath;
   }
 
-  saveCacheManifest(manifestPath, buildManifestEntries(allIngestShards, cacheHashMap));
+  saveCacheManifest(manifestPath, buildManifestEntries(allIngestShards, cacheHashMap, sourceContentHashMap));
   pt?.complete(["assets.json", "segments.json"]);
-  return { assetsJson, segmentsJson, gapReport: { version: "1", entries: [] }, outputDir, mediaSourceMap, mediaSourceMapPath };
+  return {
+    assetsJson,
+    segmentsJson,
+    gapReport: { version: "1", entries: [] },
+    outputDir,
+    mediaSourceMap,
+    mediaSourceMapPath,
+    analysisReadiness: buildAnalysisReadiness(initialMarlinReadiness(opts)),
+  };
+}
+
+function matchImageSequenceGroups(
+  assets: AssetItem[],
+  groups: ReturnType<typeof groupImageSequenceRequests>["groups"],
+): Map<string, ReturnType<typeof groupImageSequenceRequests>["groups"][number]> {
+  const byFrameSet = new Map(groups.map((group) => [group.frame_set_content_sha256, group]));
+  return new Map(assets.flatMap((asset) => {
+    const frameSet = asset.image_sequence?.frame_set_content_sha256;
+    const group = frameSet ? byFrameSet.get(frameSet) : undefined;
+    return group ? [[asset.asset_id, group] as const] : [];
+  }));
 }
 
 async function runSttStage(
@@ -1007,7 +1316,10 @@ async function runVlmStage(
   opts: PipelineOptions, policy: Record<string, unknown>,
   assetsJson: AssetsJson, segmentsJson: SegmentsJson,
   existingSegmentsJson: SegmentsJson | undefined,
-  policyHash: string, segmentsPath: string, assetsPath: string,
+  sourceFileMap: Map<string, string>, outputDir: string,
+  _policyHash: string, segmentsPath: string, assetsPath: string,
+  sourceIdentityCache: SourceContentIdentityCache,
+  persistOutputs = true,
 ): Promise<{ assets: AssetsJson; segments: SegmentsJson; vlmShards?: VlmShard[]; vlmSummary?: VlmAssetRunSummary } | null> {
   const vlmPolicy = (policy as Record<string, unknown>)["vlm"] as VlmPolicy | undefined;
   const samplingPolicy = (policy as Record<string, unknown>)["sampling"] as SamplingPolicy | undefined;
@@ -1015,9 +1327,29 @@ async function runVlmStage(
   if (!vlmPolicy || !samplingPolicy) return null;
 
   const minSegDuration = (qualThresholds?.min_segment_duration_us as number) ?? 750_000;
+  const vlmPolicyHash = computeVlmCachePolicyHash(
+    vlmPolicy,
+    samplingPolicy,
+    minSegDuration,
+    opts.contentHint,
+  );
+  const cacheDecisions = new Map<string, import("./stages/vlm.js").VlmCacheDecision>();
   const cachedSegmentIds = opts.vlmOnly
     ? new Set<string>()
-    : hydrateCachedVlmSegments({ currentSegments: segmentsJson.items, cachedSegments: existingSegmentsJson?.items, vlmPolicy, policyHash });
+    : hydrateCachedVlmSegments({
+      currentSegments: segmentsJson.items,
+      cachedSegments: existingSegmentsJson?.items,
+      vlmPolicy,
+      policyHash: vlmPolicyHash,
+      samplingPolicy,
+      minSegmentDurationUs: minSegDuration,
+      sourceFileMap,
+      outputDir,
+      sourceIdentityCache,
+      cacheDecisions,
+      eligibleAssetIds: visualAssetIds(assetsJson),
+      assets: assetsJson.items,
+    });
 
   let vlmShards: VlmShard[] = [];
   let vlmSummary: VlmAssetRunSummary | undefined;
@@ -1026,12 +1358,23 @@ async function runVlmStage(
       assets: assetsJson.items, segments: segmentsJson.items, vlmPolicy, samplingPolicy,
       minSegmentDurationUs: minSegDuration, vlmFn: opts.vlmFn, contentHint: opts.contentHint,
       concurrency: opts.vlmConcurrency, reporter: opts.vlmProgressReporter, cachedSegmentIds,
+      sourceFileMap, outputDir,
+      policyHash: vlmPolicyHash, sourceIdentityCache, cacheDecisions,
     });
     vlmShards = liveVlm.shards; vlmSummary = liveVlm.summary;
   }
 
   if (vlmShards.length > 0 || cachedSegmentIds.size > 0) {
-    const result = vlmReduce(vlmShards, assetsJson, segmentsJson, policyHash, vlmPolicy.response_format, segmentsPath, assetsPath);
+    const result = vlmReduce(
+      vlmShards,
+      assetsJson,
+      segmentsJson,
+      vlmPolicyHash,
+      vlmPolicy.response_format,
+      segmentsPath,
+      assetsPath,
+      persistOutputs,
+    );
     return { assets: result.assets, segments: result.segments, vlmShards, vlmSummary };
   }
   return { assets: assetsJson, segments: segmentsJson, vlmShards, vlmSummary };
@@ -1044,6 +1387,7 @@ async function runAppraiserPipelineStage(
   outputDir: string,
   segmentsPath: string,
   policyHash: string,
+  eligibleAssetIds: ReadonlySet<string>,
 ): Promise<SegmentsJson> {
   console.log("[pipeline] Stage 10.5/12 editorial appraiser starting");
   const summary = await runAppraiserStage({
@@ -1056,6 +1400,7 @@ async function runAppraiserPipelineStage(
     model: opts.appraiserModel,
     concurrency: opts.vlmConcurrency ?? DEFAULT_APPRAISER_CONCURRENCY,
     appraiserFn: opts.appraiserFn,
+    eligibleAssetIds,
   });
 
   if (!summary.skippedNoRuntime) {
@@ -1077,6 +1422,9 @@ async function runVisualQualityPipelineStage(
   sourceFileMap: Map<string, string>,
   segmentsPath: string,
   policyHash: string,
+  assetsJson: AssetsJson,
+  analyzeFn?: VisualQualityAnalyzeFn,
+  eligibleAssetIds?: ReadonlySet<string>,
 ): Promise<SegmentsJson> {
   console.log("[pipeline] Stage 10.6/12 ffmpeg visual quality measurements starting");
   const result = await runVisualQualityMeasurementStage({
@@ -1084,6 +1432,9 @@ async function runVisualQualityPipelineStage(
     sourceFileMap,
     segmentsOutputPath: segmentsPath,
     policyHash,
+    analyzeFn,
+    eligibleAssetIds,
+    assetMediaKinds: new Map(assetsJson.items.map((asset) => [asset.asset_id, asset.media_kind ?? "unknown"])),
   });
   const { summary } = result;
   console.log(
@@ -1100,23 +1451,12 @@ async function runVisualQualityPipelineStage(
   return result.segmentsJson;
 }
 
-async function runMarlinStage(
-  opts: PipelineOptions,
-  projectId: string,
-  absProjectDir: string,
-  sourceFiles: string[],
-  segmentsPath: string,
-): Promise<SegmentsJson | undefined> {
-  if (!opts.marlinFn) return undefined;
-
-  console.log("[pipeline] Stage 8.5/12 Marlin reporter starting");
-  await runMarlinAnalysis({
-    projectDir: absProjectDir,
-    projectId,
-    sourceFiles,
-    marlinFn: opts.marlinFn,
-    model: opts.marlinModel,
-    queries: opts.marlinQueries,
-  });
-  return readJsonIfExists<SegmentsJson>(segmentsPath);
+function expectedSourceHashes(
+  shards: IngestShard[],
+  sourceContentHashMap: Map<string, string>,
+): Map<string, string> {
+  return new Map(shards.flatMap((shard) => {
+    const hash = sourceContentHashMap.get(shard.asset.asset_id);
+    return hash ? [[path.resolve(shard.sourceFile), hash] as const] : [];
+  }));
 }

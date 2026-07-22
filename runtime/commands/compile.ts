@@ -12,10 +12,12 @@ import { compile, type CompileResult, type ReviewPatch } from "../compiler/index
 import type { ProjectState } from "../state/reconcile.js";
 import { ProgressTracker } from "../progress.js";
 import { confirmBriefDefaults, type BriefConfirmationOptions } from "../brief-confirmation.js";
+import { inferExistingTimelineRate } from "../compiler/existing-timeline.js";
 
 export interface CompileCommandOptions {
   createdAt?: string;
   fpsNum?: number;
+  fpsDen?: number;
   sourceMapPath?: string;
   reviewPatch?: ReviewPatch;
   confirmations?: BriefConfirmationOptions;
@@ -77,10 +79,14 @@ export async function runCompilePhase(
 
   try {
     await confirmBriefDefaults(ctx.projectDir, options?.confirmations);
+    const existingRate = options?.fpsNum === undefined
+      ? inferExistingTimelineRate(ctx.projectDir)
+      : undefined;
     const compileResult = compile({
       projectPath: ctx.projectDir,
       createdAt: options?.createdAt ?? inferCreatedAt(ctx.projectDir),
-      fpsNum: options?.fpsNum,
+      fpsNum: options?.fpsNum ?? existingRate?.fpsNum,
+      fpsDen: options?.fpsNum !== undefined ? options.fpsDen : existingRate?.fpsDen,
       sourceMapPath: options?.sourceMapPath,
       reviewPatch: options?.reviewPatch,
     });

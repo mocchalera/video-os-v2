@@ -37,6 +37,10 @@ import {
 import { atomicWriteJson } from "./_util.js";
 import type { SegmentsJson } from "../pipeline-types.js";
 import { mapWithConcurrency } from "./vlm.js";
+import {
+  reduceEditorialObservation,
+  type ObservationContribution,
+} from "./editorial-observation.js";
 
 export const DEFAULT_APPRAISER_CONCURRENCY = 3;
 export const APPRAISER_FRAME_CACHE_VERSION = "appraiser-frame-v1";
@@ -87,6 +91,7 @@ export interface AppraiserStageOptions {
   completeEditorialJsonImpl?: CompleteEditorialJsonLike;
   editorialLlmOptions?: EditorialLlmConnectorOptions;
   execFileImpl?: ExecFileLike;
+  eligibleAssetIds?: ReadonlySet<string>;
 }
 
 export interface AppraiserSegmentFailure {
@@ -298,6 +303,7 @@ export async function runAppraiserStage(
       options.segmentsJson,
       reason,
       options.policyHash,
+      options.eligibleAssetIds,
     );
     if (changed) {
       atomicWriteJson(options.segmentsOutputPath, options.segmentsJson);
@@ -307,7 +313,8 @@ export async function runAppraiserStage(
   }
 
   const candidates = options.segmentsJson.items.filter((segment) =>
-    options.sourceFileMap.has(segment.asset_id)
+    options.sourceFileMap.has(segment.asset_id) &&
+    (!options.eligibleAssetIds || options.eligibleAssetIds.has(segment.asset_id))
   );
   summary.skippedSegments = options.segmentsJson.items.length - candidates.length;
   if (candidates.length === 0) {
@@ -439,10 +446,10 @@ export async function runAppraiserStage(
 export function mergeAppraiserVisualQuality(
   current: CanonicalVisualQuality | undefined,
   appraiserQuality: AppraiserVisualQuality,
-  visualQualityMeasurements?: VisualQualityMeasurements,
+  _visualQualityMeasurements?: VisualQualityMeasurements,
 ): CanonicalVisualQuality {
   const currentLabels = current?.labels;
-  const motionQuality = measuredMotionQuality(visualQualityMeasurements);
+  const motionQuality = current?.scores.motion_quality;
   const scoreMeasurements: Record<string, VisualQualityScoreMeasurement> = {
     light_quality: {
       measured: true,
@@ -461,16 +468,11 @@ export function mergeAppraiserVisualQuality(
       measured: true,
       source: "appraiser.visual_quality.composition_score",
     },
-    motion_quality: motionQuality === undefined
-      ? {
-        measured: false,
-        source: "visual_quality_measurements",
-        reason: "motion_metric_unavailable",
-      }
-      : {
-        measured: true,
-        source: "visual_quality_measurements.shake.average_energy",
-      },
+    motion_quality: {
+      measured: false,
+      source: "appraiser",
+      reason: "intent_relative_quality_not_inferred_from_motion_amount",
+    },
   };
   return {
     scores: {
@@ -588,10 +590,12 @@ function applyAppraiserSkipped(
   segmentsJson: SegmentsJson,
   reason: string,
   policyHash: string,
+  eligibleAssetIds?: ReadonlySet<string>,
 ): boolean {
   let changed = false;
   const runtimeRecord = skippedRuntimeRecord(reason);
   for (const segment of segmentsJson.items as SegmentWithAppraisal[]) {
+    if (eligibleAssetIds && !eligibleAssetIds.has(segment.asset_id)) continue;
     segment.visual_appraisal = skippedVisualAppraisal(reason, runtimeRecord);
     segment.confidence = {
       ...segment.confidence,
@@ -664,6 +668,16 @@ function applyAppraiserShards(
       shard.result.visual_quality,
       segment.visual_quality_measurements,
     );
+    segment.editorial_observation = reduceEditorialObservation(
+      segment,
+      segment.editorial_observation,
+      [appraiserObservationContribution(
+        shard,
+        shard.result,
+        shard.frame,
+        shard.promptHash,
+      )],
+    );
 
     segment.confidence = {
       ...segment.confidence,
@@ -690,6 +704,48 @@ function applyAppraiserShards(
   }
 
   return changed;
+}
+
+function appraiserObservationContribution(
+  shard: AppraiserShard,
+  result: AppraiserResult,
+  frame: ExtractedAppraiserFrame,
+  promptHash: string,
+): ObservationContribution {
+  const evidenceRef = `appraiser:${shard.segment_id}:${shard.requestHash ?? promptHash}:frame`;
+  const hasText = result.extracted_text.some((item) => item.text.trim().length > 0);
+  return {
+    status: "partial",
+    values: { text_presence: hasText ? "present" : "unknown" },
+    confidence: {
+      text: {
+        score: hasText
+          ? Math.max(...result.extracted_text.map((item) => item.confidence))
+          : 0.5,
+        evidence_refs: [evidenceRef],
+      },
+    },
+    evidence: [{
+      evidence_ref: evidenceRef,
+      producer: "appraiser",
+      evidence_type: "appraiser_frame",
+      fields: ["text_presence"],
+      artifact_ref: frame.framePath,
+      frame_us: frame.frameUs,
+      observed_value: hasText ? "present" : "unknown",
+    }],
+    ...(!hasText ? { warnings: ["appraiser_single_frame_cannot_prove_text_absence"] } : {}),
+    producer: {
+      producer: "appraiser",
+      producer_version: APPRAISER_CONNECTOR_VERSION,
+      model: shard.model,
+      runtime: shard.runtimeRecord?.runtime ?? shard.model,
+      prompt_hash: promptHash,
+      actual_verified_frame_count: 1,
+      evidence_refs: [evidenceRef],
+      ...(shard.requestHash ? { cache_identity: shard.requestHash } : {}),
+    },
+  };
 }
 
 function buildAppraiserProvenance(options: {
@@ -757,17 +813,6 @@ function skippedRuntimeRecord(reason: string): DecisionRuntimeRecord {
     ],
     fallback_warnings: [reason],
   };
-}
-
-function measuredMotionQuality(
-  measurements: VisualQualityMeasurements | undefined,
-): number | undefined {
-  const value = measurements?.metrics_measured.shake === true
-    ? measurements.shake?.average_energy
-    : undefined;
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(0, Math.min(1, value))
-    : undefined;
 }
 
 function hasReusableAppraisal(
