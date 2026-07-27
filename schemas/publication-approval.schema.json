@@ -6,7 +6,9 @@
   "required": ["version", "project_id", "created_at", "canonical_video", "approvals", "destinations"],
   "additionalProperties": false,
   "properties": {
-    "version": { "const": "publication-approval/v1" },
+    "version": {
+      "enum": ["publication-approval/v1", "publication-approval/v2"]
+    },
     "project_id": { "type": "string", "minLength": 1 },
     "created_at": { "type": "string", "format": "date-time" },
     "canonical_video": {
@@ -34,6 +36,20 @@
       "items": { "$ref": "#/$defs/destination" }
     }
   },
+  "allOf": [{
+    "if": {
+      "properties": {
+        "version": { "const": "publication-approval/v2" }
+      }
+    },
+    "then": {
+      "properties": {
+        "destinations": {
+          "items": { "$ref": "#/$defs/destinationV2" }
+        }
+      }
+    }
+  }],
   "$defs": {
     "approval": {
       "type": "object",
@@ -55,8 +71,29 @@
         "platform": { "type": "string", "enum": ["youtube", "vimeo", "instagram", "tiktok", "internal"] },
         "visibility": { "type": "string", "enum": ["private", "unlisted", "public", "workspace_only"] },
         "account": { "type": "string", "minLength": 1 },
+        "channel_id": { "type": "string", "minLength": 1 },
+        "metadata_sha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
         "notes": { "type": "string" }
       }
+    },
+    "destinationV2": {
+      "allOf": [
+        { "$ref": "#/$defs/destination" },
+        {
+          "if": {
+            "required": ["platform"],
+            "properties": {
+              "platform": { "const": "youtube" }
+            }
+          },
+          "then": {
+            "required": ["channel_id", "metadata_sha256"]
+          }
+        }
+      ]
     }
   }
 }

@@ -29,6 +29,37 @@
   "allOf": [
     {
       "if": {
+        "properties": { "version": { "const": "1.1.0" } },
+        "required": ["version"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "required": ["final_video", "qa_report", "derived_video_provenance"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "version": { "const": "1.2.0" } },
+        "required": ["version"]
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "required": [
+              "final_video",
+              "qa_report",
+              "derived_video_provenance",
+              "layout_snapshot"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
         "properties": { "source_of_truth": { "const": "engine_render" } },
         "required": ["source_of_truth"]
       },
@@ -38,7 +69,8 @@
             "required": [
               "editorial_timeline_hash",
               "source_inputs_hash",
-              "source_inputs_attestation_status"
+              "source_inputs_attestation_status",
+              "render"
             ]
           }
         }
@@ -59,7 +91,9 @@
           "type": "array",
           "items": { "$ref": "#/$defs/captionArtifactRef" }
         },
-        "qa_report": { "$ref": "#/$defs/artifactRef" }
+        "qa_report": { "$ref": "#/$defs/artifactRef" },
+        "derived_video_provenance": { "$ref": "#/$defs/artifactRef" },
+        "layout_snapshot": { "$ref": "#/$defs/artifactRef" }
       },
       "additionalProperties": false
     },
@@ -100,6 +134,105 @@
           "enum": ["verified", "live_only", "not_applicable"]
         },
         "source_inputs_freshness_reason": { "type": "string" }
+        ,
+        "render": { "$ref": "#/$defs/renderProvenance" }
+      },
+      "additionalProperties": false
+    },
+    "renderProvenance": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "route_receipt",
+        "renderer_versions",
+        "layer_receipts",
+        "delivery_execution",
+        "inputs",
+        "outputs"
+      ],
+      "properties": {
+        "contract_version": { "const": "render-provenance/v1" },
+        "route_receipt": { "$ref": "#/$defs/artifactRef" },
+        "renderer_versions": {
+          "type": "object",
+          "required": ["ffmpeg"],
+          "properties": {
+            "ffmpeg": { "type": "string", "minLength": 1 },
+            "hyperframes": { "type": "string", "minLength": 1 },
+            "remotion": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "layer_receipts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["renderer", "path", "sha256"],
+            "properties": {
+              "renderer": { "enum": ["hyperframes", "remotion"] },
+              "path": { "type": "string" },
+              "sha256": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "font_receipt": { "$ref": "#/$defs/artifactRef" },
+        "delivery_execution": {
+          "type": "object",
+          "required": [
+            "definition",
+            "measurement_source",
+            "lossy_video_encode_passes",
+            "operations"
+          ],
+          "properties": {
+            "definition": { "const": "sequential_h264_generations/v1" },
+            "measurement_source": { "enum": ["runtime_trace", "execution_plan"] },
+            "lossy_video_encode_passes": { "type": "integer", "minimum": 1 },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["id", "kind"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "kind": {
+                    "enum": [
+                      "lossy_video_generation",
+                      "stream_copy",
+                      "decode",
+                      "alpha_intermediate",
+                      "lossless_intermediate"
+                    ]
+                  },
+                  "codec": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "inputs": { "$ref": "#/$defs/renderInputs" },
+        "outputs": { "$ref": "#/$defs/renderOutputs" }
+      },
+      "additionalProperties": false
+    },
+    "renderInputs": {
+      "type": "object",
+      "required": ["timeline"],
+      "properties": {
+        "timeline": { "$ref": "#/$defs/artifactRef" },
+        "caption_approval": { "$ref": "#/$defs/artifactRef" }
+      },
+      "additionalProperties": false
+    },
+    "renderOutputs": {
+      "type": "object",
+      "required": ["final_video"],
+      "properties": {
+        "final_video": { "$ref": "#/$defs/artifactRef" }
       },
       "additionalProperties": false
     }

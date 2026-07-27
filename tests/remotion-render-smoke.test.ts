@@ -43,6 +43,8 @@ async function createBlackSource(outputPath: string): Promise<void> {
 async function probeVideo(outputPath: string): Promise<{
   codec_name: string;
   pix_fmt: string;
+  r_frame_rate: string;
+  avg_frame_rate: string;
 }> {
   const { stdout } = await execFileAsync("ffprobe", [
     "-v",
@@ -50,24 +52,31 @@ async function probeVideo(outputPath: string): Promise<{
     "-select_streams",
     "v:0",
     "-show_entries",
-    "stream=codec_name,pix_fmt",
+    "stream=codec_name,pix_fmt,r_frame_rate,avg_frame_rate",
     "-of",
     "json",
     outputPath,
   ]);
 
   const parsed = JSON.parse(stdout) as {
-    streams?: Array<{ codec_name?: string; pix_fmt?: string }>;
+    streams?: Array<{
+      codec_name?: string;
+      pix_fmt?: string;
+      r_frame_rate?: string;
+      avg_frame_rate?: string;
+    }>;
   };
   const stream = parsed.streams?.[0];
 
-  if (!stream?.codec_name || !stream.pix_fmt) {
+  if (!stream?.codec_name || !stream.pix_fmt || !stream.r_frame_rate || !stream.avg_frame_rate) {
     throw new Error(`ffprobe did not return video codec details for ${outputPath}`);
   }
 
   return {
     codec_name: stream.codec_name,
     pix_fmt: stream.pix_fmt,
+    r_frame_rate: stream.r_frame_rate,
+    avg_frame_rate: stream.avg_frame_rate,
   };
 }
 
@@ -113,8 +122,8 @@ function writeTimeline(timelinePath: string): TimelineIR {
     created_at: "2026-04-27T00:00:00.000Z",
     sequence: {
       name: "Remotion Smoke",
-      fps_num: 24,
-      fps_den: 1,
+      fps_num: 30_000,
+      fps_den: 1_001,
       width: 320,
       height: 568,
       start_frame: 0,
@@ -302,7 +311,9 @@ describeIf("Remotion renderer smoke", () => {
       expect(result).toMatchObject({
         assemblyPath: outputPath,
         durationInFrames: 36,
-        fps: 24,
+        fps: 30_000 / 1_001,
+        fpsNum: 30_000,
+        fpsDen: 1_001,
         width: timeline.sequence.width,
         height: timeline.sequence.height,
         font: {
@@ -318,6 +329,8 @@ describeIf("Remotion renderer smoke", () => {
       const stream = await probeVideo(outputPath);
       expect(stream.codec_name).toBe("h264");
       expect(stream.pix_fmt).toBe("yuv420p");
+      expect(stream.r_frame_rate).toBe("30000/1001");
+      expect(stream.avg_frame_rate).toBe("30000/1001");
       expect(await probeAudioCodec(outputPath)).toBe("aac");
       expect(await probeFrameLuma(outputPath, 18)).toBeGreaterThan(16.1);
       expect(await probeFrameLuma(outputPath, 30)).toBeGreaterThan(16.1);

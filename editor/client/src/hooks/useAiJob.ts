@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { JobPhase } from '@shared/ai-job-contract';
 
 // ── Types ───────────────────────────────────────────────────────
 
-export type AiJobPhase = 'compile' | 'review' | 'render';
+export type AiJobPhase = JobPhase;
 export type AiJobStatus = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed';
 
 export interface AiJobProgress {
@@ -43,6 +44,7 @@ export function useAiJob(
     onCompileComplete?: () => void;
     onReviewComplete?: () => void;
     onRenderComplete?: () => void;
+    onCaptionFinalizeComplete?: () => void;
     onError?: (phase: AiJobPhase, error: string) => void;
     onConflict?: (remoteRevision: string) => void;
   },
@@ -105,6 +107,9 @@ export function useAiJob(
             break;
           case 'render':
             callbacksRef.current?.onRenderComplete?.();
+            break;
+          case 'caption-finalize':
+            callbacksRef.current?.onCaptionFinalizeComplete?.();
             break;
         }
       } else if (job.status === 'failed' || job.status === 'blocked') {

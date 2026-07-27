@@ -186,8 +186,74 @@
         "render_meta_path": {
           "type": "string"
         },
+        "deterministic_scan": {
+          "$ref": "#/$defs/deterministicOutputQA"
+        },
         "marlin_report_path": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "deterministicOutputQA": {
+      "type": "object",
+      "required": ["status", "issues"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["verified", "blocked", "incomplete"]
+        },
+        "duration_sec": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "scanned_duration_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/deterministicOutputQAIssue"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "deterministicOutputQAIssue": {
+      "type": "object",
+      "required": ["kind", "severity", "detail"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["black", "freeze", "inset", "dimensions", "decode"]
+        },
+        "severity": {
+          "const": "blocking"
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_sec": {
+          "type": "number",
+          "minimum": 0
+        },
+        "end_sec": {
+          "type": "number",
+          "minimum": 0
         }
       },
       "additionalProperties": false

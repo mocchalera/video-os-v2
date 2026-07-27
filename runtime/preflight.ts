@@ -23,6 +23,31 @@ export interface PreflightResult {
   discovery: SourceDiscoveryResult;
 }
 
+export interface PreflightCommandOptions {
+  encoding: "utf-8";
+  timeout: number;
+}
+
+export type PreflightCommandRunner = (
+  command: string,
+  args: string[],
+  options: PreflightCommandOptions,
+) => string;
+
+export interface DiskSpaceCheckOptions {
+  sourceBytes?: number;
+  availableBytes?: number;
+  peakMultiplier?: number;
+  reserveBytes?: number;
+  execFileSyncImpl?: PreflightCommandRunner;
+}
+
+const DEFAULT_PEAK_DISK_MULTIPLIER = 3;
+const DEFAULT_DISK_RESERVE_BYTES = 512 * 1024 * 1024;
+
+const defaultCommandRunner: PreflightCommandRunner = (command, args, options) =>
+  execFileSync(command, args, options);
+
 export function parsePreflightArgs(argv: string[]): {
   sourceFolder: string;
   projectId: string | undefined;
@@ -82,9 +107,31 @@ export function checkApiKeys(): CheckResult[] {
   return results;
 }
 
-export function checkBinary(name: string): CheckResult {
+export function checkNodeRuntime(
+  version = process.versions.node,
+  requiredMajor = 22,
+): CheckResult {
+  const major = Number.parseInt(version.split(".")[0] ?? "", 10);
+  if (major === requiredMajor) {
+    return {
+      name: "node_runtime",
+      status: "pass",
+      detail: `Node.js ${version} matches required ${requiredMajor}.x`,
+    };
+  }
+  return {
+    name: "node_runtime",
+    status: "fail",
+    detail: `Node.js ${version || "unknown"} is unsupported; required ${requiredMajor}.x`,
+  };
+}
+
+export function checkBinary(
+  name: string,
+  execFileSyncImpl: PreflightCommandRunner = defaultCommandRunner,
+): CheckResult {
   try {
-    const raw = execSync(`${name} -version 2>&1`, {
+    const raw = execFileSyncImpl(name, ["-version"], {
       timeout: 5000,
       encoding: "utf-8",
     });
@@ -96,28 +143,95 @@ export function checkBinary(name: string): CheckResult {
       status: "pass",
       detail: `found — ${version}`,
     };
-  } catch {
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException & {
+      stderr?: string | Buffer;
+    };
+    if (error.code === "ENOENT") {
+      return {
+        name,
+        status: "fail",
+        detail: `not found in PATH — install ${name} (https://ffmpeg.org)`,
+      };
+    }
+    const stderr = typeof error.stderr === "string"
+      ? error.stderr
+      : error.stderr?.toString("utf-8");
+    const detail = (stderr || error.message || "unknown startup error")
+      .trim()
+      .split("\n")
+      .slice(0, 3)
+      .join(" ");
     return {
       name,
       status: "fail",
-      detail: `not found in PATH — install ${name} (https://ffmpeg.org)`,
+      detail: `found but failed to start — ${detail}`,
     };
   }
 }
 
-export function checkDiskSpace(sourceFolderPath: string): CheckResult {
+export function checkFfmpegCaptionFilters(
+  execFileSyncImpl: PreflightCommandRunner = defaultCommandRunner,
+): CheckResult {
   try {
-    const folderSize = getDirSize(sourceFolderPath);
-    const requiredBytes = folderSize * 2;
-    const dfOut = execFileSync("df", ["-k", sourceFolderPath], {
-      encoding: "utf-8",
+    const raw = execFileSyncImpl("ffmpeg", ["-hide_banner", "-filters"], {
       timeout: 5000,
+      encoding: "utf-8",
     });
-    const lines = dfOut.trim().split("\n");
-    const dataLine = lines[lines.length - 1];
-    const cols = dataLine?.split(/\s+/) ?? [];
-    const availKb = parseInt(cols[3] ?? "0", 10);
-    const availBytes = availKb * 1024;
+    const hasSubtitles =
+      /^[ \t]*[.A-Z| ]{3}[ \t]+subtitles[ \t]+/m.test(raw);
+    const hasAss = /^[ \t]*[.A-Z| ]{3}[ \t]+ass[ \t]+/m.test(raw);
+    if (hasSubtitles && hasAss) {
+      return {
+        name: "ffmpeg_caption_filters",
+        status: "pass",
+        detail: "ffmpeg subtitles and ass filters are available",
+      };
+    }
+    const missing = [
+      ...(hasSubtitles ? [] : ["subtitles"]),
+      ...(hasAss ? [] : ["ass"]),
+    ];
+    return {
+      name: "ffmpeg_caption_filters",
+      status: "fail",
+      detail: `ffmpeg is missing required caption filter(s): ${missing.join(", ")}`,
+    };
+  } catch (err) {
+    const error = err as Error & { stderr?: string | Buffer };
+    const stderr = typeof error.stderr === "string"
+      ? error.stderr
+      : error.stderr?.toString("utf-8");
+    return {
+      name: "ffmpeg_caption_filters",
+      status: "fail",
+      detail: `could not inspect ffmpeg caption filters — ${(stderr || error.message).trim()}`,
+    };
+  }
+}
+
+export function checkDiskSpace(
+  sourceFolderPath: string,
+  options: DiskSpaceCheckOptions = {},
+): CheckResult {
+  try {
+    const folderSize = options.sourceBytes ?? getDirSize(sourceFolderPath);
+    const multiplier = options.peakMultiplier ?? DEFAULT_PEAK_DISK_MULTIPLIER;
+    const reserveBytes = options.reserveBytes ?? DEFAULT_DISK_RESERVE_BYTES;
+    const requiredBytes = Math.ceil(folderSize * multiplier + reserveBytes);
+    let availBytes = options.availableBytes;
+    if (availBytes === undefined) {
+      const runner = options.execFileSyncImpl ?? defaultCommandRunner;
+      const dfOut = runner("df", ["-k", sourceFolderPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
+      const lines = dfOut.trim().split("\n");
+      const dataLine = lines[lines.length - 1];
+      const cols = dataLine?.split(/\s+/) ?? [];
+      const availKb = parseInt(cols[3] ?? "0", 10);
+      availBytes = availKb * 1024;
+    }
 
     const folderMB = (folderSize / (1024 * 1024)).toFixed(1);
     const requiredMB = (requiredBytes / (1024 * 1024)).toFixed(1);
@@ -127,14 +241,14 @@ export function checkDiskSpace(sourceFolderPath: string): CheckResult {
       return {
         name: "disk_space",
         status: "pass",
-        detail: `${availMB} MB available (need ${requiredMB} MB = 2× source ${folderMB} MB)`,
+        detail: `${availMB} MB available (need ${requiredMB} MB = ${multiplier}× source ${folderMB} MB + ${(reserveBytes / (1024 * 1024)).toFixed(0)} MB reserve)`,
       };
     }
 
     return {
       name: "disk_space",
       status: "fail",
-      detail: `only ${availMB} MB available, need ${requiredMB} MB (2× source ${folderMB} MB)`,
+      detail: `only ${availMB} MB available, need ${requiredMB} MB (${multiplier}× source ${folderMB} MB + ${(reserveBytes / (1024 * 1024)).toFixed(0)} MB reserve)`,
     };
   } catch (err) {
     return {
@@ -271,8 +385,19 @@ export function runPreflight(
 ): PreflightResult {
   const checks: CheckResult[] = [];
   checks.push(...checkApiKeys());
-  checks.push(checkBinary("ffmpeg"));
+  checks.push(checkNodeRuntime());
+  const ffmpegCheck = checkBinary("ffmpeg");
+  checks.push(ffmpegCheck);
   checks.push(checkBinary("ffprobe"));
+  if (ffmpegCheck.status === "pass") {
+    checks.push(checkFfmpegCaptionFilters());
+  } else {
+    checks.push({
+      name: "ffmpeg_caption_filters",
+      status: "fail",
+      detail: "not checked because ffmpeg is unavailable",
+    });
+  }
   const sourceLocators = Array.isArray(sourceInput) ? sourceInput : [sourceInput];
   const sourceResult = checkSourceInputs(
     sourceLocators,
@@ -284,7 +409,12 @@ export function runPreflight(
   const folderCheck = sourceResult.check;
   if (folderCheck?.status !== "fail") {
     const diskTarget = resolveDiskTarget(sourceLocators);
-    if (diskTarget) checks.push(checkDiskSpace(diskTarget));
+    if (diskTarget) {
+      const sourceBytes = sourceResult.discovery.requests
+        .filter((request) => request.disposition === "candidate")
+        .reduce((sum, request) => sum + (request.size_bytes ?? 0), 0);
+      checks.push(checkDiskSpace(diskTarget, { sourceBytes }));
+    }
   }
 
   checks.push(checkShellCompat());

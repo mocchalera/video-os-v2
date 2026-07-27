@@ -16,8 +16,18 @@ import {
   type CaptionPolicy,
 } from "../runtime/caption/segmenter.js";
 import { generateSrt } from "../runtime/render/pipeline.js";
-import { buildAssForceStyle, DEFAULT_CAPTION_STYLE_PRESET } from "../editor/shared/caption-style-tokens.js";
+import {
+  buildAssDocument,
+  DEFAULT_CAPTION_STYLE_PRESET,
+  parseSrtCues,
+} from "../editor/shared/caption-style-tokens.js";
 import { resolveBundledFontPaths } from "../runtime/fonts/bundled-font.js";
+import {
+  frameRateRatio,
+  frameRateValue,
+  framesToMilliseconds,
+  rationalFrameRate,
+} from "../editor/shared/rational-timebase.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,11 +48,15 @@ const transcript = JSON.parse(
   ),
 );
 
-const fps = timeline.sequence?.fps_num ?? 24;
+const frameRate = rationalFrameRate(
+  timeline.sequence?.fps_num ?? 24,
+  timeline.sequence?.fps_den ?? 1,
+);
+const fps = frameRateValue(frameRate);
 const seqWidth = timeline.sequence?.width ?? 1920;
 const seqHeight = timeline.sequence?.height ?? 1080;
 
-console.log(`Timeline: ${timeline.tracks.audio[0].clips.length} A1 clips, fps=${fps}`);
+console.log(`Timeline: ${timeline.tracks.audio[0].clips.length} A1 clips, fps=${frameRateRatio(frameRate)}`);
 console.log(`Transcript: ${transcript.items.length} items`);
 
 // Count speakers
@@ -82,9 +96,19 @@ console.log(`\nGenerated ${captionSource.speech_captions.length} captions (after
 
 // ── 3. Generate SRT ──────────────────────────────────────────────────
 
-const srtContent = generateSrt(captionSource.speech_captions, fps);
+const srtContent = generateSrt(captionSource.speech_captions, frameRate);
 const srtPath = path.join(OUTPUT_DIR, "captions.srt");
 fs.writeFileSync(srtPath, srtContent, "utf-8");
+const assPath = path.join(OUTPUT_DIR, "captions.ass");
+fs.writeFileSync(
+  assPath,
+  buildAssDocument(parseSrtCues(srtContent), DEFAULT_CAPTION_STYLE_PRESET, {
+    width: seqWidth,
+    height: seqHeight,
+    fps,
+  }),
+  "utf-8",
+);
 
 console.log(`\nSRT written to: ${srtPath}`);
 console.log("--- SRT Content ---");
@@ -95,9 +119,10 @@ console.log("--- End SRT ---");
 
 console.log("\n=== Caption Report ===");
 for (const cap of captionSource.speech_captions) {
-  const startMs = Math.round((cap.timeline_in_frame / fps) * 1000);
-  const endMs = Math.round(
-    ((cap.timeline_in_frame + cap.timeline_duration_frames) / fps) * 1000,
+  const startMs = framesToMilliseconds(cap.timeline_in_frame, frameRate);
+  const endMs = framesToMilliseconds(
+    cap.timeline_in_frame + cap.timeline_duration_frames,
+    frameRate,
   );
   console.log(
     `  ${cap.caption_id}: ${startMs}ms-${endMs}ms | CPS=${cap.metrics.cps} | "${cap.text}"`,
@@ -189,7 +214,7 @@ try {
 
 // Step 2: Burn captions with subtitles filter + loudnorm
 const finalPath = path.join(OUTPUT_DIR, "final_v003.mp4");
-const escapedSrt = srtPath.replace(/:/g, "\\:").replace(/\\/g, "\\\\");
+const escapedAss = assPath.replace(/:/g, "\\:").replace(/\\/g, "\\\\");
 const escapedFontsDir = resolveBundledFontPaths().fontsDir
   .replace(/:/g, "\\:")
   .replace(/\\/g, "\\\\");
@@ -199,7 +224,7 @@ try {
   execFileSync("ffmpeg", [
     "-y",
     "-i", rawEditPath,
-    "-vf", `subtitles=filename='${escapedSrt}':fontsdir='${escapedFontsDir}':force_style='${buildAssForceStyle(DEFAULT_CAPTION_STYLE_PRESET, { width: seqWidth, height: seqHeight, fps })}'`,
+    "-vf", `subtitles=filename='${escapedAss}':fontsdir='${escapedFontsDir}'`,
     "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
     "-c:v", "libx264", "-preset", "medium", "-crf", "18",
     "-c:a", "aac", "-b:a", "192k",

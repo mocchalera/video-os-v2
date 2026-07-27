@@ -7,7 +7,8 @@ const { execFileMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
 }));
 
-vi.mock("node:child_process", () => ({
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...await importOriginal<typeof import("node:child_process")>(),
   execFile: execFileMock,
 }));
 
@@ -144,6 +145,144 @@ describe("render pipeline aspect ratio fitting", () => {
     expect(readTimelineDurationSeconds(timelinePath)).toBe(8);
   });
 
+  it("uses timeline rational fps for 30-minute mux and subtitle boundaries", async () => {
+    const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
+    const approvalPath = path.join(tmpDir, "07_package", "caption_approval.json");
+    const outputDir = path.join(tmpDir, "07_package");
+    const finalFrame = 53_946;
+
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.mkdirSync(path.dirname(approvalPath), { recursive: true });
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: {
+        fps_num: 30_000,
+        fps_den: 1_001,
+        width: 1_920,
+        height: 1_080,
+      },
+      tracks: {
+        video: [{
+          track_id: "V1",
+          kind: "video",
+          clips: [{
+            clip_id: "C1",
+            timeline_in_frame: 0,
+            timeline_duration_frames: finalFrame,
+          }],
+        }],
+        audio: [{
+          track_id: "A1",
+          kind: "audio",
+          clips: [{
+            clip_id: "A1C1",
+            asset_id: "AST_AUDIO",
+            src_in_us: 0,
+            src_out_us: 1_800_000_000,
+            timeline_in_frame: 0,
+            timeline_duration_frames: finalFrame,
+            role: "dialogue",
+          }],
+        }],
+      },
+    }));
+    fs.writeFileSync(approvalPath, JSON.stringify({
+      speech_captions: [{
+        timeline_in_frame: finalFrame - 1,
+        timeline_duration_frames: 1,
+        text: "end",
+      }],
+    }));
+    fs.writeFileSync(assemblyPath, "stub-assembly");
+
+    await runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      captionApprovalPath: approvalPath,
+      captionPolicy: {
+        language: "en",
+        delivery_mode: "sidecar",
+        source: "authored",
+        styling_class: "clean-lower-third",
+      },
+      outputDir,
+      // Legacy caller value must not override timeline.sequence.
+      fps: 30,
+    });
+
+    expect(fs.readFileSync(
+      path.join(outputDir, "captions", "speech.approved.srt"),
+      "utf8",
+    )).toContain("00:29:59,965 --> 00:29:59,998");
+    const finalMuxCall = execFileMock.mock.calls
+      .map((call) => call[1] as string[])
+      .find((args) => args.includes("-frames:v") && args.includes("-c:a"));
+    expect(finalMuxCall).toEqual(expect.arrayContaining([
+      "-t", "1799.998200",
+      "-frames:v", "53946",
+    ]));
+  });
+
+  it("passes original-only dialogue through without applying loudnorm", async () => {
+    const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
+    const outputDir = path.join(tmpDir, "07_package");
+
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: { fps_num: 30_000, fps_den: 1_001, width: 1_920, height: 1_080 },
+      provenance: { audio_policy: { mode: "original_only" } },
+      tracks: {
+        video: [{ track_id: "V1", clips: [{ timeline_in_frame: 0, timeline_duration_frames: 300 }] }],
+        audio: [{
+          track_id: "A1",
+          clips: [{
+            asset_id: "AST_AUDIO",
+            timeline_in_frame: 0,
+            timeline_duration_frames: 300,
+            role: "dialogue",
+            audio_policy: { a1_loudnorm: false },
+          }],
+        }],
+      },
+    }), "utf-8");
+    fs.writeFileSync(assemblyPath, "stub-assembly", "utf-8");
+
+    const result = await runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      captionPolicy: {
+        language: "ja",
+        delivery_mode: "sidecar",
+        source: "none",
+        styling_class: "clean-lower-third",
+      },
+      outputDir,
+      fps: 30,
+    });
+
+    expect(JSON.parse(fs.readFileSync(result.audioMixReportPath, "utf-8"))).toMatchObject({
+      version: "audio-mix-report/v1",
+      has_bgm: false,
+      strategy: "original_passthrough_v1",
+      final_mastering: { applied: false },
+    });
+    const appliedLoudnorm = execFileMock.mock.calls
+      .map((call) => call[1] as string[])
+      .find((args) =>
+        args.some((arg) => arg.includes("linear=true")) &&
+        args.some((arg) => arg.endsWith("final_mix.wav"))
+      );
+    expect(appliedLoudnorm).toBeUndefined();
+    const fitCall = execFileMock.mock.calls
+      .map((call) => call[1] as string[])
+      .find((args) => args.includes("-frames:v"));
+    expect(fitCall).toEqual(expect.arrayContaining(["-frames:v", "300"]));
+    expect(fitCall![fitCall!.indexOf("-vf") + 1]).toContain("trim=end_frame=300");
+  });
+
   it("runRenderPipeline fits raw video to timeline dimensions before final mux", async () => {
     const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
     const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
@@ -190,10 +329,211 @@ describe("render pipeline aspect ratio fitting", () => {
     expect(fs.existsSync(result.finalVideoPath)).toBe(true);
     expect(result.renderRouteReceiptPath).toBe(path.join(outputDir, "logs", "render-route.json"));
     expect(JSON.parse(fs.readFileSync(result.renderRouteReceiptPath, "utf8"))).toMatchObject({
-      version: "render-route/v1",
+      version: "render-route/v2",
       assembly_engine: "ffmpeg",
       hyperframes_overlay: false,
+      delivery: {
+        definition: "sequential_h264_generations/v1",
+        lossy_video_encode_passes: 1,
+      },
+      delivery_execution: {
+        definition: "sequential_h264_generations/v1",
+        measurement_source: "runtime_trace",
+        lossy_video_encode_passes: 2,
+      },
     });
+  });
+
+  it("routes a separate Remotion alpha layer through the shared one-pass compositor", async () => {
+    const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
+    const outputDir = path.join(tmpDir, "07_package");
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      version: "2",
+      project_id: "remotion-pipeline",
+      sequence: { fps_num: 30_000, fps_den: 1_001, width: 640, height: 360 },
+      tracks: {
+        video: [{
+          track_id: "V1",
+          clips: [{
+            clip_id: "BASE",
+            asset_id: "AST",
+            segment_id: "SEG",
+            src_in_us: 0,
+            src_out_us: 2_002_000,
+            timeline_in_frame: 0,
+            timeline_duration_frames: 60,
+            role: "dialogue",
+          }],
+        }],
+        audio: [],
+      },
+    }));
+    fs.writeFileSync(assemblyPath, "stub-assembly");
+    const layerPath = path.join(outputDir, "video", "remotion-under-caption-overlay.webm");
+    const receiptPath = path.join(outputDir, "logs", "remotion-under-caption-layer-receipt.json");
+    const renderRemotionLayerImpl = vi.fn(async () => {
+      fs.mkdirSync(path.dirname(layerPath), { recursive: true });
+      fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
+      fs.writeFileSync(layerPath, "alpha");
+      fs.writeFileSync(receiptPath, JSON.stringify({
+        version: "remotion-layer-receipt/v2",
+        renderer: "remotion",
+        renderer_version: "4.0.452",
+      }));
+      return {
+        overlayPath: layerPath,
+        receiptPath,
+        durationInFrames: 60,
+        fps: 30_000 / 1_001,
+        fpsNum: 30_000,
+        fpsDen: 1_001,
+        width: 640,
+        height: 360,
+        elementCount: 1,
+        layerCacheHit: false,
+        font: {
+          mode: "subset" as const,
+          format: "woff2" as const,
+          sha256: "a",
+          sourceSha256: "b",
+          sizeBytes: 1,
+          characterCount: 1,
+          cacheHit: false,
+        },
+      };
+    });
+
+    const result = await runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      captionPolicy: {
+        language: "ja",
+        delivery_mode: "sidecar",
+        source: "none",
+        styling_class: "clean-lower-third",
+      },
+      outputDir,
+      fps: 30,
+      renderRemotionLayerImpl,
+      renderRouteDecision: {
+        version: "render-route/v2",
+        requested_assembly_engine: "auto",
+        assembly_engine: "ffmpeg",
+        base_engine: "ffmpeg",
+        visual_layers: [{
+          renderer: "remotion",
+          mode: "alpha_overlay",
+          composite_stage: "under_caption",
+          reuse_scopes: ["brand"],
+          element_ids: ["TITLE"],
+          z_index_min: 100,
+          z_index_max: 100,
+          embedded_in_base: false,
+        }],
+        caption_layer: { engine: "none", composite_stage: "caption" },
+        delivery: {
+          compositor: "ffmpeg",
+          video_encoder: "ffmpeg",
+          definition: "sequential_h264_generations/v1",
+          lossy_video_encode_passes: 2,
+        },
+        hyperframes_overlay: false,
+        remotion_overlay_count: 1,
+        hyperframes_element_count: 0,
+        speech_caption_engine: "none",
+        style_family: "clean_editorial",
+        genre: "longform",
+        reasons: [],
+      },
+    });
+
+    expect(renderRemotionLayerImpl).toHaveBeenCalledWith(expect.objectContaining({
+      compositeStage: "under_caption",
+      elementIds: ["TITLE"],
+    }));
+    const compositorCall = execFileMock.mock.calls
+      .map((call) => call[1] as string[])
+      .find((args) => args.includes(layerPath) && args.includes("-filter_complex"));
+    expect(compositorCall).toBeDefined();
+    expect(compositorCall!.filter((value, index) =>
+      value === "-c:v" && compositorCall![index + 1] === "libx264"
+    )).toHaveLength(1);
+    expect(JSON.parse(fs.readFileSync(result.renderRouteReceiptPath, "utf8")))
+      .toMatchObject({
+        remotion_overlay_receipt_path: receiptPath,
+        visual_layer_receipt_paths: [receiptPath],
+      });
+  });
+
+  it("counts packets and skips a redundant fit encode when geometry and frame count match", async () => {
+    const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
+    const outputDir = path.join(tmpDir, "07_package");
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: { fps_num: 30, fps_den: 1, width: 1920, height: 1080 },
+      tracks: {
+        video: [{
+          track_id: "V1",
+          clips: [{ timeline_in_frame: 0, timeline_duration_frames: 60 }],
+        }],
+        audio: [],
+      },
+    }), "utf8");
+    fs.writeFileSync(assemblyPath, "stub-assembly", "utf8");
+    execFileMock.mockImplementation((
+      command: string,
+      args: string[],
+      _opts: unknown,
+      cb: (err: Error | null, stdout?: string, stderr?: string) => void,
+    ) => {
+      if (command === "ffprobe" && args.includes("-count_packets")) {
+        cb(null, JSON.stringify({
+          streams: [{
+            width: 1920,
+            height: 1080,
+            nb_frames: "60",
+            nb_read_packets: "60",
+          }],
+        }), "");
+        return;
+      }
+      const outputPath = args[args.length - 1];
+      if (typeof outputPath === "string" && !outputPath.startsWith("-")) {
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, "stub", "utf8");
+      }
+      cb(null, "", "");
+    });
+
+    await runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      captionPolicy: {
+        language: "ja",
+        delivery_mode: "sidecar",
+        source: "none",
+        styling_class: "clean-lower-third",
+      },
+      outputDir,
+      fps: 30,
+    });
+
+    const probeCall = execFileMock.mock.calls
+      .map((call) => call[1] as string[])
+      .find((args) => args.includes("-count_packets"));
+    expect(probeCall).toEqual(expect.arrayContaining([
+      "-show_entries", "stream=width,height,nb_read_packets,nb_frames",
+    ]));
+    const redundantFitCall = execFileMock.mock.calls
+      .filter((call) => call[0] === "ffmpeg")
+      .map((call) => call[1] as string[])
+      .find((args) => args.includes("-vf"));
+    expect(redundantFitCall).toBeUndefined();
   });
 
   it("regenerates burn-in SRT from caption approval instead of reusing stale text", async () => {
@@ -442,5 +782,133 @@ describe("render pipeline aspect ratio fitting", () => {
       strategy: "timeline_embedded_bgm_mastering_v1",
       bgm_ownership: { owner: "timeline_assembler", asset_ids: ["AST_MUSIC"] },
     });
+  });
+
+  it("fails before render side effects for legacy captions and unknown caption styles", async () => {
+    const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
+    const outputDir = path.join(tmpDir, "07_package");
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(assemblyPath, "stub-assembly");
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: { fps_num: 30, fps_den: 1, width: 640, height: 360 },
+      tracks: {
+        video: [{
+          track_id: "V1",
+          clips: [{
+            clip_id: "LEGACY",
+            captions: [{ text: "legacy", in_frame: 0, out_frame: 30 }],
+          }],
+        }],
+        audio: [],
+      },
+    }));
+    await expect(runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      captionPolicy: {
+        language: "ja",
+        delivery_mode: "both",
+        source: "transcript",
+        styling_class: "clean-lower-third",
+      },
+      outputDir,
+      fps: 30,
+    })).rejects.toThrow(
+      "legacy_clip_captions_forbidden_in_package: clip_ids=LEGACY",
+    );
+    expect(fs.existsSync(outputDir)).toBe(false);
+
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: { fps_num: 30, fps_den: 1, width: 640, height: 360 },
+      tracks: { video: [], audio: [] },
+    }));
+    await expect(runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      captionPolicy: {
+        language: "ja",
+        delivery_mode: "both",
+        source: "transcript",
+        styling_class: "unknown-longform-style",
+      },
+      outputDir,
+      fps: 30,
+    })).rejects.toThrow(
+      "caption_font_contract_not_ready: Unknown styling_class requires fallback: unknown-longform-style",
+    );
+    expect(fs.existsSync(outputDir)).toBe(false);
+  });
+
+  it("rejects injected overlapping renderer ranges at the render boundary", async () => {
+    const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
+    const outputDir = path.join(tmpDir, "07_package");
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(assemblyPath, "stub-assembly");
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      sequence: { fps_num: 30, fps_den: 1, width: 640, height: 360 },
+      tracks: { video: [], audio: [] },
+    }));
+    const shared = {
+      mode: "alpha_overlay" as const,
+      composite_stage: "under_caption" as const,
+      reuse_scopes: ["project" as const],
+      embedded_in_base: false,
+    };
+    await expect(runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      captionPolicy: {
+        language: "ja",
+        delivery_mode: "sidecar",
+        source: "none",
+        styling_class: "clean-lower-third",
+      },
+      outputDir,
+      fps: 30,
+      renderRouteDecision: {
+        version: "render-route/v2",
+        requested_assembly_engine: "auto",
+        assembly_engine: "ffmpeg",
+        base_engine: "ffmpeg",
+        visual_layers: [
+          {
+            ...shared,
+            renderer: "hyperframes",
+            element_ids: ["HF_LOW", "HF_HIGH"],
+            z_index_min: 100,
+            z_index_max: 300,
+          },
+          {
+            ...shared,
+            renderer: "remotion",
+            element_ids: ["REM_MID"],
+            z_index_min: 200,
+            z_index_max: 200,
+          },
+        ],
+        caption_layer: { engine: "none", composite_stage: "caption" },
+        delivery: {
+          compositor: "ffmpeg",
+          video_encoder: "ffmpeg",
+          definition: "sequential_h264_generations/v1",
+          lossy_video_encode_passes: 2,
+        },
+        hyperframes_overlay: true,
+        remotion_overlay_count: 1,
+        hyperframes_element_count: 2,
+        speech_caption_engine: "none",
+        style_family: "clean_editorial",
+        genre: "longform",
+        reasons: [],
+      },
+    })).rejects.toThrow(
+      "renderer_z_order_interleaving_unsupported: stage=under_caption ranges=hyperframes:100-300,remotion:200-200",
+    );
+    expect(fs.existsSync(outputDir)).toBe(false);
   });
 });

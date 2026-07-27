@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
+  assertCompileDurationGate,
   main as compileTimelineMain,
   parseArgs as parseCompileTimelineArgs,
   runCompileTimeline,
@@ -37,6 +38,44 @@ describe("editorial pipeline entrypoints", () => {
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it("fails closed only when a hard duration gate resolves outside its allowed window", () => {
+    const shortResolution = {
+      resolved_overlaps: 0,
+      resolved_duplicates: 0,
+      resolved_invalid_ranges: 0,
+      duration_fit: false,
+      total_frames: 636,
+      target_frames: 1128,
+      duration_mode: "strict",
+      min_target_frames: 792,
+      max_target_frames: 1464,
+      duration_status: "short",
+      content_frames: 300,
+    };
+
+    expect(() => assertCompileDurationGate({
+      hardGate: true,
+      resolution: shortResolution,
+    })).toThrow(
+      "Hard duration gate failed: status=short content_frames=300 allowed_frames=792..1464 target_frames=1128",
+    );
+
+    expect(() => assertCompileDurationGate({
+      hardGate: false,
+      resolution: shortResolution,
+    })).not.toThrow();
+
+    expect(() => assertCompileDurationGate({
+      hardGate: true,
+      resolution: {
+        ...shortResolution,
+        duration_fit: true,
+        duration_status: "pass",
+        content_frames: 1128,
+      },
+    })).not.toThrow();
   });
 
   it("does not shell out to compile or render CLIs from editorial orchestration", () => {

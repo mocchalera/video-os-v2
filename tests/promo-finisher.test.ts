@@ -240,7 +240,7 @@ describe("promo finisher ASS and ffmpeg args", () => {
       fadeSec: 0.8,
     });
 
-    expect(ass).toContain("Style: Default,Noto Sans JP,66");
+    expect(ass).toContain("Style: Default,VideoOS Noto Sans JP Bold,66");
     expect(ass).toContain("PlayResX: 1920");
     expect(ass).toContain("PlayResY: 1080");
     expect(ass).toContain(",1,6,0,2,90,90,72,1");
@@ -250,5 +250,25 @@ describe("promo finisher ASS and ffmpeg args", () => {
     expect(args.join(" ")).toContain("Resources/Fonts");
     expect(args.join(" ")).toContain("fade=t=out:st=75.2:d=0.8");
     expect(args.join(" ")).toContain("afade=t=out:st=75.2:d=0.8");
+  });
+
+  it("supports a vertical translucent panel style for social captions", () => {
+    const ass = buildAssSubtitleFile([
+      { text: "AIには作れない\n人の挑戦の物語", in_frame: 0, out_frame: 48, style: "simple-shadow" },
+    ], 24, {
+      playResX: 1080,
+      playResY: 1920,
+      fontSize: 60,
+      marginV: 300,
+      borderStyle: 3,
+      outline: 12,
+      backColor: "&H500B2434",
+    });
+
+    expect(ass).toContain("PlayResX: 1080");
+    expect(ass).toContain("PlayResY: 1920");
+    expect(ass).toContain("&H500B2434");
+    expect(ass).toContain(",3,12,0,2,90,90,300,1");
+    expect(ass).toContain("AIには作れない\\N人の挑戦の物語");
   });
 });

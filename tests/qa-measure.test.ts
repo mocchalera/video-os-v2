@@ -7,7 +7,8 @@ const { execFileMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
 }));
 
-vi.mock("node:child_process", () => ({
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
   execFile: execFileMock,
 }));
 

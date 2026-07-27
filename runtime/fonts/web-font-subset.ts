@@ -51,6 +51,7 @@ export interface PreparedWebFontAsset extends VideoWebFontAsset {
 export interface StagedWebFontAsset extends PreparedWebFontAsset {
   fontsDir: string;
   fontHref: string;
+  manifestPath: string;
 }
 
 interface WebFontSubsetCacheRecord {
@@ -313,11 +314,27 @@ export function stageWebFontAssets(
 ): StagedWebFontAsset {
   const prepared = prepareWebFontAsset(values, options);
   const fontsDir = path.join(destinationRoot, "fonts");
+  const licensesDir = path.join(destinationRoot, "licenses");
   const fontPath = path.join(fontsDir, prepared.filename);
-  const licensePath = path.join(fontsDir, DEFAULT_VIDEO_FONT.licenseFilename);
+  const licensePath = path.join(licensesDir, DEFAULT_VIDEO_FONT.licenseFilename);
+  const extension = path.extname(prepared.filename).toLowerCase();
+  if (!new Set([".ttf", ".otf", ".woff", ".woff2"]).has(extension)) {
+    throw new Error(`Font staging refused non-font asset: ${prepared.filename}`);
+  }
   mkdirSync(fontsDir, { recursive: true });
+  mkdirSync(licensesDir, { recursive: true });
   copyFileSync(prepared.fontPath, fontPath);
   copyFileSync(prepared.licensePath, licensePath);
+  const manifestPath = path.join(destinationRoot, "font-manifest.json");
+  writeFileSync(manifestPath, `${JSON.stringify({
+    version: "font-staging-manifest/v1",
+    font_id: prepared.fontId,
+    family: prepared.family,
+    fallback_used: prepared.mode === "full_fallback",
+    diagnostics: prepared.fallbackReason ? [{ code: "subset_fallback", message: prepared.fallbackReason }] : [],
+    assets: [{ role: "web", path: path.relative(destinationRoot, fontPath), sha256: `sha256:${prepared.sha256}` }],
+    license: path.relative(destinationRoot, licensePath),
+  }, null, 2)}\n`, "utf8");
   return {
     ...prepared,
     webPublicPath: `fonts/${prepared.filename}`,
@@ -325,5 +342,6 @@ export function stageWebFontAssets(
     licensePath,
     fontsDir,
     fontHref: `./fonts/${prepared.filename}`,
+    manifestPath,
   };
 }

@@ -82,6 +82,7 @@ export async function produceAssembly(
     timelinePath: opts.timelinePath,
     outputPath: opts.outputPath,
     sourceOverrides: opts.sourceMap,
+    legacyCaptionMode: "reject",
   });
   writeRenderFreshnessMetadata(projectDir, result.outputPath, {
     sourceInputsBefore,

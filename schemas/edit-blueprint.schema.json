@@ -736,6 +736,8 @@
         "mode": { "enum": ["off", "speech_sync", "protect_reveals"] },
         "ordinary_lead_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
         "audio_first_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "question_audio_first_frames": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "gap_ownership": { "enum": ["previous", "blank"] },
         "anchors": {
           "type": "array",
           "items": { "$ref": "#/$defs/captionRevealAnchor" }

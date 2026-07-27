@@ -164,10 +164,30 @@ public enum ProjectRenderRunPlanner {
     ) -> ProjectRenderRunPlan {
         let resolvedPreflight = preflightStatus ?? ProjectPackagePreflightRunner.pending()
         let sourceOfTruth = resolvedPreflight.sourceOfTruth
-        let packageFinalVideoURL = projectURL.appendingPathComponent("07_package/video/final.mp4")
+        let deliveryResolution = ProjectActiveDeliveryReader.resolution(projectURL: projectURL)
+        let activeDelivery: ProjectActiveDeliveryPaths?
+        let legacyAllowed: Bool
+        switch deliveryResolution {
+        case .active(let paths):
+            activeDelivery = paths
+            legacyAllowed = false
+        case .absent:
+            activeDelivery = nil
+            legacyAllowed = true
+        case .invalid:
+            activeDelivery = nil
+            legacyAllowed = false
+        }
+        let packageFinalVideoURL = activeDelivery?.finalVideoURL
+            ?? (legacyAllowed
+                ? projectURL.appendingPathComponent("07_package/video/final.mp4")
+                : projectURL.appendingPathComponent("07_package/.invalid-active-delivery/package-final.mp4"))
         var resolvedOptions = options
         if sourceOfTruth == "nle_finishing", resolvedOptions.suppliedFinalURL == nil {
-            let publishedFinalURL = projectURL.appendingPathComponent("09_output/final.mp4")
+            let publishedFinalURL = activeDelivery?.finalVideoURL
+                ?? (legacyAllowed
+                    ? projectURL.appendingPathComponent("09_output/final.mp4")
+                    : projectURL.appendingPathComponent("07_package/.invalid-active-delivery/final.mp4"))
             if FileManager.default.fileExists(atPath: publishedFinalURL.path) {
                 resolvedOptions.suppliedFinalURL = publishedFinalURL
             }

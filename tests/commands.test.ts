@@ -2551,17 +2551,39 @@ function visualQATestOptions(
     requireCompiledTimeline: true,
     skipPreview: true,
     visualQA: {
+      runDeterministicOutputQAImpl: async () => ({
+        status: "verified",
+        duration_sec: 1,
+        width: 1920,
+        height: 1080,
+        issues: [],
+      }),
       runMarlinQAImpl: async (projectDir) => makeMockMarlinQAReport(projectDir, score, visualQA),
     },
   };
 }
 
 function visualQAWaiverOptions(
+  projectDir: string,
   reason = "Test fixture approves without running local visual model.",
-): Pick<NonNullable<Parameters<typeof runReview>[2]>, "allowUnverifiedVisual" | "visualQaWaiverReason"> {
+): NonNullable<Parameters<typeof runReview>[2]> {
+  writeFreshReviewRender(projectDir);
   return {
     allowUnverifiedVisual: true,
     visualQaWaiverReason: reason,
+    requireCompiledTimeline: true,
+    skipPreview: true,
+    visualQA: {
+      runDeterministicOutputQAImpl: async () => ({
+        status: "verified",
+        duration_sec: 1,
+        width: 1920,
+        height: 1080,
+        issues: [],
+      }),
+      runMarlinQAImpl: async (dir) =>
+        makeMockMarlinQAReport(dir, 0, "blocked"),
+    },
   };
 }
 
@@ -2871,7 +2893,7 @@ describe("/review command", () => {
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
-        ...visualQAWaiverOptions("Operator reviewed external playback."),
+        ...visualQAWaiverOptions(tmpDir, "Operator reviewed external playback."),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 
@@ -2925,7 +2947,7 @@ describe("/review command", () => {
       });
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(tmpDir),
         operatorAccept: async () => {
           operatorAcceptCalled = true;
           return { accepted: false };
@@ -2982,7 +3004,7 @@ describe("/review command", () => {
         creativeOverride: true,
         approvedBy: "director",
         overrideReason: "Artistic choice — summit sequence not needed for this cut.",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(tmpDir),
       });
 
       expect(result.success).toBe(true);
@@ -3027,7 +3049,7 @@ describe("/review command", () => {
 
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(tmpDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 
@@ -3437,7 +3459,7 @@ describe("/review command", () => {
 
       await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(tmpDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 
@@ -3510,7 +3532,7 @@ describe("/review command", () => {
       });
       const second = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T06:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(tmpDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
       expect(second.success).toBe(true);
@@ -3534,7 +3556,7 @@ describe("/review command", () => {
       });
       const result = await runReview(tmpDir, agent, {
         createdAt: "2026-03-21T05:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(tmpDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
       });
 

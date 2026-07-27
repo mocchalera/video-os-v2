@@ -2,6 +2,24 @@ import XCTest
 @testable import VideoOSStudioCore
 
 final class TimelineDocumentTests: XCTestCase {
+    func testRationalFrameRateConversionsStayStableAtThirtyMinutes() {
+        let sequence = TimelineSequence(
+            name: "NTSC Preview",
+            fpsNum: 30_000,
+            fpsDen: 1_001,
+            width: 1_920,
+            height: 1_080,
+            startFrame: 0,
+            outputAspectRatio: "16:9"
+        )
+        let finalFrame = sequence.secondsToFrames(30 * 60)
+        let finalSeconds = sequence.framesToSeconds(finalFrame)
+
+        XCTAssertEqual(finalFrame, 53_946)
+        XCTAssertEqual(sequence.secondsToFrames(finalSeconds), finalFrame)
+        XCTAssertLessThanOrEqual(abs(finalSeconds - 1_800) * sequence.fps, 0.5)
+    }
+
     func testLoadTimelineDocumentComputesDisplayTracksAndDuration() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-timeline-\(UUID().uuidString)")

@@ -10,8 +10,8 @@
  */
 
 import {
+  ASS_BOLD_VIDEO_FONT,
   ASS_HEAVY_VIDEO_FONT,
-  DEFAULT_VIDEO_FONT,
   DEFAULT_VIDEO_FONT_ID,
   type VideoFontId,
 } from "./font-contract.js";
@@ -88,8 +88,10 @@ export interface SequenceInfo {
 export const DEFAULT_CAPTION_STYLE_PRESET: CaptionStylePreset = {
   presetId: "default",
   fontId: DEFAULT_VIDEO_FONT_ID,
-  fontFamily: DEFAULT_VIDEO_FONT.family,
+  fontFamily: ASS_BOLD_VIDEO_FONT.family,
   fontWeight: 700,
+  assFontFamily: ASS_BOLD_VIDEO_FONT.family,
+  assSynthesizeBold: false,
   fontSizePx1080: 24,
   lineHeightPx1080: 32,
   fillRgba: "FFFFFFFF",
@@ -140,6 +142,10 @@ export const CAPTION_STYLE_PRESETS: Record<string, CaptionStylePreset> = {
   "clean-lower-third": {
     ...DEFAULT_CAPTION_STYLE_PRESET,
     presetId: "clean-lower-third",
+    fontFamily: ASS_HEAVY_VIDEO_FONT.family,
+    fontWeight: 900,
+    assFontFamily: ASS_HEAVY_VIDEO_FONT.family,
+    assSynthesizeBold: false,
     fontSizePx1080: 60, // 5.6% — speech-led digest: readable on phone-sized playback
     lineHeightPx1080: 74,
     outlinePx1080: 3,
@@ -202,6 +208,7 @@ export const CAPTION_STYLE_PRESETS: Record<string, CaptionStylePreset> = {
   "single-layer-speaker-separated-bold-outline-safe-area-ja": {
     ...SNS_VERTICAL_OUTLINE_PRESET,
     presetId: "single-layer-speaker-separated-bold-outline-safe-area-ja",
+    fontFamily: ASS_HEAVY_VIDEO_FONT.family,
     fontWeight: 900,
     assFontFamily: ASS_HEAVY_VIDEO_FONT.family,
     assSynthesizeBold: false,
@@ -288,6 +295,7 @@ export function buildAssForceStyle(
   preset: CaptionStylePreset,
   sequence: SequenceInfo,
 ): string {
+  assertDeterministicAssFont(preset);
   const scale = sequence.height / 1080;
   const fontSize = Math.round(preset.fontSizePx1080 * scale);
   const outline = Math.round(preset.outlinePx1080 * scale * 10) / 10;
@@ -365,6 +373,7 @@ export function buildAssDocument(
   preset: CaptionStylePreset,
   sequence: SequenceInfo,
 ): string {
+  assertDeterministicAssFont(preset);
   const scale = sequence.height / 1080;
   const fontSize = Math.round(preset.fontSizePx1080 * scale);
   const outline = Math.round(preset.outlinePx1080 * scale * 10) / 10;
@@ -480,6 +489,31 @@ export function buildAssDocument(
   }
 
   return lines.join("\n") + "\n";
+}
+
+/**
+ * ASS/libass exposes only a synthetic Bold switch and may resolve a variable
+ * Japanese family to the wrong CoreText face. Any authored 700/900 style must
+ * therefore select the matching uniquely named static family and disable
+ * synthetic bold at the final ASS generation boundary.
+ */
+export function assertDeterministicAssFont(preset: CaptionStylePreset): void {
+  const assFamily = preset.assFontFamily ?? preset.fontFamily;
+  const expected = preset.fontWeight === ASS_BOLD_VIDEO_FONT.weight
+    ? ASS_BOLD_VIDEO_FONT
+    : preset.fontWeight === ASS_HEAVY_VIDEO_FONT.weight
+      ? ASS_HEAVY_VIDEO_FONT
+      : undefined;
+  if (!expected) return;
+  if (
+    preset.fontFamily !== expected.family
+    || assFamily !== expected.family
+    || preset.assSynthesizeBold !== false
+  ) {
+    throw new Error(
+      `ASS weight ${preset.fontWeight} requires ${expected.family} with assSynthesizeBold=false`,
+    );
+  }
 }
 
 /**

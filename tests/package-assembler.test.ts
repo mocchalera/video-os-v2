@@ -42,6 +42,14 @@ vi.mock("../runtime/packaging/qa-measure.js", () => ({
     dialogueWindowMs?: number;
     observedNonSilentMs?: number;
     videoFrame?: typeof matchingVideoFrame;
+    deterministicOutputQA?: {
+      status: "verified";
+      duration_sec: number;
+      scanned_duration_sec: number;
+      width: number;
+      height: number;
+      issues: [];
+    };
   }) => ({
     version: "1.0.0",
     measured_at: "2026-03-21T12:00:00.000Z",
@@ -60,12 +68,27 @@ vi.mock("../runtime/packaging/qa-measure.js", () => ({
       ? Math.max(0, metrics.dialogueWindowMs - metrics.observedNonSilentMs)
       : 0,
     video_frame: metrics.videoFrame,
+    deterministic_output_qa: metrics.deterministicOutputQA ?? {
+      status: "verified",
+      duration_sec: (metrics.videoDurationMs ?? 0) / 1000,
+      scanned_duration_sec: (metrics.videoDurationMs ?? 0) / 1000,
+      width: metrics.videoFrame?.width,
+      height: metrics.videoFrame?.height,
+      issues: [],
+    },
   })),
   writeQaMeasurements: vi.fn(),
   collectQaMeasurementWarnings: vi.fn(() => []),
 }));
 
 import { packageCommand } from "../runtime/commands/package.js";
+import {
+  resolveProjectRenderRoute,
+  writeRenderRouteReceipt,
+  type RenderRouteDecision,
+} from "../runtime/render/route-resolver.js";
+import { HYPERFRAMES_RENDERER_VERSION } from "../runtime/content/hyperframes-renderer.js";
+import { REMOTION_RENDERER_VERSION } from "../runtime/render/remotion/render-remotion.js";
 
 const tempDirs: string[] = [];
 
@@ -89,6 +112,14 @@ beforeEach(() => {
     observed_non_silent_ms: 8500,
     silence_total_ms: 1500,
     video_frame: matchingVideoFrame,
+    deterministic_output_qa: {
+      status: "verified",
+      duration_sec: 28,
+      scanned_duration_sec: 28,
+      width: 1920,
+      height: 1080,
+      issues: [],
+    },
   });
 });
 
@@ -153,6 +184,13 @@ function createTempProject(): string {
     min_score: 70,
     issues: { total: 0, critical: 0, warning: 0, info: 0 },
     issue_summaries: [],
+    deterministic_scan: {
+      status: "verified",
+      duration_sec: 10,
+      width: 1920,
+      height: 1080,
+      issues: [],
+    },
   };
   fs.writeFileSync(reviewReportPath, stringifyYaml(reviewReport), "utf-8");
 
@@ -196,7 +234,11 @@ function createTempProject(): string {
   return tmpDir;
 }
 
-function stubRenderOutputs(projectDir: string, assemblyPath: string) {
+function stubRenderOutputs(
+  projectDir: string,
+  assemblyPath: string,
+  routeDecision: RenderRouteDecision = resolveProjectRenderRoute(projectDir),
+) {
   const outputDir = path.join(projectDir, "07_package");
   const rawVideoPath = path.join(outputDir, "video", "raw_video.mp4");
   const rawDialoguePath = path.join(outputDir, "audio", "raw_dialogue.wav");
@@ -226,8 +268,32 @@ function stubRenderOutputs(projectDir: string, assemblyPath: string) {
       },
     },
   }), "utf-8");
+  const renderRouteReceiptPath = writeRenderRouteReceipt(outputDir, routeDecision, {
+    baseAssemblyPath: assemblyPath,
+    effectiveAssemblyPath: finalVideoPath,
+    timelinePath: path.join(projectDir, "05_timeline", "timeline.json"),
+    finalVideoPath,
+    operations: [
+      { id: "base_assembly", kind: "lossy_video_generation", codec: "h264" },
+      ...(routeDecision.delivery.lossy_video_encode_passes > 1
+        ? [{ id: "final_visual_composite", kind: "lossy_video_generation" as const, codec: "h264" }]
+        : []),
+      { id: "final_mux_video", kind: "stream_copy", codec: "h264" },
+    ],
+    measurementSource: "execution_plan",
+    rendererVersions: {
+      ...(routeDecision.visual_layers.some((layer) => layer.renderer === "hyperframes")
+        ? { hyperframes: HYPERFRAMES_RENDERER_VERSION }
+        : {}),
+      ...(routeDecision.base_engine === "remotion"
+        || routeDecision.visual_layers.some((layer) => layer.renderer === "remotion")
+        ? { remotion: REMOTION_RENDERER_VERSION }
+        : {}),
+    },
+  });
 
   return {
+    baseAssemblyPath: assemblyPath,
     assemblyPath,
     rawVideoPath,
     rawDialoguePath,
@@ -236,6 +302,7 @@ function stubRenderOutputs(projectDir: string, assemblyPath: string) {
     sidecarPaths: [] as string[],
     logs: {},
     audioMixReportPath,
+    renderRouteReceiptPath,
   };
 }
 
@@ -302,6 +369,25 @@ describe("package command assembler wiring", () => {
       strategy: "timeline_embedded_bgm_mastering_v1",
       bgm_ownership: { owner: "timeline_assembler", asset_ids: ["AST_BGM_EMBEDDED"] },
     });
+  });
+
+  it("measures the existing final deliverable instead of the base assembly when skipping render", async () => {
+    const projectDir = createTempProject();
+    const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
+    fs.writeFileSync(assemblyPath, "existing-assembly", "utf-8");
+    stampFreshAssembly(projectDir, assemblyPath);
+
+    const result = await packageCommand(projectDir, {
+      skipRender: true,
+      assemblyPath,
+    });
+
+    expect(result.success, result.error?.message).toBe(true);
+    expect(measureQaMediaMock).toHaveBeenCalledWith(expect.objectContaining({
+      videoPath: path.join(projectDir, "07_package/video/final.mp4"),
+      audioPath: path.join(projectDir, "07_package/audio/final_mix.wav"),
+      dialoguePath: path.join(projectDir, "07_package/audio/raw_dialogue.wav"),
+    }));
   });
 
   it("refreshes outputs when the project is already packaged", async () => {
@@ -408,6 +494,69 @@ describe("package command assembler wiring", () => {
     expect(fs.existsSync(path.join(projectDir, "09_output", "final.mp4"))).toBe(true);
   });
 
+  it("checks source freshness on the hashed base assembly after HyperFrames compositing", async () => {
+    const projectDir = createTempProject();
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+    const overlayClip = {
+      ...timeline.tracks.video[0].clips[0],
+      clip_id: "OV_SECTION",
+      role: "title",
+      metadata: {
+        content_element: {
+          version: "content-element/v1",
+          element_id: "SECTION",
+          kind: "template",
+          template_ref: "vos:content.section-label/v1",
+          template_version: "1.0.0",
+          props: { title: "Section" },
+          layout: {
+            anchor: "top_left",
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation_deg: 0,
+            opacity: 1,
+            safe_area: true,
+            z_index: 100,
+          },
+        },
+      },
+    };
+    timeline.tracks.overlay = [{ track_id: "OV1", kind: "overlay", clips: [overlayClip] }];
+    fs.writeFileSync(timelinePath, JSON.stringify(timeline), "utf-8");
+    const statePath = path.join(projectDir, "project_state.yaml");
+    const state = parseYaml(fs.readFileSync(statePath, "utf-8"));
+    state.approval_record.artifact_versions.timeline_version = computeFileHash(timelinePath);
+    state.approval_record.artifact_versions.editorial_timeline_hash = computeFileHash(timelinePath);
+    fs.writeFileSync(statePath, stringifyYaml(state), "utf-8");
+
+    const baseAssemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
+    const effectiveAssemblyPath = path.join(projectDir, "07_package", "video", "assembly.with-content.mp4");
+    fs.writeFileSync(baseAssemblyPath, "base-assembly", "utf-8");
+    stampFreshAssembly(projectDir, baseAssemblyPath);
+    renderMock.mockImplementation(async () => ({
+      ...stubRenderOutputs(projectDir, effectiveAssemblyPath),
+      baseAssemblyPath,
+      assemblyPath: effectiveAssemblyPath,
+    }));
+
+    const result = await packageCommand(projectDir, {
+      assemblyPath: baseAssemblyPath,
+      precomputedMetrics: {
+        integratedLufs: -16,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 28000,
+        audioDurationMs: 28000,
+        dialogueWindowMs: 10000,
+        observedNonSilentMs: 8500,
+        videoFrame: matchingVideoFrame,
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it("rejects an explicit runtime package assembly shortcut without source freshness metadata", async () => {
     const projectDir = createTempProject();
     const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
@@ -498,8 +647,14 @@ describe("package command assembler wiring", () => {
     const projectDir = createTempProject();
     const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
 
-    renderMock.mockImplementation(async ({ assemblyOutputPath }: { assemblyOutputPath: string }) =>
-      stubRenderOutputs(projectDir, assemblyOutputPath)
+    renderMock.mockImplementation(async ({
+      assemblyOutputPath,
+      renderRouteDecision,
+    }: {
+      assemblyOutputPath: string;
+      renderRouteDecision: RenderRouteDecision;
+    }) =>
+      stubRenderOutputs(projectDir, assemblyOutputPath, renderRouteDecision)
     );
 
     const result = await packageCommand(projectDir, {

@@ -452,6 +452,47 @@ private struct DeliveryQuickActionsSection: View {
             LabeledContent("不足", value: missingDeliveryArtifactsLabel)
             LabeledContent("QA", value: renderQAValue)
             LabeledContent("QAチェック", value: "\(model.renderPackageStatus.qaCheckCount)件 / 失敗 \(model.renderPackageStatus.qaFailedCheckCount)件")
+            if model.renderPackageStatus.layoutQAStatus != nil {
+                LabeledContent("字幕・CTA", value: model.renderPackageStatus.layoutQAReviewSummary)
+                if let issue = model.renderPackageStatus.layoutQAReviewItems.first {
+                    Text("\(issue.timeRangeLabel)  \(issue.title)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("ProjectPanel.LayoutQAFirstIssue")
+                    Text(issue.remediation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("ProjectPanel.LayoutQAFirstRemediation")
+                }
+            }
+            if model.renderPackageStatus.speechCadenceStatus != nil,
+               model.renderPackageStatus.speechCadenceStatus != "not_applicable" {
+                LabeledContent("音声テンポ", value: model.renderPackageStatus.speechCadenceReviewSummary)
+                if let issue = model.renderPackageStatus.speechCadenceReviewItems.first {
+                    Text("\(issue.timeRangeLabel)  \(issue.title) · \(issue.durationLabel)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("ProjectPanel.SpeechCadenceFirstIssue")
+                    Text("\(issue.suggestedActionLabel)：\(issue.remediation)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("ProjectPanel.SpeechCadenceFirstRemediation")
+                }
+            }
+            if model.renderPackageStatus.captionDeliveryStatus != nil,
+               model.renderPackageStatus.captionDeliveryStatus != "not_applicable" {
+                LabeledContent("字幕タイミング", value: model.renderPackageStatus.captionDeliveryReviewSummary)
+                if let issue = model.renderPackageStatus.captionDeliveryReviewItems.first {
+                    Text("\(issue.timeRangeLabel)  \(issue.title) · \(issue.measurementLabel)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("ProjectPanel.CaptionDeliveryFirstIssue")
+                    Text("「\(issue.textExcerpt)」 \(issue.suggestedActionLabel)：\(issue.remediation)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("ProjectPanel.CaptionDeliveryFirstRemediation")
+                }
+            }
             LabeledContent("最終出力", value: outputAvailabilityLabel(model.renderPackageStatus.publishedFinalVideoExists))
             LabeledContent("宣材テロップ", value: localizedStudioLabel(model.promoFinishStatus.readinessLabel))
             LabeledContent("テロップ数", value: model.promoFinishStatus.subtitleSidecarExists ? "\(model.promoFinishStatus.captionCount)件" : "-")

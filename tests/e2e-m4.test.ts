@@ -150,6 +150,13 @@ function writeReviewVisualQA(
     min_score: 70,
     issues: { total: 0, critical: 0, warning: 0, info: 0 },
     issue_summaries: [],
+    deterministic_scan: {
+      status: "verified",
+      duration_sec: 10,
+      width: 1920,
+      height: 1080,
+      issues: [],
+    },
     video_path: "09_output/rough-cut.mp4",
     video_hash: "test-video-hash",
     timeline_path: "05_timeline/timeline.json",

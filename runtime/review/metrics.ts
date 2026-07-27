@@ -295,10 +295,7 @@ export function writeReviewMetricsArtifact(
   projectDir: string,
   metrics: ReviewMetricsArtifact,
 ): string {
-  const validation = validateAgainstSchema(metrics, "review-metrics.schema.json");
-  if (!validation.valid) {
-    throw new Error(`review_metrics.json failed schema validation: ${validation.errors.join("; ")}`);
-  }
+  validateReviewMetricsArtifact(metrics);
 
   const outPath = path.join(path.resolve(projectDir), "06_review/review_metrics.json");
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
@@ -306,6 +303,15 @@ export function writeReviewMetricsArtifact(
   fs.writeFileSync(tmpPath, `${JSON.stringify(metrics, null, 2)}\n`, "utf-8");
   fs.renameSync(tmpPath, outPath);
   return outPath;
+}
+
+export function validateReviewMetricsArtifact(
+  metrics: ReviewMetricsArtifact,
+): void {
+  const validation = validateAgainstSchema(metrics, "review-metrics.schema.json");
+  if (!validation.valid) {
+    throw new Error(`review_metrics.json failed schema validation: ${validation.errors.join("; ")}`);
+  }
 }
 
 export function runReviewMetrics(

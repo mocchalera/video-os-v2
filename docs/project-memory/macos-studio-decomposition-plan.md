@@ -1,8 +1,30 @@
 # macOS Studio decomposition plan
 
-Status: active  
-Owner task: `T-0006`  
+Status: implementation-ready
+Owner task: `T-0041`
 Started: 2026-07-11
+
+## Current handoff
+
+`T-0006` completed the first behavior-preserving view extraction. The next
+slice is tracked separately as ready task `T-0041`: extract
+`ProjectLibraryStore` behind `StudioViewModel` forwarding properties.
+
+Scope boundaries:
+
+- move repository root, project scan/init, and selected-project identity only;
+- keep `StudioViewModel` as composition root and compatibility facade;
+- do not move timeline editing, media browsing, agent jobs, or render execution;
+- do not change canonical artifact schemas, UserDefaults keys, accessibility
+  identifiers, or visible behavior.
+
+Required verification:
+
+- focused `ProjectLibraryStore` tests;
+- `swift test` from `apps/macos-studio`;
+- `swift build --target VideoOSStudio`;
+- `./script/build_and_run.sh --verify`;
+- `git diff --check`.
 
 ## Objective
 
@@ -82,5 +104,6 @@ is 93 lines.
 - the extracted file has one cohesive feature responsibility;
 - Project Control Loop evidence records the commands and changed files.
 
-The next implementation slice is `ProjectLibraryStore` with
-`StudioViewModel` retained as the composition root and compatibility facade.
+The next implementation slice is `ProjectLibraryStore` under ready task
+`T-0041`, with `StudioViewModel` retained as the composition root and
+compatibility facade.

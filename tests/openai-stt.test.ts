@@ -240,6 +240,42 @@ describe("STT: mergeChunkResults", () => {
     expect(merged[0].end_us).toBe(15_000_000);
   });
 
+  it("converts word timestamps to asset-level and keeps them through the transcript artifact", () => {
+    const chunkResults = [{
+      chunk: { start_us: 10_000_000, end_us: 30_000_000, index: 0 },
+      result: {
+        utterances: [{
+          speaker: "s1",
+          start_us: 0,
+          end_us: 1_000_000,
+          text: "どう思いますか",
+          words: [
+            { word: "どう", start_us: 100_000, end_us: 300_000 },
+            { word: "思いますか", start_us: 400_000, end_us: 900_000 },
+          ],
+        }],
+      } as SttChunkResult,
+    }];
+
+    const { merged } = mergeChunkResults(chunkResults);
+    expect(merged[0].words).toEqual([
+      { word: "どう", start_us: 10_100_000, end_us: 10_300_000 },
+      { word: "思いますか", start_us: 10_400_000, end_us: 10_900_000 },
+    ]);
+
+    const artifact = buildTranscriptArtifact(
+      merged,
+      "AST_words",
+      "project_words",
+      "ja",
+      undefined,
+      { ...MOCK_STT_POLICY, generate_words: true },
+      "policyhash-words",
+    );
+    expect(artifact.word_timing_mode).toBe("word");
+    expect(artifact.items[0].words).toEqual(merged[0].words);
+  });
+
   it("sorts by start_us", () => {
     const chunkResults = [
       {
@@ -569,6 +605,20 @@ describe("STT: buildTranscriptArtifact", () => {
     );
     expect(artifact.analysis_status).toBe("failed");
     expect(artifact.items).toHaveLength(0);
+  });
+
+  it("does not claim word timing when the provider returned no words", () => {
+    const artifact = buildTranscriptArtifact(
+      [{ speaker_raw: "sp0", start_us: 0, end_us: 1_000_000, text: "語時刻なし", chunk_index: 0 }],
+      "AST_no_words",
+      "project_1",
+      "ja",
+      undefined,
+      { ...MOCK_STT_POLICY, generate_words: true },
+      "hash",
+    );
+    expect(artifact.word_timing_mode).toBe("none");
+    expect(artifact.items[0].words).toBeUndefined();
   });
 
   it("validates against transcript.schema.json", () => {

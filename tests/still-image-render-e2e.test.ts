@@ -398,14 +398,19 @@ describe("EYE-070C2B truthful still rendering real media", () => {
     })).rejects.toThrow("remotion_explicit_audio_unsupported_for_still");
     expect(fs.existsSync(directRemotion)).toBe(false);
 
-    const routedMixed = await produceAssembly({
+    const routedOutput = path.join(
+      fixture.projectDir,
+      "05_timeline/mixed-remotion-request.mp4",
+    );
+    await expect(produceAssembly({
       timelinePath,
       sourceMap: { [fixture.asset.asset_id]: fixture.sourcePath, [videoId]: video },
-      outputPath: path.join(fixture.projectDir, "05_timeline/mixed-remotion-request.mp4"),
+      outputPath: routedOutput,
       engine: "remotion",
-    });
-    expect(routedMixed.engine).toBe("ffmpeg");
-    expect(probe(routedMixed.assemblyPath).map((stream) => stream.codec_type).sort()).toEqual(["audio", "video"]);
+    })).rejects.toThrow(
+      "legacy_clip_captions_forbidden_in_package: clip_ids=CLP_IMG",
+    );
+    expect(fs.existsSync(routedOutput)).toBe(false);
 
     timeline.tracks.audio = [];
     fs.writeFileSync(timelinePath, JSON.stringify(timeline));

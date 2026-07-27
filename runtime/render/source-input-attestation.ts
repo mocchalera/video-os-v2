@@ -6,6 +6,7 @@ import { computeFileHash } from "../state/reconcile.js";
 import { sha256FileHex } from "../source-content-identity.js";
 import type { TimelineIR } from "../compiler/types.js";
 import { CanonicalRenderInputError, resolveCanonicalRenderInputs } from "./canonical-render-input.js";
+import { assertCaptionCleanSourceEligibility } from "./clean-source-policy.js";
 
 export const SOURCE_INPUT_ATTESTATION_VERSION = "source-input-attestation/v3" as const;
 export const MAX_PERSISTED_SOURCE_INPUTS = 256;
@@ -367,9 +368,23 @@ export function createSourceInputAttestation(
     if (identityStatus === "live_only") {
       warnings.push(`ingest_identity_unproven:${use.assetId}`);
     }
+    const mediaKind = isDerivedStill
+      ? "image"
+      : isDerivedSequence
+        ? "sequence"
+        : canonicalMediaKind(use, mapEntry);
+    assertCaptionCleanSourceEligibility({
+      projectDir: absDir,
+      assetId: use.assetId,
+      sourcePath,
+      contentSha256: contentSha,
+      mediaKind,
+      declaredOrigin: mapEntry.source_origin,
+      cleanBaseAttestation: mapEntry.clean_base_attestation,
+    });
     entries.push({
       asset_id: use.assetId,
-      media_kind: isDerivedStill ? "image" : isDerivedSequence ? "sequence" : canonicalMediaKind(use, mapEntry),
+      media_kind: mediaKind,
       content_sha256: contentSha,
       identity_status: identityStatus,
       render_input_identity: isDerivedStill

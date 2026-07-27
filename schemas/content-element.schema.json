@@ -37,7 +37,27 @@
       },
       "additionalProperties": false
     },
-    "renderer_hint": { "enum": ["auto", "ffmpeg", "remotion", "hyperframes"] }
+    "renderer_hint": { "enum": ["auto", "ffmpeg", "remotion", "hyperframes"] },
+    "creative_recipe": {
+      "type": "object",
+      "required": [
+        "version",
+        "reuse_scope",
+        "authoring_surface",
+        "layer_mode",
+        "composite_stage",
+        "requires_base_frame"
+      ],
+      "properties": {
+        "version": { "const": "creative-recipe/v1" },
+        "reuse_scope": { "enum": ["one_off", "project", "brand", "campaign"] },
+        "authoring_surface": { "enum": ["html_motion", "typed_component", "native_filter"] },
+        "layer_mode": { "enum": ["alpha_overlay", "full_frame", "native_filter"] },
+        "composite_stage": { "enum": ["under_caption", "over_caption"] },
+        "requires_base_frame": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
   },
   "allOf": [
     {

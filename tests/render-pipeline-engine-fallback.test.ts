@@ -71,7 +71,7 @@ describe("render pipeline alternate assembly engine fallback", () => {
     ).rejects.toThrow(`Assembly file not found: ${assemblyPath}`);
   });
 
-  it("fails closed when a prebuilt FFmpeg assembly could omit Remotion overlays", async () => {
+  it("fails closed only when a prebuilt FFmpeg assembly could omit a base-frame Remotion treatment", async () => {
     const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-route-prebuilt-"));
     const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
     const assemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
@@ -90,9 +90,32 @@ describe("render pipeline alternate assembly engine fallback", () => {
             timeline_in_frame: 0,
             timeline_duration_frames: 30,
             metadata: {
-              overlay: {
-                text: "本気のビートボックス",
-                styling_class: "vos:overlay.title-card",
+              content_element: {
+                version: "content-element/v1",
+                element_id: "TITLE",
+                kind: "template",
+                template_ref: "vos:content.title-card/v1",
+                template_version: "1.0.0",
+                props: { title: "本気のビートボックス" },
+                layout: {
+                  anchor: "center",
+                  x: 0,
+                  y: 0,
+                  scale: 1,
+                  rotation_deg: 0,
+                  opacity: 1,
+                  safe_area: true,
+                  z_index: 100,
+                },
+                renderer_hint: "remotion",
+                creative_recipe: {
+                  version: "creative-recipe/v1",
+                  reuse_scope: "project",
+                  authoring_surface: "typed_component",
+                  layer_mode: "alpha_overlay",
+                  composite_stage: "under_caption",
+                  requires_base_frame: true,
+                },
               },
             },
           }],
@@ -107,7 +130,9 @@ describe("render pipeline alternate assembly engine fallback", () => {
         timelinePath,
         outputDir: path.join(projectDir, "07_package"),
         assemblyPath,
-      })).rejects.toThrow("Prebuilt assemblyPath cannot prove that 1 Remotion-owned overlay");
+      })).rejects.toThrow(
+        "Prebuilt assemblyPath cannot prove that base-frame-dependent Remotion visual layers were rendered",
+      );
     } finally {
       fs.rmSync(projectDir, { recursive: true, force: true });
     }

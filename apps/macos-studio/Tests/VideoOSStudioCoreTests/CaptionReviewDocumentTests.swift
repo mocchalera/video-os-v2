@@ -23,7 +23,77 @@ final class CaptionReviewDocumentTests: XCTestCase {
 
         XCTAssertEqual(document.captionStyle, .default)
         XCTAssertEqual(document.captionStyle.fontID, "noto-sans-jp")
-        XCTAssertEqual(document.captionStyle.fontFamily, "Noto Sans JP")
+        XCTAssertEqual(document.captionStyle.fontFamily, "VideoOS Noto Sans JP Bold")
+        XCTAssertEqual(document.captionStyle.fontWeight, 700)
+    }
+
+    func testCleanLowerThirdUsesVerifiedHeavyFamilyAndNumericPreviewWeight() throws {
+        let json = """
+        {
+          "version": "caption-review-queue/v2",
+          "project": "/tmp/project",
+          "status": "ready",
+          "base_caption_draft_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "fps": 24,
+          "caption_style": {
+            "preset_id": "clean-lower-third",
+            "font_id": "noto-sans-jp",
+            "font_family": "VideoOS Noto Sans JP Black",
+            "font_weight": 900,
+            "font_size_px_1080": 60,
+            "line_height_px_1080": 74,
+            "outline_px_1080": 3,
+            "margin_v_1080": 36,
+            "max_width_ratio": 0.9,
+            "alignment": "bottom_center"
+          },
+          "font_contract": {
+            "status": "ready",
+            "font_id": "noto-sans-jp",
+            "family": "VideoOS Noto Sans JP Black",
+            "fallback_used": false,
+            "diagnostics": []
+          },
+          "can_undo": false,
+          "total_caption_count": 0,
+          "matched_caption_count": 0,
+          "exported_caption_count": 0,
+          "items": []
+        }
+        """
+
+        let document = try JSONDecoder().decode(
+            CaptionReviewQueueDocument.self,
+            from: Data(json.utf8)
+        )
+
+        XCTAssertEqual(document.captionStyle.fontFamily, "VideoOS Noto Sans JP Black")
+        XCTAssertEqual(document.captionStyle.fontWeight, 900)
+        XCTAssertEqual(document.captionStyle.previewFontWeight, .black)
+        XCTAssertEqual(CaptionReviewPreviewStyle.previewFontWeight(for: 800), .heavy)
+        XCTAssertEqual(CaptionReviewPreviewStyle.previewFontWeight(for: 700), .bold)
+    }
+
+    func testUnregisteredHeavyFamilyFailsClosedInsteadOfUsingSystemFallback() {
+        let status = CaptionFontRuntimeStatus(assets: [
+            .init(
+                role: "primary",
+                family: "Noto Sans JP",
+                resource: "NotoSansJP-Variable",
+                state: .ready
+            ),
+            .init(
+                role: "heavy",
+                family: "VideoOS Noto Sans JP Black",
+                resource: "VideoOSNotoSansJPBlack",
+                state: .blocked,
+                diagnostic: "missing_resource: VideoOSNotoSansJPBlack.ttf"
+            ),
+        ])
+
+        XCTAssertFalse(status.canRenderCustomFont(family: "VideoOS Noto Sans JP Black"))
+        XCTAssertEqual(status.blocker(requiredFamily: "VideoOS Noto Sans JP Black")?.code, "font_contract_mismatch")
+        XCTAssertTrue(status.blocker(requiredFamily: "VideoOS Noto Sans JP Black")?.message.contains("missing_resource") == true)
     }
 
     func testDecodesSharedCLIQueueContractAndSummaries() throws {
@@ -152,6 +222,67 @@ final class CaptionReviewDocumentTests: XCTestCase {
             "--state", "verified",
             "--category", "other",
         ])
+    }
+
+    func testQueueV2RestoresApprovalAndOperationalControlsAfterReload() throws {
+        let hash = "sha256:" + String(repeating: "a", count: 64)
+        let json = """
+        {
+          "version":"caption-review-queue/v2","project":"/tmp/project","status":"ready","fps":24,
+          "base_caption_draft_hash":"\(hash)","can_undo":false,"undo_depth":0,
+          "approval_readiness":{"can_approve":true,"blockers":[],"warning_issue_count":1,"warnings_acknowledged":true},
+          "safe_bulk_review":{"eligible_caption_ids":[],"eligible_count":0,"excluded":[],"exclusion_reason_counts":{}},
+          "font_contract":{"status":"ready","font_id":"noto-sans-jp","family":"Noto Sans JP","fallback_used":false,"diagnostics":[]},
+          "current_approval":{"status":"approved","hash":"\(hash)"},
+          "total_caption_count":0,"matched_caption_count":0,"exported_caption_count":0,"items":[]
+        }
+        """
+        let document = try JSONDecoder().decode(CaptionReviewQueueDocument.self, from: Data(json.utf8))
+        XCTAssertTrue(document.approvalReadiness.canApprove)
+        XCTAssertEqual(document.currentApproval?.status, "approved")
+        XCTAssertEqual(document.currentApproval?.hash, hash)
+        XCTAssertEqual(document.fontContract?.fallbackUsed, false)
+    }
+
+    func testFinalizeArgumentsAndSuccessPayloadUseExplicitCLIContract() {
+        let projectURL = URL(fileURLWithPath: "/tmp/video project")
+        XCTAssertEqual(CaptionReviewRunner.finalizeArguments(projectURL: projectURL), [
+            "npx", "tsx", "scripts/caption-finalize.ts", "run",
+            "--project", "/tmp/video project", "--json",
+        ])
+        let result = CaptionReviewRunner.decodeSuccessPayload("""
+        {"generation_id":"gen-123","active_delivery":{"artifacts":{"final_video":{"path":"07_package/generations/gen-123/video/final.mp4"}}}}
+        """, successMessage: "done")
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.generationID, "gen-123")
+        XCTAssertEqual(result.finalPath, "07_package/generations/gen-123/video/final.mp4")
+    }
+
+    func testReviewerReadinessRefreshDoesNotRequireEnter() {
+        XCTAssertTrue(CaptionReviewerRefreshPolicy.shouldRefresh(from: "", to: "Editor"))
+        XCTAssertFalse(CaptionReviewerRefreshPolicy.shouldRefresh(from: "Editor", to: " Editor "))
+        XCTAssertLessThan(CaptionReviewerRefreshPolicy.delayNanoseconds, 1_000_000_000)
+    }
+
+    func testPreviewTransportPreservesPlayLoopAndRejectsStaleReselectCompletion() {
+        var transport = CaptionPreviewTransportState()
+        let first = transport.reselect(loopStart: 1, loopEnd: 3)
+        transport.itemBecameReady(generation: first)
+        XCTAssertEqual(transport.readiness, .loading)
+        transport.initialSeekCompleted(generation: first, success: true)
+        transport.play()
+        XCTAssertTrue(transport.isPlaying)
+        XCTAssertTrue(transport.tick(3.1))
+        XCTAssertEqual(transport.currentSeconds, 1)
+
+        let second = transport.reselect(loopStart: 5, loopEnd: 7)
+        transport.initialSeekCompleted(generation: first, success: false)
+        XCTAssertEqual(transport.readiness, .loading)
+        transport.itemBecameReady(generation: second)
+        XCTAssertEqual(transport.readiness, .loading)
+        transport.initialSeekCompleted(generation: second, success: true)
+        XCTAssertEqual(transport.readiness, .ready)
+        XCTAssertEqual(transport.currentSeconds, 5)
     }
 
     func testRunnerRoutesSplitMergeAndUndoThroughSharedCLI() {

@@ -106,6 +106,24 @@ export function resolveRemotionOverlayClip(
         anchor: contentAnchor(normalized.element.layout.anchor),
       };
     }
+    if (templateRef === "vos:content.section-label/v1") {
+      return {
+        presetId: "vos:overlay.chapter-kicker",
+        text: String(normalized.element.props.title ?? ""),
+        anchor: contentAnchor(normalized.element.layout.anchor),
+      };
+    }
+    if (templateRef === "vos:content.lower-third/v1") {
+      const name = String(normalized.element.props.name ?? "");
+      const role = typeof normalized.element.props.role === "string"
+        ? normalized.element.props.role
+        : "";
+      return {
+        presetId: "vos:overlay.lower-third",
+        text: role ? `${name}\n${role}` : name,
+        anchor: contentAnchor(normalized.element.layout.anchor),
+      };
+    }
     return null;
   }
 

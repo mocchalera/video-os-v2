@@ -163,11 +163,13 @@ export function isSupportedEffectType(t: string): t is RenderEffectType {
 export interface RenderSpec {
   version: "1";
   /** Bump when renderer semantics change so persisted exact-preview caches invalidate. */
-  rendererContractVersion: "5";
+  rendererContractVersion: "6";
   timelineRevision: string;
   renderSpecHash: string;
   sequence: {
     fps: number;
+    fpsNum: number;
+    fpsDen: number;
     width: number;
     height: number;
     sampleRate: number;
@@ -199,7 +201,13 @@ export interface RenderSpec {
 export interface PreviewArtifactMeta {
   renderSpecHash: string;
   timelineRevision: string;
-  sequence: { width: number; height: number; fps: number };
+  sequence: {
+    width: number;
+    height: number;
+    fps: number;
+    fpsNum: number;
+    fpsDen: number;
+  };
   generatedAt: string;
   status: "ready" | "rendering" | "error";
   warnings: string[];
@@ -340,6 +348,8 @@ export function buildRenderSpec(
   }
   const fps =
     timeline.sequence.fps_num / (timeline.sequence.fps_den || 1);
+  const fpsNum = timeline.sequence.fps_num;
+  const fpsDen = timeline.sequence.fps_den || 1;
   const { width, height } = timeline.sequence;
   const sampleRate = timeline.sequence.sample_rate ?? 48000;
   const dialogueCutFadeMs = timelineHasAppliedSkill(
@@ -647,11 +657,13 @@ export function buildRenderSpec(
   // ── Assemble spec (without hash) ──
   const spec: RenderSpec = {
     version: "1",
-    rendererContractVersion: "5",
+    rendererContractVersion: "6",
     timelineRevision,
     renderSpecHash: "", // computed below
     sequence: {
       fps,
+      fpsNum,
+      fpsDen,
       width,
       height,
       sampleRate,

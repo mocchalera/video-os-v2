@@ -382,6 +382,50 @@ describe("Patch Applicator", () => {
     expect(clip.timeline_duration_frames).toBe(36);
   });
 
+  it("move_segment keeps clip captions and its beat marker aligned", () => {
+    const timeline = makeMinimalTimeline([
+      {
+        trackId: "V1",
+        clip: {
+          clip_id: "CLP_0001",
+          beat_id: "b01",
+          timeline_in_frame: 24,
+          timeline_duration_frames: 48,
+          captions: [{
+            text: "挑戦する",
+            in_frame: 30,
+            out_frame: 60,
+            style: "simple-shadow",
+          }],
+        },
+      },
+    ]);
+    timeline.markers = [{
+      frame: 24,
+      kind: "beat",
+      label: "b01: 挑戦",
+    }];
+
+    const result = applyPatch(timeline, {
+      timeline_version: "1",
+      operations: [{
+        op: "move_segment",
+        target_clip_id: "CLP_0001",
+        new_timeline_in_frame: 96,
+        reason: "ripple",
+      }],
+    }, []);
+
+    expect(result.errors).toEqual([]);
+    expect(result.timeline.tracks.video[0].clips[0].captions).toEqual([{
+      text: "挑戦する",
+      in_frame: 102,
+      out_frame: 132,
+      style: "simple-shadow",
+    }]);
+    expect(result.timeline.markers[0].frame).toBe(96);
+  });
+
   it("move_segment can lift a clip to another video track", () => {
     const timeline = makeMinimalTimeline([
       { trackId: "V1", clip: { clip_id: "CLP_0001", timeline_in_frame: 0, timeline_duration_frames: 24 } },

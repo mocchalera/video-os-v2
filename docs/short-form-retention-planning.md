@@ -55,4 +55,4 @@ HyperFrames/Remotionのsection labelは`viewer_label`を使用し、`HOOK`、`LE
 
 字幕・HyperFrames overlayだけを直した場合、Remotion base assemblyのfingerprintは変わりません。既存assemblyを再利用し、その後段だけを再生成します。画、音声、Remotion所有overlay、transition、source mediaが変わった場合はcache missとなり、base assemblyから再レンダーします。
 
-長尺、event、cinematic、通常16:9、および`credibility_first`のcold-open強制には適用しません。未登録字幕styleのfail-fastも`social_talking_head`だけに限定します。
+長尺、event、cinematic、通常16:9、および`credibility_first`のcold-open強制には適用しません。未登録字幕styleとfont contractのfail-fastはgenreに依存せず、字幕が有効な全経路へ適用します。

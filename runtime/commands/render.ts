@@ -21,6 +21,7 @@ export async function runRender(
     commandName: "/render",
     actorName: "render-video",
     allowedStates: ["approved", "packaged"],
+    requireFinalRenderApproval: true,
   });
 
   if (!result.success) {

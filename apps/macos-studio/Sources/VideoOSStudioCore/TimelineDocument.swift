@@ -590,7 +590,7 @@ public struct TimelineDocument: Decodable, Equatable, Sendable {
 
     public func qaTimestampJumpTarget(for timestampSec: Double) -> QATimestampJumpTarget {
         let safeSeconds = timestampSec.isFinite ? max(0, timestampSec) : 0
-        let rawFrame = (safeSeconds * sequence.fps).rounded()
+        let rawFrame = Double(sequence.secondsToFrames(safeSeconds))
         let frame: Int
         if rawFrame <= 0 {
             frame = 0
@@ -651,8 +651,16 @@ public struct TimelineSequence: Decodable, Equatable, Sendable {
     }
 
     public func framesToSeconds(_ frames: Int) -> Double {
-        guard fps > 0 else { return 0 }
-        return Double(frames) / fps
+        guard fpsNum > 0, fpsDen > 0 else { return 0 }
+        return Double(frames) * Double(fpsDen) / Double(fpsNum)
+    }
+
+    public func secondsToFrames(_ seconds: Double) -> Int {
+        guard seconds.isFinite, fpsNum > 0, fpsDen > 0 else { return 0 }
+        let frames = (max(0, seconds) * Double(fpsNum) / Double(fpsDen)).rounded()
+        guard frames.isFinite else { return 0 }
+        if frames >= Double(Int.max) { return Int.max }
+        return Int(frames)
     }
 
     public func framesToTimecode(_ frames: Int) -> String {

@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  ASS_BOLD_VIDEO_FONT,
   ASS_HEAVY_VIDEO_FONT,
   DEFAULT_VIDEO_FONT,
   DEFAULT_VIDEO_FONT_ID,
@@ -26,6 +27,8 @@ import {
   webFontSubsetCacheKey,
 } from "../runtime/fonts/web-font-subset.js";
 import { remotionDesignTokens } from "../runtime/render/remotion/styles/design-tokens.js";
+import { inspectCaptionFontContract } from "../runtime/caption/font-contract.js";
+import { validateAgainstSchema } from "../runtime/commands/shared.js";
 
 describe("bundled video font contract", () => {
   it("pins Noto Sans JP by font_id and rejects unknown font IDs", () => {
@@ -36,6 +39,42 @@ describe("bundled video font contract", () => {
     });
     expect(resolveVideoFont(DEFAULT_VIDEO_FONT_ID)).toBe(DEFAULT_VIDEO_FONT);
     expect(() => resolveVideoFont("remote-font")).toThrow("Unknown video font_id");
+  });
+
+  it("blocks an implicit style/font fallback instead of approving it", () => {
+    expect(inspectCaptionFontContract("unknown-future-style")).toMatchObject({
+      status: "blocked",
+      fallback_used: true,
+      diagnostics: [{ code: "unknown_caption_style" }],
+    });
+  });
+
+  it("binds clean-lower-third to the verified heavy asset selected by ASS and Studio", () => {
+    expect(inspectCaptionFontContract("clean-lower-third")).toMatchObject({
+      status: "ready",
+      family: "VideoOS Noto Sans JP Black",
+      selected_family: "VideoOS Noto Sans JP Black",
+      selected_asset: {
+        role: "ass_heavy",
+        family: "VideoOS Noto Sans JP Black",
+        sha256: `sha256:${ASS_HEAVY_VIDEO_FONT.sha256}`,
+        weight: 900,
+      },
+    });
+  });
+
+  it("binds longform captions to the verified static 700 asset", () => {
+    expect(inspectCaptionFontContract("longform-event")).toMatchObject({
+      status: "ready",
+      family: "VideoOS Noto Sans JP Bold",
+      selected_family: "VideoOS Noto Sans JP Bold",
+      selected_asset: {
+        role: "ass_bold",
+        family: "VideoOS Noto Sans JP Bold",
+        sha256: `sha256:${ASS_BOLD_VIDEO_FONT.sha256}`,
+        weight: 700,
+      },
+    });
   });
 
   it("canonicalizes composition characters independently of authoring order", () => {
@@ -88,6 +127,13 @@ describe("bundled video font contract", () => {
       expect(staged.fontHref).toMatch(/^\.\/fonts\/noto-sans-jp-[a-f0-9]{20}\.woff2$/);
       expect(readFileSync(staged.fontPath).subarray(0, 4).toString("ascii")).toBe("wOF2");
       expect(readFileSync(staged.licensePath, "utf8")).toContain("SIL OPEN FONT LICENSE");
+      expect(readdirSync(staged.fontsDir).every((name) => /\.(?:ttf|otf|woff2?)$/i.test(name))).toBe(true);
+      expect(staged.licensePath).toContain(`${path.sep}licenses${path.sep}`);
+      expect(readFileSync(staged.manifestPath, "utf8")).toContain('"font_id": "noto-sans-jp"');
+      expect(validateAgainstSchema(
+        JSON.parse(readFileSync(staged.manifestPath, "utf8")),
+        "font-staging-manifest.schema.json",
+      ).valid).toBe(true);
     } finally {
       rmSync(cacheDir, { recursive: true, force: true });
       rmSync(stageDir, { recursive: true, force: true });
@@ -120,6 +166,10 @@ describe("bundled video font contract", () => {
       .update(readFileSync(paths.fontPath))
       .digest("hex");
     expect(actualHash).toBe(DEFAULT_VIDEO_FONT.sha256);
+    const actualBoldHash = createHash("sha256")
+      .update(readFileSync(paths.assBoldFontPath))
+      .digest("hex");
+    expect(actualBoldHash).toBe(ASS_BOLD_VIDEO_FONT.sha256);
     const actualHeavyHash = createHash("sha256")
       .update(readFileSync(paths.assHeavyFontPath))
       .digest("hex");
@@ -136,18 +186,24 @@ describe("bundled video font contract", () => {
       expect(staged.fontHref).toBe("./fonts/NotoSansJP-Variable.ttf");
       expect(createHash("sha256").update(readFileSync(staged.fontPath)).digest("hex"))
         .toBe(DEFAULT_VIDEO_FONT.sha256);
+      expect(createHash("sha256").update(readFileSync(staged.assBoldFontPath)).digest("hex"))
+        .toBe(ASS_BOLD_VIDEO_FONT.sha256);
       expect(createHash("sha256").update(readFileSync(staged.assHeavyFontPath)).digest("hex"))
         .toBe(ASS_HEAVY_VIDEO_FONT.sha256);
       expect(readFileSync(staged.licensePath, "utf8")).toContain("SIL OPEN FONT LICENSE");
+      expect(validateAgainstSchema(
+        JSON.parse(readFileSync(staged.manifestPath, "utf8")),
+        "font-staging-manifest.schema.json",
+      ).valid).toBe(true);
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
   });
 
-  it("uses one family in caption, Remotion, and HyperFrames contracts", () => {
+  it("uses a static caption face while browser renderers keep the canonical variable family", () => {
     expect(DEFAULT_CAPTION_STYLE_PRESET).toMatchObject({
       fontId: "noto-sans-jp",
-      fontFamily: "Noto Sans JP",
+      fontFamily: "VideoOS Noto Sans JP Bold",
     });
     expect(remotionDesignTokens.fontFamilies.heading).toBe('"Noto Sans JP", sans-serif');
     expect(remotionDesignTokens.fontFamilies.body).toBe('"Noto Sans JP", sans-serif');

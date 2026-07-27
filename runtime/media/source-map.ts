@@ -5,6 +5,10 @@ import type { AssetItem } from "../connectors/ffprobe.js";
 import type { MediaKind } from "./media-kind-registry.js";
 import type { ImageSequenceGroup } from "./image-sequence.js";
 import { resolveBgmAnalysisPath } from "./bgm-analyzer.js";
+import {
+  isKnownGeneratedVideoPath,
+  type MediaSourceOrigin,
+} from "./source-origin.js";
 
 export const MEDIA_DIR_NAME = "02_media";
 export const SOURCE_MAP_FILE_NAME = "source_map.json";
@@ -22,6 +26,11 @@ export interface MediaSourceMapEntry {
   source_fingerprint?: string;
   source_size_bytes?: number;
   source_mtime_ms?: number;
+  source_origin?: MediaSourceOrigin;
+  clean_base_attestation?: {
+    path: string;
+    sha256: string;
+  };
   image_sequence?: {
     frame_set_content_sha256: string;
     frame_count: number;
@@ -244,6 +253,10 @@ function normalizeLoadedEntry(
     ...(entry.source_fingerprint ? { source_fingerprint: entry.source_fingerprint } : {}),
     ...(typeof entry.source_size_bytes === "number" ? { source_size_bytes: entry.source_size_bytes } : {}),
     ...(typeof entry.source_mtime_ms === "number" ? { source_mtime_ms: entry.source_mtime_ms } : {}),
+    ...(entry.source_origin ? { source_origin: entry.source_origin } : {}),
+    ...(entry.clean_base_attestation
+      ? { clean_base_attestation: entry.clean_base_attestation }
+      : {}),
     ...(entry.image_sequence ? { image_sequence: entry.image_sequence } : {}),
   };
 }
@@ -285,6 +298,20 @@ export function loadSourceMap(
         source_fingerprint: typeof item.source_fingerprint === "string" ? item.source_fingerprint : undefined,
         source_size_bytes: typeof item.source_size_bytes === "number" ? item.source_size_bytes : undefined,
         source_mtime_ms: typeof item.source_mtime_ms === "number" ? item.source_mtime_ms : undefined,
+        source_origin: item.source_origin === "original_source"
+          || item.source_origin === "rendered_output"
+          || item.source_origin === "verified_caption_free_proxy"
+          ? item.source_origin
+          : undefined,
+        clean_base_attestation: item.clean_base_attestation
+          && typeof item.clean_base_attestation === "object"
+          && typeof (item.clean_base_attestation as Record<string, unknown>).path === "string"
+          && typeof (item.clean_base_attestation as Record<string, unknown>).sha256 === "string"
+          ? {
+              path: (item.clean_base_attestation as Record<string, string>).path,
+              sha256: (item.clean_base_attestation as Record<string, string>).sha256,
+            }
+          : undefined,
         image_sequence: normalizeLoadedImageSequence(item.image_sequence),
       });
       if (normalized) entries.push(normalized);
@@ -559,23 +586,36 @@ export function createMediaLinks(
 
   const docItems: MediaSourceMapEntry[] = plans
     .filter((plan): plan is MediaLinkPlan & { assetId: string } => !!plan.assetId && fs.existsSync(plan.sourcePath))
-    .map((plan) => ({
-      asset_id: plan.assetId,
-      source_locator: toPosixRel(projectPath, plan.linkPath),
-      local_source_path: toPosixRel(projectPath, plan.linkPath),
-      link_path: toPosixRel(projectPath, plan.linkPath),
-      ...(plan.displayName ? { display_name: plan.displayName } : {}),
-      kind: plan.kind,
-      link_type: "symlink",
-      ...(plan.asset?.media_kind ? { media_kind: plan.asset.media_kind } : {}),
-      ...(plan.asset?.source_content_sha256 ? { source_content_sha256: plan.asset.source_content_sha256 } : {}),
-      ...(plan.asset?.source_fingerprint ? { source_fingerprint: plan.asset.source_fingerprint } : {}),
-      ...(typeof plan.asset?.source_size_bytes === "number" ? { source_size_bytes: plan.asset.source_size_bytes } : {}),
-      ...(typeof plan.asset?.source_mtime_ms === "number" ? { source_mtime_ms: plan.asset.source_mtime_ms } : {}),
-      ...(sequenceMetadataByAssetId.get(plan.assetId)
-        ? { image_sequence: sequenceMetadataByAssetId.get(plan.assetId)! }
-        : {}),
-    }));
+    .map((plan) => {
+      const previousEntry = previous.entryMap.get(plan.assetId);
+      const identityUnchanged = !!plan.asset?.source_content_sha256
+        && previousEntry?.source_content_sha256 === plan.asset.source_content_sha256;
+      return {
+        asset_id: plan.assetId,
+        source_locator: toPosixRel(projectPath, plan.linkPath),
+        local_source_path: toPosixRel(projectPath, plan.linkPath),
+        link_path: toPosixRel(projectPath, plan.linkPath),
+        ...(plan.displayName ? { display_name: plan.displayName } : {}),
+        kind: plan.kind,
+        link_type: "symlink" as const,
+        ...(plan.asset?.media_kind ? { media_kind: plan.asset.media_kind } : {}),
+        ...(plan.asset?.source_content_sha256 ? { source_content_sha256: plan.asset.source_content_sha256 } : {}),
+        ...(plan.asset?.source_fingerprint ? { source_fingerprint: plan.asset.source_fingerprint } : {}),
+        ...(typeof plan.asset?.source_size_bytes === "number" ? { source_size_bytes: plan.asset.source_size_bytes } : {}),
+        ...(typeof plan.asset?.source_mtime_ms === "number" ? { source_mtime_ms: plan.asset.source_mtime_ms } : {}),
+        source_origin: identityUnchanged && previousEntry?.source_origin
+          ? previousEntry.source_origin
+          : isKnownGeneratedVideoPath(plan.sourcePath)
+            ? "rendered_output" as const
+            : "original_source" as const,
+        ...(identityUnchanged && previousEntry?.clean_base_attestation
+          ? { clean_base_attestation: previousEntry.clean_base_attestation }
+          : {}),
+        ...(sequenceMetadataByAssetId.get(plan.assetId)
+          ? { image_sequence: sequenceMetadataByAssetId.get(plan.assetId)! }
+          : {}),
+      };
+    });
 
   const nextDoc: MediaSourceMapDoc = {
     version: "1",

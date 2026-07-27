@@ -364,6 +364,13 @@ describe("canonical source-input attestation", () => {
           audioClipCount: 0,
         };
       },
+      runDeterministicOutputQAImpl: async () => ({
+        status: "verified",
+        duration_sec: 1,
+        width: 1920,
+        height: 1080,
+        issues: [],
+      }),
       runMarlinQAImpl: async () => report,
     });
     expect(rendered).toBe(1);

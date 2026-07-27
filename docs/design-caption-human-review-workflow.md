@@ -192,6 +192,7 @@ type CaptionReviewOperation =
   | {
       op: "set_review_state";
       caption_id: string;
+      base_text_hash: string;
       state: "verified" | "flagged" | "unreviewed";
       note?: string;
     }
@@ -378,11 +379,20 @@ Studio未実装時も同じ工程を試せるよう、thin CLIを用意する。
 
 ```sh
 npx tsx scripts/caption-review.ts queue --project <dir>
+npx tsx scripts/caption-review.ts prepare --project <dir>
+npx tsx scripts/caption-review.ts verify-safe --project <dir> --reviewer <name> \
+  --base-caption-draft-hash <hash> --caption-text-hash SC_001=<hash> [...]
 npx tsx scripts/caption-review.ts init --project <dir> --reviewer <name>
 npx tsx scripts/caption-review.ts apply --project <dir> --patch <json>
 npx tsx scripts/caption-review.ts validate --project <dir>
 npx tsx scripts/caption-review.ts approve --project <dir> --reviewer <name>
 ```
+
+`queue` v2はReview Coreが算出した`approval_readiness`（blocker code/messageを全件）、`safe_bulk_review`、`font_contract`、整合する`current_approval`を返す。長行・密度のlayout warnは一括確認対象にできるが、block/flagged、固有名詞、数値、否定、低timing確度は除外する。一括確認はdraft hashと全caption text hashを必須とし、staleなら0件更新、成功時は1操作としてundoする。
+
+`clean-lower-third`のfont contractは`VideoOS Noto Sans JP Black`/900を選択する。ASSはmanifestの`ass_heavy` assetをFontnameとして使いsynthetic boldを無効化し、Studioは同じfamilyをCoreText登録して900を`.black`として表示する。登録失敗時はsystem fontへfallbackせず、`font_contract_mismatch`として承認とoverlayを停止する。
+
+`caption_draft.json`欠落時のqueueは`recovery_action`を返す。`prepare`/`recover`はcanonical caption生成器を隔離領域で実行し、既存patch/approvalのbase hashと一致したdraftだけをatomicに復元する。既存レビューartifactを暗黙に上書きしない。
 
 CLIはReview Coreのadapterとし、独自ルールを持たない。`queue`はHTML、CSV、JSONへexport可能にするが、正はJSON成果物である。
 

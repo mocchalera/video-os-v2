@@ -1,7 +1,7 @@
 /**
  * AI Jobs API routes (Phase 2b-3).
  *
- * POST /api/projects/:id/ai/jobs       — Start an AI job (compile/review/render)
+ * POST /api/projects/:id/ai/jobs       — Start an AI job (compile/review/render/caption-finalize)
  * GET  /api/projects/:id/ai/jobs/current — Current running job for the project
  * GET  /api/projects/:id/ai/jobs/:jobId — Specific job details
  * GET  /api/projects/:id/ai/progress    — Read progress.json (polling endpoint)
@@ -20,10 +20,14 @@ import {
   getProjectLockKind,
 } from "../utils.js";
 import { getReconcileStatus, type ReconcileStatus } from "../services/reconcile-status.js";
+import {
+  AI_JOB_PHASES,
+  sanitizeAiJobOptions,
+  type JobPhase,
+} from "../../shared/ai-job-contract.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
-type JobPhase = "compile" | "review" | "render";
 type JobStatus = "queued" | "running" | "succeeded" | "failed" | "blocked" | "obsolete";
 
 interface AiJob {
@@ -197,11 +201,11 @@ export function createAiJobsRouter(projectsDir: string): Router {
     const { phase, base_timeline_revision, options } = req.body as {
       phase?: string;
       base_timeline_revision?: string;
-      options?: Record<string, unknown>;
+      options?: unknown;
     };
 
     // Validate phase
-    const validPhases: JobPhase[] = ["compile", "review", "render"];
+    const validPhases: readonly JobPhase[] = AI_JOB_PHASES;
     if (!phase || !validPhases.includes(phase as JobPhase)) {
       res.status(422).json({
         error: "Invalid phase",
@@ -211,6 +215,11 @@ export function createAiJobsRouter(projectsDir: string): Router {
     }
 
     const jobPhase = phase as JobPhase;
+    const sanitizedOptions = sanitizeAiJobOptions(jobPhase, options);
+    if (!sanitizedOptions.ok) {
+      res.status(422).json({ error: "Invalid job options", details: sanitizedOptions.error });
+      return;
+    }
 
     // Check timeline revision if provided
     const timelinePath = path.join(projDir, "05_timeline", "timeline.json");
@@ -260,14 +269,14 @@ export function createAiJobsRouter(projectsDir: string): Router {
       return;
     }
 
-    // Render phase: only allowed if state is approved or packaged
-    if (jobPhase === "render") {
+    // Render/finalize phases: only allowed if state is approved or packaged.
+    if (jobPhase === "render" || jobPhase === "caption-finalize") {
       try {
         const status = getReconcileStatus(projDir);
         const state = status.currentState;
         if (state !== "approved" && state !== "packaged") {
           res.status(422).json({
-            error: "Render is only allowed when project state is 'approved' or 'packaged'",
+            error: `${jobPhase} is only allowed when project state is 'approved' or 'packaged'`,
             current_state: state,
           });
           return;
@@ -275,6 +284,18 @@ export function createAiJobsRouter(projectsDir: string): Router {
       } catch {
         // Non-fatal — allow render attempt
       }
+    }
+
+    if (
+      jobPhase === "caption-finalize"
+      && sanitizedOptions.options.approval_path === undefined
+      && !fs.existsSync(path.join(projDir, "07_package", "caption_approval.json"))
+    ) {
+      res.status(422).json({
+        error: "caption-finalize requires an approved caption intent",
+        missing: "07_package/caption_approval.json",
+      });
+      return;
     }
 
     // Acquire project lock
@@ -301,7 +322,7 @@ export function createAiJobsRouter(projectsDir: string): Router {
     activeJobs.set(projectId, job);
 
     // Spawn worker process
-    spawnJobWorker(projectId, projDir, job, options ?? {});
+    spawnJobWorker(projectId, projDir, job, sanitizedOptions.options);
 
     // Respond immediately with job info
     res.status(202).json({

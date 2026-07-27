@@ -11,13 +11,17 @@ import {
   captionReviewUndoDepth,
   editCaptionReview,
   initializeCaptionReviewPatch,
+  inspectCaptionReviewOperationalState,
   loadCaptionReviewContext,
   mergeCaptionReview,
   proposeCaptionGlossaryTerm,
   queueCaptionReview,
+  prepareCaptionReviewDraft,
+  retimeCaptionReview,
   splitCaptionReview,
   undoCaptionReview,
   validateCaptionReview,
+  verifySafeCaptionReview,
 } from "../runtime/caption/review-service.js";
 import type {
   CaptionReviewQueueItem,
@@ -28,7 +32,7 @@ import {
   type CaptionStylePreset,
 } from "../editor/shared/caption-style-tokens.js";
 
-type CaptionReviewCommand = "queue" | "init" | "edit" | "split" | "merge" | "glossary-propose" | "undo" | "apply" | "validate" | "approve";
+type CaptionReviewCommand = "queue" | "prepare" | "recover" | "init" | "verify-safe" | "edit" | "split" | "merge" | "retime" | "glossary-propose" | "undo" | "apply" | "validate" | "approve";
 type QueueFormat = "json" | "csv" | "html";
 
 export interface CaptionReviewCliArgs {
@@ -49,6 +53,8 @@ export interface CaptionReviewCliArgs {
   splitFrame?: number;
   baseTextHash?: string;
   nextBaseTextHash?: string;
+  baseCaptionDraftHash?: string;
+  captionTextHashes: Record<string, string>;
   note?: string;
   category?: "stt" | "proper_noun" | "kanji" | "punctuation" | "other";
   format: QueueFormat;
@@ -58,11 +64,15 @@ export interface CaptionReviewCliArgs {
 }
 
 const USAGE = `Usage:
-  npx tsx scripts/caption-review.ts queue --project <dir> [--format json|csv|html] [--output <file>] [--severity block|warn|info|all] [--limit N]
+  npx tsx scripts/caption-review.ts queue --project <dir> [--reviewer <name>] [--format json|csv|html] [--output <file>] [--severity block|warn|info|all] [--limit N]
+  npx tsx scripts/caption-review.ts prepare --project <dir>
+  npx tsx scripts/caption-review.ts recover --project <dir>   # prepare alias
   npx tsx scripts/caption-review.ts init --project <dir> --reviewer <name> [--patch <file>]
+  npx tsx scripts/caption-review.ts verify-safe --project <dir> --reviewer <name> --base-caption-draft-hash <hash> --caption-text-hash <id>=<hash> [...]
   npx tsx scripts/caption-review.ts edit --project <dir> --caption-id <id> [--text <text>] [--start-frame N --end-frame N] [--state unreviewed|verified|flagged] [--base-text-hash <hash>] [--category stt|proper_noun|kanji|punctuation|other] [--note <text>]
   npx tsx scripts/caption-review.ts split --project <dir> --caption-id <id> --split-frame N [--first-text <text> --second-text <text>] [--base-text-hash <hash>]
   npx tsx scripts/caption-review.ts merge --project <dir> --caption-id <id> --next-caption-id <id> [--text <text>] [--base-text-hash <hash> --next-base-text-hash <hash>]
+  npx tsx scripts/caption-review.ts retime --project <dir> --reviewer <name>
   npx tsx scripts/caption-review.ts glossary-propose --project <dir> --caption-id <id> --canonical <term> [--variant <text> ...]
   npx tsx scripts/caption-review.ts undo --project <dir>
   npx tsx scripts/caption-review.ts apply --project <dir> [--patch <file>]
@@ -72,7 +82,7 @@ const USAGE = `Usage:
 export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
   const args = argv.slice(2);
   const command = args.shift() as CaptionReviewCommand | undefined;
-  if (!command || !["queue", "init", "edit", "split", "merge", "glossary-propose", "undo", "apply", "validate", "approve"].includes(command)) {
+  if (!command || !["queue", "prepare", "recover", "init", "verify-safe", "edit", "split", "merge", "retime", "glossary-propose", "undo", "apply", "validate", "approve"].includes(command)) {
     throw new Error(`A valid command is required.\n${USAGE}`);
   }
 
@@ -92,6 +102,8 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
   let splitFrame: number | undefined;
   let baseTextHash: string | undefined;
   let nextBaseTextHash: string | undefined;
+  let baseCaptionDraftHash: string | undefined;
+  const captionTextHashes: Record<string, string> = {};
   let note: string | undefined;
   let category: CaptionReviewCliArgs["category"];
   let format: QueueFormat = "json";
@@ -117,6 +129,13 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
     else if (arg === "--split-frame") splitFrame = integerValue(args, ++index, arg);
     else if (arg === "--base-text-hash") baseTextHash = requiredValue(args, ++index, arg);
     else if (arg === "--next-base-text-hash") nextBaseTextHash = requiredValue(args, ++index, arg);
+    else if (arg === "--base-caption-draft-hash") baseCaptionDraftHash = requiredValue(args, ++index, arg);
+    else if (arg === "--caption-text-hash") {
+      const value = requiredValue(args, ++index, arg);
+      const separator = value.indexOf("=");
+      if (separator <= 0 || separator === value.length - 1) throw new Error("--caption-text-hash requires <caption-id>=<hash>");
+      captionTextHashes[value.slice(0, separator)] = value.slice(separator + 1);
+    }
     else if (arg === "--state") {
       const value = requiredValue(args, ++index, arg);
       if (!isReviewState(value)) throw new Error(`Unsupported review state: ${value}`);
@@ -145,8 +164,11 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
   }
 
   if (!projectDir) throw new Error(`--project is required.\n${USAGE}`);
-  if ((command === "init" || command === "approve") && !reviewer?.trim()) {
+  if ((command === "init" || command === "approve" || command === "verify-safe" || command === "retime") && !reviewer?.trim()) {
     throw new Error(`--reviewer is required for ${command}`);
+  }
+  if (command === "verify-safe" && (!baseCaptionDraftHash || Object.keys(captionTextHashes).length === 0)) {
+    throw new Error("verify-safe requires --base-caption-draft-hash and at least one --caption-text-hash");
   }
   if (command === "edit" && (!captionID ||
       (text === undefined && state === undefined && startFrame === undefined && endFrame === undefined))) {
@@ -168,10 +190,10 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
     throw new Error("glossary-propose requires --caption-id and --canonical");
   }
   const mutationCommands: CaptionReviewCommand[] = ["edit", "split", "merge", "glossary-propose"];
-  if (!mutationCommands.includes(command) &&
+  if (!mutationCommands.includes(command) && command !== "verify-safe" &&
       (captionID || nextCaptionID || text !== undefined || firstText !== undefined || secondText !== undefined ||
         state || note || category || startFrame !== undefined || endFrame !== undefined || splitFrame !== undefined ||
-        baseTextHash || nextBaseTextHash || canonical || variants.length > 0)) {
+        baseTextHash || nextBaseTextHash || baseCaptionDraftHash || Object.keys(captionTextHashes).length > 0 || canonical || variants.length > 0)) {
     throw new Error("caption mutation arguments are only valid for edit, split, merge, or glossary-propose");
   }
   if (command !== "glossary-propose" && (canonical || variants.length > 0)) {
@@ -200,6 +222,8 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
     splitFrame,
     baseTextHash,
     nextBaseTextHash,
+    baseCaptionDraftHash,
+    captionTextHashes,
     note,
     category,
     format,
@@ -213,10 +237,35 @@ export function runCaptionReviewCli(
   argv = process.argv,
   write: (message: string) => void = (message) => console.log(message),
 ): number {
+  if (argv.slice(2).some((value) => value === "--help" || value === "-h")) {
+    write(USAGE);
+    return 0;
+  }
   const args = parseCaptionReviewArgs(argv);
   switch (args.command) {
     case "queue": {
-      const allItems = queueCaptionReview(args.projectDir, args.patchPath);
+      const operational = inspectCaptionReviewOperationalState(
+        args.projectDir,
+        args.reviewer,
+        args.patchPath,
+      );
+      if (operational.status === "needs_recovery") {
+        if (args.format !== "json") throw new Error(operational.recoveryAction!.message);
+        write(JSON.stringify({
+          version: "caption-review-queue/v2",
+          project: args.projectDir,
+          status: operational.status,
+          recovery_action: operational.recoveryAction,
+          approval_readiness: operational.approvalReadiness,
+          safe_bulk_review: operational.safeBulk,
+          total_caption_count: 0,
+          matched_caption_count: 0,
+          exported_caption_count: 0,
+          items: [],
+        }, null, 2));
+        return 0;
+      }
+      const allItems = operational.items;
       const filtered = filterQueue(allItems, args.severity);
       const items = args.limit === undefined ? filtered : filtered.slice(0, args.limit);
       const context = loadCaptionReviewContext(args.projectDir);
@@ -229,6 +278,12 @@ export function runCaptionReviewCli(
         canUndo: canUndoCaptionReview(args.projectDir),
         undoDepth: captionReviewUndoDepth(args.projectDir),
         glossaryProposals: captionGlossaryProposals(args.projectDir),
+        baseCaptionDraftHash: operational.baseCaptionDraftHash!,
+        approvalReadiness: operational.approvalReadiness,
+        safeBulk: operational.safeBulk,
+        fontContract: operational.fontContract!,
+        currentApproval: operational.currentApproval,
+        approvalWarning: operational.approvalWarning,
       });
       if (args.outputPath) {
         fs.mkdirSync(path.dirname(args.outputPath), { recursive: true });
@@ -237,6 +292,17 @@ export function runCaptionReviewCli(
       } else {
         write(rendered);
       }
+      return 0;
+    }
+    case "prepare":
+    case "recover": {
+      const result = prepareCaptionReviewDraft(args.projectDir);
+      write(JSON.stringify({
+        command: args.command,
+        status: result.status,
+        caption_draft_path: result.draftPath,
+        base_caption_draft_hash: result.draftHash,
+      }, null, 2));
       return 0;
     }
     case "init": {
@@ -282,6 +348,25 @@ export function runCaptionReviewCli(
       }, null, 2));
       return 0;
     }
+    case "verify-safe": {
+      const result = verifySafeCaptionReview(args.projectDir, {
+        reviewer: args.reviewer!,
+        baseCaptionDraftHash: args.baseCaptionDraftHash!,
+        captionTextHashes: args.captionTextHashes,
+      });
+      write(JSON.stringify({
+        command: "verify-safe",
+        patch_path: result.patchPath,
+        preview_path: result.previewPath,
+        verified_count: result.assessment.eligible_count,
+        excluded_count: result.assessment.excluded.length,
+        excluded: result.assessment.excluded,
+        exclusion_reason_counts: result.assessment.exclusion_reason_counts,
+        undo_depth: captionReviewUndoDepth(args.projectDir),
+        validation: result.preview.validation,
+      }, null, 2));
+      return 0;
+    }
     case "split": {
       const result = splitCaptionReview(args.projectDir, {
         captionID: args.captionID!,
@@ -302,6 +387,19 @@ export function runCaptionReviewCli(
         expectedSecondTextHash: args.nextBaseTextHash,
       });
       writeMutationResult("merge", result, write);
+      return 0;
+    }
+    case "retime": {
+      const result = retimeCaptionReview(args.projectDir, args.reviewer!);
+      write(JSON.stringify({
+        command: "retime",
+        patch_path: result.patchPath,
+        preview_path: result.previewPath,
+        timing_report_path: result.timingReportPath,
+        adjusted_caption_count: result.adjustedCaptionCount,
+        timing_report: result.timingReport,
+        validation: result.preview.validation,
+      }, null, 2));
       return 0;
     }
     case "glossary-propose": {
@@ -352,6 +450,8 @@ export function runCaptionReviewCli(
         caption_count: result.approval.speech_captions.length,
         caption_review_patch_hash: result.patchHash,
         validation_hash: result.validationHash,
+        approval_hash: result.approvalHash,
+        status: result.approval.approval.status,
       }, null, 2));
       return 0;
     }
@@ -380,12 +480,20 @@ function renderQueue(
     canUndo: boolean;
     undoDepth: number;
     glossaryProposals: ReturnType<typeof captionGlossaryProposals>;
+    baseCaptionDraftHash: string;
+    approvalReadiness: ReturnType<typeof inspectCaptionReviewOperationalState>["approvalReadiness"];
+    safeBulk: ReturnType<typeof inspectCaptionReviewOperationalState>["safeBulk"];
+    fontContract: NonNullable<ReturnType<typeof inspectCaptionReviewOperationalState>["fontContract"]>;
+    currentApproval: ReturnType<typeof inspectCaptionReviewOperationalState>["currentApproval"];
+    approvalWarning: ReturnType<typeof inspectCaptionReviewOperationalState>["approvalWarning"];
   },
 ): string {
   if (format === "json") {
     return JSON.stringify({
-      version: "caption-review-queue/v1",
+      version: "caption-review-queue/v2",
       project: metadata.projectDir,
+      status: "ready",
+      base_caption_draft_hash: metadata.baseCaptionDraftHash,
       fps: metadata.fps,
       caption_style: {
         preset_id: metadata.captionStyle.presetId,
@@ -402,6 +510,11 @@ function renderQueue(
       can_undo: metadata.canUndo,
       undo_depth: metadata.undoDepth,
       glossary_proposals: metadata.glossaryProposals,
+      approval_readiness: metadata.approvalReadiness,
+      safe_bulk_review: metadata.safeBulk,
+      font_contract: metadata.fontContract,
+      ...(metadata.currentApproval ? { current_approval: metadata.currentApproval } : {}),
+      ...(metadata.approvalWarning ? { approval_warning: metadata.approvalWarning } : {}),
       total_caption_count: metadata.total,
       matched_caption_count: metadata.selected,
       exported_caption_count: items.length,

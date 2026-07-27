@@ -24,6 +24,8 @@ export interface CaptionSemanticTimingPolicy {
   mode: "off" | "speech_sync" | "protect_reveals";
   ordinary_lead_frames?: number;
   audio_first_frames?: number;
+  question_audio_first_frames?: number;
+  gap_ownership?: "previous" | "blank";
   anchors?: CaptionRevealAnchor[];
 }
 export type BriefAudioPolicy = "ducking" | "bgm_only" | "original_only";

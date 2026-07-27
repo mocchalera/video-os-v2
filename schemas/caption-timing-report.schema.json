@@ -14,12 +14,16 @@
     "issues"
   ],
   "properties": {
-    "version": { "const": "caption-timing-report/v1" },
+    "version": { "enum": ["caption-timing-report/v1", "caption-timing-report/v2"] },
     "mode": { "enum": ["off", "speech_sync", "protect_reveals"] },
     "checked_caption_count": { "type": "integer", "minimum": 0 },
     "protected_caption_count": { "type": "integer", "minimum": 0 },
     "split_count": { "type": "integer", "minimum": 0 },
     "adjusted_lead_count": { "type": "integer", "minimum": 0 },
+    "question_caption_count": { "type": "integer", "minimum": 0 },
+    "question_adjusted_count": { "type": "integer", "minimum": 0 },
+    "previous_speech_guard_count": { "type": "integer", "minimum": 0 },
+    "gap_tail_hold_count": { "type": "integer", "minimum": 0 },
     "unresolved_count": { "type": "integer", "minimum": 0 },
     "issues": {
       "type": "array",
@@ -30,6 +34,8 @@
           "code": {
             "enum": [
               "premature_caption_lead",
+              "question_caption_lead",
+              "previous_speech_overlap",
               "unresolved_reveal_anchor",
               "ambiguous_reveal_anchor",
               "reveal_after_caption"
@@ -45,5 +51,16 @@
       }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "version": { "const": "caption-timing-report/v2" } } },
+    "then": {
+      "required": [
+        "question_caption_count",
+        "question_adjusted_count",
+        "previous_speech_guard_count",
+        "gap_tail_hold_count"
+      ]
+    }
+  }],
   "additionalProperties": false
 }

@@ -504,7 +504,7 @@ export interface TransitionChainInput {
   gap?: {
     width: number;
     height: number;
-    fps: number;
+    fps: number | string;
   };
 }
 
@@ -522,6 +522,8 @@ export interface TransitionChainOptions {
   videoEncodeArgs: string[];
   /** Audio codec args when includeAudio, e.g. ["-c:a","pcm_s16le",...]. */
   audioCodecArgs?: string[];
+  /** Canonical output CFR, preferably the timeline numerator/denominator. */
+  outputFps?: string;
   outputPath: string;
 }
 
@@ -641,6 +643,7 @@ export function buildGapAwareTransitionChainInputs(
   clipInputs: TransitionChainTimelineInput[],
   opts: {
     fps: number;
+    fpsRational?: string;
     width: number;
     height: number;
     startFrame?: number;
@@ -670,7 +673,7 @@ export function buildGapAwareTransitionChainInputs(
       gap: {
         width: opts.width,
         height: opts.height,
-        fps: opts.fps,
+        fps: opts.fpsRational ?? opts.fps,
       },
     });
   };
@@ -821,6 +824,9 @@ export function buildTransitionChainArgs(opts: TransitionChainOptions): string[]
   args.push(...opts.videoEncodeArgs);
   if (opts.includeAudio && opts.audioCodecArgs) {
     args.push(...opts.audioCodecArgs);
+  }
+  if (opts.outputFps) {
+    args.push("-r", opts.outputFps, "-fps_mode", "cfr");
   }
   args.push("-pix_fmt", "yuv420p", opts.outputPath);
   return args;

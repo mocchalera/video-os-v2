@@ -127,6 +127,7 @@
           "properties": {
             "op": { "const": "set_review_state" },
             "caption_id": { "$ref": "#/$defs/captionId" },
+            "base_text_hash": { "$ref": "#/$defs/textHash" },
             "state": { "enum": ["unreviewed", "verified", "flagged"] },
             "note": { "type": "string" }
           },

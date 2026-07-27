@@ -75,7 +75,7 @@ describe("semantic caption timing", () => {
       caption_id: "SC_0001_SETUP",
       text: "AI｜わかった。",
       timeline_in_frame: 0,
-      timeline_duration_frames: 48,
+      timeline_duration_frames: 49,
       reveal_timing: { status: "setup_only", anchor_frame: 48 },
     });
     expect(result.captions[1]).toMatchObject({
@@ -179,5 +179,192 @@ describe("semantic caption timing", () => {
       valid: true,
       errors: [],
     });
+  });
+
+  it("keeps a pause on the previous caption and reveals a question at audio onset", () => {
+    const result = applyCaptionSemanticTiming({
+      captions: [
+        caption({
+          caption_id: "SC_0001",
+          timeline_in_frame: 0,
+          timeline_duration_frames: 20,
+          text: "前の発言です",
+          transcript_item_ids: ["TRI_1"],
+          timing: {
+            source: "word_remap",
+            confidence: 0.95,
+            sourceWordRefs: [{ word: "前の発言です", start_us: 0, end_us: 1_000_000 }],
+            triggeredFallback: false,
+            timelineInFrame: 0,
+            timelineDurationFrames: 24,
+          },
+        }),
+        caption({
+          caption_id: "SC_0002",
+          timeline_in_frame: 18,
+          timeline_duration_frames: 30,
+          text: "どう思います？",
+          transcript_item_ids: ["TRI_2"],
+          timing: {
+            source: "word_remap",
+            confidence: 0.95,
+            sourceWordRefs: [{ word: "どう思います", start_us: 1_250_000, end_us: 2_000_000 }],
+            triggeredFallback: false,
+            timelineInFrame: 30,
+            timelineDurationFrames: 18,
+          },
+        }),
+      ],
+      policy: {
+        mode: "speech_sync",
+        ordinary_lead_frames: 2,
+        question_audio_first_frames: 0,
+        gap_ownership: "previous",
+      },
+      transcriptItems: new Map([
+        ["TRI_1", { item_id: "TRI_1", start_us: 0, end_us: 1_000_000, text: "前の発言です" }],
+        ["TRI_2", { item_id: "TRI_2", start_us: 1_250_000, end_us: 2_000_000, text: "どう思います？" }],
+      ]),
+      clips: [clip],
+      fps,
+    });
+
+    expect(result.captions[0]).toMatchObject({
+      caption_id: "SC_0001",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 30,
+    });
+    expect(result.captions[1]).toMatchObject({
+      caption_id: "SC_0002",
+      timeline_in_frame: 30,
+      timeline_duration_frames: 18,
+    });
+    expect(result.report).toMatchObject({
+      question_caption_count: 1,
+      question_adjusted_count: 1,
+      previous_speech_guard_count: 1,
+      gap_tail_hold_count: 1,
+    });
+    expect(result.report.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "question_caption_lead", caption_id: "SC_0002" }),
+      expect.objectContaining({ code: "previous_speech_overlap", caption_id: "SC_0002" }),
+    ]));
+    expect(validateAgainstSchema(result.report, "caption-timing-report.schema.json")).toEqual({
+      valid: true,
+      errors: [],
+    });
+  });
+
+  it("still permits a two-frame lead for ordinary text when prior speech has ended", () => {
+    const result = applyCaptionSemanticTiming({
+      captions: [caption({
+        caption_id: "SC_0002",
+        timeline_in_frame: 20,
+        timeline_duration_frames: 30,
+        text: "通常の次字幕",
+        transcript_item_ids: ["TRI_2"],
+      })],
+      policy: { mode: "speech_sync", ordinary_lead_frames: 2, gap_ownership: "previous" },
+      transcriptItems: items({
+        item_id: "TRI_2",
+        start_us: 916_667,
+        end_us: 2_000_000,
+        text: "通常の次字幕",
+      }),
+      clips: [clip],
+      fps,
+    });
+
+    expect(result.captions[0].timeline_in_frame).toBe(20);
+    expect(result.report.adjusted_lead_count).toBe(0);
+  });
+
+  it("does not spend an actual pause on ordinary-text reading lead", () => {
+    const result = applyCaptionSemanticTiming({
+      captions: [
+        caption({
+          caption_id: "SC_0001",
+          timeline_in_frame: 0,
+          timeline_duration_frames: 24,
+          text: "前の発言",
+          transcript_item_ids: ["TRI_1"],
+        }),
+        caption({
+          caption_id: "SC_0002",
+          timeline_in_frame: 34,
+          timeline_duration_frames: 26,
+          text: "通常の次字幕",
+          transcript_item_ids: ["TRI_2"],
+        }),
+      ],
+      policy: { mode: "speech_sync", ordinary_lead_frames: 2, gap_ownership: "previous" },
+      transcriptItems: new Map([
+        ["TRI_1", { item_id: "TRI_1", start_us: 0, end_us: 1_000_000, text: "前の発言" }],
+        ["TRI_2", { item_id: "TRI_2", start_us: 1_500_000, end_us: 2_500_000, text: "通常の次字幕" }],
+      ]),
+      clips: [clip],
+      fps,
+    });
+
+    expect(result.captions[0]).toMatchObject({
+      caption_id: "SC_0001",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 36,
+    });
+    expect(result.captions[1]).toMatchObject({
+      caption_id: "SC_0002",
+      timeline_in_frame: 36,
+    });
+    expect(result.report).toMatchObject({
+      adjusted_lead_count: 1,
+      gap_tail_hold_count: 1,
+    });
+    expect(result.report.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "premature_caption_lead",
+        caption_id: "SC_0002",
+        message: expect.stringContaining("clamped to 0-frame reading lead"),
+      }),
+    ]));
+  });
+
+  it("uses transcript onset before a clip-remap fallback range", () => {
+    const result = applyCaptionSemanticTiming({
+      captions: [caption({
+        caption_id: "SC_0002",
+        timeline_in_frame: 34,
+        timeline_duration_frames: 26,
+        text: "フォールバックですか？",
+        transcript_item_ids: ["TRI_2"],
+        timing: {
+          source: "clip_item_remap",
+          confidence: 0.4,
+          triggeredFallback: true,
+          timelineInFrame: 34,
+          timelineDurationFrames: 26,
+        },
+      })],
+      policy: { mode: "speech_sync", ordinary_lead_frames: 2, gap_ownership: "previous" },
+      transcriptItems: items({
+        item_id: "TRI_2",
+        start_us: 1_500_000,
+        end_us: 2_500_000,
+        text: "フォールバックですか？",
+      }),
+      clips: [clip],
+      fps,
+    });
+
+    expect(result.captions[0]).toMatchObject({
+      timeline_in_frame: 36,
+      timeline_duration_frames: 24,
+    });
+    expect(result.report.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "question_caption_lead",
+        caption_id: "SC_0002",
+        message: expect.stringContaining("aligned to question onset"),
+      }),
+    ]));
   });
 });

@@ -49,6 +49,8 @@ import {
   resolveAudioGainWithFallback,
   type AudioGainRole,
 } from "../../editor/shared/audio-gain.js";
+import { assertNoLegacyClipCaptionsForPackage } from "./legacy-caption-guard.js";
+import { assertMediaWriteReady } from "../system/media-write-doctor.js";
 
 export interface AssemblerOptions {
   projectDir: string;
@@ -60,6 +62,8 @@ export interface AssemblerOptions {
   cleanupTemp?: boolean;
   workingDirRoot?: string;
   execFileImpl?: ExecFileLike;
+  /** Test/host seam for the fail-closed toolchain and capacity gate. */
+  assertMediaWriteReadyImpl?: typeof assertMediaWriteReady;
   /**
    * Explicit asset_id -> source file map. Takes precedence over the
    * project-derived resolution (preview manifest, source map, assets.json).
@@ -67,6 +71,12 @@ export interface AssemblerOptions {
    */
   sourceOverrides?: Record<string, string>;
   includeAudio?: boolean;
+  /**
+   * Legacy clip captions are only a preview compatibility surface. Final
+   * engine-render packaging must pass "reject" and use approved ASS/libass.
+   * Finishing previews may pass "omit" to render the clean picture layer.
+   */
+  legacyCaptionMode?: "preview_burn" | "omit" | "reject";
 }
 
 export interface AssemblyResult {
@@ -207,7 +217,8 @@ export function buildStillVideoArgs(
     "-y", "-loop", "1", "-framerate", fpsRational, "-i", inputPath,
     "-map", "0:v:0", "-vf", buildStillVideoFilter(width, height, fitMode, background),
     "-frames:v", String(frameCount), "-an", "-r", fpsRational,
-    ...x264Args(INTERMEDIATE_X264), "-pix_fmt", "yuv420p", outputPath,
+    "-c:v", "libx264", "-preset", INTERMEDIATE_X264.preset, "-qp", "0",
+    "-pix_fmt", "yuv420p", outputPath,
   ];
 }
 
@@ -252,6 +263,8 @@ export function buildVideoTrimArgs(
   transform?: ClipFilterTransform,
   endingFade?: { color: "black" | "white"; durationSec: number },
   timelineDurationSec?: number,
+  fpsRational: string = String(fps),
+  timelineDurationFrames?: number,
 ): string[] {
   const fitFilter = transform
     ? buildVideoFitFilterFromTransform(width, height, transform)
@@ -263,8 +276,13 @@ export function buildVideoTrimArgs(
   const composedFilter = fadeDurationSec > 0 && endingFade
     ? `${fitFilter},fade=t=out:st=${formatFfmpegTimestamp(clipDurationSec - fadeDurationSec)}:d=${formatFfmpegTimestamp(fadeDurationSec)}:color=${endingFade.color}`
     : fitFilter;
+  // Frame-bounded trims count frames at the point where the filter runs.
+  // Normalize source cadence first so timeline frames are never interpreted as
+  // 29.97/30 fps source frames on a 24 fps sequence.
   const videoFilter = timelineDurationSec !== undefined
-    ? `${composedFilter},tpad=stop_mode=clone:stop_duration=1,trim=duration=${formatFfmpegTimestamp(timelineDurationSec)},setpts=PTS-STARTPTS`
+    ? `${composedFilter},fps=${fpsRational},tpad=stop_mode=clone:stop_duration=1,${timelineDurationFrames !== undefined
+      ? `trim=end_frame=${timelineDurationFrames}`
+      : `trim=duration=${formatFfmpegTimestamp(timelineDurationSec)}`},setpts=PTS-STARTPTS`
     : composedFilter;
   return [
     "-y",
@@ -274,9 +292,12 @@ export function buildVideoTrimArgs(
     "-map", "0:v:0",
     "-vf", videoFilter,
     "-an",
-    "-r", String(fps),
-    ...(timelineDurationSec !== undefined
-      ? ["-t", formatFfmpegTimestamp(timelineDurationSec)]
+    "-r", fpsRational,
+    "-fps_mode", "cfr",
+    ...(timelineDurationFrames !== undefined
+      ? ["-frames:v", String(timelineDurationFrames)]
+      : timelineDurationSec !== undefined
+        ? ["-t", formatFfmpegTimestamp(timelineDurationSec)]
       : []),
     // Parity: segment encodes must use the same near-lossless profile as
     // the preview path so cross-path frames share encoder settings.
@@ -388,11 +409,12 @@ export function buildGapVideoArgs(
   width: number,
   height: number,
   fps: number,
+  fpsRational: string = String(fps),
 ): string[] {
   return [
     "-y",
     "-f", "lavfi",
-    "-i", `color=c=black:s=${width}x${height}:r=${fps}`,
+    "-i", `color=c=black:s=${width}x${height}:r=${fpsRational}`,
     "-t", formatFfmpegTimestamp(durationSec),
     "-an",
     ...x264Args(INTERMEDIATE_X264),
@@ -470,13 +492,15 @@ export function buildCaptionOverlayArgs(
   width: number,
   height: number,
   fontPath: string = resolveBundledFontPaths().fontPath,
+  fpsRational: string = String(fps),
 ): string[] {
   return [
     "-y",
     "-i", inputPath,
     "-vf", buildCaptionDrawtextFilter(captions, fps, width, height, fontPath),
     "-an",
-    "-r", String(fps),
+    "-r", fpsRational,
+    "-fps_mode", "cfr",
     "-c:v", "libx264",
     "-pix_fmt", "yuv420p",
     outputPath,
@@ -711,17 +735,20 @@ export function buildFinalAssemblyMuxArgs(
   videoPath: string,
   audioPath: string,
   outputPath: string,
-  options: { audioFilter?: string; durationSec?: number } = {},
+  options: { audioFilter?: string | null; durationSec?: number } = {},
 ): string[] {
   const durationArgs = options.durationSec !== undefined
     ? ["-t", formatFfmpegTimestamp(options.durationSec), "-shortest"]
     : [];
+  const audioFilterArgs = options.audioFilter === null
+    ? []
+    : ["-af", options.audioFilter ?? "loudnorm=I=-16:LRA=11:TP=-1.5"];
   return [
     "-y",
     "-i", videoPath,
     "-i", audioPath,
     "-c:v", "copy",
-    "-af", options.audioFilter ?? "loudnorm=I=-16:LRA=11:TP=-1.5",
+    ...audioFilterArgs,
     "-ar", "48000",
     "-c:a", "aac",
     "-b:a", "192k",
@@ -1029,6 +1056,9 @@ export async function assembleTimelineToMp4(
   const execFileImpl: ExecFileLike = opts.execFileImpl ?? defaultExecFile;
 
   const timeline = readTimeline(timelinePath);
+  if (opts.legacyCaptionMode === "reject") {
+    assertNoLegacyClipCaptionsForPackage(timeline);
+  }
   assertTimelineRenderSupported(timeline, {
     projectDir,
     timelinePath,
@@ -1053,6 +1083,29 @@ export async function assembleTimelineToMp4(
   }
 
   const workingDirRoot = opts.workingDirRoot ?? os.tmpdir();
+  const totalDurationSec = totalFrames / fps;
+  const estimatedOutputBytes = Math.max(
+    256 * 1024 * 1024,
+    Math.ceil(totalDurationSec * 2 * 1024 * 1024),
+  );
+  (opts.assertMediaWriteReadyImpl ?? assertMediaWriteReady)({
+    reservations: [
+      {
+        label: "assembly output",
+        path: outputPath,
+        requiredBytes: estimatedOutputBytes,
+      },
+      {
+        label: "assembly scratch",
+        path: workingDirRoot,
+        requiredBytes: Math.max(512 * 1024 * 1024, estimatedOutputBytes * 2),
+      },
+    ],
+    requireFfmpeg: opts.execFileImpl === undefined,
+    requireFfprobe: false,
+    requireCaptionFilters: opts.legacyCaptionMode === "preview_burn" &&
+      opts.execFileImpl === undefined,
+  });
   const workingDir = fs.mkdtempSync(path.join(workingDirRoot, "vos-assembler-"));
   const timelineDir = path.dirname(timelinePath);
   const resolver = createSourceResolver(projectDir, timelineDir, timeline, opts.sourceOverrides);
@@ -1066,8 +1119,6 @@ export async function assembleTimelineToMp4(
     timeline,
     TALKING_HEAD_PACING_SKILL_ID,
   );
-  const totalDurationSec = totalFrames / fps;
-
     const renderedVideoSegments: string[] = [];
 
     // Single-generation transition chain (cross-path parity): render every
@@ -1126,7 +1177,7 @@ export async function assembleTimelineToMp4(
     });
     const gapAwareChain = buildGapAwareTransitionChainInputs(
       clipChainInputs,
-      { fps, width, height, totalFrames },
+      { fps, fpsRational, width, height, totalFrames },
     );
     const chainTransitions = clipChainTransitions.flatMap((t) => {
       const fromIndex = gapAwareChain.clipIndexToChainIndex.get(t.fromIndex);
@@ -1146,6 +1197,7 @@ export async function assembleTimelineToMp4(
           width,
           height,
           fps,
+          fpsRational,
         ));
       } else {
         const window = transitionWindows.find(
@@ -1176,6 +1228,8 @@ export async function assembleTimelineToMp4(
               extractClipTransform(clip),
               extractEndingVideoFade(clip, fps),
               durationSec,
+              fpsRational,
+              window.end_frame - window.start_frame,
             ));
             halfPaths.push(half);
           }
@@ -1211,6 +1265,8 @@ export async function assembleTimelineToMp4(
             transform,
             extractEndingVideoFade(clip, fps),
             plan.duration_sec,
+            fpsRational,
+            plan.end_frame - plan.start_frame,
           ));
         }
       }
@@ -1225,6 +1281,7 @@ export async function assembleTimelineToMp4(
         transitions: chainTransitions,
         includeAudio: false,
         videoEncodeArgs: x264Args(INTERMEDIATE_X264),
+        outputFps: fpsRational,
         outputPath: videoOnlyPath,
       }));
     } else {
@@ -1232,7 +1289,9 @@ export async function assembleTimelineToMp4(
       fs.writeFileSync(concatListPath, buildConcatListContent(renderedVideoSegments), "utf-8");
       await runFfmpeg(execFileImpl, ffmpegBin, buildVideoConcatArgs(concatListPath, videoOnlyPath, fps));
     }
-    const captions = collectTimelineCaptions(timeline);
+    const captions = opts.legacyCaptionMode === "reject" || opts.legacyCaptionMode === "omit"
+      ? []
+      : collectTimelineCaptions(timeline);
     const captionedVideoPath = captions.length > 0
       ? path.join(workingDir, "assembly.video.captioned.mp4")
       : videoOnlyPath;
@@ -1244,6 +1303,8 @@ export async function assembleTimelineToMp4(
         fps,
         width,
         height,
+        undefined,
+        fpsRational,
       ));
     }
 
@@ -1372,13 +1433,22 @@ export async function assembleTimelineToMp4(
       const measurement = parseLoudnormOutput(measurementResult.stderr);
       finalAudioFilter = buildAudioFinishApplyFilter(audioFinish, measurement);
     }
+    const preserveOriginalAudioLevel =
+      audioPolicyMode === "original_only" &&
+      effectiveAudioPlans.length > 0 &&
+      effectiveAudioPlans.every((plan) =>
+        isBgmPlan(plan) || plan.audio_policy?.a1_loudnorm === false
+      );
 
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     await runFfmpeg(execFileImpl, ffmpegBin, buildFinalAssemblyMuxArgs(
       captionedVideoPath,
       mixedAudioPath,
       outputPath,
-      { audioFilter: finalAudioFilter, durationSec: totalDurationSec },
+      {
+        audioFilter: finalAudioFilter ?? (preserveOriginalAudioLevel ? null : undefined),
+        durationSec: totalDurationSec,
+      },
     ));
 
     try {

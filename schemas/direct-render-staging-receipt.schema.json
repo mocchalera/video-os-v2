@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/direct-render-staging-receipt.schema.json",
+  "title": "Direct Render Staging Receipt",
+  "type": "object",
+  "required": ["version", "source_path", "source_sha256", "staged_path", "staged_sha256", "staged_at"],
+  "properties": {
+    "version": { "const": "direct-render-staging-receipt/v1" },
+    "source_path": { "type": "string", "minLength": 1 },
+    "source_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "staged_path": { "type": "string", "minLength": 1 },
+    "staged_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "staged_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

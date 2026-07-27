@@ -5,6 +5,8 @@ import {
   checkApiKeys,
   checkBinary,
   checkDiskSpace,
+  checkFfmpegCaptionFilters,
+  checkNodeRuntime,
   checkShellCompat,
   checkSourceFolder,
   runPreflight,
@@ -93,6 +95,52 @@ describe("checkBinary", () => {
     expect(result.status).toBe("fail");
     expect(result.detail).toContain("not found");
   });
+
+  it("distinguishes a missing binary from one that cannot start", () => {
+    const missing = checkBinary("ffmpeg", () => {
+      const error = new Error("spawn ffmpeg ENOENT") as NodeJS.ErrnoException;
+      error.code = "ENOENT";
+      throw error;
+    });
+    const broken = checkBinary("ffmpeg", () => {
+      const error = new Error("command failed") as Error & { stderr?: string };
+      error.stderr = "dyld: Library not loaded: libharfbuzz.0.dylib";
+      throw error;
+    });
+
+    expect(missing.detail).toContain("not found");
+    expect(broken.detail).toContain("found but failed to start");
+    expect(broken.detail).toContain("libharfbuzz");
+  });
+});
+
+describe("checkNodeRuntime", () => {
+  it("accepts Node 22.x and rejects other majors", () => {
+    expect(checkNodeRuntime("22.23.1")).toMatchObject({ status: "pass" });
+    expect(checkNodeRuntime("24.8.0")).toMatchObject({
+      status: "fail",
+      name: "node_runtime",
+    });
+  });
+});
+
+describe("checkFfmpegCaptionFilters", () => {
+  it("requires both subtitles and ass filters", () => {
+    const available = checkFfmpegCaptionFilters(() =>
+      " ... subtitles         V->V       Render text subtitles\n ... ass               V->V       Render ASS subtitles"
+    );
+    const homebrewFfmpeg = checkFfmpegCaptionFilters(() =>
+      " .. subtitles         V->V       Render text subtitles\n .. ass               V->V       Render ASS subtitles"
+    );
+    const missingAss = checkFfmpegCaptionFilters(() =>
+      " ... subtitles         V->V       Render text subtitles"
+    );
+
+    expect(available.status).toBe("pass");
+    expect(homebrewFfmpeg.status).toBe("pass");
+    expect(missingAss.status).toBe("fail");
+    expect(missingAss.detail).toContain("ass");
+  });
 });
 
 // ── Source folder checks ──────────────────────────────────────────
@@ -165,6 +213,29 @@ describe("checkDiskSpace", () => {
     // Dev machines should have enough space for 2 KB
     expect(result.status).toBe("pass");
     expect(result.detail).toContain("available");
+  });
+
+  it("fails deterministically when peak working space and reserve do not fit", () => {
+    const result = checkDiskSpace(mkTmpDir("disk-capacity-fail"), {
+      sourceBytes: 100,
+      peakMultiplier: 3,
+      reserveBytes: 50,
+      availableBytes: 349,
+    });
+
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("3× source");
+  });
+
+  it("passes at the exact peak working-space boundary", () => {
+    const result = checkDiskSpace(mkTmpDir("disk-capacity-pass"), {
+      sourceBytes: 100,
+      peakMultiplier: 3,
+      reserveBytes: 50,
+      availableBytes: 350,
+    });
+
+    expect(result.status).toBe("pass");
   });
 });
 

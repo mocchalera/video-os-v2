@@ -21,6 +21,8 @@ export interface RevealClipContext {
 
 export type CaptionTimingIssueCode =
   | "premature_caption_lead"
+  | "question_caption_lead"
+  | "previous_speech_overlap"
   | "unresolved_reveal_anchor"
   | "ambiguous_reveal_anchor"
   | "reveal_after_caption";
@@ -35,12 +37,16 @@ export interface CaptionTimingIssue {
 }
 
 export interface CaptionTimingReport {
-  version: "caption-timing-report/v1";
+  version: "caption-timing-report/v1" | "caption-timing-report/v2";
   mode: CaptionSemanticTimingPolicy["mode"];
   checked_caption_count: number;
   protected_caption_count: number;
   split_count: number;
   adjusted_lead_count: number;
+  question_caption_count?: number;
+  question_adjusted_count?: number;
+  previous_speech_guard_count?: number;
+  gap_tail_hold_count?: number;
   unresolved_count: number;
   issues: CaptionTimingIssue[];
 }
@@ -60,6 +66,7 @@ export interface ApplyCaptionSemanticTimingResult {
 
 const DEFAULT_ORDINARY_LEAD_FRAMES = 2;
 const DEFAULT_AUDIO_FIRST_FRAMES = 1;
+const DEFAULT_QUESTION_AUDIO_FIRST_FRAMES = 0;
 
 function cloneCaption(entry: CaptionDraftEntry): CaptionDraftEntry {
   return structuredClone(entry);
@@ -104,12 +111,48 @@ function earliestReferencedFrame(
   clips: RevealClipContext[],
   fps: number,
 ): number | undefined {
+  const wordFrames = entry.timing?.sourceWordRefs
+    ?.map((word) => mapSourceUsToTimelineFrame(word.start_us, entry, clips, fps))
+    .filter((frame): frame is number => frame !== undefined);
+  if (wordFrames && wordFrames.length > 0) return Math.min(...wordFrames);
   const frames = entry.transcript_item_ids
     .map((id) => transcriptItems.get(id))
     .filter((item): item is RevealTranscriptItem => Boolean(item))
     .map((item) => mapSourceUsToTimelineFrame(item.start_us, entry, clips, fps))
     .filter((frame): frame is number => frame !== undefined);
-  return frames.length > 0 ? Math.min(...frames) : undefined;
+  if (frames.length > 0) return Math.min(...frames);
+  if (entry.timing?.source === "clip_item_remap") {
+    return entry.timing.timelineInFrame;
+  }
+  return undefined;
+}
+
+function latestReferencedFrame(
+  entry: CaptionDraftEntry,
+  transcriptItems: Map<string, RevealTranscriptItem>,
+  clips: RevealClipContext[],
+  fps: number,
+): number | undefined {
+  const wordFrames = entry.timing?.sourceWordRefs
+    ?.map((word) => mapSourceUsToTimelineFrame(word.end_us, entry, clips, fps))
+    .filter((frame): frame is number => frame !== undefined);
+  if (wordFrames && wordFrames.length > 0) return Math.max(...wordFrames);
+  const frames = entry.transcript_item_ids
+    .map((id) => transcriptItems.get(id))
+    .filter((item): item is RevealTranscriptItem => Boolean(item))
+    .map((item) => mapSourceUsToTimelineFrame(item.end_us, entry, clips, fps))
+    .filter((frame): frame is number => frame !== undefined);
+  if (frames.length > 0) return Math.max(...frames);
+  if (entry.timing?.source === "clip_item_remap") {
+    return entry.timing.timelineInFrame + entry.timing.timelineDurationFrames;
+  }
+  return undefined;
+}
+
+function isQuestionCaption(text: string): boolean {
+  const body = splitSpeakerPrefix(text).body.replace(/\s+/g, "");
+  return /[?？]/u.test(body)
+    || /(?:ですか|ますか|でしょうか|ませんか|だろうか|なんだろう|できるかな|じゃないかな)[。！!…]*$/u.test(body);
 }
 
 function findWordStartUs(
@@ -239,12 +282,16 @@ export function applyCaptionSemanticTiming(
 ): ApplyCaptionSemanticTimingResult {
   const policy = input.policy ?? { mode: "off" as const };
   const report: CaptionTimingReport = {
-    version: "caption-timing-report/v1",
+    version: "caption-timing-report/v2",
     mode: policy.mode,
     checked_caption_count: input.captions.length,
     protected_caption_count: 0,
     split_count: 0,
     adjusted_lead_count: 0,
+    question_caption_count: 0,
+    question_adjusted_count: 0,
+    previous_speech_guard_count: 0,
+    gap_tail_hold_count: 0,
     unresolved_count: 0,
     issues: [],
   };
@@ -254,31 +301,84 @@ export function applyCaptionSemanticTiming(
 
   const ordinaryLeadFrames = Math.max(0, policy.ordinary_lead_frames ?? DEFAULT_ORDINARY_LEAD_FRAMES);
   const defaultAudioFirstFrames = Math.max(0, policy.audio_first_frames ?? DEFAULT_AUDIO_FIRST_FRAMES);
+  const questionAudioFirstFrames = Math.max(
+    0,
+    policy.question_audio_first_frames ?? DEFAULT_QUESTION_AUDIO_FIRST_FRAMES,
+  );
 
-  let captions = input.captions.map(cloneCaption).map((entry) => {
+  let previousSpeechEnd: number | undefined;
+  let captions = input.captions
+    .map(cloneCaption)
+    .sort((a, b) => a.timeline_in_frame - b.timeline_in_frame || a.caption_id.localeCompare(b.caption_id))
+    .map((entry) => {
     const speechFrame = earliestReferencedFrame(entry, input.transcriptItems, input.clips, input.fps);
-    if (speechFrame === undefined) return entry;
-    const allowedStart = Math.max(0, speechFrame - ordinaryLeadFrames);
-    if (entry.timeline_in_frame >= allowedStart) return entry;
+    const speechEnd = latestReferencedFrame(entry, input.transcriptItems, input.clips, input.fps);
+    if (speechFrame === undefined) {
+      if (speechEnd !== undefined) previousSpeechEnd = speechEnd;
+      return entry;
+    }
+    const question = isQuestionCaption(entry.text);
+    if (question) report.question_caption_count = (report.question_caption_count ?? 0) + 1;
+    let allowedStart = Math.max(
+      0,
+      question ? speechFrame + questionAudioFirstFrames : speechFrame - ordinaryLeadFrames,
+    );
+    // A real pause belongs to the tail of the previous caption. Ordinary
+    // reading lead is allowed only when it does not consume that silence.
+    if (!question && previousSpeechEnd !== undefined && speechFrame > previousSpeechEnd) {
+      allowedStart = speechFrame;
+    }
+    // ASR word ranges can overlap at chunk boundaries. Never let a noisy
+    // previous end delay the next cue beyond the next cue's own audio onset.
+    const guardedStart = previousSpeechEnd === undefined
+      ? allowedStart
+      : Math.max(allowedStart, Math.min(previousSpeechEnd, speechFrame));
+    const targetStart = Math.max(entry.timeline_in_frame, guardedStart);
+    const originalStart = entry.timeline_in_frame;
     const originalOut = entry.timeline_in_frame + entry.timeline_duration_frames;
-    if (allowedStart >= originalOut) return entry;
-    const leadFrames = speechFrame - entry.timeline_in_frame;
-    report.adjusted_lead_count += 1;
-    report.issues.push({
-      code: "premature_caption_lead",
-      severity: "warn",
-      caption_id: entry.caption_id,
-      lead_frames: leadFrames,
-      message: `${entry.caption_id} was ${leadFrames} frames ahead of referenced speech; clamped to ${ordinaryLeadFrames}-frame reading lead`,
-    });
-    return withTiming(entry, allowedStart, originalOut, entry.text, entry.reveal_timing, input.fps);
+    const targetOut = Math.max(originalOut, speechEnd ?? originalOut, targetStart + 1);
+
+    if (question && originalStart < allowedStart) {
+      const leadFrames = allowedStart - originalStart;
+      report.adjusted_lead_count += 1;
+      report.question_adjusted_count = (report.question_adjusted_count ?? 0) + 1;
+      report.issues.push({
+        code: "question_caption_lead",
+        severity: "warn",
+        caption_id: entry.caption_id,
+        lead_frames: leadFrames,
+        message: `${entry.caption_id} question was ${leadFrames} frames ahead of audio; aligned to question onset`,
+      });
+    } else if (!question && originalStart < allowedStart) {
+      const leadFrames = speechFrame - originalStart;
+      const appliedLeadFrames = Math.max(0, speechFrame - allowedStart);
+      report.adjusted_lead_count += 1;
+      report.issues.push({
+        code: "premature_caption_lead",
+        severity: "warn",
+        caption_id: entry.caption_id,
+        lead_frames: leadFrames,
+        message: `${entry.caption_id} was ${leadFrames} frames ahead of referenced speech; clamped to ${appliedLeadFrames}-frame reading lead`,
+      });
+    }
+    if (previousSpeechEnd !== undefined && originalStart < previousSpeechEnd) {
+      const overlapFrames = previousSpeechEnd - originalStart;
+      report.previous_speech_guard_count = (report.previous_speech_guard_count ?? 0) + 1;
+      report.issues.push({
+        code: "previous_speech_overlap",
+        severity: "warn",
+        caption_id: entry.caption_id,
+        lead_frames: overlapFrames,
+        message: `${entry.caption_id} began ${overlapFrames} frames before the previous utterance ended; moved behind the prior speech boundary`,
+      });
+    }
+
+    previousSpeechEnd = speechEnd ?? previousSpeechEnd;
+    if (targetStart === originalStart && targetOut === originalOut) return entry;
+    return withTiming(entry, targetStart, targetOut, entry.text, entry.reveal_timing, input.fps);
   });
 
-  if (policy.mode !== "protect_reveals") {
-    return { captions, report };
-  }
-
-  for (const anchor of policy.anchors ?? []) {
+  if (policy.mode === "protect_reveals") for (const anchor of policy.anchors ?? []) {
     const matches = captions.filter((entry) => anchorMatchesEntry(anchor, entry));
     if (matches.length !== 1) {
       report.unresolved_count += 1;
@@ -372,6 +472,27 @@ export function applyCaptionSemanticTiming(
     captions = captions.flatMap((candidate) =>
       candidate.caption_id === entry.caption_id ? replacement : [candidate]
     );
+  }
+
+  if ((policy.gap_ownership ?? "previous") === "previous") {
+    captions.sort((a, b) => a.timeline_in_frame - b.timeline_in_frame || a.caption_id.localeCompare(b.caption_id));
+    captions = captions.map((entry, index) => {
+      const next = captions[index + 1];
+      if (!next || next.timeline_in_frame <= entry.timeline_in_frame) return entry;
+      const currentOut = entry.timeline_in_frame + entry.timeline_duration_frames;
+      if (currentOut === next.timeline_in_frame) return entry;
+      if (currentOut < next.timeline_in_frame) {
+        report.gap_tail_hold_count = (report.gap_tail_hold_count ?? 0) + 1;
+      }
+      return withTiming(
+        entry,
+        entry.timeline_in_frame,
+        next.timeline_in_frame,
+        entry.text,
+        entry.reveal_timing,
+        input.fps,
+      );
+    });
   }
 
   captions.sort((a, b) => a.timeline_in_frame - b.timeline_in_frame || a.caption_id.localeCompare(b.caption_id));

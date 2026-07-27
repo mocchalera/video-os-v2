@@ -22,6 +22,25 @@ export type ContentAnchor =
 
 export type ContentRendererId = "ffmpeg" | "remotion" | "hyperframes";
 export type ContentRendererHint = "auto" | ContentRendererId;
+export type CreativeReuseScope = "one_off" | "project" | "brand" | "campaign";
+export type CreativeAuthoringSurface =
+  | "html_motion"
+  | "typed_component"
+  | "native_filter";
+export type CreativeLayerMode =
+  | "alpha_overlay"
+  | "full_frame"
+  | "native_filter";
+export type CreativeCompositeStage = "under_caption" | "over_caption";
+
+export interface CreativeRecipeV1 {
+  version: "creative-recipe/v1";
+  reuse_scope: CreativeReuseScope;
+  authoring_surface: CreativeAuthoringSurface;
+  layer_mode: CreativeLayerMode;
+  composite_stage: CreativeCompositeStage;
+  requires_base_frame: boolean;
+}
 
 export interface ContentAnimationRef {
   preset: string;
@@ -56,6 +75,7 @@ export interface ContentElementV1 {
     out?: ContentAnimationRef;
   };
   renderer_hint?: ContentRendererHint;
+  creative_recipe?: CreativeRecipeV1;
 }
 
 export interface TimedContentElement {

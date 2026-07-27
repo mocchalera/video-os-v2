@@ -9,7 +9,6 @@ project:
 
 commands:
   install: "npm install"
-  lint: ""
   typecheck: "npm run build"
   test: "npm test"
   e2e: "npm run verify"

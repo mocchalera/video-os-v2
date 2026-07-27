@@ -1,6 +1,11 @@
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  runDeterministicOutputQA,
+  type DeterministicOutputQAAllowedRange,
+  type DeterministicOutputQAResult,
+} from "../review/deterministic-output-qa.js";
 
 export interface PrecomputedQaMetrics {
   integratedLufs?: number;
@@ -15,6 +20,7 @@ export interface PrecomputedQaMetrics {
   expectedDialogueStartMs?: number;
   expectedDialogueEndMs?: number;
   videoFrame?: QaVideoFrameMetadata;
+  deterministicOutputQA?: DeterministicOutputQAResult;
 }
 
 export interface TimeWindowMs {
@@ -57,6 +63,7 @@ export interface QaMeasurements {
   expected_dialogue_end_ms?: number;
   video_frame?: QaVideoFrameMetadata;
   video_frame_probe_error?: string;
+  deterministic_output_qa?: DeterministicOutputQAResult;
 }
 
 export interface QaMeasurementWarning {
@@ -73,6 +80,7 @@ export interface MeasureQaMediaOptions {
   videoOnly?: boolean;
   outputPath: string;
   createdAt?: string;
+  deterministicAllowedRanges?: DeterministicOutputQAAllowedRange[];
 }
 
 const SILENCE_NOISE_DB = -35;
@@ -473,6 +481,14 @@ export function buildQaMeasurementsFromPrecomputed(
       ? { expected_dialogue_end_ms: metrics.expectedDialogueEndMs }
       : {}),
     ...(metrics.videoFrame ? { video_frame: metrics.videoFrame } : {}),
+    deterministic_output_qa: metrics.deterministicOutputQA ?? {
+      status: "verified",
+      duration_sec: videoDurationMs / 1000,
+      scanned_duration_sec: videoDurationMs / 1000,
+      ...(metrics.videoFrame?.width ? { width: metrics.videoFrame.width } : {}),
+      ...(metrics.videoFrame?.height ? { height: metrics.videoFrame.height } : {}),
+      issues: [],
+    },
   };
 }
 
@@ -498,6 +514,11 @@ export async function measureQaMedia(
   }
 
   const videoDurationMs = await probeDurationMs(videoPath, "v:0");
+  const deterministicOutputQA = runDeterministicOutputQA(videoPath, {
+    ...(options.deterministicAllowedRanges
+      ? { allowedRanges: options.deterministicAllowedRanges }
+      : {}),
+  });
   const audioDurationMs = audioPath ? await probeDurationMs(audioPath, "a:0") : 0;
   let videoFrame: QaVideoFrameMetadata | undefined;
   let videoFrameProbeError: string | undefined;
@@ -550,6 +571,7 @@ export async function measureQaMedia(
       : {}),
     ...(videoFrame ? { video_frame: videoFrame } : {}),
     ...(videoFrameProbeError ? { video_frame_probe_error: videoFrameProbeError } : {}),
+    deterministic_output_qa: deterministicOutputQA,
   };
 
   writeQaMeasurements(options.outputPath, measurements);

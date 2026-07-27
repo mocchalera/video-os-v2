@@ -97,10 +97,30 @@ describe("timelineToCompositionProps", () => {
     expect(timelineToCompositionProps(timeline, {}).durationInFrames).toBe(96);
   });
 
-  it("rounds non-integer fps for Remotion", () => {
+  it("extends a transparent overlay composition through a trailing CTA", () => {
+    const timeline = makeTimeline([
+      makeClip({ timeline_in_frame: 0, timeline_duration_frames: 90 }),
+    ]);
+    (timeline.tracks as TimelineIR["tracks"] & {
+      overlay: TimelineIR["tracks"]["video"];
+    }).overlay = [{
+      track_id: "OV1",
+      kind: "overlay",
+      clips: [makeClip({
+        clip_id: "cta",
+        asset_id: "__overlay__",
+        timeline_in_frame: 90,
+        timeline_duration_frames: 60,
+      })],
+    }];
+
+    expect(timelineToCompositionProps(timeline, {}).durationInFrames).toBe(150);
+  });
+
+  it("preserves rational fps for Remotion instead of rounding to an integer rate", () => {
     const timeline = makeTimeline([], 24_000, 1_001);
 
-    expect(timelineToCompositionProps(timeline, {}).fps).toBe(24);
+    expect(timelineToCompositionProps(timeline, {}).fps).toBe(24_000 / 1_001);
   });
 
   it("collects only Remotion-displayed overlay strings for font subsetting", () => {
@@ -125,7 +145,11 @@ describe("timelineToCompositionProps", () => {
   });
 
   it("resolves canonical title and emphasis templates without arbitrary JSX", () => {
-    const canonicalClip = (templateRef: string, props: Record<string, string>) => makeClip({
+    const canonicalClip = (
+      templateRef: string,
+      props: Record<string, string>,
+      rendererHint = "auto",
+    ) => makeClip({
       clip_id: templateRef,
       metadata: {
         content_element: {
@@ -145,7 +169,7 @@ describe("timelineToCompositionProps", () => {
             safe_area: true,
             z_index: 100,
           },
-          renderer_hint: "auto",
+          renderer_hint: rendererHint,
         },
       },
     });
@@ -177,6 +201,18 @@ describe("timelineToCompositionProps", () => {
       text: "次の一歩を始める",
       actionText: "無料相談へ",
       brandText: "VIDEO OS",
+    });
+    expect(resolveRemotionOverlayClip(
+      canonicalClip("vos:content.section-label/v1", { title: "第1次AI革命" }, "remotion"),
+    )).toMatchObject({
+      presetId: "vos:overlay.chapter-kicker",
+      text: "第1次AI革命",
+    });
+    expect(resolveRemotionOverlayClip(
+      canonicalClip("vos:content.lower-third/v1", { name: "坂本", role: "講師" }, "remotion"),
+    )).toMatchObject({
+      presetId: "vos:overlay.lower-third",
+      text: "坂本\n講師",
     });
   });
 

@@ -4,7 +4,7 @@
  * Usage:
  *   npx tsx scripts/editor-job-worker.ts <projectDir> <phase> [optionsJSON]
  *
- * Phases: compile | review | render
+ * Phases: compile | review | render | caption-finalize
  *
  * Writes JSON result to stdout on completion. Exit code 0 = success, 1 = failure.
  * Progress is tracked via progress.json (written by ProgressTracker in runtime).
@@ -15,6 +15,7 @@ import * as path from "node:path";
 import { runCompilePhase } from "../runtime/commands/compile.js";
 import { runReview, type ReviewAgent, type ReviewAgentContext, type ReviewAgentResult } from "../runtime/commands/review/index.js";
 import { runRender } from "../runtime/commands/render.js";
+import { runCaptionFinalize } from "../runtime/caption/caption-finalize.js";
 
 // ── Parse CLI args ──────────────────────────────────────────────
 
@@ -171,6 +172,34 @@ async function main(): Promise<void> {
           ].filter(Boolean),
         });
         process.exit(result.success ? 0 : 1);
+        break;
+      }
+
+      case "caption-finalize": {
+        const finalized = await runCaptionFinalize(resolvedDir, {
+          approvalPath: options.approval_path as string | undefined,
+          suppliedFinalPath: options.supplied_final_path as string | undefined,
+          suppliedFinalReceiptPath: options.supplied_final_receipt_path as string | undefined,
+          createdAt: options.created_at as string | undefined,
+          packageOptions: {
+            skipRender: options.skip_render === true,
+            assemblyPath: options.assembly_path as string | undefined,
+          },
+        });
+        const deliverablePath = path.resolve(
+          resolvedDir,
+          finalized.activeDelivery.artifacts.final_video.path,
+        );
+        writeResult({
+          success: true,
+          phase: "caption-finalize",
+          reused: finalized.reused,
+          deliveryGeneration: finalized.generationId,
+          deliverablePath,
+          activeDeliveryPath: finalized.activeDeliveryPath,
+          artifacts: [finalized.activeDeliveryPath, deliverablePath],
+        });
+        process.exit(0);
         break;
       }
 

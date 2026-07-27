@@ -3,10 +3,18 @@ import Foundation
 public struct CaptionReviewActionResult: Equatable, Sendable {
     public let success: Bool
     public let message: String
+    public let approvalHash: String?
+    public let approvalStatus: String?
+    public let generationID: String?
+    public let finalPath: String?
 
-    public init(success: Bool, message: String) {
+    public init(success: Bool, message: String, approvalHash: String? = nil, approvalStatus: String? = nil, generationID: String? = nil, finalPath: String? = nil) {
         self.success = success
         self.message = message
+        self.approvalHash = approvalHash
+        self.approvalStatus = approvalStatus
+        self.generationID = generationID
+        self.finalPath = finalPath
     }
 }
 
@@ -21,12 +29,13 @@ public struct CaptionReviewRunnerError: Error, Equatable, Sendable {
 public enum CaptionReviewRunner {
     public static func load(
         projectURL: URL,
-        repositoryRoot: URL
+        repositoryRoot: URL,
+        reviewer: String = ""
     ) async -> Result<CaptionReviewQueueDocument, CaptionReviewRunnerError> {
         await Task.detached(priority: .userInitiated) {
             do {
                 let output = try SubprocessRunner.run(
-                    arguments: queueArguments(projectURL: projectURL),
+                    arguments: queueArguments(projectURL: projectURL, reviewer: reviewer),
                     currentDirectoryURL: repositoryRoot
                 )
                 guard output.exitCode == 0 else {
@@ -215,13 +224,57 @@ public enum CaptionReviewRunner {
         }.value
     }
 
-    public static func queueArguments(projectURL: URL) -> [String] {
-        [
+    public static func prepareDraft(projectURL: URL, repositoryRoot: URL) async -> CaptionReviewActionResult {
+        await Task.detached(priority: .userInitiated) {
+            runAction(command: "caption review prepare", arguments: prepareArguments(projectURL: projectURL), repositoryRoot: repositoryRoot, successMessage: "字幕ドラフトを準備しました。")
+        }.value
+    }
+
+    public static func verifySafe(
+        projectURL: URL,
+        repositoryRoot: URL,
+        reviewer: String,
+        baseCaptionDraftHash: String,
+        items: [CaptionReviewQueueItem]
+    ) async -> CaptionReviewActionResult {
+        await Task.detached(priority: .userInitiated) {
+            runAction(command: "caption review verify-safe", arguments: verifySafeArguments(projectURL: projectURL, reviewer: reviewer, baseCaptionDraftHash: baseCaptionDraftHash, items: items), repositoryRoot: repositoryRoot, successMessage: "安全な字幕を一括確認しました。")
+        }.value
+    }
+
+    public static func finalize(projectURL: URL, repositoryRoot: URL) async -> CaptionReviewActionResult {
+        await Task.detached(priority: .userInitiated) {
+            runAction(command: "caption finalize", arguments: finalizeArguments(projectURL: projectURL), repositoryRoot: repositoryRoot, successMessage: "承認字幕で再レンダーしました。")
+        }.value
+    }
+
+    public static func queueArguments(projectURL: URL, reviewer: String = "") -> [String] {
+        var arguments = [
             "npx", "tsx", "scripts/caption-review.ts", "queue",
             "--project", projectURL.path,
             "--format", "json",
             "--severity", "all",
         ]
+        if !reviewer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            arguments.append(contentsOf: ["--reviewer", reviewer])
+        }
+        return arguments
+    }
+
+    public static func prepareArguments(projectURL: URL) -> [String] {
+        ["npx", "tsx", "scripts/caption-review.ts", "prepare", "--project", projectURL.path]
+    }
+
+    public static func verifySafeArguments(projectURL: URL, reviewer: String, baseCaptionDraftHash: String, items: [CaptionReviewQueueItem]) -> [String] {
+        var arguments = ["npx", "tsx", "scripts/caption-review.ts", "verify-safe", "--project", projectURL.path, "--reviewer", reviewer, "--base-caption-draft-hash", baseCaptionDraftHash]
+        for item in items.sorted(by: { $0.captionID < $1.captionID }) {
+            arguments.append(contentsOf: ["--caption-text-hash", "\(item.captionID)=\(item.textHash)"])
+        }
+        return arguments
+    }
+
+    public static func finalizeArguments(projectURL: URL) -> [String] {
+        ["npx", "tsx", "scripts/caption-finalize.ts", "run", "--project", projectURL.path, "--json"]
     }
 
     public static func initializeArguments(projectURL: URL, reviewer: String) -> [String] {
@@ -334,10 +387,28 @@ public enum CaptionReviewRunner {
                     message: processFailureReason(command: command, output: output)
                 )
             }
-            return CaptionReviewActionResult(success: true, message: successMessage)
+            return decodeSuccessPayload(output.stdout, successMessage: successMessage)
         } catch {
             return CaptionReviewActionResult(success: false, message: "\(command) failed to run: \(error)")
         }
+    }
+
+    public static func decodeSuccessPayload(
+        _ stdout: String,
+        successMessage: String
+    ) -> CaptionReviewActionResult {
+        let payload = (try? JSONSerialization.jsonObject(with: Data(stdout.utf8))) as? [String: Any]
+        let active = (payload?["active_delivery"] ?? payload?["activeDelivery"]) as? [String: Any]
+        let artifacts = active?["artifacts"] as? [String: Any]
+        let final = artifacts?["final_video"] as? [String: Any]
+        return CaptionReviewActionResult(
+            success: true,
+            message: successMessage,
+            approvalHash: payload?["approval_hash"] as? String,
+            approvalStatus: payload?["status"] as? String,
+            generationID: (payload?["generation_id"] ?? payload?["generationId"]) as? String,
+            finalPath: final?["path"] as? String
+        )
     }
 
     private static func processFailureReason(

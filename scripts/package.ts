@@ -53,6 +53,10 @@ import {
   verifyExistingPackage,
   type PackageVerificationResult,
 } from "../runtime/packaging/package-verification.js";
+import { resolveDeliveryArtifactPaths } from "../runtime/packaging/active-delivery.js";
+import { inspectFinalRenderApproval } from "../runtime/packaging/final-render-approval.js";
+import { assertNoLegacyClipCaptionsForPackage } from "../runtime/render/legacy-caption-guard.js";
+import { assertCaptionFontContractReady } from "../runtime/caption/font-contract.js";
 
 const USAGE = [
   "Usage: npx tsx scripts/package.ts <project-path> [options]",
@@ -88,15 +92,62 @@ export interface PackageCliArgs {
 }
 
 export interface PackagePreflight {
+  version: "package-preflight/v2";
+  decision: PackagePreflightDecision;
+  project_identity: PackagePreflightProjectIdentity;
+  structured_issues: PackagePreflightIssue[];
+  next_action: PackagePreflightNextAction;
+  /** @deprecated Kept for package-preflight/v1 consumers. Use decision instead. */
   ok: boolean;
   projectDir: string;
+  /** @deprecated Kept for package-preflight/v1 consumers. Use structured_issues instead. */
   issues: string[];
+  /** @deprecated Kept for package-preflight/v1 consumers. Use next_action instead. */
   nextSteps: string[];
   sourceOfTruth?: SourceOfTruth;
   autonomyMode?: AutonomyMode;
   projectId?: string;
   currentState?: string;
   visualQaSummary: string;
+}
+
+export interface PackagePreflightArtifactPaths {
+  captionApprovalPath: string;
+  qaReportPath: string;
+  packageManifestPath: string;
+  finalRenderApprovalPath?: string;
+}
+
+export type PackagePreflightDecision = "ready_to_run" | "blocked";
+
+export type PackagePreflightIdentityStatus =
+  | "confirmed"
+  | "inferred"
+  | "unresolved"
+  | "conflict";
+
+export interface PackagePreflightIdentitySource {
+  artifact: "timeline" | "state" | "qa" | "manifest";
+  path: string;
+  status: "present" | "missing" | "empty" | "malformed";
+  project_id?: string;
+}
+
+export interface PackagePreflightProjectIdentity {
+  status: PackagePreflightIdentityStatus;
+  project_id?: string;
+  evidence_count: number;
+  sources: PackagePreflightIdentitySource[];
+}
+
+export interface PackagePreflightIssue {
+  code: string;
+  message: string;
+}
+
+export interface PackagePreflightNextAction {
+  code: "run_package" | "resolve_project_identity" | "resolve_preflight_issues";
+  message: string;
 }
 
 export type AssemblyFreshnessStatus =
@@ -212,8 +263,15 @@ export function parseArgs(argv: string[]): PackageCliArgs {
 export function buildPackagePreflight(
   projectDir: string,
   args: Pick<PackageCliArgs, "sourceOfTruth" | "autonomyMode"> = {},
+  artifactPaths?: PackagePreflightArtifactPaths,
 ): PackagePreflight {
   const absDir = path.resolve(projectDir);
+  const resolvedDelivery = resolveDeliveryArtifactPaths(absDir, { verifyHashes: true });
+  const deliveryPaths = artifactPaths ?? {
+    captionApprovalPath: resolvedDelivery.captionApprovalPath,
+    qaReportPath: resolvedDelivery.qaReportPath,
+    packageManifestPath: resolvedDelivery.packageManifestPath,
+  };
   const issues: string[] = [];
   const timelinePath = path.join(absDir, "05_timeline", "timeline.json");
   const blueprintPath = path.join(absDir, "04_plan", "edit_blueprint.yaml");
@@ -235,13 +293,37 @@ export function buildPackagePreflight(
     );
   }
 
-  const timeline = readJsonForPreflight<{ version?: unknown }>(timelinePath, issues);
+  const timeline = readJsonForPreflight<
+    import("../runtime/compiler/types.js").TimelineIR
+  >(timelinePath, issues);
   const currentTimelineVersion =
     typeof timeline?.version === "string" ? timeline.version : timeline ? "1" : undefined;
   const blueprint = readYamlForPreflight<{
-    caption_policy?: { source?: string };
+    caption_policy?: { source?: string; styling_class?: string };
   }>(blueprintPath, issues);
-  const captionApproval = readOptionalJson(path.join(absDir, "07_package", "caption_approval.json"));
+  if (timeline) {
+    try {
+      assertNoLegacyClipCaptionsForPackage(timeline);
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  const captionApproval = readOptionalJson(deliveryPaths.captionApprovalPath);
+  const approvedCaptionPolicy = (
+    captionApproval as { caption_policy?: { source?: string; styling_class?: string } } | null
+  )?.caption_policy;
+  const effectiveCaptionPolicy = approvedCaptionPolicy ?? blueprint?.caption_policy;
+  if (
+    effectiveCaptionPolicy?.source
+    && effectiveCaptionPolicy.source !== "none"
+    && effectiveCaptionPolicy.styling_class
+  ) {
+    try {
+      assertCaptionFontContractReady(effectiveCaptionPolicy.styling_class);
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : String(error));
+    }
+  }
   const musicCues = readOptionalJson(path.join(absDir, "07_package", "music_cues.json"));
   const musicEligibility = assessMusicAssetEligibility(absDir, musicCues);
   if (!musicEligibility.eligible && musicEligibility.message) {
@@ -249,6 +331,22 @@ export function buildPackagePreflight(
   }
   const reviewReport = readReviewReport(absDir, issues);
   const visualQaSummary = summarizeVisualQA(reviewReport);
+  const projectIdentity = resolvePackagePreflightProjectIdentity(absDir, {
+    timeline,
+    state: doc,
+  }, deliveryPaths);
+  issues.push(...identityIssues(projectIdentity));
+  const finalRenderApproval = inspectFinalRenderApproval(absDir, {
+    ...(deliveryPaths.finalRenderApprovalPath
+      ? { approvalPath: deliveryPaths.finalRenderApprovalPath }
+      : {}),
+    captionApprovalPath: deliveryPaths.captionApprovalPath,
+  });
+  if (!finalRenderApproval.ready) {
+    issues.push(
+      `final_render_approval ${finalRenderApproval.status}: ${finalRenderApproval.issues.join("; ")}`,
+    );
+  }
 
   let sourceOfTruth: SourceOfTruth | undefined;
   if (doc && autonomyMode && timeline && blueprint) {
@@ -274,14 +372,27 @@ export function buildPackagePreflight(
   }
 
   const uniqueIssues = unique(issues);
+  const decision: PackagePreflightDecision = uniqueIssues.length === 0
+    ? "ready_to_run"
+    : "blocked";
+  const structuredIssues = uniqueIssues.map((message) => ({
+    code: issueCode(message),
+    message,
+  }));
+  const nextSteps = nextStepsForIssues(uniqueIssues);
   return {
-    ok: uniqueIssues.length === 0,
+    version: "package-preflight/v2",
+    decision,
+    project_identity: projectIdentity,
+    structured_issues: structuredIssues,
+    next_action: nextActionForPreflight(decision, projectIdentity, nextSteps),
+    ok: decision === "ready_to_run",
     projectDir: absDir,
     issues: uniqueIssues,
-    nextSteps: nextStepsForIssues(uniqueIssues),
+    nextSteps,
     sourceOfTruth,
     autonomyMode,
-    ...(doc?.project_id ? { projectId: doc.project_id } : {}),
+    ...(projectIdentity.project_id ? { projectId: projectIdentity.project_id } : {}),
     ...(doc?.current_state ? { currentState: doc.current_state } : {}),
     visualQaSummary,
   };
@@ -291,6 +402,8 @@ export function formatPreflightReport(preflight: PackagePreflight): string {
   const lines = [
     "[package] Gate 10 preflight",
     `Project: ${preflight.projectDir}`,
+    `Project identity: ${preflight.project_identity.status}`
+      + (preflight.project_identity.project_id ? ` (${preflight.project_identity.project_id})` : ""),
     `Autonomy mode: ${preflight.autonomyMode ?? "unresolved"}`,
     `Source of truth: ${preflight.sourceOfTruth ?? "unresolved"}`,
     `Visual QA: ${preflight.visualQaSummary}`,
@@ -369,6 +482,7 @@ export async function ensureFreshAssembly(
     projectDir: absDir,
     timelinePath: before.timelinePath,
     outputPath: assemblyPath,
+    legacyCaptionMode: "reject",
   });
   const metaPath = writeRenderFreshnessMetadata(absDir, assemblyPath, {
     createdAt: options.createdAt,
@@ -428,7 +542,7 @@ export async function runPackageCli(argv: string[] = process.argv): Promise<numb
     } else {
       console.log(formatPreflightReport(preflight));
     }
-    return preflight.ok ? 0 : 1;
+    return preflight.decision === "ready_to_run" ? 0 : 1;
   }
 
   const output = args.json ? console.error : console.log;
@@ -439,6 +553,7 @@ export async function runPackageCli(argv: string[] = process.argv): Promise<numb
 
   const options: PackageCommandOptions = {
     skipRender: args.skipRender,
+    projectId: preflight.projectId,
     ...(args.createdAt ? { createdAt: args.createdAt } : {}),
   };
 
@@ -605,6 +720,173 @@ function readOptionalJson<T = Record<string, unknown>>(filePath: string): T | nu
   }
 }
 
+function resolvePackagePreflightProjectIdentity(
+  projectDir: string,
+  parsed: {
+    timeline: { project_id?: unknown } | null;
+    state: ProjectStateDoc | null;
+  },
+  artifactPaths: Pick<PackagePreflightArtifactPaths, "qaReportPath" | "packageManifestPath">,
+): PackagePreflightProjectIdentity {
+  const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+  const statePath = path.join(projectDir, "project_state.yaml");
+  const qaPath = path.resolve(artifactPaths.qaReportPath);
+  const manifestPath = path.resolve(artifactPaths.packageManifestPath);
+  const qaRelativePath = projectRelativePath(projectDir, qaPath);
+  const manifestRelativePath = projectRelativePath(projectDir, manifestPath);
+  const sources: PackagePreflightIdentitySource[] = [
+    identitySource("timeline", "05_timeline/timeline.json", timelinePath, parsed.timeline),
+    identitySource("state", "project_state.yaml", statePath, parsed.state),
+    identitySource("qa", qaRelativePath, qaPath, readIdentityJson(qaPath)),
+    identitySource(
+      "manifest",
+      manifestRelativePath,
+      manifestPath,
+      readIdentityJson(manifestPath),
+    ),
+  ];
+  const evidence = sources.filter((source) => source.status === "present");
+  const projectIDs = unique(evidence.flatMap((source) => (
+    source.project_id ? [source.project_id] : []
+  )));
+
+  if (projectIDs.length > 1) {
+    return {
+      status: "conflict",
+      evidence_count: evidence.length,
+      sources,
+    };
+  }
+  if (projectIDs.length === 0) {
+    return {
+      status: "unresolved",
+      evidence_count: 0,
+      sources,
+    };
+  }
+  return {
+    status: evidence.length === 1 ? "inferred" : "confirmed",
+    project_id: projectIDs[0],
+    evidence_count: evidence.length,
+    sources,
+  };
+}
+
+function projectRelativePath(projectDir: string, filePath: string): string {
+  return path.relative(path.resolve(projectDir), path.resolve(filePath)).split(path.sep).join("/");
+}
+
+function identitySource(
+  artifact: PackagePreflightIdentitySource["artifact"],
+  relativePath: string,
+  absolutePath: string,
+  value: unknown,
+): PackagePreflightIdentitySource {
+  if (!fs.existsSync(absolutePath)) {
+    return { artifact, path: relativePath, status: "missing" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { artifact, path: relativePath, status: "malformed" };
+  }
+  const projectID = (value as Record<string, unknown>).project_id;
+  if (typeof projectID !== "string") {
+    return { artifact, path: relativePath, status: "malformed" };
+  }
+  const normalized = projectID.trim();
+  if (!normalized) {
+    return { artifact, path: relativePath, status: "empty" };
+  }
+  return { artifact, path: relativePath, status: "present", project_id: normalized };
+}
+
+function readIdentityJson(filePath: string): unknown {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function identityIssues(identity: PackagePreflightProjectIdentity): string[] {
+  const issues = identity.sources
+    .filter((source) => source.status === "malformed")
+    .map((source) => `project identity artifact ${source.path} is malformed`);
+  if (identity.status === "conflict") {
+    const evidence = identity.sources
+      .filter((source) => source.status === "present")
+      .map((source) => `${source.artifact}=${source.project_id}`)
+      .join(" ");
+    issues.push(`project identity mismatch: ${evidence}`);
+  } else if (identity.status === "unresolved") {
+    issues.push("project identity could not be resolved from timeline, state, QA, or manifest");
+  }
+  return issues;
+}
+
+function issueCode(message: string): string {
+  if (message.startsWith("legacy_clip_captions_forbidden_in_package:")) {
+    return "LEGACY_CLIP_CAPTIONS_FORBIDDEN_IN_PACKAGE";
+  }
+  if (message.startsWith("caption_font_contract_not_ready:")) {
+    return "CAPTION_FONT_CONTRACT_NOT_READY";
+  }
+  if (message.startsWith("final_render_approval ")) {
+    return message.startsWith("final_render_approval missing")
+      ? "PACKAGE_PREFLIGHT_FINAL_RENDER_APPROVAL_MISSING"
+      : "PACKAGE_PREFLIGHT_FINAL_RENDER_APPROVAL_STALE";
+  }
+  if (message.startsWith("project identity mismatch:")) {
+    return "PACKAGE_PREFLIGHT_PROJECT_ID_MISMATCH";
+  }
+  if (message.startsWith("project identity could not be resolved")) {
+    return "PACKAGE_PREFLIGHT_PROJECT_ID_UNRESOLVED";
+  }
+  if (message.startsWith("project identity artifact ")) {
+    return "PACKAGE_PREFLIGHT_IDENTITY_ARTIFACT_MALFORMED";
+  }
+  if (message.includes("project_state.yaml is missing")) return "PACKAGE_PREFLIGHT_STATE_MISSING";
+  if (message.includes("project_state.yaml could not be read")) return "PACKAGE_PREFLIGHT_STATE_INVALID";
+  if (message.includes("creative_brief.yaml is missing")) return "PACKAGE_PREFLIGHT_BRIEF_MISSING";
+  if (message.includes("creative_brief.yaml could not be read")) return "PACKAGE_PREFLIGHT_BRIEF_INVALID";
+  if (message.includes("05_timeline/timeline.json is missing")) return "PACKAGE_PREFLIGHT_TIMELINE_MISSING";
+  if (message.includes("05_timeline/timeline.json could not be parsed")) return "PACKAGE_PREFLIGHT_TIMELINE_INVALID";
+  if (message.includes("04_plan/edit_blueprint.yaml is missing")) return "PACKAGE_PREFLIGHT_BLUEPRINT_MISSING";
+  if (message.includes("04_plan/edit_blueprint.yaml could not be parsed")) return "PACKAGE_PREFLIGHT_BLUEPRINT_INVALID";
+  if (message.includes("current_state")) return "PACKAGE_PREFLIGHT_STATE_NOT_APPROVED";
+  if (message.includes("approval_record")) return "PACKAGE_PREFLIGHT_APPROVAL_REQUIRED";
+  if (message.includes("visual_qa")) return "PACKAGE_PREFLIGHT_VISUAL_QA_BLOCKED";
+  if (message.includes("caption_approval")) return "PACKAGE_PREFLIGHT_CAPTION_APPROVAL_STALE";
+  if (message.includes("music_cues")) return "PACKAGE_PREFLIGHT_MUSIC_CUES_INVALID";
+  if (message.includes("source_of_truth") || message.includes("handoff_resolution")) {
+    return "PACKAGE_PREFLIGHT_SOURCE_OF_TRUTH_UNRESOLVED";
+  }
+  return "PACKAGE_PREFLIGHT_GATE10_BLOCKED";
+}
+
+function nextActionForPreflight(
+  decision: PackagePreflightDecision,
+  identity: PackagePreflightProjectIdentity,
+  nextSteps: string[],
+): PackagePreflightNextAction {
+  if (decision === "ready_to_run") {
+    return {
+      code: "run_package",
+      message: "Run package with the same project and options.",
+    };
+  }
+  if (identity.status === "conflict" || identity.status === "unresolved") {
+    return {
+      code: "resolve_project_identity",
+      message: "Make timeline, state, QA, and manifest project_id values agree, then rerun preflight.",
+    };
+  }
+  return {
+    code: "resolve_preflight_issues",
+    message: nextSteps[0] ?? "Resolve the listed preflight issues, then rerun preflight.",
+  };
+}
+
 function inferSourceOfTruth(
   doc: ProjectStateDoc,
   autonomyMode: AutonomyMode,
@@ -653,6 +935,11 @@ function nextStepsForIssues(issues: string[]): string[] {
   }
   if (joined.includes("music_cues")) {
     steps.push("Refresh music cues before packaging.");
+  }
+  if (joined.includes("final_render_approval")) {
+    steps.push(
+      "Review captions, typography, section titles, audio/BGM, and output spec; then refresh final-render-approval.json before packaging.",
+    );
   }
   if (steps.length === 0) {
     steps.push("Fix the listed Gate 10 prerequisites, then rerun package.");

@@ -47,8 +47,57 @@ function createValidator(schemaFile: string) {
 
 function visualQAWaiverOptions() {
   return {
+    render: true,
     allowUnverifiedVisual: true,
     visualQaWaiverReason: "E2E fixture approves without local rendered visual QA.",
+    visualQA: {
+      assembleTimelineToMp4Impl: async (
+        { outputPath, projectDir }: { outputPath?: string; projectDir: string },
+      ) => {
+        const resolvedOutput = outputPath ??
+          path.join(projectDir, "09_output", "rough-cut.mp4");
+        fs.mkdirSync(path.dirname(resolvedOutput), { recursive: true });
+        fs.writeFileSync(resolvedOutput, "deterministic-e2e-render", "utf8");
+        return {
+          outputPath: resolvedOutput,
+          workingDir: path.join(projectDir, ".tmp"),
+          timelineDurationFrames: 300,
+          videoSegmentCount: 1,
+          audioClipCount: 0,
+        };
+      },
+      runDeterministicOutputQAImpl: async () => ({
+        status: "verified" as const,
+        duration_sec: 10,
+        scanned_duration_sec: 10,
+        width: 1920,
+        height: 1080,
+        issues: [],
+      }),
+      runMarlinQAImpl: async (
+        _projectDir: string,
+        videoPath: string,
+      ) => ({
+        version: "1" as const,
+        project_id: "e2e-test",
+        video_path: videoPath,
+        video_duration_sec: 10,
+        overall_assessment: "verified" as const,
+        scene_descriptions: [],
+        issues: [],
+        pacing_assessment: {
+          too_fast: false,
+          too_slow: false,
+          notes: "E2E fixture",
+        },
+        emotion_arc_assessment: {
+          follows_brief: true,
+          notes: "E2E fixture",
+        },
+        score: 90,
+        visual_qa: "verified" as const,
+      }),
+    },
   };
 }
 

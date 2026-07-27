@@ -6,6 +6,7 @@ import * as path from "node:path";
 import {
   createRemotionAssemblyFingerprint,
   readValidRemotionAssemblyCache,
+  readValidRemotionLayerCache,
   stageSourceMapForRemotion,
 } from "../runtime/render/remotion/render-remotion.js";
 import { materializeVerifiedStillSnapshots } from "../runtime/render/canonical-render-input.js";
@@ -46,6 +47,70 @@ describe("Remotion base assembly fingerprint", () => {
     expect(createRemotionAssemblyFingerprint(first, { A1: source }, timelinePath)).not.toBe(fingerprint);
   });
 
+  it("excludes separate Remotion overlays from the base cache but binds base-frame treatments", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-remotion-base-split-"));
+    dirs.push(dir);
+    const source = path.join(dir, "source.mp4");
+    const timelinePath = path.join(dir, "timeline.json");
+    fs.writeFileSync(source, "source");
+    const first = timeline();
+    const fingerprint = createRemotionAssemblyFingerprint(first, { A1: source }, timelinePath);
+    const overlayClip = (requiresBaseFrame: boolean) => ({
+      clip_id: "TITLE",
+      asset_id: "A1",
+      segment_id: "S1",
+      src_in_us: 0,
+      src_out_us: 1_000_000,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 30,
+      role: "title",
+      metadata: {
+        content_element: {
+          version: "content-element/v1",
+          element_id: "TITLE",
+          kind: "template",
+          template_ref: "vos:content.title-card/v1",
+          template_version: "1.0.0",
+          props: { title: "Title" },
+          layout: {
+            anchor: "center",
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation_deg: 0,
+            opacity: 1,
+            safe_area: true,
+            z_index: 100,
+          },
+          renderer_hint: "remotion",
+          creative_recipe: {
+            version: "creative-recipe/v1",
+            reuse_scope: "brand",
+            authoring_surface: "typed_component",
+            layer_mode: "alpha_overlay",
+            composite_stage: "under_caption",
+            requires_base_frame: requiresBaseFrame,
+          },
+        },
+      },
+    });
+    (first.tracks as TimelineIR["tracks"] & {
+      overlay: TimelineIR["tracks"]["video"];
+    }).overlay = [{
+      track_id: "O1",
+      kind: "overlay",
+      clips: [overlayClip(false)],
+    }] as unknown as TimelineIR["tracks"]["video"];
+    expect(createRemotionAssemblyFingerprint(first, { A1: source }, timelinePath))
+      .toBe(fingerprint);
+
+    (first.tracks as TimelineIR["tracks"] & {
+      overlay: TimelineIR["tracks"]["video"];
+    }).overlay[0].clips = [overlayClip(true)] as unknown as TimelineIR["tracks"]["video"][number]["clips"];
+    expect(createRemotionAssemblyFingerprint(first, { A1: source }, timelinePath))
+      .not.toBe(fingerprint);
+  });
+
   it("requires a v2 receipt with the exact full output hash and size", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-remotion-receipt-"));
     dirs.push(dir);
@@ -79,6 +144,79 @@ describe("Remotion base assembly fingerprint", () => {
     fs.writeFileSync(output, "ORIGINAL");
     writeReceipt("remotion-assembly-cache/v1", hash("ORIGINAL"), 8);
     expect(readValidRemotionAssemblyCache(output, receiptPath, fingerprint)).toBeUndefined();
+  });
+
+  it("rejects Remotion alpha-layer reuse when the live media contract drifts", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-remotion-layer-reuse-"));
+    dirs.push(dir);
+    const overlayPath = path.join(dir, "overlay.webm");
+    const receiptPath = path.join(dir, "receipt.json");
+    const fingerprint = "f".repeat(64);
+    const media = {
+      version: "alpha-layer-media/v1" as const,
+      codec_name: "vp9",
+      pixel_format: "yuva420p",
+      alpha_mode: "1",
+      has_alpha: true,
+      width: 640,
+      height: 360,
+      fps_num: 30,
+      fps_den: 1,
+      duration_frames: 30,
+      time_base: "1/1000",
+      audio_stream_count: 0,
+    };
+    fs.writeFileSync(overlayPath, "overlay");
+    const result = {
+      overlayPath,
+      receiptPath,
+      durationInFrames: 30,
+      fps: 30,
+      fpsNum: 30,
+      fpsDen: 1,
+      width: 640,
+      height: 360,
+      elementCount: 1,
+      layerCacheHit: false,
+      font: {
+        mode: "bundled",
+        format: "woff2",
+        sha256: "a",
+        sourceSha256: "b",
+        sizeBytes: 1,
+        characterCount: 1,
+        cacheHit: false,
+      },
+    } as const;
+    fs.writeFileSync(receiptPath, JSON.stringify({
+      version: "remotion-layer-receipt/v2",
+      renderer: "remotion",
+      renderer_version: "4.0.452",
+      fingerprint,
+      overlay_sha256: createHash("sha256").update("overlay").digest("hex"),
+      media,
+      result,
+    }));
+    const input = {
+      overlayPath,
+      receiptPath,
+      fingerprint,
+      expected: {
+        width: 640,
+        height: 360,
+        fpsNum: 30,
+        fpsDen: 1,
+        durationFrames: 30,
+      },
+    };
+    await expect(readValidRemotionLayerCache({
+      ...input,
+      probeAlphaLayerImpl: async () => media,
+    })).resolves.toMatchObject(result);
+    await expect(readValidRemotionLayerCache({
+      ...input,
+      probeAlphaLayerImpl: async () => ({ ...media, has_alpha: false }),
+    })).resolves.toBeUndefined();
   });
 
   it("materializes collision-free private snapshots and disposes them", () => {

@@ -64,7 +64,7 @@ function textWritingMode(writingMode: OverlayPresetProps["writing_mode"]): CSSPr
   return { writingMode: "horizontal-tb" };
 }
 
-function overlayPosition(anchor: string | undefined, safeArea: SafeArea): OverlayPosition {
+export function overlayPosition(anchor: string | undefined, safeArea: SafeArea): OverlayPosition {
   switch (anchor) {
     case "top-left":
       return {
@@ -72,6 +72,31 @@ function overlayPosition(anchor: string | undefined, safeArea: SafeArea): Overla
         justifyContent: "flex-start",
         paddingTop: safeArea.top,
         paddingLeft: safeArea.left,
+      };
+    case "top-center":
+      return {
+        alignItems: "center",
+        justifyContent: "flex-start",
+        paddingTop: safeArea.top,
+      };
+    case "top-right":
+      return {
+        alignItems: "flex-end",
+        justifyContent: "flex-start",
+        paddingTop: safeArea.top,
+        paddingRight: safeArea.right,
+      };
+    case "center-left":
+      return {
+        alignItems: "flex-start",
+        justifyContent: "center",
+        paddingLeft: safeArea.left,
+      };
+    case "center-right":
+      return {
+        alignItems: "flex-end",
+        justifyContent: "center",
+        paddingRight: safeArea.right,
       };
     case "bottom-right":
       return {

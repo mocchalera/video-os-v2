@@ -9,15 +9,29 @@ an SNS short, interview, event, or long-form video.
 | Canonical timeline content | Base assembly | Additional composite |
 | --- | --- | --- |
 | video/audio/captions only | FFmpeg | none |
-| Remotion-owned overlay | Remotion | none |
+| separate Remotion-owned overlay | FFmpeg | transparent Remotion layer |
+| base-frame-dependent Remotion treatment | Remotion | none for that treatment |
 | HyperFrames-owned content element | FFmpeg | transparent HyperFrames overlay |
-| Remotion and HyperFrames elements | Remotion | transparent HyperFrames overlay |
+| separate Remotion and HyperFrames elements | FFmpeg | transparent renderer-owned layers |
 
 Speech captions remain owned by the existing FFmpeg/libass finishing stage.
-This prevents a Remotion preview caption from being burned twice. Explicitly
+Production package assembly rejects any legacy `clip.captions`; only an
+explicit `preview_burn` compatibility path may use FFmpeg drawtext. This
+prevents legacy clip captions or a Remotion preview caption from being burned
+again underneath approved ASS. Unknown caption styles, generic-family heavy
+weights, and missing/mismatched font assets fail closed for every captioned
+genre; `caption_policy.source: none` remains valid. Explicitly
 requesting FFmpeg when a Remotion-owned element exists fails closed instead of
 silently dropping graphics. Unknown templates and invalid content elements also
 fail before rendering.
+
+Renderer-owned alpha artifacts are grouped only when that grouping preserves
+the global z-order. A sequence such as HyperFrames 100 / Remotion 200 /
+HyperFrames 300 cannot be represented by the current one-artifact-per-renderer
+model, so shared route preflight and the render boundary reject it with
+`renderer_z_order_interleaving_unsupported` instead of silently reordering it.
+Cross-renderer z-index ties are rejected for the same reason: the artifact
+model cannot preserve the element-level tie-break after grouping.
 
 The approved dialogue-short style
 `single-layer-speaker-separated-safe-area-ja` remains genre-scoped. Its ASS
@@ -68,6 +82,25 @@ assembly paths are recorded in:
 ```text
 07_package/logs/render-route.json
 ```
+
+The receipt records pinned renderer versions, hash-bound timeline/caption
+inputs, layer and font receipts, the final-video hash, and an execution-derived
+delivery operation list. `lossy_video_encode_passes` means sequential H.264
+generations carried by the delivered picture. It includes the H.264 base
+assembly, a conditional fit re-encode, and the final visual composite when
+they actually execute. Stream copies, decodes, VP9 alpha intermediates, and
+lossless audio intermediates are listed separately and do not increment it.
+
+HyperFrames and Remotion alpha cache hits require both receipt/hash identity
+and a live ffprobe match for codec, pixel format/alpha, dimensions, rational
+FPS, duration frames, WebM timebase `1/1000`, and absence of audio. Missing or
+drifted media is a cache miss and is regenerated safely.
+
+For `engine_render`, `package_manifest.json.provenance.render` binds this route
+receipt and its layer/font receipts. `scripts/package.ts --verify-existing
+--json` re-resolves the route and rejects missing/tampered artifacts, renderer
+version drift, encode-count drift, input/output hash drift, and live alpha
+media drift.
 
 Use `--assembly-engine remotion` only for explicit diagnostics or parity work.
 Do not force Remotion simply to obtain a social-video style; captions and style

@@ -8,8 +8,11 @@
  */
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { materializeFileSync } from "../filesystem/materialize-file.js";
 import { assertTimelineRenderSupported } from "./media-kind-guard.js";
 import { resolveCanonicalRenderInputs } from "./canonical-render-input.js";
 import { assessRenderArtifactFreshness } from "./source-input-attestation.js";
@@ -40,12 +43,37 @@ import { resolveBundledFontPaths } from "../fonts/bundled-font.js";
 import { assessMusicAssetEligibility } from "../music/asset-eligibility.js";
 import { applyMusicMixProfile, type MusicCuesDoc } from "../audio/music-cues.js";
 import { timelineEmbeddedMusicAssetIds } from "../audio/timeline-music.js";
-import { renderHyperFramesContentOverlay } from "../content/hyperframes-renderer.js";
+import { shouldPreserveOriginalAudioLevel } from "../audio/preservation.js";
+import { DEFAULT_MASTERING, measureAudioLoudness } from "../audio/mastering.js";
+import { renderHyperFramesContentLayer } from "../content/hyperframes-renderer.js";
+import { renderRemotionContentLayer } from "./remotion/render-remotion.js";
+import {
+  composeFinalVisuals,
+  type FinalVisualLayer,
+} from "./final-visual-compositor.js";
 import {
   resolveProjectRenderRoute,
   writeRenderRouteReceipt,
+  assertVisualLayerZOrderSupported,
+  type DeliveryVideoOperation,
   type RenderRouteDecision,
 } from "./route-resolver.js";
+import { assertNoLegacyClipCaptionsForPackage } from "./legacy-caption-guard.js";
+import {
+  assertCaptionFontContractReady,
+  captionFontContractForReceipt,
+} from "../caption/font-contract.js";
+import { HYPERFRAMES_RENDERER_VERSION } from "../content/hyperframes-renderer.js";
+import { REMOTION_RENDERER_VERSION } from "./remotion/render-remotion.js";
+import {
+  frameRateValue,
+  framesToMilliseconds,
+  framesToSeconds,
+  rationalFrameRate,
+  secondsToFrames,
+  type FrameRateInput,
+} from "../../editor/shared/rational-timebase.js";
+import { assertMediaWriteReady } from "../system/media-write-doctor.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -73,9 +101,20 @@ export interface RenderPipelineOptions {
   };
   outputDir: string; // 07_package/
   fps: number;
+  /** Verified generation-local font directory used by caption-finalize. */
+  captionFontsDir?: string;
+  /** Test/host seam; production defaults to the pinned HyperFrames adapter. */
+  renderHyperFramesLayerImpl?: typeof renderHyperFramesContentLayer;
+  /** Test/host seam; production defaults to the pinned Remotion adapter. */
+  renderRemotionLayerImpl?: typeof renderRemotionContentLayer;
+  /** Test/host seam for the shared single-pass compositor. */
+  composeFinalVisualsImpl?: typeof composeFinalVisuals;
+  /** Test/host seam for the fail-closed toolchain and capacity gate. */
+  assertMediaWriteReadyImpl?: typeof assertMediaWriteReady;
 }
 
 export interface RenderPipelineResult {
+  baseAssemblyPath: string;
   assemblyPath: string;
   rawVideoPath: string;
   rawDialoguePath: string;
@@ -116,23 +155,35 @@ function writeLog(logsDir: string, name: string, content: string): string {
 interface TimelineSequenceConfig {
   width: number;
   height: number;
+  fpsNum: number;
+  fpsDen: number;
   output_aspect_ratio?: string;
 }
 
 function readTimelineSequenceConfig(timelinePath: string): TimelineSequenceConfig {
   const raw = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
-    sequence?: { width?: number; height?: number; output_aspect_ratio?: string };
+    sequence?: {
+      width?: number;
+      height?: number;
+      fps_num?: number;
+      fps_den?: number;
+      output_aspect_ratio?: string;
+    };
   };
 
   const width = raw.sequence?.width;
   const height = raw.sequence?.height;
-  if (!width || !height) {
-    throw new Error(`Timeline sequence width/height missing: ${timelinePath}`);
+  const fpsNum = raw.sequence?.fps_num;
+  const fpsDen = raw.sequence?.fps_den;
+  if (!width || !height || !fpsNum || !fpsDen) {
+    throw new Error(`Timeline sequence width/height/fps missing: ${timelinePath}`);
   }
 
   return {
     width,
     height,
+    fpsNum,
+    fpsDen,
     output_aspect_ratio: raw.sequence?.output_aspect_ratio,
   };
 }
@@ -252,20 +303,47 @@ function makeNoTransformClip(): RenderVideoClip {
   };
 }
 
-/** Probe the video stream dimensions of a file. */
-async function probeVideoDimensions(
+/**
+ * Probe geometry and exact encoded-frame packet count so a same-size but
+ * short stream is not copied through. Counting packets scans container
+ * metadata without decoding every frame; one video packet is one authored
+ * frame for the supported CFR delivery streams.
+ */
+async function probeVideoStream(
   inputPath: string,
-): Promise<{ width: number; height: number } | null> {
+): Promise<{ width: number; height: number; frameCount: number | null } | null> {
   try {
     const result = await execFilePromise("ffprobe", [
       "-v", "error",
+      "-count_packets",
       "-select_streams", "v:0",
-      "-show_entries", "stream=width,height",
-      "-of", "csv=p=0",
+      "-show_entries", "stream=width,height,nb_read_packets,nb_frames",
+      "-of", "json",
       inputPath,
     ]);
-    const [w, h] = result.stdout.trim().split(",").map(Number);
-    if (Number.isFinite(w) && Number.isFinite(h)) return { width: w, height: h };
+    const stream = (JSON.parse(result.stdout) as {
+      streams?: Array<{
+        width?: unknown;
+        height?: unknown;
+        nb_read_packets?: unknown;
+        nb_frames?: unknown;
+      }>;
+    }).streams?.[0];
+    const width = Number(stream?.width);
+    const height = Number(stream?.height);
+    const frameCountValue = stream?.nb_read_packets ?? stream?.nb_frames;
+    const frameCount = typeof frameCountValue === "string"
+      ? Number(frameCountValue)
+      : null;
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      return {
+        width,
+        height,
+        frameCount: frameCount !== null && Number.isSafeInteger(frameCount)
+          ? frameCount
+          : null,
+      };
+    }
     return null;
   } catch {
     return null;
@@ -276,31 +354,45 @@ async function fitVideoToTimeline(
   inputPath: string,
   outputPath: string,
   timelinePath: string,
-): Promise<string> {
+): Promise<{ outputPath: string; operation: "stream_copy" | "lossy_video_generation" }> {
   const sequence = readTimelineSequenceConfig(timelinePath);
+  const durationSec = readTimelineDurationSeconds(timelinePath);
+  const frameRate = rationalFrameRate(sequence.fpsNum, sequence.fpsDen);
+  const durationFrames = durationSec === undefined
+    ? undefined
+    : secondsToFrames(durationSec, frameRate);
 
-  // Parity: when the assembly is already at the sequence dimensions
-  // (always true for the shared-filtergraph assembler), re-encoding here
-  // would add a lossy generation the preview path does not have. Skip.
-  const dims = await probeVideoDimensions(inputPath);
-  if (dims && dims.width === sequence.width && dims.height === sequence.height) {
-    fs.copyFileSync(inputPath, outputPath);
-    return outputPath;
+  // Copy only when both geometry and authored frame count already match.
+  const stream = await probeVideoStream(inputPath);
+  if (
+    stream &&
+    stream.width === sequence.width &&
+    stream.height === sequence.height &&
+    (durationFrames === undefined || stream.frameCount === durationFrames)
+  ) {
+    materializeFileSync(inputPath, outputPath);
+    return { outputPath, operation: "stream_copy" };
   }
 
-  const videoFilter = buildAspectRatioFitFilter(sequence.width, sequence.height);
+  const fitFilter = buildAspectRatioFitFilter(sequence.width, sequence.height);
+  const videoFilter = durationFrames === undefined
+    ? fitFilter
+    : `${fitFilter},tpad=stop_mode=clone:stop_duration=1,trim=end_frame=${durationFrames},setpts=PTS-STARTPTS`;
   await execFilePromise("ffmpeg", [
     "-y",
     "-i", inputPath,
     "-vf", videoFilter,
     "-an",
+    "-r", `${sequence.fpsNum}/${sequence.fpsDen}`,
+    "-fps_mode", "cfr",
+    ...(durationFrames === undefined ? [] : ["-frames:v", String(durationFrames)]),
     // Same near-lossless intermediate profile as the preview path.
     ...x264Args(INTERMEDIATE_X264),
     "-pix_fmt", "yuv420p",
     outputPath,
   ]);
 
-  return outputPath;
+  return { outputPath, operation: "lossy_video_generation" };
 }
 
 // ── Phase 1: Demux ─────────────────────────────────────────────────
@@ -357,6 +449,7 @@ export async function burnCaptions(
   sequence?: { width: number; height: number; fps: number },
   stylingClass?: string,
   canonicalCues?: AssCaptionCue[],
+  fontsDir?: string,
 ): Promise<string> {
   ensureDir(path.dirname(outputPath));
 
@@ -367,20 +460,18 @@ export async function burnCaptions(
   // floated a bottom lower-third into mid-frame. styling_class selects the
   // per-project preset (position/width/wrap); unknown classes fall back to
   // the default. When no sequence is given, fall back to plain SRT burn.
-  let subtitlePath = srtPath;
-  if (sequence) {
-    const preset = resolveCaptionStylePreset(stylingClass);
-    const cues = canonicalCues ?? parseSrtCues(fs.readFileSync(srtPath, "utf-8"));
-    const assContent = buildAssDocument(cues, preset, sequence);
-    subtitlePath = srtPath.replace(/\.srt$/i, "") + ".burn.ass";
-    fs.writeFileSync(subtitlePath, assContent, "utf-8");
-  }
+  const subtitlePath = prepareCaptionBurnAsset(
+    srtPath,
+    sequence,
+    stylingClass,
+    canonicalCues,
+  );
 
   const escapedSubtitlePath = subtitlePath
     .replace(/\\/g, "\\\\")
     .replace(/:/g, "\\:")
     .replace(/'/g, "'\\''");
-  const escapedFontsDir = resolveBundledFontPaths().fontsDir
+  const escapedFontsDir = (fontsDir ?? resolveBundledFontPaths().fontsDir)
     .replace(/\\/g, "\\\\")
     .replace(/:/g, "\\:")
     .replace(/'/g, "'\\''");
@@ -397,6 +488,27 @@ export async function burnCaptions(
   ]);
 
   return outputPath;
+}
+
+/**
+ * Materialize the canonical libass input without encoding video. The shared
+ * final visual compositor consumes this file together with renderer-owned
+ * alpha layers in one filter graph.
+ */
+export function prepareCaptionBurnAsset(
+  srtPath: string,
+  sequence?: { width: number; height: number; fps: number },
+  stylingClass?: string,
+  canonicalCues?: AssCaptionCue[],
+): string {
+  if (!sequence) return srtPath;
+  if (stylingClass) assertCaptionFontContractReady(stylingClass);
+  const preset = resolveCaptionStylePreset(stylingClass);
+  const cues = canonicalCues ?? parseSrtCues(fs.readFileSync(srtPath, "utf-8"));
+  const assContent = buildAssDocument(cues, preset, sequence);
+  const subtitlePath = srtPath.replace(/\.srt$/i, "") + ".burn.ass";
+  fs.writeFileSync(subtitlePath, assContent, "utf-8");
+  return subtitlePath;
 }
 
 interface ApprovedCaptionForBurn {
@@ -416,7 +528,7 @@ interface ApprovedCaptionForBurn {
  */
 export function buildApprovedCaptionAssCues(
   captions: ApprovedCaptionForBurn[],
-  fps: number,
+  frameRate: FrameRateInput,
 ): AssCaptionCue[] {
   return captions.map((caption) => {
     const body = caption.text.includes("｜")
@@ -427,8 +539,11 @@ export function buildApprovedCaptionAssCues(
         caption.reveal_timing?.role ?? "",
       );
     return {
-      startSec: caption.timeline_in_frame / fps,
-      endSec: (caption.timeline_in_frame + caption.timeline_duration_frames) / fps,
+      startSec: framesToSeconds(caption.timeline_in_frame, frameRate),
+      endSec: framesToSeconds(
+        caption.timeline_in_frame + caption.timeline_duration_frames,
+        frameRate,
+      ),
       text: caption.text,
       ...(isProtectedReveal
         ? { semanticRole: "reveal" as const }
@@ -445,8 +560,8 @@ export function buildApprovedCaptionAssCues(
  * Convert frame-based timecodes to SRT timestamp format:
  *   HH:MM:SS,mmm
  */
-function framesToSrtTimestamp(frame: number, fps: number): string {
-  const totalMs = Math.round((frame / fps) * 1000);
+function framesToSrtTimestamp(frame: number, frameRate: FrameRateInput): string {
+  const totalMs = framesToMilliseconds(frame, frameRate);
   const hours = Math.floor(totalMs / 3_600_000);
   const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
   const seconds = Math.floor((totalMs % 60_000) / 1000);
@@ -467,8 +582,8 @@ function framesToSrtTimestamp(frame: number, fps: number): string {
  * Convert frame-based timecodes to VTT timestamp format:
  *   HH:MM:SS.mmm
  */
-function framesToVttTimestamp(frame: number, fps: number): string {
-  const totalMs = Math.round((frame / fps) * 1000);
+function framesToVttTimestamp(frame: number, frameRate: FrameRateInput): string {
+  const totalMs = framesToMilliseconds(frame, frameRate);
   const hours = Math.floor(totalMs / 3_600_000);
   const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
   const seconds = Math.floor((totalMs % 60_000) / 1000);
@@ -494,7 +609,7 @@ export function generateSrt(
     timeline_duration_frames: number;
     text: string;
   }>,
-  fps: number,
+  frameRate: FrameRateInput,
 ): string {
   const lines: string[] = [];
 
@@ -505,7 +620,7 @@ export function generateSrt(
 
     lines.push(String(i + 1));
     lines.push(
-      `${framesToSrtTimestamp(startFrame, fps)} --> ${framesToSrtTimestamp(endFrame, fps)}`,
+      `${framesToSrtTimestamp(startFrame, frameRate)} --> ${framesToSrtTimestamp(endFrame, frameRate)}`,
     );
     lines.push(cap.text);
     lines.push("");
@@ -523,7 +638,7 @@ export function generateVtt(
     timeline_duration_frames: number;
     text: string;
   }>,
-  fps: number,
+  frameRate: FrameRateInput,
 ): string {
   const lines: string[] = ["WEBVTT", ""];
 
@@ -533,7 +648,7 @@ export function generateVtt(
     const endFrame = cap.timeline_in_frame + cap.timeline_duration_frames;
 
     lines.push(
-      `${framesToVttTimestamp(startFrame, fps)} --> ${framesToVttTimestamp(endFrame, fps)}`,
+      `${framesToVttTimestamp(startFrame, frameRate)} --> ${framesToVttTimestamp(endFrame, frameRate)}`,
     );
     lines.push(cap.text);
     lines.push("");
@@ -646,11 +761,15 @@ async function normalizeAudioDuration(
 export async function runRenderPipeline(
   opts: RenderPipelineOptions,
 ): Promise<RenderPipelineResult> {
-  const { outputDir, captionPolicy, fps } = opts;
+  const { outputDir, captionPolicy } = opts;
   let hasCanonicalDerivedMedia = false;
   let hasCanonicalStill = false;
+  let captionFontContract: ReturnType<typeof captionFontContractForReceipt> | undefined;
   if (opts.timelinePath && fs.existsSync(opts.timelinePath)) {
-    const timeline = JSON.parse(fs.readFileSync(opts.timelinePath, "utf8"));
+    const timeline = JSON.parse(
+      fs.readFileSync(opts.timelinePath, "utf8"),
+    ) as import("../compiler/types.js").TimelineIR;
+    assertNoLegacyClipCaptionsForPackage(timeline);
     assertTimelineRenderSupported(timeline, {
       projectDir: opts.projectDir,
       timelinePath: opts.timelinePath,
@@ -663,6 +782,12 @@ export async function runRenderPipeline(
     });
     hasCanonicalStill = canonicalInputs.imageAssetIds.size > 0;
     hasCanonicalDerivedMedia = hasCanonicalStill || canonicalInputs.sequenceAssetIds.size > 0;
+  }
+  if (captionPolicy.source !== "none") {
+    captionFontContract = captionFontContractForReceipt(captionPolicy.styling_class);
+  }
+  if (opts.renderRouteDecision) {
+    assertVisualLayerZOrderSupported(opts.renderRouteDecision.visual_layers);
   }
 
   // Preserve legacy option/file validation precedence without invoking an
@@ -695,6 +820,34 @@ export async function runRenderPipeline(
       );
     }
   }
+  const sequenceConfig = readTimelineSequenceConfig(opts.timelinePath);
+  const frameRate = rationalFrameRate(sequenceConfig.fpsNum, sequenceConfig.fpsDen);
+  const fps = frameRateValue(frameRate);
+  const estimatedDurationSec = readTimelineDurationSeconds(opts.timelinePath) ?? 0;
+  const estimatedOutputBytes = Math.max(
+    256 * 1024 * 1024,
+    Math.ceil(estimatedDurationSec * 4 * 1024 * 1024),
+  );
+  (opts.assertMediaWriteReadyImpl ?? assertMediaWriteReady)({
+    reservations: [
+      {
+        label: "package render output",
+        path: outputDir,
+        requiredBytes: estimatedOutputBytes,
+      },
+      {
+        label: "render scratch/cache",
+        path: opts.bundleCacheDir ?? os.tmpdir(),
+        requiredBytes: Math.max(
+          512 * 1024 * 1024,
+          estimatedOutputBytes * 2,
+        ),
+      },
+    ],
+    requireFfmpeg: true,
+    requireFfprobe: true,
+    requireCaptionFilters: captionPolicy.source !== "none",
+  });
   // 1. Create output subdirs
   const videoDir = path.join(outputDir, "video");
   const audioDir = path.join(outputDir, "audio");
@@ -707,6 +860,27 @@ export async function runRenderPipeline(
 
   const logs: Record<string, string> = {};
   const sidecarPaths: string[] = [];
+  let fontReceiptPath: string | undefined;
+  if (captionFontContract) {
+    fontReceiptPath = path.join(logsDir, "caption-font-receipt.json");
+    const stagedManifestPath = opts.captionFontsDir
+      ? path.join(path.dirname(opts.captionFontsDir), "font-manifest.json")
+      : undefined;
+    fs.writeFileSync(fontReceiptPath, `${JSON.stringify({
+      version: "caption-font-receipt/v1",
+      styling_class: captionPolicy.styling_class,
+      contract: captionFontContract,
+      ...(stagedManifestPath && fs.existsSync(stagedManifestPath)
+        ? {
+            staged_font_manifest: {
+              path: path.resolve(stagedManifestPath),
+              sha256: `sha256:${createHash("sha256").update(fs.readFileSync(stagedManifestPath)).digest("hex")}`,
+            },
+          }
+        : {}),
+    }, null, 2)}\n`, "utf8");
+    logs.caption_font_receipt = fontReceiptPath;
+  }
 
   // 2. Verify or produce assembly path
   let assemblyPath: string;
@@ -729,28 +903,67 @@ export async function runRenderPipeline(
     opts.projectDir,
     opts.assemblyEngine ?? "auto",
   );
-  if (opts.assemblyPath && routeDecision.remotion_overlay_count > 0) {
+  assertVisualLayerZOrderSupported(routeDecision.visual_layers);
+  const deliveryOperations: DeliveryVideoOperation[] = [
+    { id: "base_assembly", kind: "lossy_video_generation", codec: "h264" },
+  ];
+  if (
+    opts.assemblyPath &&
+    routeDecision.visual_layers.some((layer) =>
+      layer.renderer === "remotion" && layer.embedded_in_base
+    )
+  ) {
     throw new Error(
-      `Prebuilt assemblyPath cannot prove that ${routeDecision.remotion_overlay_count} ` +
-        "Remotion-owned overlay clip(s) were rendered. Use the auto/remotion assembly route.",
+      "Prebuilt assemblyPath cannot prove that base-frame-dependent Remotion " +
+        "visual layers were rendered. Use the auto/remotion assembly route.",
     );
   }
 
   const baseAssemblyPath = assemblyPath;
-  let hyperframesReceiptPath: string | undefined;
+  const finalVisualLayers: FinalVisualLayer[] = [];
+  const hyperframesReceiptPaths: string[] = [];
+  const remotionReceiptPaths: string[] = [];
+  const renderHyperFramesLayerImpl =
+    opts.renderHyperFramesLayerImpl ?? renderHyperFramesContentLayer;
+  const renderRemotionLayerImpl =
+    opts.renderRemotionLayerImpl ?? renderRemotionContentLayer;
+  const composeFinalVisualsImpl =
+    opts.composeFinalVisualsImpl ?? composeFinalVisuals;
 
-  // 2.5. Composite only HyperFrames-owned content elements. Remotion filters
-  // those clips out at its renderer boundary, so each overlay has one owner.
+  // 2.5. Render only HyperFrames-owned transparent layers. They are cached
+  // independently from the base assembly and composed later with captions.
   try {
-    const contentResult = await renderHyperFramesContentOverlay({
-      timelinePath: opts.timelinePath,
-      baseAssemblyPath: assemblyPath,
-      outputDir,
-    });
-    if (contentResult) {
-      assemblyPath = contentResult.compositePath;
-      logs["hyperframes"] = contentResult.receiptPath;
-      hyperframesReceiptPath = contentResult.receiptPath;
+    const hyperframesStages = [...new Set(
+      routeDecision.visual_layers
+        .filter((layer) => layer.renderer === "hyperframes" && !layer.embedded_in_base)
+        .map((layer) => layer.composite_stage),
+    )];
+    for (const compositeStage of hyperframesStages) {
+      const contentResult = await renderHyperFramesLayerImpl({
+        timelinePath: opts.timelinePath,
+        outputDir,
+        compositeStage,
+      });
+      if (!contentResult) continue;
+      const layerDecisions = routeDecision.visual_layers.filter((layer) =>
+        layer.renderer === "hyperframes" &&
+        !layer.embedded_in_base &&
+        layer.composite_stage === compositeStage
+      );
+      finalVisualLayers.push({
+        path: contentResult.overlayPath,
+        renderer: "hyperframes",
+        compositeStage,
+        zIndex: Math.min(...layerDecisions.map((layer) => layer.z_index_min)),
+        elementIds: layerDecisions.flatMap((layer) => layer.element_ids),
+      });
+      hyperframesReceiptPaths.push(contentResult.receiptPath);
+      deliveryOperations.push({
+        id: `hyperframes_${compositeStage}`,
+        kind: "alpha_intermediate",
+        codec: "vp9",
+      });
+      logs[`hyperframes_${compositeStage}`] = contentResult.receiptPath;
     }
   } catch (err) {
     const logPath = writeLog(
@@ -762,12 +975,50 @@ export async function runRenderPipeline(
     throw new Error(`HyperFrames content render failed: ${String(err)}`);
   }
 
-  const renderRouteReceiptPath = writeRenderRouteReceipt(outputDir, routeDecision, {
-    baseAssemblyPath,
-    effectiveAssemblyPath: assemblyPath,
-    hyperframesReceiptPath,
-  });
-  logs["render_route"] = renderRouteReceiptPath;
+  try {
+    const remotionStages = [...new Set(
+      routeDecision.visual_layers
+        .filter((layer) => layer.renderer === "remotion" && !layer.embedded_in_base)
+        .map((layer) => layer.composite_stage),
+    )];
+    for (const compositeStage of remotionStages) {
+      const layerDecisions = routeDecision.visual_layers.filter((layer) =>
+        layer.renderer === "remotion" &&
+        !layer.embedded_in_base &&
+        layer.composite_stage === compositeStage
+      );
+      const contentResult = await renderRemotionLayerImpl({
+        timelinePath: opts.timelinePath,
+        outputDir,
+        compositeStage,
+        elementIds: layerDecisions.flatMap((layer) => layer.element_ids),
+        bundleCacheDir: opts.bundleCacheDir,
+      });
+      if (!contentResult) continue;
+      finalVisualLayers.push({
+        path: contentResult.overlayPath,
+        renderer: "remotion",
+        compositeStage,
+        zIndex: Math.min(...layerDecisions.map((layer) => layer.z_index_min)),
+        elementIds: layerDecisions.flatMap((layer) => layer.element_ids),
+      });
+      remotionReceiptPaths.push(contentResult.receiptPath);
+      deliveryOperations.push({
+        id: `remotion_${compositeStage}`,
+        kind: "alpha_intermediate",
+        codec: "vp9",
+      });
+      logs[`remotion_${compositeStage}`] = contentResult.receiptPath;
+    }
+  } catch (err) {
+    const logPath = writeLog(
+      logsDir,
+      "remotion_layer",
+      `Remotion content layer render failed: ${String(err)}`,
+    );
+    logs["remotion_layer"] = logPath;
+    throw new Error(`Remotion content layer render failed: ${String(err)}`);
+  }
 
   // 3. Demux
   let rawVideoPath: string;
@@ -779,6 +1030,7 @@ export async function runRenderPipeline(
     const demuxResult = await demux(assemblyPath, outputDir, hasTimelineAudio);
     rawVideoPath = demuxResult.rawVideoPath;
     rawDialoguePath = demuxResult.rawDialoguePath;
+    deliveryOperations.push({ id: "demux_video", kind: "stream_copy", codec: "h264" });
     logs["demux"] = writeLog(logsDir, "demux", "Demux completed successfully");
   } catch (err) {
     const logPath = writeLog(logsDir, "demux", `Demux failed: ${String(err)}`);
@@ -789,7 +1041,16 @@ export async function runRenderPipeline(
   // 3.5. Fit the video stream to timeline output dimensions with scale+pad.
   try {
     const normalizedVideoPath = path.join(videoDir, "raw_video.normalized.mp4");
-    await fitVideoToTimeline(rawVideoPath, normalizedVideoPath, opts.timelinePath);
+    const fitResult = await fitVideoToTimeline(
+      rawVideoPath,
+      normalizedVideoPath,
+      opts.timelinePath,
+    );
+    deliveryOperations.push({
+      id: "video_fit",
+      kind: fitResult.operation,
+      codec: "h264",
+    });
     fs.renameSync(normalizedVideoPath, rawVideoPath);
     logs["video_fit"] = writeLog(
       logsDir,
@@ -834,12 +1095,12 @@ export async function runRenderPipeline(
     (captionPolicy.delivery_mode === "sidecar" ||
       captionPolicy.delivery_mode === "both")
   ) {
-    const srtContent = generateSrt(approvedCaptions, fps);
+    const srtContent = generateSrt(approvedCaptions, frameRate);
     const srtPath = path.join(captionsDir, "speech.approved.srt");
     fs.writeFileSync(srtPath, srtContent, "utf-8");
     sidecarPaths.push(srtPath);
 
-    const vttContent = generateVtt(approvedCaptions, fps);
+    const vttContent = generateVtt(approvedCaptions, frameRate);
     const vttPath = path.join(captionsDir, "speech.vtt");
     fs.writeFileSync(vttPath, vttContent, "utf-8");
     sidecarPaths.push(vttPath);
@@ -851,8 +1112,11 @@ export async function runRenderPipeline(
     );
   }
 
-  // 5. Burn captions into video if applicable
+  // 5. Prepare canonical ASS, then composite every visual treatment in one
+  // delivery-video encode. A renderer layer is not allowed to pre-composite
+  // the base, and caption burn is not allowed to start a second encode.
   let currentVideoPath = rawVideoPath;
+  let captionAssPath: string | undefined;
   if (
     captionPolicy.source !== "none" &&
     approvedCaptions.length > 0 &&
@@ -862,25 +1126,15 @@ export async function runRenderPipeline(
     // Burn-in must always be regenerated from the canonical approval. Reusing
     // an existing SRT can silently burn stale text after a caption-only re-edit.
     const srtForBurn = path.join(captionsDir, "speech.approved.srt");
-    const srtContent = generateSrt(approvedCaptions, fps);
+    const srtContent = generateSrt(approvedCaptions, frameRate);
     fs.writeFileSync(srtForBurn, srtContent, "utf-8");
 
-    const captionedVideoPath = path.join(videoDir, "captioned_video.mp4");
     try {
-      const seq = readTimelineSequenceConfig(opts.timelinePath);
-      await burnCaptions(
-        rawVideoPath,
+      captionAssPath = prepareCaptionBurnAsset(
         srtForBurn,
-        captionedVideoPath,
-        { width: seq.width, height: seq.height, fps },
+        { width: sequenceConfig.width, height: sequenceConfig.height, fps },
         captionPolicy.styling_class,
-        buildApprovedCaptionAssCues(approvedCaptions, fps),
-      );
-      currentVideoPath = captionedVideoPath;
-      logs["caption_burn"] = writeLog(
-        logsDir,
-        "caption_burn",
-        "Caption burn completed successfully",
+        buildApprovedCaptionAssCues(approvedCaptions, frameRate),
       );
     } catch (err) {
       const logPath = writeLog(
@@ -893,18 +1147,101 @@ export async function runRenderPipeline(
     }
   }
 
+  if (finalVisualLayers.length > 0 || captionAssPath) {
+    const compositedVideoPath = path.join(videoDir, "composited_video.mp4");
+    const timelineDurationSec = readTimelineDurationSeconds(opts.timelinePath);
+    const timelineDurationFrames = timelineDurationSec === undefined
+      ? undefined
+      : secondsToFrames(timelineDurationSec, frameRate);
+    try {
+      await composeFinalVisualsImpl({
+        baseVideoPath: rawVideoPath,
+        layers: finalVisualLayers,
+        assPath: captionAssPath,
+        fontsDir: captionAssPath
+          ? opts.captionFontsDir ?? resolveBundledFontPaths().fontsDir
+          : undefined,
+        outputPath: compositedVideoPath,
+        width: sequenceConfig.width,
+        height: sequenceConfig.height,
+        fpsNum: sequenceConfig.fpsNum,
+        fpsDen: sequenceConfig.fpsDen,
+        durationFrames: timelineDurationFrames,
+      });
+      currentVideoPath = compositedVideoPath;
+      deliveryOperations.push({
+        id: "final_visual_composite",
+        kind: "lossy_video_generation",
+        codec: "h264",
+      });
+      logs["visual_composite"] = writeLog(
+        logsDir,
+        "visual_composite",
+        `Single-pass visual composite completed with ${finalVisualLayers.length} ` +
+          `renderer layer(s) and ${captionAssPath ? "canonical ASS captions" : "no captions"}`,
+      );
+      if (captionAssPath) {
+        logs["caption_burn"] = writeLog(
+          logsDir,
+          "caption_burn",
+          "Canonical ASS captions applied by the single-pass visual compositor",
+        );
+      }
+    } catch (err) {
+      const logPath = writeLog(
+        logsDir,
+        "visual_composite",
+        `Single-pass visual composite failed: ${String(err)}`,
+      );
+      logs["visual_composite"] = logPath;
+      throw new Error(`Single-pass visual composite failed: ${String(err)}`);
+    }
+  }
+
+  const finalizeRenderRouteReceipt = (finalVideoPath: string): string => {
+    const renderRouteReceiptPath = writeRenderRouteReceipt(outputDir, routeDecision, {
+      baseAssemblyPath,
+      effectiveAssemblyPath: currentVideoPath,
+      hyperframesReceiptPath: hyperframesReceiptPaths[0],
+      remotionOverlayReceiptPath: remotionReceiptPaths[0],
+      visualLayerReceiptPaths: [...hyperframesReceiptPaths, ...remotionReceiptPaths],
+      timelinePath: opts.timelinePath,
+      captionApprovalPath: opts.captionApprovalPath,
+      finalVideoPath,
+      fontReceiptPath,
+      operations: deliveryOperations,
+      rendererVersions: {
+        ...(routeDecision.visual_layers.some((layer) => layer.renderer === "hyperframes")
+          ? { hyperframes: HYPERFRAMES_RENDERER_VERSION }
+          : {}),
+        ...(routeDecision.base_engine === "remotion"
+          || routeDecision.visual_layers.some((layer) => layer.renderer === "remotion")
+          ? { remotion: REMOTION_RENDERER_VERSION }
+          : {}),
+      },
+    });
+    logs.render_route = renderRouteReceiptPath;
+    return renderRouteReceiptPath;
+  };
+
   // 6. Audio mix (dialogue + optional BGM -> final_mix.wav). Both paths use
   // the same mastering contract and emit machine-readable evidence for QA.
   const finalMixPath = path.join(audioDir, "final_mix.wav");
   const audioMixReportPath = path.join(logsDir, "audio-mix-report.json");
   const embeddedBgmAssetIds = timelineEmbeddedMusicAssetIds(timelineForMix);
+  const preserveOriginalAudioLevel = shouldPreserveOriginalAudioLevel(timelineForMix) &&
+    embeddedBgmAssetIds.length === 0 &&
+    !(opts.musicCuesPath && fs.existsSync(opts.musicCuesPath));
 
   if (!hasTimelineAudio) {
     const finalVideoPath = path.join(videoDir, "final.mp4");
-    fs.copyFileSync(currentVideoPath, finalVideoPath);
+    materializeFileSync(currentVideoPath, finalVideoPath);
+    deliveryOperations.push({ id: "final_video_materialize", kind: "stream_copy", codec: "h264" });
+    const renderRouteReceiptPath = finalizeRenderRouteReceipt(finalVideoPath);
     logs["audio_mix"] = writeLog(logsDir, "audio_mix", "not_applicable: timeline has no audio or BGM; no audio stream fabricated");
     logs["final_mux"] = writeLog(logsDir, "final_mux", "Video-only final copied without fabricated audio");
     return {
+      baseAssemblyPath,
       assemblyPath,
       rawVideoPath,
       rawDialoguePath: "",
@@ -918,7 +1255,26 @@ export async function runRenderPipeline(
   }
   if (!rawDialoguePath) throw new Error("timeline_audio_expected_but_demux_missing");
 
-  if (opts.musicCuesPath && fs.existsSync(opts.musicCuesPath)) {
+  if (preserveOriginalAudioLevel) {
+    fs.copyFileSync(rawDialoguePath, finalMixPath);
+    const measurement = await measureAudioLoudness(rawDialoguePath);
+    fs.writeFileSync(audioMixReportPath, `${JSON.stringify({
+      version: "audio-mix-report/v1",
+      has_bgm: false,
+      strategy: "original_passthrough_v1",
+      final_mastering: {
+        ...DEFAULT_MASTERING,
+        applied: false,
+        premaster_measurement: measurement,
+      },
+    }, null, 2)}\n`, "utf-8");
+    logs["audio_mix_report"] = audioMixReportPath;
+    logs["audio_mix"] = writeLog(
+      logsDir,
+      "audio_mix",
+      "Original-only dialogue passed through without loudness normalization",
+    );
+  } else if (opts.musicCuesPath && fs.existsSync(opts.musicCuesPath)) {
     // With music cues: attempt to import and use the audio mixer
     try {
       const { mixAudio, extractSpeechIntervals } = await import("../audio/mixer.js");
@@ -1047,7 +1403,7 @@ export async function runRenderPipeline(
     const timelineDurationSec = readTimelineDurationSeconds(opts.timelinePath);
     const timelineDurationFrames = timelineDurationSec === undefined
       ? undefined
-      : Math.round(timelineDurationSec * fps);
+      : secondsToFrames(timelineDurationSec, frameRate);
     await finalMux(
       currentVideoPath,
       finalMixPath,
@@ -1062,6 +1418,7 @@ export async function runRenderPipeline(
         ? "Final mux completed successfully"
         : `Final mux completed successfully at timeline duration ${timelineDurationSec.toFixed(6)}s`,
     );
+    deliveryOperations.push({ id: "final_mux_video", kind: "stream_copy", codec: "h264" });
   } catch (err) {
     const logPath = writeLog(
       logsDir,
@@ -1071,8 +1428,10 @@ export async function runRenderPipeline(
     logs["final_mux"] = logPath;
     throw new Error(`Final mux failed: ${String(err)}`);
   }
+  const renderRouteReceiptPath = finalizeRenderRouteReceipt(finalVideoPath);
 
   return {
+    baseAssemblyPath,
     assemblyPath,
     rawVideoPath,
     rawDialoguePath,

@@ -182,7 +182,7 @@ describe("hybrid production render route", () => {
 
       expect(fs.statSync(result.finalVideoPath).size).toBeGreaterThan(0);
       expect(JSON.parse(fs.readFileSync(result.renderRouteReceiptPath, "utf8"))).toMatchObject({
-        version: "render-route/v1",
+        version: "render-route/v2",
         assembly_engine: "remotion",
         remotion_overlay_count: 1,
         hyperframes_overlay: true,

@@ -30,6 +30,23 @@ export interface VideoWebFontAsset {
 }
 
 /**
+ * Static 700 face used by libass for normal bold captions.
+ *
+ * The bundled variable face exposes its first CoreText face as Thin. When ASS
+ * requests the shared "Noto Sans JP" family at Bold, CoreText can therefore
+ * resolve an installed Thin face instead of the bundled 700 instance. A
+ * uniquely named static face makes the requested weight deterministic.
+ */
+export const ASS_BOLD_VIDEO_FONT = {
+  family: "VideoOS Noto Sans JP Bold",
+  filename: "VideoOSNotoSansJPBold.ttf",
+  repoRelativePath:
+    "apps/macos-studio/Sources/VideoOSStudio/Resources/Fonts/VideoOSNotoSansJPBold.ttf",
+  sha256: "46f70c5a56a050d9cf1049a2a126ca74eee45ee6400c1548afc258c4b03a0fb3",
+  weight: 700,
+} as const;
+
+/**
  * Static 900 face used by libass for display-heavy short captions.
  *
  * libass exposes only a boolean Bold flag in ASS styles, so it cannot select

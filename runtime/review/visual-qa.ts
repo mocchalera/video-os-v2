@@ -26,6 +26,14 @@ import {
   writeRenderFreshnessMetadata as writeSharedRenderFreshnessMetadata,
   type SourceInputAttestationStatus,
 } from "../render/source-input-attestation.js";
+import {
+  deriveDeterministicAllowedRanges,
+  runDeterministicOutputQA,
+  type DeterministicEndingIntent,
+  type DeterministicOutputQAAllowedRange,
+  type DeterministicOutputQAResult,
+  type DeterministicTimelineIntent,
+} from "./deterministic-output-qa.js";
 
 export const DEFAULT_REVIEW_VISUAL_QA_MIN_SCORE = 70;
 
@@ -54,6 +62,7 @@ export interface ReviewVisualQA {
   source_inputs_status?: SourceInputAttestationStatus;
   source_input_warnings?: string[];
   render_meta_path?: string;
+  deterministic_scan?: DeterministicOutputQAResult;
   marlin_report_path?: string;
 }
 
@@ -74,6 +83,15 @@ export type AssembleTimelineForReview = (
   options: AssemblerOptions,
 ) => Promise<AssemblyResult>;
 
+export type RunDeterministicOutputQAForReview = (
+  videoPath: string,
+  options: {
+    expectedWidth?: number;
+    expectedHeight?: number;
+    allowedRanges?: DeterministicOutputQAAllowedRange[];
+  },
+) => DeterministicOutputQAResult | Promise<DeterministicOutputQAResult>;
+
 export interface EvaluateReviewVisualQAOptions {
   render?: boolean;
   writeReport?: boolean;
@@ -82,6 +100,8 @@ export interface EvaluateReviewVisualQAOptions {
   repoRoot?: string;
   marlinReportDir?: string;
   runMarlinQAImpl?: RunMarlinQAForReview;
+  runDeterministicOutputQAImpl?: RunDeterministicOutputQAForReview;
+  deterministicAllowedRanges?: DeterministicOutputQAAllowedRange[];
   assembleTimelineToMp4Impl?: AssembleTimelineForReview;
   now?: () => Date;
 }
@@ -192,6 +212,52 @@ export async function evaluateReviewVisualQA(
     });
   }
 
+  const expectedDimensions = readTimelineDimensions(timelinePath);
+  const derivedAllowedRanges = deriveDeterministicAllowedRanges(
+    readTimelineIntent(timelinePath),
+    readEndingIntent(absDir),
+  );
+  const runDeterministicQA =
+    options.runDeterministicOutputQAImpl ?? runDeterministicOutputQA;
+  let deterministicScan: DeterministicOutputQAResult;
+  try {
+    deterministicScan = await runDeterministicQA(videoPath, {
+      ...(expectedDimensions?.width
+        ? { expectedWidth: expectedDimensions.width }
+        : {}),
+      ...(expectedDimensions?.height
+        ? { expectedHeight: expectedDimensions.height }
+        : {}),
+      ...(derivedAllowedRanges.length > 0 || options.deterministicAllowedRanges
+        ? {
+            allowedRanges: [
+              ...derivedAllowedRanges,
+              ...(options.deterministicAllowedRanges ?? []),
+            ],
+          }
+        : {}),
+    });
+  } catch (err) {
+    deterministicScan = {
+      status: "incomplete",
+      reason: `deterministic_output_qa_failed: ${errorMessage(err)}`,
+      issues: [],
+    };
+  }
+  if (deterministicScan.status !== "verified") {
+    return blockedVisualQA(
+      "blocked",
+      `deterministic_output_qa_${deterministicScan.status}`,
+      minScore,
+      {
+        videoPath,
+        timelinePath,
+        freshness,
+        deterministicScan,
+      },
+    );
+  }
+
   const brief = readCreativeBrief(absDir);
   if (!brief) {
     return blockedVisualQA("blocked", "creative_brief_missing", minScore, {
@@ -218,12 +284,14 @@ export async function evaluateReviewVisualQA(
       timelinePath,
       freshness,
       reportPath,
+      deterministicScan,
     });
   } catch (err) {
     return blockedVisualQA("blocked", `marlin_qa_failed: ${errorMessage(err)}`, minScore, {
       videoPath,
       timelinePath,
       freshness,
+      deterministicScan,
     });
   }
 }
@@ -237,6 +305,7 @@ export function visualQAFromMarlinReport(
     timelinePath: string;
     freshness: RenderFreshness;
     reportPath?: string;
+    deterministicScan?: DeterministicOutputQAResult;
   },
 ): ReviewVisualQA {
   const verified = isMarlinQAReportVerified(report);
@@ -263,6 +332,9 @@ export function visualQAFromMarlinReport(
     ...(context.freshness.renderMetaPath
       ? { render_meta_path: path.relative(context.projectDir, context.freshness.renderMetaPath) }
       : {}),
+    ...(context.deterministicScan
+      ? { deterministic_scan: context.deterministicScan }
+      : {}),
     ...(context.reportPath
       ? { marlin_report_path: path.relative(context.projectDir, context.reportPath) }
       : {}),
@@ -275,11 +347,12 @@ export function isReviewVisualQAApprovalGrade(
   report: ReviewVisualQAGateReport,
   visualApplicable = true,
 ): boolean {
-  if (hasReviewVisualQAWaiver(report)) return true;
   const visual = report.visual_qa;
   if (!visualApplicable) {
     return visual?.status === "not_applicable" && visual.reason === "audio_only_timeline";
   }
+  if (visual?.deterministic_scan?.status !== "verified") return false;
+  if (hasReviewVisualQAWaiver(report)) return true;
   if (!visual || visual.status !== "verified") return false;
   return typeof visual.score === "number" && visual.score >= visual.min_score;
 }
@@ -294,15 +367,21 @@ export function reviewVisualQAGateReason(
   report: ReviewVisualQAGateReport,
   visualApplicable = true,
 ): string | null {
-  if (hasReviewVisualQAWaiver(report)) {
-    return null;
-  }
   const visual = report.visual_qa;
   if (!visual) return "review_report.visual_qa is missing";
   if (!visualApplicable) {
     return visual.status === "not_applicable" && visual.reason === "audio_only_timeline"
       ? null
       : `audio-only timeline requires review_report.visual_qa status \"not_applicable\" with reason \"audio_only_timeline\", got \"${visual.status}\"`;
+  }
+  if (!visual.deterministic_scan) {
+    return "review_report.visual_qa.deterministic_scan is missing";
+  }
+  if (visual.deterministic_scan.status !== "verified") {
+    return `review_report.visual_qa.deterministic_scan.status must be "verified", got "${visual.deterministic_scan.status}"`;
+  }
+  if (hasReviewVisualQAWaiver(report)) {
+    return null;
   }
   if (visual.status !== "verified") {
     return `review_report.visual_qa.status must be "verified", got "${visual.status}"`;
@@ -379,6 +458,7 @@ function blockedVisualQA(
     videoPath: string;
     timelinePath: string;
     freshness?: Partial<RenderFreshness> & { renderMetaPath?: string };
+    deterministicScan?: DeterministicOutputQAResult;
   },
 ): ReviewVisualQA {
   const projectDir = path.dirname(path.dirname(context.timelinePath));
@@ -400,6 +480,9 @@ function blockedVisualQA(
       : {}),
     ...(context.freshness?.renderMetaPath
       ? { render_meta_path: path.relative(projectDir, context.freshness.renderMetaPath) }
+      : {}),
+    ...(context.deterministicScan
+      ? { deterministic_scan: context.deterministicScan }
       : {}),
   };
 }
@@ -478,6 +561,49 @@ function readCreativeBrief(projectDir: string): CreativeBrief | null {
     return parseYaml(fs.readFileSync(briefPath, "utf-8")) as CreativeBrief;
   } catch {
     return null;
+  }
+}
+
+function readTimelineDimensions(
+  timelinePath: string,
+): { width: number; height: number } | null {
+  try {
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+      sequence?: { width?: unknown; height?: unknown };
+    };
+    const width = Number(timeline.sequence?.width);
+    const height = Number(timeline.sequence?.height);
+    return Number.isInteger(width) &&
+        width > 0 &&
+        Number.isInteger(height) &&
+        height > 0
+      ? { width, height }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readTimelineIntent(timelinePath: string): DeterministicTimelineIntent {
+  try {
+    return JSON.parse(
+      fs.readFileSync(timelinePath, "utf-8"),
+    ) as DeterministicTimelineIntent;
+  } catch {
+    return {};
+  }
+}
+
+function readEndingIntent(projectDir: string): DeterministicEndingIntent | undefined {
+  const blueprintPath = path.join(projectDir, "04_plan/edit_blueprint.yaml");
+  if (!fs.existsSync(blueprintPath)) return undefined;
+  try {
+    const blueprint = parseYaml(
+      fs.readFileSync(blueprintPath, "utf-8"),
+    ) as { ending_policy?: DeterministicEndingIntent };
+    return blueprint.ending_policy;
+  } catch {
+    return undefined;
   }
 }
 

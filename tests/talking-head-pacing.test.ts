@@ -175,6 +175,51 @@ describe("snapRangeToUtteranceBoundaries", () => {
     expect(snapped!.duration_bound).toBe(true);
   });
 
+  it("keeps a complete authored range when it rounds within the frame cap", () => {
+    const frameDurationUs = 1_000_000 / 24;
+    const completeStatement: UtteranceSpan[] = [
+      { start_us: 1_298_562_188, end_us: 1_301_662_188 },
+      { start_us: 1_301_662_188, end_us: 1_304_662_188 },
+      { start_us: 1_304_662_188, end_us: 1_307_002_188 },
+      { start_us: 1_306_782_188, end_us: 1_308_502_188 },
+      { start_us: 1_308_502_188, end_us: 1_309_622_188 },
+      { start_us: 1_309_622_188, end_us: 1_311_822_188 },
+      { start_us: 1_311_822_188, end_us: 1_313_562_188 },
+      { start_us: 1_313_562_188, end_us: 1_314_722_188 },
+      { start_us: 1_314_722_188, end_us: 1_317_722_188 },
+      { start_us: 1_317_722_188, end_us: 1_319_522_188 },
+      { start_us: 1_319_522_188, end_us: 1_323_322_187 },
+      { start_us: 1_323_322_187, end_us: 1_326_622_188 },
+      { start_us: 1_326_133_375, end_us: 1_328_973_375 },
+      { start_us: 1_328_973_375, end_us: 1_332_593_375 },
+      { start_us: 1_332_593_375, end_us: 1_335_493_375 },
+      { start_us: 1_335_493_375, end_us: 1_337_113_375 },
+      { start_us: 1_337_113_375, end_us: 1_338_333_375 },
+      { start_us: 1_338_333_375, end_us: 1_339_553_375 },
+      { start_us: 1_339_553_375, end_us: 1_342_233_375 },
+      { start_us: 1_342_233_375, end_us: 1_344_193_375 },
+      { start_us: 1_344_193_375, end_us: 1_346_733_375 },
+    ];
+    const sourceInUs = 1_298_562_188;
+    const sourceOutUs = 1_344_193_375;
+
+    const snapped = snapRangeToUtteranceBoundaries(
+      sourceInUs,
+      sourceOutUs,
+      completeStatement,
+      15_000_000,
+      {
+        preferNextOutBoundary: true,
+        maxDurationUs: 1_095 * frameDurationUs,
+        targetDurationUs: 1_095 * frameDurationUs,
+        durationFrameUs: frameDurationUs,
+      },
+    );
+
+    expect(Math.round((sourceOutUs - sourceInUs) / frameDurationUs)).toBe(1_095);
+    expect(snapped).toBeNull();
+  });
+
   it("can shift to a later utterance group when that better matches the beat target", () => {
     const breakthrough: UtteranceSpan[] = [
       { start_us: 85_819_719, end_us: 92_119_719 },

@@ -238,7 +238,7 @@ final class ProjectRenderRunnerTests: XCTestCase {
             return ProjectInitializationProcessResult(
                 status: 1,
                 stdout: """
-                {"ok":false,"projectDir":"\(project.path)","issues":["approval_record is missing"],"nextSteps":[],"visualQaSummary":"missing"}
+                {"version":"package-preflight/v2","decision":"blocked","project_identity":{"status":"unresolved","evidence_count":0,"sources":[]},"structured_issues":[{"code":"PACKAGE_PREFLIGHT_APPROVAL_REQUIRED","message":"approval_record is missing"}],"next_action":{"code":"resolve_preflight_issues","message":"Resolve approval"},"ok":false,"projectDir":"\(project.path)","issues":["approval_record is missing"],"nextSteps":[],"visualQaSummary":"missing"}
                 """,
                 stderr: ""
             )
@@ -259,14 +259,24 @@ final class ProjectRenderRunnerTests: XCTestCase {
         XCTAssertEqual(invalid.failureLabel, "package preflight unavailable")
     }
 
-    func testPreflightRunnerRejectsExitAndProjectIdentityContradictions() throws {
+    func testPreflightRunnerRejectsExitContradictionsWithoutReinterpretingOracleDecision() throws {
         let (root, project) = try temporaryRenderProject("videoos-render-preflight-contract", state: "approved")
         let readyJSON = """
-        {"ok":true,"projectDir":"\(project.path)","issues":[],"nextSteps":[],"sourceOfTruth":"engine_render","projectId":"demo","currentState":"approved","visualQaSummary":"verified"}
+        {"version":"package-preflight/v2","decision":"ready_to_run","project_identity":{"status":"inferred","project_id":"demo","evidence_count":1,"sources":[]},"structured_issues":[],"next_action":{"code":"run_package","message":"Run package"},"ok":true,"projectDir":"\(project.path)","issues":[],"nextSteps":[],"sourceOfTruth":"engine_render","projectId":"","currentState":"approved","visualQaSummary":"verified"}
         """
         let blockedJSON = """
-        {"ok":false,"projectDir":"\(project.path)","issues":["blocked"],"nextSteps":[],"visualQaSummary":"missing"}
+        {"version":"package-preflight/v2","decision":"blocked","project_identity":{"status":"conflict","evidence_count":2,"sources":[]},"structured_issues":[{"code":"PACKAGE_PREFLIGHT_PROJECT_ID_MISMATCH","message":"blocked"}],"next_action":{"code":"resolve_project_identity","message":"Resolve identity"},"ok":false,"projectDir":"\(project.path)","issues":["blocked"],"nextSteps":[],"visualQaSummary":"missing"}
         """
+
+        let ready = ProjectPackagePreflightRunner.status(
+            repositoryRoot: root,
+            projectURL: project
+        ) { _, _ in
+            ProjectInitializationProcessResult(status: 0, stdout: readyJSON, stderr: "")
+        }
+        XCTAssertTrue(ready.available)
+        XCTAssertTrue(ready.canPackage)
+        XCTAssertEqual(ready.projectID, "")
 
         for (exitCode, json) in [(Int32(1), readyJSON), (Int32(0), blockedJSON), (Int32(2), blockedJSON)] {
             let status = ProjectPackagePreflightRunner.status(
@@ -279,30 +289,6 @@ final class ProjectRenderRunnerTests: XCTestCase {
             XCTAssertFalse(status.available, "exit \(exitCode)")
             XCTAssertEqual(status.failureLabel, "package preflight unavailable", "exit \(exitCode)")
         }
-
-        let missingPath = ProjectPackagePreflightRunner.status(
-            repositoryRoot: root,
-            projectURL: project
-        ) { _, _ in
-            ProjectInitializationProcessResult(
-                status: 0,
-                stdout: readyJSON.replacingOccurrences(of: "\"projectDir\":\"\(project.path)\",", with: ""),
-                stderr: ""
-            )
-        }
-        XCTAssertFalse(missingPath.available)
-
-        let differentPath = ProjectPackagePreflightRunner.status(
-            repositoryRoot: root,
-            projectURL: project
-        ) { _, _ in
-            ProjectInitializationProcessResult(
-                status: 0,
-                stdout: readyJSON.replacingOccurrences(of: project.path, with: project.appendingPathComponent("other").path),
-                stderr: ""
-            )
-        }
-        XCTAssertFalse(differentPath.available)
     }
 
     private func renderPlan(

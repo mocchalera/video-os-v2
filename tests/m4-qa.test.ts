@@ -24,6 +24,8 @@ import {
   checkLoudnessTarget,
   checkAudioMixPolicy,
   checkResolutionSpec,
+  checkDeterministicFinalOutput,
+  checkFinalCaptionStructuralInvariants,
   checkPackageCompleteness,
   buildQaReport,
   getRequiredChecks,
@@ -58,6 +60,13 @@ function validReviewReport() {
       min_score: 70,
       issues: { total: 0, critical: 0, warning: 0, info: 0 },
       issue_summaries: [],
+      deterministic_scan: {
+        status: "verified" as const,
+        duration_sec: 10,
+        width: 1920,
+        height: 1080,
+        issues: [],
+      },
     },
   };
 }
@@ -193,6 +202,10 @@ describe("Gate 10", () => {
           min_score: 70,
           issues: { total: 0, critical: 0, warning: 0, info: 0 },
           issue_summaries: [],
+          deterministic_scan: {
+            status: "verified",
+            issues: [],
+          },
         },
       },
     });
@@ -227,6 +240,10 @@ describe("Gate 10", () => {
           min_score: 70,
           issues: { total: 0, critical: 0, warning: 0, info: 0 },
           issue_summaries: [],
+          deterministic_scan: {
+            status: "verified",
+            issues: [],
+          },
         },
       },
     });
@@ -271,6 +288,32 @@ describe("Gate 10", () => {
     expect(result.passed).toBe(true);
   });
 
+  it("does not let a visual QA waiver bypass an incomplete deterministic scan", () => {
+    const result = checkGate10(validProjectState(), {
+      reviewReport: {
+        visual_qa: {
+          status: "blocked",
+          reason: "marlin_unavailable",
+          min_score: 70,
+          issues: { total: 0, critical: 0, warning: 0, info: 0 },
+          issue_summaries: [],
+          deterministic_scan: {
+            status: "incomplete",
+            reason: "ffmpeg_scan_failed",
+            issues: [],
+          },
+        },
+        visual_qa_waiver: true,
+        visual_qa_waiver_reason: "Operator accepts model QA unavailability.",
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain(
+      'review_report.visual_qa.deterministic_scan.status must be "verified", got "incomplete"',
+    );
+  });
+
   it("passes when review_report carries an explicit visual QA waiver", () => {
     const result = checkGate10(validProjectState(), {
       reviewReport: {
@@ -280,6 +323,10 @@ describe("Gate 10", () => {
           min_score: 70,
           issues: { total: 0, critical: 0, warning: 0, info: 0 },
           issue_summaries: [],
+          deterministic_scan: {
+            status: "verified",
+            issues: [],
+          },
         },
         visual_qa_waiver: true,
         visual_qa_waiver_reason: "Operator reviewed the final MP4 externally.",
@@ -287,6 +334,57 @@ describe("Gate 10", () => {
     });
 
     expect(result.passed).toBe(true);
+  });
+
+  it("fails closed when deterministic output QA is missing", () => {
+    const result = checkGate10(validProjectState(), {
+      reviewReport: {
+        visual_qa: {
+          status: "verified",
+          score: 90,
+          min_score: 70,
+          issues: { total: 0, critical: 0, warning: 0, info: 0 },
+          issue_summaries: [],
+        },
+      },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.errors).toContain(
+      "review_report.visual_qa.deterministic_scan is missing",
+    );
+  });
+});
+
+describe("checkDeterministicFinalOutput", () => {
+  it("blocks publication when the full-output scan is incomplete", () => {
+    const checks = checkDeterministicFinalOutput({
+      status: "incomplete",
+      reason: "scanned 1.000s of 30.000s",
+      issues: [],
+    });
+    expect(checks.find((check) => check.name === "final_decode_valid"))
+      .toMatchObject({ passed: false });
+  });
+
+  it("projects a persistent inset into a blocking package QA check", () => {
+    const checks = checkDeterministicFinalOutput({
+      status: "blocked",
+      duration_sec: 30,
+      scanned_duration_sec: 30,
+      width: 1080,
+      height: 1920,
+      issues: [{
+        kind: "inset",
+        severity: "blocking",
+        detail: "persistent four-sided inset from 7.000s to 7.550s",
+        start_sec: 7,
+        end_sec: 7.55,
+      }],
+    });
+    expect(checks.find((check) =>
+      check.name === "unexpected_inset_region_absent"
+    )).toMatchObject({ passed: false });
   });
 });
 
@@ -329,7 +427,7 @@ describe("checkCaptionDensity", () => {
         caption_id: "SC_SHORT",
         text: "坂本｜プリキュアわかる？",
         timeline_in_frame: 0,
-        timeline_duration_frames: 23,
+        timeline_duration_frames: 24,
       },
     ];
     const result = checkCaptionDensity(
@@ -339,7 +437,7 @@ describe("checkCaptionDensity", () => {
       "single-layer-speaker-separated-bold-outline-safe-area-ja",
     );
     expect(result.passed).toBe(true);
-    expect(result.details).toContain("max: 11.74");
+    expect(result.details).toContain("max: 11.25");
   });
 
   it("does not count a stacked speaker badge as subtitle body density", () => {
@@ -347,7 +445,7 @@ describe("checkCaptionDensity", () => {
       caption_id: "SC_BADGE",
       text: "坂本｜あと あれだよね",
       timeline_in_frame: 0,
-      timeline_duration_frames: 20,
+      timeline_duration_frames: 24,
     }];
     const result = checkCaptionDensity(
       captions,
@@ -356,7 +454,7 @@ describe("checkCaptionDensity", () => {
       "bold-outline-speaker-separated-safe-area-ja",
     );
     expect(result.passed).toBe(true);
-    expect(result.details).toContain("max: 12.00");
+    expect(result.details).toContain("max: 10.00");
   });
 
   it("fail - overlapping captions", () => {
@@ -377,6 +475,56 @@ describe("checkCaptionDensity", () => {
     const result = checkCaptionDensity(captions, 24, "en");
     expect(result.passed).toBe(false);
     expect(result.details).toContain("Overlap");
+  });
+
+  it("treats density and line-length findings as acknowledged after caption approval", () => {
+    expect(checkCaptionDensity([{
+      caption_id: "SC_APPROVED",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 30,
+      text: "一行二十文字を超えていても人間が確認済みの字幕です",
+    }], 30, "ja", "longform-event", { humanApproved: true })).toMatchObject({
+      name: "caption_density_valid",
+      passed: true,
+    });
+  });
+
+  it("requires approval for sub-target dwell but never waives unreadable flashes", () => {
+    const briefImpactCaption = [{
+      caption_id: "SC_IMPACT",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 15,
+      text: "危機です",
+    }];
+    const unreadableFlash = [{
+      caption_id: "SC_FLASH",
+      timeline_in_frame: 0,
+      timeline_duration_frames: 8,
+      text: "一瞬",
+    }];
+
+    expect(checkCaptionDensity(
+      briefImpactCaption,
+      30,
+      "ja",
+      "social-short",
+    ).passed).toBe(false);
+    expect(checkCaptionDensity(
+      briefImpactCaption,
+      30,
+      "ja",
+      "social-short",
+      { humanApproved: true },
+    ).passed).toBe(true);
+    const approvedFlash = checkCaptionDensity(
+      unreadableFlash,
+      30,
+      "ja",
+      "social-short",
+      { humanApproved: true },
+    );
+    expect(approvedFlash.passed).toBe(false);
+    expect(approvedFlash.details).toContain("non-waivable");
   });
 });
 
@@ -658,6 +806,29 @@ function validAudioMixReport(hasBgm: boolean): AudioMixReport {
 }
 
 describe("checkAudioMixPolicy", () => {
+  it("accepts explicit original-audio passthrough evidence", () => {
+    const report: AudioMixReport = {
+      version: "audio-mix-report/v1",
+      has_bgm: false,
+      strategy: "original_passthrough_v1",
+      final_mastering: {
+        applied: false,
+        loudness_target_lufs: -16,
+        lra_target: 7,
+        true_peak_target_dbtp: -1.5,
+        premaster_measurement: {
+          input_i: "-23.61",
+          input_tp: "-1.00",
+          input_lra: "11.60",
+          input_thresh: "-35.47",
+          target_offset: "1.21",
+        },
+      },
+    };
+
+    expect(checkAudioMixPolicy(report, false).passed).toBe(true);
+  });
+
   it("accepts multiple timeline-owned music assets without external re-add evidence", () => {
     const report: AudioMixReport = {
       version: "audio-mix-report/v1",
@@ -746,6 +917,40 @@ describe("getRequiredChecks", () => {
     // nle_finishing does not include those but has supplied_export_probe_valid
     expect(nleChecks).not.toContain("caption_density_valid");
     expect(nleChecks).toContain("supplied_export_probe_valid");
+  });
+});
+
+describe("final caption structural QA", () => {
+  it("does not let human approval hide a protected reveal that starts early", () => {
+    const result = checkFinalCaptionStructuralInvariants([{
+      caption_id: "SC_1",
+      asset_id: "AST_1",
+      segment_id: "SEG_1",
+      timeline_in_frame: 30,
+      timeline_duration_frames: 30,
+      text: "価値",
+      transcript_ref: "TR_1",
+      transcript_item_ids: ["ITEM_1"],
+      source: "transcript",
+      styling_class: "social-short",
+      metrics: { dwell_ms: 1000, cps: 2 },
+      reveal_timing: {
+        anchor_id: "A1",
+        role: "payoff",
+        anchor_text: "価値",
+        status: "protected",
+        source: "word_timing",
+        anchor_frame: 30,
+        audio_first_frames: 1,
+        original_timeline_in_frame: 30,
+      },
+    }], 30, "ja");
+
+    expect(result).toMatchObject({
+      name: "caption_final_invariants_valid",
+      passed: false,
+    });
+    expect(result.details).toContain("premature_protected_reveal");
   });
 });
 

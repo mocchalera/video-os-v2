@@ -7,6 +7,7 @@ final class MacOSStudioCrossLanguageContractTests: XCTestCase {
         let artifactVersion: String
         let playbackCases: [PlaybackCase]
         let preflightCases: [PreflightCase]
+        let preflightProcessCases: [PreflightProcessCase]
         let packageCases: [PackageCase]
     }
 
@@ -40,6 +41,20 @@ final class MacOSStudioCrossLanguageContractTests: XCTestCase {
         let expected: ProjectPackageVerificationStatus
     }
 
+    private struct PreflightProcessCase: Decodable {
+        struct Expected: Decodable {
+            let available: Bool
+            let canPackage: Bool
+            let failureLabel: String?
+        }
+
+        let id: String
+        let files: [String: String]
+        let exitCode: Int32
+        let stdout: String
+        let expected: Expected
+    }
+
     private var temporaryDirectories: [URL] = []
 
     override func tearDownWithError() throws {
@@ -71,7 +86,7 @@ final class MacOSStudioCrossLanguageContractTests: XCTestCase {
     func testRuntimePreflightExpectationsDriveRenderReadiness() throws {
         let fixture = try loadFixture()
 
-        XCTAssertEqual(fixture.preflightCases.count, 3)
+        XCTAssertEqual(fixture.preflightCases.count, 7)
         for testCase in fixture.preflightCases {
             let project = try materialize(testCase.files, prefix: "preflight-\(testCase.id)")
             let root = project.deletingLastPathComponent()
@@ -92,10 +107,40 @@ final class MacOSStudioCrossLanguageContractTests: XCTestCase {
         }
     }
 
+    func testSharedPreflightProcessCasesCoverIdentityAndTransportFailures() throws {
+        let fixture = try loadFixture()
+
+        XCTAssertEqual(
+            fixture.preflightProcessCases.map(\.id),
+            ["normal", "empty_id_inferred", "project_id_mismatch", "malformed_json", "exit_json_contradiction"]
+        )
+        for testCase in fixture.preflightProcessCases {
+            let project = try materialize(testCase.files, prefix: "preflight-process-\(testCase.id)")
+            let root = project.deletingLastPathComponent()
+            try write("script", to: root.appendingPathComponent("scripts/package.ts"))
+            let stdout = testCase.stdout.replacingOccurrences(of: "$PROJECT_DIR", with: project.path)
+
+            let status = ProjectPackagePreflightRunner.status(
+                repositoryRoot: root,
+                projectURL: project
+            ) { _, _ in
+                ProjectInitializationProcessResult(
+                    status: testCase.exitCode,
+                    stdout: stdout,
+                    stderr: ""
+                )
+            }
+
+            XCTAssertEqual(status.available, testCase.expected.available, testCase.id)
+            XCTAssertEqual(status.canPackage, testCase.expected.canPackage, testCase.id)
+            XCTAssertEqual(status.failureLabel, testCase.expected.failureLabel, testCase.id)
+        }
+    }
+
     func testPackageProjectionMatchesSchemaOracleExpectations() throws {
         let fixture = try loadFixture()
 
-        XCTAssertEqual(fixture.packageCases.count, 18)
+        XCTAssertEqual(fixture.packageCases.count, 26)
         for testCase in fixture.packageCases {
             let project = try materialize(testCase.files, prefix: "package-\(testCase.id)")
             let status = ProjectRenderPackageStatusReader.status(

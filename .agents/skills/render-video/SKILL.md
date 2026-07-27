@@ -33,20 +33,72 @@ metadata:
 - 手続き生成音を使えるのは、provenanceで `usage_class=simple_sound` と明示された短い単純音だけ。通常BGMの代替にはしない。
 
 ## やること（ステップ）
-1. Gate 10 と package 前提を読み取り専用preflightで確認する。Studioも同じJSON oracleを使う。
+1. 高コストなassembly/renderより前に、最終描画と同じ字幕・固定フォント・章タイトルで
+   短尺レビュー・パックを作る。まず計画だけを表示し、対象区間と合計尺を確認する。
+
+```bash
+npm run final-render-review-pack -- plan \
+  --project projects/<project>
+```
+
+   `--source` はtimelineと時刻が一致する、字幕・Video OS章タイトルを焼く前の
+   assembly/NLE完成映像を指定する。元カメラ素材や、すでに同じ字幕・章タイトルを
+   焼いた映像を指定しない。ffprobe実測の解像度、rational FPS、総尺、音声streamが
+   timelineと一致しない入力はfail closedする。
+
+```bash
+npm run final-render-review-pack -- build \
+  --project projects/<project> \
+  --source projects/<project>/05_timeline/assembly.mp4
+```
+
+   冒頭・中盤・終盤、代表的な問いかけ、最長/2行字幕、全章タイトルが自動選択される。
+   選択区間は一回のFFmpeg連結、HyperFrames描画一回、ASS字幕焼き一回で
+   `06_review/final-render-review-pack/review-reel.mp4` にまとまる。同じ映像・視覚timeline
+   projection・caption approval・固定フォントなら再利用する。音声方針だけの変更では
+   視覚レビューを無効化しない。
+2. レビュー・リールをユーザーと確認する。Cockpitではside panelで動画を開き、
+   字幕本文、字幕ウェイト、章タイトルの大きさ、問いかけ/発話の同期を確認する。
+   `dialogue-clean` または `loudness-only` を選ぶ場合は、代表区間の未処理/処理後A/Bも
+   同じAskに添付し、試聴承認を得るまで最終承認しない。
+3. 視覚レビューmanifestと音声判断をSHA-256へ拘束して最終レンダーを承認する。
+
+```bash
+npm run final-render-checklist -- approve \
+  --project projects/<project> \
+  --approved-by "<human>" \
+  --captions approved \
+  --typography approved \
+  --sections approved \
+  --visual-preview 06_review/final-render-review-pack/manifest.json \
+  --audio dialogue-clean \
+  --audio-preview 06_review/audio-finish-preview/manifest.json \
+  --audio-preview-sha256 sha256:<hash> \
+  --bgm none \
+  --output-spec approved
+```
+
+   creative brief、timeline、caption approval、music cues、視覚レビュー、音声試聴の
+   どれかが変われば承認は自動的にstaleとなる。`status`が`ready`になるまで進まない。
+
+```bash
+npm run final-render-checklist -- status --project projects/<project>
+```
+
+4. Gate 10 と package 前提を読み取り専用preflightで確認する。Studioも同じJSON oracleを使う。
 
 ```bash
 npm run package -- projects/<project> --preflight-only --json
 ```
 
    終了コード0かつJSONの`ok: true`でない場合はpackageへ進まない。このコマンドはproject artifactを書き換えない。
-2. `engine_render` path なら先に読み取り専用 preflight を行う。
+5. `engine_render` path なら先に読み取り専用 preflight を行う。
 
 ```bash
 npm run render-route -- projects/<project>
 ```
 
-3. 表示された route が `timeline.json` の登録済み要素と一致することを確認して
+6. 表示された route が `timeline.json` の登録済み要素と一致することを確認して
    package CLI を呼ぶ。SNS / interview / event / longform というジャンル名だけを
    engine 選択に使わない。
 
@@ -54,28 +106,40 @@ npm run render-route -- projects/<project>
 npm run package -- projects/<project> --source-of-truth engine_render
 ```
 
-4. `nle_finishing` path なら supplied final を検証用に渡す。
+7. `nle_finishing` path なら supplied final を検証用に渡す。
 
 ```bash
 npm run package -- projects/<project> --source-of-truth nle_finishing --supplied-final projects/<project>/07_package/video/final.mp4
 ```
 
-5. `assembly.mp4` を手動管理する場合だけ `--no-assembly` または `--assembly-path <path>` を使う。
+8. `assembly.mp4` を手動管理する場合だけ `--no-assembly` または `--assembly-path <path>` を使う。
    通常は自動生成に任せる。
-6. Studio確認やNLE handoffを行う場合、最終timeline更新後に playback contract を確認する。
+9. Studio確認やNLE handoffを行う場合、最終timeline更新後に playback contract を確認する。
 
 ```bash
 swift run --package-path apps/macos-studio videoos-studio-cli playback-contract-status <project-id>
 ```
 
    `status: exact` でない場合は、古いpreviewを採用せずrender/packageを再実行する。manifestのhashだけを手編集して整合したことにしない。
-7. speech-led / interview の場合は `07_package/qa-report.json` で総尺差だけでなく
+10. speech-led / interview の場合は `07_package/qa-report.json` で総尺差だけでなく
    `dialogue_timeline_alignment_valid` も確認する。`raw_dialogue.wav` の実信号が
    timelineのdialogue window外へ1フレーム以上出ていれば公開候補へ昇格しない。
-8. VFR素材で口の同期を調整した場合は、選んだ映像フレームを固定し、映像・音声の
+11. VFR素材で口の同期を調整した場合は、選んだ映像フレームを固定し、映像・音声の
    source offsetを別々に実測する。残差は音声側で補正し、別プレイヤー／診断proxyの
    見え方だけを根拠に演出尺を変更しない。
-9. YouTube等への外部公開はrender/packageとは別gateとする。対象hashにcreative・rights・
+12. 字幕・章タイトルの映像が承認済みで、MAだけを変更する場合はフル映像を再エンコード
+   しない。承認済みcaption-finalize receiptを入力にし、映像stream hashを不変のまま
+   2-pass MA音声だけを再muxする。
+
+```bash
+npm run audio-finish-remux -- \
+  --project projects/<project> \
+  --source-receipt projects/<project>/07_package/caption-finalize/generations/<id>/caption-finalize-receipt.json \
+  --finalize
+```
+
+   source generationが現在の最終承認にすでに拘束済みなら、二重MA防止のためfail closedする。
+13. YouTube等への外部公開はrender/packageとは別gateとする。対象hashにcreative・rights・
    privacy承認と公開先を束ねた`07_package/publication_approval.yaml`を作り、外部write直前に
    次を通す。
 

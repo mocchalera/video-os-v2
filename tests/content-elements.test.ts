@@ -52,6 +52,61 @@ describe("content-element/v1 validation", () => {
     });
   });
 
+  it("routes renderer-neutral creative recipes by authoring surface and reuse scope", () => {
+    const exploratory = sectionElement({
+      creative_recipe: {
+        version: "creative-recipe/v1",
+        reuse_scope: "one_off",
+        authoring_surface: "html_motion",
+        layer_mode: "alpha_overlay",
+        composite_stage: "under_caption",
+        requires_base_frame: false,
+      },
+    });
+    const reusable = sectionElement({
+      creative_recipe: {
+        version: "creative-recipe/v1",
+        reuse_scope: "brand",
+        authoring_surface: "typed_component",
+        layer_mode: "alpha_overlay",
+        composite_stage: "under_caption",
+        requires_base_frame: false,
+      },
+    });
+
+    expect(validateContentElement(exploratory).ok).toBe(true);
+    expect(validateContentElement(reusable).ok).toBe(true);
+    expect(normalizeOverlayClipContent({
+      clip_id: "EXPLORATORY",
+      content_element: exploratory,
+    }).renderer_owner).toBe("hyperframes");
+    expect(normalizeOverlayClipContent({
+      clip_id: "REUSABLE",
+      content_element: reusable,
+    }).renderer_owner).toBe("remotion");
+  });
+
+  it("fails closed for contradictory creative recipe modes", () => {
+    const result = validateContentElement(sectionElement({
+      creative_recipe: {
+        version: "creative-recipe/v1",
+        reuse_scope: "one_off",
+        authoring_surface: "html_motion",
+        layer_mode: "native_filter",
+        composite_stage: "under_caption",
+        requires_base_frame: false,
+      },
+    }));
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: "creative_recipe.layer_mode",
+        code: "invalid_creative_recipe",
+      }),
+    ]));
+  });
+
   it.each([
     "/Users/operator/secret.png",
     "file:///tmp/secret.png",
@@ -225,6 +280,8 @@ describe("deterministic HyperFrames HTML", () => {
     expect(html).toContain("坂本");
     expect(html).toContain("-webkit-text-stroke");
     expect(html).toContain("lower-third-name");
+    expect(html).toContain(".lower-third { width: max-content;");
+    expect(html).toContain("white-space: nowrap; word-break: keep-all;");
     expect(html).not.toContain("lower-third-panel");
   });
 });
@@ -272,5 +329,19 @@ describe("content render ownership plan", () => {
     expect(plan.hyperframes_elements.map((entry) => entry.element.element_id)).toEqual(["HF"]);
     expect(plan.remotion_clip_ids).toEqual(["REMOTION"]);
     expect(plan.issues).toEqual([]);
+    expect(plan).toMatchObject({ fps: 30, fps_num: 30, fps_den: 1 });
+  });
+
+  it("preserves a rational timeline rate for renderer CLIs", () => {
+    const plan = buildContentRenderPlan({
+      sequence: { width: 1920, height: 1080, fps_num: 30_000, fps_den: 1_001 },
+      tracks: { video: [], audio: [], overlay: [] },
+    });
+
+    expect(plan).toMatchObject({
+      fps: 30_000 / 1_001,
+      fps_num: 30_000,
+      fps_den: 1_001,
+    });
   });
 });

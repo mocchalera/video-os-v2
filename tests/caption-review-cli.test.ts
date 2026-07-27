@@ -2,20 +2,25 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { validateAgainstSchema } from "../runtime/commands/shared.js";
 import {
   applyCaptionReview,
   approveCaptionReview,
   captionReviewUndoDepth,
   editCaptionReview,
   initializeCaptionReviewPatch,
+  inspectCaptionReviewOperationalState,
   mergeCaptionReview,
   proposeCaptionGlossaryTerm,
   queueCaptionReview,
+  prepareCaptionReviewDraft,
   splitCaptionReview,
   undoCaptionReview,
   validateCaptionReview,
+  verifySafeCaptionReview,
 } from "../runtime/caption/review-service.js";
 import {
+  computeCaptionDraftHash,
   computeCaptionTextHash,
 } from "../runtime/caption/review-core.js";
 import {
@@ -32,6 +37,16 @@ afterEach(() => {
 });
 
 describe("caption review CLI workflow", () => {
+  it("documents recovery, safe bulk, reviewer readiness, and approval commands", () => {
+    const output: string[] = [];
+    expect(runCaptionReviewCli(["node", "caption-review.ts", "--help"], (line) => output.push(line))).toBe(0);
+    expect(output.join("\n")).toContain("queue --project <dir> [--reviewer <name>]");
+    expect(output.join("\n")).toContain("prepare --project <dir>");
+    expect(output.join("\n")).toContain("verify-safe --project <dir>");
+    expect(output.join("\n")).toContain("retime --project <dir> --reviewer <name>");
+    expect(output.join("\n")).toContain("approve --project <dir>");
+  });
+
   it("initializes a hash-bound patch without overwriting human work", () => {
     const projectDir = createProject(["聞きたいことがあります"]);
     const result = initializeCaptionReviewPatch(projectDir, "editor", {
@@ -123,9 +138,128 @@ describe("caption review CLI workflow", () => {
     initializeCaptionReviewPatch(projectDir, "editor");
 
     expect(() => approveCaptionReview(projectDir, "human-editor")).toThrow(
-      /1 caption\(s\) are unreviewed/,
+      /unreviewed_captions/,
     );
     expect(fs.existsSync(path.join(projectDir, "07_package/caption_approval.json"))).toBe(false);
+  });
+
+  it("returns recovery metadata and restores a missing draft without touching existing review artifacts", () => {
+    const projectDir = createProject(["保全される字幕です"]);
+    const draftPath = path.join(projectDir, "07_package/caption_draft.json");
+    const draft = JSON.parse(fs.readFileSync(draftPath, "utf8"));
+    initializeCaptionReviewPatch(projectDir, "editor");
+    const patchPath = path.join(projectDir, "07_package/caption_review_patch.json");
+    const patchBefore = fs.readFileSync(patchPath, "utf8");
+    fs.rmSync(draftPath);
+
+    const state = inspectCaptionReviewOperationalState(projectDir, "editor");
+    expect(state).toMatchObject({
+      status: "needs_recovery",
+      recoveryAction: { code: "prepare_caption_draft", safe_to_run: true },
+    });
+    const recovered = prepareCaptionReviewDraft(projectDir, (stagingDir) => {
+      fs.writeFileSync(
+        path.join(stagingDir, "07_package/caption_draft.json"),
+        JSON.stringify(draft, null, 2),
+      );
+      return { success: true, captionDraft: draft };
+    });
+    expect(recovered.draftHash).toBe(computeCaptionDraftHash(draft));
+    expect(fs.readFileSync(patchPath, "utf8")).toBe(patchBefore);
+  });
+
+  it("refuses recovery hash drift atomically while preserving protected review artifacts", () => {
+    const projectDir = createProject(["元の字幕です"]);
+    const draftPath = path.join(projectDir, "07_package/caption_draft.json");
+    const draft = JSON.parse(fs.readFileSync(draftPath, "utf8"));
+    initializeCaptionReviewPatch(projectDir, "editor");
+    const patchPath = path.join(projectDir, "07_package/caption_review_patch.json");
+    const patchBefore = fs.readFileSync(patchPath, "utf8");
+    fs.rmSync(draftPath);
+    const changed = structuredClone(draft);
+    changed.speech_captions[0].text = "一致しない字幕です";
+
+    expect(() => prepareCaptionReviewDraft(projectDir, (stagingDir) => {
+      fs.writeFileSync(path.join(stagingDir, "07_package/caption_draft.json"), JSON.stringify(changed));
+      return { success: true, captionDraft: changed };
+    })).toThrow(/hash mismatch/);
+    expect(fs.existsSync(draftPath)).toBe(false);
+    expect(fs.readFileSync(patchPath, "utf8")).toBe(patchBefore);
+  });
+
+  it("bulk verifies safe and layout-warning captions as one undoable atomic action", () => {
+    const projectDir = createProject([
+      "安全な字幕です",
+      "これは一行二十文字を超えても一括確認できる字幕テキストです",
+      "Tomyは42回参加しないと言いました",
+    ]);
+    initializeCaptionReviewPatch(projectDir, "editor");
+    const state = inspectCaptionReviewOperationalState(projectDir, "editor");
+    const hashes = Object.fromEntries(state.items.map((item) => [item.caption_id, item.text_hash]));
+    const result = verifySafeCaptionReview(projectDir, {
+      reviewer: "editor",
+      baseCaptionDraftHash: state.baseCaptionDraftHash!,
+      captionTextHashes: hashes,
+    });
+    expect(result.assessment.eligible_caption_ids).toEqual(["SC_001", "SC_002"]);
+    expect(result.preview.speech_captions.filter((entry) => entry.review.state === "verified")).toHaveLength(2);
+    expect(captionReviewUndoDepth(projectDir)).toBe(1);
+    expect(undoCaptionReview(projectDir).preview.validation.verified_count).toBe(0);
+
+    const patchPath = path.join(projectDir, "07_package/caption_review_patch.json");
+    const before = fs.readFileSync(patchPath, "utf8");
+    expect(() => verifySafeCaptionReview(projectDir, {
+      reviewer: "editor",
+      baseCaptionDraftHash: state.baseCaptionDraftHash!,
+      captionTextHashes: { ...hashes, SC_001: `sha256:${"0".repeat(64)}` },
+    })).toThrow(/stale/);
+    expect(fs.readFileSync(patchPath, "utf8")).toBe(before);
+  });
+
+  it("allows approval when a verified caption only exceeds the line-length guide", () => {
+    const projectDir = createProject([
+      "これは一行二十文字を超えても人が承認できる字幕テキストです",
+    ]);
+    initializeCaptionReviewPatch(projectDir, "editor");
+    const caption = queueCaptionReview(projectDir)[0];
+    const edited = editCaptionReview(projectDir, {
+      captionID: caption.caption_id,
+      state: "verified",
+      expectedTextHash: caption.text_hash,
+    });
+
+    expect(edited.preview.speech_captions[0].issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "line_too_long", severity: "warn" }),
+    ]));
+    expect(edited.preview.validation).toMatchObject({
+      valid: true,
+      blocking_issue_count: 0,
+      unreviewed_count: 0,
+    });
+    fs.writeFileSync(path.join(projectDir, "07_package/caption_review_preview.json"), JSON.stringify({
+      ...edited.preview,
+      speech_captions: edited.preview.speech_captions.map((entry) => ({
+        ...entry,
+        issues: entry.issues.map((issue) => issue.code === "line_too_long" ? { ...issue, severity: "block" } : issue),
+      })),
+    }));
+    expect(() => approveCaptionReview(projectDir, "human-editor")).not.toThrow();
+    const restored = inspectCaptionReviewOperationalState(projectDir, "human-editor");
+    expect(restored.currentApproval).toMatchObject({ status: "approved" });
+    expect(restored.approvalReadiness.can_approve).toBe(true);
+
+    const approvalPath = path.join(projectDir, "07_package/caption_approval.json");
+    const approval = JSON.parse(fs.readFileSync(approvalPath, "utf8"));
+    approval.approval.validation_hash = `sha256:${"0".repeat(64)}`;
+    fs.writeFileSync(approvalPath, JSON.stringify(approval, null, 2));
+    const stale = inspectCaptionReviewOperationalState(projectDir, "human-editor");
+    expect(stale.currentApproval).toBeUndefined();
+    expect(stale.approvalWarning).toMatchObject({ code: "stale_approval" });
+    expect(stale.approvalReadiness.can_approve).toBe(true);
+    const reapproved = approveCaptionReview(projectDir, "human-editor-2");
+    expect(reapproved.approvalHash).not.toBe(restored.currentApproval?.hash);
+    expect(inspectCaptionReviewOperationalState(projectDir, "human-editor-2").currentApproval)
+      .toMatchObject({ status: "approved", hash: reapproved.approvalHash });
   });
 
   it("edits through the shared adapter and returns the patched queue state", () => {
@@ -235,13 +369,15 @@ describe("caption review CLI workflow", () => {
       "--format", "json",
       "--severity", "all",
     ], (message) => output.push(message))).toBe(0);
-    expect(JSON.parse(output.join("\n"))).toMatchObject({
+    const queueDocument = JSON.parse(output.join("\n"));
+    expect(validateAgainstSchema(queueDocument, "caption-review-queue.schema.json")).toEqual({ valid: true, errors: [] });
+    expect(queueDocument).toMatchObject({
       undo_depth: 1,
       glossary_proposals: [{ canonical: "Tomy", variants: ["富井"] }],
       caption_style: {
         preset_id: "longform-event",
         font_id: "noto-sans-jp",
-        font_family: "Noto Sans JP",
+        font_family: "VideoOS Noto Sans JP Bold",
         font_size_px_1080: 56,
         line_height_px_1080: 70,
         outline_px_1080: 4,
@@ -284,6 +420,80 @@ describe("caption review CLI workflow", () => {
       timeline_in_frame: 0,
       timeline_duration_frames: 72,
     });
+  });
+
+  it("retimes a verified review to speech onset and keeps silence on the prior caption", () => {
+    const projectDir = createProject(["前の発言", "どう思いますか？"]);
+    const draftPath = path.join(projectDir, "07_package/caption_draft.json");
+    const draft = JSON.parse(fs.readFileSync(draftPath, "utf8"));
+    draft.caption_policy.semantic_timing = {
+      mode: "speech_sync",
+      ordinary_lead_frames: 2,
+      question_audio_first_frames: 0,
+      gap_ownership: "previous",
+    };
+    draft.speech_captions[0].timeline_in_frame = 0;
+    draft.speech_captions[0].timeline_duration_frames = 24;
+    draft.speech_captions[1].timeline_in_frame = 34;
+    draft.speech_captions[1].timeline_duration_frames = 38;
+    fs.writeFileSync(draftPath, JSON.stringify(draft, null, 2));
+    fs.mkdirSync(path.join(projectDir, "03_analysis/transcripts"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "03_analysis/transcripts/TR_001.json"), JSON.stringify({
+      version: "2.0.0",
+      asset_id: "AST_001",
+      language: "ja",
+      word_timing_mode: "word",
+      items: [
+        {
+          item_id: "TI_1",
+          start_us: 0,
+          end_us: 1_000_000,
+          text: "前の発言",
+          words: [{ word: "前の発言", start_us: 0, end_us: 1_000_000 }],
+        },
+        {
+          item_id: "TI_2",
+          start_us: 1_500_000,
+          end_us: 2_500_000,
+          text: "どう思いますか？",
+          words: [
+            { word: "どう", start_us: 1_500_000, end_us: 1_700_000 },
+            { word: "思います", start_us: 1_700_000, end_us: 2_300_000 },
+            { word: "か", start_us: 2_300_000, end_us: 2_500_000 },
+          ],
+        },
+      ],
+    }, null, 2));
+    const { patchPath, patch } = initializeCaptionReviewPatch(projectDir, "editor");
+    patch.operations.push(
+      { op: "set_review_state", caption_id: "SC_001", state: "verified" },
+      { op: "set_review_state", caption_id: "SC_002", state: "verified" },
+    );
+    fs.writeFileSync(patchPath, JSON.stringify(patch, null, 2));
+
+    const output: string[] = [];
+    expect(runCaptionReviewCli([
+      "node", "caption-review.ts", "retime",
+      "--project", projectDir,
+      "--reviewer", "editor",
+    ], (message) => output.push(message))).toBe(0);
+    const result = JSON.parse(output.join("\n"));
+    expect(result).toMatchObject({
+      command: "retime",
+      adjusted_caption_count: 2,
+      timing_report: {
+        question_caption_count: 1,
+        question_adjusted_count: 0,
+        gap_tail_hold_count: 1,
+        unresolved_count: 0,
+      },
+      validation: { valid: true, verified_count: 2 },
+    });
+    const preview = JSON.parse(fs.readFileSync(result.preview_path, "utf8"));
+    expect(preview.speech_captions).toMatchObject([
+      { caption_id: "SC_001", timeline_in_frame: 0, timeline_duration_frames: 35 },
+      { caption_id: "SC_002", timeline_in_frame: 36, timeline_duration_frames: 24 },
+    ]);
   });
 
   it("rejects a stale patch after the timeline changes", () => {
@@ -372,7 +582,23 @@ function createProject(texts: string[]): string {
       start_frame: 0,
       output_aspect_ratio: "16:9",
     },
-    tracks: { video: [], audio: [] },
+    tracks: {
+      video: [],
+      audio: [{
+        track_id: "A1",
+        role: "dialogue",
+        clips: [{
+          clip_id: "ACL_001",
+          asset_id: "AST_001",
+          segment_id: "SEG_001",
+          role: "A1",
+          src_in_us: 0,
+          src_out_us: 10_000_000,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 240,
+        }],
+      }],
+    },
   }, null, 2));
   fs.writeFileSync(path.join(projectDir, "07_package/caption_draft.json"), JSON.stringify({
     version: "1.0",

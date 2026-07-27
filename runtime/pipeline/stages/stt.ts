@@ -157,6 +157,9 @@ export async function sttMap(
               start_us: item.start_us,
               end_us: item.end_us,
               text: item.text,
+              ...(item.words && item.words.length > 0
+                ? { words: item.words.map((word) => ({ ...word })) }
+                : {}),
             }));
 
             // Assign speakers and normalize labels

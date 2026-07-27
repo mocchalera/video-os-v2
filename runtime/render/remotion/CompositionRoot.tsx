@@ -2,7 +2,11 @@ import { Composition, registerRoot } from "remotion";
 import type { TimelineIR } from "../../compiler/types.js";
 import type { VideoWebFontAsset } from "../../../editor/shared/font-contract.js";
 import { VideoTimeline } from "./VideoTimeline.js";
-import { timelineToCompositionProps } from "./timeline-to-props.js";
+import { OverlayTimeline } from "./OverlayTimeline.js";
+import {
+  REMOTION_OVERLAY_COMPOSITION_ID,
+  timelineToCompositionProps,
+} from "./timeline-to-props.js";
 
 export interface VideoTimelineCompositionInput {
   [key: string]: unknown;
@@ -49,7 +53,7 @@ export const CompositionRoot = () => {
     fallbackProps.sourceMap,
   );
 
-  return (
+  return (<>
     <Composition<any, VideoTimelineCompositionInput>
       id={compositionProps.id}
       component={VideoTimeline}
@@ -68,7 +72,25 @@ export const CompositionRoot = () => {
         };
       }}
     />
-  );
+    <Composition<any, VideoTimelineCompositionInput>
+      id={REMOTION_OVERLAY_COMPOSITION_ID}
+      component={OverlayTimeline}
+      durationInFrames={compositionProps.durationInFrames}
+      fps={compositionProps.fps}
+      width={compositionProps.width}
+      height={compositionProps.height}
+      defaultProps={compositionProps.defaultProps}
+      calculateMetadata={({ props }) => {
+        const resolved = timelineToCompositionProps(props.timeline, props.sourceMap);
+        return {
+          durationInFrames: resolved.durationInFrames,
+          fps: resolved.fps,
+          width: resolved.width,
+          height: resolved.height,
+        };
+      }}
+    />
+  </>);
 };
 
 registerRoot(CompositionRoot);

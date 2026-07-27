@@ -74,6 +74,29 @@ afterAll(() => {
 });
 
 describe("clip video filters", () => {
+  it("uses the canonical vertical sequence dimensions", () => {
+    const clip = {
+      assetId: "AST_001",
+      clipId: "clip_vertical",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 0,
+      durationSec: 5,
+      timelineInFrame: 0,
+      timelineOutFrame: 120,
+      timelineDurationSec: 5,
+      sourceRangeDurationSec: 5,
+    } satisfies RenderClip;
+
+    const filters = buildClipVideoFilters(clip, 24, {
+      outputWidth: 1080,
+      outputHeight: 1920,
+    });
+
+    expect(filters).toContain("scale=1080:1920:force_original_aspect_ratio=decrease");
+    expect(filters).toContain("pad=1080:1920");
+    expect(filters).not.toContain("1920:1080");
+  });
+
   it("normalizes clip timestamps before applying a relative ending fade", () => {
     const clip = {
       assetId: "AST_001",

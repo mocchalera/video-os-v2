@@ -899,6 +899,97 @@ struct MediaPanel: View {
                 LabeledContent("QA", value: renderQAValue(model.renderPackageStatus))
                 LabeledContent("根拠", value: model.renderPackageStatus.manifestSourceOfTruth ?? model.renderPackageStatus.qaSourceOfTruth ?? "-")
                 LabeledContent("チェック", value: "\(model.renderPackageStatus.qaCheckCount)件 / 失敗 \(model.renderPackageStatus.qaFailedCheckCount)件")
+                if model.renderPackageStatus.layoutQAStatus != nil {
+                    LabeledContent("字幕・CTA", value: model.renderPackageStatus.layoutQAReviewSummary)
+                    ForEach(model.renderPackageStatus.layoutQAReviewItems.prefix(3)) { issue in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(issue.timeRangeLabel)
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Text(issue.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            }
+                            Text(issue.remediation)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if !issue.layerIDs.isEmpty {
+                                Text(issue.layerIDs.joined(separator: " / "))
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("MediaPanel.LayoutQAIssue.\(issue.id)")
+                    }
+                    if model.renderPackageStatus.layoutQAReviewItems.count > 3 {
+                        Text("ほか \(model.renderPackageStatus.layoutQAReviewItems.count - 3)件はQAレポートで確認")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if model.renderPackageStatus.speechCadenceStatus != nil,
+                   model.renderPackageStatus.speechCadenceStatus != "not_applicable" {
+                    LabeledContent("音声テンポ", value: model.renderPackageStatus.speechCadenceReviewSummary)
+                    ForEach(model.renderPackageStatus.speechCadenceReviewItems.prefix(3)) { issue in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(issue.timeRangeLabel)
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Text(issue.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            }
+                            Text("\(issue.durationLabel) · \(issue.suggestedActionLabel)")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Text(issue.remediation)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("MediaPanel.SpeechCadenceIssue.\(issue.id)")
+                    }
+                    if model.renderPackageStatus.speechCadenceReviewItems.count > 3 {
+                        Text("ほか \(model.renderPackageStatus.speechCadenceReviewItems.count - 3)件はQAレポートで確認")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if model.renderPackageStatus.captionDeliveryStatus != nil,
+                   model.renderPackageStatus.captionDeliveryStatus != "not_applicable" {
+                    LabeledContent("字幕タイミング", value: model.renderPackageStatus.captionDeliveryReviewSummary)
+                    ForEach(model.renderPackageStatus.captionDeliveryReviewItems.prefix(3)) { issue in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(issue.timeRangeLabel)
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                Text(issue.title)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                            }
+                            Text("「\(issue.textExcerpt)」")
+                                .font(.caption)
+                                .lineLimit(2)
+                            Text("\(issue.measurementLabel) · \(issue.suggestedActionLabel)")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Text(issue.remediation)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("MediaPanel.CaptionDeliveryIssue.\(issue.id)")
+                    }
+                    if model.renderPackageStatus.captionDeliveryReviewItems.count > 3 {
+                        Text("ほか \(model.renderPackageStatus.captionDeliveryReviewItems.count - 3)件はQAレポートで確認")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 if let createdAt = model.renderPackageStatus.manifestCreatedAt {
                     LabeledContent("作成日時", value: createdAt)
                 }

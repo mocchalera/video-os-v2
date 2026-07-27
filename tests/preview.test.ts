@@ -9,7 +9,8 @@ const { execFileMock } = vi.hoisted(() => ({
   execFileMock: vi.fn(),
 }));
 
-vi.mock("node:child_process", () => ({
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
   execFile: execFileMock,
 }));
 
@@ -355,6 +356,16 @@ describe("renderPreviewSegment integration", () => {
     expect(result.clipCount).toBe(3);
     expect(result.durationSec).toBeCloseTo(15, 0); // (96+144+120)/24 = 15
     expect(result.outputPath).toContain("preview-full.mp4");
+    const receipt = JSON.parse(fs.readFileSync(result.receiptPath, "utf8"));
+    expect(receipt).toMatchObject({
+      version: "timeline-preview-receipt/v1",
+      preview_path: "05_timeline/preview-full.mp4",
+      preview_size_bytes: fs.statSync(result.outputPath).size,
+      caption_input: null,
+    });
+    expect(receipt.preview_sha256).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(receipt.preview_mtime_ms).toBe(Math.round(fs.statSync(result.outputPath).mtimeMs));
+    expect(receipt.timeline_sha256).toMatch(/^sha256:[a-f0-9]{64}$/);
     // ffmpeg called 3 times for clip extraction + 1 for concat
     expect(execFileMock).toHaveBeenCalledTimes(4);
   });

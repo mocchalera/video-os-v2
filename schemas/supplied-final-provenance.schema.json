@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/supplied-final-provenance.schema.json",
+  "title": "Supplied Final Provenance",
+  "type": "object",
+  "required": [
+    "version",
+    "source_receipt_path",
+    "source_receipt_sha256",
+    "base_final_path",
+    "base_final_sha256",
+    "supplied_final_path",
+    "supplied_final_sha256",
+    "caption_ass_sha256",
+    "font_family",
+    "font_sha256",
+    "video_stream_sha256",
+    "verified_at"
+  ],
+  "properties": {
+    "version": { "const": "supplied-final-provenance/v1" },
+    "source_receipt_path": { "type": "string", "minLength": 1 },
+    "source_receipt_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "base_final_path": { "type": "string", "minLength": 1 },
+    "base_final_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "supplied_final_path": { "type": "string", "minLength": 1 },
+    "supplied_final_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "caption_ass_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "font_family": { "type": "string", "minLength": 1 },
+    "font_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "video_stream_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "verified_at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

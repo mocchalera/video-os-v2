@@ -38,6 +38,7 @@ export interface AudioMixReport {
   has_bgm: boolean;
   strategy:
     | "dialogue_only_mastering_v1"
+    | "original_passthrough_v1"
     | "waveform_sidechain_v1"
     | "timeline_embedded_bgm_mastering_v1";
   bgm_ownership?: {
@@ -45,6 +46,7 @@ export interface AudioMixReport {
     asset_ids: string[];
   };
   final_mastering: {
+    applied?: boolean;
     loudness_target_lufs: number;
     lra_target: number;
     true_peak_target_dbtp: number;

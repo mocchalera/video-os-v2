@@ -1,9 +1,16 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { computeNormalizedJsonHash } from "../artifacts/p1-manifest-coverage.js";
 import { atomicWriteJson } from "../pipeline/stages/_util.js";
+import {
+  applyCaptionSemanticTimingPhase,
+  applyCaptionWordTiming,
+  captionCommand,
+  type CaptionCommandResult,
+} from "../commands/caption.js";
 import {
   createDraftApproval,
   type CaptionApproval,
@@ -13,9 +20,15 @@ import {
   type CaptionDraft,
   type CaptionDraftEntry,
 } from "./editorial.js";
+import { finalizeCaptionDraftTiming } from "./final-invariants.js";
+import type { TranscriptArtifact } from "./segmenter.js";
+import type { CaptionTimingReport } from "./semantic-timing.js";
+import type { TimelineIR } from "../compiler/types.js";
 import { loadProjectCaptionGlossary } from "./project-glossary.js";
 import {
   applyCaptionReviewPatch,
+  assessSafeBulkReview,
+  buildCaptionApprovalReadiness,
   buildCaptionReviewQueue,
   computeCaptionDraftHash,
   type CaptionReviewDiff,
@@ -24,7 +37,10 @@ import {
   type CaptionReviewPreview,
   type CaptionReviewQueueItem,
   type CaptionReviewState,
+  type CaptionApprovalReadiness,
+  type SafeBulkReviewAssessment,
 } from "./review-core.js";
+import { inspectCaptionFontContract, type CaptionFontContract } from "./font-contract.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (options: Record<string, unknown>) => {
@@ -44,6 +60,7 @@ export const CAPTION_DRAFT_PATH = "07_package/caption_draft.json";
 export const CAPTION_REVIEW_PATCH_PATH = "07_package/caption_review_patch.json";
 export const CAPTION_REVIEW_PREVIEW_PATH = "07_package/caption_review_preview.json";
 export const CAPTION_APPROVAL_PATH = "07_package/caption_approval.json";
+export const CAPTION_REVIEW_TIMING_REPORT_PATH = "07_package/caption_review_timing_report.json";
 export const TIMELINE_PATH = "05_timeline/timeline.json";
 
 export interface CaptionReviewContext {
@@ -63,6 +80,12 @@ export interface ApplyCaptionReviewResult {
   previewPath: string;
 }
 
+export interface RetimeCaptionReviewResult extends ApplyCaptionReviewResult {
+  adjustedCaptionCount: number;
+  timingReport?: CaptionTimingReport;
+  timingReportPath?: string;
+}
+
 export interface ValidateCaptionReviewResult {
   valid: boolean;
   patch?: CaptionReviewPatch;
@@ -76,6 +99,34 @@ export interface ApproveCaptionReviewResult {
   approvalPath: string;
   patchHash: string;
   validationHash: string;
+  approvalHash: string;
+}
+
+export interface CaptionReviewRecoveryAction {
+  code: "prepare_caption_draft" | "protected_existing_review";
+  label: string;
+  command: string[];
+  safe_to_run: boolean;
+  message: string;
+}
+
+export interface CaptionReviewOperationalState {
+  status: "ready" | "needs_recovery";
+  items: CaptionReviewQueueItem[];
+  baseCaptionDraftHash?: string;
+  approvalReadiness: CaptionApprovalReadiness;
+  safeBulk: SafeBulkReviewAssessment;
+  fontContract?: CaptionFontContract;
+  recoveryAction?: CaptionReviewRecoveryAction;
+  currentApproval?: { status: "approved"; hash: string };
+  approvalWarning?: { code: "stale_approval"; message: string };
+}
+
+export interface VerifySafeCaptionsOptions {
+  reviewer: string;
+  baseCaptionDraftHash: string;
+  captionTextHashes: Record<string, string>;
+  updatedAt?: string;
 }
 
 export interface EditCaptionReviewOptions {
@@ -128,6 +179,172 @@ export function loadCaptionReviewContext(projectDir: string): CaptionReviewConte
     fps: timelineFps(timeline),
     protectedTerms: buildGlossary(glossary.sources),
   };
+}
+
+export function inspectCaptionReviewOperationalState(
+  projectDir: string,
+  reviewer = "",
+  patchInputPath?: string,
+  checkExistingApproval = true,
+): CaptionReviewOperationalState {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const draftPath = path.join(absoluteProjectDir, CAPTION_DRAFT_PATH);
+  if (!fs.existsSync(draftPath)) {
+    const protectedReview = [CAPTION_REVIEW_PATCH_PATH, CAPTION_APPROVAL_PATH]
+      .some((relativePath) => fs.existsSync(path.join(absoluteProjectDir, relativePath)));
+    return {
+      status: "needs_recovery",
+      items: [],
+      approvalReadiness: buildCaptionApprovalReadiness({
+        reviewer,
+        validation: emptyValidation(),
+        stale: true,
+        fontReady: false,
+        staleMessage: "caption_draft.json がありません。字幕ドラフトを準備してください。",
+        fontMessage: "字幕ドラフトがないためフォント契約を確認できません。",
+      }),
+      safeBulk: { eligible_caption_ids: [], eligible_count: 0, excluded: [], exclusion_reason_counts: {} },
+      recoveryAction: protectedReview ? {
+        code: "prepare_caption_draft",
+        label: "字幕ドラフトを準備",
+        command: ["npx", "tsx", "scripts/caption-review.ts", "prepare", "--project", absoluteProjectDir],
+        safe_to_run: true,
+        message: "隔離領域で再生成して既存patch/approvalの基準hashと照合し、一致した場合だけdraftを復元します。",
+      } : {
+        code: "prepare_caption_draft",
+        label: "字幕ドラフトを準備",
+        command: ["npx", "tsx", "scripts/caption-review.ts", "prepare", "--project", absoluteProjectDir],
+        safe_to_run: true,
+        message: "canonical caption生成器でcaption_draft.jsonを準備します。",
+      },
+    };
+  }
+
+  const context = loadCaptionReviewContext(absoluteProjectDir);
+  const rawItems = buildCaptionReviewQueue(context.draft, {
+    fps: context.fps,
+    protectedTerms: context.protectedTerms,
+  });
+  let items = rawItems;
+  let stale = false;
+  let staleMessage: string | undefined;
+  try {
+    items = queueCaptionReview(absoluteProjectDir, patchInputPath);
+  } catch (error) {
+    stale = true;
+    staleMessage = error instanceof Error ? error.message : String(error);
+  }
+  let currentApproval: CaptionReviewOperationalState["currentApproval"];
+  let approvalWarning: CaptionReviewOperationalState["approvalWarning"];
+  if (checkExistingApproval && fs.existsSync(path.join(context.projectDir, CAPTION_APPROVAL_PATH))) {
+    try {
+      const approval = readJsonFile<CaptionApproval>(path.join(context.projectDir, CAPTION_APPROVAL_PATH));
+      const approvalHash = assertCaptionApprovalCurrent(context.projectDir, approval, patchInputPath);
+      currentApproval = { status: "approved", hash: approvalHash };
+    } catch (error) {
+      approvalWarning = {
+        code: "stale_approval",
+        message: `既存caption_approval.jsonは現行レビューと不一致です。再承認してください: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+  const validation = validationFromQueue(items);
+  const fontContract = inspectCaptionFontContract(context.draft.caption_policy.styling_class);
+  return {
+    status: "ready",
+    items,
+    baseCaptionDraftHash: computeCaptionDraftHash(context.draft),
+    approvalReadiness: buildCaptionApprovalReadiness({
+      reviewer,
+      validation,
+      stale,
+      fontReady: fontContract.status === "ready" && !fontContract.fallback_used,
+      staleMessage,
+      fontMessage: fontContract.diagnostics.map((entry) => entry.message).join("; ") || undefined,
+    }),
+    safeBulk: assessSafeBulkReview(items, { protectedTerms: context.protectedTerms }),
+    fontContract,
+    ...(currentApproval ? { currentApproval } : {}),
+    ...(approvalWarning ? { approvalWarning } : {}),
+  };
+}
+
+export function assertCaptionApprovalCurrent(
+  projectDir: string,
+  approval: CaptionApproval,
+  patchInputPath?: string,
+): string {
+  assertSchema("caption-approval.schema.json", approval);
+  const context = loadCaptionReviewContext(projectDir);
+  const patchPath = patchInputPath
+    ? path.resolve(patchInputPath)
+    : path.join(context.projectDir, CAPTION_REVIEW_PATCH_PATH);
+  if (!fs.existsSync(patchPath)) throw new Error("caption review patch is missing");
+  const patch = readJsonFile<CaptionReviewPatch>(patchPath);
+  assertSchema("caption-review-patch.schema.json", patch);
+  const evaluated = evaluateCaptionReviewPatch(context, patch);
+  const expectedPatchHash = computeNormalizedJsonHash(patch);
+  const expectedValidationHash = computeNormalizedJsonHash(evaluated.preview.validation);
+  if (
+    approval.approval.status !== "approved"
+    || approval.approval.base_caption_draft_hash !== computeCaptionDraftHash(context.draft)
+    || approval.approval.caption_review_patch_hash !== expectedPatchHash
+    || approval.approval.validation_hash !== expectedValidationHash
+  ) throw new Error("approval provenance does not match the current draft/patch/validation");
+
+  const expectedContent = {
+    version: context.draft.version,
+    project_id: context.draft.project_id,
+    base_timeline_version: context.draft.base_timeline_version,
+    caption_policy: context.draft.caption_policy,
+    speech_captions: evaluated.preview.speech_captions.map(stripReviewFields),
+    text_overlays: context.draft.text_overlays,
+  };
+  const actualContent = {
+    version: approval.version,
+    project_id: approval.project_id,
+    base_timeline_version: approval.base_timeline_version,
+    caption_policy: approval.caption_policy,
+    speech_captions: approval.speech_captions,
+    text_overlays: approval.text_overlays,
+  };
+  if (computeNormalizedJsonHash(actualContent) !== computeNormalizedJsonHash(expectedContent)) {
+    throw new Error("approval captions do not match the current reviewed output");
+  }
+  return computeNormalizedJsonHash(approval);
+}
+
+export function prepareCaptionReviewDraft(
+  projectDir: string,
+  generator?: (stagingProjectDir: string) => CaptionCommandResult,
+): { status: "prepared" | "already_exists"; draftPath: string; draftHash: string } {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const draftPath = path.join(absoluteProjectDir, CAPTION_DRAFT_PATH);
+  if (fs.existsSync(draftPath)) {
+    const draft = readJsonFile<CaptionDraft>(draftPath);
+    return { status: "already_exists", draftPath, draftHash: computeCaptionDraftHash(draft) };
+  }
+  const expectedHashes = protectedDraftHashes(absoluteProjectDir);
+  const stagingProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "caption-draft-recovery-"));
+  try {
+    stageCaptionRecoveryInputs(absoluteProjectDir, stagingProjectDir);
+    const runGenerator = generator ?? ((dir: string) => captionCommand(dir, { editorialEnabled: false }));
+    const result = runGenerator(stagingProjectDir);
+    const stagedDraftPath = path.join(stagingProjectDir, CAPTION_DRAFT_PATH);
+    if (!result.success || !result.captionDraft || !fs.existsSync(stagedDraftPath)) {
+      throw new Error(`Caption draft recovery failed: ${result.error?.message ?? "canonical generator did not produce caption_draft.json"}`);
+    }
+    const draftHash = computeCaptionDraftHash(result.captionDraft);
+    if (expectedHashes.length > 0 && expectedHashes.some((expected) => expected !== draftHash)) {
+      throw new Error(
+        `Caption draft recovery hash mismatch: generated=${draftHash} protected=${expectedHashes.join(",")}; existing review artifacts were preserved`,
+      );
+    }
+    atomicWriteJson(draftPath, result.captionDraft);
+    return { status: "prepared", draftPath, draftHash };
+  } finally {
+    fs.rmSync(stagingProjectDir, { recursive: true, force: true });
+  }
 }
 
 export function queueCaptionReview(
@@ -244,6 +461,102 @@ export function applyCaptionReview(
     diffs: result.diffs,
     patchPath: canonicalPatchPath,
     previewPath,
+  };
+}
+
+/**
+ * Recompute an existing reviewed caption set from transcript word boundaries.
+ *
+ * Text and caption IDs remain unchanged. Deterministic timing adjustments are
+ * appended to the review patch, so approval provenance becomes stale until the
+ * operator explicitly approves the reviewed result again.
+ */
+export function retimeCaptionReview(
+  projectDir: string,
+  reviewer: string,
+  updatedAt?: string,
+): RetimeCaptionReviewResult {
+  const actor = reviewer.trim();
+  if (!actor) throw new Error("reviewer is required");
+  const { context, patch, patchPath, preview } = loadMutableCaptionReview(projectDir);
+  const transcripts = loadCaptionReviewTranscripts(context.projectDir);
+  const workingDraft: CaptionDraft = {
+    ...context.draft,
+    speech_captions: preview.speech_captions.map(reviewedEntryToDraft),
+  };
+  const wordTimed = applyCaptionWordTiming(
+    workingDraft,
+    workingDraft.caption_policy,
+    context.timeline as TimelineIR,
+    transcripts,
+  );
+  const retimed = applyCaptionSemanticTimingPhase(
+    wordTimed,
+    workingDraft.caption_policy,
+    context.timeline as TimelineIR,
+    transcripts,
+  );
+  const reviewTimeline = context.timeline as TimelineIR;
+  const fps =
+    reviewTimeline.sequence.fps_num / reviewTimeline.sequence.fps_den;
+  const finalized = finalizeCaptionDraftTiming(
+    retimed.draft,
+    fps,
+    workingDraft.caption_policy.language,
+  );
+  const blockingFinalIssues = finalized.issues.filter(
+    (issue) => issue.severity === "block",
+  );
+  if (blockingFinalIssues.length > 0) {
+    throw new Error(
+      "Final caption invariants failed after retime: " +
+      blockingFinalIssues.map((issue) => issue.message).join("; "),
+    );
+  }
+  const desiredByID = new Map(
+    finalized.draft.speech_captions.map((entry) => [entry.caption_id, entry]),
+  );
+  let adjustedCaptionCount = 0;
+  const operationCountBefore = patch.operations.length;
+  for (const entry of preview.speech_captions) {
+    const desired = desiredByID.get(entry.caption_id);
+    if (!desired) throw new Error(`Retimed caption missing from result: ${entry.caption_id}`);
+    const currentEnd = entry.timeline_in_frame + entry.timeline_duration_frames;
+    const desiredEnd = desired.timeline_in_frame + desired.timeline_duration_frames;
+    if (entry.timeline_in_frame === desired.timeline_in_frame && currentEnd === desiredEnd) continue;
+    patch.operations.push({
+      op: "adjust_timing",
+      caption_id: entry.caption_id,
+      start_frame: desired.timeline_in_frame,
+      end_frame: desiredEnd,
+    });
+    if (entry.review.state === "verified") {
+      patch.operations.push({
+        op: "set_review_state",
+        caption_id: entry.caption_id,
+        state: "verified",
+        note: "Speech-boundary retime: question onset and prior-speech guard verified.",
+      });
+    }
+    adjustedCaptionCount += 1;
+  }
+  patch.session.reviewer = actor;
+  const persisted = persistCaptionReviewMutation(
+    context,
+    patch,
+    patchPath,
+    patch.operations.length - operationCountBefore,
+    updatedAt,
+  );
+  const timingReportPath = retimed.report
+    ? path.join(context.projectDir, CAPTION_REVIEW_TIMING_REPORT_PATH)
+    : undefined;
+  if (retimed.report && timingReportPath) atomicWriteJson(timingReportPath, retimed.report);
+  return {
+    ...persisted,
+    adjustedCaptionCount,
+    timingReport: retimed.report,
+    timingReportPath,
   };
 }
 
@@ -415,6 +728,89 @@ export function undoCaptionReview(
   return persistCaptionReviewMutation(context, patch, patchPath, 0, updatedAt, false);
 }
 
+export function verifySafeCaptionReview(
+  projectDir: string,
+  options: VerifySafeCaptionsOptions,
+): ApplyCaptionReviewResult & { assessment: SafeBulkReviewAssessment } {
+  const actor = options.reviewer.trim();
+  if (!actor) throw new Error("reviewer is required");
+  const context = loadCaptionReviewContext(projectDir);
+  const currentDraftHash = computeCaptionDraftHash(context.draft);
+  if (!options.baseCaptionDraftHash || options.baseCaptionDraftHash !== currentDraftHash) {
+    throw new Error("Caption review bulk input is stale: base_caption_draft_hash does not match");
+  }
+
+  const patchPath = path.join(context.projectDir, CAPTION_REVIEW_PATCH_PATH);
+  let patch: CaptionReviewPatch;
+  let preview: CaptionReviewPreview;
+  if (fs.existsSync(patchPath)) {
+    patch = readJsonFile<CaptionReviewPatch>(patchPath);
+    assertSchema("caption-review-patch.schema.json", patch);
+    preview = evaluateCaptionReviewPatch(context, patch).preview;
+  } else {
+    const timestamp = options.updatedAt ?? new Date().toISOString();
+    patch = {
+      version: "caption-review-patch/v1",
+      project_id: context.draft.project_id,
+      base_caption_draft_hash: currentDraftHash,
+      base_timeline_hash: context.timelineHash,
+      operations: [],
+      session: { reviewer: actor, started_at: timestamp, updated_at: timestamp },
+    };
+    const evaluated = applyCaptionReviewPatch(context.draft, patch, context.timelineHash, {
+      fps: context.fps,
+      protectedTerms: context.protectedTerms,
+    });
+    if (!evaluated.success) throw new Error(evaluated.errors.join("\n"));
+    preview = evaluated.preview;
+  }
+
+  const currentItems = preview.speech_captions.map((entry) => ({
+    caption_id: entry.caption_id,
+    timeline_in_frame: entry.timeline_in_frame,
+    timeline_duration_frames: entry.timeline_duration_frames,
+    text: entry.text,
+    source_text: entry.review.source_text,
+    text_hash: entry.text_hash,
+    review_state: entry.review.state,
+    risk_score: entry.risk_score,
+    issues: entry.issues,
+  }));
+  for (const item of currentItems) {
+    if (!options.captionTextHashes[item.caption_id]) {
+      throw new Error(`Caption review bulk input is incomplete: text hash missing for ${item.caption_id}`);
+    }
+    if (options.captionTextHashes[item.caption_id] !== item.text_hash) {
+      throw new Error(`Caption review bulk input is stale: ${item.caption_id} text hash does not match`);
+    }
+  }
+  const assessment = assessSafeBulkReview(currentItems, { protectedTerms: context.protectedTerms });
+  if (assessment.eligible_count === 0) {
+    throw new Error("No safe captions are eligible for bulk verification");
+  }
+  const byID = new Map(currentItems.map((item) => [item.caption_id, item]));
+  for (const captionID of assessment.eligible_caption_ids) {
+    patch.operations.push({
+      op: "set_review_state",
+      caption_id: captionID,
+      base_text_hash: byID.get(captionID)!.text_hash,
+      state: "verified",
+      note: "safe_bulk_review/v1",
+    });
+  }
+  patch.session.reviewer = actor;
+  return {
+    ...persistCaptionReviewMutation(
+      context,
+      patch,
+      patchPath,
+      assessment.eligible_count,
+      options.updatedAt,
+    ),
+    assessment,
+  };
+}
+
 function loadMutableCaptionReview(projectDir: string): {
   context: CaptionReviewContext;
   patch: CaptionReviewPatch;
@@ -564,6 +960,11 @@ export function approveCaptionReview(
   const actor = reviewer.trim();
   if (!actor) throw new Error("reviewer is required");
   const context = loadCaptionReviewContext(projectDir);
+  const operational = inspectCaptionReviewOperationalState(context.projectDir, actor, options.patchPath, false);
+  if (!operational.approvalReadiness.can_approve) {
+    throw new Error(`Caption review cannot be approved:\n${operational.approvalReadiness.blockers
+      .map((blocker) => `${blocker.code}: ${blocker.message}`).join("\n")}`);
+  }
   const validation = validateCaptionReview(context.projectDir, options.patchPath);
   if (!validation.valid || !validation.preview || !validation.patch) {
     throw new Error(`Caption review cannot be approved:\n${validation.errors.join("\n")}`);
@@ -593,7 +994,13 @@ export function approveCaptionReview(
   assertSchema("caption-approval.schema.json", approval);
   const approvalPath = path.join(context.projectDir, CAPTION_APPROVAL_PATH);
   atomicWriteJson(approvalPath, approval);
-  return { approval, approvalPath, patchHash, validationHash };
+  return {
+    approval,
+    approvalPath,
+    patchHash,
+    validationHash,
+    approvalHash: computeNormalizedJsonHash(approval),
+  };
 }
 
 function stripReviewFields(entry: CaptionReviewPreview["speech_captions"][number]): CaptionDraftEntry {
@@ -640,6 +1047,29 @@ function evaluateCaptionReviewPatch(
   return result;
 }
 
+function reviewedEntryToDraft(
+  entry: CaptionReviewPreview["speech_captions"][number],
+): CaptionDraftEntry {
+  const copy = structuredClone(entry) as unknown as Record<string, unknown>;
+  delete copy.text_hash;
+  delete copy.review;
+  delete copy.issues;
+  delete copy.risk_score;
+  return copy as unknown as CaptionDraftEntry;
+}
+
+function loadCaptionReviewTranscripts(projectDir: string): Map<string, TranscriptArtifact> {
+  const transcripts = new Map<string, TranscriptArtifact>();
+  const transcriptDir = path.join(projectDir, "03_analysis", "transcripts");
+  if (!fs.existsSync(transcriptDir)) return transcripts;
+  for (const file of fs.readdirSync(transcriptDir)) {
+    if (!file.startsWith("TR_") || !file.endsWith(".json")) continue;
+    const transcript = readJsonFile<TranscriptArtifact>(path.join(transcriptDir, file));
+    transcripts.set(transcript.asset_id, transcript);
+  }
+  return transcripts;
+}
+
 function readRequiredJson<T>(projectDir: string, relativePath: string): T {
   const filePath = path.join(projectDir, relativePath);
   if (!fs.existsSync(filePath)) throw new Error(`Required artifact not found: ${filePath}`);
@@ -660,6 +1090,60 @@ function timelineFps(timeline: unknown): number {
   const denominator = sequence?.fps_den ?? 1;
   if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) return 24;
   return numerator / denominator;
+}
+
+function emptyValidation(): CaptionReviewPreview["validation"] {
+  return {
+    valid: false,
+    blocking_issue_count: 0,
+    warning_issue_count: 0,
+    unreviewed_count: 0,
+    verified_count: 0,
+    edited_count: 0,
+    flagged_count: 0,
+  };
+}
+
+function validationFromQueue(items: CaptionReviewQueueItem[]): CaptionReviewPreview["validation"] {
+  const blockingIssueCount = items.flatMap((item) => item.issues)
+    .filter((issue) => issue.severity === "block").length;
+  const unreviewedCount = items.filter((item) => item.review_state === "unreviewed").length;
+  const flaggedCount = items.filter((item) => item.review_state === "flagged").length;
+  return {
+    valid: blockingIssueCount === 0 && unreviewedCount === 0 && flaggedCount === 0,
+    blocking_issue_count: blockingIssueCount,
+    warning_issue_count: items.flatMap((item) => item.issues).filter((issue) => issue.severity === "warn").length,
+    unreviewed_count: unreviewedCount,
+    verified_count: items.filter((item) => item.review_state === "verified").length,
+    edited_count: 0,
+    flagged_count: flaggedCount,
+  };
+}
+
+function protectedDraftHashes(projectDir: string): string[] {
+  const hashes: string[] = [];
+  const patchPath = path.join(projectDir, CAPTION_REVIEW_PATCH_PATH);
+  if (fs.existsSync(patchPath)) {
+    const patch = readJsonFile<CaptionReviewPatch>(patchPath);
+    if (typeof patch.base_caption_draft_hash === "string") hashes.push(patch.base_caption_draft_hash);
+  }
+  const approvalPath = path.join(projectDir, CAPTION_APPROVAL_PATH);
+  if (fs.existsSync(approvalPath)) {
+    const approval = readJsonFile<CaptionApproval>(approvalPath);
+    const hash = approval.approval?.base_caption_draft_hash;
+    if (typeof hash === "string") hashes.push(hash);
+  }
+  return [...new Set(hashes)];
+}
+
+function stageCaptionRecoveryInputs(projectDir: string, stagingProjectDir: string): void {
+  for (const relativePath of ["01_intent", "02_ingest", "03_analysis", "04_plan", "05_timeline", "06_review"]) {
+    const source = path.join(projectDir, relativePath);
+    if (fs.existsSync(source)) fs.symlinkSync(source, path.join(stagingProjectDir, relativePath), "dir");
+  }
+  const statePath = path.join(projectDir, "project_state.yaml");
+  if (fs.existsSync(statePath)) fs.copyFileSync(statePath, path.join(stagingProjectDir, "project_state.yaml"));
+  fs.mkdirSync(path.join(stagingProjectDir, "07_package"), { recursive: true });
 }
 
 function assertSchema(schemaFile: string, data: unknown): void {

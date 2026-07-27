@@ -138,6 +138,14 @@ public struct CaptionReviewQueueDocument: Codable, Equatable, Sendable {
     public let matchedCaptionCount: Int
     public let exportedCaptionCount: Int
     public let items: [CaptionReviewQueueItem]
+    public let status: String
+    public let baseCaptionDraftHash: String?
+    public let recoveryAction: CaptionReviewRecoveryAction?
+    public let approvalReadiness: CaptionApprovalReadiness
+    public let safeBulkReview: CaptionSafeBulkReview
+    public let fontContract: CaptionFontContract?
+    public let currentApproval: CaptionCurrentApproval?
+    public let approvalWarning: CaptionApprovalWarning?
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -151,6 +159,14 @@ public struct CaptionReviewQueueDocument: Codable, Equatable, Sendable {
         case matchedCaptionCount = "matched_caption_count"
         case exportedCaptionCount = "exported_caption_count"
         case items
+        case status
+        case baseCaptionDraftHash = "base_caption_draft_hash"
+        case recoveryAction = "recovery_action"
+        case approvalReadiness = "approval_readiness"
+        case safeBulkReview = "safe_bulk_review"
+        case fontContract = "font_contract"
+        case currentApproval = "current_approval"
+        case approvalWarning = "approval_warning"
     }
 
     public init(
@@ -164,7 +180,15 @@ public struct CaptionReviewQueueDocument: Codable, Equatable, Sendable {
         totalCaptionCount: Int,
         matchedCaptionCount: Int,
         exportedCaptionCount: Int,
-        items: [CaptionReviewQueueItem]
+        items: [CaptionReviewQueueItem],
+        status: String = "ready",
+        baseCaptionDraftHash: String? = nil,
+        recoveryAction: CaptionReviewRecoveryAction? = nil,
+        approvalReadiness: CaptionApprovalReadiness? = nil,
+        safeBulkReview: CaptionSafeBulkReview = .empty,
+        fontContract: CaptionFontContract? = nil,
+        currentApproval: CaptionCurrentApproval? = nil,
+        approvalWarning: CaptionApprovalWarning? = nil
     ) {
         self.version = version
         self.project = project
@@ -177,6 +201,14 @@ public struct CaptionReviewQueueDocument: Codable, Equatable, Sendable {
         self.matchedCaptionCount = matchedCaptionCount
         self.exportedCaptionCount = exportedCaptionCount
         self.items = items
+        self.status = status
+        self.baseCaptionDraftHash = baseCaptionDraftHash
+        self.recoveryAction = recoveryAction
+        self.approvalReadiness = approvalReadiness ?? .legacy(items: items)
+        self.safeBulkReview = safeBulkReview
+        self.fontContract = fontContract
+        self.currentApproval = currentApproval
+        self.approvalWarning = approvalWarning
     }
 
     public init(from decoder: Decoder) throws {
@@ -192,6 +224,15 @@ public struct CaptionReviewQueueDocument: Codable, Equatable, Sendable {
         matchedCaptionCount = try values.decode(Int.self, forKey: .matchedCaptionCount)
         exportedCaptionCount = try values.decode(Int.self, forKey: .exportedCaptionCount)
         items = try values.decode([CaptionReviewQueueItem].self, forKey: .items)
+        status = try values.decodeIfPresent(String.self, forKey: .status) ?? "ready"
+        baseCaptionDraftHash = try values.decodeIfPresent(String.self, forKey: .baseCaptionDraftHash)
+        recoveryAction = try values.decodeIfPresent(CaptionReviewRecoveryAction.self, forKey: .recoveryAction)
+        approvalReadiness = try values.decodeIfPresent(CaptionApprovalReadiness.self, forKey: .approvalReadiness)
+            ?? .legacy(items: items)
+        safeBulkReview = try values.decodeIfPresent(CaptionSafeBulkReview.self, forKey: .safeBulkReview) ?? .empty
+        fontContract = try values.decodeIfPresent(CaptionFontContract.self, forKey: .fontContract)
+        currentApproval = try values.decodeIfPresent(CaptionCurrentApproval.self, forKey: .currentApproval)
+        approvalWarning = try values.decodeIfPresent(CaptionApprovalWarning.self, forKey: .approvalWarning)
     }
 
     public var blockingCount: Int {
@@ -211,9 +252,78 @@ public struct CaptionReviewQueueDocument: Codable, Equatable, Sendable {
     }
 }
 
+public struct CaptionCurrentApproval: Codable, Equatable, Sendable {
+    public let status: String
+    public let hash: String
+}
+
+public struct CaptionApprovalWarning: Codable, Equatable, Sendable {
+    public let code: String
+    public let message: String
+}
+
+public struct CaptionReviewRecoveryAction: Codable, Equatable, Sendable {
+    public let code: String
+    public let label: String
+    public let command: [String]
+    public let safeToRun: Bool
+    public let message: String
+    enum CodingKeys: String, CodingKey { case code, label, command, message; case safeToRun = "safe_to_run" }
+}
+
+public struct CaptionApprovalReadiness: Codable, Equatable, Sendable {
+    public struct Blocker: Codable, Equatable, Identifiable, Sendable {
+        public var id: String { code }
+        public let code: String
+        public let message: String
+    }
+    public let canApprove: Bool
+    public let blockers: [Blocker]
+    public let warningIssueCount: Int
+    public let warningsAcknowledged: Bool
+    enum CodingKeys: String, CodingKey {
+        case canApprove = "can_approve"; case blockers
+        case warningIssueCount = "warning_issue_count"; case warningsAcknowledged = "warnings_acknowledged"
+    }
+    static func legacy(items: [CaptionReviewQueueItem]) -> Self {
+        let canApprove = !items.isEmpty && items.allSatisfy { $0.reviewState == .verified && !$0.hasBlockingIssue }
+        return Self(canApprove: canApprove, blockers: [], warningIssueCount: 0, warningsAcknowledged: canApprove)
+    }
+}
+
+public struct CaptionSafeBulkReview: Codable, Equatable, Sendable {
+    public struct Excluded: Codable, Equatable, Identifiable, Sendable {
+        public var id: String { captionID }
+        public let captionID: String
+        public let reasons: [String]
+        enum CodingKeys: String, CodingKey { case captionID = "caption_id"; case reasons }
+    }
+    public let eligibleCaptionIDs: [String]
+    public let eligibleCount: Int
+    public let excluded: [Excluded]
+    public let exclusionReasonCounts: [String: Int]
+    enum CodingKeys: String, CodingKey {
+        case eligibleCaptionIDs = "eligible_caption_ids"; case eligibleCount = "eligible_count"
+        case excluded; case exclusionReasonCounts = "exclusion_reason_counts"
+    }
+    public static let empty = Self(eligibleCaptionIDs: [], eligibleCount: 0, excluded: [], exclusionReasonCounts: [:])
+}
+
+public struct CaptionFontContract: Codable, Equatable, Sendable {
+    public struct Diagnostic: Codable, Equatable, Sendable { public let code: String; public let message: String }
+    public let status: String
+    public let fontID: String
+    public let family: String
+    public let fallbackUsed: Bool
+    public let diagnostics: [Diagnostic]
+    enum CodingKeys: String, CodingKey {
+        case status; case fontID = "font_id"; case family; case fallbackUsed = "fallback_used"; case diagnostics
+    }
+}
+
 public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
     public static let defaultFontID = "noto-sans-jp"
-    public static let defaultFontFamily = "Noto Sans JP"
+    public static let defaultFontFamily = "VideoOS Noto Sans JP Bold"
 
     public enum Alignment: String, Codable, Sendable {
         case bottomCenter = "bottom_center"
@@ -295,4 +405,28 @@ public struct CaptionReviewPreviewStyle: Codable, Equatable, Sendable {
         maxWidthRatio: 0.88,
         alignment: .bottomCenter
     )
+
+    public enum PreviewFontWeight: String, Equatable, Sendable {
+        case regular
+        case bold
+        case heavy
+        case black
+    }
+
+    public static func previewFontWeight(for numericWeight: Int) -> PreviewFontWeight {
+        switch numericWeight {
+        case 900...:
+            return .black
+        case 800...:
+            return .heavy
+        case 700...:
+            return .bold
+        default:
+            return .regular
+        }
+    }
+
+    public var previewFontWeight: PreviewFontWeight {
+        Self.previewFontWeight(for: fontWeight)
+    }
 }

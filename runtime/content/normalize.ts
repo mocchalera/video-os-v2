@@ -7,6 +7,7 @@ import type {
   JSONValue,
 } from "./types.js";
 import { validateContentElement, type ContentElementIssue } from "./validation.js";
+import { resolveCreativeRenderer } from "./creative-recipe.js";
 
 export interface OverlayClipLike {
   clip_id: string;
@@ -82,11 +83,11 @@ function defaultLayout(anchor: ContentAnchor): ContentElementLayout {
 }
 
 function ownerFor(element: ContentElementV1): ContentRendererId | null {
-  if (!element.template_ref) return element.renderer_hint === "auto" ? "ffmpeg" : element.renderer_hint ?? "ffmpeg";
-  const manifest = resolveContentTemplate(element.template_ref);
-  if (manifest === null) return null;
-  if (element.renderer_hint && element.renderer_hint !== "auto") return element.renderer_hint;
-  return manifest.preferred_renderer;
+  const manifest = element.template_ref
+    ? resolveContentTemplate(element.template_ref)
+    : null;
+  if (element.template_ref && manifest === null) return null;
+  return resolveCreativeRenderer(element, manifest);
 }
 
 function invalidIssue(path: string, message: string): ContentElementIssue {

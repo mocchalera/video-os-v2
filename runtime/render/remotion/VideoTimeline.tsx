@@ -8,16 +8,17 @@ import {
 import { BundledFontGate } from "./components/BundledFontGate.js";
 import { TextOverlayLayer } from "./components/TextOverlayLayer.js";
 import { TransitionLayer } from "./components/TransitionLayer.js";
+import {
+  frameRateValue,
+  microsecondsToFrames,
+  rationalFrameRate,
+} from "../../../editor/shared/rational-timebase.js";
 
 export interface VideoTimelineProps {
   timeline: TimelineIR;
   sourceMap: Record<string, string>;
   fontAsset?: VideoWebFontAsset;
   stillAssetIds?: string[];
-}
-
-function microsecondsToFrames(microseconds: number, fps: number): number {
-  return Math.round((microseconds / 1_000_000) * fps);
 }
 
 function objectFitForLetterboxPolicy(
@@ -36,7 +37,11 @@ export const VideoTimeline = ({
   fontAsset = DEFAULT_VIDEO_WEB_FONT_ASSET,
   stillAssetIds = [],
 }: VideoTimelineProps) => {
-  const fps = Math.round(timeline.sequence.fps_num / timeline.sequence.fps_den);
+  const frameRate = rationalFrameRate(
+    timeline.sequence.fps_num,
+    timeline.sequence.fps_den,
+  );
+  const fps = frameRateValue(frameRate);
   const objectFit = objectFitForLetterboxPolicy(timeline.sequence.letterbox_policy);
   const overlayTracks = (timeline.tracks as TimelineIR["tracks"] & { overlay?: TrackOutput[] }).overlay;
 
@@ -70,8 +75,8 @@ export const VideoTimeline = ({
                 }}
               /> : <OffthreadVideo
                 src={source}
-                startFrom={microsecondsToFrames(clip.src_in_us, fps)}
-                endAt={microsecondsToFrames(clip.src_out_us, fps)}
+                startFrom={microsecondsToFrames(clip.src_in_us, frameRate)}
+                endAt={microsecondsToFrames(clip.src_out_us, frameRate)}
                 style={{ width: "100%", height: "100%", objectFit }}
               />}
             </Sequence>

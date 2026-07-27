@@ -2,6 +2,85 @@ import XCTest
 @testable import VideoOSStudioCore
 
 final class ProjectMediaResolverTests: XCTestCase {
+    func testLegacyPreviewUsesReceiptSmallHashesAndVideoIdentityWithoutBodyRehash() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-legacy-preview-identity-\(UUID().uuidString)")
+        let timeline = root.appendingPathComponent("05_timeline/timeline.json")
+        let draft = root.appendingPathComponent("07_package/caption_draft.json")
+        let final = root.appendingPathComponent("09_output/final.mp4")
+        for url in [timeline, draft, final] {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        }
+        try Data("timeline".utf8).write(to: timeline)
+        try Data("draft".utf8).write(to: draft)
+        try Data([1, 2, 3, 4]).write(to: final)
+        let timelineDate = Date(timeIntervalSince1970: 100)
+        let previewDate = Date(timeIntervalSince1970: 200)
+        try FileManager.default.setAttributes([.modificationDate: timelineDate], ofItemAtPath: timeline.path)
+        try FileManager.default.setAttributes([.modificationDate: previewDate], ofItemAtPath: final.path)
+        let previewHash = try BGMReviewSourceResolver.sha256(for: final)
+        let timelineHash = try BGMReviewSourceResolver.sha256(for: timeline)
+        let draftHash = try BGMReviewSourceResolver.sha256(for: draft)
+        let attributes = try FileManager.default.attributesOfItem(atPath: final.path)
+        let size = (attributes[.size] as! NSNumber).int64Value
+        let mtime = Int64(((attributes[.modificationDate] as! Date).timeIntervalSince1970 * 1_000).rounded())
+        try """
+        {
+          "version": "timeline-preview-receipt/v1",
+          "preview_path": "09_output/final.mp4",
+          "preview_sha256": "\(previewHash)",
+          "preview_size_bytes": \(size),
+          "preview_mtime_ms": \(mtime),
+          "timeline_path": "05_timeline/timeline.json",
+          "timeline_sha256": "\(timelineHash)",
+          "caption_input": {
+            "path": "07_package/caption_draft.json",
+            "sha256": "\(draftHash)"
+          },
+          "created_at": "2026-07-23T00:00:00Z"
+        }
+        """.write(to: URL(fileURLWithPath: final.path + ".receipt.json"), atomically: true, encoding: .utf8)
+
+        XCTAssertNotNil(ProjectMediaResolver.resolveTimelinePreview(
+            projectURL: root,
+            playheadSeconds: 1,
+            durationReader: { _ in 30 }
+        ))
+
+        try Data("stale timeline".utf8).write(to: timeline)
+        XCTAssertNil(ProjectMediaResolver.resolveTimelinePreview(
+            projectURL: root,
+            playheadSeconds: 1,
+            durationReader: { _ in 30 }
+        ))
+        try Data("timeline".utf8).write(to: timeline)
+        try FileManager.default.setAttributes([.modificationDate: timelineDate], ofItemAtPath: timeline.path)
+
+        try Data([9, 8, 7, 6]).write(to: final)
+        try FileManager.default.setAttributes([.modificationDate: previewDate], ofItemAtPath: final.path)
+        XCTAssertNotNil(ProjectMediaResolver.resolveTimelinePreview(
+            projectURL: root,
+            playheadSeconds: 1,
+            durationReader: { _ in 30 }
+        ), "Studio must not synchronously hash the large legacy video body")
+    }
+
+    func testMissingBurnedPreviewReceiptRequiresRegenerationInsteadOfNoOpRetry() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-preview-receipt-\(UUID().uuidString)")
+        let final = root.appendingPathComponent("09_output/final.mp4")
+        let draft = root.appendingPathComponent("07_package/caption_draft.json")
+        try FileManager.default.createDirectory(at: final.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: draft.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([1]).write(to: final)
+        try Data("{}".utf8).write(to: draft)
+
+        let failure = ProjectMediaResolver.timelinePreviewFailure(projectURL: root)
+        XCTAssertFalse(failure.retryable)
+        XCTAssertTrue(failure.message.contains("receipt"))
+        XCTAssertTrue(failure.message.contains("再生成"))
+    }
+
     func testResolveSelectedClipPrefersSourceMapEntry() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-media-resolver-\(UUID().uuidString)")
@@ -556,7 +635,7 @@ final class ProjectMediaResolverTests: XCTestCase {
         XCTAssertEqual(reference.resolvedFrom, "09_output/rough-cut")
     }
 
-    func testTimelinePreviewSkipsRenderedArtifactWhenManifestIsStale() throws {
+    func testTimelinePreviewUsesFreshFinalWhenManifestIsStale() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-timeline-preview-contract-stale-\(UUID().uuidString)")
         let timelineDir = root.appendingPathComponent("05_timeline")
@@ -565,16 +644,52 @@ final class ProjectMediaResolverTests: XCTestCase {
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
         let timeline = timelineDir.appendingPathComponent("timeline.json")
-        let roughCut = outputDir.appendingPathComponent("rough-cut.mp4")
+        let approvalPreview = timelineDir.appendingPathComponent("preview-full.mp4")
+        let final = outputDir.appendingPathComponent("final.mp4")
         try Data([9]).write(to: timeline)
         try #"{"base_timeline_hash":"old-hash"}"#.write(
             to: timelineDir.appendingPathComponent("preview-manifest.json"),
             atomically: true,
             encoding: .utf8
         )
-        try Data([1]).write(to: roughCut)
+        try Data([0]).write(to: approvalPreview)
+        try Data([1]).write(to: final)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: timeline.path)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: roughCut.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: approvalPreview.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: final.path)
+
+        let reference = try XCTUnwrap(ProjectMediaResolver.resolveTimelinePreview(
+            projectURL: root,
+            playheadSeconds: 1,
+            durationReader: { _ in 90 }
+        ))
+
+        XCTAssertEqual(reference.url?.standardizedFileURL.path, final.standardizedFileURL.path)
+        XCTAssertEqual(reference.resolvedFrom, "09_output/final")
+    }
+
+    func testTimelinePreviewRemainsNilWhenManifestAndIndependentOutputsAreStale() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-timeline-preview-contract-all-stale-\(UUID().uuidString)")
+        let timelineDir = root.appendingPathComponent("05_timeline")
+        let outputDir = root.appendingPathComponent("09_output")
+        try FileManager.default.createDirectory(at: timelineDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+
+        let timeline = timelineDir.appendingPathComponent("timeline.json")
+        let approvalPreview = timelineDir.appendingPathComponent("preview-full.mp4")
+        let staleFinal = outputDir.appendingPathComponent("final.mp4")
+        try Data([9]).write(to: timeline)
+        try #"{"base_timeline_hash":"old-hash"}"#.write(
+            to: timelineDir.appendingPathComponent("preview-manifest.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data([0]).write(to: approvalPreview)
+        try Data([1]).write(to: staleFinal)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 300)], ofItemAtPath: timeline.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 400)], ofItemAtPath: approvalPreview.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: staleFinal.path)
 
         let reference = ProjectMediaResolver.resolveTimelinePreview(
             projectURL: root,
@@ -583,6 +698,44 @@ final class ProjectMediaResolverTests: XCTestCase {
         )
 
         XCTAssertNil(reference)
+    }
+
+    func testTimelinePreviewKeepsApprovalPreviewPriorityWhenContractIsExact() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-timeline-preview-contract-exact-\(UUID().uuidString)")
+        let timelineDir = root.appendingPathComponent("05_timeline")
+        let outputDir = root.appendingPathComponent("09_output")
+        try FileManager.default.createDirectory(at: timelineDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+
+        let timeline = timelineDir.appendingPathComponent("timeline.json")
+        let approvalPreview = timelineDir.appendingPathComponent("preview-full.mp4")
+        let final = outputDir.appendingPathComponent("final.mp4")
+        let timelineData = Data([9])
+        try timelineData.write(to: timeline)
+        let timelineHash = ProjectPlaybackContractStatusReader.fileHash16(timelineData)
+        try #"{"base_timeline_hash":"\#(timelineHash)"}"#.write(
+            to: timelineDir.appendingPathComponent("preview-manifest.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try Data([0]).write(to: approvalPreview)
+        try Data([1]).write(to: final)
+        let draft = root.appendingPathComponent("07_package/caption_draft.json")
+        try FileManager.default.createDirectory(at: draft.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: draft)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: timeline.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: approvalPreview.path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: final.path)
+
+        let reference = try XCTUnwrap(ProjectMediaResolver.resolveTimelinePreview(
+            projectURL: root,
+            playheadSeconds: 1,
+            durationReader: { _ in 90 }
+        ))
+
+        XCTAssertEqual(reference.url?.standardizedFileURL.path, approvalPreview.standardizedFileURL.path)
+        XCTAssertEqual(reference.resolvedFrom, "05_timeline/preview-full")
     }
 
     func testProgramMediaFallsBackToSourceWhenOnlyLegacyPreviewIsTooShort() throws {

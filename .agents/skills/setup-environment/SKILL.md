@@ -39,8 +39,9 @@ metadata:
 ```bash
 node -v
 npm -v
-which ffmpeg
-which ffprobe
+ffmpeg -version
+ffprobe -version
+ffmpeg -hide_banner -filters
 which python3
 test -f .env.local && echo yes || echo no
 test -d node_modules && echo yes || echo no
@@ -48,15 +49,17 @@ test -d node_modules && echo yes || echo no
 
 - 結果は必ず表形式で返す。最低でも `項目 | 現在値 | 期待値 | 状態` を含める
 - 確認対象は以下:
-  - Node.js バージョン: `>= 18` 推奨
-  - npm バージョン
-  - `ffmpeg` の存在
-  - `ffprobe` の存在
+  - Node.js バージョン: `22.x` 必須（`.nvmrc` / `.node-version` と CI に合わせる）
+  - npm バージョン: `10.x`
+  - `ffmpeg` が実際に起動できること
+  - `ffprobe` が実際に起動できること
+  - `ffmpeg` の `subtitles` / `ass` filter が利用できること
   - `python3` の存在
   - `.env.local` の存在
   - `node_modules/` の存在
 - **次アクションを案内するのは不足項目だけ** にする
-- Node.js が古い場合は他の手順に進む前に更新する。目安は `nvm install 20 && nvm use 20`、または `nvm use 18`
+- Node.js が `22.x` 以外なら他の手順に進む前に揃える。目安は `nvm install 22 && nvm use 22`
+- `which ffmpeg` / `which ffprobe` だけでは合格にしない。共有 library 欠落などで binary が起動不能な状態を見逃すため、上記の version command の exit code を確認する
 
 ### Step 2: `ffmpeg` / `ffprobe` を入れる
 
@@ -80,8 +83,11 @@ choco install ffmpeg
 ```bash
 ffmpeg -version
 ffprobe -version
+ffmpeg -hide_banner -filters | grep -E ' (subtitles|ass) '
 ```
 
+- binary が存在しても `Library not loaded` などで起動しない場合は、インストール済み扱いにせず依存 library / ffmpeg package を修復する
+- `subtitles` / `ass` のどちらかが無い build は burn-in 字幕の render に使わない
 - ここで詰まったら `references/troubleshoot-setup.md` の `ffmpeg: command not found` を読む
 
 ### Step 3: `npm install` を実行する
@@ -148,6 +154,13 @@ python3 -m pip install pyannote.audio torch torchaudio
 
 ### Step 6: 動作確認をする
 
+- 素材を書き込む前に、共通 preflight で Node、ffmpeg/ffprobe、字幕 filter、source、作業 disk 容量をまとめて確認する
+
+```bash
+npx tsx scripts/preflight.ts <素材フォルダパス>
+```
+
+- preflight に `fail` があれば ingest / render へ進まない
 - まず API キー不要の demo を確認する
 
 ```bash

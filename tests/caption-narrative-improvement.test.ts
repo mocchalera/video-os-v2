@@ -75,6 +75,18 @@ describe("Caption timing separation", () => {
       separated[0].timeline_in_frame + separated[0].timeline_duration_frames,
     ).toBeLessThan(separated[1].timeline_in_frame);
   });
+
+  it("recomputes final dwell and CPS after separation shortens a cue", () => {
+    const captions: SpeechCaption[] = [
+      makeTimedCaption("SC_1", 0, 30),
+      makeTimedCaption("SC_2", 10, 30),
+    ];
+    const separated = enforceCaptionSeparation(captions, 1, 30, "ja");
+
+    expect(separated[0].timeline_duration_frames).toBe(9);
+    expect(separated[0].metrics.dwell_ms).toBe(300);
+    expect(separated[0].metrics.cps).toBeCloseTo(13.33, 2);
+  });
 });
 
 describe("Short-form caption layout", () => {
@@ -392,6 +404,48 @@ describe("Word-level Timing Remap", () => {
     expect(result.timelineInFrame).toBeGreaterThanOrEqual(0);
     expect(result.timelineDurationFrames).toBeGreaterThan(0);
     expect(result.sourceWordRefs).toHaveLength(3);
+  });
+
+  it("uses only the words matching each caption when one transcript item is split", () => {
+    const sharedItem: TranscriptItemWithWords = {
+      item_id: "item1",
+      start_us: 0,
+      end_us: 2_000_000,
+      text: "今日はどう思いますか",
+      word_timing_mode: "word",
+      words: [
+        { word: "今日は", start_us: 0, end_us: 400_000, confidence: 0.95 },
+        { word: "どう", start_us: 1_000_000, end_us: 1_200_000, confidence: 0.95 },
+        { word: "思います", start_us: 1_200_000, end_us: 1_700_000, confidence: 0.95 },
+        { word: "か", start_us: 1_700_000, end_us: 1_800_000, confidence: 0.95 },
+      ],
+    };
+    const transcriptItems = new Map([[sharedItem.item_id, sharedItem]]);
+    const baseInput: TimingRemapInput = {
+      captionId: "SC_0001",
+      text: "今日は",
+      transcriptItemIds: ["item1"],
+      clipTimelineInFrame: 0,
+      clipTimelineDurationFrames: 30,
+      clipSrcInUs: 0,
+      clipSrcOutUs: 3_000_000,
+      clipTimelineInFrameBase: 0,
+      fps: 30,
+    };
+
+    const first = remapWithWordTimestamps(baseInput, transcriptItems);
+    const question = remapWithWordTimestamps({
+      ...baseInput,
+      captionId: "SC_0002",
+      text: "どう思いますか",
+      clipTimelineInFrame: 24,
+      clipTimelineDurationFrames: 36,
+    }, transcriptItems);
+
+    expect(first).toMatchObject({ timelineInFrame: 0, timelineDurationFrames: 12 });
+    expect(first.sourceWordRefs?.map((word) => word.word)).toEqual(["今日は"]);
+    expect(question).toMatchObject({ timelineInFrame: 30, timelineDurationFrames: 24 });
+    expect(question.sourceWordRefs?.map((word) => word.word)).toEqual(["どう", "思います", "か"]);
   });
 
   it("falls back to clip_item_remap when no word timestamps", () => {

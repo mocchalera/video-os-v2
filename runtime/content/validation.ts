@@ -5,6 +5,12 @@ import type {
   ContentElementV1,
   JSONValue,
 } from "./types.js";
+import {
+  CREATIVE_RECIPE_AUTHORING_SURFACES,
+  CREATIVE_RECIPE_COMPOSITE_STAGES,
+  CREATIVE_RECIPE_LAYER_MODES,
+  CREATIVE_RECIPE_REUSE_SCOPES,
+} from "./creative-recipe.js";
 
 export type ContentElementIssueCode =
   | "invalid_shape"
@@ -17,6 +23,7 @@ export type ContentElementIssueCode =
   | "unsafe_asset_reference"
   | "unknown_template"
   | "unsupported_renderer"
+  | "invalid_creative_recipe"
   | "invalid_template_props";
 
 export interface ContentElementIssue {
@@ -44,6 +51,10 @@ const ANCHORS = new Set([
   "bottom_right",
 ]);
 const RENDERERS = new Set(["auto", "ffmpeg", "remotion", "hyperframes"]);
+const CREATIVE_REUSE_SCOPES = new Set(CREATIVE_RECIPE_REUSE_SCOPES);
+const CREATIVE_AUTHORING_SURFACES = new Set(CREATIVE_RECIPE_AUTHORING_SURFACES);
+const CREATIVE_LAYER_MODES = new Set(CREATIVE_RECIPE_LAYER_MODES);
+const CREATIVE_COMPOSITE_STAGES = new Set(CREATIVE_RECIPE_COMPOSITE_STAGES);
 export const CONTENT_ANIMATION_PRESETS = new Set([
   "none",
   "fade",
@@ -179,6 +190,92 @@ function validateAnimationRef(
   return true;
 }
 
+function validateCreativeRecipe(
+  value: unknown,
+  issues: ContentElementIssue[],
+): void {
+  if (!isRecord(value)) {
+    issues.push({
+      path: "creative_recipe",
+      code: "invalid_creative_recipe",
+      message: "creative_recipe must be an object",
+    });
+    return;
+  }
+  const checks: Array<[boolean, string, string]> = [
+    [value.version === "creative-recipe/v1", "version", "version must be creative-recipe/v1"],
+    [
+      typeof value.reuse_scope === "string"
+        && CREATIVE_REUSE_SCOPES.has(value.reuse_scope as never),
+      "reuse_scope",
+      "reuse_scope is invalid",
+    ],
+    [
+      typeof value.authoring_surface === "string"
+        && CREATIVE_AUTHORING_SURFACES.has(value.authoring_surface as never),
+      "authoring_surface",
+      "authoring_surface is invalid",
+    ],
+    [
+      typeof value.layer_mode === "string"
+        && CREATIVE_LAYER_MODES.has(value.layer_mode as never),
+      "layer_mode",
+      "layer_mode is invalid",
+    ],
+    [
+      typeof value.composite_stage === "string"
+        && CREATIVE_COMPOSITE_STAGES.has(value.composite_stage as never),
+      "composite_stage",
+      "composite_stage is invalid",
+    ],
+    [
+      typeof value.requires_base_frame === "boolean",
+      "requires_base_frame",
+      "requires_base_frame must be boolean",
+    ],
+  ];
+  for (const [ok, field, message] of checks) {
+    if (!ok) {
+      issues.push({
+        path: `creative_recipe.${field}`,
+        code: "invalid_creative_recipe",
+        message,
+      });
+    }
+  }
+
+  if (
+    value.authoring_surface === "native_filter"
+    && value.layer_mode !== "native_filter"
+  ) {
+    issues.push({
+      path: "creative_recipe.layer_mode",
+      code: "invalid_creative_recipe",
+      message: "native_filter authoring requires native_filter layer_mode",
+    });
+  }
+  if (
+    value.authoring_surface !== "native_filter"
+    && value.layer_mode === "native_filter"
+  ) {
+    issues.push({
+      path: "creative_recipe.layer_mode",
+      code: "invalid_creative_recipe",
+      message: "native_filter layer_mode requires native_filter authoring_surface",
+    });
+  }
+  if (
+    value.requires_base_frame === true
+    && value.authoring_surface !== "typed_component"
+  ) {
+    issues.push({
+      path: "creative_recipe.requires_base_frame",
+      code: "invalid_creative_recipe",
+      message: "base-frame access is currently supported only by typed_component recipes",
+    });
+  }
+}
+
 export function validateContentElement(input: unknown): ContentElementValidationResult {
   const issues: ContentElementIssue[] = [];
   if (!isRecord(input)) {
@@ -203,6 +300,9 @@ export function validateContentElement(input: unknown): ContentElementValidation
 
   if (input.renderer_hint !== undefined && (typeof input.renderer_hint !== "string" || !RENDERERS.has(input.renderer_hint))) {
     issues.push({ path: "renderer_hint", code: "unsupported_renderer", message: "renderer_hint is invalid" });
+  }
+  if (input.creative_recipe !== undefined) {
+    validateCreativeRecipe(input.creative_recipe, issues);
   }
 
   if (input.animation !== undefined) {

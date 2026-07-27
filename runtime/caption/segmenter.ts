@@ -41,6 +41,10 @@ export interface CaptionSemanticTimingPolicy {
   ordinary_lead_frames?: number;
   /** Delay after protected audio onset. Defaults to 1 frame. */
   audio_first_frames?: number;
+  /** Delay question captions until this many frames after audio onset. Defaults to 0. */
+  question_audio_first_frames?: number;
+  /** Which cue owns silence between adjacent utterances. Defaults to previous. */
+  gap_ownership?: "previous" | "blank";
   anchors?: CaptionRevealAnchor[];
 }
 
@@ -168,6 +172,7 @@ export interface TranscriptArtifact {
   asset_id: string;
   items: TranscriptItem[];
   language?: string;
+  word_timing_mode?: "word" | "char" | "none";
 }
 
 // ---------------------------------------------------------------------------
@@ -175,7 +180,8 @@ export interface TranscriptArtifact {
 // ---------------------------------------------------------------------------
 
 const GAP_SPLIT_US = 500_000; // 500 ms in microseconds
-const MIN_DWELL_MS = 800;
+export const MIN_CAPTION_TARGET_DWELL_MS = 800;
+export const MIN_CAPTION_HARD_FLOOR_MS = 300;
 const SENTENCE_END_RE = /[。！？.!?]$/;
 const JA_LINE_START_PARTICLES = new Set([
   "は",
@@ -225,7 +231,7 @@ function framesToMs(frames: number, fps: number): number {
   return (frames / fps) * 1000;
 }
 
-function computeCps(
+export function computeCaptionCps(
   text: string,
   durationMs: number,
   language: string,
@@ -304,7 +310,7 @@ function segmentItems(
       const segEnd =
         cur.timelineInFrame + cur.timelineDurationFrames;
       const segDurationMs = framesToMs(segEnd - segStart, fps);
-      const cps = computeCps(combinedText, segDurationMs, language);
+      const cps = computeCaptionCps(combinedText, segDurationMs, language);
       if (cps > maxCps) {
         shouldSplit = true;
       }
@@ -670,7 +676,9 @@ export function generateCaptionSource(
     let durationFrames = outFrame - inFrame;
 
     // Apply minimum dwell time
-    const minDwellFrames = Math.ceil((MIN_DWELL_MS / 1000) * fps);
+    const minDwellFrames = Math.ceil(
+      (MIN_CAPTION_TARGET_DWELL_MS / 1000) * fps,
+    );
     if (durationFrames < minDwellFrames) {
       // Check if extending would collide with next segment
       const nextSeg = si + 1 < segments.length ? segments[si + 1] : null;
@@ -689,7 +697,7 @@ export function generateCaptionSource(
     }
 
     const dwellMs = framesToMs(durationFrames, fps);
-    const cps = computeCps(text, dwellMs, language);
+    const cps = computeCaptionCps(text, dwellMs, language);
 
     // Determine asset_id and segment_id from first item's clip context
     const firstPending = seg[0];
@@ -732,14 +740,14 @@ export function generateCaptionSource(
   };
 }
 
-export function enforceCaptionSeparation(
-  captions: SpeechCaption[],
+export function enforceCaptionSeparation<T extends SpeechCaption>(
+  captions: T[],
   gapFrames: number,
   fps: number,
   language: string,
-): SpeechCaption[] {
+): T[] {
   const gap = Math.max(0, Math.floor(gapFrames));
-  const result: SpeechCaption[] = [];
+  const result: T[] = [];
   for (let index = 0; index < captions.length; index++) {
     const caption = { ...captions[index], metrics: { ...captions[index].metrics } };
     const next = captions[index + 1];
@@ -753,8 +761,10 @@ export function enforceCaptionSeparation(
     if (caption.timeline_duration_frames <= 0) continue;
     const dwellMs = framesToMs(caption.timeline_duration_frames, fps);
     caption.metrics.dwell_ms = Math.round(dwellMs);
-    caption.metrics.cps = Math.round(computeCps(caption.text, dwellMs, language) * 100) / 100;
-    result.push(caption);
+    caption.metrics.cps = Math.round(
+      computeCaptionCps(caption.text, dwellMs, language) * 100,
+    ) / 100;
+    result.push(caption as T);
   }
   return result;
 }

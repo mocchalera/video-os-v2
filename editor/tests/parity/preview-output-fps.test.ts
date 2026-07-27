@@ -12,8 +12,8 @@ describe("Studio exact-preview output frame rate", () => {
   });
 
   it("preserves fractional sequence rates with stable precision", () => {
-    expect(previewOutputFrameRateArgs(30_000 / 1_001)).toEqual([
-      "-r", "29.970030", "-fps_mode", "cfr",
+    expect(previewOutputFrameRateArgs({ fpsNum: 30_000, fpsDen: 1_001 })).toEqual([
+      "-r", "30000/1001", "-fps_mode", "cfr",
     ]);
   });
 

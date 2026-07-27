@@ -56,7 +56,7 @@ final class ProjectRenderPackageStatusTests: XCTestCase {
     func testStatusReportsFailedQA() throws {
         let project = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-render-status-failed-\(UUID().uuidString)")
-        try writeRenderPackageFixture(project: project, qaPassed: false)
+        try writeRenderPackageFixture(project: project, qaPassed: false, includeLayoutIssue: true)
 
         let status = ProjectRenderPackageStatusReader.status(
             projectURL: project,
@@ -66,6 +66,71 @@ final class ProjectRenderPackageStatusTests: XCTestCase {
         XCTAssertEqual(status.readinessLabel, "qa failed")
         XCTAssertEqual(status.qaPassed, false)
         XCTAssertEqual(status.qaFailedCheckCount, 1)
+        XCTAssertEqual(status.layoutQAStatus, "blocked")
+        XCTAssertEqual(status.layoutQAReviewSummary, "要修正 1件")
+        XCTAssertEqual(status.layoutQAReviewItems.map(\.code), ["caption_visual_collision"])
+        XCTAssertEqual(status.layoutQAReviewItems.first?.timeRangeLabel, "00:00:02.000–00:00:03.000")
+        XCTAssertEqual(status.layoutQAReviewItems.first?.layerIDs, ["CAP_1", "CTA_1"])
+        XCTAssertEqual(status.layoutQAReviewItems.first?.title, "字幕と画面テキストが衝突")
+        XCTAssertEqual(status.layoutQAReviewItems.first?.remediation, "字幕またはCTAの表示区間・位置を分離してください。")
+    }
+
+    func testStatusReportsVerifiedLayoutWithoutFalseReviewItems() throws {
+        let project = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-render-status-layout-clean-\(UUID().uuidString)")
+        try writeRenderPackageFixture(project: project, qaPassed: true, includeVerifiedLayout: true)
+
+        let status = ProjectRenderPackageStatusReader.status(
+            projectURL: project,
+            verificationStatus: verifiedPackage()
+        )
+
+        XCTAssertEqual(status.layoutQAStatus, "verified")
+        XCTAssertEqual(status.layoutQAReviewSummary, "レイアウト検証済み")
+        XCTAssertTrue(status.layoutQAReviewItems.isEmpty)
+    }
+
+    func testStatusReportsWaveformGroundedSpeechCadenceReviewItems() throws {
+        let project = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-render-status-cadence-\(UUID().uuidString)")
+        try writeRenderPackageFixture(project: project, qaPassed: true)
+        try writeSpeechCadenceMetric(project: project)
+
+        let status = ProjectRenderPackageStatusReader.status(
+            projectURL: project,
+            verificationStatus: verifiedPackage()
+        )
+
+        XCTAssertEqual(status.speechCadenceStatus, "review_required")
+        XCTAssertEqual(status.speechCadenceReviewSummary, "間を確認 1件")
+        XCTAssertEqual(status.speechCadenceReviewItems.map(\.code), ["excessive_internal_silence"])
+        XCTAssertEqual(status.speechCadenceReviewItems.first?.timeRangeLabel, "00:00:01.001–00:00:01.802")
+        XCTAssertEqual(status.speechCadenceReviewItems.first?.durationLabel, "0.8秒")
+        XCTAssertEqual(status.speechCadenceReviewItems.first?.suggestedActionLabel, "ジャンプカット候補")
+        XCTAssertEqual(status.speechCadenceReviewItems.first?.clipID, "CLIP_001")
+        XCTAssertEqual(status.speechCadenceReviewItems.first?.title, "発話中の間が長い")
+    }
+
+    func testStatusReportsCaptionDeliveryReviewItems() throws {
+        let project = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-render-status-caption-delivery-\(UUID().uuidString)")
+        try writeRenderPackageFixture(project: project, qaPassed: true)
+        try writeCaptionDeliveryMetric(project: project)
+
+        let status = ProjectRenderPackageStatusReader.status(
+            projectURL: project,
+            verificationStatus: verifiedPackage()
+        )
+
+        XCTAssertEqual(status.captionDeliveryStatus, "review_required")
+        XCTAssertEqual(status.captionDeliveryReviewSummary, "字幕タイミング確認 1件")
+        XCTAssertEqual(status.captionDeliveryReviewItems.map(\.code), ["insufficient_read_time"])
+        XCTAssertEqual(status.captionDeliveryReviewItems.first?.timeRangeLabel, "00:00:05.005–00:00:05.506")
+        XCTAssertEqual(status.captionDeliveryReviewItems.first?.measurementLabel, "0.5秒（基準 0.8秒）")
+        XCTAssertEqual(status.captionDeliveryReviewItems.first?.suggestedActionLabel, "読了時間を延ばす")
+        XCTAssertEqual(status.captionDeliveryReviewItems.first?.captionID, "SC_FLASH")
+        XCTAssertEqual(status.captionDeliveryReviewItems.first?.textExcerpt, "馬鹿げてますよね")
+        XCTAssertEqual(status.captionDeliveryReviewItems.first?.title, "字幕を読む時間が短い")
     }
 
     func testStatusRejectsPartialQAAndManifestContracts() throws {
@@ -156,7 +221,9 @@ private func writeRenderPackageFixture(
     qaSourceOfTruth: String = "engine_render",
     manifestSourceOfTruth: String = "engine_render",
     includeQADetails: Bool = true,
-    includeManifestProvenance: Bool = true
+    includeManifestProvenance: Bool = true,
+    includeLayoutIssue: Bool = false,
+    includeVerifiedLayout: Bool = false
 ) throws {
     let package = project.appendingPathComponent("07_package")
     let video = package.appendingPathComponent("video")
@@ -182,6 +249,54 @@ private func writeRenderPackageFixture(
     )
     let qaDetails = includeQADetails ? #", "details": "ok""# : ""
     let loudnessDetails = includeQADetails ? #", "details": "measured""# : ""
+    let layoutMetrics: String
+    if includeLayoutIssue {
+        layoutMetrics = """
+        ,
+          "metrics": {
+            "deterministic_layout_qa": {
+              "version": "deterministic-layout-qa/v2",
+              "status": "blocked",
+              "snapshot_version": "render-layout-snapshot/v1",
+              "issues": [{
+                "code": "caption_visual_collision",
+                "severity": "blocking",
+                "detail": "CAP_1 collides with cta CTA_1",
+                "layer_ids": ["CAP_1", "CTA_1"],
+                "start_frame": 60,
+                "end_frame": 90
+              }],
+              "review_items": [{
+                "issue_id": "LAYOUTQA_0123456789ABCDEF",
+                "code": "caption_visual_collision",
+                "severity": "blocking",
+                "title_ja": "字幕と画面テキストが衝突",
+                "remediation_ja": "字幕またはCTAの表示区間・位置を分離してください。",
+                "layer_ids": ["CAP_1", "CTA_1"],
+                "start_frame": 60,
+                "end_frame": 90,
+                "start_timecode": "00:00:02.000",
+                "end_timecode": "00:00:03.000"
+              }]
+            }
+          }
+        """
+    } else if includeVerifiedLayout {
+        layoutMetrics = """
+        ,
+          "metrics": {
+            "deterministic_layout_qa": {
+              "version": "deterministic-layout-qa/v2",
+              "status": "verified",
+              "snapshot_version": "render-layout-snapshot/v1",
+              "issues": [],
+              "review_items": []
+            }
+          }
+        """
+    } else {
+        layoutMetrics = ""
+    }
     try """
     {
       "version": "1",
@@ -192,7 +307,7 @@ private func writeRenderPackageFixture(
       "checks": [
         { "name": "timeline_schema_valid", "passed": true\(qaDetails) },
         { "name": "loudness", "passed": \(qaPassed ? "true" : "false")\(loudnessDetails) }
-      ]
+      ]\(layoutMetrics)
     }
     """.write(to: package.appendingPathComponent("qa-report.json"), atomically: true, encoding: .utf8)
     let provenance = includeManifestProvenance
@@ -217,4 +332,108 @@ private func writeRenderPackageFixture(
       }\(provenance)
     }
     """.write(to: package.appendingPathComponent("package_manifest.json"), atomically: true, encoding: .utf8)
+}
+
+private func writeSpeechCadenceMetric(project: URL) throws {
+    let reportURL = project
+        .appendingPathComponent("07_package")
+        .appendingPathComponent("qa-report.json")
+    let data = try Data(contentsOf: reportURL)
+    var report = try XCTUnwrap(
+        JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    report["metrics"] = [
+        "speech_cadence_qa": [
+            "version": "speech-cadence-qa/v1",
+            "status": "review_required",
+            "mode": "aggressive",
+            "checked_clip_count": 1,
+            "silence_event_count": 1,
+            "intentional_hold_count": 0,
+            "thresholds": [
+                "head_silence_max_ms": 350,
+                "internal_silence_max_ms": 600,
+                "tail_silence_max_ms": 350,
+                "source": "short-form-retention/aggressive/v1",
+            ],
+            "review_items": [[
+                "issue_id": "CADENCEQA_0123456789ABCDEF",
+                "code": "excessive_internal_silence",
+                "severity": "review",
+                "clip_id": "CLIP_001",
+                "asset_id": "AST_001",
+                "silence_event_id": "AE_INTERNAL",
+                "source_start_us": 1_000_000,
+                "source_end_us": 1_800_000,
+                "timeline_start_frame": 30,
+                "timeline_end_frame": 54,
+                "start_timecode": "00:00:01.001",
+                "end_timecode": "00:00:01.802",
+                "duration_ms": 801,
+                "suggested_action": "jump_cut",
+                "title_ja": "発話中の間が長い",
+                "remediation_ja": "文脈と表情を確認して詰めてください。",
+            ]],
+        ],
+    ]
+    try JSONSerialization.data(
+        withJSONObject: report,
+        options: [.prettyPrinted, .sortedKeys]
+    ).write(to: reportURL, options: .atomic)
+}
+
+private func writeCaptionDeliveryMetric(project: URL) throws {
+    let reportURL = project
+        .appendingPathComponent("07_package")
+        .appendingPathComponent("qa-report.json")
+    let data = try Data(contentsOf: reportURL)
+    var report = try XCTUnwrap(
+        JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    report["metrics"] = [
+        "caption_delivery_qa": [
+            "version": "caption-delivery-qa/v1",
+            "status": "review_required",
+            "mode": "aggressive",
+            "checked_caption_count": 1,
+            "evidence_caption_count": 1,
+            "incomplete_caption_count": 0,
+            "intentional_reveal_count": 0,
+            "thresholds": [
+                "ordinary_lead_frames": 2,
+                "question_audio_first_frames": 0,
+                "max_lag_ms": 120,
+                "speech_end_tolerance_frames": 1,
+                "min_dwell_ms": 800,
+                "cps_limit": 16,
+                "source": "caption-semantic-timing+short-form-retention/aggressive/v1",
+            ],
+            "review_items": [[
+                "issue_id": "CAPTIONQA_0123456789ABCDEF",
+                "code": "insufficient_read_time",
+                "severity": "review",
+                "caption_id": "SC_FLASH",
+                "asset_id": "AST_001",
+                "segment_id": "SEG_001",
+                "text_excerpt": "馬鹿げてますよね",
+                "caption_start_frame": 150,
+                "caption_end_frame": 165,
+                "audio_start_frame": 150,
+                "audio_end_frame": 156,
+                "timeline_start_frame": 150,
+                "timeline_end_frame": 165,
+                "start_timecode": "00:00:05.005",
+                "end_timecode": "00:00:05.506",
+                "measured_ms": 501,
+                "threshold_ms": 800,
+                "suggested_action": "extend_read_time",
+                "title_ja": "字幕を読む時間が短い",
+                "remediation_ja": "読了時間を確保してください。",
+            ]],
+        ],
+    ]
+    try JSONSerialization.data(
+        withJSONObject: report,
+        options: [.prettyPrinted, .sortedKeys]
+    ).write(to: reportURL, options: .atomic)
 }

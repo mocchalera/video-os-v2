@@ -66,6 +66,11 @@ import {
   type RevealTranscriptItem,
 } from "../caption/semantic-timing.js";
 import { planSocialHookOverlay } from "../caption/social-finishing.js";
+import {
+  finalizeCaptionDraftTiming,
+  validateFinalCaptionInvariants,
+  type FinalCaptionInvariantIssue,
+} from "../caption/final-invariants.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -100,6 +105,13 @@ export interface CaptionCommandOptions {
   excludeSpeakers?: string[];
   /** If true, remove filler words from captions. Default: false. */
   removeFillers?: boolean;
+}
+
+export interface CaptionRetimeResult {
+  success: boolean;
+  error?: CommandError;
+  captionDraft?: CaptionDraft;
+  captionTimingReport?: CaptionTimingReport;
 }
 
 export interface ApproveCaptionsOptions {
@@ -279,6 +291,94 @@ export function captionCommand(
   return { success: true, captionSource, captionDraft: draft, captionTimingReport: timingReport };
 }
 
+/**
+ * Recompute timing for an existing caption draft without regenerating text or
+ * reconciling the editorial project state. This is the safe repair route when
+ * word timestamps are backfilled after human text review has already begun.
+ */
+export function retimeCaptionDraft(projectDir: string): CaptionRetimeResult {
+  const absDir = path.resolve(projectDir);
+  const draftPath = path.join(absDir, "07_package", "caption_draft.json");
+  const timelinePath = path.join(absDir, "05_timeline", "timeline.json");
+  if (!fs.existsSync(draftPath) || !fs.existsSync(timelinePath)) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "caption_draft.json and timeline.json are required for caption retiming",
+      },
+    };
+  }
+
+  try {
+    const draft = JSON.parse(fs.readFileSync(draftPath, "utf-8")) as CaptionDraft;
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as TimelineIR;
+    const transcripts = new Map<string, TranscriptArtifact>();
+    const transcriptDir = path.join(absDir, "03_analysis", "transcripts");
+    if (fs.existsSync(transcriptDir)) {
+      for (const file of fs.readdirSync(transcriptDir)) {
+        if (!file.startsWith("TR_") || !file.endsWith(".json")) continue;
+        const transcript = JSON.parse(
+          fs.readFileSync(path.join(transcriptDir, file), "utf-8"),
+        ) as TranscriptArtifact;
+        transcripts.set(transcript.asset_id, transcript);
+      }
+    }
+
+    const workingDraft: CaptionDraft = {
+      ...draft,
+      speech_captions: draft.speech_captions.map((entry) => structuredClone(entry)),
+      draft_status: "ready_for_human_approval",
+    };
+    const timedDraft = applyCaptionWordTiming(workingDraft, draft.caption_policy, timeline, transcripts);
+    const timingResult = applyCaptionSemanticTimingPhase(
+      timedDraft,
+      draft.caption_policy,
+      timeline,
+      transcripts,
+    );
+    const finalized = finalizeCaptionDraftTiming(
+      timingResult.draft,
+      timeline.sequence.fps_num / timeline.sequence.fps_den,
+      draft.caption_policy.language,
+    );
+    applyReadinessGate(
+      finalized.draft,
+      draft.caption_policy,
+      timingResult.report,
+      timeline.sequence.fps_num / timeline.sequence.fps_den,
+      finalized.issues,
+    );
+
+    atomicWriteJson(draftPath, finalized.draft);
+    if (timingResult.report) {
+      atomicWriteJson(
+        path.join(absDir, "07_package", "caption_timing_report.json"),
+        timingResult.report,
+      );
+    }
+    return {
+      success: true,
+      captionDraft: finalized.draft,
+      captionTimingReport: timingResult.report,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
+function atomicWriteJson(filePath: string, value: unknown): void {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+  fs.renameSync(tempPath, filePath);
+}
+
 // ── Separate approval command (human-only) ──────────────────────
 
 /**
@@ -310,6 +410,37 @@ export function approveCaptions(
     };
   }
   const draft: CaptionDraft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
+  const timelinePath = path.join(absDir, "05_timeline/timeline.json");
+  if (!fs.existsSync(timelinePath)) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "timeline.json not found; final caption invariants cannot be verified",
+      },
+    };
+  }
+  const approvalTimeline: TimelineIR = JSON.parse(
+    fs.readFileSync(timelinePath, "utf-8"),
+  );
+  const approvalFps =
+    approvalTimeline.sequence.fps_num / approvalTimeline.sequence.fps_den;
+  const finalInvariantIssues = validateFinalCaptionInvariants(
+    draft.speech_captions,
+    approvalFps,
+    draft.caption_policy.language,
+  ).filter((issue) => issue.severity === "block");
+  if (finalInvariantIssues.length > 0) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message:
+          "Final caption invariants failed: " +
+          finalInvariantIssues.map((issue) => issue.message).join("; "),
+      },
+    };
+  }
 
   // Reject if draft is not ready for approval
   if (draft.draft_status !== "ready_for_human_approval") {
@@ -383,7 +514,6 @@ export function approveCaptions(
   // of the way merely to make a caption-only correction.
   let timelineUpdated = false;
   if (doc.current_state === "approved" || doc.current_state === "packaged") {
-    const timelinePath = path.join(absDir, "05_timeline/timeline.json");
     if (fs.existsSync(timelinePath)) {
       const timeline: TimelineIR = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
       const fps = timeline.sequence.fps_num / timeline.sequence.fps_den;
@@ -422,21 +552,27 @@ async function runEditorialAndFinishDraft(
   });
 
   // Apply timing phase to editorial draft
-  const timedDraft = applyTimingPhase(draft, captionPolicy, timeline, transcripts);
-  const timingResult = applySemanticTimingPhase(timedDraft, captionPolicy, timeline, transcripts);
+  const timedDraft = applyCaptionWordTiming(draft, captionPolicy, timeline, transcripts);
+  const timingResult = applyCaptionSemanticTimingPhase(timedDraft, captionPolicy, timeline, transcripts);
+  const finalized = finalizeCaptionDraftTiming(
+    timingResult.draft,
+    timeline.sequence.fps_num / timeline.sequence.fps_den,
+    captionPolicy.language,
+  );
 
   // Apply readiness gate
   applyReadinessGate(
-    timingResult.draft,
+    finalized.draft,
     captionPolicy,
     timingResult.report,
     timeline.sequence.fps_num / timeline.sequence.fps_den,
+    finalized.issues,
   );
 
   // Write draft and report
   fs.writeFileSync(
     path.join(packageDir, "caption_draft.json"),
-    JSON.stringify(timingResult.draft, null, 2),
+    JSON.stringify(finalized.draft, null, 2),
     "utf-8",
   );
   fs.writeFileSync(
@@ -455,7 +591,7 @@ async function runEditorialAndFinishDraft(
   return {
     success: true,
     captionSource,
-    captionDraft: timingResult.draft,
+    captionDraft: finalized.draft,
     editorialReport: report,
     captionTimingReport: timingResult.report,
   };
@@ -467,7 +603,7 @@ async function runEditorialAndFinishDraft(
  * Apply word-level timing remap to draft entries.
  * Updates each entry with timing metadata (source, confidence, sourceWordRefs).
  */
-function applyTimingPhase(
+export function applyCaptionWordTiming(
   draft: CaptionDraft,
   captionPolicy: CaptionPolicy,
   timeline: TimelineIR,
@@ -488,7 +624,7 @@ function applyTimingPhase(
         end_us: item.end_us,
         text: item.text,
         words: item.words,
-        word_timing_mode: item.word_timing_mode,
+        word_timing_mode: item.word_timing_mode ?? tr.word_timing_mode,
       });
     }
   }
@@ -536,15 +672,21 @@ function applyTimingPhase(
     const timing = timingResults.get(entry.caption_id);
     if (!timing) return entry;
 
+    const preservedWordTiming = timing.timingSource === "clip_item_remap"
+      && entry.timing?.sourceWordRefs?.length
+      ? entry.timing
+      : undefined;
+
     return {
       ...entry,
       timeline_in_frame: timing.timelineInFrame,
       timeline_duration_frames: timing.timelineDurationFrames,
       timing: {
-        source: timing.timingSource,
-        confidence: timing.timingConfidence,
-        sourceWordRefs: timing.sourceWordRefs,
-        triggeredFallback: timing.timingSource === "clip_item_remap",
+        source: preservedWordTiming?.source ?? timing.timingSource,
+        confidence: preservedWordTiming?.confidence ?? timing.timingConfidence,
+        sourceWordRefs: preservedWordTiming?.sourceWordRefs ?? timing.sourceWordRefs,
+        triggeredFallback: preservedWordTiming?.triggeredFallback
+          ?? timing.timingSource === "clip_item_remap",
         timelineInFrame: timing.timelineInFrame,
         timelineDurationFrames: timing.timelineDurationFrames,
       },
@@ -559,7 +701,7 @@ function applyTimingPhase(
 
 // ── Semantic speech timing phase ───────────────────────────────
 
-function applySemanticTimingPhase(
+export function applyCaptionSemanticTimingPhase(
   draft: CaptionDraft,
   captionPolicy: CaptionPolicy,
   timeline: TimelineIR,
@@ -580,7 +722,7 @@ function applySemanticTimingPhase(
         end_us: item.end_us,
         text: item.text,
         words: item.words,
-        word_timing_mode: item.word_timing_mode,
+        word_timing_mode: item.word_timing_mode ?? transcript.word_timing_mode,
       });
     }
   }
@@ -651,6 +793,7 @@ function applyReadinessGate(
   captionPolicy: CaptionPolicy,
   timingReport?: CaptionTimingReport,
   fps = 24,
+  finalInvariantIssues: FinalCaptionInvariantIssue[] = [],
 ): void {
   const language = captionPolicy.language;
   const baseLayout = getLayoutPolicy(language, captionPolicy.styling_class);
@@ -662,6 +805,9 @@ function applyReadinessGate(
   let hasFailure = false;
 
   if (timingReport?.issues.some((issue) => issue.severity === "block")) {
+    hasFailure = true;
+  }
+  if (finalInvariantIssues.some((issue) => issue.severity === "block")) {
     hasFailure = true;
   }
 
@@ -726,16 +872,22 @@ function buildPassthroughDraft(
   };
 
   // Apply timing phase
-  const timedDraft = applyTimingPhase(draft, captionPolicy, timeline, transcripts);
-  const timingResult = applySemanticTimingPhase(timedDraft, captionPolicy, timeline, transcripts);
+  const timedDraft = applyCaptionWordTiming(draft, captionPolicy, timeline, transcripts);
+  const timingResult = applyCaptionSemanticTimingPhase(timedDraft, captionPolicy, timeline, transcripts);
+  const finalized = finalizeCaptionDraftTiming(
+    timingResult.draft,
+    timeline.sequence.fps_num / timeline.sequence.fps_den,
+    captionPolicy.language,
+  );
 
   // Apply readiness gate
   applyReadinessGate(
-    timingResult.draft,
+    finalized.draft,
     captionPolicy,
     timingResult.report,
     timeline.sequence.fps_num / timeline.sequence.fps_den,
+    finalized.issues,
   );
 
-  return { draft: timingResult.draft, timingReport: timingResult.report };
+  return { draft: finalized.draft, timingReport: timingResult.report };
 }

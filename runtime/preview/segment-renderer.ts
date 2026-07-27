@@ -18,6 +18,8 @@ import {
 } from "../render/canonical-render-input.js";
 import { assertSourceInputsUnchanged, createSourceInputAttestation } from "../render/source-input-attestation.js";
 import { buildStillVideoArgs } from "../render/assembler.js";
+import { computeSha256 } from "../packaging/manifest.js";
+import { assertMediaWriteReady } from "../system/media-write-doctor.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -44,12 +46,15 @@ export interface PreviewSegmentOptions {
   /** Output file path override */
   outputPath?: string;
   execFileImpl?: typeof execFile;
+  /** Test/host seam for the fail-closed toolchain and capacity gate. */
+  assertMediaWriteReadyImpl?: typeof assertMediaWriteReady;
 }
 
 export interface PreviewSegmentResult {
   outputPath: string;
   clipCount: number;
   durationSec: number;
+  receiptPath: string;
 }
 
 interface TimelineData {
@@ -269,6 +274,18 @@ export async function renderPreviewSegment(
     timelinePath: opts.timelinePath,
     sourceLocators: opts.sourceMap,
   });
+  const outputPath = opts.outputPath ??
+    defaultOutputPath(opts.projectDir, opts.beatId, opts.firstNSec);
+  (opts.assertMediaWriteReadyImpl ?? assertMediaWriteReady)({
+    reservations: [{
+      label: "preview output and scratch",
+      path: path.dirname(outputPath),
+      requiredBytes: 512 * 1024 * 1024,
+    }],
+    requireFfmpeg: opts.execFileImpl === undefined,
+    requireFfprobe: false,
+    requireCaptionFilters: false,
+  });
   const canonicalInputs = materializeVerifiedStillSnapshots(
     resolveCanonicalRenderInputs(timeline as never, {
       projectDir: opts.projectDir,
@@ -307,8 +324,6 @@ export async function renderPreviewSegment(
   }
 
   // Prepare output directory
-  const outputPath = opts.outputPath ??
-    defaultOutputPath(opts.projectDir, opts.beatId, opts.firstNSec);
   const outputDir = path.dirname(outputPath);
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -382,10 +397,35 @@ export async function renderPreviewSegment(
       fs.rmSync(outputPath, { force: true });
       throw error;
     }
+    const receiptPath = `${outputPath}.receipt.json`;
+    const previewStat = fs.statSync(outputPath);
+    const approvalPath = path.join(opts.projectDir, "07_package/caption_approval.json");
+    const draftPath = path.join(opts.projectDir, "07_package/caption_draft.json");
+    const captionInputPath = fs.existsSync(approvalPath)
+      ? approvalPath
+      : fs.existsSync(draftPath) ? draftPath : undefined;
+    const receipt = {
+      version: "timeline-preview-receipt/v1",
+      preview_path: path.relative(opts.projectDir, outputPath),
+      preview_sha256: computeSha256(outputPath),
+      preview_size_bytes: previewStat.size,
+      preview_mtime_ms: Math.round(previewStat.mtimeMs),
+      timeline_path: path.relative(opts.projectDir, opts.timelinePath),
+      timeline_sha256: computeSha256(opts.timelinePath),
+      caption_input: captionInputPath ? {
+        path: path.relative(opts.projectDir, captionInputPath),
+        sha256: computeSha256(captionInputPath),
+      } : null,
+      created_at: new Date().toISOString(),
+    };
+    const temporaryReceiptPath = `${receiptPath}.tmp-${process.pid}`;
+    fs.writeFileSync(temporaryReceiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+    fs.renameSync(temporaryReceiptPath, receiptPath);
     return {
       outputPath,
       clipCount: clips.length,
       durationSec,
+      receiptPath,
     };
   } finally {
     // Clean up temp directory

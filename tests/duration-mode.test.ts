@@ -497,7 +497,7 @@ describe("QA: Required Checks", () => {
     expect(checks).toContain("resolution_valid");
     expect(checks).toContain("source_inputs_freshness_valid");
     expect(checks).toContain("dialogue_timeline_alignment_valid");
-    expect(checks.length).toBe(12);
+    expect(checks.length).toBe(13);
   });
 });
 

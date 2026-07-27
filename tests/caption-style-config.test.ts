@@ -19,7 +19,10 @@ describe("caption style preset registry", () => {
   it("default preset suppresses auto-wrap (WrapStyle=2)", () => {
     expect(DEFAULT_CAPTION_STYLE_PRESET.wrapStyle).toBe(2);
     expect(DEFAULT_CAPTION_STYLE_PRESET.fontId).toBe("noto-sans-jp");
-    expect(DEFAULT_CAPTION_STYLE_PRESET.fontFamily).toBe("Noto Sans JP");
+    expect(DEFAULT_CAPTION_STYLE_PRESET.fontFamily).toBe("VideoOS Noto Sans JP Bold");
+    expect(DEFAULT_CAPTION_STYLE_PRESET.fontWeight).toBe(700);
+    expect(DEFAULT_CAPTION_STYLE_PRESET.assFontFamily).toBe("VideoOS Noto Sans JP Bold");
+    expect(DEFAULT_CAPTION_STYLE_PRESET.assSynthesizeBold).toBe(false);
   });
 
   it("registers the default and clean-lower-third presets", () => {
@@ -30,6 +33,10 @@ describe("caption style preset registry", () => {
   it("resolves clean-lower-third to a lower, larger, no-wrap lower-third", () => {
     const p = resolveCaptionStylePreset("clean-lower-third");
     expect(p.presetId).toBe("clean-lower-third");
+    expect(p.fontFamily).toBe("VideoOS Noto Sans JP Black");
+    expect(p.fontWeight).toBe(900);
+    expect(p.assFontFamily).toBe("VideoOS Noto Sans JP Black");
+    expect(p.assSynthesizeBold).toBe(false);
     expect(p.alignment).toBe("bottom_center");
     expect(p.fontSizePx1080).toBe(60); // speech-led: readable on phone-sized playback
     expect(p.outlinePx1080).toBe(3);
@@ -45,12 +52,24 @@ describe("caption style preset registry", () => {
     expect(cinematic).toBeLessThan(digest); // film captions stay restrained
     expect(sns).toBeGreaterThan(digest); // vertical short-form is oversized
     expect(resolveCaptionStylePreset("sns-vertical").fontWeight).toBe(700);
-    expect(resolveCaptionStylePreset("longform-event")).toMatchObject({
+    const longform = resolveCaptionStylePreset("longform-event");
+    expect(longform).toMatchObject({
       presetId: "longform-event",
+      fontFamily: "VideoOS Noto Sans JP Bold",
+      fontWeight: 700,
+      assFontFamily: "VideoOS Noto Sans JP Bold",
+      assSynthesizeBold: false,
       fontSizePx1080: 56,
       marginV1080: 48,
       wrapStyle: 2,
     });
+    expect(buildAssDocument(
+      [{ startSec: 0, endSec: 1, text: "太字を固定" }],
+      longform,
+      { width: 1920, height: 1080, fps: 30 },
+    )).toMatch(
+      /Style: Default,VideoOS Noto Sans JP Bold,56,[^\n]*,0,0,0,0,100,100/,
+    );
   });
 
   it("resolves the approved SNS style to large outline-only subtitles", () => {
@@ -112,6 +131,29 @@ describe("caption style preset registry", () => {
 });
 
 describe("ASS document generation (burn-in)", () => {
+  it("rejects generic or mismatched families for authored 700/900 ASS styles", () => {
+    const sequence = { width: 1920, height: 1080, fps: 30 };
+    const invalidBold = {
+      ...DEFAULT_CAPTION_STYLE_PRESET,
+      fontFamily: "Noto Sans JP",
+      assFontFamily: "Noto Sans JP",
+      assSynthesizeBold: true,
+    };
+    expect(() => buildAssForceStyle(invalidBold, sequence))
+      .toThrow("ASS weight 700 requires VideoOS Noto Sans JP Bold");
+    expect(() => buildAssDocument([], invalidBold, sequence))
+      .toThrow("ASS weight 700 requires VideoOS Noto Sans JP Bold");
+
+    const invalidHeavy = {
+      ...resolveCaptionStylePreset("clean-lower-third"),
+      fontFamily: "VideoOS Noto Sans JP Bold",
+      assFontFamily: "VideoOS Noto Sans JP Bold",
+      assSynthesizeBold: false,
+    };
+    expect(() => buildAssDocument([], invalidHeavy, sequence))
+      .toThrow("ASS weight 900 requires VideoOS Noto Sans JP Black");
+  });
+
   it("pins PlayRes to the frame and carries preset style + WrapStyle", () => {
     const ass = buildAssDocument(
       [{ startSec: 1, endSec: 3.5, text: "行1\n行2" }],
@@ -123,7 +165,7 @@ describe("ASS document generation (burn-in)", () => {
     expect(ass).toContain("WrapStyle: 2");
     // Style row ends with ...,Alignment,MarginL,MarginR,MarginV,Encoding
     // clean-lower-third at 1080p: 60px, alignment 2, MarginL/R 96, MarginV 36
-    expect(ass).toMatch(/Style: Default,Noto Sans JP,60,[^\n]*,2,96,96,36,1/);
+    expect(ass).toMatch(/Style: Default,VideoOS Noto Sans JP Black,60,[^\n]*,0,0,0,0,100,100,0,0,1,3,0,2,96,96,36,1/);
     expect(ass).toContain(
       "Dialogue: 0,0:00:01.00,0:00:03.50,Default,,0,0,0,,行1\\N行2",
     );
@@ -148,8 +190,8 @@ describe("ASS document generation (burn-in)", () => {
       { width: 1080, height: 1920, fps: 24 },
     );
 
-    expect(ass).toMatch(/Style: Offscreen,Noto Sans JP,103,[^\n]*,8,65,65,389,1/);
-    expect(ass).toMatch(/Style: Onscreen,Noto Sans JP,103,[^\n]*,2,65,65,235,1/);
+    expect(ass).toMatch(/Style: Offscreen,VideoOS Noto Sans JP Bold,103,[^\n]*,8,65,65,389,1/);
+    expect(ass).toMatch(/Style: Onscreen,VideoOS Noto Sans JP Bold,103,[^\n]*,2,65,65,235,1/);
     expect(ass).toContain("Dialogue: 0,0:00:00.00,0:00:01.00,Offscreen,,0,0,0,,AI｜ビートを始める");
     expect(ass).toContain("Dialogue: 0,0:00:01.00,0:00:02.00,Onscreen,,0,0,0,,坂本｜もっと本気で");
   });

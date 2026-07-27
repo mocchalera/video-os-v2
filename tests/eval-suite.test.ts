@@ -37,6 +37,7 @@ function makeProject(
     selects?: boolean;
     blueprint?: boolean;
     timeline?: boolean;
+    video?: boolean;
   } = {},
 ): string {
   const dir = path.join(repo, "projects", projectId);
@@ -50,6 +51,7 @@ function makeProject(
   if (options.selects) write(path.join(dir, "04_plan/selects_candidates.yaml"), "version: '1'\n");
   if (options.blueprint) write(path.join(dir, "04_plan/edit_blueprint.yaml"), "version: '1'\n");
   if (options.timeline) write(path.join(dir, "05_timeline/timeline.json"), "{}\n");
+  if (options.video) write(path.join(dir, "09_output/rough-cut.mp4"), "render");
   return dir;
 }
 
@@ -243,6 +245,13 @@ describe("golden eval suite", () => {
       const result = await evaluateReviewVisualQA(projectDir, {
         repoRoot: repo,
         writeReport: false,
+        runDeterministicOutputQAImpl: async () => ({
+          status: "verified",
+          duration_sec: 10,
+          width: 1920,
+          height: 1080,
+          issues: [],
+        }),
         runMarlinQAImpl: async (_dir, _video, _brief, options) => {
           observedWriteReport = options?.writeReport;
           return marlinReport;
@@ -251,6 +260,40 @@ describe("golden eval suite", () => {
 
       expect(observedWriteReport).toBe(false);
       expect(result.status).toBe("verified");
+      expect(result.deterministic_scan?.status).toBe("verified");
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks visual approval when deterministic output QA is incomplete", async () => {
+    const repo = makeRepo();
+    try {
+      const projectDir = makeProject(repo, "incomplete-scan", {
+        brief: true,
+        timeline: true,
+        video: true,
+      });
+      let marlinCalls = 0;
+      const result = await evaluateReviewVisualQA(projectDir, {
+        repoRoot: repo,
+        runDeterministicOutputQAImpl: async () => ({
+          status: "incomplete",
+          reason: "ffmpeg_scan_failed: decode error",
+          issues: [],
+        }),
+        runMarlinQAImpl: async () => {
+          marlinCalls += 1;
+          throw new Error("must not run after incomplete deterministic QA");
+        },
+      });
+
+      expect(result).toMatchObject({
+        status: "blocked",
+        reason: "deterministic_output_qa_incomplete",
+        deterministic_scan: { status: "incomplete" },
+      });
+      expect(marlinCalls).toBe(0);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }

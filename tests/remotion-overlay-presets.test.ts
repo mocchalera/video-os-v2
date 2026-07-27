@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getOverlayText,
+  overlayPosition,
   overlayPresets,
   resolveOverlayPreset,
 } from "../runtime/render/remotion/styles/overlay-presets.js";
@@ -42,6 +43,35 @@ describe("Remotion overlay preset registry", () => {
       expect(preset?.id).toBe(id);
       expect(typeof preset?.render).toBe("function");
     }
+  });
+});
+
+describe("overlayPosition", () => {
+  const safeArea = { top: 96, right: 54, bottom: 96, left: 54 };
+
+  it("honors top-center and top-right anchors", () => {
+    expect(overlayPosition("top-center", safeArea)).toEqual({
+      alignItems: "center",
+      justifyContent: "flex-start",
+      paddingTop: 96,
+    });
+    expect(overlayPosition("top-right", safeArea)).toEqual({
+      alignItems: "flex-end",
+      justifyContent: "flex-start",
+      paddingTop: 96,
+      paddingRight: 54,
+    });
+  });
+
+  it("honors center-left and center-right anchors", () => {
+    expect(overlayPosition("center-left", safeArea)).toMatchObject({
+      alignItems: "flex-start",
+      justifyContent: "center",
+    });
+    expect(overlayPosition("center-right", safeArea)).toMatchObject({
+      alignItems: "flex-end",
+      justifyContent: "center",
+    });
   });
 });
 

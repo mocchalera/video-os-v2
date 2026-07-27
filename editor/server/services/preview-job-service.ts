@@ -35,6 +35,12 @@ import { dialogueCutFadeSec } from "../../shared/dialogue-cut-fade.js";
 import { canonicalLinearGainFilter } from "../../shared/audio-gain.js";
 import { resolvePreviewBundledFontsDir } from "./font-assets.js";
 import {
+  frameRateRatio,
+  frameRateValue,
+  rationalFrameRate,
+  type FrameRateInput,
+} from "../../shared/rational-timebase.js";
+import {
   CanonicalRenderInputError,
   resolveCanonicalRenderInputs,
 } from "../../../runtime/render/canonical-render-input.js";
@@ -449,11 +455,9 @@ function generateSrt(
 /** Maximum number of preview-*.mp4 artifacts retained per project. */
 const PREVIEW_CACHE_KEEP = 3;
 
-export function previewOutputFrameRateArgs(fps: number): string[] {
-  if (!Number.isFinite(fps) || fps <= 0) {
-    throw new Error(`Invalid preview output frame rate: ${fps}`);
-  }
-  const value = Number.isInteger(fps) ? String(fps) : fps.toFixed(6);
+export function previewOutputFrameRateArgs(rate: FrameRateInput): string[] {
+  const fps = frameRateValue(rate);
+  const value = typeof rate === "number" ? String(fps) : frameRateRatio(rate);
   return ["-r", value, "-fps_mode", "cfr"];
 }
 
@@ -563,7 +567,10 @@ function isExactPreviewEnabled(): boolean {
 
 export function authoritativeStillInRenderSpec(projectDir: string, renderSpec: RenderSpec): boolean {
   const timeline = {
-    sequence: { fps_num: Math.round(renderSpec.sequence.fps * 1000), fps_den: 1000 },
+    sequence: {
+      fps_num: renderSpec.sequence.fpsNum,
+      fps_den: renderSpec.sequence.fpsDen,
+    },
     tracks: {
       video: [{ track_id: "V1", kind: "video", clips: renderSpec.video.clips.map((clip) => ({
         asset_id: clip.assetId,
@@ -974,7 +981,9 @@ export class PreviewJobService {
       const clipPaths: string[] = [];
       // Merge build-time warnings from RenderSpec with runtime warnings
       const warnings: string[] = [...(spec.warnings ?? [])];
-      const { width, height, fps } = spec.sequence;
+      const { width, height, fps, fpsNum, fpsDen } = spec.sequence;
+      const frameRate = rationalFrameRate(fpsNum, fpsDen);
+      const fpsRational = frameRateRatio(frameRate);
       const timelineDurationFrames = previewTimelineDurationFrames(
         videoClips,
         spec.audio.dialogueClips,
@@ -1011,7 +1020,7 @@ export class PreviewJobService {
       );
       const gapAwareChain = buildGapAwareTransitionChainInputs(
         audioExtendedInputs,
-        { fps, width, height, totalFrames: timelineDurationFrames },
+        { fps, fpsRational, width, height, totalFrames: timelineDurationFrames },
       );
       const chainTransitionIndexes = transitionIndexes.flatMap((t) => {
         const fromIndex = gapAwareChain.clipIndexToChainIndex.get(t.fromIndex);
@@ -1085,7 +1094,7 @@ export class PreviewJobService {
         }
 
         ffmpegArgs.push(
-          ...previewOutputFrameRateArgs(fps),
+          ...previewOutputFrameRateArgs(frameRate),
           "-pix_fmt", "yuv420p",
           clipOutPath,
         );
@@ -1125,7 +1134,7 @@ export class PreviewJobService {
         chainArgs.splice(
           chainArgs.length - 1,
           0,
-          ...previewOutputFrameRateArgs(fps),
+          ...previewOutputFrameRateArgs(frameRate),
         );
 
         const concatExec = execFileWithChild("ffmpeg", chainArgs);
@@ -1313,7 +1322,7 @@ export class PreviewJobService {
           // Caption burn is the only re-encode of the artifact — it must use
           // the same profile as the final path's burn.
           ...x264Args(INTERMEDIATE_X264),
-          ...previewOutputFrameRateArgs(fps),
+          ...previewOutputFrameRateArgs(frameRate),
         );
       } else {
         finalArgs.push("-c:v", "copy");
@@ -1346,7 +1355,7 @@ export class PreviewJobService {
       const meta: PreviewArtifactMeta = {
         renderSpecHash,
         timelineRevision: spec.timelineRevision,
-        sequence: { width, height, fps },
+        sequence: { width, height, fps, fpsNum, fpsDen },
         generatedAt: new Date().toISOString(),
         status: "ready",
         warnings,

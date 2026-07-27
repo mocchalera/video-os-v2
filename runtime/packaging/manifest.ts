@@ -9,6 +9,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import type { RenderRouteReceipt } from "../render/route-resolver.js";
+
+export interface PackageRenderProvenance {
+  contract_version: "render-provenance/v1";
+  route_receipt: { path: string; sha256: string };
+  renderer_versions: RenderRouteReceipt["renderer_versions"];
+  layer_receipts: RenderRouteReceipt["layer_receipts"];
+  font_receipt?: RenderRouteReceipt["font_receipt"];
+  delivery_execution: RenderRouteReceipt["delivery_execution"];
+  inputs: RenderRouteReceipt["inputs"];
+  outputs: RenderRouteReceipt["outputs"];
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -31,6 +43,8 @@ export interface PackageManifest {
       sha256: string;
     }>;
     qa_report: { path: string; sha256: string };
+    derived_video_provenance?: { path: string; sha256: string };
+    layout_snapshot?: { path: string; sha256: string };
   };
   provenance: {
     editorial_timeline_hash: string;
@@ -43,6 +57,7 @@ export interface PackageManifest {
     source_inputs_hash?: string;
     source_inputs_attestation_status?: "verified" | "live_only" | "not_applicable";
     source_inputs_freshness_reason?: string;
+    render?: PackageRenderProvenance;
   };
 }
 
@@ -53,9 +68,19 @@ export interface PackageManifest {
  * Returns the full hex digest prefixed with "sha256:".
  */
 export function computeSha256(filePath: string): string {
-  const content = fs.readFileSync(filePath);
-  const hex = crypto.createHash("sha256").update(content).digest("hex");
-  return `sha256:${hex}`;
+  const hash = crypto.createHash("sha256");
+  const descriptor = fs.openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(8 * 1024 * 1024);
+  try {
+    for (;;) {
+      const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  return `sha256:${hash.digest("hex")}`;
 }
 
 /**
@@ -109,9 +134,31 @@ export function buildEngineRenderManifest(opts: {
   sourceInputsAttestationStatus: "verified" | "live_only" | "not_applicable";
   sourceInputsFreshnessReason?: string;
   captionPolicy: { source: string; delivery_mode: string };
+  renderRouteReceiptPath: string;
+  derivedVideoProvenancePath?: string;
+  layoutSnapshotPath?: string;
   createdAt?: string;
 }): PackageManifest {
   const { outputDir, captionPolicy } = opts;
+  const routeReceipt = JSON.parse(
+    fs.readFileSync(opts.renderRouteReceiptPath, "utf8"),
+  ) as RenderRouteReceipt;
+  if (routeReceipt.receipt_version !== "render-route-receipt/v3") {
+    throw new Error("render_route_receipt_version_invalid");
+  }
+  const renderProvenance: PackageRenderProvenance = {
+    contract_version: "render-provenance/v1",
+    route_receipt: {
+      path: path.resolve(opts.renderRouteReceiptPath),
+      sha256: computeSha256(opts.renderRouteReceiptPath),
+    },
+    renderer_versions: routeReceipt.renderer_versions,
+    layer_receipts: routeReceipt.layer_receipts,
+    ...(routeReceipt.font_receipt ? { font_receipt: routeReceipt.font_receipt } : {}),
+    delivery_execution: routeReceipt.delivery_execution,
+    inputs: routeReceipt.inputs,
+    outputs: routeReceipt.outputs,
+  };
 
   // Final video
   const finalVideoPath = opts.finalVideoPath ?? path.join(outputDir, "video", "final.mp4");
@@ -125,6 +172,18 @@ export function buildEngineRenderManifest(opts: {
   const qaReport = artifactEntry(qaReportPath);
   if (!qaReport) {
     throw new Error(`Required artifact not found: ${qaReportPath}`);
+  }
+  const derivedVideoProvenance = opts.derivedVideoProvenancePath
+    ? artifactEntry(opts.derivedVideoProvenancePath)
+    : null;
+  if (opts.derivedVideoProvenancePath && !derivedVideoProvenance) {
+    throw new Error(`Required artifact not found: ${opts.derivedVideoProvenancePath}`);
+  }
+  const layoutSnapshot = opts.layoutSnapshotPath
+    ? artifactEntry(opts.layoutSnapshotPath)
+    : null;
+  if (opts.layoutSnapshotPath && !layoutSnapshot) {
+    throw new Error(`Required artifact not found: ${opts.layoutSnapshotPath}`);
   }
 
   // Optional stems
@@ -175,6 +234,10 @@ export function buildEngineRenderManifest(opts: {
   const artifacts: PackageManifest["artifacts"] = {
     final_video: finalVideo,
     qa_report: qaReport,
+    ...(derivedVideoProvenance
+      ? { derived_video_provenance: derivedVideoProvenance }
+      : {}),
+    ...(layoutSnapshot ? { layout_snapshot: layoutSnapshot } : {}),
   };
 
   if (rawVideo) artifacts.raw_video = rawVideo;
@@ -183,7 +246,11 @@ export function buildEngineRenderManifest(opts: {
   if (captions.length > 0) artifacts.captions = captions;
 
   return {
-    version: "1.0.0",
+    version: derivedVideoProvenance && layoutSnapshot
+      ? "1.2.0"
+      : derivedVideoProvenance
+      ? "1.1.0"
+      : "1.0.0",
     project_id: opts.projectId,
     source_of_truth: "engine_render",
     base_timeline_version: opts.baseTimelineVersion,
@@ -209,6 +276,7 @@ export function buildEngineRenderManifest(opts: {
       ...(opts.sourceInputsFreshnessReason
         ? { source_inputs_freshness_reason: opts.sourceInputsFreshnessReason }
         : {}),
+      render: renderProvenance,
     },
   };
 }
@@ -233,6 +301,8 @@ export function buildNleFinishingManifest(opts: {
   finalVideoPath: string;
   qaReportPath: string;
   sidecarPaths?: string[];
+  derivedVideoProvenancePath?: string;
+  layoutSnapshotPath?: string;
   createdAt?: string;
 }): PackageManifest {
   const { captionPolicy } = opts;
@@ -251,6 +321,18 @@ export function buildNleFinishingManifest(opts: {
     throw new Error(
       `Required artifact not found: ${opts.qaReportPath}`,
     );
+  }
+  const derivedVideoProvenance = opts.derivedVideoProvenancePath
+    ? artifactEntry(opts.derivedVideoProvenancePath)
+    : null;
+  if (opts.derivedVideoProvenancePath && !derivedVideoProvenance) {
+    throw new Error(`Required artifact not found: ${opts.derivedVideoProvenancePath}`);
+  }
+  const layoutSnapshot = opts.layoutSnapshotPath
+    ? artifactEntry(opts.layoutSnapshotPath)
+    : null;
+  if (opts.layoutSnapshotPath && !layoutSnapshot) {
+    throw new Error(`Required artifact not found: ${opts.layoutSnapshotPath}`);
   }
 
   // Caption sidecars
@@ -287,12 +369,20 @@ export function buildNleFinishingManifest(opts: {
   const artifacts: PackageManifest["artifacts"] = {
     final_video: finalVideo,
     qa_report: qaReport,
+    ...(derivedVideoProvenance
+      ? { derived_video_provenance: derivedVideoProvenance }
+      : {}),
+    ...(layoutSnapshot ? { layout_snapshot: layoutSnapshot } : {}),
   };
 
   if (captions.length > 0) artifacts.captions = captions;
 
   return {
-    version: "1.0.0",
+    version: derivedVideoProvenance && layoutSnapshot
+      ? "1.2.0"
+      : derivedVideoProvenance
+      ? "1.1.0"
+      : "1.0.0",
     project_id: opts.projectId,
     source_of_truth: "nle_finishing",
     base_timeline_version: opts.baseTimelineVersion,

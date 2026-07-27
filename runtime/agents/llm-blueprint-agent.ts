@@ -352,6 +352,8 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
         mode: "speech_sync",
         ordinary_lead_frames: 2,
         audio_first_frames: 1,
+        question_audio_first_frames: 0,
+        gap_ownership: "previous",
         anchors: [],
       },
     },
@@ -415,6 +417,7 @@ export function buildLlmBlueprintPrompt(input: BlueprintPromptInput): string {
     "ending_policy は完全な最終発言の後に最低1.5秒の動く元素材を残し、音声と映像を自然にフェードさせてください。最終フレームの静止で尺を埋めないでください。",
     "字幕は speech caption の単一レイヤーを前提とし、同じ発話を別テロップ層へ重複して出さないでください。",
     "speech captionは内容を問わず発話より大きく先出ししないでください。caption_policy.semantic_timing.mode は transcript 字幕なら通常 speech_sync とし、読みやすさのための微先行は最大2フレームまでにします。",
+    "問いかけ字幕は question_audio_first_frames: 0 で音声開始に揃え、無音区間は gap_ownership: previous として次の発言を先取りせず前字幕の後ろへ置いてください。",
     "笑い・驚き・結果が成立する語だけは semantic_timing.mode: protect_reveals とし、通常の発話同期に加えて情報解禁アンカーを使います。protected reveal は音声 onset より先に表示しないでください。",
     "semantic_timing anchor_text は候補 transcript_excerpt に実在し、字幕本文にもそのまま残る完全一致部分文字列だけを使ってください。segment_id も既存 selects の値だけを使い、精密時刻が分からないのに timeline_frame を推測しないでください。字幕なし・authored-onlyの場合だけ mode=off にしてください。",
     "brief の emotion_curve と pacing intent に基づいて、必要な beat だけに craft directives を割り当ててください。craft は任意です。",
@@ -875,6 +878,8 @@ function sanitizeCaptionPolicy(value: unknown, briefContent: unknown): NonNullab
   policy.semantic_timing = {
     mode,
     ordinary_lead_frames: nonNegativeInteger(semanticRaw.ordinary_lead_frames) ?? 2,
+    question_audio_first_frames: nonNegativeInteger(semanticRaw.question_audio_first_frames) ?? 0,
+    gap_ownership: enumValue(semanticRaw.gap_ownership, new Set(["previous", "blank"] as const)) ?? "previous",
     ...(mode === "protect_reveals"
       ? { audio_first_frames: nonNegativeInteger(semanticRaw.audio_first_frames) ?? 1 }
       : {}),

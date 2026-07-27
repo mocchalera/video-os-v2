@@ -8,7 +8,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { compile, applyPatch, detectProjectBgm } from "../runtime/compiler/index.js";
+import {
+  compile,
+  applyPatch,
+  detectProjectBgm,
+  type CompileResult,
+} from "../runtime/compiler/index.js";
 import { writePreviewManifest } from "../runtime/compiler/export.js";
 import type { ReviewPatch } from "../runtime/compiler/patch.js";
 import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
@@ -29,6 +34,24 @@ export interface CompileTimelineArgs {
   skipPreview?: boolean;
   skipConfirmations?: boolean;
   forceConfirmations?: boolean;
+}
+
+export function assertCompileDurationGate(input: {
+  hardGate: boolean;
+  resolution: CompileResult["resolution"];
+}): void {
+  if (!input.hardGate || input.resolution.duration_fit) return;
+
+  const contentFrames = input.resolution.content_frames ?? input.resolution.total_frames;
+  const minFrames = input.resolution.min_target_frames ?? input.resolution.target_frames;
+  const maxFrames = input.resolution.max_target_frames ?? input.resolution.target_frames;
+  const status = input.resolution.duration_status
+    ?? (contentFrames < minFrames ? "short" : "over");
+
+  throw new Error(
+    `Hard duration gate failed: status=${status} content_frames=${contentFrames} ` +
+    `allowed_frames=${minFrames}..${maxFrames} target_frames=${input.resolution.target_frames}`,
+  );
 }
 
 export function parseArgs(argv: string[] = process.argv): CompileTimelineArgs {
@@ -129,6 +152,17 @@ export async function runCompileTimeline(options: CompileTimelineArgs): Promise<
     sourceMapPath,
     bgm_duration_us: bgm?.durationUs,
   });
+
+  try {
+    assertCompileDurationGate({
+      hardGate: result.duration_policy?.hard_gate === true,
+      resolution: result.resolution,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    pt.fail("duration_gate", message);
+    throw error;
+  }
   pt.advance("timeline.json");
 
   console.log(`Timeline compiled: ${result.outputPath}`);
@@ -228,7 +262,15 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
   );
 
   // Apply patch with blueprint target duration
-  const result = applyPatch(timeline, patch, selects.candidates, targetDurationFrames);
+  const result = applyPatch(
+    timeline,
+    patch,
+    selects.candidates,
+    targetDurationFrames,
+    blueprint.duration_policy,
+    timeline.sequence.fps_num,
+    timeline.sequence.fps_den,
+  );
 
   if (result.errors.length > 0) {
     console.error("Patch errors:");
@@ -256,10 +298,17 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
   console.log(`  Preview manifest: ${manifestPath}`);
   console.log(`  Resolution: ${JSON.stringify(result.resolution)}`);
 
-  // Warn if post-patch duration exceeds blueprint target
+  assertCompileDurationGate({
+    hardGate: blueprint.duration_policy?.hard_gate === true,
+    resolution: result.resolution,
+  });
+
+  // Non-hard duration policies remain advisory after patching.
   if (!result.resolution.duration_fit) {
     console.error(
-      `WARNING: Post-patch duration (${result.resolution.total_frames} frames) exceeds target (${result.resolution.target_frames} frames)`,
+      `WARNING: Post-patch duration is outside the target window ` +
+      `(content=${result.resolution.content_frames ?? result.resolution.total_frames} frames, ` +
+      `target=${result.resolution.target_frames} frames)`,
     );
   }
 

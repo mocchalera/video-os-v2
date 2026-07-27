@@ -18,6 +18,7 @@ import {
   type TranscribeFn,
   type SttChunkResult,
   type SttUtterance,
+  type SttWord,
   type SttPolicy,
   type TranscriptAlignmentThresholds,
   STT_CONNECTOR_VERSION,
@@ -46,6 +47,7 @@ export interface TranscriptItem {
   end_us: number;
   text: string;
   confidence?: number;
+  words?: SttWord[];
 }
 
 /** The full transcript artifact for one asset. */
@@ -275,6 +277,8 @@ export interface MergedUtterance {
   end_us: number;
   text: string;
   confidence?: number;
+  /** Word timings converted to asset-level time. */
+  words?: SttWord[];
   /** Which chunk this came from */
   chunk_index: number;
 }
@@ -417,6 +421,15 @@ export function mergeChunkResults(
         end_us: utt.end_us + chunk.start_us,
         text: utt.text,
         confidence: utt.confidence,
+        ...(utt.words && utt.words.length > 0
+          ? {
+              words: utt.words.map((word) => ({
+                ...word,
+                start_us: word.start_us + chunk.start_us,
+                end_us: word.end_us + chunk.start_us,
+              })),
+            }
+          : {}),
         chunk_index: chunk.index,
       });
     }
@@ -515,8 +528,13 @@ export function buildTranscriptArtifact(
       end_us: utt.end_us,
       text: utt.text,
       ...(utt.confidence !== undefined ? { confidence: utt.confidence } : {}),
+      ...(utt.words && utt.words.length > 0
+        ? { words: utt.words.map((word) => ({ ...word })) }
+        : {}),
     };
   });
+
+  const hasWordTiming = items.some((item) => item.words && item.words.length > 0);
 
   const requestHash = computeRequestHash({
     connector_version: STT_CONNECTOR_VERSION,
@@ -535,7 +553,10 @@ export function buildTranscriptArtifact(
     ...(language ? { language } : {}),
     ...(languageConfidence !== undefined ? { language_confidence: languageConfidence } : {}),
     analysis_status: items.length > 0 ? "ready" : "failed",
-    word_timing_mode: sttPolicy.generate_words ? "word" : "none",
+    // This field describes the artifact we actually produced, not merely the
+    // requested provider option. Claiming `word` without items[].words makes
+    // downstream caption timing silently fall back to character estimates.
+    word_timing_mode: hasWordTiming ? "word" : "none",
     provenance: {
       stage: "stt",
       method: "openai_transcribe_diarize",

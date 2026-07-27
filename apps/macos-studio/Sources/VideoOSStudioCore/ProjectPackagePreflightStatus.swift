@@ -1,7 +1,105 @@
 import Foundation
 
+public enum ProjectPackagePreflightDecision: String, Equatable, Sendable, Decodable {
+    case readyToRun = "ready_to_run"
+    case blocked
+}
+
+public enum ProjectPackagePreflightIdentityStatus: String, Equatable, Sendable, Decodable {
+    case confirmed
+    case inferred
+    case unresolved
+    case conflict
+}
+
+public enum ProjectPackagePreflightIdentityArtifact: String, Equatable, Sendable, Decodable {
+    case timeline
+    case state
+    case qa
+    case manifest
+}
+
+public enum ProjectPackagePreflightIdentitySourceStatus: String, Equatable, Sendable, Decodable {
+    case present
+    case missing
+    case empty
+    case malformed
+}
+
+public struct ProjectPackagePreflightIdentitySource: Equatable, Sendable, Decodable {
+    public let artifact: ProjectPackagePreflightIdentityArtifact
+    public let path: String
+    public let status: ProjectPackagePreflightIdentitySourceStatus
+    public let projectID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case artifact
+        case path
+        case status
+        case projectID = "project_id"
+    }
+}
+
+public struct ProjectPackagePreflightIdentity: Equatable, Sendable, Decodable {
+    public let status: ProjectPackagePreflightIdentityStatus
+    public let projectID: String?
+    public let evidenceCount: Int
+    public let sources: [ProjectPackagePreflightIdentitySource]
+
+    public init(
+        status: ProjectPackagePreflightIdentityStatus,
+        projectID: String? = nil,
+        evidenceCount: Int = 0,
+        sources: [ProjectPackagePreflightIdentitySource] = []
+    ) {
+        self.status = status
+        self.projectID = projectID
+        self.evidenceCount = evidenceCount
+        self.sources = sources
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case projectID = "project_id"
+        case evidenceCount = "evidence_count"
+        case sources
+    }
+}
+
+public struct ProjectPackagePreflightIssue: Equatable, Sendable, Decodable {
+    public let code: String
+    public let message: String
+
+    public init(code: String, message: String) {
+        self.code = code
+        self.message = message
+    }
+}
+
+public struct ProjectPackagePreflightNextAction: Equatable, Sendable, Decodable {
+    public enum Code: String, Equatable, Sendable, Decodable {
+        case runPackage = "run_package"
+        case resolveProjectIdentity = "resolve_project_identity"
+        case resolvePreflightIssues = "resolve_preflight_issues"
+    }
+
+    public let code: Code
+    public let message: String
+
+    public init(code: Code, message: String) {
+        self.code = code
+        self.message = message
+    }
+}
+
 public struct ProjectPackagePreflightStatus: Equatable, Sendable, Decodable {
+    public let version: String
+    public let decision: ProjectPackagePreflightDecision
+    public let projectIdentity: ProjectPackagePreflightIdentity
+    public let structuredIssues: [ProjectPackagePreflightIssue]
+    public let nextAction: ProjectPackagePreflightNextAction
     public let available: Bool
+    /// package-preflight/v1 compatibility projection. Studio uses decision.
     public let ok: Bool
     public let projectDir: String?
     public let issues: [String]
@@ -15,6 +113,11 @@ public struct ProjectPackagePreflightStatus: Equatable, Sendable, Decodable {
     public init(
         available: Bool = true,
         ok: Bool,
+        version: String = "package-preflight/v2",
+        decision: ProjectPackagePreflightDecision? = nil,
+        projectIdentity: ProjectPackagePreflightIdentity? = nil,
+        structuredIssues: [ProjectPackagePreflightIssue]? = nil,
+        nextAction: ProjectPackagePreflightNextAction? = nil,
         projectDir: String? = nil,
         issues: [String] = [],
         nextSteps: [String] = [],
@@ -24,6 +127,23 @@ public struct ProjectPackagePreflightStatus: Equatable, Sendable, Decodable {
         currentState: String? = nil,
         visualQaSummary: String? = nil
     ) {
+        let resolvedDecision = decision ?? (ok ? .readyToRun : .blocked)
+        self.version = version
+        self.decision = resolvedDecision
+        self.projectIdentity = projectIdentity ?? ProjectPackagePreflightIdentity(
+            status: projectID == nil ? .unresolved : .confirmed,
+            projectID: projectID,
+            evidenceCount: projectID == nil ? 0 : 1
+        )
+        self.structuredIssues = structuredIssues ?? issues.map {
+            ProjectPackagePreflightIssue(code: "PACKAGE_PREFLIGHT_BLOCKED", message: $0)
+        }
+        self.nextAction = nextAction ?? ProjectPackagePreflightNextAction(
+            code: resolvedDecision == .readyToRun ? .runPackage : .resolvePreflightIssues,
+            message: nextSteps.first ?? (resolvedDecision == .readyToRun
+                ? "Run package with the same project and options."
+                : "Resolve the listed preflight issues, then rerun preflight.")
+        )
         self.available = available
         self.ok = ok
         self.projectDir = projectDir
@@ -37,6 +157,11 @@ public struct ProjectPackagePreflightStatus: Equatable, Sendable, Decodable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case version
+        case decision
+        case projectIdentity = "project_identity"
+        case structuredIssues = "structured_issues"
+        case nextAction = "next_action"
         case ok
         case projectDir
         case issues
@@ -50,6 +175,18 @@ public struct ProjectPackagePreflightStatus: Equatable, Sendable, Decodable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(String.self, forKey: .version)
+        guard version == "package-preflight/v2" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .version,
+                in: container,
+                debugDescription: "unsupported package preflight version"
+            )
+        }
+        decision = try container.decode(ProjectPackagePreflightDecision.self, forKey: .decision)
+        projectIdentity = try container.decode(ProjectPackagePreflightIdentity.self, forKey: .projectIdentity)
+        structuredIssues = try container.decode([ProjectPackagePreflightIssue].self, forKey: .structuredIssues)
+        nextAction = try container.decode(ProjectPackagePreflightNextAction.self, forKey: .nextAction)
         available = true
         ok = try container.decode(Bool.self, forKey: .ok)
         projectDir = try container.decodeIfPresent(String.self, forKey: .projectDir)
@@ -62,22 +199,14 @@ public struct ProjectPackagePreflightStatus: Equatable, Sendable, Decodable {
         visualQaSummary = try container.decodeIfPresent(String.self, forKey: .visualQaSummary)
     }
 
-    public var contractIsComplete: Bool {
-        guard ok else { return true }
-        return !(projectID?.isEmpty ?? true)
-            && (currentState == "approved" || currentState == "packaged")
-            && (sourceOfTruth == "engine_render" || sourceOfTruth == "nle_finishing")
-    }
-
     public var failureLabel: String? {
         guard available else { return "package preflight unavailable" }
-        guard contractIsComplete else { return "package preflight incomplete" }
-        guard ok else { return issues.first ?? "package preflight blocked" }
-        return nil
+        guard decision == .blocked else { return nil }
+        return structuredIssues.first?.message ?? issues.first ?? "package preflight blocked"
     }
 
     public var canPackage: Bool {
-        failureLabel == nil
+        available && decision == .readyToRun
     }
 
     public static func unavailable(_ issue: String) -> ProjectPackagePreflightStatus {
@@ -138,17 +267,9 @@ public enum ProjectPackagePreflightRunner {
                   let decoded = try? JSONDecoder().decode(ProjectPackagePreflightStatus.self, from: data) else {
                 return .unavailable("package preflight returned invalid JSON")
             }
-            let expectedExitStatus: Int32 = decoded.ok ? 0 : 1
+            let expectedExitStatus: Int32 = decoded.decision == .readyToRun ? 0 : 1
             guard output.status == expectedExitStatus else {
                 return .unavailable("package preflight returned a contradictory exit status")
-            }
-            guard let reportedProjectDir = decoded.projectDir,
-                  !reportedProjectDir.isEmpty else {
-                return .unavailable("package preflight omitted the project path")
-            }
-            let reportedURL = URL(fileURLWithPath: reportedProjectDir).standardizedFileURL
-            if reportedURL.path != projectURL.standardizedFileURL.path {
-                return .unavailable("package preflight returned a different project path")
             }
             return decoded
         } catch {

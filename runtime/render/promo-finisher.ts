@@ -12,8 +12,8 @@ import {
   type AssemblyResult,
   type ExecFileLike,
 } from "./assembler.js";
-import { DEFAULT_VIDEO_FONT } from "../../editor/shared/font-contract.js";
-import { resolveBundledFontPaths } from "../fonts/bundled-font.js";
+import { ASS_BOLD_VIDEO_FONT } from "../../editor/shared/font-contract.js";
+import { verifyBundledFont } from "../fonts/bundled-font.js";
 import { assertTimelineRenderSupported } from "./media-kind-guard.js";
 import { assertSourceInputsUnchanged, createSourceInputAttestation } from "./source-input-attestation.js";
 
@@ -83,6 +83,8 @@ export interface AssSubtitleStyleOptions {
   marginV?: number;
   primaryColor?: string;
   outlineColor?: string;
+  backColor?: string;
+  borderStyle?: 1 | 3;
   playResX?: number;
   playResY?: number;
 }
@@ -336,13 +338,15 @@ export function buildAssSubtitleFile(
   styleOptions: AssSubtitleStyleOptions = {},
 ): string {
   const style = {
-    fontName: styleOptions.fontName ?? DEFAULT_VIDEO_FONT.family,
+    fontName: styleOptions.fontName ?? ASS_BOLD_VIDEO_FONT.family,
     fontSize: styleOptions.fontSize ?? 66,
     bold: styleOptions.bold ?? true,
     outline: styleOptions.outline ?? 6,
     marginV: styleOptions.marginV ?? 72,
     primaryColor: styleOptions.primaryColor ?? "&H00FFFFFF",
     outlineColor: styleOptions.outlineColor ?? "&H00000000",
+    backColor: styleOptions.backColor ?? "&H64000000",
+    borderStyle: styleOptions.borderStyle ?? 1,
     playResX: styleOptions.playResX ?? 1920,
     playResY: styleOptions.playResY ?? 1080,
   };
@@ -358,7 +362,7 @@ export function buildAssSubtitleFile(
     "",
     "[V4+ Styles]",
     "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding",
-    `Style: Default,${style.fontName},${style.fontSize},${style.primaryColor},&H000000FF,${style.outlineColor},&H64000000,${bold},0,0,0,100,100,0,0,1,${style.outline},0,2,90,90,${style.marginV},1`,
+    `Style: Default,${style.fontName},${style.fontSize},${style.primaryColor},&H000000FF,${style.outlineColor},${style.backColor},${bold},0,0,0,100,100,0,0,${style.borderStyle},${style.outline},0,2,90,90,${style.marginV},1`,
     "",
     "[Events]",
     "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
@@ -374,7 +378,7 @@ export function buildAssSubtitleFile(
 export function buildPromoFinalizeFfmpegArgs(options: PromoFinalizeFfmpegArgsOptions): string[] {
   const fadeSec = Math.max(0, options.fadeSec ?? DEFAULT_ENDING_FADE_SEC);
   const fadeStart = Math.max(0, options.durationSec - fadeSec);
-  const fontsDir = options.fontsDir ?? resolveBundledFontPaths().fontsDir;
+  const fontsDir = options.fontsDir ?? verifyBundledFont().fontsDir;
   const subtitleFilter = `subtitles=filename='${escapeFfmpegFilterValue(options.assPath)}':fontsdir='${escapeFfmpegFilterValue(fontsDir)}'`;
   const videoFilters = [
     subtitleFilter,

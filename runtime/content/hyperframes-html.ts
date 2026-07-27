@@ -180,10 +180,10 @@ export function generateHyperFramesHTML(
     .question-panel { width: ${Math.round(input.width * 0.86)}px; text-align: center; }
     .question-label { margin-bottom: 14px; color: #00d4ff; font-size: ${Math.round(input.height * 0.022)}px; font-weight: 800; letter-spacing: .12em; -webkit-text-stroke: 1px rgba(0,0,0,.72); paint-order: stroke fill; }
     .question-text { font-size: ${Math.round(input.height * 0.058)}px; font-weight: 800; line-height: 1.18; white-space: pre-wrap; text-wrap: balance; -webkit-text-stroke: ${Math.max(2, Math.round(input.height * 0.0035))}px #080808; paint-order: stroke fill; text-shadow: 0 3px 10px rgba(0,0,0,.58); }
-    .lower-third { max-width: ${Math.round(input.width * 0.64)}px; }
-    .lower-third-name { display: inline-block; font-size: ${Math.round(input.height * 0.043)}px; font-weight: 800; line-height: 1.1; -webkit-text-stroke: ${Math.max(2, Math.round(input.height * 0.0028))}px #080808; paint-order: stroke fill; text-shadow: 0 3px 8px rgba(0,0,0,.55); }
+    .lower-third { width: max-content; max-width: ${Math.round(input.width * 0.64)}px; text-align: left; }
+    .lower-third-name { display: inline-block; white-space: nowrap; word-break: keep-all; font-size: ${Math.round(input.height * 0.043)}px; font-weight: 800; line-height: 1.1; -webkit-text-stroke: ${Math.max(2, Math.round(input.height * 0.0028))}px #080808; paint-order: stroke fill; text-shadow: 0 3px 8px rgba(0,0,0,.55); }
     .lower-third-name::after { content: ""; display: block; width: 72%; height: 5px; margin-top: 9px; border-radius: 999px; background: #00d4ff; box-shadow: 0 2px 5px rgba(0,0,0,.5); }
-    .lower-third-role { margin-top: 10px; color: rgba(255,255,255,.94); font-size: ${Math.round(input.height * 0.024)}px; font-weight: 700; -webkit-text-stroke: 1px rgba(0,0,0,.8); paint-order: stroke fill; }
+    .lower-third-role { margin-top: 10px; white-space: nowrap; word-break: keep-all; color: rgba(255,255,255,.94); font-size: ${Math.round(input.height * 0.024)}px; font-weight: 700; -webkit-text-stroke: 1px rgba(0,0,0,.8); paint-order: stroke fill; }
     @keyframes vos-fade-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
   </style>
 </head>

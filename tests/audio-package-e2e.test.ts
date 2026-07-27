@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { computeFileHash } from "../runtime/state/reconcile.js";
 import { assessAssemblyFreshness, runPackageCli } from "../scripts/package.js";
+import { approveFinalRenderChecklist } from "../runtime/packaging/final-render-approval.js";
 
 const tempDirs: string[] = [];
 afterEach(() => {
@@ -128,6 +129,21 @@ ffIt("packages a canonical audio-only timeline with real media QA and visual N/A
     },
   };
   fs.writeFileSync(path.join(projectDir, "project_state.yaml"), stringifyYaml(state), "utf-8");
+  approveFinalRenderChecklist(projectDir, {
+    approvedBy: "operator",
+    approvedAt: "2026-07-20T00:00:00.000Z",
+    checklist: {
+      captions: "not_applicable",
+      caption_typography: "not_applicable",
+      section_titles: "not_applicable",
+      audio: {
+        decision: "preserve",
+        preview_reviewed: false,
+        bgm: "none",
+      },
+      output_spec: "approved",
+    },
+  });
 
   const staleAssemblyPath = path.join(projectDir, "05_timeline", "assembly.mp4");
   execFileSync("ffmpeg", [

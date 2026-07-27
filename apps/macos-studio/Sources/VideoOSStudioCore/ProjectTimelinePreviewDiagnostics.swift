@@ -426,16 +426,19 @@ public enum ProjectTimelinePreviewDiagnosticsReader {
     }
 
     private static func sequenceFPS(_ sequence: [String: Any]) -> Double {
+        if let numerator = sequence["fps_num"] as? Int,
+           let denominator = sequence["fps_den"] as? Int,
+           numerator > 0,
+           denominator > 0 {
+            return Double(numerator) / Double(denominator)
+        }
         if let fps = sequence["fps"] as? Double, fps > 0 {
             return fps
         }
         if let fps = sequence["fps"] as? Int, fps > 0 {
             return Double(fps)
         }
-        let numerator = sequence["fps_num"] as? Int ?? 24
-        let denominator = sequence["fps_den"] as? Int ?? 1
-        guard numerator > 0, denominator > 0 else { return 24 }
-        return Double(numerator) / Double(denominator)
+        return 24
     }
 
     private static func doubleValue(_ value: Any?) -> Double? {

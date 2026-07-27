@@ -169,6 +169,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_package/active_delivery.json",
+    schemaFile: "active-delivery.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "06_review/editorial_pipeline_status.json",
     schemaFile: "editorial-pipeline-status.schema.json",
     format: "json",
@@ -202,6 +209,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     format: "json",
     optional: true,
     runnerChecks: ["package_qa_report_passed"],
+  },
+  {
+    artifactPath: "07_package/derived-video-provenance.json",
+    schemaFile: "derived-video-provenance.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
   },
   {
     artifactPath: "07_package/delivery_profiles/default.yaml",

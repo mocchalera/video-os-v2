@@ -67,13 +67,16 @@ export function parseRenderRouteArgs(argv: string[]): RenderRouteCliArgs {
 }
 
 export function formatRenderRoute(decision: RenderRouteDecision): string {
-  const layers = [
-    decision.assembly_engine,
-    ...(decision.hyperframes_overlay ? ["hyperframes-overlay"] : []),
-    ...(decision.speech_caption_engine === "ffmpeg-libass" ? ["ffmpeg-libass-captions"] : []),
-  ];
+  const layers = decision.visual_layers.map((layer) =>
+    `${layer.renderer}:${layer.mode}:${layer.composite_stage}` +
+    (layer.embedded_in_base ? ":embedded" : ""),
+  );
   return [
-    `Render route: ${layers.join(" + ")}`,
+    `Base: ${decision.base_engine}`,
+    `Visual layers: ${layers.length > 0 ? layers.join(" + ") : "none"}`,
+    `Captions: ${decision.caption_layer.engine}`,
+    `Delivery: ${decision.delivery.compositor}/${decision.delivery.video_encoder} ` +
+      `(${decision.delivery.lossy_video_encode_passes} lossy video encode)`,
     `Genre/style: ${decision.genre} / ${decision.style_family}`,
     ...decision.reasons.map((reason) => `- ${reason}`),
   ].join("\n");

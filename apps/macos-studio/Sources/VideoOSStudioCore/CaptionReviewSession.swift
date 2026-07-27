@@ -1,6 +1,14 @@
 import Combine
 import Foundation
 
+public enum CaptionReviewerRefreshPolicy {
+    public static let delayNanoseconds: UInt64 = 300_000_000
+    public static func shouldRefresh(from oldValue: String, to newValue: String) -> Bool {
+        oldValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            != newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 public struct CaptionReviewConflict: Identifiable, Equatable, Sendable {
     public let id: String
     public let loaded: CaptionReviewQueueItem
@@ -34,26 +42,36 @@ public final class CaptionReviewSession: ObservableObject {
     @Published public var draftStartFrame = 0
     @Published public var draftEndFrame = 1
     @Published public var isAutosaveEnabled = true
-    @Published public var reviewer: String
+    @Published public var reviewer: String {
+        didSet { scheduleReviewerReadinessRefresh(from: oldValue, to: reviewer) }
+    }
     @Published public private(set) var isBusy = false
     @Published public private(set) var statusMessage = "字幕ドラフトを読み込んでいます。"
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var conflict: CaptionReviewConflict?
     @Published public private(set) var requiresManualConflictSave = false
     @Published public private(set) var isTextCompositionActive = false
+    @Published public private(set) var approvalHash: String?
+    @Published public private(set) var approvalStatus: String?
+    @Published public private(set) var activeGenerationID: String?
+    @Published public private(set) var activeFinalPath: String?
 
     public let projectURL: URL
     public let repositoryRoot: URL
+    public let fontRuntimeStatus: CaptionFontRuntimeStatus?
     private var autosaveTask: Task<Void, Never>?
+    private var reviewerReadinessTask: Task<Void, Never>?
 
     public init(
         projectURL: URL,
         repositoryRoot: URL,
-        reviewer: String = NSFullUserName()
+        reviewer: String = NSFullUserName(),
+        fontRuntimeStatus: CaptionFontRuntimeStatus? = nil
     ) {
         self.projectURL = projectURL
         self.repositoryRoot = repositoryRoot
         self.reviewer = reviewer.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.fontRuntimeStatus = fontRuntimeStatus
     }
 
     public var selectedItem: CaptionReviewQueueItem? {
@@ -100,12 +118,20 @@ public final class CaptionReviewSession: ObservableObject {
 
     public var canApprove: Bool {
         guard let document else { return false }
-        return !isBusy &&
-            !isTextCompositionActive &&
-            document.blockingCount == 0 &&
-            document.flaggedCount == 0 &&
-            document.verifiedCount == document.items.count &&
-            !reviewer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !isBusy && !isTextCompositionActive
+            && document.approvalReadiness.canApprove
+            && approvalBlockers.isEmpty
+    }
+
+    public var approvalBlockers: [CaptionApprovalReadiness.Blocker] {
+        guard let document else { return [] }
+        var blockers = document.approvalReadiness.blockers
+        if let runtimeBlocker = fontRuntimeStatus?.blocker(
+            requiredFamily: document.captionStyle.fontFamily
+        ), !blockers.contains(where: { $0.code == runtimeBlocker.code }) {
+            blockers.append(runtimeBlocker)
+        }
+        return blockers
     }
 
     public func load(
@@ -118,12 +144,15 @@ public final class CaptionReviewSession: ObservableObject {
         errorMessage = nil
         let result = await CaptionReviewRunner.load(
             projectURL: projectURL,
-            repositoryRoot: repositoryRoot
+            repositoryRoot: repositoryRoot,
+            reviewer: reviewer
         )
         switch result {
         case let .success(document):
             self.document = document
             items = document.items
+            approvalHash = document.currentApproval?.hash
+            approvalStatus = document.currentApproval?.status
             statusMessage = statusOverride ?? "\(document.items.count)件の字幕をリスク順で読み込みました。"
             let requestedID = preferredCaptionID ?? selectedCaptionID
             let nextID = requestedID.flatMap { selectedID in
@@ -373,7 +402,8 @@ public final class CaptionReviewSession: ObservableObject {
 
     public func approve() async {
         guard canApprove else {
-            errorMessage = "修正必須・要確認・未確認の字幕を解消してから承認してください。"
+            let blockerMessage = approvalBlockers.map(\.message).joined(separator: "\n")
+            errorMessage = blockerMessage.isEmpty ? "承認条件を確認してください。" : blockerMessage
             return
         }
         isBusy = true
@@ -385,7 +415,69 @@ public final class CaptionReviewSession: ObservableObject {
         )
         statusMessage = result.message
         errorMessage = result.success ? nil : result.message
+        if result.success {
+            approvalHash = result.approvalHash
+            approvalStatus = result.approvalStatus
+            await load(statusOverride: result.message)
+        }
         isBusy = false
+    }
+
+    public func refreshReviewerReadiness() async {
+        await load(preferredCaptionID: selectedCaptionID)
+    }
+
+    private func scheduleReviewerReadinessRefresh(from oldValue: String, to newValue: String) {
+        reviewerReadinessTask?.cancel()
+        guard CaptionReviewerRefreshPolicy.shouldRefresh(from: oldValue, to: newValue) else { return }
+        reviewerReadinessTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: CaptionReviewerRefreshPolicy.delayNanoseconds)
+            guard !Task.isCancelled, let self, !self.isBusy else { return }
+            await self.refreshReviewerReadiness()
+        }
+    }
+
+    public func prepareDraft() async {
+        isBusy = true
+        errorMessage = nil
+        let result = await CaptionReviewRunner.prepareDraft(projectURL: projectURL, repositoryRoot: repositoryRoot)
+        isBusy = false
+        statusMessage = result.message
+        errorMessage = result.success ? nil : result.message
+        if result.success { await load(statusOverride: result.message) }
+    }
+
+    public func verifySafeCaptions() async {
+        guard let document, let baseHash = document.baseCaptionDraftHash else { return }
+        let actor = reviewer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !actor.isEmpty else { errorMessage = "レビュー担当者名を入力してください。"; return }
+        isBusy = true
+        errorMessage = nil
+        let result = await CaptionReviewRunner.verifySafe(
+            projectURL: projectURL,
+            repositoryRoot: repositoryRoot,
+            reviewer: actor,
+            baseCaptionDraftHash: baseHash,
+            items: document.items
+        )
+        isBusy = false
+        statusMessage = result.message
+        errorMessage = result.success ? nil : result.message
+        if result.success { await load(statusOverride: result.message) }
+    }
+
+    public func finalizeApprovedCaptions() async {
+        guard approvalStatus == "approved" else { return }
+        isBusy = true
+        errorMessage = nil
+        let result = await CaptionReviewRunner.finalize(projectURL: projectURL, repositoryRoot: repositoryRoot)
+        isBusy = false
+        statusMessage = result.message
+        errorMessage = result.success ? nil : result.message
+        if result.success {
+            activeGenerationID = result.generationID
+            activeFinalPath = result.finalPath
+        }
     }
 
     private func adjacentTimelineItem(offset: Int) -> CaptionReviewQueueItem? {

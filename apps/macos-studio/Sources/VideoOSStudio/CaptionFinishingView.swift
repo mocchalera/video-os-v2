@@ -43,7 +43,8 @@ struct CaptionFinishingView: View {
     ) {
         _session = StateObject(wrappedValue: CaptionReviewSession(
             projectURL: projectURL,
-            repositoryRoot: repositoryRoot
+            repositoryRoot: repositoryRoot,
+            fontRuntimeStatus: StudioBundledFontRegistry.registrationReport
         ))
         self.onRevealInTimeline = onRevealInTimeline
     }
@@ -51,10 +52,31 @@ struct CaptionFinishingView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            approvalReadinessBar
             Divider()
             if session.isBusy && session.items.isEmpty {
                 ProgressView("字幕ドラフトを読み込んでいます...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let recovery = session.document?.recoveryAction, session.items.isEmpty {
+                VStack(spacing: 16) {
+                    ContentUnavailableView(
+                        "字幕ドラフトが必要です",
+                        systemImage: "captions.bubble.fill",
+                        description: Text(recovery.message)
+                    )
+                    Button {
+                        Task { await session.prepareDraft() }
+                    } label: {
+                        Label("字幕ドラフトを準備", systemImage: "wand.and.stars")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(session.isBusy || !recovery.safeToRun)
+                    .accessibilityIdentifier("CaptionPrepareDraftButton")
+                    Text(session.errorMessage ?? session.statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(session.errorMessage == nil ? Color.secondary : Color.red)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error = session.errorMessage, session.items.isEmpty {
                 ContentUnavailableView(
                     "字幕レビューを開始できません",
@@ -150,6 +172,15 @@ struct CaptionFinishingView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 180)
                 .accessibilityIdentifier("CaptionReviewerField")
+                .onSubmit { Task { await session.refreshReviewerReadiness() } }
+
+            Button {
+                Task { await session.verifySafeCaptions() }
+            } label: {
+                Label("安全な字幕を一括確認（\(session.document?.safeBulkReview.eligibleCount ?? 0)）", systemImage: "checkmark.circle")
+            }
+            .disabled(session.isBusy || (session.document?.safeBulkReview.eligibleCount ?? 0) == 0)
+            .accessibilityIdentifier("CaptionSafeBulkVerifyButton")
 
             Button {
                 Task { await session.undoLastAction() }
@@ -175,6 +206,54 @@ struct CaptionFinishingView: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(.regularMaterial)
+    }
+
+    @ViewBuilder
+    private var approvalReadinessBar: some View {
+        if let document = session.document {
+            let blockers = session.approvalBlockers
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: blockers.isEmpty && document.approvalReadiness.canApprove ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(blockers.isEmpty && document.approvalReadiness.canApprove ? Color.green : Color.orange)
+                    if blockers.isEmpty {
+                        Text("完パケ承認できます。warning は確認済みとして記録されています。")
+                    } else {
+                        Text(blockers.map { "[\($0.code)] \($0.message)" }.joined(separator: "  "))
+                    }
+                    Spacer()
+                }
+                .font(.caption)
+                if !document.safeBulkReview.exclusionReasonCounts.isEmpty {
+                    Text("一括確認対象 \(document.safeBulkReview.eligibleCount)件 / 除外: " + document.safeBulkReview.exclusionReasonCounts.sorted(by: { $0.key < $1.key }).map { "\($0.key) \($0.value)件" }.joined(separator: "、"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let warning = document.approvalWarning {
+                    Label("[\(warning.code)] \(warning.message)", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                if let status = session.approvalStatus, let hash = session.approvalHash {
+                    HStack {
+                        Text("caption_approval.json: \(status) / \(hash)")
+                            .font(.caption2.monospaced())
+                            .textSelection(.enabled)
+                        Button("承認字幕で再レンダー") { Task { await session.finalizeApprovedCaptions() } }
+                            .disabled(session.isBusy)
+                            .accessibilityIdentifier("CaptionExplicitFinalizeButton")
+                    }
+                }
+                if let generation = session.activeGenerationID, let finalPath = session.activeFinalPath {
+                    Text("active generation: \(generation) / final: \(finalPath)")
+                        .font(.caption2.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .background(Color.secondary.opacity(0.06))
+        }
     }
 
     private var queuePane: some View {
@@ -586,6 +665,7 @@ struct CaptionFinishingView: View {
                     Label(previewController.isPlaying ? "一時停止" : "前後をループ再生", systemImage: previewController.isPlaying ? "pause.fill" : "play.fill")
                 }
                 .keyboardShortcut(.space, modifiers: [])
+                .disabled(previewController.readiness != .ready)
                 .accessibilityIdentifier("CaptionPreviewPlayButton")
 
                 Button {
@@ -595,6 +675,25 @@ struct CaptionFinishingView: View {
                 }
                 .help("発話前の余白から再生")
                 .accessibilityLabel("前後プレビューを先頭から再生")
+                .disabled(previewController.readiness != .ready)
+
+                if previewController.readiness == .loading {
+                    ProgressView().controlSize(.small)
+                    Text("player準備中")
+                        .font(.caption)
+                } else if previewController.readiness == .failed {
+                    Label("playerエラー", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                    if previewController.canRetry {
+                        Button("再試行") { previewController.retry() }
+                            .accessibilityIdentifier("CaptionPreviewRetryButton")
+                    } else {
+                        Text("再生成が必要")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
 
                 Text(previewController.statusMessage)
                     .font(.caption)
@@ -1061,8 +1160,9 @@ private struct CaptionActualSizeOverlay: View {
             let outline = max(0.35, style.outlinePx1080 * scale)
             let bottomMargin = style.marginV1080 * scale
 
-            Text(text)
-                .font(.custom(style.fontFamily, size: fontSize).weight(style.fontWeight >= 700 ? .bold : .regular))
+            if StudioBundledFontRegistry.registrationReport.canRenderCustomFont(family: style.fontFamily) {
+                Text(text)
+                    .font(.custom(style.fontFamily, size: fontSize).weight(style.previewFontWeight.swiftUIWeight))
                 .multilineTextAlignment(.center)
                 .lineSpacing(lineSpacing)
                 .foregroundStyle(.white)
@@ -1081,6 +1181,13 @@ private struct CaptionActualSizeOverlay: View {
                 )
                 .lineLimit(3)
                 .allowsHitTesting(false)
+            } else {
+                Label("選択fontを登録できないため字幕previewを停止しました", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+            }
         }
         .accessibilityHidden(true)
     }
@@ -1093,6 +1200,21 @@ private struct CaptionActualSizeOverlay: View {
             return height / 2
         case .topCenter:
             return min(height, CGFloat(margin) + CGFloat(contentHeight) / 2)
+        }
+    }
+}
+
+private extension CaptionReviewPreviewStyle.PreviewFontWeight {
+    var swiftUIWeight: Font.Weight {
+        switch self {
+        case .black:
+            return .black
+        case .heavy:
+            return .heavy
+        case .bold:
+            return .bold
+        case .regular:
+            return .regular
         }
     }
 }

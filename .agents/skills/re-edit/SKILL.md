@@ -122,4 +122,7 @@ npx tsx scripts/compile-timeline.ts projects/<project> --fps 30
 - `change_audio_policy` は ducking / nat sound / fade 調整であり、BGM asset の差し替えではない
 - 「長くして」は `move_segment` / `insert_segment` / upstream blueprint 修正になることがある。duration を盲目的に伸ばさない
 - MAまたは人物リフレームを含む場合は `finish-interview` を併用し、字幕や質問カードより前の映像レイヤーへ変換を適用する
+- 講演・インタビューを信頼感のある縦型SNSショートへ仕上げる場合は
+  `finish-business-short` を併用し、重複発言の削除、冒頭主張、フル字幕、
+  話者表記、登録済みCTA、retention QAを一体で扱う
 - patch mode は `selects_candidates.yaml` や `edit_blueprint.yaml` を自動更新しない

@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { evaluatePlaybackContract } from "../runtime/preview/playback-contract.js";
 import {
@@ -13,7 +15,15 @@ import {
 import { verifyExistingPackage } from "../runtime/packaging/package-verification.js";
 import { createSourceInputAttestation } from "../runtime/render/source-input-attestation.js";
 import { computeFileHash } from "../runtime/state/reconcile.js";
+import { resolveProjectRenderRoute } from "../runtime/render/route-resolver.js";
+import { captionFontContractForReceipt } from "../runtime/caption/font-contract.js";
+import { HYPERFRAMES_RENDERER_VERSION } from "../runtime/content/hyperframes-renderer.js";
+import { REMOTION_RENDERER_VERSION } from "../runtime/render/remotion/render-remotion.js";
 import { buildPackagePreflight } from "./package.js";
+import {
+  approveFinalRenderChecklist,
+  FINAL_RENDER_APPROVAL_RELATIVE_PATH,
+} from "../runtime/packaging/final-render-approval.js";
 
 export const MACOS_STUDIO_CONTRACT_FIXTURE_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -171,9 +181,50 @@ function gate10BaseFiles(): Record<string, string> {
   };
 }
 
+function withFinalRenderApproval(files: Record<string, string>): Record<string, string> {
+  const approved = structuredClone(files);
+  return withMaterializedCase({ id: "final-render-approval", files: approved }, (root) => {
+    approveFinalRenderChecklist(root, {
+      approvedBy: "fixture-operator",
+      approvedAt: "2026-07-23T00:00:00Z",
+      checklist: {
+        captions: "not_applicable",
+        caption_typography: "not_applicable",
+        section_titles: "not_applicable",
+        audio: {
+          decision: "preserve",
+          preview_reviewed: false,
+          bgm: "none",
+        },
+        output_spec: "approved",
+      },
+    });
+    approved[FINAL_RENDER_APPROVAL_RELATIVE_PATH] = fs.readFileSync(
+      path.join(root, FINAL_RENDER_APPROVAL_RELATIVE_PATH),
+      "utf8",
+    );
+    return approved;
+  });
+}
+
 function preflightCases(): Array<FileCase> {
-  const ready = gate10BaseFiles();
-  const missingApproval = { ...ready };
+  const base = withFinalRenderApproval(gate10BaseFiles());
+  const ready = structuredClone(base);
+  ready["07_package/qa-report.json"] = jsonText({ project_id: "studio-contract" });
+  ready["07_package/package_manifest.json"] = jsonText({ project_id: "studio-contract" });
+
+  const emptyIdentity = structuredClone(base);
+  const emptyIdentityState = parseYaml(emptyIdentity["project_state.yaml"]) as Record<string, unknown>;
+  emptyIdentityState.project_id = "";
+  emptyIdentity["project_state.yaml"] = stringifyYaml(emptyIdentityState);
+
+  const identityMismatch = structuredClone(ready);
+  identityMismatch["07_package/package_manifest.json"] = jsonText({ project_id: "other-project" });
+
+  const malformedIdentityArtifact = structuredClone(ready);
+  malformedIdentityArtifact["07_package/qa-report.json"] = "{not-json\n";
+
+  const missingApproval = { ...base };
   const stateWithoutApproval = JSON.parse(JSON.stringify({
     version: 1,
     project_id: "studio-contract",
@@ -187,7 +238,7 @@ function preflightCases(): Array<FileCase> {
   }));
   missingApproval["project_state.yaml"] = stringifyYaml(stateWithoutApproval);
 
-  const staleCaption = { ...ready };
+  const staleCaption = structuredClone(base);
   staleCaption["04_plan/edit_blueprint.yaml"] = stringifyYaml({
     version: "1",
     project_id: "studio-contract",
@@ -199,11 +250,90 @@ function preflightCases(): Array<FileCase> {
     base_timeline_version: "timeline-v1",
     approval: { status: "approved" },
   });
+  const staleCaptionWithApproval = withFinalRenderApproval(staleCaption);
+
+  const missingFinalRenderApproval = structuredClone(base);
+  delete missingFinalRenderApproval[FINAL_RENDER_APPROVAL_RELATIVE_PATH];
 
   return [
     { id: "ready_engine_render", files: ready },
+    { id: "empty_id_inferred", files: emptyIdentity },
+    { id: "project_id_mismatch", files: identityMismatch },
+    { id: "malformed_identity_artifact", files: malformedIdentityArtifact },
     { id: "missing_approval", files: missingApproval },
-    { id: "stale_caption_approval", files: staleCaption },
+    { id: "stale_caption_approval", files: staleCaptionWithApproval },
+    { id: "missing_final_render_approval", files: missingFinalRenderApproval },
+  ];
+}
+
+function buildPreflightProcessCases(cases: FileCase[]): Array<{
+  id: string;
+  files: Record<string, string>;
+  exitCode: number;
+  stdout: string;
+  expected: { available: boolean; canPackage: boolean; failureLabel?: string };
+}> {
+  const responses = new Map(cases.map((testCase) => [
+    testCase.id,
+    withMaterializedCase(testCase, (root) => ({
+      files: testCase.files,
+      preflight: normalizeFixturePaths(buildPackagePreflight(root), root),
+    })),
+  ]));
+  const ready = responses.get("ready_engine_render");
+  const empty = responses.get("empty_id_inferred");
+  const mismatch = responses.get("project_id_mismatch");
+  if (!ready || !empty || !mismatch) {
+    throw new Error("required package preflight process fixtures are missing");
+  }
+  return [
+    {
+      id: "normal",
+      files: ready.files,
+      exitCode: 0,
+      stdout: jsonText(ready.preflight),
+      expected: { available: true, canPackage: true },
+    },
+    {
+      id: "empty_id_inferred",
+      files: empty.files,
+      exitCode: 0,
+      stdout: jsonText(empty.preflight),
+      expected: { available: true, canPackage: true },
+    },
+    {
+      id: "project_id_mismatch",
+      files: mismatch.files,
+      exitCode: 1,
+      stdout: jsonText(mismatch.preflight),
+      expected: {
+        available: true,
+        canPackage: false,
+        failureLabel: (mismatch.preflight as { issues: string[] }).issues[0],
+      },
+    },
+    {
+      id: "malformed_json",
+      files: ready.files,
+      exitCode: 1,
+      stdout: "{not-json\n",
+      expected: {
+        available: false,
+        canPackage: false,
+        failureLabel: "package preflight unavailable",
+      },
+    },
+    {
+      id: "exit_json_contradiction",
+      files: ready.files,
+      exitCode: 1,
+      stdout: jsonText(ready.preflight),
+      expected: {
+        available: false,
+        canPackage: false,
+        failureLabel: "package preflight unavailable",
+      },
+    },
   ];
 }
 
@@ -230,12 +360,15 @@ function validManifest(): Record<string, unknown> {
       final_video: { path: "09_output/final.mp4", sha256: "pending" },
       qa_report: { path: "07_package/qa-report.json", sha256: "pending" },
     },
-    provenance: { editorial_timeline_hash: "pending" },
+    provenance: { editorial_timeline_hash: "pending", render: "pending" },
   };
 }
 
 function canonicalPackageFiles(): Record<string, string> {
+  const gateFiles = gate10BaseFiles();
   const files: Record<string, string> = {
+    "01_intent/creative_brief.yaml": gateFiles["01_intent/creative_brief.yaml"],
+    "04_plan/edit_blueprint.yaml": gateFiles["04_plan/edit_blueprint.yaml"],
     "05_timeline/timeline.json": gate10BaseFiles()["05_timeline/timeline.json"],
     "00_sources/fixture-audio.wav": "fixture-audio",
     "02_media/fixture-audio.wav": "fixture-audio",
@@ -254,6 +387,7 @@ function canonicalPackageFiles(): Record<string, string> {
     }),
     "07_package/qa-report.json": jsonText(validQAReport()),
     "07_package/package_manifest.json": jsonText(validManifest()),
+    "07_package/logs/render-route.json": jsonText({ pending: true }),
     "09_output/final.mp4": "fixture-video",
     "project_state.yaml": stringifyYaml({
       version: 1,
@@ -281,17 +415,136 @@ function rebindPackageHashes(files: Record<string, string>): Record<string, stri
         editorial_timeline_hash: string;
         source_inputs_hash?: string;
         source_inputs_attestation_status?: string;
+        render?: unknown;
       };
     };
     manifest.artifacts.final_video.sha256 = computeSha256(path.join(root, "09_output/final.mp4"));
     manifest.artifacts.qa_report.sha256 = computeSha256(path.join(root, "07_package/qa-report.json"));
     manifest.provenance.editorial_timeline_hash = computeFileHash(path.join(root, "05_timeline/timeline.json"));
+    const route = resolveProjectRenderRoute(root);
+    const ffmpegVersion = execFileSync("ffmpeg", ["-version"], {
+      encoding: "utf8",
+    }).split(/\r?\n/, 1)[0].trim();
+    const timelineSha256 = computeSha256(path.join(root, "05_timeline/timeline.json"));
+    const finalSha256 = computeSha256(path.join(root, "09_output/final.mp4"));
+    const blueprint = parseYaml(
+      rebound["04_plan/edit_blueprint.yaml"],
+    ) as { caption_policy?: { styling_class?: string } };
+    let fontReceipt: { path: string; sha256: string } | undefined;
+    if (route.caption_layer.engine === "ffmpeg-libass") {
+      const fontReceiptPath = "07_package/logs/caption-font-receipt.json";
+      const stylingClass = blueprint.caption_policy?.styling_class ?? "";
+      rebound[fontReceiptPath] = jsonText({
+        version: "caption-font-receipt/v1",
+        styling_class: stylingClass,
+        contract: captionFontContractForReceipt(stylingClass),
+      });
+      fs.writeFileSync(path.join(root, fontReceiptPath), rebound[fontReceiptPath]);
+      fontReceipt = {
+        path: fontReceiptPath,
+        sha256: computeSha256(path.join(root, fontReceiptPath)),
+      };
+    }
+    const operations = [
+      { id: "base_assembly", kind: "lossy_video_generation", codec: "h264" },
+      ...(route.delivery.lossy_video_encode_passes > 1
+        ? [{ id: "final_visual_composite", kind: "lossy_video_generation", codec: "h264" }]
+        : []),
+      { id: "final_video_materialize", kind: "stream_copy", codec: "h264" },
+    ];
+    const receipt = {
+      ...route,
+      receipt_version: "render-route-receipt/v3",
+      renderer_versions: {
+        ffmpeg: ffmpegVersion,
+        ...(route.visual_layers.some((layer) => layer.renderer === "hyperframes")
+          ? { hyperframes: HYPERFRAMES_RENDERER_VERSION }
+          : {}),
+        ...(route.base_engine === "remotion"
+          || route.visual_layers.some((layer) => layer.renderer === "remotion")
+          ? { remotion: REMOTION_RENDERER_VERSION }
+          : {}),
+      },
+      inputs: {
+        timeline: {
+          path: "05_timeline/timeline.json",
+          sha256: timelineSha256,
+        },
+      },
+      outputs: {
+        final_video: {
+          path: "09_output/final.mp4",
+          sha256: finalSha256,
+        },
+      },
+      layer_receipts: [],
+      ...(fontReceipt ? { font_receipt: fontReceipt } : {}),
+      delivery_execution: {
+        definition: "sequential_h264_generations/v1",
+        measurement_source: "execution_plan",
+        lossy_video_encode_passes: route.delivery.lossy_video_encode_passes,
+        operations,
+      },
+      base_assembly_path: "09_output/final.mp4",
+      effective_assembly_path: "09_output/final.mp4",
+    };
+    rebound["07_package/logs/render-route.json"] = jsonText(receipt);
+    fs.writeFileSync(
+      path.join(root, "07_package/logs/render-route.json"),
+      rebound["07_package/logs/render-route.json"],
+    );
+    const renderSummary = {
+      contract_version: "render-provenance/v1",
+      route_receipt: {
+        path: "07_package/logs/render-route.json",
+        sha256: computeSha256(path.join(root, "07_package/logs/render-route.json")),
+      },
+      renderer_versions: receipt.renderer_versions,
+      layer_receipts: receipt.layer_receipts,
+      ...(receipt.font_receipt ? { font_receipt: receipt.font_receipt } : {}),
+      delivery_execution: receipt.delivery_execution,
+      inputs: receipt.inputs,
+      outputs: receipt.outputs,
+    };
+    manifest.provenance.render = renderSummary;
     const sourceInputs = createSourceInputAttestation(root);
     manifest.provenance.source_inputs_hash = sourceInputs.source_inputs_hash;
     manifest.provenance.source_inputs_attestation_status = sourceInputs.status;
     rebound["07_package/package_manifest.json"] = jsonText(manifest);
     return rebound;
   });
+}
+
+function mutateRenderReceipt(
+  files: Record<string, string>,
+  mutate: (receipt: Record<string, unknown>) => void,
+): Record<string, string> {
+  const mutated = structuredClone(files);
+  const receiptPath = "07_package/logs/render-route.json";
+  const receipt = JSON.parse(mutated[receiptPath]) as Record<string, unknown>;
+  mutate(receipt);
+  mutated[receiptPath] = jsonText(receipt);
+  const manifest = JSON.parse(mutated["07_package/package_manifest.json"]) as {
+    provenance: { render: Record<string, unknown> };
+  };
+  const render = manifest.provenance.render;
+  render.route_receipt = {
+    path: receiptPath,
+    sha256: `sha256:${createHash("sha256").update(mutated[receiptPath]).digest("hex")}`,
+  };
+  for (const key of [
+    "renderer_versions",
+    "layer_receipts",
+    "font_receipt",
+    "delivery_execution",
+    "inputs",
+    "outputs",
+  ]) {
+    if (key in receipt) render[key] = receipt[key];
+    else delete render[key];
+  }
+  mutated["07_package/package_manifest.json"] = jsonText(manifest);
+  return mutated;
 }
 
 function mutateJson(
@@ -309,6 +562,70 @@ function mutateJson(
 
 function packageCases(): FileCase[] {
   const valid = canonicalPackageFiles();
+  const captionedInput = structuredClone(valid);
+  const captionedBlueprint = parseYaml(
+    captionedInput["04_plan/edit_blueprint.yaml"],
+  ) as Record<string, unknown> & {
+    caption_policy: Record<string, unknown>;
+  };
+  captionedBlueprint.caption_policy = {
+    source: "authored",
+    delivery_mode: "both",
+    styling_class: "clean-lower-third",
+  };
+  captionedInput["04_plan/edit_blueprint.yaml"] = stringifyYaml(captionedBlueprint);
+  const validCaptioned = rebindPackageHashes(captionedInput);
+  const fontReceiptMissing = mutateRenderReceipt(validCaptioned, (receipt) => {
+    delete receipt.font_receipt;
+  });
+  const fontReceiptTampered = structuredClone(validCaptioned);
+  const fontReceiptPath = "07_package/logs/caption-font-receipt.json";
+  const tamperedFontReceipt = JSON.parse(fontReceiptTampered[fontReceiptPath]) as {
+    contract: { selected_family?: string };
+  };
+  tamperedFontReceipt.contract.selected_family = "Tampered Font";
+  fontReceiptTampered[fontReceiptPath] = jsonText(tamperedFontReceipt);
+  const layerReceiptMissingInput = structuredClone(valid);
+  const layerTimeline = JSON.parse(
+    layerReceiptMissingInput["05_timeline/timeline.json"],
+  ) as { tracks: Record<string, unknown> };
+  layerTimeline.tracks.overlay = [{
+    track_id: "O1",
+    kind: "overlay",
+    clips: [{
+      clip_id: "HF_MISSING",
+      segment_id: "SEG_HF_MISSING",
+      asset_id: "asset-1",
+      src_in_us: 0,
+      src_out_us: 1_000_000,
+      timeline_in_frame: 0,
+      timeline_duration_frames: 30,
+      role: "overlay",
+      motivation: "Exercise missing layer receipt verification.",
+      metadata: {
+        content_element: {
+          version: "content-element/v1",
+          element_id: "HF_MISSING",
+          kind: "template",
+          template_ref: "vos:content.section-label/v1",
+          template_version: "1.0.0",
+          props: { title: "Missing receipt" },
+          layout: {
+            anchor: "top_left",
+            x: 0,
+            y: 0,
+            scale: 1,
+            rotation_deg: 0,
+            opacity: 1,
+            safe_area: true,
+            z_index: 100,
+          },
+        },
+      },
+    }],
+  }];
+  layerReceiptMissingInput["05_timeline/timeline.json"] = jsonText(layerTimeline);
+  const layerReceiptMissing = rebindPackageHashes(layerReceiptMissingInput);
   const qaMissingDetails = mutateJson(valid, "07_package/qa-report.json", (qa) => {
     delete (qa.checks as Array<Record<string, unknown>>)[0].details;
   });
@@ -363,6 +680,19 @@ function packageCases(): FileCase[] {
     delete provenance.source_inputs_hash;
     delete provenance.source_inputs_attestation_status;
   }, false);
+  const renderReceiptTampered = structuredClone(valid);
+  const tamperedRoute = JSON.parse(renderReceiptTampered["07_package/logs/render-route.json"]);
+  tamperedRoute.genre = "cinematic";
+  renderReceiptTampered["07_package/logs/render-route.json"] = jsonText(tamperedRoute);
+  const renderRouteDrift = mutateRenderReceipt(valid, (receipt) => {
+    receipt.genre = "cinematic";
+  });
+  const rendererVersionDrift = mutateRenderReceipt(valid, (receipt) => {
+    (receipt.renderer_versions as Record<string, unknown>).ffmpeg = "ffmpeg forged";
+  });
+  const encodePassDrift = mutateRenderReceipt(valid, (receipt) => {
+    (receipt.delivery_execution as Record<string, unknown>).lossy_video_encode_passes = 2;
+  });
   const stateUnknownProperty = structuredClone(valid);
   const state = parseYaml(stateUnknownProperty["project_state.yaml"]) as Record<string, unknown>;
   state.unexpected = true;
@@ -370,6 +700,7 @@ function packageCases(): FileCase[] {
 
   return [
     { id: "valid", files: valid },
+    { id: "valid_captioned", files: validCaptioned },
     { id: "qa_missing_details", files: qaMissingDetails },
     { id: "qa_unknown_property", files: qaUnknownProperty },
     { id: "manifest_missing_provenance", files: manifestMissingProvenance },
@@ -386,11 +717,19 @@ function packageCases(): FileCase[] {
     { id: "qa_empty_checks", files: qaEmptyChecks },
     { id: "timeline_version_mismatch", files: timelineVersionMismatch },
     { id: "source_inputs_provenance_missing", files: sourceInputsMissing },
+    { id: "render_route_receipt_tampered", files: renderReceiptTampered },
+    { id: "render_route_drift", files: renderRouteDrift },
+    { id: "renderer_version_drift", files: rendererVersionDrift },
+    { id: "encode_pass_drift", files: encodePassDrift },
+    { id: "font_receipt_missing", files: fontReceiptMissing },
+    { id: "font_receipt_tampered", files: fontReceiptTampered },
+    { id: "layer_receipt_missing", files: layerReceiptMissing },
     { id: "state_unknown_property", files: stateUnknownProperty },
   ];
 }
 
 export function buildMacOSStudioContractFixture(): object {
+  const packagePreflightCases = preflightCases();
   return {
     artifactVersion: "macos-studio-contract/v1",
     generatedFrom: [
@@ -402,11 +741,16 @@ export function buildMacOSStudioContractFixture(): object {
       ...testCase,
       expected: withMaterializedCase(testCase, evaluatePlaybackContract),
     })),
-    preflightCases: preflightCases().map((testCase) => {
+    preflightCases: packagePreflightCases.map((testCase) => {
       const preflight = withMaterializedCase(testCase, (root) => buildPackagePreflight(root));
       return {
         ...testCase,
         expected: {
+          version: preflight.version,
+          decision: preflight.decision,
+          project_identity: preflight.project_identity,
+          structured_issues: preflight.structured_issues,
+          next_action: preflight.next_action,
           ok: preflight.ok,
           issues: preflight.issues,
           nextSteps: preflight.nextSteps,
@@ -418,6 +762,7 @@ export function buildMacOSStudioContractFixture(): object {
         },
       };
     }),
+    preflightProcessCases: buildPreflightProcessCases(packagePreflightCases),
     packageCases: packageCases().map((testCase) => ({
       ...testCase,
       expected: withMaterializedCase(testCase, (root) => (

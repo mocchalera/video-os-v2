@@ -38,7 +38,7 @@ interface Step {
  */
 const EVAL_MIN_SCORE = "50";
 
-const STEPS: Step[] = [
+export const VERIFY_STEPS: Step[] = [
   {
     name: "typecheck",
     command: "npx",
@@ -57,7 +57,7 @@ const STEPS: Step[] = [
   {
     name: "review-metrics (demo)",
     command: "npx",
-    args: ["tsx", "scripts/review-metrics.ts", "projects/demo"],
+    args: ["tsx", "scripts/review-metrics.ts", "projects/demo", "--no-write"],
   },
   {
     name: "golden-eval (agreement >= " + EVAL_MIN_SCORE + ")",
@@ -93,7 +93,7 @@ export function main(argv: string[] = process.argv): number {
   const { full } = parseArgs(argv);
   const results: Array<{ name: string; ok: boolean; seconds: number }> = [];
 
-  for (const step of STEPS) {
+  for (const step of VERIFY_STEPS) {
     if (step.full && !full) continue;
     console.log(`\n━━ verify: ${step.name} ━━`);
     const startedAt = Date.now();

@@ -166,11 +166,19 @@ npm run full-pipeline -- \
 
 ```bash
 npm run render-route -- projects/my-project
+npm run final-render-review-pack -- plan --project projects/my-project
+npm run final-render-review-pack -- build --project projects/my-project --source projects/my-project/05_timeline/assembly.mp4
+npm run final-render-checklist -- approve --project projects/my-project [checklist options]
 npm run package -- projects/my-project --preflight-only --json
-npm run package -- projects/my-project
+npm run caption-finalize -- run --project projects/my-project
 ```
 
 `--preflight-only --json` はproject artifactを書き換えず、Studioと同じGate 10判定を返します。
+長尺のfinal全体を焼く前に、`final-render-review-pack`は冒頭・中盤・終盤、問いかけ、
+最長/2行字幕、全章タイトルだけを本番と同じASS・固定フォント・HyperFramesで
+一つの短いreview reelへ描画します。visual timeline projection、caption approval、
+元映像、fontが同じなら再利用します。元映像の解像度、rational FPS、総尺、音声streamが
+timelineと一致しない場合と、承認manifestのSHAが無いfinal renderはfail closedです。
 `render-route` は `timeline.json` の要素所有権から FFmpeg / Remotion /
 HyperFrames の組み合わせを読み取り専用で表示します。`package` は同じ判定を
 `auto` で使い、通常ジャンルの既存 FFmpeg 経路を維持したまま、登録済み要素が
@@ -180,7 +188,7 @@ HyperFrames の組み合わせを読み取り専用で表示します。`package
 短尺SNSのコールドオープン、早いpayoff、視聴者向け章題、固定画の意味的な視覚更新は、
 [`docs/short-form-retention-planning.md`](docs/short-form-retention-planning.md) の明示的な適用条件と監査に従います。
 
-`npm run full-pipeline` は粗編集と QA loop までを主導します。final package / handoff artifact が必要な場合は、承認・caption/music 前提を満たしたあと `npm run package` を出口にしてください。
+`npm run full-pipeline` は粗編集と QA loop までを主導します。人間が字幕を承認した後は `caption-finalize` が fresh ASS/SRT、final、QA、manifest、preview/receipt を世代単位で作り、全検証成功時だけ `07_package/active_delivery.json` をatomicに切り替えます。運用手順とlegacy互換は [`docs/caption-finalize-runbook.md`](docs/caption-finalize-runbook.md) を参照してください。
 
 ### 6. VideoOSStudioで確認・仕上げ
 
@@ -212,7 +220,11 @@ previewの会話と重ねて試聴し、音楽適合・会話適合・生成品�
 | `editorial-pipeline` | retrieval → planning → compile → render → QA の統合実行 | `npx tsx scripts/editorial-pipeline.ts --project projects/<project-id> [--skip-fine] [--skip-render] [--skip-qa]` |
 | `render-rough-cut` | `timeline.json` を BGM 付き MP4 にレンダーし duration parity を記録 | `npx tsx scripts/render-rough-cut.ts --project projects/<project-id> [--output path] [--bgm path]` |
 | `promo-finish` | transcript aligned 字幕、最後の余韻、音声/映像フェード付き宣材MP4を生成 | `npm run promo-finish -- --project projects/<project-id> [--output path]` |
-| `caption-review` | 字幕のrisk queue、編集、split / merge、timing、用語候補、検証、人間承認 | `npx tsx scripts/caption-review.ts <queue|init|edit|split|merge|glossary-propose|undo|apply|validate|approve> --project projects/<project-id> [options]` |
+| `caption-review` | draft復旧、risk queue、安全な一括確認、編集、split / merge、timing、用語候補、検証、人間承認 | `npx tsx scripts/caption-review.ts <queue|prepare|recover|init|verify-safe|edit|split|merge|glossary-propose|undo|apply|validate|approve> --project projects/<project-id> [options]` |
+| `caption-finalize` | 承認intentをimmutable化し、caption-bound納品一式を世代生成・検証してatomicにactive化 | `npm run caption-finalize -- run --project projects/<project-id> [--supplied-final /path/final.mp4]` |
+| `final-render-review-pack` | 長尺final前に本番同等の代表区間review reelを計画・生成・freshness確認 | `npm run final-render-review-pack -- <plan|build|status> --project projects/<project-id> [options]` |
+| `final-render-checklist` | 視覚review reelと音声A/Bをhash-boundし、最終renderを承認 | `npm run final-render-checklist -- <status|approve> --project projects/<project-id> [options]` |
+| `audio-finish-remux` | 承認済み映像streamを再encodeせず、2-pass MA音声だけを再mux・任意でatomic finalize | `npm run audio-finish-remux -- --project projects/<project-id> --source-receipt <receipt.json> [--finalize]` |
 | `bgm-shortlist` | 生成BGM候補の元音源をSHA照合し、音楽・会話適合・類似性・権利の人間レビューキューを作成・更新 | `npx tsx scripts/bgm-shortlist.ts <verify|prepare-review|review> [options]` |
 | `package` | approved rough cut から final package / QA manifest を作成。`--preflight-only --json`は読み取り専用Gate 10確認 | `npm run package -- projects/<project-id> [options]` |
 | `render-route` | timeline要素から FFmpeg / Remotion / HyperFrames の描画経路を読み取り専用で確認 | `npm run render-route -- projects/<project-id> [--json]` |
@@ -300,6 +312,9 @@ npx tsx scripts/editorial-pipeline.ts --project projects/my-project --qa
      -> caption_source.json / caption_draft.json
      -> caption_review_patch.json / caption_review_preview.json
      -> explicit human approval -> caption_approval.json
+  -> Caption Finalize
+     -> immutable approval intent / generation-scoped ASS/SRT/final/QA/manifest/preview
+     -> verified active_delivery.json atomic switch
   -> 06_review/* / 07_package/* / 09_output/*
 ```
 
@@ -313,6 +328,8 @@ npx tsx scripts/editorial-pipeline.ts --project projects/my-project --qa
 - `scripts/editorial-pipeline.ts` は retrieval、rough/fine pass、compile、render、QA improvement loop を統合します。
 - `scripts/compile-timeline.ts` は deterministic compile の公開 CLI です。scene continuity ordering と visual coherence cache がある場合はコンパイル時に利用します。
 - `scripts/caption-review.ts` とVideoOSStudioの字幕仕上げUIは同じReview Coreを使います。機械ドラフトは直接上書きせず、人間の変更をpatchとして保持し、承認条件を満たした場合だけ `caption_approval.json` を生成します。
+- `queue --format json --reviewer <name>` は `approval_readiness`、font contract、safe bulk対象/除外理由、整合する既存approvalを返します。draft欠落時は `recovery_action` に従い `prepare`（`recover` alias）を実行します。既存patch/approvalがある場合も隔離再生成とbase hash照合後にだけdraftを復元します。
+- `clean-lower-third` は検証済みheavy asset（`VideoOS Noto Sans JP Black`/900）をASSとStudioで共用します。font staging manifest v2とfinalize receiptは選択family/role/path/hash/weightを束縛し、Studioでheavy resourceを登録できない場合はsystem fallbackせず承認をblockします。
 - Premiere で詰めたい場合は、`timeline.json -> FCP7 XML -> Premiere -> FCP7 XML -> timeline.json` の往復が可能です。
 
 ## Premiere Pro 連携
@@ -347,7 +364,7 @@ projects/<project-id>/09_output/rough-cut.mp4
 projects/<project-id>/09_output/render-report.json
 ```
 
-`07_package/` は QA、manifest、音声 stem、caption sidecar などの内部パッケージ用ディレクトリです。公開・納品用に固定した成果物は `/package` または後段の publish flow で `09_output/final.mp4` に発行する想定です。
+`07_package/` は QA、manifest、音声 stem、caption sidecar などの内部パッケージ用ディレクトリです。新しいcaption-bound納品は `07_package/active_delivery.json` が指すgenerationを正本とし、pointerが存在しない旧プロジェクトだけ従来の `07_package/*` と `09_output/final.mp4` を参照します。
 
 ## アーキテクチャ
 

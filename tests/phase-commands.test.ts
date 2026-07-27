@@ -19,6 +19,7 @@ import { runReview, type ReviewAgent, type ReviewReport, type ReviewPatch } from
 import { runRender } from "../runtime/commands/render.js";
 import { runFullPipeline, type FullPipelineDeps } from "../runtime/commands/full-pipeline.js";
 import { readProgress } from "../runtime/progress.js";
+import { approveFinalRenderChecklist } from "../runtime/packaging/final-render-approval.js";
 import {
   writeProjectState,
   readProjectState,
@@ -361,6 +362,14 @@ function stampApprovedState(projectDir: string): void {
         min_score: 70,
         issues: { total: 0, critical: 0, warning: 0, info: 0 },
         issue_summaries: [],
+        deterministic_scan: {
+          status: "verified",
+          duration_sec: 10,
+          scanned_duration_sec: 10,
+          width: 1920,
+          height: 1080,
+          issues: [],
+        },
       },
     }),
     "utf-8",
@@ -394,6 +403,24 @@ function stampApprovedState(projectDir: string): void {
       decided_at: "2026-03-23T10:00:00Z",
     },
     history: [],
+  });
+}
+
+function approveCurrentFinalRender(projectDir: string): void {
+  approveFinalRenderChecklist(projectDir, {
+    approvedBy: "operator",
+    approvedAt: "2026-03-23T10:00:00Z",
+    checklist: {
+      captions: "not_applicable",
+      caption_typography: "not_applicable",
+      section_titles: "not_applicable",
+      audio: {
+        decision: "preserve",
+        preview_reviewed: false,
+        bgm: "none",
+      },
+      output_spec: "approved",
+    },
   });
 }
 
@@ -581,6 +608,7 @@ describe("phase commands", () => {
       state: "approved",
     });
     stampApprovedState(tmpDir);
+    approveCurrentFinalRender(tmpDir);
 
     const result = await runRender(tmpDir, {
       skipRender: true,
@@ -599,5 +627,22 @@ describe("phase commands", () => {
     expect(readProjectState(tmpDir)?.current_state).toBe("packaged");
     expect(readProgress(tmpDir)?.phase).toBe("render");
     expect(readProgress(tmpDir)?.status).toBe("completed");
+  });
+
+  it("render phase blocks before package writes when final approval is missing", async () => {
+    const tmpDir = createProject("render-missing-final-approval", {
+      state: "approved",
+    });
+    stampApprovedState(tmpDir);
+
+    const result = await runRender(tmpDir, {
+      skipRender: true,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatchObject({
+      code: "GATE_CHECK_FAILED",
+    });
+    expect(result.error?.message).toContain("Final render approval is missing");
   });
 });

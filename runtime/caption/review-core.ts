@@ -91,6 +91,7 @@ export type CaptionReviewOperation =
     })
   | (CaptionPatchBase & {
       op: "set_review_state";
+      base_text_hash?: string;
       state: CaptionReviewState;
       note?: string;
     })
@@ -162,6 +163,37 @@ export interface CaptionReviewOptions {
   protectedTerms?: string[];
 }
 
+export type SafeBulkExclusionReason =
+  | "already_reviewed"
+  | "flagged"
+  | "blocking_issue"
+  | "content_confidence"
+  | "proper_noun"
+  | "numeric"
+  | "negation";
+
+export interface SafeBulkReviewAssessment {
+  eligible_caption_ids: string[];
+  eligible_count: number;
+  excluded: Array<{ caption_id: string; reasons: SafeBulkExclusionReason[] }>;
+  exclusion_reason_counts: Partial<Record<SafeBulkExclusionReason, number>>;
+}
+
+export type CaptionApprovalBlockerCode =
+  | "reviewer_required"
+  | "unreviewed_captions"
+  | "flagged_captions"
+  | "blocking_issues"
+  | "stale_review"
+  | "font_contract_mismatch";
+
+export interface CaptionApprovalReadiness {
+  can_approve: boolean;
+  blockers: Array<{ code: CaptionApprovalBlockerCode; message: string }>;
+  warning_issue_count: number;
+  warnings_acknowledged: boolean;
+}
+
 export type ApplyCaptionReviewPatchResult =
   | { success: true; preview: CaptionReviewPreview; diffs: CaptionReviewDiff[] }
   | { success: false; errors: string[] };
@@ -206,6 +238,87 @@ export function buildCaptionReviewQueue(
     .sort((a, b) => b.risk_score - a.risk_score ||
       a.timeline_in_frame - b.timeline_in_frame ||
       a.caption_id.localeCompare(b.caption_id));
+}
+
+/** Pure Review Core policy used by both CLI and Studio. */
+export function assessSafeBulkReview(
+  items: CaptionReviewQueueItem[],
+  options: Pick<CaptionReviewOptions, "protectedTerms"> = {},
+): SafeBulkReviewAssessment {
+  const protectedTerms = options.protectedTerms ?? [];
+  const excluded: SafeBulkReviewAssessment["excluded"] = [];
+  const eligible: string[] = [];
+  const counts: SafeBulkReviewAssessment["exclusion_reason_counts"] = {};
+  for (const item of items) {
+    const reasons: SafeBulkExclusionReason[] = [];
+    if (item.review_state !== "unreviewed") reasons.push("already_reviewed");
+    if (item.review_state === "flagged") reasons.push("flagged");
+    if (item.issues.some((issue) => issue.severity === "block")) reasons.push("blocking_issue");
+    if (item.issues.some((issue) =>
+      issue.code === "low_timing_confidence" || issue.code === "timing_fallback"
+    )) reasons.push("content_confidence");
+    if (
+      protectedTerms.some((term) => term && item.text.includes(term))
+      || /(?:[A-Z][A-Za-z]{1,}|[A-Za-z]{2,})/.test(item.text)
+    ) reasons.push("proper_noun");
+    if (/[0-9０-９]/.test(item.text)) reasons.push("numeric");
+    if (/(?:ない|ません|ではない|じゃない|なかった|ませんでした|ず(?:に|、|。|$)|ぬ(?:\s|、|。|$)|未[\p{L}]|非[\p{L}])/u.test(item.text)) {
+      reasons.push("negation");
+    }
+    const uniqueReasons = [...new Set(reasons)];
+    if (uniqueReasons.length === 0) {
+      eligible.push(item.caption_id);
+    } else {
+      excluded.push({ caption_id: item.caption_id, reasons: uniqueReasons });
+      for (const reason of uniqueReasons) counts[reason] = (counts[reason] ?? 0) + 1;
+    }
+  }
+  return {
+    eligible_caption_ids: eligible.sort(),
+    eligible_count: eligible.length,
+    excluded: excluded.sort((left, right) => left.caption_id.localeCompare(right.caption_id)),
+    exclusion_reason_counts: counts,
+  };
+}
+
+export function buildCaptionApprovalReadiness(input: {
+  reviewer: string;
+  validation: CaptionReviewValidation;
+  stale: boolean;
+  fontReady: boolean;
+  staleMessage?: string;
+  fontMessage?: string;
+}): CaptionApprovalReadiness {
+  const blockers: CaptionApprovalReadiness["blockers"] = [];
+  if (!input.reviewer.trim()) blockers.push({ code: "reviewer_required", message: "レビュー担当者名が必要です。" });
+  if (input.validation.unreviewed_count > 0) blockers.push({
+    code: "unreviewed_captions",
+    message: `未確認の字幕が${input.validation.unreviewed_count}件あります。`,
+  });
+  if (input.validation.flagged_count > 0) blockers.push({
+    code: "flagged_captions",
+    message: `要確認の字幕が${input.validation.flagged_count}件あります。`,
+  });
+  if (input.validation.blocking_issue_count > 0) blockers.push({
+    code: "blocking_issues",
+    message: `修正必須の問題が${input.validation.blocking_issue_count}件あります。`,
+  });
+  if (input.stale) blockers.push({
+    code: "stale_review",
+    message: input.staleMessage ?? "字幕レビューの入力が更新されています。再読み込みしてください。",
+  });
+  if (!input.fontReady) blockers.push({
+    code: "font_contract_mismatch",
+    message: input.fontMessage ?? "選択された字幕フォントを保証できません。",
+  });
+  return {
+    can_approve: blockers.length === 0,
+    blockers,
+    warning_issue_count: input.validation.warning_issue_count,
+    warnings_acknowledged: input.validation.warning_issue_count === 0 || (
+      input.validation.unreviewed_count === 0 && input.validation.flagged_count === 0
+    ),
+  };
 }
 
 export function applyCaptionReviewPatch(
@@ -308,6 +421,12 @@ function applyOperation(
     merged.text = operation.result.text.trim();
     merged.timeline_in_frame = operation.result.start_frame;
     merged.timeline_duration_frames = operation.result.end_frame - operation.result.start_frame;
+    merged.timing = mergeCaptionTiming(
+      first,
+      second,
+      operation.result.start_frame,
+      operation.result.end_frame,
+    );
     merged.transcript_item_ids = uniqueStrings([
       ...first.transcript_item_ids,
       ...second.transcript_item_ids,
@@ -336,6 +455,7 @@ function applyOperation(
     case "replace_text":
       if (!operation.text.trim()) return { success: false, error: "replacement text is empty" };
       entry.text = operation.text.trim();
+      retargetCaptionWordRefs(entry);
       markEdited(entry);
       break;
     case "set_line_break": {
@@ -380,6 +500,7 @@ function applyOperation(
         split.text = part.text.trim();
         split.timeline_in_frame = part.start_frame;
         split.timeline_duration_frames = part.end_frame - part.start_frame;
+        split.timing = splitCaptionTiming(entry, part.text, part.start_frame, part.end_frame);
         split.review = {
           state: "unreviewed",
           edited: true,
@@ -424,7 +545,7 @@ function validateEntries(
       addIssue(issues, "too_many_lines", "block", `${lines.length}行あります（最大${policy.maxLines}行）`);
     }
     if (lines.some((line) => [...line].length > policy.maxCharsPerLine)) {
-      addIssue(issues, "line_too_long", "block", `1行${policy.maxCharsPerLine}文字を超えています`);
+      addIssue(issues, "line_too_long", "warn", `1行${policy.maxCharsPerLine}文字を超えています`);
     }
     if (lines.length > 1 && lines.some((line) => [...line.trim()].length <= 1)) {
       addIssue(issues, "orphan_character", "block", "1文字だけの孤立行があります");
@@ -506,6 +627,96 @@ function toReviewedEntry(entry: CaptionDraftEntry): ReviewedCaptionEntry {
 
 function cloneEntry(entry: ReviewedCaptionEntry): ReviewedCaptionEntry {
   return structuredClone(entry);
+}
+
+function mergeCaptionTiming(
+  first: ReviewedCaptionEntry,
+  second: ReviewedCaptionEntry,
+  startFrame: number,
+  endFrame: number,
+): CaptionDraftEntry["timing"] {
+  const template = first.timing ?? second.timing;
+  if (!template) return undefined;
+  const sourceWordRefs = dedupeSourceWordRefs([
+    ...(first.timing?.sourceWordRefs ?? []),
+    ...(second.timing?.sourceWordRefs ?? []),
+  ]);
+  return {
+    ...structuredClone(template),
+    ...(sourceWordRefs.length > 0 ? {
+      source: "word_remap" as const,
+      sourceWordRefs,
+      triggeredFallback: false,
+      confidence: Math.min(first.timing?.confidence ?? 1, second.timing?.confidence ?? 1),
+    } : {}),
+    timelineInFrame: startFrame,
+    timelineDurationFrames: endFrame - startFrame,
+  };
+}
+
+function splitCaptionTiming(
+  source: ReviewedCaptionEntry,
+  text: string,
+  startFrame: number,
+  endFrame: number,
+): CaptionDraftEntry["timing"] {
+  if (!source.timing) return undefined;
+  const selected = selectSourceWordRefs(source.timing.sourceWordRefs ?? [], text);
+  return {
+    ...structuredClone(source.timing),
+    ...(selected.length > 0 ? { sourceWordRefs: selected } : {}),
+    timelineInFrame: startFrame,
+    timelineDurationFrames: endFrame - startFrame,
+  };
+}
+
+function retargetCaptionWordRefs(entry: ReviewedCaptionEntry): void {
+  if (!entry.timing?.sourceWordRefs?.length) return;
+  const selected = selectSourceWordRefs(entry.timing.sourceWordRefs, entry.text);
+  if (selected.length > 0) entry.timing.sourceWordRefs = selected;
+}
+
+function selectSourceWordRefs(
+  words: NonNullable<NonNullable<CaptionDraftEntry["timing"]>["sourceWordRefs"]>,
+  text: string,
+): typeof words {
+  const target = normalizeTimingText(text);
+  if (!target) return [];
+  const spans: Array<{ word: typeof words[number]; start: number; end: number }> = [];
+  let combined = "";
+  for (const word of dedupeSourceWordRefs(words)) {
+    const normalized = normalizeTimingText(word.word);
+    if (!normalized) continue;
+    const start = combined.length;
+    combined += normalized;
+    spans.push({ word, start, end: combined.length });
+  }
+  const offset = combined.indexOf(target);
+  if (offset < 0) return [];
+  const end = offset + target.length;
+  return spans
+    .filter((span) => span.end > offset && span.start < end)
+    .map((span) => structuredClone(span.word));
+}
+
+function dedupeSourceWordRefs(
+  words: NonNullable<NonNullable<CaptionDraftEntry["timing"]>["sourceWordRefs"]>,
+): typeof words {
+  const seen = new Set<string>();
+  return words.filter((word) => {
+    const key = `${word.start_us}:${word.end_us}:${normalizeTimingText(word.word)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((word) => structuredClone(word));
+}
+
+function normalizeTimingText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/^(?:AI|画面|坂本)[｜|]/u, "")
+    .replace(/[\p{P}\p{S}\s\u200B-\u200D\uFEFF]/gu, "")
+    .toLowerCase();
 }
 
 function markEdited(entry: ReviewedCaptionEntry): void {

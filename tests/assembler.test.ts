@@ -152,6 +152,55 @@ describe("ffmpeg assembler", () => {
     expect(fs.existsSync(result.outputPath)).toBe(true);
   });
 
+  it("keeps legacy clip captions preview-only and rejects them at the production assembly boundary", async () => {
+    const projectDir = createTempDemoProject();
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+      tracks: { video: Array<{ clips: Array<Record<string, unknown>> }> };
+    };
+    timeline.tracks.video[0].clips[0].captions = [{
+      text: "legacy",
+      in_frame: 0,
+      out_frame: 24,
+      style: "simple-shadow",
+    }];
+    fs.writeFileSync(timelinePath, JSON.stringify(timeline), "utf-8");
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+
+    await expect(assembleTimelineToMp4({
+      projectDir,
+      timelinePath,
+      legacyCaptionMode: "reject",
+      execFileImpl: createExecMock(calls),
+    })).rejects.toThrow(
+      "legacy_clip_captions_forbidden_in_package: clip_ids=CLP_0001",
+    );
+    expect(calls).toEqual([]);
+
+    await assembleTimelineToMp4({
+      projectDir,
+      timelinePath,
+      legacyCaptionMode: "preview_burn",
+      execFileImpl: createExecMock(calls),
+    });
+    expect(calls.some((call) =>
+      call.args.includes("-vf") &&
+      call.args.some((arg) => arg.includes("drawtext="))
+    )).toBe(true);
+
+    calls.length = 0;
+    await assembleTimelineToMp4({
+      projectDir,
+      timelinePath,
+      legacyCaptionMode: "omit",
+      execFileImpl: createExecMock(calls),
+    });
+    expect(calls.some((call) =>
+      call.args.includes("-vf") &&
+      call.args.some((arg) => arg.includes("drawtext="))
+    )).toBe(false);
+  });
+
   it("runs measured dialogue-clean finishing and caps the final mux to timeline duration", async () => {
     const projectDir = createTempDemoProject();
     const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
@@ -283,12 +332,16 @@ describe("ffmpeg assembler", () => {
       undefined,
       undefined,
       946 / 24,
+      "24/1",
+      946,
     );
     const filter = args[args.indexOf("-vf") + 1];
 
+    expect(filter).toContain("fps=24/1");
+    expect(filter.indexOf("fps=24/1")).toBeLessThan(filter.indexOf("trim=end_frame=946"));
     expect(filter).toContain("tpad=stop_mode=clone:stop_duration=1");
-    expect(filter).toContain("trim=duration=39.416667");
-    expect(args[args.indexOf("-t") + 1]).toBe("39.416667");
+    expect(filter).toContain("trim=end_frame=946");
+    expect(args[args.indexOf("-frames:v") + 1]).toBe("946");
   });
 
   it("masters final audio with loudnorm during mux", () => {
@@ -317,6 +370,54 @@ describe("ffmpeg assembler", () => {
     expect(args[args.indexOf("-af") + 1]).toBe("custom-dialogue-filter");
     expect(args[args.indexOf("-t") + 1]).toBe("12.5");
     expect(args).toContain("-shortest");
+  });
+
+  it("omits final loudness normalization when original audio explicitly disables it", () => {
+    const args = buildFinalAssemblyMuxArgs(
+      "/tmp/video.mp4",
+      "/tmp/audio.m4a",
+      "/tmp/final.mp4",
+      { audioFilter: null, durationSec: 12.5 },
+    );
+
+    expect(args).not.toContain("-af");
+    expect(args).toContain("-c:a");
+    expect(args).toContain("-shortest");
+  });
+
+  it("preserves original-only audio level through the final mux", async () => {
+    const projectDir = createTempDemoProject();
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+      provenance?: { audio_policy?: { mode?: string } };
+      tracks: { audio: Array<{ clips: Array<{ audio_policy?: Record<string, unknown> }> }> };
+    };
+    timeline.provenance = {
+      ...(timeline.provenance ?? {}),
+      audio_policy: { mode: "original_only" },
+    };
+    for (const track of timeline.tracks.audio) {
+      for (const clip of track.clips) {
+        clip.audio_policy = { ...(clip.audio_policy ?? {}), a1_loudnorm: false };
+      }
+    }
+    fs.writeFileSync(timelinePath, JSON.stringify(timeline), "utf-8");
+
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    await assembleTimelineToMp4({
+      projectDir,
+      cleanupTemp: false,
+      workingDirRoot: projectDir,
+      execFileImpl: createExecMock(calls),
+    });
+
+    const muxCall = calls.find((call) =>
+      call.args.some((arg) => arg.endsWith("assembly.mp4")) &&
+      call.args.includes("-c:v") &&
+      call.args.includes("copy")
+    );
+    expect(muxCall).toBeDefined();
+    expect(muxCall!.args).not.toContain("-af");
   });
 
   it("throws a clear error when ffmpeg is not available", async () => {

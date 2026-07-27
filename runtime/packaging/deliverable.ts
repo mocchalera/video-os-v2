@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { materializeFileSync } from "../filesystem/materialize-file.js";
 
 export const PUBLISHED_OUTPUT_DIR = "09_output";
 export const PUBLISHED_FINAL_VIDEO = "final.mp4";
@@ -22,7 +23,7 @@ export function publishFinalVideo(projectDir: string, sourcePath: string): Publi
   fs.mkdirSync(path.dirname(published.path), { recursive: true });
 
   if (path.resolve(sourcePath) !== path.resolve(published.path)) {
-    fs.copyFileSync(sourcePath, published.path);
+    materializeFileSync(sourcePath, published.path);
   }
 
   return published;

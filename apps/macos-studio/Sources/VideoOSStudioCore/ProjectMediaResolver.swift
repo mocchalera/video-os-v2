@@ -661,6 +661,29 @@ public struct ProjectViewerReadinessDiagnostic: Equatable, Sendable {
 }
 
 public enum ProjectMediaResolver {
+    public struct TimelinePreviewFailure: Equatable, Sendable {
+        public let message: String
+        public let retryable: Bool
+    }
+
+    public static func timelinePreviewFailure(projectURL: URL) -> TimelinePreviewFailure {
+        if case .invalid = ProjectActiveDeliveryReader.resolution(projectURL: projectURL) {
+            return .init(message: "active_delivery.jsonが不正です。legacy映像へはfallbackしません。", retryable: false)
+        }
+        let hasCaption = ["07_package/caption_approval.json", "07_package/caption_draft.json"]
+            .contains { FileManager.default.fileExists(atPath: projectURL.appendingPathComponent($0).path) }
+        if hasCaption {
+            let burned = ["09_output/rough-cut.mp4", "09_output/final.mp4", "07_package/video/final.mp4"]
+                .map { projectURL.appendingPathComponent($0) }
+                .first { FileManager.default.fileExists(atPath: $0.path) }
+            if let burned,
+               !FileManager.default.fileExists(atPath: burned.path + ".receipt.json") {
+                return .init(message: "burn済みpreviewのtimeline/caption receiptがありません。previewを再生成してください。", retryable: false)
+            }
+        }
+        return .init(message: "現在のタイムラインに対応するプレビュー動画がありません。", retryable: true)
+    }
+
     public static func preferredProgramMedia(
         timelinePreview: ProjectMediaReference?,
         source: ProjectMediaReference?
@@ -708,8 +731,8 @@ public enum ProjectMediaResolver {
         guard let chosen = timelinePreviewCandidates(projectURL: projectURL, playheadSeconds: playheadSeconds)
             .first(where: {
                 FileManager.default.fileExists(atPath: $0.url.path)
-                    && isTimelinePreviewContractUsable(projectURL: projectURL)
-                    && isTimelinePreviewFresh($0.url, projectURL: projectURL)
+                    && isTimelinePreviewContractUsable($0, projectURL: projectURL)
+                    && isTimelinePreviewFresh($0, projectURL: projectURL)
                     && isTimelinePreviewUsable($0.url, playheadSeconds: playheadSeconds, durationReader: durationReader)
             })
         else {
@@ -923,7 +946,9 @@ public enum ProjectMediaResolver {
         return normalizedPlayhead <= duration + 0.25
     }
 
-    private static func isTimelinePreviewFresh(_ url: URL, projectURL: URL) -> Bool {
+    private static func isTimelinePreviewFresh(_ candidate: TimelinePreviewCandidate, projectURL: URL) -> Bool {
+        if candidate.contractDependency == .activeDelivery { return true }
+        let url = candidate.url
         let timelineURL = projectURL.appendingPathComponent("05_timeline/timeline.json")
         guard let timelineDate = modificationDate(for: timelineURL),
               let previewDate = modificationDate(for: url)
@@ -933,8 +958,60 @@ public enum ProjectMediaResolver {
         return previewDate >= timelineDate.addingTimeInterval(-1)
     }
 
-    private static func isTimelinePreviewContractUsable(projectURL: URL) -> Bool {
-        ProjectPlaybackContractStatusReader.status(projectURL: projectURL).state != .stale
+    private static func isTimelinePreviewContractUsable(
+        _ candidate: TimelinePreviewCandidate,
+        projectURL: URL
+    ) -> Bool {
+        switch candidate.contractDependency {
+        case .activeDelivery:
+            return true
+        case .previewManifest:
+            return ProjectPlaybackContractStatusReader.status(projectURL: projectURL).state != .stale
+                && legacyPreviewReceiptValid(candidate.url, projectURL: projectURL, allowMissingReceipt: true)
+        case .independentArtifact:
+            return legacyPreviewReceiptValid(candidate.url, projectURL: projectURL, allowMissingReceipt: false)
+        }
+    }
+
+    private static func legacyPreviewReceiptValid(
+        _ previewURL: URL,
+        projectURL: URL,
+        allowMissingReceipt: Bool
+    ) -> Bool {
+        let receiptURL = URL(fileURLWithPath: previewURL.path + ".receipt.json")
+        let approvalURL = projectURL.appendingPathComponent("07_package/caption_approval.json")
+        let draftURL = projectURL.appendingPathComponent("07_package/caption_draft.json")
+        let captionURL = FileManager.default.fileExists(atPath: approvalURL.path)
+            ? approvalURL
+            : FileManager.default.fileExists(atPath: draftURL.path) ? draftURL : nil
+        guard FileManager.default.fileExists(atPath: receiptURL.path) else {
+            return allowMissingReceipt || captionURL == nil
+        }
+        guard let data = try? Data(contentsOf: receiptURL),
+              let receipt = try? JSONDecoder().decode(TimelinePreviewReceipt.self, from: data),
+              receipt.version == "timeline-preview-receipt/v1",
+              receipt.previewSHA256.range(of: #"^sha256:[a-f0-9]{64}$"#, options: .regularExpression) != nil,
+              receipt.timelineSHA256.range(of: #"^sha256:[a-f0-9]{64}$"#, options: .regularExpression) != nil,
+              projectURL.appendingPathComponent(receipt.previewPath).standardizedFileURL == previewURL.standardizedFileURL,
+              projectURL.appendingPathComponent(receipt.timelinePath).standardizedFileURL
+                == projectURL.appendingPathComponent("05_timeline/timeline.json").standardizedFileURL,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: previewURL.path),
+              let previewSize = (attributes[.size] as? NSNumber)?.int64Value,
+              let previewDate = attributes[.modificationDate] as? Date,
+              previewSize == receipt.previewSizeBytes,
+              Int64((previewDate.timeIntervalSince1970 * 1_000).rounded()) == receipt.previewMtimeMs,
+              (try? BGMReviewSourceResolver.sha256(for: projectURL.appendingPathComponent(receipt.timelinePath))) == receipt.timelineSHA256
+        else { return false }
+        if let captionURL {
+            guard let caption = receipt.captionInput,
+                  caption.sha256.range(of: #"^sha256:[a-f0-9]{64}$"#, options: .regularExpression) != nil,
+                  projectURL.appendingPathComponent(caption.path).standardizedFileURL == captionURL.standardizedFileURL,
+                  (try? BGMReviewSourceResolver.sha256(for: captionURL)) == caption.sha256
+            else { return false }
+        } else if receipt.captionInput != nil {
+            return false
+        }
+        return true
     }
 
     private static func modificationDate(for url: URL) -> Date? {
@@ -944,10 +1021,27 @@ public enum ProjectMediaResolver {
     private static func timelinePreviewCandidates(
         projectURL: URL,
         playheadSeconds: Double
-    ) -> [(url: URL, source: String, displayName: String)] {
-        var candidates: [(url: URL, source: String, displayName: String)] = []
+    ) -> [TimelinePreviewCandidate] {
+        var candidates: [TimelinePreviewCandidate] = []
         let timelineDir = projectURL.appendingPathComponent("05_timeline")
         let previewsDir = timelineDir.appendingPathComponent("previews")
+
+        let deliveryResolution = ProjectActiveDeliveryReader.resolution(projectURL: projectURL)
+        if case .invalid = deliveryResolution { return [] }
+        if case let .active(activeDelivery) = deliveryResolution {
+            candidates.append(TimelinePreviewCandidate(
+                url: activeDelivery.previewURL,
+                source: "active_delivery/preview",
+                displayName: "確定済み納品プレビュー",
+                contractDependency: .activeDelivery
+            ))
+            candidates.append(TimelinePreviewCandidate(
+                url: activeDelivery.finalVideoURL,
+                source: "active_delivery/final",
+                displayName: "確定済み最終書き出し",
+                contractDependency: .activeDelivery
+            ))
+        }
 
         if let meta = PreviewArtifactMeta.load(from: previewsDir.appendingPathComponent("preview.json")),
            meta.status == "ready",
@@ -955,68 +1049,79 @@ public enum ProjectMediaResolver {
            !videoPath.isEmpty,
            !videoPath.contains("/"),
            !videoPath.contains("..") {
-            candidates.append((
-                previewsDir.appendingPathComponent(videoPath),
-                "05_timeline/previews",
-                "照合済みプレビュー"
+            candidates.append(TimelinePreviewCandidate(
+                url: previewsDir.appendingPathComponent(videoPath),
+                source: "05_timeline/previews",
+                displayName: "照合済みプレビュー",
+                contractDependency: .previewManifest
             ))
         }
 
-        candidates.append((
-            timelineDir.appendingPathComponent("preview-full.mp4"),
-            "05_timeline/preview-full",
-            "全体タイムラインプレビュー"
+        candidates.append(TimelinePreviewCandidate(
+            url: timelineDir.appendingPathComponent("preview-full.mp4"),
+            source: "05_timeline/preview-full",
+            displayName: "全体タイムラインプレビュー",
+            contractDependency: .previewManifest
         ))
 
         if playheadSeconds <= 30 {
-            candidates.append((
-                timelineDir.appendingPathComponent("preview-first30s.mp4"),
-                "05_timeline/preview-first30s",
-                "冒頭30秒プレビュー"
+            candidates.append(TimelinePreviewCandidate(
+                url: timelineDir.appendingPathComponent("preview-first30s.mp4"),
+                source: "05_timeline/preview-first30s",
+                displayName: "冒頭30秒プレビュー",
+                contractDependency: .previewManifest
             ))
         }
 
         if let legacyPreview = legacyEditorPreviewCandidate(in: timelineDir) {
-            candidates.append((
-                legacyPreview,
-                "05_timeline/preview-editor",
-                "旧エディタープレビュー"
+            candidates.append(TimelinePreviewCandidate(
+                url: legacyPreview,
+                source: "05_timeline/preview-editor",
+                displayName: "旧エディタープレビュー",
+                contractDependency: .previewManifest
             ))
         }
 
-        candidates.append((
-            projectURL.appendingPathComponent("09_output/rough-cut.mp4"),
-            "09_output/rough-cut",
-            "書き出し済み粗編集"
-        ))
+        if case .absent = deliveryResolution {
+            candidates.append(TimelinePreviewCandidate(
+                url: projectURL.appendingPathComponent("09_output/rough-cut.mp4"),
+                source: "09_output/rough-cut",
+                displayName: "書き出し済み粗編集",
+                contractDependency: .independentArtifact
+            ))
 
-        candidates.append((
-            projectURL.appendingPathComponent("09_output/final.mp4"),
-            "09_output/final",
-            "最終書き出し"
-        ))
+            candidates.append(TimelinePreviewCandidate(
+                url: projectURL.appendingPathComponent("09_output/final.mp4"),
+                source: "09_output/final",
+                displayName: "最終書き出し",
+                contractDependency: .independentArtifact
+            ))
 
-        if let latestOutput = latestRenderedOutputCandidate(
-            in: projectURL.appendingPathComponent("09_output")
-        ) {
-            candidates.append((
-                latestOutput,
-                "09_output/latest",
-                "最新書き出し"
+            if let latestOutput = latestRenderedOutputCandidate(
+                in: projectURL.appendingPathComponent("09_output")
+            ) {
+                candidates.append(TimelinePreviewCandidate(
+                    url: latestOutput,
+                    source: "09_output/latest",
+                    displayName: "最新書き出し",
+                    contractDependency: .independentArtifact
+                ))
+            }
+
+            candidates.append(TimelinePreviewCandidate(
+                url: projectURL.appendingPathComponent("07_package/video/final.mp4"),
+                source: "07_package/video/final",
+                displayName: "パッケージ済み最終動画",
+                contractDependency: .independentArtifact
+            ))
+
+            candidates.append(TimelinePreviewCandidate(
+                url: projectURL.appendingPathComponent("07_package/assembly.mp4"),
+                source: "07_package/assembly",
+                displayName: "パッケージ済み構成プレビュー",
+                contractDependency: .independentArtifact
             ))
         }
-
-        candidates.append((
-            projectURL.appendingPathComponent("07_package/video/final.mp4"),
-            "07_package/video/final",
-            "パッケージ済み最終動画"
-        ))
-
-        candidates.append((
-            projectURL.appendingPathComponent("07_package/assembly.mp4"),
-            "07_package/assembly",
-            "パッケージ済み構成プレビュー"
-        ))
 
         return candidates
     }
@@ -1071,6 +1176,48 @@ public enum ProjectMediaResolver {
             }
             .first?
             .url
+    }
+}
+
+private struct TimelinePreviewCandidate {
+    enum ContractDependency {
+        /// Hash-bound active_delivery + finalize receipt is the freshness oracle.
+        case activeDelivery
+        /// Approval previews are valid only while preview-manifest.json matches timeline.json.
+        case previewManifest
+        /// Burned outputs require a timeline/caption receipt whenever live caption input exists.
+        case independentArtifact
+    }
+
+    let url: URL
+    let source: String
+    let displayName: String
+    let contractDependency: ContractDependency
+}
+
+private struct TimelinePreviewReceipt: Decodable {
+    struct CaptionInput: Decodable {
+        let path: String
+        let sha256: String
+    }
+    let version: String
+    let previewPath: String
+    let previewSHA256: String
+    let previewSizeBytes: Int64
+    let previewMtimeMs: Int64
+    let timelinePath: String
+    let timelineSHA256: String
+    let captionInput: CaptionInput?
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case previewPath = "preview_path"
+        case previewSHA256 = "preview_sha256"
+        case previewSizeBytes = "preview_size_bytes"
+        case previewMtimeMs = "preview_mtime_ms"
+        case timelinePath = "timeline_path"
+        case timelineSHA256 = "timeline_sha256"
+        case captionInput = "caption_input"
     }
 }
 

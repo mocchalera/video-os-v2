@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/clean-base-attestation.schema.json",
+  "title": "Caption-free Clean Base Attestation",
+  "type": "object",
+  "required": ["version", "subject", "claim", "verification"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "clean-base-attestation/v1" },
+    "subject": {
+      "type": "object",
+      "required": ["content_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "content_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "claim": { "const": "caption_free_clean_base" },
+    "verification": {
+      "type": "object",
+      "required": [
+        "method",
+        "coverage",
+        "producer_id",
+        "verifier_id",
+        "verifier_type",
+        "verified_at",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "const": "human_full_duration_visual_review" },
+        "coverage": { "const": "full_duration" },
+        "producer_id": { "type": "string", "minLength": 1 },
+        "verifier_id": { "type": "string", "minLength": 1 },
+        "verifier_type": { "const": "human" },
+        "verified_at": { "type": "string", "format": "date-time" },
+        "evidence": { "$ref": "#/$defs/artifactRef" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "artifactRef": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

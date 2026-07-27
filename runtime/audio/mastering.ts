@@ -162,10 +162,7 @@ export async function masterAudio(
   outputPath: string,
   defaults?: MasteringDefaults,
 ): Promise<{ measurement: LoudnormMeasurement }> {
-  // Pass 1: Measurement
-  const pass1Args = buildLoudnormPass1Args(inputPath, defaults);
-  const pass1Result = await execFfmpeg(pass1Args, true);
-  const measurement = parseLoudnormOutput(pass1Result.stderr);
+  const measurement = await measureAudioLoudness(inputPath, defaults);
 
   // Pass 2: Apply
   const pass2Args = buildLoudnormPass2Args(inputPath, outputPath, measurement, defaults);
@@ -175,4 +172,14 @@ export async function masterAudio(
   }
 
   return { measurement };
+}
+
+/** Measure loudness without changing or producing an audio stream. */
+export async function measureAudioLoudness(
+  inputPath: string,
+  defaults?: MasteringDefaults,
+): Promise<LoudnormMeasurement> {
+  const pass1Args = buildLoudnormPass1Args(inputPath, defaults);
+  const pass1Result = await execFfmpeg(pass1Args, true);
+  return parseLoudnormOutput(pass1Result.stderr);
 }

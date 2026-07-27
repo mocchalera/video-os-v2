@@ -6,6 +6,8 @@ import {
   buildCaptionReviewQueue,
   computeCaptionDraftHash,
   computeCaptionTextHash,
+  assessSafeBulkReview,
+  buildCaptionApprovalReadiness,
   type CaptionReviewPatch,
 } from "../runtime/caption/review-core.js";
 
@@ -36,6 +38,21 @@ describe("caption review core", () => {
 
     expect(queue[0].issues).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "protected_term_split", severity: "block" }),
+    ]));
+  });
+
+  it("warns without blocking when a caption line exceeds the character guide", () => {
+    const draft = makeDraft([
+      makeCaption("SC_0001", "これは一行二十文字を超えても人が承認できる字幕テキストです", 0, 120),
+    ]);
+
+    const queue = buildCaptionReviewQueue(draft, { fps: 24 });
+
+    expect(queue[0].issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "line_too_long", severity: "warn" }),
+    ]));
+    expect(queue[0].issues).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "line_too_long", severity: "block" }),
     ]));
   });
 
@@ -147,6 +164,93 @@ describe("caption review core", () => {
     }]);
   });
 
+  it("partitions word references when a reviewed caption is split", () => {
+    const source = makeCaption("SC_0001", "どう思いますか答えです", 0, 72);
+    source.timing = {
+      source: "word_remap",
+      confidence: 0.9,
+      sourceWordRefs: [
+        { word: "どう", start_us: 0, end_us: 100_000 },
+        { word: "思います", start_us: 100_000, end_us: 300_000 },
+        { word: "か", start_us: 300_000, end_us: 400_000 },
+        { word: "答え", start_us: 500_000, end_us: 700_000 },
+        { word: "です", start_us: 700_000, end_us: 800_000 },
+      ],
+      triggeredFallback: false,
+      timelineInFrame: 0,
+      timelineDurationFrames: 72,
+    };
+    const draft = makeDraft([source]);
+    const patch = makePatch(draft, [{
+      op: "split_caption",
+      caption_id: "SC_0001",
+      base_text_hash: computeCaptionTextHash(source.text),
+      parts: [
+        { caption_id: "SC_0001_A", text: "どう思いますか", start_frame: 0, end_frame: 36 },
+        { caption_id: "SC_0001_B", text: "答えです", start_frame: 36, end_frame: 72 },
+      ],
+    }]);
+
+    const result = applyCaptionReviewPatch(draft, patch, "timeline-hash");
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.preview.speech_captions[0].timing?.sourceWordRefs?.map((word) => word.word)).toEqual([
+      "どう", "思います", "か",
+    ]);
+    expect(result.preview.speech_captions[1].timing?.sourceWordRefs?.map((word) => word.word)).toEqual([
+      "答え", "です",
+    ]);
+    expect(result.preview.speech_captions[1].timing).toMatchObject({
+      timelineInFrame: 36,
+      timelineDurationFrames: 36,
+    });
+  });
+
+  it("combines word references when reviewed captions are merged", () => {
+    const first = makeCaption("SC_0001", "問いかけ", 0, 36);
+    const second = makeCaption("SC_0002", "答え", 36, 36);
+    first.timing = {
+      source: "word_remap",
+      confidence: 0.9,
+      sourceWordRefs: [{ word: "問いかけ", start_us: 0, end_us: 400_000 }],
+      triggeredFallback: false,
+      timelineInFrame: 0,
+      timelineDurationFrames: 36,
+    };
+    second.timing = {
+      source: "word_remap",
+      confidence: 0.8,
+      sourceWordRefs: [{ word: "答え", start_us: 500_000, end_us: 800_000 }],
+      triggeredFallback: false,
+      timelineInFrame: 36,
+      timelineDurationFrames: 36,
+    };
+    const draft = makeDraft([first, second]);
+    const patch = makePatch(draft, [{
+      op: "merge_captions",
+      caption_ids: ["SC_0001", "SC_0002"],
+      base_text_hashes: [computeCaptionTextHash(first.text), computeCaptionTextHash(second.text)],
+      result: {
+        caption_id: "SC_0001",
+        text: "問いかけと答え",
+        start_frame: 0,
+        end_frame: 72,
+      },
+    }]);
+
+    const result = applyCaptionReviewPatch(draft, patch, "timeline-hash");
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.preview.speech_captions[0].timing).toMatchObject({
+      confidence: 0.8,
+      timelineInFrame: 0,
+      timelineDurationFrames: 72,
+    });
+    expect(result.preview.speech_captions[0].timing?.sourceWordRefs?.map((word) => word.word)).toEqual([
+      "問いかけ", "答え",
+    ]);
+  });
+
   it("produces schema-valid patch and review preview documents", () => {
     const draft = makeDraft([makeCaption("SC_0001", "字幕です", 0, 48)]);
     const patch = makePatch(draft, [{
@@ -189,6 +293,54 @@ describe("caption review core", () => {
       "timing_fallback",
       "low_timing_confidence",
     ]));
+  });
+
+  it("excludes risky captions from safe bulk review and reports every reason", () => {
+    const draft = makeDraft([
+      makeCaption("SC_0001", "よろしくお願いします", 0, 48),
+      makeCaption("SC_0002", "Tomyは42回参加しました", 48, 48),
+      makeCaption("SC_0003", "参加しないでください", 96, 48),
+    ]);
+    const queue = buildCaptionReviewQueue(draft, { protectedTerms: ["Tomy"] });
+
+    const assessment = assessSafeBulkReview(queue, { protectedTerms: ["Tomy"] });
+
+    expect(assessment.eligible_caption_ids).toEqual(["SC_0001"]);
+    expect(assessment.excluded).toEqual(expect.arrayContaining([
+      expect.objectContaining({ caption_id: "SC_0002", reasons: expect.arrayContaining(["proper_noun", "numeric"]) }),
+      expect.objectContaining({ caption_id: "SC_0003", reasons: ["negation"] }),
+    ]));
+  });
+
+  it("uses one readiness oracle and permits acknowledged warnings", () => {
+    const validation = {
+      valid: true,
+      blocking_issue_count: 0,
+      warning_issue_count: 1,
+      unreviewed_count: 0,
+      verified_count: 1,
+      edited_count: 0,
+      flagged_count: 0,
+    };
+    const ready = buildCaptionApprovalReadiness({
+      reviewer: "editor",
+      validation,
+      stale: false,
+      fontReady: true,
+    });
+    expect(ready).toMatchObject({ can_approve: true, blockers: [], warnings_acknowledged: true });
+
+    const blocked = buildCaptionApprovalReadiness({
+      reviewer: "",
+      validation: { ...validation, valid: false, unreviewed_count: 1, flagged_count: 1, blocking_issue_count: 1 },
+      stale: true,
+      fontReady: false,
+    });
+    expect(blocked.can_approve).toBe(false);
+    expect(blocked.blockers.map((entry) => entry.code)).toEqual([
+      "reviewer_required", "unreviewed_captions", "flagged_captions",
+      "blocking_issues", "stale_review", "font_contract_mismatch",
+    ]);
   });
 });
 

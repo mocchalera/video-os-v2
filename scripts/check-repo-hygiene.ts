@@ -5,6 +5,7 @@ const MAX_TRACKED_FILE_BYTES = 2 * 1024 * 1024;
 const PINNED_BUNDLED_FONT_PATHS = new Set([
   "apps/macos-studio/Sources/VideoOSStudio/Resources/Fonts/NotoSansJP-Variable.ttf",
   "apps/macos-studio/Sources/VideoOSStudio/Resources/Fonts/VideoOSNotoSansJPBlack.ttf",
+  "apps/macos-studio/Sources/VideoOSStudio/Resources/Fonts/VideoOSNotoSansJPBold.ttf",
 ]);
 const ALLOWED_TRACKED_PROJECTS = new Set(["_template", "demo", "sample"]);
 

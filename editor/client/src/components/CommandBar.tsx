@@ -32,6 +32,7 @@ function phaseLabel(phase: AiJobPhase): string {
     case 'compile': return 'Compiling';
     case 'review': return 'Reviewing';
     case 'render': return 'Rendering';
+    case 'caption-finalize': return 'Finalizing captions';
   }
 }
 

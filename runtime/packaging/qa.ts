@@ -8,6 +8,19 @@
  */
 
 import type { AudioMixReport } from "../audio/mixer.js";
+import { equivalentFrameRates } from "../../editor/shared/rational-timebase.js";
+import {
+  MIN_CAPTION_HARD_FLOOR_MS,
+  MIN_CAPTION_TARGET_DWELL_MS,
+} from "../caption/segmenter.js";
+import type { DeterministicOutputQAResult } from "../review/deterministic-output-qa.js";
+import type { DeterministicLayoutQAResult } from "../review/deterministic-layout-qa.js";
+import type { SpeechCadenceQAResult } from "../review/speech-cadence-qa.js";
+import type { CaptionDeliveryQAResult } from "../review/caption-delivery-qa.js";
+import {
+  validateFinalCaptionInvariants,
+} from "../caption/final-invariants.js";
+import type { CaptionDraftEntry } from "../caption/editorial.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -72,11 +85,16 @@ export interface QaReport {
     actual_video_frame?: VideoFrameMetrics;
     expected_video_frame?: ExpectedVideoFrameSpec;
     resolution_mismatches?: string[];
+    deterministic_output_qa?: DeterministicOutputQAResult;
+    deterministic_layout_qa?: DeterministicLayoutQAResult;
+    speech_cadence_qa?: SpeechCadenceQAResult;
+    caption_delivery_qa?: CaptionDeliveryQAResult;
   };
   artifacts: {
     final_video?: string;
     final_mix?: string;
     audio_mix_report?: string;
+    layout_snapshot?: string;
   };
   source_inputs_freshness?: {
     status: "fresh" | "stale";
@@ -84,6 +102,108 @@ export interface QaReport {
     source_inputs_hash?: string;
     attestation_status?: "verified" | "live_only" | "not_applicable";
     warnings?: string[];
+  };
+}
+
+export function checkDeterministicFinalOutput(
+  result: DeterministicOutputQAResult | undefined,
+): QaCheckResult[] {
+  const issues = result?.issues ?? [];
+  const summarize = (kind: "black" | "freeze" | "inset"): string => {
+    const matching = issues.filter((issue) => issue.kind === kind);
+    return matching.length === 0
+      ? `no unexpected ${kind} region detected in the complete final output`
+      : matching.map((issue) => issue.detail).join("; ");
+  };
+  return [
+    {
+      name: "final_decode_valid",
+      passed: result !== undefined && result.status !== "incomplete",
+      details: result
+        ? `status=${result.status}` + (result.reason ? ` reason=${result.reason}` : "")
+        : "deterministic full-output scan is missing",
+    },
+    {
+      name: "unexpected_black_region_absent",
+      passed: !issues.some((issue) => issue.kind === "black"),
+      details: summarize("black"),
+    },
+    {
+      name: "unexpected_freeze_region_absent",
+      passed: !issues.some((issue) => issue.kind === "freeze"),
+      details: summarize("freeze"),
+    },
+    {
+      name: "unexpected_inset_region_absent",
+      passed: !issues.some((issue) => issue.kind === "inset"),
+      details: summarize("inset"),
+    },
+  ];
+}
+
+export function checkDeterministicLayoutQA(
+  result: DeterministicLayoutQAResult | undefined,
+): QaCheckResult[] {
+  const issues = result?.issues ?? [];
+  const has = (...codes: Array<DeterministicLayoutQAResult["issues"][number]["code"]>) =>
+    issues.some((issue) => codes.includes(issue.code));
+  const details = (
+    ...codes: Array<DeterministicLayoutQAResult["issues"][number]["code"]>
+  ): string => {
+    const matching = issues.filter((issue) => codes.includes(issue.code));
+    return matching.length > 0
+      ? matching.map((issue) => issue.detail).join("; ")
+      : "no blocking finding";
+  };
+  return [
+    {
+      name: "render_layout_evidence_complete",
+      passed: result?.status !== "incomplete" && result !== undefined,
+      details: result
+        ? `status=${result.status} snapshot_sha256=${result.snapshot_sha256 ?? "missing"}`
+        : "deterministic layout QA is missing",
+    },
+    {
+      name: "caption_safe_area_valid",
+      passed: !has("caption_outside_safe_area", "glyph_clipped"),
+      details: details("caption_outside_safe_area", "glyph_clipped"),
+    },
+    {
+      name: "caption_font_glyphs_valid",
+      passed: !has("font_fallback", "missing_glyph"),
+      details: details("font_fallback", "missing_glyph"),
+    },
+    {
+      name: "single_speech_caption_layer_valid",
+      passed: !has("duplicate_speech_caption_layer"),
+      details: details("duplicate_speech_caption_layer"),
+    },
+    {
+      name: "caption_visual_collision_absent",
+      passed: !has("caption_visual_collision"),
+      details: details("caption_visual_collision"),
+    },
+    {
+      name: "end_state_valid",
+      passed: !has("end_card_hold_invalid", "final_frame_state_invalid"),
+      details: details("end_card_hold_invalid", "final_frame_state_invalid"),
+    },
+  ];
+}
+
+export function checkFinalCaptionStructuralInvariants(
+  captions: CaptionDraftEntry[],
+  fps: number,
+  language: string,
+): QaCheckResult {
+  const blocking = validateFinalCaptionInvariants(captions, fps, language)
+    .filter((issue) => issue.severity === "block");
+  return {
+    name: "caption_final_invariants_valid",
+    passed: blocking.length === 0,
+    details: blocking.length === 0
+      ? "final caption durations, separation, metrics, and reveal anchors are valid"
+      : blocking.map((issue) => `${issue.code}:${issue.caption_id}`).join("; "),
   };
 }
 
@@ -106,20 +226,32 @@ export function checkCaptionDensity(
   fps: number,
   language: string,
   stylingClass?: string,
+  options: { humanApproved?: boolean } = {},
 ): QaCheckResult {
-  const errors: string[] = [];
+  const blockingErrors: string[] = [];
+  const advisoryErrors: string[] = [];
   let maxDensity = 0;
 
   for (const cap of captions) {
     // Positive duration check
     if (cap.timeline_duration_frames <= 0) {
-      errors.push(
+      blockingErrors.push(
         `${cap.caption_id}: non-positive duration (${cap.timeline_duration_frames} frames)`,
       );
       continue;
     }
 
     const durationSec = cap.timeline_duration_frames / fps;
+    const dwellMs = durationSec * 1000;
+    if (dwellMs < MIN_CAPTION_HARD_FLOOR_MS) {
+      blockingErrors.push(
+        `${cap.caption_id}: dwell ${dwellMs.toFixed(0)} ms is below the non-waivable ${MIN_CAPTION_HARD_FLOOR_MS} ms safety floor`,
+      );
+    } else if (dwellMs < MIN_CAPTION_TARGET_DWELL_MS) {
+      advisoryErrors.push(
+        `${cap.caption_id}: dwell ${dwellMs.toFixed(0)} ms is below the ${MIN_CAPTION_TARGET_DWELL_MS} ms readability target`,
+      );
+    }
 
     // Both languages use CPS (characters per second) aligned with line-breaker policy
     // Speaker-separated presets render the leading label as a small stacked
@@ -141,7 +273,7 @@ export function checkCaptionDensity(
     // impossible even when the typography is large and the line is short.
     const cpsLimit = japanese ? (shortFormOutline ? 16.0 : 6.0) : 15.0;
     if (cps > cpsLimit) {
-      errors.push(
+      advisoryErrors.push(
         `${cap.caption_id}: CPS ${cps.toFixed(2)} exceeds ${cpsLimit.toFixed(1)} limit`,
       );
     }
@@ -149,7 +281,7 @@ export function checkCaptionDensity(
     const maxCharsPerLine = shortFormOutline ? 13 : japanese ? 20 : 42;
     for (const line of visibleText.split("\n")) {
       if ([...line].length > maxCharsPerLine) {
-        errors.push(
+        advisoryErrors.push(
           `${cap.caption_id}: line length ${[...line].length} exceeds ${maxCharsPerLine} character layout limit`,
         );
       }
@@ -165,19 +297,24 @@ export function checkCaptionDensity(
     const curr = sorted[i];
     const prevEnd = prev.timeline_in_frame + prev.timeline_duration_frames;
     if (prevEnd > curr.timeline_in_frame) {
-      errors.push(
+      blockingErrors.push(
         `Overlap: ${prev.caption_id} ends at frame ${prevEnd}, ` +
         `${curr.caption_id} starts at frame ${curr.timeline_in_frame}`,
       );
     }
   }
 
+  const errors = options.humanApproved
+    ? blockingErrors
+    : [...blockingErrors, ...advisoryErrors];
   return {
     name: "caption_density_valid",
     passed: errors.length === 0,
     details:
       errors.length === 0
-        ? `Caption density OK (max: ${maxDensity.toFixed(2)})`
+        ? options.humanApproved && advisoryErrors.length > 0
+          ? `Human-approved caption layout (${advisoryErrors.length} density/line finding(s) acknowledged; max: ${maxDensity.toFixed(2)} CPS)`
+          : `Caption density OK (max: ${maxDensity.toFixed(2)})`
         : errors.join("; "),
   };
 }
@@ -266,20 +403,21 @@ export function checkDialogueTimelineAlignment(
     };
   }
 
-  const passed = observedOutsideExpectedMs < frameDurationMs;
+  const thresholdMs = frameDurationMs / 2;
+  const passed = observedOutsideExpectedMs <= thresholdMs;
   return {
     name: "dialogue_timeline_alignment_valid",
     passed,
     details: passed
-      ? `outside_expected_ms=${observedOutsideExpectedMs.toFixed(2)} threshold_ms=${frameDurationMs.toFixed(2)}`
-      : `outside_expected_ms=${observedOutsideExpectedMs.toFixed(2)} threshold_ms=${frameDurationMs.toFixed(2)} reason=dialogue_signal_outside_timeline_windows`,
+      ? `outside_expected_ms=${observedOutsideExpectedMs.toFixed(2)} threshold_ms=${thresholdMs.toFixed(2)}`
+      : `outside_expected_ms=${observedOutsideExpectedMs.toFixed(2)} threshold_ms=${thresholdMs.toFixed(2)} reason=dialogue_signal_outside_timeline_windows`,
   };
 }
 
 // ── A/V Drift ──────────────────────────────────────────────────────
 
 /**
- * Duration delta between video and audio must be less than 1 frame duration.
+ * Duration delta between video and audio must be at most half a frame.
  * This verifies stream parity, not content or lip sync; content placement is
  * checked separately by checkDialogueTimelineAlignment.
  */
@@ -289,14 +427,15 @@ export function checkAvDrift(
   frameDurationMs: number,
 ): QaCheckResult {
   const driftMs = Math.abs(videoDurationMs - audioDurationMs);
+  const thresholdMs = frameDurationMs / 2;
 
   return {
     name: "av_drift_valid",
-    passed: driftMs < frameDurationMs,
+    passed: driftMs <= thresholdMs,
     details:
-      driftMs < frameDurationMs
-        ? `A/V duration delta ${driftMs.toFixed(2)}ms < frame duration ${frameDurationMs.toFixed(2)}ms`
-        : `A/V duration delta ${driftMs.toFixed(2)}ms >= frame duration ${frameDurationMs.toFixed(2)}ms`,
+      driftMs <= thresholdMs
+        ? `A/V duration delta ${driftMs.toFixed(2)}ms <= half-frame ${thresholdMs.toFixed(2)}ms`
+        : `A/V duration delta ${driftMs.toFixed(2)}ms > half-frame ${thresholdMs.toFixed(2)}ms`,
   };
 }
 
@@ -364,10 +503,14 @@ export function checkAudioMixPolicy(
   if (report.has_bgm !== expectedHasBgm) {
     errors.push(`has_bgm expected=${expectedHasBgm} actual=${report.has_bgm}`);
   }
-  if (report.final_mastering?.loudness_target_lufs !== -16) {
+  const originalPassthrough = report.strategy === "original_passthrough_v1";
+  if (originalPassthrough && report.final_mastering?.applied !== false) {
+    errors.push("original passthrough must record final_mastering.applied=false");
+  }
+  if (!originalPassthrough && report.final_mastering?.loudness_target_lufs !== -16) {
     errors.push("final loudness target must be -16 LUFS");
   }
-  if (report.final_mastering?.true_peak_target_dbtp !== -1.5) {
+  if (!originalPassthrough && report.final_mastering?.true_peak_target_dbtp !== -1.5) {
     errors.push("final true-peak target must be -1.5 dBTP");
   }
 
@@ -396,7 +539,7 @@ export function checkAudioMixPolicy(
         errors.push(`dialogue-first BGM duck gain must be <= -18 dB (actual=${report.sidechain.requested_duck_gain_db})`);
       }
     }
-  } else if (report.strategy !== "dialogue_only_mastering_v1") {
+  } else if (report.strategy !== "dialogue_only_mastering_v1" && !originalPassthrough) {
     errors.push(`strategy expected=dialogue_only_mastering_v1 actual=${report.strategy}`);
   }
 
@@ -408,7 +551,9 @@ export function checkAudioMixPolicy(
         ? requireDialogueFirst
           ? "BGM dialogue-first limited, reference-normalized, waveform-sidechained, and final-mastered"
           : "BGM reference-normalized, waveform-sidechained, and final-mastered"
-        : "Dialogue-only mix final-mastered"
+        : originalPassthrough
+          ? "Original-only dialogue level preserved without mastering"
+          : "Dialogue-only mix final-mastered"
       : errors.join("; "),
   };
 }
@@ -528,7 +673,26 @@ export function checkResolutionSpec(
     );
   }
 
-  if (typeof expected.fps === "number" && Number.isFinite(expected.fps)) {
+  if (
+    typeof expected.fps_num === "number" && expected.fps_num > 0 &&
+    typeof expected.fps_den === "number" && expected.fps_den > 0
+  ) {
+    if (
+      typeof actual.fps_num !== "number" || actual.fps_num <= 0 ||
+      typeof actual.fps_den !== "number" || actual.fps_den <= 0
+    ) {
+      mismatches.push(
+        `fps expected=${expected.fps_num}/${expected.fps_den} actual=unknown`,
+      );
+    } else if (!equivalentFrameRates(
+      { fpsNum: expected.fps_num, fpsDen: expected.fps_den },
+      { fpsNum: actual.fps_num, fpsDen: actual.fps_den },
+    )) {
+      mismatches.push(
+        `fps expected=${expected.fps_num}/${expected.fps_den} actual=${actual.fps_num}/${actual.fps_den}`,
+      );
+    }
+  } else if (typeof expected.fps === "number" && Number.isFinite(expected.fps)) {
     if (typeof actual.fps !== "number" || !Number.isFinite(actual.fps)) {
       mismatches.push(`fps expected=${formatFps(expected.fps)} actual=unknown`);
     } else if (Math.abs(actual.fps - expected.fps) > FPS_TOLERANCE) {
@@ -726,6 +890,7 @@ export function getRequiredChecks(
       "caption_policy_valid",
       "caption_density_valid",
       "caption_alignment_valid",
+      "render_layout_evidence_complete",
       "resolution_valid",
       "dialogue_occupancy_valid",
       "dialogue_timeline_alignment_valid",

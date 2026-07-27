@@ -14,7 +14,19 @@ interface StudioContractFixture {
   preflightCases: Array<{
     id: string;
     files: Record<string, string>;
-    expected: { ok: boolean; issues: string[] };
+    expected: {
+      ok: boolean;
+      decision: string;
+      issues: string[];
+      project_identity: { status: string; project_id?: string };
+      structured_issues: Array<{ code: string; message: string }>;
+    };
+  }>;
+  preflightProcessCases: Array<{
+    id: string;
+    exitCode: number;
+    stdout: string;
+    expected: { available: boolean; canPackage: boolean; failureLabel?: string };
   }>;
   packageCases: Array<{
     id: string;
@@ -46,15 +58,43 @@ describe("macOS Studio cross-language contract fixture", () => {
     ]);
     expect(fixture.preflightCases.find((testCase) => testCase.id === "ready_engine_render")?.expected.ok)
       .toBe(true);
+    expect(fixture.preflightCases.find((testCase) => testCase.id === "ready_engine_render")?.expected)
+      .toMatchObject({
+        decision: "ready_to_run",
+        project_identity: { status: "confirmed", project_id: "studio-contract" },
+        structured_issues: [],
+      });
+    expect(fixture.preflightCases.find((testCase) => testCase.id === "empty_id_inferred")?.expected)
+      .toMatchObject({
+        ok: true,
+        decision: "ready_to_run",
+        project_identity: { status: "inferred", project_id: "studio-contract" },
+      });
+    expect(fixture.preflightCases.find((testCase) => testCase.id === "project_id_mismatch")?.expected)
+      .toMatchObject({
+        ok: false,
+        decision: "blocked",
+        project_identity: { status: "conflict" },
+        structured_issues: [{ code: "PACKAGE_PREFLIGHT_PROJECT_ID_MISMATCH" }],
+      });
+    expect(fixture.preflightCases.find((testCase) => testCase.id === "malformed_identity_artifact")?.expected.structured_issues)
+      .toContainEqual(expect.objectContaining({ code: "PACKAGE_PREFLIGHT_IDENTITY_ARTIFACT_MALFORMED" }));
     expect(fixture.preflightCases.find((testCase) => testCase.id === "missing_approval")?.expected.issues)
       .toContain("approval_record is missing");
     expect(fixture.preflightCases.find((testCase) => testCase.id === "stale_caption_approval")?.expected.issues)
       .toContain("caption_approval is stale");
+    expect(fixture.preflightCases.find((testCase) => testCase.id === "missing_final_render_approval")?.expected)
+      .toMatchObject({
+        ok: false,
+        decision: "blocked",
+        structured_issues: [{ code: "PACKAGE_PREFLIGHT_FINAL_RENDER_APPROVAL_MISSING" }],
+      });
     expect(Object.fromEntries(fixture.packageCases.map((testCase) => [
       testCase.id,
       testCase.expected.readinessLabel,
     ]))).toEqual({
       valid: "render packaged",
+      valid_captioned: "render packaged",
       qa_missing_details: "qa report unreadable",
       qa_unknown_property: "qa report unreadable",
       manifest_missing_provenance: "package manifest unreadable",
@@ -72,10 +112,34 @@ describe("macOS Studio cross-language contract fixture", () => {
       timeline_version_mismatch: "package contract mismatch",
       source_inputs_provenance_missing: "package manifest unreadable",
       state_unknown_property: "package contract mismatch",
+      render_route_receipt_tampered: "package contract mismatch",
+      render_route_drift: "package contract mismatch",
+      renderer_version_drift: "package contract mismatch",
+      encode_pass_drift: "package contract mismatch",
+      font_receipt_missing: "package contract mismatch",
+      font_receipt_tampered: "package contract mismatch",
+      layer_receipt_missing: "package contract mismatch",
     });
     expect(fixture.packageCases.find((testCase) => testCase.id === "valid")?.expected.ready).toBe(true);
-    expect(fixture.packageCases.filter((testCase) => testCase.id !== "valid").every((testCase) => !testCase.expected.ready))
+    expect(fixture.packageCases.find((testCase) => testCase.id === "valid_captioned")?.expected.ready)
       .toBe(true);
+    expect(fixture.packageCases.filter((testCase) =>
+      !["valid", "valid_captioned"].includes(testCase.id)
+    ).every((testCase) => !testCase.expected.ready))
+      .toBe(true);
+    expect(fixture.preflightProcessCases.map((testCase) => testCase.id)).toEqual([
+      "normal",
+      "empty_id_inferred",
+      "project_id_mismatch",
+      "malformed_json",
+      "exit_json_contradiction",
+    ]);
+    expect(fixture.preflightProcessCases.find((testCase) => testCase.id === "exit_json_contradiction")?.expected)
+      .toEqual({
+        available: false,
+        canPackage: false,
+        failureLabel: "package preflight unavailable",
+      });
   }, 30_000);
 
   it("uses schema-valid canonical artifacts for every Gate 10 fixture", () => {

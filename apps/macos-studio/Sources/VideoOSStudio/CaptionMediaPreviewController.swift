@@ -5,6 +5,7 @@ import VideoOSStudioCore
 
 @MainActor
 final class CaptionMediaPreviewController: ObservableObject {
+    enum Readiness { case loading, ready, failed }
     let player = AVPlayer()
 
     @Published private(set) var isPlaying = false
@@ -15,10 +16,13 @@ final class CaptionMediaPreviewController: ObservableObject {
     @Published private(set) var loopEndSeconds = 0.0
     @Published private(set) var captionStartSeconds = 0.0
     @Published private(set) var captionEndSeconds = 0.0
+    @Published private(set) var readiness: Readiness = .loading
+    @Published private(set) var canRetry = true
 
     private var currentURL: URL?
     private var timeObserver: Any?
     private var generation = 0
+    private var retryRequest: (projectURL: URL, item: CaptionReviewQueueItem, fps: Double, padding: Double)?
 
     init() {
         player.actionAtItemEnd = .none
@@ -44,6 +48,7 @@ final class CaptionMediaPreviewController: ObservableObject {
         fps: Double,
         paddingSeconds: Double = 1.25
     ) {
+        retryRequest = (projectURL, item, fps, paddingSeconds)
         generation += 1
         let requestGeneration = generation
         pause()
@@ -54,6 +59,8 @@ final class CaptionMediaPreviewController: ObservableObject {
         loopEndSeconds = captionEndSeconds + paddingSeconds
         currentSeconds = loopStartSeconds
         waveformPeaks = []
+        readiness = .loading
+        canRetry = true
 
         guard let media = ProjectMediaResolver.resolveTimelinePreview(
             projectURL: projectURL,
@@ -61,16 +68,54 @@ final class CaptionMediaPreviewController: ObservableObject {
         ), media.exists, let url = media.url else {
             currentURL = nil
             player.replaceCurrentItem(with: nil)
-            statusMessage = "現在のタイムラインに対応するプレビュー動画がありません。"
+            let failure = ProjectMediaResolver.timelinePreviewFailure(projectURL: projectURL)
+            statusMessage = failure.message
+            canRetry = failure.retryable
+            readiness = .failed
             return
         }
 
-        if currentURL != url {
+        let playerItem: AVPlayerItem
+        if currentURL != url || player.currentItem == nil {
             currentURL = url
-            player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            playerItem = AVPlayerItem(url: url)
+            player.replaceCurrentItem(with: playerItem)
+        } else {
+            playerItem = player.currentItem!
         }
-        seek(to: loopStartSeconds)
-        statusMessage = "発話前後を含む\(String(format: "%.1f", loopEndSeconds - loopStartSeconds))秒のループです。"
+        statusMessage = "プレビュー動画の準備完了を待っています。"
+        Task { [weak self] in
+            do {
+                let playable = try await playerItem.asset.load(.isPlayable)
+                guard playable else { throw PreviewReadinessError.notPlayable }
+                // Large local media can need several seconds for first decode.
+                // Generation checks make reselection cancel this wait logically.
+                for _ in 0..<750 {
+                    guard let self, self.generation == requestGeneration else { return }
+                    switch playerItem.status {
+                    case .readyToPlay:
+                        let seekCompleted = await self.seekForPreparation(to: self.loopStartSeconds)
+                        guard self.generation == requestGeneration else { return }
+                        guard seekCompleted else { throw PreviewReadinessError.seekFailed }
+                        self.readiness = .ready
+                        self.statusMessage = "発話前後を含む\(String(format: "%.1f", self.loopEndSeconds - self.loopStartSeconds))秒のループです。"
+                        return
+                    case .failed:
+                        throw playerItem.error ?? PreviewReadinessError.notPlayable
+                    case .unknown:
+                        try await Task.sleep(nanoseconds: 20_000_000)
+                    @unknown default:
+                        throw PreviewReadinessError.notPlayable
+                    }
+                }
+                throw PreviewReadinessError.timeout
+            } catch {
+                guard let self, self.generation == requestGeneration else { return }
+                self.readiness = .failed
+                self.canRetry = true
+                self.statusMessage = "プレビュー準備に失敗しました: \(error.localizedDescription)"
+            }
+        }
 
         let start = loopStartSeconds
         let end = loopEndSeconds
@@ -99,7 +144,7 @@ final class CaptionMediaPreviewController: ObservableObject {
     }
 
     func play() {
-        guard player.currentItem != nil else { return }
+        guard player.currentItem != nil, readiness == .ready else { return }
         if currentSeconds < loopStartSeconds || currentSeconds >= loopEndSeconds {
             seek(to: loopStartSeconds)
         }
@@ -115,6 +160,12 @@ final class CaptionMediaPreviewController: ObservableObject {
     func restartLoop() {
         seek(to: loopStartSeconds)
         play()
+    }
+
+    func retry() {
+        guard let request = retryRequest else { return }
+        currentURL = nil
+        prepare(projectURL: request.projectURL, item: request.item, fps: request.fps, paddingSeconds: request.padding)
     }
 
     private func handlePlaybackTime(_ seconds: Double) {
@@ -134,5 +185,33 @@ final class CaptionMediaPreviewController: ObservableObject {
             toleranceAfter: .zero
         )
         currentSeconds = bounded
+    }
+
+    private func seekForPreparation(to seconds: Double) async -> Bool {
+        let bounded = max(0, seconds)
+        let completed = await withCheckedContinuation { continuation in
+            player.seek(
+                to: CMTime(seconds: bounded, preferredTimescale: 600),
+                toleranceBefore: .zero,
+                toleranceAfter: .zero
+            ) { finished in
+                continuation.resume(returning: finished)
+            }
+        }
+        if completed { currentSeconds = bounded }
+        return completed
+    }
+}
+
+private enum PreviewReadinessError: LocalizedError {
+    case notPlayable
+    case seekFailed
+    case timeout
+    var errorDescription: String? {
+        switch self {
+        case .notPlayable: return "動画を再生できません"
+        case .seekFailed: return "開始位置へ移動できません"
+        case .timeout: return "player準備がタイムアウトしました"
+        }
     }
 }

@@ -184,6 +184,8 @@ interface TimelineDoc {
   sequence?: {
     fps_num?: number;
     fps_den?: number;
+    width?: number;
+    height?: number;
   };
   tracks?: {
     video?: Array<{
@@ -737,11 +739,15 @@ function videoFadeFilter(clip: RenderClip, fps: number): string | undefined {
 export function buildClipVideoFilters(
   clip: RenderClip,
   fps: number,
-  options: { applyEndingFade?: boolean } = {},
+  options: {
+    applyEndingFade?: boolean;
+    outputWidth?: number;
+    outputHeight?: number;
+  } = {},
 ): string {
   const fitFilter = buildVideoFitFilterFromTransform(
-    1920,
-    1080,
+    options.outputWidth ?? 1920,
+    options.outputHeight ?? 1080,
     extractClipTransform(clip) ?? {},
   );
   return [
@@ -1550,6 +1556,16 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
       `Reusable video lacks fresh canonical source identity metadata: ${reuseFreshnessBefore.reason ?? reuseFreshnessBefore.status}`,
     );
   }
+  const outputWidth = timeline.sequence?.width;
+  const outputHeight = timeline.sequence?.height;
+  if (
+    !Number.isInteger(outputWidth) ||
+    !Number.isInteger(outputHeight) ||
+    (outputWidth ?? 0) <= 0 ||
+    (outputHeight ?? 0) <= 0
+  ) {
+    throw new Error("Timeline sequence width and height must be positive integers");
+  }
   const sourceInputsBefore = createSourceInputAttestation(projectPath, {
     timelinePath,
     includeAudio: !args.noAudio,
@@ -1677,6 +1693,8 @@ export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
         const tmpClip = path.join(tempDir, `clip-${String(index + 1).padStart(4, "0")}.mp4`);
         const videoFilters = buildClipVideoFilters(clip, fps, {
           applyEndingFade: !args.deferEndingFade,
+          outputWidth,
+          outputHeight,
         });
         await runFfmpeg([
           "-ss",

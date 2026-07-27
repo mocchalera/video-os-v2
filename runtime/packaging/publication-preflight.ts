@@ -3,16 +3,19 @@ import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { validateAgainstSchema } from "../commands/shared.js";
 import { computeSha256 } from "./manifest.js";
+import { resolveDeliveryArtifactPaths } from "./active-delivery.js";
 
 export interface PublicationDestination {
   platform: "youtube" | "vimeo" | "instagram" | "tiktok" | "internal";
   visibility: "private" | "unlisted" | "public" | "workspace_only";
   account?: string;
+  channel_id?: string;
+  metadata_sha256?: string;
   notes?: string;
 }
 
 interface PublicationApproval {
-  version: "publication-approval/v1";
+  version: "publication-approval/v1" | "publication-approval/v2";
   project_id: string;
   canonical_video: { path: "09_output/final.mp4"; sha256: string };
   approvals: Record<"creative" | "rights" | "privacy", {
@@ -36,7 +39,19 @@ export interface PublicationPreflightResult {
   project_id?: string;
   canonical_video?: { path: string; sha256: string };
   destinations?: PublicationDestination[];
+  approval?: {
+    version: PublicationApproval["version"];
+    path: string;
+    sha256: string;
+  };
   checks: PublicationPreflightCheck[];
+}
+
+export interface PublicationDestinationRequest {
+  platform: PublicationDestination["platform"];
+  visibility: PublicationDestination["visibility"];
+  channel_id?: string;
+  metadata_sha256?: string;
 }
 
 function readJson(filePath: string): unknown {
@@ -45,11 +60,24 @@ function readJson(filePath: string): unknown {
 
 export function runPublicationPreflight(
   projectDir: string,
-  requestedDestination?: Pick<PublicationDestination, "platform" | "visibility">,
+  requestedDestination?: PublicationDestinationRequest,
 ): PublicationPreflightResult {
   const absProjectDir = path.resolve(projectDir);
   const approvalPath = path.join(absProjectDir, "07_package", "publication_approval.yaml");
   const checks: PublicationPreflightCheck[] = [];
+  let delivery: ReturnType<typeof resolveDeliveryArtifactPaths>;
+  try {
+    delivery = resolveDeliveryArtifactPaths(absProjectDir, { verifyHashes: true });
+  } catch (error) {
+    return {
+      ready: false,
+      checks: [{
+        name: "active_delivery_pointer_valid",
+        passed: false,
+        details: error instanceof Error ? error.message : String(error),
+      }],
+    };
+  }
 
   if (!fs.existsSync(approvalPath)) {
     return {
@@ -80,18 +108,30 @@ export function runPublicationPreflight(
   checks.push({
     name: "publication_approval_schema_valid",
     passed: validation.valid,
-    details: validation.valid ? "schema=publication-approval/v1" : validation.errors.join("; "),
+    details: validation.valid ? `schema=${approval.version}` : validation.errors.join("; "),
   });
   if (!validation.valid) return { ready: false, project_id: approval.project_id, checks };
+  const approvalIdentity = {
+    version: approval.version,
+    path: approvalPath,
+    sha256: computeSha256(approvalPath),
+  };
 
-  const canonicalPath = path.join(absProjectDir, approval.canonical_video.path);
+  const canonicalPath = delivery.finalVideoPath;
   const canonicalExists = fs.existsSync(canonicalPath);
   checks.push({
     name: "canonical_video_present",
     passed: canonicalExists,
-    details: `path=${approval.canonical_video.path}`,
+    details: `path=${path.relative(absProjectDir, canonicalPath)} source=${delivery.source}`,
   });
-  if (!canonicalExists) return { ready: false, project_id: approval.project_id, checks };
+  if (!canonicalExists) {
+    return {
+      ready: false,
+      project_id: approval.project_id,
+      approval: approvalIdentity,
+      checks,
+    };
+  }
 
   const actualSha256 = computeSha256(canonicalPath);
   checks.push({
@@ -109,7 +149,7 @@ export function runPublicationPreflight(
     });
   }
 
-  const qaPath = path.join(absProjectDir, "07_package", "qa-report.json");
+  const qaPath = delivery.qaReportPath;
   const qaReport = fs.existsSync(qaPath) ? readJson(qaPath) as { project_id?: string; passed?: boolean } : null;
   checks.push({
     name: "package_qa_passed",
@@ -117,7 +157,7 @@ export function runPublicationPreflight(
     details: qaReport ? `passed=${String(qaReport.passed)}` : "missing=07_package/qa-report.json",
   });
 
-  const manifestPath = path.join(absProjectDir, "07_package", "package_manifest.json");
+  const manifestPath = delivery.packageManifestPath;
   const manifest = fs.existsSync(manifestPath) ? readJson(manifestPath) as {
     project_id?: string;
     artifacts?: { final_video?: { sha256?: string } };
@@ -139,12 +179,24 @@ export function runPublicationPreflight(
   if (requestedDestination) {
     const destinationApproved = approval.destinations.some((destination) =>
       destination.platform === requestedDestination.platform &&
-      destination.visibility === requestedDestination.visibility
+      destination.visibility === requestedDestination.visibility &&
+      (
+        requestedDestination.channel_id === undefined ||
+        destination.channel_id === requestedDestination.channel_id
+      ) &&
+      (
+        requestedDestination.metadata_sha256 === undefined ||
+        destination.metadata_sha256 === requestedDestination.metadata_sha256
+      )
     );
     checks.push({
       name: "destination_approved",
       passed: destinationApproved,
-      details: `platform=${requestedDestination.platform} visibility=${requestedDestination.visibility}`,
+      details:
+        `platform=${requestedDestination.platform} ` +
+        `visibility=${requestedDestination.visibility} ` +
+        `channel_id=${requestedDestination.channel_id ?? "not_requested"} ` +
+        `metadata_sha256=${requestedDestination.metadata_sha256 ?? "not_requested"}`,
     });
   }
 
@@ -153,6 +205,7 @@ export function runPublicationPreflight(
     project_id: approval.project_id,
     canonical_video: { path: canonicalPath, sha256: actualSha256 },
     destinations: approval.destinations,
+    approval: approvalIdentity,
     checks,
   };
 }

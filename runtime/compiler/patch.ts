@@ -497,6 +497,7 @@ function opMoveSegment(
 
   const clip = found.clip;
   const originalTrack = found.track;
+  const previousStart = clip.timeline_in_frame;
   const nextStart = op.new_timeline_in_frame ?? clip.timeline_in_frame;
   const nextDuration = op.new_duration_frames ?? clip.timeline_duration_frames;
   const requestedTrack = op.target_track_id && op.target_track_id !== originalTrack.track_id
@@ -540,7 +541,27 @@ function opMoveSegment(
       return { op_index: index, op: op.op, message: "Still-image move overlaps another clip on the target track." };
     }
   }
-  if (op.new_timeline_in_frame !== undefined) clip.timeline_in_frame = op.new_timeline_in_frame;
+  if (op.new_timeline_in_frame !== undefined) {
+    const frameDelta = op.new_timeline_in_frame - previousStart;
+    clip.timeline_in_frame = op.new_timeline_in_frame;
+    if (frameDelta !== 0) {
+      for (const caption of clip.captions ?? []) {
+        caption.in_frame += frameDelta;
+        caption.out_frame += frameDelta;
+      }
+      if (originalTrack.kind === "video") {
+        for (const marker of timeline.markers) {
+          if (
+            marker.kind === "beat" &&
+            marker.frame === previousStart &&
+            (marker.label === clip.beat_id || marker.label.startsWith(`${clip.beat_id}:`))
+          ) {
+            marker.frame += frameDelta;
+          }
+        }
+      }
+    }
+  }
   if (op.new_duration_frames !== undefined) {
     clip.timeline_duration_frames = op.new_duration_frames;
     if (clip.media_kind === "image") {

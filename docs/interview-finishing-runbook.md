@@ -34,6 +34,21 @@
 7. 外部アップロード前に、権利、privacy、公開範囲、アップロード対象hashの人間承認を取る。
    `07_package/publication_approval.yaml`で全承認を同じ`09_output/final.mp4`のSHA-256へ束ね、
    `npm run publication-preflight -- <project> --platform youtube --visibility unlisted`を通す。
+   YouTube Data APIへの大容量送信はローカルworkerだけで行い、GAS/connectorへ動画binaryを渡さない。
+   metadata JSONを用意し、OAuth access tokenをコマンド引数ではなく環境変数へ設定して実行する。
+
+   ```sh
+   YOUTUBE_ACCESS_TOKEN='...' npm run youtube-upload -- <project> \
+     --metadata <youtube-metadata.json> \
+     --privacy unlisted \
+     --expected-channel <channel-id>
+   ```
+
+   既定visibilityは`unlisted`。`public`は同じfinal video hashとpublic destinationに結び付く既存の
+   publication approvalがpreflightを通過しない限り拒否される。再開用session URLは
+   `07_package/.youtube-upload-sessions/`の0600 fileへ隔離され、redacted final receiptは
+   `07_package/publication-receipts/`へ保存される。workerは308 offset resume、5xx backoff、
+   session expiry時の再初期化、同一hash/metadata/visibilityの重複防止、processing pollingを行う。
 8. upload後は「API成功」だけで終えず、remote ID、visibility、processing完了、再生可能性を確認する。
 9. Slack等へ共有した場合は、workspace、channel、thread、message timestamp、共有URLを記録する。
 

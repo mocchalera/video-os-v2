@@ -798,6 +798,7 @@ function boundedUtteranceRange(
   minDurationUs: number,
   maxDurationUs: number | undefined,
   targetDurationUs: number | undefined,
+  maxDurationToleranceUs: number,
 ): { src_in_us: number; src_out_us: number; duration_bound: boolean } | null {
   if (maxDurationUs === undefined && targetDurationUs === undefined) return null;
 
@@ -817,7 +818,10 @@ function boundedUtteranceRange(
       if (start >= srcOutUs || srcInUs >= end) continue;
 
       const duration = end - start;
-      if (maxDurationUs !== undefined && duration > maxDurationUs) continue;
+      if (
+        maxDurationUs !== undefined &&
+        duration > maxDurationUs + maxDurationToleranceUs
+      ) continue;
 
       const durationScore = Math.abs(duration - targetUs) / targetUs;
       const centerScore = Math.abs(((start + end) / 2) - originalCenter) / Math.max(toleranceUs, targetUs);
@@ -872,6 +876,7 @@ export function snapRangeToUtteranceBoundaries(
     preferNextOutBoundary?: boolean;
     maxDurationUs?: number;
     targetDurationUs?: number;
+    durationFrameUs?: number;
   } = {},
 ): UtteranceSnapResult | null {
   if (utterances.length === 0 || toleranceUs <= 0) return null;
@@ -881,6 +886,11 @@ export function snapRangeToUtteranceBoundaries(
   const endBoundaries = boundaryValues(edges, "end");
   const guardUs = SPEECH_CUT_GUARD_US;
   const minDurationUs = guardUs * 2 + 1;
+  // Timeline duration is rounded to frames below. Admit the same source ranges
+  // here so a sub-half-frame overage cannot displace an authored utterance.
+  const maxDurationToleranceUs = options.durationFrameUs && options.durationFrameUs > 0
+    ? Math.max(0, options.durationFrameUs / 2 - 1)
+    : 0;
 
   const bounded = boundedUtteranceRange(
     srcInUs,
@@ -891,6 +901,7 @@ export function snapRangeToUtteranceBoundaries(
     minDurationUs,
     options.maxDurationUs,
     options.targetDurationUs,
+    maxDurationToleranceUs,
   );
   if (bounded) {
     if (bounded.src_in_us === srcInUs && bounded.src_out_us === srcOutUs) return null;
@@ -964,6 +975,7 @@ export function applyUtteranceSnap(
         preferNextOutBoundary: options.preferNextOutBoundary,
         maxDurationUs: clip.beat_id ? options.maxDurationUsByBeat?.get(clip.beat_id) : undefined,
         targetDurationUs: clip.beat_id ? options.targetDurationUsByBeat?.get(clip.beat_id) : undefined,
+        durationFrameUs: options.usPerFrame,
       },
     );
     if (!result) continue;
