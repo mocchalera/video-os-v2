@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import * as child_process from "node:child_process";
 import { createRequire } from "node:module";
@@ -638,12 +639,21 @@ describe("Python OTIO bridge", () => {
   });
 
   it("bridge script is valid Python syntax", () => {
-    const result = child_process.spawnSync(
-      "python3",
-      ["-m", "py_compile", bridgeScriptPath],
-      { encoding: "utf-8", timeout: 10_000 },
-    );
-    expect(result.status).toBe(0);
+    const pycacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), "otio-bridge-pycache-"));
+    try {
+      const result = child_process.spawnSync(
+        "python3",
+        ["-m", "py_compile", bridgeScriptPath],
+        {
+          encoding: "utf-8",
+          timeout: 10_000,
+          env: { ...process.env, PYTHONPYCACHEPREFIX: pycacheRoot },
+        },
+      );
+      expect(result.status).toBe(0);
+    } finally {
+      fs.rmSync(pycacheRoot, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(!otioAvailable)(

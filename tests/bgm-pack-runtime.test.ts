@@ -143,13 +143,14 @@ function writeManifest(packDir: string, manifest: BgmPackManifest): void {
 }
 
 describe("read-only BGM pack registry", () => {
-  it("verifies a valid synthetic pack and resolves its pinned track", () => {
+  it("keeps a legacy manifest without pinned provenance assets compatible", () => {
     const root = makeRoot();
     const { packDir, manifest } = writePack(root);
     const verification = verifyPack(packDir);
     expect(verification.ok).toBe(true);
     expect(verification.issues).toEqual([]);
     expect(verification.files_checked).toBe(5);
+    expect(verification.verified_provenance_paths).toEqual([]);
 
     const resolved = resolveTrack("track-a", manifest.tracks[0].full_mix.content_hash, {
       searchRoots: [{ source: "environment", priority: 1, path: root }],

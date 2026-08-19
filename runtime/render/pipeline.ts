@@ -45,6 +45,12 @@ import { applyMusicMixProfile, type MusicCuesDoc } from "../audio/music-cues.js"
 import { timelineEmbeddedMusicAssetIds } from "../audio/timeline-music.js";
 import { shouldPreserveOriginalAudioLevel } from "../audio/preservation.js";
 import { DEFAULT_MASTERING, measureAudioLoudness } from "../audio/mastering.js";
+import {
+  assertAudioRenderPlanFresh,
+  executeAudioRenderPlan,
+} from "../audio/render-executor.js";
+import type { AudioRenderPlan } from "../audio/render-plan.js";
+import { resolveSharedAudioRenderPlan } from "../audio/render-route.js";
 import { renderHyperFramesContentLayer } from "../content/hyperframes-renderer.js";
 import { renderRemotionContentLayer } from "./remotion/render-remotion.js";
 import {
@@ -82,6 +88,9 @@ export interface RenderPipelineOptions {
   timelinePath: string;
   captionApprovalPath?: string;
   musicCuesPath?: string;
+  sfxCuesPath?: string;
+  /** Preflighted shared audio plan supplied by /package. */
+  audioRenderPlan?: AudioRenderPlan;
   assemblyPath?: string; // Pre-built assembly.mp4 (skip Remotion step)
   /** Alternate engine if assemblyPath is not pre-built */
   assemblyEngine?: AssemblyEngine;
@@ -111,6 +120,9 @@ export interface RenderPipelineOptions {
   composeFinalVisualsImpl?: typeof composeFinalVisuals;
   /** Test/host seam for the fail-closed toolchain and capacity gate. */
   assertMediaWriteReadyImpl?: typeof assertMediaWriteReady;
+  /** Test seams for the shared A1/A2/A3 execution route. */
+  executeAudioRenderPlanImpl?: typeof executeAudioRenderPlan;
+  assertAudioRenderPlanFreshImpl?: typeof assertAudioRenderPlanFresh;
 }
 
 export interface RenderPipelineResult {
@@ -762,6 +774,18 @@ export async function runRenderPipeline(
   opts: RenderPipelineOptions,
 ): Promise<RenderPipelineResult> {
   const { outputDir, captionPolicy } = opts;
+  const sharedAudioPlan = opts.audioRenderPlan ?? resolveSharedAudioRenderPlan({
+    projectDir: opts.projectDir,
+    timelinePath: opts.timelinePath,
+    musicCuesPath: opts.musicCuesPath,
+    sfxCuesPath: opts.sfxCuesPath,
+    sourceOverrides: opts.sourceMap,
+  });
+  if (sharedAudioPlan) {
+    (opts.assertAudioRenderPlanFreshImpl ?? assertAudioRenderPlanFresh)(
+      sharedAudioPlan,
+    );
+  }
   let hasCanonicalDerivedMedia = false;
   let hasCanonicalStill = false;
   let captionFontContract: ReturnType<typeof captionFontContractForReceipt> | undefined;
@@ -893,6 +917,7 @@ export async function runRenderPipeline(
       outputPath: opts.assemblyOutputPath!,
       engine: resolvedEngine!,
       bundleCacheDir: opts.bundleCacheDir,
+      includeAudio: !sharedAudioPlan,
     });
     assemblyPath = produced.assemblyPath;
   }
@@ -1027,7 +1052,11 @@ export async function runRenderPipeline(
     typeof timelineForMix.audio_mix?.bgm_asset_id === "string";
   let rawDialoguePath: string | undefined;
   try {
-    const demuxResult = await demux(assemblyPath, outputDir, hasTimelineAudio);
+    const demuxResult = await demux(
+      assemblyPath,
+      outputDir,
+      hasTimelineAudio && !sharedAudioPlan,
+    );
     rawVideoPath = demuxResult.rawVideoPath;
     rawDialoguePath = demuxResult.rawDialoguePath;
     deliveryOperations.push({ id: "demux_video", kind: "stream_copy", codec: "h264" });
@@ -1231,7 +1260,8 @@ export async function runRenderPipeline(
   const embeddedBgmAssetIds = timelineEmbeddedMusicAssetIds(timelineForMix);
   const preserveOriginalAudioLevel = shouldPreserveOriginalAudioLevel(timelineForMix) &&
     embeddedBgmAssetIds.length === 0 &&
-    !(opts.musicCuesPath && fs.existsSync(opts.musicCuesPath));
+    !(opts.musicCuesPath && fs.existsSync(opts.musicCuesPath)) &&
+    !(opts.sfxCuesPath && fs.existsSync(opts.sfxCuesPath));
 
   if (!hasTimelineAudio) {
     const finalVideoPath = path.join(videoDir, "final.mp4");
@@ -1253,11 +1283,33 @@ export async function runRenderPipeline(
       renderRouteReceiptPath,
     };
   }
-  if (!rawDialoguePath) throw new Error("timeline_audio_expected_but_demux_missing");
+  if (!rawDialoguePath && !sharedAudioPlan) {
+    throw new Error("timeline_audio_expected_but_demux_missing");
+  }
+  const demuxedDialoguePath = rawDialoguePath;
 
-  if (preserveOriginalAudioLevel) {
-    fs.copyFileSync(rawDialoguePath, finalMixPath);
-    const measurement = await measureAudioLoudness(rawDialoguePath);
+  if (sharedAudioPlan) {
+    const executed = await (opts.executeAudioRenderPlanImpl ?? executeAudioRenderPlan)({
+      plan: sharedAudioPlan,
+      outputDir: audioDir,
+      outputPaths: {
+        rawDialoguePath: path.join(audioDir, "raw_dialogue.wav"),
+        finalMixPath,
+        reportPath: audioMixReportPath,
+      },
+      replaceExisting: true,
+      workDirRoot: opts.bundleCacheDir,
+    });
+    rawDialoguePath = executed.rawDialoguePath;
+    logs["audio_mix_report"] = executed.reportPath;
+    logs["audio_mix"] = writeLog(
+      logsDir,
+      "audio_mix",
+      `Shared AudioRenderPlan executed plan_hash=${executed.planHash}`,
+    );
+  } else if (preserveOriginalAudioLevel) {
+    fs.copyFileSync(demuxedDialoguePath!, finalMixPath);
+    const measurement = await measureAudioLoudness(demuxedDialoguePath!);
     fs.writeFileSync(audioMixReportPath, `${JSON.stringify({
       version: "audio-mix-report/v1",
       has_bgm: false,
@@ -1305,13 +1357,13 @@ export async function runRenderPipeline(
       const embeddedBgm = embeddedBgmAssetIds.includes(musicCuesDoc.music_asset.asset_id);
       const mixResult = embeddedBgm
         ? await mixAudio({
-            rawDialoguePath,
+            rawDialoguePath: demuxedDialoguePath!,
             speechIntervals: extractSpeechIntervals(a1Clips, fps),
             outputPath: finalMixPath,
             fps,
           })
         : await mixAudio({
-            rawDialoguePath,
+            rawDialoguePath: demuxedDialoguePath!,
             bgmPath,
             musicCues: musicCuesDoc,
             speechIntervals: extractSpeechIntervals(a1Clips, fps),
@@ -1351,7 +1403,7 @@ export async function runRenderPipeline(
     try {
       const { mixAudio } = await import("../audio/mixer.js");
       const mixResult = await mixAudio({
-        rawDialoguePath,
+        rawDialoguePath: demuxedDialoguePath!,
         speechIntervals: [],
         outputPath: finalMixPath,
         fps,
@@ -1388,7 +1440,7 @@ export async function runRenderPipeline(
   }
 
   const timelineAudioDurationSec = readTimelineDurationSeconds(opts.timelinePath);
-  if (timelineAudioDurationSec !== undefined) {
+  if (timelineAudioDurationSec !== undefined && !sharedAudioPlan) {
     await normalizeAudioDuration(finalMixPath, timelineAudioDurationSec);
     logs["audio_duration"] = writeLog(
       logsDir,
@@ -1434,7 +1486,7 @@ export async function runRenderPipeline(
     baseAssemblyPath,
     assemblyPath,
     rawVideoPath,
-    rawDialoguePath,
+    rawDialoguePath: rawDialoguePath ?? "",
     finalMixPath,
     finalVideoPath,
     sidecarPaths,

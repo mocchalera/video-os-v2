@@ -1,8 +1,8 @@
 # BGM Library, Selection, Arrangement, and Mixing implementation plan
 
-Status: implementation in progress; contracts, pack registry, explainable selection, generated-candidate intake, and Studio human review complete
+Status: implementation in progress; candidate Pack promotion and explicit hash-pinned cue-to-A2 projection complete
 
-Date: 2026-07-16
+Date: 2026-07-28
 
 Music-production workstream: Cockpit task `9cd0d6eb`
 
@@ -14,8 +14,22 @@ Implementation checkpoint (2026-07-16):
 - The current CLI records the semantic channel as unavailable and applies the
   stricter metadata-only auto thresholds. Brief-to-track CLAP comparison is a
   later additive channel; no semantic score is fabricated.
-- Arrangement, `music_cues` vNext, A2 projection, shared preview/final mixing,
-  Studio controls, pack installation, and real Core Pack audio remain pending.
+- Shared preview/final mixing, dialogue finishing, Studio apply controls, and
+  public Core Pack release approval remain pending.
+
+Phase 2 checkpoint (2026-07-28):
+
+- A caller-supplied `track_id` can be locked only after it resolves to one
+  Registry-verified Pack candidate. The selection pins Pack ID/version,
+  Registry canonical manifest hash, full-mix hash/size, and analysis hash/size.
+- Additive `music-cues/v2` records exact rational-FPS source/timeline ranges,
+  section/phase, semantic anchor, and the beat-alignment decision. Degraded
+  analysis stays visible and never becomes a fabricated high-confidence grid.
+- The compiler validates selection/hash drift and projects v2 cues idempotently
+  onto A2. Missing cues, no-BGM projects, and legacy `original_only` behavior
+  remain unchanged.
+- The decision report is always `audition_only`; ranked top-three output is
+  never treated as final music selection or public-release approval.
 
 Candidate-intake checkpoint (2026-07-17):
 
@@ -394,18 +408,17 @@ record.
 
 ### 6.6 Additive `music-cues/vNext`
 
-Existing fields stay readable. The TypeScript type, JSON Schema, package reader,
-compiler projection, Swift decoder, and tests must change atomically to add:
+The Phase 2 TypeScript, JSON Schema, planner, CLI, and compiler path implement
+`music-cues/v2` additively while v1 remains readable. V2 adds:
 
-- `selection_ref` and selected analysis hash;
-- source `in_us` / `out_us` for section-aware placement;
-- `loop_policy` and explicit loop repetitions;
-- gain envelope and per-cue base gain;
-- dynamic-EQ policy;
-- ending-resolution mode;
-- render-plan version.
+- `selection_ref` and exact Pack, full-mix, and analysis pins;
+- rational timeline FPS and exact source/timeline ranges;
+- section, phase, semantic anchor, and explicit beat-alignment decision;
+- degraded-analysis status and warnings without fabricated grid confidence.
 
-No renderer may infer source ranges from timeline entry frames after vNext.
+V2 source ranges are authoritative and are not inferred from timeline entry
+frames. Loop policy/repetitions, gain envelope, dynamic EQ, ending resolution,
+shared render-plan versioning, and Swift apply controls remain Phase 3 or later.
 
 ## 7. Pack installation and registry
 
@@ -660,7 +673,7 @@ Headless commands:
 npx tsx scripts/bgm-pack.ts list|verify|install
 npx tsx scripts/analyze-bgm-library.ts --pack core-v1
 npx tsx scripts/select-bgm.ts --project projects/<id> --mode suggest|auto
-npx tsx scripts/apply-bgm.ts --project projects/<id> --track <id>|--selection
+npm run bgm:plan-cues -- --project projects/<id> --track-id <id> --output <new-dir> ...
 ```
 
 Agent tools receive compact structured evidence, not raw embeddings:
@@ -850,8 +863,9 @@ preference. Do not claim genre/mood quality from unit tests alone.
   acceptance suite.
 - Existing `03_analysis/bgm_analysis.json`, local `bgm*.mp3|wav`, and `--bgm`
   remain supported during migration.
-- Old `music_cues.json` is normalized at read time; new fields are written only
-  after the full schema/runtime/Swift reader set is deployed.
+- Old `music_cues.json` stays readable. V2 fields are emitted only by the
+  explicit, hash-pinned cue planner; missing cues and legacy `original_only`
+  projects retain their previous compiler behavior.
 - A project selection pins pack ID/version and content hash, so upgrading an
   installed pack cannot silently change an existing edit.
 - Rollback disables library/auto-select and keeps project-local BGM plus the old

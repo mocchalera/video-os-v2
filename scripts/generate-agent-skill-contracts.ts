@@ -3,6 +3,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT } from "../runtime/audio/sound-design-contract.js";
 import { FULL_PIPELINE_AGENT_SKILL_CONTRACT } from "../runtime/pipeline/full-pipeline-contract.js";
 
 export const AGENT_SKILL_CONTRACTS_MANIFEST_PATH =
@@ -11,7 +12,10 @@ export const AGENT_SKILL_CONTRACTS_MANIFEST_PATH =
 export function buildAgentSkillContractsManifest(): object {
   return {
     schemaVersion: 1,
-    generatedFrom: "runtime/pipeline/full-pipeline-contract.ts",
+    generatedFrom: [
+      "runtime/pipeline/full-pipeline-contract.ts",
+      "runtime/audio/sound-design-contract.ts",
+    ],
     skills: {
       [FULL_PIPELINE_AGENT_SKILL_CONTRACT.skillName]: {
         skillPath: FULL_PIPELINE_AGENT_SKILL_CONTRACT.skillPath,
@@ -20,6 +24,15 @@ export function buildAgentSkillContractsManifest(): object {
         resumeStages: FULL_PIPELINE_AGENT_SKILL_CONTRACT.resumeStages,
         prerequisiteReferences: FULL_PIPELINE_AGENT_SKILL_CONTRACT.prerequisiteReferences,
         producedArtifacts: FULL_PIPELINE_AGENT_SKILL_CONTRACT.producedArtifacts,
+      },
+      [SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.skillName]: {
+        skillPath: SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.skillPath,
+        commands: SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.commands,
+        flags: SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.flags,
+        prerequisiteReferences:
+          SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.prerequisiteReferences,
+        producedArtifacts:
+          SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT.producedArtifacts,
       },
     },
   };

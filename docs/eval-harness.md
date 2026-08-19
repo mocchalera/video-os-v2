@@ -67,10 +67,10 @@ selects / blueprint / timeline が揃っていること。
 - **self**: ゴールデン自身の入力を現行コンパイラで再コンパイルして承認版と比較。
   新データ不要で、コンパイラ/ポリシーのドリフトを検出する。
   ゴールデンのファイルには一切書き込まない（tmp にコピーして実行）。
-- **suite**: checkout 内で `approval_record.approved_by` を持つゴールデンを
-  動的に発見し、self、brief-alignment、Marlin QA、構造と映像の乖離を
-  単一サマリへ集約する。OSS checkout に private golden は同梱しない。
-  rights-cleared なローカル fixture を追加するか `--projects` で明示する。
+- **suite**: `fumoto-growth` / `togakushi-camp` / `ena-promo` に加え、
+  speech-led testimonial の人間承認ゴールデン
+  `ax1-komatsu-testimonial-d4892` / `ax1-female-testimonial-d4892` を固定対象に、
+  self、brief-alignment、Marlin QA、構造と映像の乖離を単一サマリへ集約する。
   通常実行は決定論的で、live judge は `--judge`、live Marlin QA は `--marlin`
   を指定した場合のみ起動する。旧形式timeline、render欠如、モデル未実行は
   成功として偽装せず、ステージごとの理由付き `skipped` として残す。

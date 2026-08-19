@@ -4,7 +4,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { evaluatePlaybackContract } from "../runtime/preview/playback-contract.js";
@@ -12,14 +11,17 @@ import {
   computePackagingProjectionHash,
   computeSha256,
 } from "../runtime/packaging/manifest.js";
-import { verifyExistingPackage } from "../runtime/packaging/package-verification.js";
+import {
+  verifyExistingPackageWithRendererVersionProvider,
+} from "../runtime/packaging/package-verification.js";
 import { createSourceInputAttestation } from "../runtime/render/source-input-attestation.js";
 import { computeFileHash } from "../runtime/state/reconcile.js";
 import { resolveProjectRenderRoute } from "../runtime/render/route-resolver.js";
 import { captionFontContractForReceipt } from "../runtime/caption/font-contract.js";
-import { HYPERFRAMES_RENDERER_VERSION } from "../runtime/content/hyperframes-renderer.js";
-import { REMOTION_RENDERER_VERSION } from "../runtime/render/remotion/render-remotion.js";
 import { buildPackagePreflight } from "./package.js";
+import {
+  macosStudioFixtureRendererVersionProvider,
+} from "./helpers/macos-studio-fixture-renderer-versions.js";
 import {
   approveFinalRenderChecklist,
   FINAL_RENDER_APPROVAL_RELATIVE_PATH,
@@ -422,9 +424,6 @@ function rebindPackageHashes(files: Record<string, string>): Record<string, stri
     manifest.artifacts.qa_report.sha256 = computeSha256(path.join(root, "07_package/qa-report.json"));
     manifest.provenance.editorial_timeline_hash = computeFileHash(path.join(root, "05_timeline/timeline.json"));
     const route = resolveProjectRenderRoute(root);
-    const ffmpegVersion = execFileSync("ffmpeg", ["-version"], {
-      encoding: "utf8",
-    }).split(/\r?\n/, 1)[0].trim();
     const timelineSha256 = computeSha256(path.join(root, "05_timeline/timeline.json"));
     const finalSha256 = computeSha256(path.join(root, "09_output/final.mp4"));
     const blueprint = parseYaml(
@@ -455,16 +454,8 @@ function rebindPackageHashes(files: Record<string, string>): Record<string, stri
     const receipt = {
       ...route,
       receipt_version: "render-route-receipt/v3",
-      renderer_versions: {
-        ffmpeg: ffmpegVersion,
-        ...(route.visual_layers.some((layer) => layer.renderer === "hyperframes")
-          ? { hyperframes: HYPERFRAMES_RENDERER_VERSION }
-          : {}),
-        ...(route.base_engine === "remotion"
-          || route.visual_layers.some((layer) => layer.renderer === "remotion")
-          ? { remotion: REMOTION_RENDERER_VERSION }
-          : {}),
-      },
+      renderer_versions:
+        macosStudioFixtureRendererVersionProvider.rendererVersionsFor(route),
       inputs: {
         timeline: {
           path: "05_timeline/timeline.json",
@@ -736,6 +727,7 @@ export function buildMacOSStudioContractFixture(): object {
       "runtime/preview/playback-contract.ts",
       "scripts/package.ts#buildPackagePreflight",
       "runtime/packaging/package-verification.ts",
+      "scripts/helpers/macos-studio-fixture-renderer-versions.ts",
     ],
     playbackCases: playbackCases().map((testCase) => ({
       ...testCase,
@@ -766,7 +758,13 @@ export function buildMacOSStudioContractFixture(): object {
     packageCases: packageCases().map((testCase) => ({
       ...testCase,
       expected: withMaterializedCase(testCase, (root) => (
-        normalizeFixturePaths(verifyExistingPackage(root), root)
+        normalizeFixturePaths(
+          verifyExistingPackageWithRendererVersionProvider(
+            root,
+            macosStudioFixtureRendererVersionProvider,
+          ),
+          root,
+        )
       )),
     })),
   };

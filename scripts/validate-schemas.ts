@@ -9,10 +9,11 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
-  validateProject,
-  validateProjects,
+  validateProject as validateProjectInRepoContext,
   findRepoRoot,
   type Violation,
   type ValidationProfile,
@@ -23,8 +24,6 @@ import {
 
 // ── Re-exports for backward compatibility ──────────────────────────
 export {
-  validateProject,
-  validateProjects,
   findRepoRoot,
   type Violation,
   type ValidationProfile,
@@ -32,6 +31,72 @@ export {
   type ValidationResult,
   type ValidationBatchResult,
 };
+
+function validatorRepoRoot(): string {
+  return findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
+}
+
+function isWithinDirectory(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return relative === "" ||
+    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function validateProjectWithRepoContext(
+  projectPath: string,
+  options: ValidateProjectOptions,
+  repoRoot: string,
+): ValidationResult {
+  const absoluteProject = path.resolve(projectPath);
+  if (isWithinDirectory(repoRoot, absoluteProject)) {
+    return validateProjectInRepoContext(projectPath, options);
+  }
+
+  const contextRoot = fs.mkdtempSync(
+    path.join(os.tmpdir(), "video-os-schema-validator-"),
+  );
+  const contextProject = path.join(contextRoot, "project");
+
+  try {
+    fs.symlinkSync(path.join(repoRoot, "schemas"), path.join(contextRoot, "schemas"), "dir");
+    fs.symlinkSync(path.join(repoRoot, "runtime"), path.join(contextRoot, "runtime"), "dir");
+    fs.symlinkSync(absoluteProject, contextProject, "dir");
+    return {
+      ...validateProjectInRepoContext(contextProject, options),
+      project: projectPath,
+    };
+  } finally {
+    fs.rmSync(contextRoot, { recursive: true, force: true });
+  }
+}
+
+export function validateProject(
+  projectPath: string,
+  options: ValidateProjectOptions = {},
+): ValidationResult {
+  return validateProjectWithRepoContext(projectPath, options, validatorRepoRoot());
+}
+
+export function validateProjects(
+  projectPaths: string[],
+  options: ValidateProjectOptions = {},
+): ValidationBatchResult {
+  const profile = options.profile ?? "standard";
+  const repoRoot = validatorRepoRoot();
+  const results = projectPaths.map((projectPath) =>
+    validateProjectWithRepoContext(projectPath, { profile }, repoRoot)
+  );
+
+  return {
+    profile,
+    valid: results.every((result) => result.valid),
+    projects_checked: results.length,
+    artifacts_checked: results.reduce((sum, result) => sum + result.artifacts_checked, 0),
+    error_count: results.reduce((sum, result) => sum + result.error_count, 0),
+    warning_count: results.reduce((sum, result) => sum + result.warning_count, 0),
+    results,
+  };
+}
 
 // ── CLI Arg Parsing ────────────────────────────────────────────────
 
@@ -113,7 +178,24 @@ function main(): void {
     process.exit(1);
   }
 
-  const repoRoot = findRepoRoot(process.cwd());
+  let repoRoot: string;
+  try {
+    repoRoot = validatorRepoRoot();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({
+      valid: false,
+      profile: parsed.profile,
+      violations: [],
+      runner_error: {
+        stage: "schema_repository_root_discovery",
+        message,
+        hint: "Run the validator from a checkout that contains its schemas/ directory.",
+      },
+    }, null, 2));
+    process.exit(1);
+  }
+
   const projectPaths = parsed.projectPaths.length > 0
     ? parsed.projectPaths
     : discoverProjectPaths(repoRoot);
@@ -124,12 +206,27 @@ function main(): void {
   }
 
   if (projectPaths.length === 1 && parsed.projectPaths.length === 1) {
-    const result = validateProject(projectPaths[0], { profile: parsed.profile });
+    const result = validateProjectWithRepoContext(
+      projectPaths[0],
+      { profile: parsed.profile },
+      repoRoot,
+    );
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.valid ? 0 : 1);
   }
 
-  const batch = validateProjects(projectPaths, { profile: parsed.profile });
+  const results = projectPaths.map((projectPath) =>
+    validateProjectWithRepoContext(projectPath, { profile: parsed.profile }, repoRoot)
+  );
+  const batch: ValidationBatchResult = {
+    profile: parsed.profile,
+    valid: results.every((result) => result.valid),
+    projects_checked: results.length,
+    artifacts_checked: results.reduce((sum, result) => sum + result.artifacts_checked, 0),
+    error_count: results.reduce((sum, result) => sum + result.error_count, 0),
+    warning_count: results.reduce((sum, result) => sum + result.warning_count, 0),
+    results,
+  };
   console.log(JSON.stringify(batch, null, 2));
   process.exit(batch.valid ? 0 : 1);
 }

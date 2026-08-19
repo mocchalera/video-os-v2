@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/sound-design-decision.schema.json",
+  "title": "Video OS Sound Design Decision",
+  "description": "Deterministic semantic-first, tempo-secondary SFX adoption decisions.",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "base_timeline_version",
+    "timeline_fps",
+    "solver",
+    "input_hashes",
+    "policy",
+    "beat_evidence",
+    "decisions",
+    "summary",
+    "decision_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "sound-design-decision/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "base_timeline_version": { "type": "string", "minLength": 1 },
+    "timeline_fps": { "$ref": "#/$defs/rationalFps" },
+    "solver": {
+      "type": "object",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "const": "semantic-first-tempo-secondary" },
+        "version": { "const": "1.0.0" }
+      }
+    },
+    "input_hashes": {
+      "type": "object",
+      "required": [
+        "request",
+        "timeline",
+        "library_manifest",
+        "music_analysis"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "request": { "$ref": "#/$defs/hash" },
+        "timeline": { "$ref": "#/$defs/hash" },
+        "library_manifest": { "$ref": "#/$defs/hash" },
+        "music_analysis": {
+          "anyOf": [
+            { "$ref": "#/$defs/hash" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "policy": { "$ref": "#/$defs/policy" },
+    "beat_evidence": { "$ref": "#/$defs/beatDecision" },
+    "decisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/decision" }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "candidate_count",
+        "adopted_count",
+        "rejected_count",
+        "timeline_duration_seconds",
+        "density_limit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_count": { "type": "integer", "minimum": 1 },
+        "adopted_count": { "type": "integer", "minimum": 0 },
+        "rejected_count": { "type": "integer", "minimum": 0 },
+        "timeline_duration_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "density_limit": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "decision_hash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "stableId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "rationalFps": {
+      "type": "object",
+      "required": ["num", "den"],
+      "additionalProperties": false,
+      "properties": {
+        "num": { "type": "integer", "minimum": 1 },
+        "den": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "semanticRole": {
+      "type": "string",
+      "enum": [
+        "hook_impact",
+        "transition_accent",
+        "claim_emphasis",
+        "achievement_reveal",
+        "simple_sound"
+      ]
+    },
+    "beatDecision": {
+      "type": "object",
+      "required": [
+        "status",
+        "analysis_status",
+        "analysis_path",
+        "content_hash",
+        "bpm",
+        "confidence",
+        "beat_frames",
+        "downbeat_frames",
+        "usable_for_snap",
+        "decision_reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["available", "degraded", "unavailable"]
+        },
+        "analysis_status": {
+          "type": "string",
+          "enum": ["ready", "degraded", "failed", "unavailable"]
+        },
+        "analysis_path": { "type": ["string", "null"], "minLength": 1 },
+        "content_hash": {
+          "anyOf": [
+            { "$ref": "#/$defs/hash" },
+            { "type": "null" }
+          ]
+        },
+        "bpm": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "beat_frames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "downbeat_frames": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "usable_for_snap": { "type": "boolean" },
+        "decision_reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "minimum_spacing_frames",
+        "max_cues_per_30_seconds",
+        "absolute_max_cues",
+        "semantic_accept_threshold",
+        "congestion_reject_threshold",
+        "minimum_beat_confidence",
+        "max_snap_frames",
+        "congestion_weights"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "minimum_spacing_frames": { "type": "integer", "minimum": 1 },
+        "max_cues_per_30_seconds": { "type": "integer", "minimum": 1 },
+        "absolute_max_cues": { "type": "integer", "minimum": 1 },
+        "semantic_accept_threshold": { "type": "number" },
+        "congestion_reject_threshold": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "minimum_beat_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_snap_frames": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "congestion_weights": {
+          "type": "object",
+          "required": [
+            "dialogue",
+            "music_entry",
+            "lower_third",
+            "section_label",
+            "caption",
+            "picture_edit",
+            "overlay"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "dialogue": { "type": "number", "minimum": 0 },
+            "music_entry": { "type": "number", "minimum": 0 },
+            "lower_third": { "type": "number", "minimum": 0 },
+            "section_label": { "type": "number", "minimum": 0 },
+            "caption": { "type": "number", "minimum": 0 },
+            "picture_edit": { "type": "number", "minimum": 0 },
+            "overlay": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "semanticAnchor": {
+      "type": "object",
+      "required": ["label", "frame", "window"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "frame": { "type": "integer", "minimum": 0 },
+        "window": {
+          "type": "object",
+          "required": ["earliest_frame", "latest_frame"],
+          "additionalProperties": false,
+          "properties": {
+            "earliest_frame": { "type": "integer", "minimum": 0 },
+            "latest_frame": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "congestionEvent": {
+      "type": "object",
+      "required": [
+        "event_id",
+        "type",
+        "severity",
+        "weighted_penalty",
+        "evidence_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": { "$ref": "#/$defs/stableId" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "dialogue",
+            "music_entry",
+            "lower_third",
+            "section_label",
+            "caption",
+            "picture_edit",
+            "overlay"
+          ]
+        },
+        "severity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "weighted_penalty": { "type": "number", "minimum": 0 },
+        "evidence_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "status",
+        "semantic_role",
+        "asset_id",
+        "semantic_anchor",
+        "resolved_frame",
+        "picture_timing_moved",
+        "snap",
+        "congestion",
+        "score_breakdown",
+        "conflicts",
+        "reasons"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/stableId" },
+        "status": {
+          "type": "string",
+          "enum": ["adopted", "rejected"]
+        },
+        "semantic_role": { "$ref": "#/$defs/semanticRole" },
+        "asset_id": { "$ref": "#/$defs/stableId" },
+        "semantic_anchor": { "$ref": "#/$defs/semanticAnchor" },
+        "resolved_frame": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "picture_timing_moved": { "const": false },
+        "snap": {
+          "type": "object",
+          "required": [
+            "applied",
+            "from_frame",
+            "to_frame",
+            "delta_frames",
+            "target_kind",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "applied": { "type": "boolean" },
+            "from_frame": { "type": "integer", "minimum": 0 },
+            "to_frame": { "type": "integer", "minimum": 0 },
+            "delta_frames": { "type": "integer", "minimum": -3, "maximum": 3 },
+            "target_kind": {
+              "type": ["string", "null"],
+              "enum": ["beat", "downbeat", null]
+            },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        },
+        "congestion": {
+          "type": "object",
+          "required": ["events", "total_penalty", "reject_threshold"],
+          "additionalProperties": false,
+          "properties": {
+            "events": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/congestionEvent" }
+            },
+            "total_penalty": { "type": "number", "minimum": 0 },
+            "reject_threshold": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "score_breakdown": {
+          "type": "object",
+          "required": [
+            "semantic_score",
+            "congestion_penalty",
+            "total_score"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "semantic_score": { "type": "number", "minimum": 0 },
+            "congestion_penalty": { "type": "number", "minimum": 0 },
+            "total_score": { "type": "number" }
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

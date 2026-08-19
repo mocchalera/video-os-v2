@@ -5,7 +5,12 @@ import {
   FULL_PIPELINE_AGENT_SKILL_CONTRACT,
   FULL_PIPELINE_CLI_OPTIONS,
 } from "../runtime/pipeline/full-pipeline-contract.js";
+import {
+  SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT,
+  SHORT_SOUND_DESIGN_CLI_FLAGS,
+} from "../runtime/audio/sound-design-contract.js";
 import { parseArgs } from "../scripts/full-pipeline.js";
+import { parsePlanSoundDesignArgs } from "../scripts/plan-sound-design.js";
 import {
   AGENT_SKILL_CONTRACTS_MANIFEST_PATH,
   serializeAgentSkillContractsManifest,
@@ -82,5 +87,37 @@ describe("Agent Skill executable contracts", () => {
     }
     expect(skillArtifactValues(markdown)).toEqual(contract.producedArtifacts);
     expect(contract.producedArtifacts).toContain("09_output/rough-cut.mp4");
+  });
+
+  it("binds short-sound-design commands, flags, references, and outputs to the Skill", () => {
+    const contract = SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT;
+    const markdown = fs.readFileSync(contract.skillPath, "utf8");
+    const referenceContents = contract.prerequisiteReferences.map((reference) => {
+      const referencePath = path.resolve(path.dirname(contract.skillPath), reference);
+      expect(fs.existsSync(referencePath), referencePath).toBe(true);
+      expect(markdown).toContain(reference);
+      return fs.readFileSync(referencePath, "utf8");
+    }).join("\n");
+    const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    for (const command of contract.commands) {
+      expect(fs.existsSync(command.entrypoint), command.entrypoint).toBe(true);
+      expect(packageJson.scripts[command.packageScript], command.packageScript)
+        .toContain(command.entrypoint);
+      expect(markdown, command.invocation).toContain(command.invocation);
+    }
+    let help = "";
+    try {
+      parsePlanSoundDesignArgs(["node", "script", "--help"]);
+    } catch (error) {
+      help = error instanceof Error ? error.message : String(error);
+    }
+    for (const flag of SHORT_SOUND_DESIGN_CLI_FLAGS) {
+      expect(help).toContain(flag);
+    }
+    for (const artifact of contract.producedArtifacts) {
+      expect(`${markdown}\n${referenceContents}`).toContain(artifact);
+    }
   });
 });

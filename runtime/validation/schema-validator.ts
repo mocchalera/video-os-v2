@@ -176,6 +176,20 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     runnerChecks: [],
   },
   {
+    artifactPath: "07_package/bgm-cue-decision-report.json",
+    schemaFile: "bgm-cue-decision-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
+    artifactPath: "07_package/sfx_cues.json",
+    schemaFile: "sfx-cues.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
+  },
+  {
     artifactPath: "06_review/editorial_pipeline_status.json",
     schemaFile: "editorial-pipeline-status.schema.json",
     format: "json",
@@ -209,6 +223,13 @@ const ARTIFACT_REGISTRY: ArtifactEntry[] = [
     format: "json",
     optional: true,
     runnerChecks: ["package_qa_report_passed"],
+  },
+  {
+    artifactPath: "07_package/logs/audio-mix-report.json",
+    schemaFile: "audio-mix-report.schema.json",
+    format: "json",
+    optional: true,
+    runnerChecks: [],
   },
   {
     artifactPath: "07_package/derived-video-provenance.json",

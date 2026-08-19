@@ -13,6 +13,7 @@ const requiredJobs = [
   "editor-server",
   "agent-definitions",
   "macos-studio",
+  "render-integration",
 ] as const;
 
 const resultEnvironment = [
@@ -24,6 +25,7 @@ const resultEnvironment = [
   "EDITOR_SERVER",
   "AGENT_DEFINITIONS",
   "MACOS_STUDIO",
+  "RENDER_INTEGRATION",
 ] as const;
 
 interface ProductGateStep {

@@ -27,6 +27,10 @@ npx tsx scripts/export-premiere-xml.ts <project-path> [options]
 
 The XML embeds `video_os` marker metadata in each clip, enabling roundtrip identification. A metadata comment at the top records the project ID, generation timestamp, and compiler version.
 
+Simple transitions are limited to marked, centered Cross Dissolve (`crossfade`) and Dip to Color (`match_cut_bridge` / `match_cut`). IDs, endpoint pairs, named-track membership, adjacency, positive integer duration, and the centered timeline window are validated before output. `fade_to_black` is never represented as Cross Dissolve.
+
+Canonical `timeline.tracks.overlay` title clips are enumerated before XML generation, but the current registered presets all require motion, font, layout, shadow/stroke, accent, panel/background, or safe-area semantics that Outline Text cannot represent. Canonical overlay export therefore fails closed with a structured styling diagnostic before XML or receipt writes. No registered plain-title preset currently provides an exact route. Caption tracks are never exported as generators. `--titles` and `--auto-titles` remain legacy export-only options and cannot be treated as canonical O1.
+
 ### Display Names
 
 If `02_media/source_map.json` contains `display_name` fields, they are used as clip names in Premiere. Otherwise, the clip's `motivation` field is used.
@@ -56,6 +60,8 @@ Make your edits freely. The reimport system detects these change types:
 | Reorder (move clips) | Compares timeline position | Yes |
 | Delete clips | Missing clip_id | Yes |
 | Add new clips | No `video_os` marker | No (warning) |
+| Edit/delete/add title generators | Marked canonical generator comparison | No (blocks apply) |
+| Add/delete/change simple transitions | Marked track and endpoint identity comparison | No (blocks apply) |
 
 **Important:** Do not remove or modify the `video_os:` marker comments. They are the roundtrip anchor.
 
@@ -99,7 +105,7 @@ Outputs a structured JSON diff summary:
 ### Apply Changes
 
 ```bash
-npx tsx scripts/import-premiere-xml.ts <project-path> --xml <edited.xml>
+npx tsx scripts/import-premiere-xml.ts <project-path> --xml <edited.xml> --receipt <receipt.json> --apply
 ```
 
 This will:
@@ -131,11 +137,23 @@ FCP7 XML `clipitem/@id` attributes are restricted to ASCII. Non-ASCII characters
 
 ### Text Overlays
 
-Text overlays exported via `--titles` or `--auto-titles` use FCP7's Outline Text generator. In Premiere, they appear on a dedicated V-Title track. Font rendering may differ between Premiere versions.
+Canonical overlay export is currently blocked because no registered preset is exactly representable by the emitted Outline Text parameters. A receipt-bound manifest still supports fail-closed review of previously produced marked generators: any returned title change, deletion, malformed marker/shape, duplicate, or unmapped generator is report-only and blocks apply before backup or timeline writes, including an overlay-only sequence whose sole generator is missing or malformed. Legacy `--titles` / `--auto-titles` generators are export-only and never apply to canonical O1. This fixture-backed contract is not Premiere hardware proof.
 
 ### Audio Levels
 
-`duck_music_db` values from `audio_policy` are exported as Audio Levels filter parameters and preserved through roundtrip.
+Audio-track gain and fade policy is exported as exactly one Audio Levels (`audiolevels`) filter with exactly one `level` parameter. Import accepts only finite linear gain in the 0..4 range, either as a static value or as strictly ordered, unique keyframes within the clip duration that form the supported gain plus fade-in/fade-out shapes. Duplicate effects or parameters, extra parameters, invalid identities or shapes, non-finite/out-of-range values, and ambiguous keyframes are structured unsupported edits that block apply.
+
+If the reference timeline requires exported gain or fades and a returned mapped audio clip has no Audio Levels filter, import reports `audiolevels_filter_missing` and blocks before backup or write. It never interprets disappearance as an intentional policy deletion. With a valid filter still present, gain/fade changes remain diffable and applicable alongside trim changes.
+
+No visual effect, Motion, Opacity, Crop, Lumetri, keying, speed/time-remap, nested/compound replacement, or arbitrary audio effect is native roundtrip support. Mapped direct effects reject apply; unmapped additions remain report-only/manual.
+
+For the closed static treatment subset (`zoom`, pixel crop/position, brightness/contrast/saturation), run `export-premiere-xml.ts --preflight --json`. A treated project returns exit 2 until the operator explicitly supplies `--bake-visual-effects`. The exporter then requires exact source-ledger/source-map/source-media-manifest/live-file provenance and cleared rights/privacy, and writes a video-only H.264 CRF 14 near-lossless replacement under the fixed `09_output/premiere-bakes` cache. XML labels it `[BAKED]`, markers declare `representation:baked_visual` and `effect_editable:false`, while canonical audio continues to reference original media independently. Unsupported, malformed, duplicate, overlapping, no-op, animated, HDR/VFR/rotated/alpha, or unverified input blocks; it is never silently omitted.
+
+The authoritative export is the generation named by `09_output/premiere-exports/CURRENT.json`, containing immutable XML, receipt v2, bake index, READY, manifests, and media. Import validates that complete chain before diff. Baked unchanged, same-track reorder, and delete are accepted; trim, track move, relink/source replacement, speed/rate, filter, and marker mutation block before backup/write. `hardware_verified` remains false: local fixtures do not prove Premiere behavior, human acceptance, rights clearance, or release readiness.
+
+### Simple Transitions
+
+Returned transition identity is the named video track plus marked `from_clip_id` and `to_clip_id`. Added, deleted, effect, duration, alignment, identity, orphan, duplicate, and unknown-effect cases are structured report-only edits. Any such edit blocks apply before backup or timeline writes; an unknown effect is never defaulted to Cross Dissolve. Unchanged transitions survive supported clip/audio apply unchanged. Source-handle authority is not available, so the Premiere profile remains `report_only`. The rich fixture is explicitly synthetic and is not Premiere or hardware proof.
 
 ### Empty Tracks
 

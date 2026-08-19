@@ -1,8 +1,10 @@
 import { describe, it, expect, afterAll } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
+  findRepoRoot,
   parseValidationCliArgs,
   validateProject,
   type ValidationResult,
@@ -120,6 +122,26 @@ describe("validate-schemas", () => {
       expect(result.artifacts_checked).toBeGreaterThanOrEqual(5);
       expect(result.gate2_timeline_valid).toBe(true);
       expect(result.gate3_no_fatal_reviews).toBe(true);
+    });
+
+    it("validates an external project with schemas from the validator repository", () => {
+      const externalRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "video-os-external-schema-validation-"),
+      );
+      const externalProject = path.join(externalRoot, "project");
+      copyDirSync(path.resolve(SAMPLE_PROJECT), externalProject);
+      tempDirs.push(externalRoot);
+
+      expect(() => findRepoRoot(externalProject)).toThrow(
+        "Could not find repo root (directory containing schemas/)",
+      );
+
+      const result = validateProject(externalProject, { profile: "manual-render" });
+
+      expect(result.valid).toBe(true);
+      expect(result.project).toBe(externalProject);
+      expect(result.profile).toBe("manual-render");
+      expect(result.violations).toHaveLength(0);
     });
   });
 

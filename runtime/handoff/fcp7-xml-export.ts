@@ -26,10 +26,12 @@ import {
   linearGainToDb,
   resolveAudioGainWithFallback,
 } from "../../editor/shared/audio-gain.js";
+import {
+  assertPremiereVideoRepresentations,
+  type PremiereBakedRepresentation,
+} from "./premiere-effect-bake.js";
 
 export { dbToLinearGain, linearGainToDb } from "../../editor/shared/audio-gain.js";
-
-const DEFAULT_TRANSITION_FRAMES = 15;
 
 // ── Public API ────────────────────────────────────────────────────
 
@@ -44,6 +46,8 @@ export interface Fcp7ExportOptions {
   projectId?: string;
   /** Timeline version for deriving exchange clip IDs */
   timelineVersion?: string;
+  /** Receipt-bound Premiere roundtrip session ID */
+  roundtripId?: string;
   /** Sample rate for audio (default: 48000) */
   sampleRate?: number;
   /** Audio bit depth (default: 16) */
@@ -55,6 +59,41 @@ export interface Fcp7ExportOptions {
    * Each overlay becomes a visible text element in the Premiere timeline.
    */
   textOverlays?: TextOverlay[];
+  /** True when --titles or --auto-titles was explicitly requested, even if it resolved empty. */
+  legacyTitlesRequested?: boolean;
+  /** Verified, provenance-bound video-only replacements for treated clips. */
+  videoRepresentations?: Map<string, PremiereBakedRepresentation>;
+}
+
+export function resolveFcp7AudioLevelsEmissionDecision(
+  clip: ClipOutput,
+  mix: TimelineIR["audio_mix"],
+) {
+  const ap = clip.audio_policy;
+  if (!ap && !mix) return null;
+
+  const isBgm = clip.role === "bgm" || clip.role === "music";
+  const gain = resolveAudioGainWithFallback(ap, mix, isBgm ? "bgm" : "nat_sound", {
+    fallbackToDuckMusicDb: isBgm,
+  });
+  const fadeInFrames: number | undefined = isBgm
+    ? (ap?.bgm_fade_in_frames ?? ap?.fade_in_frames ?? mix?.bgm_fade_in_frames ?? mix?.fade_in_frames)
+    : (ap?.nat_sound_fade_in_frames ?? ap?.fade_in_frames ?? mix?.nat_sound_fade_in_frames ?? mix?.fade_in_frames);
+  const fadeOutFrames: number | undefined = isBgm
+    ? (ap?.bgm_fade_out_frames ?? ap?.fade_out_frames ?? mix?.bgm_fade_out_frames ?? mix?.fade_out_frames)
+    : (ap?.nat_sound_fade_out_frames ?? ap?.fade_out_frames ?? mix?.nat_sound_fade_out_frames ?? mix?.fade_out_frames);
+  const hasFadeIn = fadeInFrames !== undefined && fadeInFrames > 0;
+  const hasFadeOut = fadeOutFrames !== undefined && fadeOutFrames > 0;
+
+  if (gain.sourceField === null && !hasFadeIn && !hasFadeOut) return null;
+
+  return {
+    linearGain: gain.sourceField !== null ? gain.gainLinear : 1.0,
+    fadeInFrames,
+    fadeOutFrames,
+    hasFadeIn,
+    hasFadeOut,
+  };
 }
 
 export interface TextOverlay {
@@ -74,6 +113,245 @@ export interface TextOverlay {
   position?: "top" | "center" | "lower-third";
   /** Optional label shown in Premiere's clip name (defaults to text) */
   label?: string;
+}
+
+export interface CanonicalTextOverlayExportIssue {
+  track_id: string;
+  clip_id: string;
+  overlay_id?: string;
+  field: string;
+  reason: string;
+  disposition: "blocked";
+}
+
+export class CanonicalTextOverlayExportError extends Error {
+  readonly issues: CanonicalTextOverlayExportIssue[];
+
+  constructor(issues: CanonicalTextOverlayExportIssue[]) {
+    super(`canonical text-overlay export blocked: ${JSON.stringify(issues)}`);
+    this.name = "CanonicalTextOverlayExportError";
+    this.issues = issues;
+  }
+}
+
+export interface SimpleTransitionExportIssue {
+  transition_id: string;
+  field: string;
+  reason: string;
+  disposition: "blocked";
+}
+
+export class SimpleTransitionExportError extends Error {
+  readonly issues: SimpleTransitionExportIssue[];
+
+  constructor(issues: SimpleTransitionExportIssue[]) {
+    super(`simple-transition export blocked: ${JSON.stringify(issues)}`);
+    this.name = "SimpleTransitionExportError";
+    this.issues = issues;
+  }
+}
+
+interface ResolvedTextOverlay extends TextOverlay {
+  generatorId: string;
+  anchor: CanonicalAnchor;
+  canonical?: {
+    trackId: string;
+    clipId: string;
+    overlayId: string;
+    roundtripId: string;
+  };
+}
+
+type CanonicalAnchor =
+  | "top_left"
+  | "top_center"
+  | "top_right"
+  | "center"
+  | "bottom_left"
+  | "bottom_center"
+  | "bottom_right";
+
+const UNREPRESENTABLE_CANONICAL_PRESETS: Record<string, readonly string[]> = {
+  "vos:overlay.title-card": ["font_family", "font_weight", "line_height", "text_shadow", "safe_area", "fade", "translate"],
+  "vos:overlay.hook-title": ["font_family", "font_weight", "letter_spacing", "text_stroke", "text_shadow", "safe_area", "fade", "scale", "rotate", "flash", "accent"],
+  "vos:overlay.cta-card": ["font_family", "font_weight", "text_shadow", "safe_area", "fade", "translate", "background", "action", "brand"],
+  "vos:overlay.lower-third": ["font_family", "font_weight", "line_height", "text_shadow", "safe_area", "fade", "translate", "panel", "accent_border"],
+  "vos:overlay.chapter-kicker": ["font_family", "font_weight", "line_height", "text_shadow", "safe_area", "fade"],
+  "vos:overlay.location-tag": ["font_family", "font_weight", "line_height", "text_shadow", "safe_area", "fade", "panel", "uppercase"],
+  "vos:overlay.credit": ["font_family", "font_weight", "line_height", "text_shadow", "safe_area", "fade"],
+  "vos:overlay.emphasis-word": ["font_family", "font_weight", "text_stroke", "text_shadow", "safe_area", "fade", "scale", "accent_color"],
+};
+
+const CANONICAL_ANCHORS = new Set<CanonicalAnchor>([
+  "top_left", "top_center", "top_right", "center",
+  "bottom_left", "bottom_center", "bottom_right",
+]);
+
+const CANONICAL_ANCHOR_ORIGINS: Record<CanonicalAnchor, [number, number]> = {
+  top_left: [-0.35, 0.35],
+  top_center: [0, 0.35],
+  top_right: [0.35, 0.35],
+  center: [0, 0],
+  bottom_left: [-0.35, -0.3],
+  bottom_center: [0, -0.3],
+  bottom_right: [0.35, -0.3],
+};
+
+function safeGeneratorIdPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    return code > 127 ? `x${code.toString(16)}` : "_";
+  });
+}
+
+/** Stable ID used by the historical marked-generator parser and receipt manifest. */
+export function fcp7TextGeneratorItemId(clipId: string, overlayId: string): string {
+  return `title-${safeGeneratorIdPart(clipId)}-${safeGeneratorIdPart(overlayId)}`;
+}
+
+function canonicalIssue(
+  trackId: string,
+  clip: ClipOutput,
+  field: string,
+  reason: string,
+  overlayId?: string,
+): CanonicalTextOverlayExportIssue {
+  return {
+    track_id: trackId,
+    clip_id: typeof clip.clip_id === "string" ? clip.clip_id : "",
+    ...(overlayId ? { overlay_id: overlayId } : {}),
+    field,
+    reason,
+    disposition: "blocked",
+  };
+}
+
+function resolveCanonicalTextOverlays(
+  timeline: TimelineIR,
+  roundtripId: string | undefined,
+): ResolvedTextOverlay[] {
+  const resolved: ResolvedTextOverlay[] = [];
+  const clipIds = new Set<string>();
+  const overlayIds = new Set<string>();
+  const generatorIds = new Set<string>();
+  const unrepresentableStyleIssues: CanonicalTextOverlayExportIssue[] = [];
+
+  for (const track of timeline.tracks.overlay ?? []) {
+    for (const clip of track.clips) {
+      const metadata = clip.metadata;
+      const rawOverlay = metadata && typeof metadata === "object"
+        ? metadata.overlay
+        : undefined;
+      const overlay = rawOverlay && typeof rawOverlay === "object" && !Array.isArray(rawOverlay)
+        ? rawOverlay as Record<string, unknown>
+        : undefined;
+      const overlayId = typeof overlay?.overlay_id === "string" ? overlay.overlay_id : undefined;
+      const fail = (field: string, reason: string): never => {
+        throw new CanonicalTextOverlayExportError([
+          canonicalIssue(track.track_id, clip, field, reason, overlayId),
+        ]);
+      };
+
+      if (track.kind !== "overlay") fail("kind", "track kind must be overlay");
+      if (clip.role !== "title") fail("role", "overlay clip role must be title");
+      if (!overlay) fail("metadata.overlay", "canonical overlay metadata object is required");
+      const canonicalOverlay = overlay!;
+      if (typeof clip.clip_id !== "string" || clip.clip_id.trim() === "") {
+        fail("clip_id", "clip_id must be non-empty");
+      }
+      if (!overlayId || overlayId.trim() === "") {
+        fail("metadata.overlay.overlay_id", "overlay_id must be non-empty");
+      }
+      if (typeof canonicalOverlay.text !== "string" || canonicalOverlay.text.trim() === "") {
+        fail("metadata.overlay.text", "text must be non-empty");
+      }
+      if (canonicalOverlay.source !== "authored") {
+        fail("metadata.overlay.source", "canonical title source must be authored");
+      }
+      if (canonicalOverlay.writing_mode !== "horizontal_tb") {
+        fail("metadata.overlay.writing_mode", "only horizontal_tb is exactly representable");
+      }
+      if (typeof canonicalOverlay.anchor !== "string" || !CANONICAL_ANCHORS.has(canonicalOverlay.anchor as CanonicalAnchor)) {
+        fail("metadata.overlay.anchor", "anchor is not one of the seven canonical anchors");
+      }
+      if (Object.hasOwn(canonicalOverlay, "safe_area")) {
+        fail("metadata.overlay.safe_area", "safe-area behavior is not represented by Outline Text");
+      }
+      for (const field of ["background", "outline", "animation"] as const) {
+        if (Object.hasOwn(canonicalOverlay, field)) {
+          fail(`metadata.overlay.${field}`, `${field} behavior is not represented by Outline Text`);
+        }
+      }
+      const canonicalFields = new Set([
+        "overlay_id", "text", "styling_class", "writing_mode", "anchor", "source",
+        "safe_area", "background", "outline", "animation",
+      ]);
+      const unsupportedField = Object.keys(canonicalOverlay).find((field) => !canonicalFields.has(field));
+      if (unsupportedField) {
+        fail(`metadata.overlay.${unsupportedField}`, "overlay field has no exact Outline Text projection");
+      }
+      const start = clip.timeline_in_frame;
+      const duration = clip.timeline_duration_frames;
+      const end = start + duration;
+      if (!Number.isSafeInteger(start) || start < 0) {
+        fail("timeline_in_frame", "start must be a non-negative safe integer");
+      }
+      if (!Number.isSafeInteger(duration) || duration <= 0) {
+        fail("timeline_duration_frames", "duration must be a positive safe integer");
+      }
+      if (!Number.isSafeInteger(end) || end <= start) {
+        fail("timeline_range", "generator end is invalid or exceeds safe integer range");
+      }
+      if (clipIds.has(clip.clip_id)) fail("clip_id", "duplicate canonical clip_id");
+      if (overlayIds.has(overlayId!)) {
+        fail("metadata.overlay.overlay_id", "duplicate canonical overlay_id");
+      }
+      const generatorId = fcp7TextGeneratorItemId(clip.clip_id, overlayId!);
+      if (generatorIds.has(generatorId)) fail("generator_id", "canonical generator ID collision");
+      clipIds.add(clip.clip_id);
+      overlayIds.add(overlayId!);
+      generatorIds.add(generatorId);
+      if (!roundtripId) fail("roundtrip_id", "canonical overlays require a roundtrip_id");
+      const stylingClass = typeof canonicalOverlay.styling_class === "string"
+        ? canonicalOverlay.styling_class
+        : "";
+      const requiredSemantics = UNREPRESENTABLE_CANONICAL_PRESETS[stylingClass];
+      unrepresentableStyleIssues.push(
+        canonicalIssue(
+          track.track_id,
+          clip,
+          "metadata.overlay.styling_class",
+          requiredSemantics
+            ? `canonical preset ${stylingClass} requires unrepresentable semantics: ${requiredSemantics.join(", ")}`
+            : `styling_class ${stylingClass || "<missing>"} has no exact Outline Text projection`,
+          overlayId,
+        ),
+      );
+    }
+  }
+  if (unrepresentableStyleIssues.length > 0) {
+    throw new CanonicalTextOverlayExportError(unrepresentableStyleIssues);
+  }
+  return resolved;
+}
+
+function resolveLegacyTextOverlays(overlays: TextOverlay[]): ResolvedTextOverlay[] {
+  return overlays.map((overlay, index) => {
+    const start = overlay.startFrame;
+    const duration = overlay.durationFrames;
+    const end = start + duration;
+    if (
+      !Number.isSafeInteger(start) || start < 0 ||
+      !Number.isSafeInteger(duration) || duration <= 0 ||
+      !Number.isSafeInteger(end) || end <= start
+    ) {
+      throw new Error(`invalid legacy title range at index ${index}`);
+    }
+    const anchor: CanonicalAnchor = overlay.position === "top"
+      ? "top_center"
+      : overlay.position === "center" ? "center" : "bottom_center";
+    return { ...overlay, anchor, generatorId: `legacy-title-${index + 1}` };
+  });
 }
 
 export interface ExtraMarker {
@@ -101,6 +379,15 @@ export function timelineToFcp7Xml(
   return ctx.build();
 }
 
+/** Derive the exact ASCII-safe clipitem ID emitted by this exporter. */
+export function fcp7ClipItemId(prefix: "cv" | "ca", id: string): string {
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    return code > 127 ? `x${code.toString(16)}` : "_";
+  });
+  return `${prefix}-${safe}`;
+}
+
 // ── Internal Implementation ───────────────────────────────────────
 
 class ExportContext {
@@ -116,6 +403,7 @@ class ExportContext {
   private timebase: number;
   private sampleRate: number;
   private audioBitDepth: number;
+  private textOverlays: ResolvedTextOverlay[];
 
   constructor(timeline: TimelineIR, opts: Fcp7ExportOptions) {
     this.timeline = timeline;
@@ -134,6 +422,103 @@ class ExportContext {
 
     this.sampleRate = opts.sampleRate ?? 48000;
     this.audioBitDepth = opts.audioBitDepth ?? 16;
+    assertPremiereVideoRepresentations(timeline, opts.videoRepresentations);
+    this.validateSimpleTransitions();
+    const canonical = resolveCanonicalTextOverlays(timeline, opts.roundtripId);
+    const legacy = resolveLegacyTextOverlays(opts.textOverlays ?? []);
+    if (canonical.length > 0 && (opts.legacyTitlesRequested || legacy.length > 0)) {
+      throw new CanonicalTextOverlayExportError([{
+        track_id: canonical[0].canonical!.trackId,
+        clip_id: canonical[0].canonical!.clipId,
+        overlay_id: canonical[0].canonical!.overlayId,
+        field: "legacy_titles",
+        reason: "canonical overlays cannot be combined with legacy titles",
+        disposition: "blocked",
+      }]);
+    }
+    this.textOverlays = canonical.length > 0 ? canonical : legacy;
+  }
+
+  private validateSimpleTransitions(): void {
+    const issues: SimpleTransitionExportIssue[] = [];
+    const transitionIds = new Set<string>();
+    const endpointPairs = new Set<string>();
+    const fail = (transition: TimelineTransitionOutput, field: string, reason: string): void => {
+      issues.push({
+        transition_id: typeof transition.transition_id === "string" ? transition.transition_id : "",
+        field,
+        reason,
+        disposition: "blocked",
+      });
+    };
+
+    for (const transition of this.timeline.transitions ?? []) {
+      if (!transition.transition_id || transitionIds.has(transition.transition_id)) {
+        fail(transition, "transition_id", "transition_id must be non-empty and unique");
+      } else {
+        transitionIds.add(transition.transition_id);
+      }
+      const edgeKey = JSON.stringify([
+        transition.track_id,
+        transition.from_clip_id,
+        transition.to_clip_id,
+      ]);
+      if (endpointPairs.has(edgeKey)) {
+        fail(transition, "endpoints", "only one transition is allowed per track endpoint pair");
+      } else {
+        endpointPairs.add(edgeKey);
+      }
+
+      const matchingTracks = this.timeline.tracks.video.filter(
+        (track) => track.track_id === transition.track_id,
+      );
+      if (matchingTracks.length !== 1) {
+        fail(transition, "track_id", "named video track must exist exactly once");
+        continue;
+      }
+      const track = matchingTracks[0];
+      const fromIndexes = track.clips.flatMap((clip, index) =>
+        clip.clip_id === transition.from_clip_id ? [index] : [],
+      );
+      const toIndexes = track.clips.flatMap((clip, index) =>
+        clip.clip_id === transition.to_clip_id ? [index] : [],
+      );
+      if (fromIndexes.length !== 1 || toIndexes.length !== 1) {
+        fail(transition, "endpoints", "both endpoints must occur exactly once on the named video track");
+        continue;
+      }
+      if (toIndexes[0] !== fromIndexes[0] + 1) {
+        fail(transition, "endpoints", "transition endpoints must be adjacent in from/to order");
+        continue;
+      }
+      if (!this.resolveTransitionEffect(transition)) {
+        fail(transition, "transition_type", "only crossfade and match_cut_bridge/match_cut are supported");
+      }
+      const frames = transition.transition_frames;
+      if (!Number.isSafeInteger(frames) || frames! <= 0) {
+        fail(transition, "transition_frames", "duration must be an explicit positive integer");
+        continue;
+      }
+      const fromClip = track.clips[fromIndexes[0]];
+      const toClip = track.clips[toIndexes[0]];
+      const fromEnd = fromClip.timeline_in_frame + fromClip.timeline_duration_frames;
+      if (fromEnd !== toClip.timeline_in_frame) {
+        fail(transition, "adjacency", "endpoint timeline intervals must meet at one cut frame");
+        continue;
+      }
+      const start = toClip.timeline_in_frame - Math.floor(frames! / 2);
+      const end = start + frames!;
+      if (
+        start < fromClip.timeline_in_frame ||
+        start > fromEnd ||
+        end < toClip.timeline_in_frame ||
+        end > toClip.timeline_in_frame + toClip.timeline_duration_frames
+      ) {
+        fail(transition, "window", "centered transition window must stay inside the neighboring timeline intervals");
+      }
+    }
+
+    if (issues.length > 0) throw new SimpleTransitionExportError(issues);
   }
 
   build(): string {
@@ -144,7 +529,7 @@ class ExportContext {
     lines.push(`<!DOCTYPE xmeml>`);
     // Metadata comment for roundtrip identification
     const projectId = this.opts.projectId || this.timeline.project_id;
-    const generatedAt = new Date().toISOString();
+    const generatedAt = this.timeline.created_at;
     lines.push(`<!-- Video OS v2 | project: ${this.escXml(projectId)} | generated: ${generatedAt} | compiler: ${this.escXml(this.timeline.provenance?.compiler_version ?? "unknown")} -->`);
     lines.push(`<xmeml version="5">`);
     lines.push(`  <sequence>`);
@@ -161,8 +546,8 @@ class ExportContext {
       this.appendVideoTrack(lines, track, 8);
     }
     // Text overlay track (V-Title) — rendered as Outline Text generators
-    if (this.opts.textOverlays && this.opts.textOverlays.length > 0) {
-      this.appendTextOverlayTrack(lines, this.opts.textOverlays, 8);
+    if (this.textOverlays.length > 0) {
+      this.appendTextOverlayTrack(lines, this.textOverlays, 8);
     }
     lines.push(`      </video>`);
 
@@ -200,6 +585,10 @@ class ExportContext {
         if (end > maxFrame) maxFrame = end;
       }
     }
+    for (const overlay of this.textOverlays) {
+      const end = overlay.startFrame + overlay.durationFrames;
+      if (end > maxFrame) maxFrame = end;
+    }
     return maxFrame;
   }
 
@@ -216,16 +605,6 @@ class ExportContext {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&apos;");
-  }
-
-  /** Derive an ASCII-safe id from an asset_id or clip_id */
-  private toAsciiId(prefix: string, id: string): string {
-    // Replace non-ASCII chars with hex encoding
-    const safe = id.replace(/[^a-zA-Z0-9_-]/g, (ch) => {
-      const code = ch.charCodeAt(0);
-      return code > 127 ? `x${code.toString(16)}` : "_";
-    });
-    return `${prefix}-${safe}`;
   }
 
   /** Convert an absolute file path to percent-encoded file:// URL */
@@ -283,6 +662,9 @@ class ExportContext {
 
   /** Resolve the best display name for a clip in the XML <name> element */
   private resolveClipDisplayName(clip: ClipOutput): string {
+    if (this.opts.videoRepresentations?.has(clip.clip_id)) {
+      return `[BAKED] ${this.opts.assetDisplayNameMap?.get(clip.asset_id) ?? clip.motivation ?? clip.clip_id}`;
+    }
     // Priority: assetDisplayNameMap → motivation → clip_id
     const displayName = this.opts.assetDisplayNameMap?.get(clip.asset_id);
     if (displayName) return displayName;
@@ -337,9 +719,11 @@ class ExportContext {
     fileId: string,
     clip: ClipOutput,
     isAudioOnly: boolean,
+    filePathOverride?: string,
+    videoOnly = false,
   ): void {
     const d = this.indent(depth);
-    const filePath = this.opts.sourceMap.get(assetId);
+    const filePath = filePathOverride ?? this.opts.sourceMap.get(assetId);
     if (!filePath) {
       lines.push(`${d}<file id="${fileId}"/>`);
       return;
@@ -374,7 +758,7 @@ class ExportContext {
 
     // Always include audio for MOV files
     const ext = (filePath.split(".").pop() ?? "").toLowerCase();
-    if (ext !== "jpg" && ext !== "jpeg" && ext !== "png" && ext !== "tiff") {
+    if (!videoOnly && ext !== "jpg" && ext !== "jpeg" && ext !== "png" && ext !== "tiff") {
       lines.push(`${d}    <audio>`);
       lines.push(`${d}      <samplecharacteristics>`);
       lines.push(`${d}        <samplerate>${this.sampleRate}</samplerate>`);
@@ -411,12 +795,26 @@ class ExportContext {
         : clip.clip_id;
 
     // Embed video_os metadata as JSON-encoded marker comment
-    const payload = JSON.stringify({
+    const baked = this.opts.videoRepresentations?.get(clip.clip_id);
+    const payload = JSON.stringify(baked ? {
+      clip_id: clip.clip_id,
+      asset_id: clip.asset_id,
+      beat_id: clip.beat_id,
+      motivation: clip.motivation || "",
+      roundtrip_id: this.opts.roundtripId,
+        representation: "baked_visual",
+        bake_request_id: baked.bake_request_id,
+        derived_asset_id: baked.derived_asset_id,
+        manifest_sha256: baked.manifest_sha256,
+        output_sha256: baked.media_sha256,
+        effect_editable: false,
+    } : {
       exchange_clip_id: exchangeClipId,
       clip_id: clip.clip_id,
       asset_id: clip.asset_id,
       beat_id: clip.beat_id,
       motivation: clip.motivation || "",
+      ...(this.opts.roundtripId ? { roundtrip_id: this.opts.roundtripId } : {}),
     });
 
     lines.push(`${d}<marker>`);
@@ -455,30 +853,10 @@ class ExportContext {
     );
   }
 
-  private resolveTransitionFrames(transition: TimelineTransitionOutput): number {
-    if (
-      typeof transition.transition_frames === "number" &&
-      transition.transition_frames > 0
-    ) {
-      return Math.round(transition.transition_frames);
-    }
-
-    const paramFrames = transition.transition_params?.transition_frames;
-    if (typeof paramFrames === "number" && paramFrames > 0) {
-      return Math.round(paramFrames);
-    }
-
-    const crossfadeSec = transition.transition_params?.crossfade_sec;
-    if (typeof crossfadeSec === "number" && crossfadeSec > 0) {
-      return Math.max(1, Math.round(crossfadeSec * this.fps));
-    }
-
-    return DEFAULT_TRANSITION_FRAMES;
-  }
-
   private resolveTransitionEffect(
     transition: TimelineTransitionOutput,
   ): { name: string; effectId: string } | null {
+    if (transition.transition_type === "fade_to_black") return null;
     const skillId =
       transition.applied_skill_id ?? transition.degraded_from_skill_id ?? "";
 
@@ -499,7 +877,6 @@ class ExportContext {
 
     switch (transition.transition_type) {
       case "crossfade":
-      case "fade_to_black":
         return { name: "Cross Dissolve", effectId: "CrossDissolve" };
       case "match_cut":
         return { name: "Dip to Color", effectId: "DipToColor" };
@@ -519,21 +896,21 @@ class ExportContext {
     if (!effect) return;
 
     const d = this.indent(depth);
-    const transitionFrames = this.resolveTransitionFrames(transition);
-    const cutFrame =
-      typeof transition.transition_params?.cut_frame_after_snap === "number"
-        ? transition.transition_params.cut_frame_after_snap
-        : toClip.timeline_in_frame;
-    const startFrame = Math.max(
-      0,
-      cutFrame - Math.floor(transitionFrames / 2),
-    );
+    const transitionFrames = transition.transition_frames!;
+    const cutFrame = toClip.timeline_in_frame;
+    const startFrame = cutFrame - Math.floor(transitionFrames / 2);
     const endFrame = startFrame + transitionFrames;
 
     lines.push(`${d}<transitionitem>`);
     lines.push(`${d}  <start>${startFrame}</start>`);
     lines.push(`${d}  <end>${endFrame}</end>`);
     lines.push(`${d}  <alignment>center</alignment>`);
+    lines.push(`${d}  <comment>${this.escXml(`video_os_transition:${JSON.stringify({
+      transition_id: transition.transition_id,
+      track_id: transition.track_id,
+      from_clip_id: fromClip.clip_id,
+      to_clip_id: toClip.clip_id,
+    })}`)}</comment>`);
     lines.push(`${d}  <effect>`);
     lines.push(`${d}    <name>${effect.name}</name>`);
     lines.push(`${d}    <effectid>${effect.effectId}</effectid>`);
@@ -561,18 +938,20 @@ class ExportContext {
     lines.push(`${d}  <locked>FALSE</locked>`);
 
     for (const [index, clip] of track.clips.entries()) {
-      const clipId = this.toAsciiId("cv", clip.clip_id);
-      const fileId = this.getFileId(clip.asset_id);
-      const alreadyDefined = this.isFileDefined(clip.asset_id);
+      const clipId = fcp7ClipItemId("cv", clip.clip_id);
+      const baked = this.opts.videoRepresentations?.get(clip.clip_id);
+      const representedAssetId = baked?.derived_asset_id ?? clip.asset_id;
+      const fileId = this.getFileId(representedAssetId);
+      const alreadyDefined = this.isFileDefined(representedAssetId);
 
-      const srcInFrames = this.usToFrames(clip.src_in_us);
-      const srcOutFrames = this.usToFrames(clip.src_out_us);
+      const srcInFrames = baked ? 0 : this.usToFrames(clip.src_in_us);
+      const srcOutFrames = baked ? clip.timeline_duration_frames : this.usToFrames(clip.src_out_us);
 
       lines.push(`${d}  <clipitem id="${clipId}">`);
       lines.push(
         `${d}    <name>${this.escXml(this.resolveClipDisplayName(clip))}</name>`,
       );
-      lines.push(`${d}    <duration>${srcOutFrames}</duration>`);
+      lines.push(`${d}    <duration>${baked ? clip.timeline_duration_frames : srcOutFrames}</duration>`);
       this.appendRate(lines, depth + 4);
       lines.push(`${d}    <start>${clip.timeline_in_frame}</start>`);
       lines.push(
@@ -586,12 +965,14 @@ class ExportContext {
         this.appendFileDefinition(
           lines,
           depth + 4,
-          clip.asset_id,
+          representedAssetId,
           fileId,
           clip,
           false,
+          baked?.absolute_media_path,
+          Boolean(baked),
         );
-        this.markFileDefined(clip.asset_id);
+        this.markFileDefined(representedAssetId);
       } else {
         // Subsequent use: back-reference only
         lines.push(`${d}    <file id="${fileId}"/>`);
@@ -621,7 +1002,7 @@ class ExportContext {
     lines.push(`${d}  <locked>FALSE</locked>`);
 
     for (const clip of track.clips) {
-      const clipId = this.toAsciiId("ca", clip.clip_id);
+      const clipId = fcp7ClipItemId("ca", clip.clip_id);
       const fileId = this.getFileId(clip.asset_id);
       const alreadyDefined = this.isFileDefined(clip.asset_id);
 
@@ -678,33 +1059,9 @@ class ExportContext {
     depth: number,
     clip: ClipOutput,
   ): void {
-    const ap = clip.audio_policy;
-    const mix = this.timeline.audio_mix;
-    if (!ap && !mix) return;
-
-    const isBgm = clip.role === "bgm" || clip.role === "music";
-
-    const gain = resolveAudioGainWithFallback(ap, mix, isBgm ? "bgm" : "nat_sound", {
-      fallbackToDuckMusicDb: isBgm,
-    });
-
-    // Resolve fade frames
-    const fadeInFrames: number | undefined = isBgm
-      ? (ap?.bgm_fade_in_frames ?? ap?.fade_in_frames ?? mix?.bgm_fade_in_frames ?? mix?.fade_in_frames)
-      : (ap?.nat_sound_fade_in_frames ?? ap?.fade_in_frames ?? mix?.nat_sound_fade_in_frames ?? mix?.fade_in_frames);
-
-    const fadeOutFrames: number | undefined = isBgm
-      ? (ap?.bgm_fade_out_frames ?? ap?.fade_out_frames ?? mix?.bgm_fade_out_frames ?? mix?.fade_out_frames)
-      : (ap?.nat_sound_fade_out_frames ?? ap?.fade_out_frames ?? mix?.nat_sound_fade_out_frames ?? mix?.fade_out_frames);
-
-    const hasGain = gain.sourceField !== null;
-    const hasFadeIn = fadeInFrames !== undefined && fadeInFrames > 0;
-    const hasFadeOut = fadeOutFrames !== undefined && fadeOutFrames > 0;
-
-    // Nothing to emit
-    if (!hasGain && !hasFadeIn && !hasFadeOut) return;
-
-    const linearGain = hasGain ? gain.gainLinear : 1.0;
+    const decision = resolveFcp7AudioLevelsEmissionDecision(clip, this.timeline.audio_mix);
+    if (!decision) return;
+    const { linearGain, fadeInFrames, fadeOutFrames, hasFadeIn, hasFadeOut } = decision;
     const d = this.indent(depth);
 
     lines.push(`${d}<filter>`);
@@ -779,11 +1136,9 @@ class ExportContext {
 
   // ── Text Overlay Track ──
 
-  private textOverlayCounter = 0;
-
   private appendTextOverlayTrack(
     lines: string[],
-    overlays: TextOverlay[],
+    overlays: ResolvedTextOverlay[],
     depth: number,
   ): void {
     const d = this.indent(depth);
@@ -792,7 +1147,6 @@ class ExportContext {
     lines.push(`${d}  <locked>FALSE</locked>`);
 
     for (const overlay of overlays) {
-      this.textOverlayCounter++;
       this.appendTextGeneratorItem(lines, overlay, depth + 2);
     }
 
@@ -801,32 +1155,18 @@ class ExportContext {
 
   private appendTextGeneratorItem(
     lines: string[],
-    overlay: TextOverlay,
+    overlay: ResolvedTextOverlay,
     depth: number,
   ): void {
     const d = this.indent(depth);
-    const id = `title-${this.textOverlayCounter}`;
+    const id = overlay.generatorId;
     const label = overlay.label || overlay.text.split("\n")[0];
     const fontSize = overlay.fontSize ?? 48;
     const [r, g, b] = overlay.color ?? [255, 255, 255];
     const opacity = overlay.opacity ?? 100;
     const durFrames = overlay.durationFrames;
 
-    // Compute vertical origin based on position
-    // FCP7 origin: center of frame = (0, 0), range roughly -0.5 to 0.5
-    let originY: number;
-    switch (overlay.position ?? "lower-third") {
-      case "top":
-        originY = 0.35;
-        break;
-      case "center":
-        originY = 0;
-        break;
-      case "lower-third":
-      default:
-        originY = -0.3;
-        break;
-    }
+    const [originX, originY] = CANONICAL_ANCHOR_ORIGINS[overlay.anchor];
 
     lines.push(`${d}<generatoritem id="${id}">`);
     lines.push(`${d}  <name>${this.escXml(label)}</name>`);
@@ -836,6 +1176,21 @@ class ExportContext {
     lines.push(`${d}  <end>${overlay.startFrame + durFrames}</end>`);
     lines.push(`${d}  <in>0</in>`);
     lines.push(`${d}  <out>${durFrames}</out>`);
+
+    if (overlay.canonical) {
+      const marker = {
+        surface: "text_overlay",
+        overlay_id: overlay.canonical.overlayId,
+        clip_id: overlay.canonical.clipId,
+        roundtrip_id: overlay.canonical.roundtripId,
+      };
+      lines.push(`${d}  <marker>`);
+      lines.push(`${d}    <name>video_os text overlay</name>`);
+      lines.push(`${d}    <comment>${this.escXml(`video_os:${JSON.stringify(marker)}`)}</comment>`);
+      lines.push(`${d}    <in>0</in>`);
+      lines.push(`${d}    <out>-1</out>`);
+      lines.push(`${d}  </marker>`);
+    }
 
     // Outline Text generator — reliable in Premiere Pro import
     lines.push(`${d}  <effect>`);
@@ -876,7 +1231,7 @@ class ExportContext {
     lines.push(`${d}      <parameterid>origin</parameterid>`);
     lines.push(`${d}      <name>Origin</name>`);
     lines.push(`${d}      <value>`);
-    lines.push(`${d}        <horiz>0</horiz>`);
+    lines.push(`${d}        <horiz>${originX}</horiz>`);
     lines.push(`${d}        <vert>${originY}</vert>`);
     lines.push(`${d}      </value>`);
     lines.push(`${d}    </parameter>`);

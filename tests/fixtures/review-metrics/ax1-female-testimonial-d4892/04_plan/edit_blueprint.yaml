@@ -1,0 +1,37 @@
+version: "1"
+project_id: ax1-female-testimonial-d4892
+sequence_goals:
+  - Synthetic two-beat talking-head fixture for public CI review metrics.
+beats:
+  - id: start_beat
+    label: opening
+    target_duration_frames: 40
+    required_roles: [hero]
+    story_role: hook
+  - id: end_beat
+    label: closing
+    target_duration_frames: 80
+    required_roles: [dialogue]
+    story_role: closing
+pacing:
+  opening_cadence: すぐ本題へ入り、前置きを置かない。
+  middle_cadence: 意味単位で支える。
+  ending_cadence: 言い切った後に余韻を残す。
+  max_shot_length_frames: 100
+music_policy:
+  start_sparse: true
+  allow_release_late: true
+  entry_beat: end_beat
+dialogue_policy:
+  preserve_natural_breath: true
+  avoid_wall_to_wall_voiceover: true
+transition_policy:
+  prefer_match_texture_over_flashy_fx: true
+ending_policy:
+  should_feel: resolved
+rejection_rules: []
+dedupe_rules:
+  allow_intentional_repetition: false
+quality_targets:
+  duration_pacing_tolerance_pct: 10
+  hook_density_min: 0.3

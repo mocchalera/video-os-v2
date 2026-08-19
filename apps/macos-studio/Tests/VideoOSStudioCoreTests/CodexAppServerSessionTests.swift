@@ -4,12 +4,12 @@ import XCTest
 final class CodexAppServerSessionTests: XCTestCase {
     func testJSONRPCResponseDecodesInitializeResult() throws {
         let json = """
-        {"id":1,"result":{"userAgent":"Codex Desktop/0.131.0","codexHome":"/Users/example/.codex","platformFamily":"unix","platformOs":"macos"}}
+        {"id":1,"result":{"userAgent":"Codex Desktop/0.131.0","codexHome":"/Users/operator/.codex","platformFamily":"unix","platformOs":"macos"}}
         """
         let response = try JSONDecoder().decode(CodexJSONRPCResponse<CodexInitializeResponse>.self, from: Data(json.utf8))
 
         XCTAssertEqual(response.id, 1)
-        XCTAssertEqual(response.result.codexHome, "/Users/example/.codex")
+        XCTAssertEqual(response.result.codexHome, "/Users/operator/.codex")
         XCTAssertEqual(response.result.platformOs, "macos")
     }
 

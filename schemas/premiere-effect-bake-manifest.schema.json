@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/premiere-effect-bake-manifest.schema.json",
+  "title": "Premiere visual-effect bake manifest",
+  "type": "object",
+  "required": ["version", "project_id", "bake_id", "request_sha256", "request", "derived_asset_id", "derived_media_kind", "representation", "effect_editable", "generated_content", "output"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "premiere-effect-bake-manifest/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "bake_id": { "type": "string", "pattern": "^VBK_[0-9A-F]{24}$" },
+    "request_sha256": { "$ref": "#/$defs/sha" },
+    "request": { "$ref": "#/$defs/request" },
+    "derived_asset_id": { "type": "string", "pattern": "^AST_BAKE_[0-9A-F]{24}$" },
+    "derived_media_kind": { "const": "premiere_visual_effect_bake" },
+    "representation": { "const": "baked_visual" },
+    "effect_editable": { "const": false },
+    "generated_content": { "const": false },
+    "output": {
+      "type": "object",
+      "required": ["path", "sha256", "video_stream_sha256", "probe", "packet_frame_evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath" },
+        "sha256": { "$ref": "#/$defs/sha" },
+        "video_stream_sha256": { "$ref": "#/$defs/sha" },
+        "probe": { "$ref": "#/$defs/probe" },
+        "packet_frame_evidence": { "$ref": "#/$defs/packetEvidence" }
+      }
+    }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "relativePath": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*%2[eE]).+$" },
+    "identity": {
+      "type": "object", "required": ["dev", "ino", "size", "mode", "mtime_ms", "ctime_ms", "nlink"], "additionalProperties": false,
+      "properties": {
+        "dev": { "type": "integer", "minimum": 0 }, "ino": { "type": "integer", "minimum": 0 }, "size": { "type": "integer", "minimum": 0 },
+        "mode": { "type": "integer", "minimum": 0 }, "mtime_ms": { "type": "number" }, "ctime_ms": { "type": "number" }, "nlink": { "const": 1 }
+      }
+    },
+    "probe": {
+      "type": "object", "required": ["format", "video", "stream_count"], "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "object", "required": ["format_name", "duration", "start_time", "size", "bit_rate"], "additionalProperties": false,
+          "properties": { "format_name": { "type": "string", "minLength": 1 }, "duration": { "type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$" }, "start_time": { "type": "string", "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$" }, "size": { "type": "string", "pattern": "^[1-9][0-9]*$" }, "bit_rate": { "type": "string", "pattern": "^[1-9][0-9]*$" } }
+        },
+        "video": {
+          "type": "object",
+          "required": ["index", "codec_name", "codec_tag_string", "profile", "level", "width", "height", "sample_aspect_ratio", "display_aspect_ratio", "r_frame_rate", "avg_frame_rate", "time_base", "start_pts", "duration_ts", "nb_frames", "pix_fmt", "field_order", "color_range", "color_space", "color_transfer", "color_primaries", "chroma_location", "rotation", "has_alpha", "tags_json", "side_data_json", "disposition_json"],
+          "additionalProperties": false,
+          "properties": {
+            "index": { "type": "integer", "minimum": 0 }, "codec_name": { "type": "string", "minLength": 1 }, "codec_tag_string": { "type": "string" }, "profile": { "type": ["string", "null"] }, "level": { "type": ["integer", "null"] },
+            "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 }, "sample_aspect_ratio": { "const": "1:1" }, "display_aspect_ratio": { "type": "string", "minLength": 1 },
+            "r_frame_rate": { "type": "string", "pattern": "^[0-9]+/[1-9][0-9]*$" }, "avg_frame_rate": { "type": "string", "pattern": "^[0-9]+/[1-9][0-9]*$" }, "time_base": { "type": "string", "pattern": "^[0-9]+/[1-9][0-9]*$" },
+            "start_pts": { "type": "string", "pattern": "^-?[0-9]+$" }, "duration_ts": { "type": "string", "pattern": "^[1-9][0-9]*$" }, "nb_frames": { "type": "string", "pattern": "^[1-9][0-9]*$" }, "pix_fmt": { "enum": ["yuv420p", "yuv422p", "yuv444p", "nv12"] }, "field_order": { "type": "string", "minLength": 1 },
+            "color_range": { "enum": ["tv", "pc"] }, "color_space": { "const": "bt709" }, "color_transfer": { "const": "bt709" }, "color_primaries": { "const": "bt709" }, "chroma_location": { "enum": ["left", "center"] },
+            "rotation": { "const": 0 }, "has_alpha": { "const": false }, "tags_json": { "type": "string" }, "side_data_json": { "type": "string" }, "disposition_json": { "type": "string" }
+          }
+        },
+        "stream_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "effect": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "params"], "additionalProperties": false, "properties": { "type": { "const": "eq" }, "params": { "type": "object", "minProperties": 1, "additionalProperties": false, "properties": { "contrast": { "type": "number" }, "brightness": { "type": "number" }, "saturation": { "type": "number" } } } } },
+        { "type": "object", "required": ["type", "params"], "additionalProperties": false, "properties": { "type": { "const": "brightness" }, "params": { "type": "object", "required": ["brightness"], "additionalProperties": false, "properties": { "brightness": { "type": "number" } } } } },
+        { "type": "object", "required": ["type", "params"], "additionalProperties": false, "properties": { "type": { "const": "contrast" }, "params": { "type": "object", "required": ["contrast"], "additionalProperties": false, "properties": { "contrast": { "type": "number" } } } } },
+        { "type": "object", "required": ["type", "params"], "additionalProperties": false, "properties": { "type": { "const": "saturation" }, "params": { "type": "object", "required": ["saturation"], "additionalProperties": false, "properties": { "saturation": { "type": "number" } } } } }
+      ]
+    },
+    "treatment": {
+      "type": "object", "required": ["version", "transform", "effects"], "additionalProperties": false,
+      "properties": {
+        "version": { "const": "premiere-visual-treatment/v1" },
+        "transform": {
+          "type": "object", "required": ["zoom", "crop", "position"], "additionalProperties": false,
+          "properties": {
+            "zoom": { "type": "number", "minimum": 1, "maximum": 4 },
+            "crop": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["x", "y", "width", "height"], "additionalProperties": false, "properties": { "x": { "type": "integer" }, "y": { "type": "integer" }, "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } } }] },
+            "position": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["x", "y"], "additionalProperties": false, "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } } }] }
+          }
+        },
+        "effects": { "type": "array", "items": { "$ref": "#/$defs/effect" } }
+      }
+    },
+    "packetEvidence": {
+      "type": "object", "required": ["frame_count", "packet_count", "ticks_per_frame", "first_pts", "first_dts", "last_pts", "last_dts", "final_end", "packet_timing_sha256", "frame_timing_sha256"], "additionalProperties": false,
+      "properties": {
+        "frame_count": { "type": "integer", "minimum": 1 }, "packet_count": { "type": "integer", "minimum": 1 }, "ticks_per_frame": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "first_pts": { "const": "0" }, "first_dts": { "const": "0" }, "last_pts": { "type": "string", "pattern": "^[0-9]+$" }, "last_dts": { "type": "string", "pattern": "^[0-9]+$" }, "final_end": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "packet_timing_sha256": { "$ref": "#/$defs/sha" }, "frame_timing_sha256": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["version", "renderer_contract_version", "project_id", "base_timeline_sha256", "clip_id", "track_id", "asset_id", "source_id", "source_locator", "source_origin", "rights_status", "privacy_status", "source_in_us", "source_out_us", "timeline_duration_frames", "source_sha256", "source_identity", "source_probe", "treatment", "scaled_dimensions", "sequence", "filtergraph", "ffmpeg_argv", "ffmpeg_path", "ffmpeg_sha256", "ffmpeg_version", "ffmpeg_version_sha256", "policy", "authority_paths", "authority_hashes"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": "premiere-effect-bake-request/v1" }, "renderer_contract_version": { "const": "6" }, "project_id": { "type": "string", "minLength": 1 }, "base_timeline_sha256": { "$ref": "#/$defs/sha" },
+        "clip_id": { "type": "string", "minLength": 1 }, "track_id": { "type": "string", "minLength": 1 }, "asset_id": { "type": "string", "minLength": 1 }, "source_id": { "type": "string", "minLength": 1 }, "source_locator": { "type": "string", "minLength": 1 },
+        "source_origin": { "enum": ["original_source", "verified_caption_free_proxy"] }, "rights_status": { "enum": ["operator_declared_ok", "licensed"] }, "privacy_status": { "const": "operator_declared_ok" },
+        "source_in_us": { "type": "integer", "minimum": 0 }, "source_out_us": { "type": "integer", "minimum": 1 }, "timeline_duration_frames": { "type": "integer", "minimum": 1 }, "source_sha256": { "$ref": "#/$defs/sha" }, "source_identity": { "$ref": "#/$defs/identity" }, "source_probe": { "$ref": "#/$defs/probe" },
+        "treatment": { "$ref": "#/$defs/treatment" },
+        "scaled_dimensions": { "type": "object", "required": ["width", "height"], "additionalProperties": false, "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } } },
+        "sequence": { "type": "object", "required": ["width", "height", "fps_num", "fps_den"], "additionalProperties": false, "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 }, "fps_num": { "type": "integer", "minimum": 1 }, "fps_den": { "type": "integer", "minimum": 1 } } },
+        "filtergraph": { "type": "string", "minLength": 1 }, "ffmpeg_argv": { "type": "array", "minItems": 1, "items": { "type": "string" } }, "ffmpeg_path": { "type": "string", "minLength": 1 }, "ffmpeg_sha256": { "$ref": "#/$defs/sha" }, "ffmpeg_version": { "type": "string", "minLength": 1 }, "ffmpeg_version_sha256": { "$ref": "#/$defs/sha" },
+        "policy": { "type": "object", "required": ["codec", "crf", "preset", "threads", "bframes", "color", "sar", "topology"], "additionalProperties": false, "properties": { "codec": { "const": "h264" }, "crf": { "const": 14 }, "preset": { "const": "veryfast" }, "threads": { "const": 1 }, "bframes": { "const": 0 }, "color": { "const": "bt709_limited" }, "sar": { "const": "1:1" }, "topology": { "const": "video_only" } } },
+        "authority_paths": { "type": "object", "required": ["source_map", "source_ledger", "source_media_manifest"], "additionalProperties": false, "properties": { "source_map": { "$ref": "#/$defs/relativePath" }, "source_ledger": { "$ref": "#/$defs/relativePath" }, "source_media_manifest": { "$ref": "#/$defs/relativePath" } } },
+        "authority_hashes": { "type": "object", "required": ["source_map", "source_ledger", "source_media_manifest"], "additionalProperties": false, "properties": { "source_map": { "$ref": "#/$defs/sha" }, "source_ledger": { "$ref": "#/$defs/sha" }, "source_media_manifest": { "$ref": "#/$defs/sha" } } }
+      }
+    }
+  }
+}

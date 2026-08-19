@@ -10,6 +10,14 @@ import { discoverGoldenProjects } from "./golden-registry.js";
 import { selfEvaluateGolden } from "./index.js";
 import type { EvalReport } from "./types.js";
 
+export const DEFAULT_GOLDEN_SUITE_PROJECTS = [
+  "fumoto-growth",
+  "togakushi-camp",
+  "ena-promo",
+  "ax1-komatsu-testimonial-d4892",
+  "ax1-female-testimonial-d4892",
+] as const;
+
 type StageStatus = "completed" | "skipped" | "failed";
 
 export interface EvalSuiteStage<TReport = unknown> {
@@ -149,11 +157,8 @@ function failed<TReport>(error: unknown): EvalSuiteStage<TReport> {
   };
 }
 
-function normalizeProjectList(projects: string[] | undefined, repoRoot: string): string[] {
-  const requested = projects && projects.length > 0
-    ? projects
-    : discoverGoldenProjects(repoRoot).map((project) => project.project_id);
-  return requested
+function normalizeProjectList(projects: string[] | undefined): string[] {
+  return (projects && projects.length > 0 ? projects : [...DEFAULT_GOLDEN_SUITE_PROJECTS])
     .map((project) => project.trim())
     .filter(Boolean);
 }
@@ -345,7 +350,7 @@ export async function runGoldenEvalSuite(
   const evaluatedAtDate = now();
   const evaluatedAt = evaluatedAtDate.toISOString();
   const suiteDir = suiteDirFor(outRoot, evaluatedAtDate);
-  const projects = normalizeProjectList(options.projects, repoRoot);
+  const projects = normalizeProjectList(options.projects);
   const threshold = options.divergenceThreshold ?? 30;
   const previous = latestPreviousSuite(outRoot);
   const previousProjects = previousProjectMap(previous);

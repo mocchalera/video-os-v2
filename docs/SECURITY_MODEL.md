@@ -28,9 +28,8 @@ untrusted network.
   `projects/*/03_analysis/search/`, `projects/*/09_output/`, generated reports,
   and Project Loop database/evidence/dashboard surfaces.
 - `scripts/check-repo-hygiene.ts` rejects tracked env files, generated outputs,
-  render/QA inspection artifacts, project outputs, project directories outside
-  the `_template` / `demo` / `sample` public fixture allowlist, and non-approved
-  tracked files over 2 MiB.
+  render/QA inspection artifacts, project outputs, and non-approved tracked
+  files over 2 MiB.
 
 Repository hygiene is a publication guard, not a secret scanner. Before a
 public release, review the actual Git diff and history for credentials,

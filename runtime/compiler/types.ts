@@ -385,9 +385,9 @@ export interface EditBlueprint {
 }
 
 export type Role = "hero" | "support" | "transition" | "texture" | "dialogue";
-export type ClipRole = Role | "music" | "nat_sound" | "bgm" | "title";
+export type ClipRole = Role | "music" | "nat_sound" | "bgm" | "sfx" | "title";
 export type SourceMediaKind = "video" | "audio" | "image" | "sequence" | "unknown";
-export type AudioSemanticRole = "dialogue" | "music" | "nat_sound" | "ambient";
+export type AudioSemanticRole = "dialogue" | "music" | "nat_sound" | "ambient" | "sfx";
 
 export interface SourceCapabilities {
   has_video: boolean;
@@ -843,6 +843,7 @@ export interface CaptionOverlay {
 export interface Track {
   track_id: string;
   kind: "video" | "audio" | "overlay" | "caption";
+  role?: "dialogue" | "music" | "nat_sound" | "ambient" | "sfx";
   clips: TimelineClip[];
 }
 
@@ -932,6 +933,7 @@ export interface TimelineIR {
 export interface TrackOutput {
   track_id: string;
   kind: "video" | "audio" | "overlay" | "caption";
+  role?: "dialogue" | "music" | "nat_sound" | "ambient" | "sfx";
   clips: ClipOutput[];
 }
 

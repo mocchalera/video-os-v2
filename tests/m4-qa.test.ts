@@ -23,6 +23,8 @@ import {
   checkAvDrift,
   checkLoudnessTarget,
   checkAudioMixPolicy,
+  checkAudioRenderPlanParity,
+  checkSfxMixPolicy,
   checkResolutionSpec,
   checkDeterministicFinalOutput,
   checkFinalCaptionStructuralInvariants,
@@ -32,6 +34,8 @@ import {
   type QaCheckResult,
 } from "../runtime/packaging/qa.js";
 import type { AudioMixReport } from "../runtime/audio/mixer.js";
+import type { MusicCuesDoc } from "../runtime/audio/music-cues.js";
+import type { SfxCuesDoc } from "../runtime/audio/sfx-cues.js";
 
 import {
   computePackagingProjectionHash,
@@ -805,6 +809,175 @@ function validAudioMixReport(hasBgm: boolean): AudioMixReport {
   };
 }
 
+function sharedMusicCues(): MusicCuesDoc {
+  return {
+    version: "2.0.0",
+    project_id: "phase3-qa",
+    base_timeline_version: "7",
+    timeline_fps: { num: 24, den: 1 },
+    music_asset: {
+      asset_id: "trust-clarity-low-01",
+      path: "/pack/full.m4a",
+      source_hash: `sha256:${"d".repeat(64)}`,
+      track_id: "trust-clarity-low-01",
+      pack_id: "core",
+      pack_version: "1.0.0",
+      pack_manifest_hash: `sha256:${"a".repeat(64)}`,
+      full_mix_content_hash: `sha256:${"b".repeat(64)}`,
+      analysis_content_hash: `sha256:${"c".repeat(64)}`,
+    },
+    cues: [{
+      cue_id: "MC_MAIN",
+      track_id: "trust-clarity-low-01",
+      entry_window: { earliest_frame: 72, latest_frame: 72 },
+      entry_frame: 72,
+      exit_frame: 600,
+      timeline_track_id: "A2",
+      source_offset_us: 3_000_000,
+      source_range: { in_us: 3_000_000, out_us: 25_000_000 },
+      timeline_range: { in_frame: 72, out_frame: 600 },
+      section: "body",
+      phase: "dialogue-bed",
+      semantic_anchor: {
+        label: "message",
+        timeline_frame: 72,
+        source_onset_us: 3_000_000,
+      },
+      beat_alignment: {
+        requested: "semantic_anchor_source_onset",
+        status: "degraded",
+        decision: "explicit_source_onset",
+        analysis_status: "degraded",
+        confidence: 0.3,
+        grid_source: null,
+        source_onset_us: 3_000_000,
+        timeline_boundaries_moved: false,
+        warnings: [],
+      },
+      fade_in_ms: 400,
+      fade_out_ms: 900,
+      ducking: {
+        base_gain_db: -16,
+        duck_gain_db: -24,
+        attack_ms: 80,
+        release_ms: 280,
+      },
+    }],
+  };
+}
+
+function validSharedAudioMixReport(
+  planHash = `sha256:${"e".repeat(64)}`,
+): AudioMixReport {
+  const measurement = {
+    input_i: "-16.00",
+    input_tp: "-1.50",
+    input_lra: "3.00",
+    input_thresh: "-26.00",
+    target_offset: "0.00",
+  };
+  return {
+    version: "audio-mix-report/v2",
+    project_id: "phase3-qa",
+    plan_hash: planHash,
+    has_bgm: true,
+    strategy: "shared_audio_render_plan_v1",
+    input_hashes: {
+      timeline: `sha256:${"f".repeat(64)}`,
+      dialogue_sources: [],
+      cue_sources: [],
+    },
+    output: {
+      content_hash: `sha256:${"1".repeat(64)}`,
+      size_bytes: 100,
+      sample_rate_hz: 48_000,
+      channels: 2,
+    },
+    stems: [
+      {
+        stem_id: "A1",
+        role: "dialogue",
+        source_track_id: "A1",
+        content_hash: `sha256:${"2".repeat(64)}`,
+        size_bytes: 100,
+        finish_applied: true,
+      },
+      {
+        stem_id: "MC_MAIN",
+        role: "music",
+        source_track_id: "A2",
+        content_hash: `sha256:${"3".repeat(64)}`,
+        size_bytes: 100,
+        finish_applied: false,
+      },
+    ],
+    cues: [{
+      cue_id: "MC_MAIN",
+      track_id: "trust-clarity-low-01",
+      timeline_range: { in_frame: 72, out_frame: 600 },
+      source_range_us: { in_us: 3_000_000, out_us: 25_000_000 },
+      applied: {
+        base_gain_db: -16,
+        duck_gain_db: -24,
+        fade_in_ms: 400,
+        fade_out_ms: 900,
+        attack_ms: 80,
+        release_ms: 280,
+      },
+      pins: {
+        pack_id: "core",
+        pack_version: "1.0.0",
+        pack_manifest_hash: `sha256:${"a".repeat(64)}`,
+        full_mix_content_hash: `sha256:${"b".repeat(64)}`,
+        full_mix_size_bytes: 100,
+        analysis_content_hash: `sha256:${"c".repeat(64)}`,
+        analysis_size_bytes: 100,
+        analysis_status: "degraded",
+      },
+      rendered_content_hash: `sha256:${"4".repeat(64)}`,
+      sidechain_content_hash: `sha256:${"5".repeat(64)}`,
+    }],
+    dialogue_finish_scope: "a1_only",
+    mastering_count: 1,
+    execution_strategy: {
+      id: "shared_audio_render_plan_executor_v1",
+      stages: ["extract_a1_stem", "single_final_mastering"],
+      deterministic_input_order: ["A1:A1", "A2:MC_MAIN"],
+    },
+    sidechain_evidence: {
+      detector: "dialogue_waveform_rms",
+      dialogue_stem_content_hash: `sha256:${"2".repeat(64)}`,
+      threshold: 0.03,
+      per_cue: [{
+        cue_id: "MC_MAIN",
+        ratio: 13,
+        attack_ms: 80,
+        release_ms: 280,
+        requested_duck_gain_db: -24,
+        sidechain_output_content_hash: `sha256:${"5".repeat(64)}`,
+      }],
+    },
+    sidechain: {
+      detector: "dialogue_waveform_rms",
+      threshold: 0.03,
+      ratio: 13,
+      attack_ms: 80,
+      release_ms: 280,
+      base_gain_db: -16,
+      requested_duck_gain_db: -24,
+    },
+    final_mastering: {
+      applied: true,
+      loudness_target_lufs: -16,
+      lra_target: 7,
+      true_peak_target_dbtp: -1.5,
+      premaster_measurement: measurement,
+      output_measurement: measurement,
+    },
+    warnings: [],
+  };
+}
+
 describe("checkAudioMixPolicy", () => {
   it("accepts explicit original-audio passthrough evidence", () => {
     const report: AudioMixReport = {
@@ -899,6 +1072,171 @@ describe("checkAudioMixPolicy", () => {
       passed: false,
     });
   });
+
+  it("validates music-cues/v2 pins and exact applied values", () => {
+    const cues = sharedMusicCues();
+    expect(checkAudioMixPolicy(
+      validSharedAudioMixReport(),
+      true,
+      true,
+      cues,
+    ).passed).toBe(true);
+
+    const drifted = validSharedAudioMixReport();
+    drifted.cues![0].applied.attack_ms = 20;
+    const result = checkAudioMixPolicy(drifted, true, true, cues);
+    expect(result.passed).toBe(false);
+    expect(result.details).toContain("attack_ms");
+  });
+
+  it("requires social/final shared plan identity and cue-contract parity", () => {
+    const finalReport = validSharedAudioMixReport();
+    const socialReport = validSharedAudioMixReport();
+    expect(checkAudioRenderPlanParity(finalReport, socialReport, true).passed).toBe(true);
+
+    socialReport.plan_hash = `sha256:${"9".repeat(64)}`;
+    expect(checkAudioRenderPlanParity(finalReport, socialReport, true)).toMatchObject({
+      passed: false,
+      details: expect.stringContaining("plan_hash mismatch"),
+    });
+    expect(checkAudioRenderPlanParity(null, null, false).passed).toBe(true);
+  });
+
+  it("fails closed for required SFX unless A3 pins, tail, ducking, and mastering evidence match", () => {
+    const pin = {
+      library_id: "video-os-test-sfx",
+      library_version: "1.0.0",
+      library_manifest_hash: `sha256:${"6".repeat(64)}`,
+      asset_content_hash: `sha256:${"7".repeat(64)}`,
+      asset_size_bytes: 100,
+      rights_evidence_ref: "evidence:test-rights",
+      provenance_ref: "provenance:test-sfx-v1",
+    };
+    const expected: SfxCuesDoc = {
+      version: "sfx-cues/v1",
+      project_id: "phase3-qa",
+      base_timeline_version: "7",
+      timeline_fps: { num: 24, den: 1 },
+      required: true,
+      library: {
+        manifest_path: "/tmp/sfx-library.json",
+        library_id: pin.library_id,
+        library_version: pin.library_version,
+        manifest_hash: pin.library_manifest_hash,
+      },
+      cues: [{
+        cue_id: "SFX_HOOK_000000",
+        semantic_role: "hook_impact",
+        asset_id: "sfx-impact-01",
+        trigger_frame: 0,
+        duration_frames: 10,
+        source_range: { in_us: 0, out_us: 500_000 },
+        gain_db: -12,
+        fade_in_ms: 5,
+        fade_out_ms: 100,
+        tail: { max_frames: 4, policy: "trim_or_pad_to_limit" },
+        duck_group: "dialogue",
+        ducking: { duck_gain_db: -20, attack_ms: 10, release_ms: 120 },
+        asset_pin: pin,
+        intent: "fixture",
+      }],
+    };
+    const report = validSharedAudioMixReport();
+    report.has_sfx = true;
+    report.stems!.push({
+      stem_id: "SFX_HOOK_000000",
+      role: "sfx",
+      source_track_id: "A3",
+      content_hash: `sha256:${"8".repeat(64)}`,
+      size_bytes: 100,
+      finish_applied: false,
+    });
+    report.sfx_cues = [{
+      cue_id: "SFX_HOOK_000000",
+      semantic_role: "hook_impact",
+      asset_id: "sfx-impact-01",
+      timeline_range: { in_frame: 0, out_frame: 14 },
+      source_range_us: { in_us: 0, out_us: 500_000 },
+      dialogue_overlap_frames: 14,
+      applied: {
+        gain_db: -12,
+        fade_in_ms: 5,
+        fade_out_ms: 100,
+        duck_group: "dialogue",
+        duck_gain_db: -20,
+        attack_ms: 10,
+        release_ms: 120,
+      },
+      tail_processing: {
+        requested_tail_frames: 4,
+        applied_tail_frames: 4,
+        timeline_action: "kept",
+        source_action: "trimmed",
+        render_duration_frames: 14,
+        render_duration_us: 583_333,
+      },
+      pins: {
+        ...pin,
+        rights_basis: "deterministic_synthesis",
+        rights_usage_scope: "internal_audition",
+        provenance_origin: "deterministic_synthesis",
+        generated_at: "2026-07-28T00:00:00Z",
+      },
+      rendered_content_hash: `sha256:${"9".repeat(64)}`,
+      a3_output_content_hash: `sha256:${"8".repeat(64)}`,
+      peak_dbtp: -8,
+      headroom_db: 8,
+    }];
+    report.sfx_sidechain_evidence = {
+      detector: "dialogue_waveform_rms",
+      dialogue_stem_content_hash: `sha256:${"2".repeat(64)}`,
+      threshold: 0.03,
+      per_cue: [{
+        cue_id: "SFX_HOOK_000000",
+        duck_group: "dialogue",
+        ratio: 13,
+        attack_ms: 10,
+        release_ms: 120,
+        requested_duck_gain_db: -20,
+        dialogue_overlap_frames: 14,
+        sidechain_applied: true,
+        a3_output_content_hash: `sha256:${"8".repeat(64)}`,
+      }],
+    };
+    expect(checkSfxMixPolicy(report, expected).passed).toBe(true);
+    const decisionPin = {
+      candidate_id: "fracture-hook",
+      decision_hash: `sha256:${"a".repeat(64)}`,
+      resolved_frame: 0,
+      semantic_role: "hook_impact" as const,
+      asset_id: "sfx-impact-01",
+    };
+    expected.decision_ref = {
+      path: "07_package/sound-design-decision.json",
+      content_hash: `sha256:${"b".repeat(64)}`,
+      decision_hash: decisionPin.decision_hash,
+      solver_id: "semantic-first-tempo-secondary",
+      solver_version: "1.0.0",
+    };
+    expected.cues[0].decision_pin = decisionPin;
+    report.input_hashes!.sound_design_decision =
+      expected.decision_ref.content_hash;
+    report.sfx_cues[0].decision_pin = { ...decisionPin };
+    expect(checkSfxMixPolicy(report, expected).passed).toBe(true);
+    report.sfx_cues[0].decision_pin!.resolved_frame = 1;
+    expect(checkSfxMixPolicy(report, expected)).toMatchObject({
+      passed: false,
+      details: expect.stringContaining("decision_pin"),
+    });
+    report.sfx_cues[0].decision_pin!.resolved_frame = 0;
+    report.sfx_cues[0].pins.asset_content_hash = `sha256:${"0".repeat(64)}`;
+    expect(checkSfxMixPolicy(report, expected)).toMatchObject({
+      passed: false,
+      details: expect.stringContaining("asset_content_hash"),
+    });
+    expect(checkSfxMixPolicy(null, expected).passed).toBe(false);
+    expect(checkSfxMixPolicy(null, null).passed).toBe(true);
+  });
 });
 
 // ── Required Checks by Profile ────────────────────────────────────
@@ -914,6 +1252,12 @@ describe("getRequiredChecks", () => {
     expect(engineChecks).toContain("dialogue_occupancy_valid");
     expect(engineChecks).toContain("dialogue_timeline_alignment_valid");
     expect(engineChecks).toContain("audio_mix_policy_valid");
+    expect(engineChecks).not.toContain("audio_render_plan_parity_valid");
+    expect(getRequiredChecks("engine_render", undefined, true))
+      .toContain("audio_render_plan_parity_valid");
+    expect(getRequiredChecks("engine_render")).not.toContain("sfx_mix_policy_valid");
+    expect(getRequiredChecks("engine_render", undefined, true, true))
+      .toContain("sfx_mix_policy_valid");
     // nle_finishing does not include those but has supplied_export_probe_valid
     expect(nleChecks).not.toContain("caption_density_valid");
     expect(nleChecks).toContain("supplied_export_probe_valid");

@@ -11,9 +11,9 @@ are repaired and verified on `Dev` at commit `08a39f53`:
   server's Express installation or ignored `outputs/` fixtures, and the CI job now
   installs the FFmpeg media toolchain required by its integration tests.
 
-Internal GitHub Actions run `29073236878` completed successfully with all six
-responsibility jobs green. The private development-repository URL is omitted
-from the OSS snapshot.
+GitHub Actions run `29073236878` completed successfully with all six responsibility
+jobs green:
+<https://github.com/mocchalera/video-os-v2-dev/actions/runs/29073236878>.
 
 ## Changes
 

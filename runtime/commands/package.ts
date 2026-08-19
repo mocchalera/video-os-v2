@@ -43,6 +43,8 @@ import {
   checkAvDrift,
   checkLoudnessTarget,
   checkAudioMixPolicy,
+  checkAudioRenderPlanParity,
+  checkSfxMixPolicy,
   checkPackageCompleteness,
   checkDialogueOccupancy,
   checkDialogueTimelineAlignment,
@@ -86,6 +88,11 @@ import {
 import { buildRenderLayoutSnapshot } from "../review/render-layout-snapshot.js";
 import { evaluateSpeechCadenceQA } from "../review/speech-cadence-qa.js";
 import type { AudioEventsArtifact } from "../artifacts/audio-events.js";
+import { resolveSharedAudioRenderPlan } from "../audio/render-route.js";
+import {
+  resolveSfxCuePlan,
+  type SfxCuesDoc,
+} from "../audio/sfx-cues.js";
 import { evaluateCaptionDeliveryQA } from "../review/caption-delivery-qa.js";
 import type { CaptionReviewPreview } from "../caption/review-core.js";
 import { assembleTimelineToMp4 } from "../render/assembler.js";
@@ -271,6 +278,30 @@ export async function packageCommand(
   const musicCues = fs.existsSync(musicCuesPath)
     ? JSON.parse(fs.readFileSync(musicCuesPath, "utf-8"))
     : null;
+  const sfxCuesPath = path.join(inputPackageDir, "sfx_cues.json");
+  const sfxCues = fs.existsSync(sfxCuesPath)
+    ? JSON.parse(fs.readFileSync(sfxCuesPath, "utf-8")) as SfxCuesDoc
+    : null;
+  if (
+    sfxCues
+    && timeline.provenance?.audio_policy?.mode !== "original_only"
+  ) {
+    try {
+      resolveSfxCuePlan({
+        projectDir: absDir,
+        timeline,
+        cuesPath: sfxCuesPath,
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: "GATE_CHECK_FAILED",
+          message: `SFX contract failed: ${String(error)}`,
+        },
+      };
+    }
+  }
   const musicEligibility = assessMusicAssetEligibility(absDir, musicCues);
   if (!musicEligibility.eligible) {
     return {
@@ -723,10 +754,22 @@ export async function packageCommand(
       const renderMusicCuesPath = fs.existsSync(musicCuesPath)
         ? musicCuesPath
         : undefined;
+      const renderSfxCuesPath = fs.existsSync(sfxCuesPath)
+        ? sfxCuesPath
+        : undefined;
 
       try {
         const assemblyEngine = options?.assemblyEngine ?? renderRouteDecision.assembly_engine;
-        const sourceInputsBefore = createSourceInputAttestation(absDir, { timelinePath });
+        const sharedAudioPlan = resolveSharedAudioRenderPlan({
+          projectDir: absDir,
+          timelinePath,
+          musicCuesPath: renderMusicCuesPath,
+          sfxCuesPath: renderSfxCuesPath,
+        });
+        const sourceInputsBefore = createSourceInputAttestation(absDir, {
+          timelinePath,
+          includeAudio: !sharedAudioPlan,
+        });
         if (!assemblyPath && assemblyEngine === "ffmpeg") {
           const existingFreshness = assessRenderArtifactFreshness(absDir, defaultAssemblyPath);
           if (existingFreshness.status === "fresh") {
@@ -736,6 +779,7 @@ export async function packageCommand(
               projectDir: absDir,
               timelinePath,
               outputPath: defaultAssemblyPath,
+              includeAudio: !sharedAudioPlan,
               legacyCaptionMode: "reject",
             });
             writeRenderFreshnessMetadata(absDir, defaultAssemblyPath, { sourceInputsBefore, createdAt });
@@ -758,6 +802,8 @@ export async function packageCommand(
           timelinePath,
           captionApprovalPath: renderCaptionApprovalPath,
           musicCuesPath: renderMusicCuesPath,
+          sfxCuesPath: renderSfxCuesPath,
+          audioRenderPlan: sharedAudioPlan,
           assemblyPath,
           ...(!assemblyPath ? {
             assemblyEngine,
@@ -827,13 +873,35 @@ export async function packageCommand(
       }
       existingArtifacts.add("qa_report"); // Will be generated below
     }
+    const finalAudioMixReport = readAudioMixReport(audioMixReportPath);
+    const requiresSharedAudioPlan = (
+      musicCues?.version === "2.0.0"
+      || sfxCues?.version === "sfx-cues/v1"
+    )
+      && timeline.provenance?.audio_policy?.mode !== "original_only";
     checks.push(timelineRequiresAudio
       ? checkAudioMixPolicy(
-          readAudioMixReport(audioMixReportPath),
+          finalAudioMixReport,
           Boolean(musicCues) || embeddedMusicAssetIds.length > 0,
           renderRouteDecision.genre === "social_talking_head",
+          musicCues,
+          sfxCues,
         )
       : { name: "audio_mix_policy_valid", passed: true, details: "not_applicable: timeline has no audio or BGM" });
+    checks.push(checkAudioRenderPlanParity(
+      finalAudioMixReport,
+      readAudioMixReport(path.join(
+        absDir,
+        "09_output",
+        "social-review-work",
+        "audio",
+        "audio-mix-report.json",
+      )),
+      requiresSharedAudioPlan,
+    ));
+    if (sfxCues?.required === true) {
+      checks.push(checkSfxMixPolicy(finalAudioMixReport, sfxCues));
+    }
     completenessCheck = checkPackageCompleteness(
       sourceOfTruth,
       captionPolicy,

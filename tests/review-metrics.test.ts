@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   computeReviewMetrics,
@@ -658,7 +659,120 @@ describe("review metrics", () => {
     expect(partialMetrics.checks.find((check) => check.id === "eye_trace.motion_flow")?.status).not.toBe("pass");
   });
 
+  it.each([
+    "ax1-komatsu-testimonial-d4892",
+    "ax1-female-testimonial-d4892",
+  ])("classifies the %s human golden without false failures", (projectId) => {
+    const fixtureDir = path.join(repoRoot, "tests/fixtures/review-metrics", projectId);
+    const privateDir = path.join(repoRoot, "projects", projectId);
+    expect(
+      fs.existsSync(path.join(fixtureDir, "05_timeline/timeline.json")),
+      `public review-metrics fixture missing for ${projectId}`,
+    ).toBe(true);
+
+    expectHumanGoldenClassification(fixtureDir);
+    if (fs.existsSync(path.join(privateDir, "05_timeline/timeline.json"))) {
+      expectHumanGoldenClassification(privateDir);
+    }
+  });
+
+  it("keeps AX-1 human goldens private and ships distilled public review-metrics fixtures", () => {
+    const policy = fs.readFileSync(
+      path.join(repoRoot, "runtime/release/public-projection-policy.yaml"),
+      "utf8",
+    );
+
+    expect(policy).toContain("- pattern: tests/**");
+    expect(policy).toContain("- pattern: projects/ax1-komatsu-testimonial-d4892/**");
+    expect(policy).toContain("- pattern: projects/ax1-female-testimonial-d4892/**");
+    expect(policy).toContain("reason: real-media project artifact is not a public fixture");
+    for (const projectId of [
+      "ax1-komatsu-testimonial-d4892",
+      "ax1-female-testimonial-d4892",
+    ]) {
+      expect(fs.existsSync(path.join(
+        repoRoot,
+        "tests/fixtures/review-metrics",
+        projectId,
+        "05_timeline/timeline.json",
+      )), projectId).toBe(true);
+    }
+  });
+
+  it.each([
+    "ax1-komatsu-testimonial-d4892",
+    "ax1-female-testimonial-d4892",
+  ])("keeps the %s public fixture identity independent of the private golden", (projectId) => {
+    const fixtureDir = path.join(repoRoot, "tests/fixtures/review-metrics", projectId);
+    const privateDir = path.join(repoRoot, "projects", projectId);
+    const privateTimeline = path.join(privateDir, "05_timeline/timeline.json");
+    if (!fs.existsSync(privateTimeline)) return;
+
+    const fixtureValues = collectEditorialIdentity(loadReviewMetricsInputs(fixtureDir));
+    const privateValues = collectEditorialIdentity(loadReviewMetricsInputs(privateDir));
+    const overlap = [...fixtureValues].filter((value) => privateValues.has(value)).sort();
+
+    expect(overlap, `${projectId} leaked private editorial identity`).toEqual([]);
+  });
 });
+
+function collectEditorialIdentity(inputs: ReviewMetricsInputs): Set<string> {
+  const values = new Set<string>();
+  const add = (value: unknown) => {
+    if (value === undefined || value === null || value === "" || value === 0) return;
+    values.add(String(value));
+  };
+
+  const clips = [
+    ...(inputs.timeline?.tracks.video ?? []).flatMap((track) => track.clips ?? []),
+    ...(inputs.timeline?.tracks.audio ?? []).flatMap((track) => track.clips ?? []),
+  ];
+  for (const clip of clips) {
+    add(clip.src_in_us);
+    add(clip.src_out_us);
+    add(clip.timeline_duration_frames);
+    add(clip.timeline_in_frame);
+    add(clip.beat_id);
+    add(clip.candidate_ref);
+    add(clip.asset_id);
+    add(clip.segment_id);
+    add(clip.motivation);
+    add(clip.clip_id);
+  }
+  for (const marker of inputs.timeline?.markers ?? []) {
+    add(marker.frame);
+    add(marker.label);
+  }
+  for (const beat of inputs.blueprint?.beats ?? []) {
+    add(beat.id);
+    add(beat.target_duration_frames);
+    add(beat.candidate_plan?.primary_candidate_ref);
+  }
+  add(inputs.blueprint?.pacing.max_shot_length_frames);
+  add(inputs.blueprint?.music_policy.entry_beat);
+  for (const candidate of inputs.selects?.candidates ?? []) {
+    add(candidate.candidate_id);
+    add(candidate.segment_id);
+    add(candidate.asset_id);
+    add(candidate.src_in_us);
+    add(candidate.src_out_us);
+  }
+  return values;
+}
+
+function expectHumanGoldenClassification(projectDir: string): void {
+  const metrics = computeReviewMetrics(loadReviewMetricsInputs(projectDir));
+  const hookDensity = metrics.checks.find((check) => check.id === "emotion.hook_density");
+  const adjacency = metrics.checks.find((check) => check.id === "eye_trace.same_asset_adjacency");
+  const cadence = metrics.checks.find((check) => check.id === "rhythm.cadence_distribution");
+  const validation = validateAgainstSchema(metrics, "review-metrics.schema.json");
+
+  expect(hookDensity?.status, `${projectDir} hookDensity`).toBe("pass");
+  expect(adjacency?.status, `${projectDir} adjacency`).toBe("warn");
+  expect(cadence?.status, `${projectDir} cadence`).toBe("pass");
+  expect(metrics.summary.by_status.fail, `${projectDir} fail count`).toBe(0);
+  expect(validation.valid, `${projectDir}: ${validation.errors.join("; ")}`).toBe(true);
+}
 
 const relationMetricIds = [
   "eye_trace.attention_jump",

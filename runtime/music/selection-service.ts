@@ -31,11 +31,26 @@ export interface BgmSelectionArtifactCandidate {
   explanation: string;
 }
 
+export interface BgmSelectedTrackPin {
+  pack_id: string;
+  pack_version: string;
+  pack_manifest_hash: string;
+  track_id: string;
+  full_mix_content_hash: string;
+  full_mix_size_bytes: number;
+  full_mix_path: string;
+  analysis_content_hash: string;
+  analysis_size_bytes: number;
+  analysis_path: string;
+  analysis_status: "ready" | "degraded" | "failed" | "unavailable";
+  registry_status: "verified";
+}
+
 export interface BgmSelectionArtifact {
   version: "1.0.0";
   project_id: string;
   created_at: string;
-  mode: "suggest" | "auto";
+  mode: "suggest" | "auto" | "operator_locked";
   scoring_strategy: {
     strategy_id: "bgm-score-v1";
     base_total_points: 100;
@@ -74,8 +89,15 @@ export interface BgmSelectionArtifact {
     confidence: number;
     explanation: string;
   } | null;
+  /** Additive Phase 2 pin. Legacy v1 selections remain valid without it. */
+  selected_track_pin?: BgmSelectedTrackPin;
   top_two_margin: number | null;
-  operator_override: null;
+  operator_override: {
+    selected_track_id: string;
+    reason: string;
+    operator_ref: string;
+    overridden_at: string;
+  } | null;
   semantic_channel: {
     status: "available" | "degraded" | "unavailable";
     model_revision: string | null;
@@ -103,6 +125,8 @@ export class BgmSelectionServiceError extends Error {
 
 export interface SelectBgmForProjectOptions {
   projectPath: string;
+  /** Optional immutable timeline input used by scratch/planning commands. */
+  timelinePath?: string;
   requestedMode: "suggest" | "auto";
   outputScope: BgmOutputScope;
   packRoot?: string;
@@ -231,7 +255,7 @@ export async function selectBgmForProject(options: SelectBgmForProjectOptions): 
 
   let sources;
   try {
-    sources = loadProjectSelectionSources(options.projectPath, catalog);
+    sources = loadProjectSelectionSources(options.projectPath, catalog, options.timelinePath);
   } catch (error) {
     if (error instanceof BgmSelectionInputError) {
       throw new BgmSelectionServiceError(issue(

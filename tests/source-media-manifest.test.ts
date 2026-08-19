@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -47,7 +48,7 @@ function schemaValidator(): ReturnType<InstanceType<typeof Ajv2020>["compile"]> 
 }
 
 function makeTempDir(): string {
-  const dir = fs.mkdtempSync(path.resolve("tests/.tmp-p1-manifest-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "p1-source-media-manifest-"));
   tempDirs.push(dir);
   return dir;
 }
@@ -150,10 +151,17 @@ describe("P1 source_media_manifest", () => {
 
   it("keeps demo timeline byte-stable when P1 flag is off", () => {
     delete process.env.ENABLE_P1_MANIFEST_COVERAGE;
-    const before = sha256File(DEMO_TIMELINE);
+    const root = makeTempDir();
+    const result = initProject("status-demo", {
+      projectsDir: path.join(root, "projects"),
+      templateDir: TEMPLATE_DIR,
+    });
+    const timelinePath = path.join(result.projectDir, "05_timeline/timeline.json");
+    fs.copyFileSync(DEMO_TIMELINE, timelinePath);
+    const before = sha256File(timelinePath);
 
-    runStatus(path.resolve("projects/demo"));
+    runStatus(result.projectDir);
 
-    expect(sha256File(DEMO_TIMELINE)).toBe(before);
+    expect(sha256File(timelinePath)).toBe(before);
   });
 });

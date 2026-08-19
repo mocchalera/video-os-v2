@@ -168,7 +168,13 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "normalization_producer": { "const": "ffmpeg-still-normalizer" },
+        "normalization_producer": {
+          "type": "string",
+          "enum": [
+            "ffmpeg-still-normalizer",
+            "macos-sips-heif-normalizer"
+          ]
+        },
         "normalization_producer_version": { "const": "1" },
         "normalized_frame_path": { "type": "string", "minLength": 1, "pattern": "^(?!/)" },
         "normalized_frame_content_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },

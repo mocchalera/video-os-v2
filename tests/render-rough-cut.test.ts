@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -22,6 +23,7 @@ import {
   selectBgmCandidate,
   validateRenderDurationAccounting,
   writeConcatList,
+  writeVideoAssemblyTimingManifest,
   type BgmCandidate,
   type RenderClip,
 } from "../scripts/render-rough-cut.js";
@@ -180,6 +182,43 @@ function createTempProject(name: string): string {
   tempDirs.push(tmpDir);
   return tmpDir;
 }
+
+describe("video assembly timing provenance", () => {
+  it("stores the full SHA-256 of timeline.json", () => {
+    const projectDir = createTempProject("assembly_timing_hash");
+    const timelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    const timelineBytes = '{"version":"1","project_id":"hash-regression"}\n';
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(timelinePath, timelineBytes, "utf8");
+
+    const clip: RenderClip = {
+      assetId: "AST_001",
+      clipId: "CLP_001",
+      sourcePath: "/tmp/source.mp4",
+      startSec: 0,
+      durationSec: 1,
+      timelineInFrame: 0,
+      timelineDurationSec: 1,
+      sourceRangeDurationSec: 1,
+      timelineOutFrame: 30,
+    };
+    writeVideoAssemblyTimingManifest(
+      projectDir,
+      timelinePath,
+      30,
+      1,
+      [clip],
+      new Map([[clip.clipId, 1]]),
+    );
+
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(projectDir, "05_timeline", "video-assembly-timing.json"), "utf8"),
+    ) as { timeline_hash: string };
+    const expected = createHash("sha256").update(timelineBytes).digest("hex");
+    expect(manifest.timeline_hash).toBe(expected);
+    expect(manifest.timeline_hash).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
 
 describe("generateSourceMapFromAssets", () => {
   it("creates 02_media/source_map.json by matching assets.json filenames", () => {

@@ -1,6 +1,6 @@
 # Release Checklist
 
-Status: current maintainer checklist as of 2026-07-11. This checklist does not
+Status: current maintainer checklist as of 2026-07-27. This checklist does not
 authorize a commit, push, tag, upload, or public release; those remain explicit
 human actions.
 
@@ -49,6 +49,8 @@ release candidate:
 npm run test:schema-contract
 npm run test:speech-led-contract
 npm run test:event-recap-contract
+npm run verify:studio-contracts
+npm run test:render-integration
 npm run verify
 ```
 
@@ -75,6 +77,11 @@ swift test
 swift run videoos-studio-cli doctor
 npm run verify:agents
 ```
+
+The required real-render boundary is exactly
+`tests/integration/final-render-review-pack.real.test.ts`, selected only by
+`vitest.integration.config.ts`. The default Vitest suite must continue to
+exclude `tests/integration/**`.
 
 Do not substitute an `editor/client` build for the supported preview-server or
 macOS Studio checks. When CI YAML changes, validate its syntax and run
@@ -127,9 +134,15 @@ fail-open local result as a passing live-model regression.
 ## 7. Review CI evidence
 
 The aggregate `product-gate` must show success for `node-runtime`,
-`schema-contract`, `speech-led-contract`, `event-recap-contract`, `repo-hygiene`, `editor-server`,
-`agent-definitions`, and `macos-studio`. Record the workflow URL/run ID and the
-exact commit SHA. A green run for another revision is not release evidence.
+`schema-contract`, `speech-led-contract`, `event-recap-contract`,
+`repo-hygiene`, `editor-server`, `agent-definitions`, `macos-studio`, and
+`render-integration`. Failure, cancellation, or skipping of any boundary must
+keep `product-gate` red. Record the workflow URL/run ID and the exact commit
+SHA. A green run for another revision is not release evidence.
+
+`macos-studio` supported-toolchain evidence requires actual execution with
+Xcode 15.4 build 15F31d and Apple Swift 5.10. A source-level CI contract or a
+green run under another Xcode version is not supported-toolchain acceptance.
 
 The optional P4a release-safety report is currently dry-run evidence only. Do
 not claim `report_only` or `enforce` protection; those modes are not

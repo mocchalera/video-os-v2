@@ -84,6 +84,19 @@ export function parseSelectBgmArgs(argv: string[]): SelectBgmCliArgs {
 }
 
 function jsonPayload(result: ProjectBgmSelectionResult): Record<string, unknown> {
+  const topCandidates = result.artifact.candidates
+    .filter((candidate) => candidate.status === "ranked")
+    .sort((left, right) =>
+      (left.rank ?? Number.MAX_SAFE_INTEGER) - (right.rank ?? Number.MAX_SAFE_INTEGER)
+      || left.track_id.localeCompare(right.track_id))
+    .slice(0, 3)
+    .map((candidate) => ({
+      track_id: candidate.track_id,
+      rank: candidate.rank,
+      score: candidate.total_score,
+      content_hash: candidate.content_hash,
+      explanation: candidate.explanation,
+    }));
   return {
     ok: result.ok,
     command: "select",
@@ -91,6 +104,7 @@ function jsonPayload(result: ProjectBgmSelectionResult): Record<string, unknown>
     requested_mode: result.requested_mode,
     effective_mode: result.artifact.mode,
     selected: result.artifact.selected,
+    top_candidates: topCandidates,
     ranked_candidates: result.artifact.candidates.filter((candidate) => candidate.status === "ranked").length,
     rejected_candidates: result.artifact.candidates.filter((candidate) => candidate.status === "rejected").length,
     wrote_artifact: result.wrote_artifact,

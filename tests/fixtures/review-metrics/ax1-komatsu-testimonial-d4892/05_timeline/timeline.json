@@ -1,0 +1,60 @@
+{
+  "version": "1",
+  "project_id": "ax1-komatsu-testimonial-d4892",
+  "created_at": "2000-01-01T00:00:00Z",
+  "sequence": {
+    "name": "Public review-metrics fixture",
+    "fps_num": 24,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_OPEN",
+            "segment_id": "SEG_SYNTH_A",
+            "asset_id": "AST_SYNTH_A",
+            "src_in_us": 2500000,
+            "src_out_us": 5000000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 60,
+            "role": "hero",
+            "motivation": "Synthetic opening select.",
+            "beat_id": "open_beat",
+            "candidate_ref": "CAND_OPEN"
+          },
+          {
+            "clip_id": "CLP_CLOSE",
+            "segment_id": "SEG_SYNTH_A",
+            "asset_id": "AST_SYNTH_A",
+            "src_in_us": 15000000,
+            "src_out_us": 19000000,
+            "timeline_in_frame": 60,
+            "timeline_duration_frames": 90,
+            "role": "dialogue",
+            "motivation": "Synthetic closing select.",
+            "beat_id": "close_beat",
+            "candidate_ref": "CAND_CLOSE"
+          }
+        ]
+      }
+    ],
+    "audio": []
+  },
+  "markers": [
+    { "frame": 0, "kind": "beat", "label": "open_beat: opening" },
+    { "frame": 60, "kind": "beat", "label": "close_beat: closing" }
+  ],
+  "provenance": {
+    "brief_path": "01_intent/creative_brief.yaml",
+    "blueprint_path": "04_plan/edit_blueprint.yaml",
+    "selects_path": "04_plan/selects_candidates.yaml",
+    "compiler_version": "public-fixture"
+  }
+}

@@ -249,6 +249,9 @@ describe("BGM project selection service", () => {
     expect(fs.existsSync(path.join(projectDir, "04_plan", "bgm_selection.json"))).toBe(false);
     const payload = JSON.parse(capture.stdout.join("")) as Record<string, unknown>;
     expect(payload).toMatchObject({ ok: true, requested_mode: "suggest", effective_mode: "suggest", wrote_artifact: false });
+    expect(payload.top_candidates).toEqual([
+      expect.objectContaining({ track_id: "interview-bed", rank: 1 }),
+    ]);
     expect(JSON.stringify(payload)).not.toContain(projectDir);
   });
 

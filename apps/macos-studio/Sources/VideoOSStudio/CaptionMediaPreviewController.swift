@@ -3,10 +3,64 @@ import Combine
 import Foundation
 import VideoOSStudioCore
 
+protocol CaptionPlaybackTimeObserving: AnyObject {
+    func addPeriodicTimeObserver(
+        _ handler: @escaping @Sendable (CMTime) -> Void
+    ) -> Any
+    func removeTimeObserver(_ token: Any)
+}
+
+protocol CaptionPlaybackTransporting: AnyObject {
+    func seek(to seconds: Double)
+    func play()
+}
+
+private final class AVPlayerCaptionPlaybackTimeObserver: CaptionPlaybackTimeObserving {
+    private let player: AVPlayer
+
+    init(player: AVPlayer) {
+        self.player = player
+    }
+
+    func addPeriodicTimeObserver(
+        _ handler: @escaping @Sendable (CMTime) -> Void
+    ) -> Any {
+        player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.05, preferredTimescale: 600),
+            queue: .main,
+            using: handler
+        )
+    }
+
+    func removeTimeObserver(_ token: Any) {
+        player.removeTimeObserver(token)
+    }
+}
+
+private final class AVPlayerCaptionPlaybackTransport: CaptionPlaybackTransporting {
+    private let player: AVPlayer
+
+    init(player: AVPlayer) {
+        self.player = player
+    }
+
+    func seek(to seconds: Double) {
+        player.seek(
+            to: CMTime(seconds: max(0, seconds), preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    func play() {
+        player.play()
+    }
+}
+
 @MainActor
 final class CaptionMediaPreviewController: ObservableObject {
     enum Readiness { case loading, ready, failed }
-    let player = AVPlayer()
+    let player: AVPlayer
 
     @Published private(set) var isPlaying = false
     @Published private(set) var statusMessage = "前後プレビューを準備しています。"
@@ -23,22 +77,61 @@ final class CaptionMediaPreviewController: ObservableObject {
     private var timeObserver: Any?
     private var generation = 0
     private var retryRequest: (projectURL: URL, item: CaptionReviewQueueItem, fps: Double, padding: Double)?
+    private let playbackObserver: CaptionPlaybackTimeObserving
+    private let playbackTransport: CaptionPlaybackTransporting
 
-    init() {
+    convenience init() {
+        let player = AVPlayer()
+        self.init(
+            player: player,
+            playbackObserver: AVPlayerCaptionPlaybackTimeObserver(player: player),
+            playbackTransport: AVPlayerCaptionPlaybackTransport(player: player)
+        )
+    }
+
+    init(
+        playbackObserver: CaptionPlaybackTimeObserving,
+        playbackTransport: CaptionPlaybackTransporting,
+        initialIsPlaying: Bool = false,
+        initialCurrentSeconds: Double = 0,
+        loopStartSeconds: Double = 0,
+        loopEndSeconds: Double = 0
+    ) {
+        self.player = AVPlayer()
+        self.playbackObserver = playbackObserver
+        self.playbackTransport = playbackTransport
+        isPlaying = initialIsPlaying
+        currentSeconds = initialCurrentSeconds
+        self.loopStartSeconds = loopStartSeconds
+        self.loopEndSeconds = loopEndSeconds
+        installPeriodicTimeObserver()
+    }
+
+    private init(
+        player: AVPlayer,
+        playbackObserver: CaptionPlaybackTimeObserving,
+        playbackTransport: CaptionPlaybackTransporting
+    ) {
+        self.player = player
+        self.playbackObserver = playbackObserver
+        self.playbackTransport = playbackTransport
+        installPeriodicTimeObserver()
+    }
+
+    private func installPeriodicTimeObserver() {
         player.actionAtItemEnd = .none
-        timeObserver = player.addPeriodicTimeObserver(
-            forInterval: CMTime(seconds: 0.05, preferredTimescale: 600),
-            queue: .main
-        ) { [weak self] time in
-            Task { @MainActor in
-                self?.handlePlaybackTime(CMTimeGetSeconds(time))
+        timeObserver = playbackObserver.addPeriodicTimeObserver { [weak self] time in
+            let seconds = CMTimeGetSeconds(time)
+            guard let controller = self else { return }
+            Task { @MainActor [controller, seconds] in
+                controller.handlePlaybackTime(seconds)
             }
         }
     }
 
     deinit {
         if let timeObserver {
-            player.removeTimeObserver(timeObserver)
+            playbackObserver.removeTimeObserver(timeObserver)
         }
     }
 
@@ -169,11 +262,19 @@ final class CaptionMediaPreviewController: ObservableObject {
     }
 
     private func handlePlaybackTime(_ seconds: Double) {
-        guard seconds.isFinite else { return }
-        currentSeconds = seconds
-        if isPlaying, seconds >= loopEndSeconds {
-            seek(to: loopStartSeconds)
-            player.play()
+        guard let decision = CaptionPlaybackTickAdapter.decision(
+            seconds: seconds,
+            isPlaying: isPlaying,
+            loopStartSeconds: loopStartSeconds,
+            loopEndSeconds: loopEndSeconds
+        ) else {
+            return
+        }
+
+        currentSeconds = decision.currentSeconds
+        if let restartSeconds = decision.restartAtSeconds {
+            playbackTransport.seek(to: restartSeconds)
+            playbackTransport.play()
         }
     }
 

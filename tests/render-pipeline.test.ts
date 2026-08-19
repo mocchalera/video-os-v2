@@ -21,6 +21,7 @@ import {
   runRenderPipeline,
 } from "../runtime/render/pipeline.js";
 import { timelineEmbeddedMusicAssetIds } from "../runtime/audio/timeline-music.js";
+import type { AudioRenderPlan } from "../runtime/audio/render-plan.js";
 
 describe("timeline embedded music ownership", () => {
   it("detects selected A2 music without music_cues and keeps multiple asset identities deterministic", () => {
@@ -209,6 +210,8 @@ describe("render pipeline aspect ratio fitting", () => {
       outputDir,
       // Legacy caller value must not override timeline.sequence.
       fps: 30,
+      // This test verifies rational timebase math, not host disk capacity.
+      assertMediaWriteReadyImpl: () => ({ ok: true, checks: [] }),
     });
 
     expect(fs.readFileSync(
@@ -281,6 +284,102 @@ describe("render pipeline aspect ratio fitting", () => {
       .find((args) => args.includes("-frames:v"));
     expect(fitCall).toEqual(expect.arrayContaining(["-frames:v", "300"]));
     expect(fitCall![fitCall!.indexOf("-vf") + 1]).toContain("trim=end_frame=300");
+  });
+
+  it("uses the shared executor for pinned A2 and never demuxes embedded mixed audio", async () => {
+    const timelinePath = path.join(tmpDir, "05_timeline", "timeline.json");
+    const assemblyPath = path.join(tmpDir, "05_timeline", "assembly.mp4");
+    const outputDir = path.join(tmpDir, "07_package");
+    fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
+    fs.writeFileSync(timelinePath, JSON.stringify({
+      version: "7",
+      project_id: "shared-audio-pipeline",
+      sequence: { fps_num: 24, fps_den: 1, width: 1920, height: 1080 },
+      provenance: { audio_policy: { mode: "ducking" } },
+      tracks: {
+        video: [{ track_id: "V1", clips: [{ timeline_in_frame: 0, timeline_duration_frames: 120 }] }],
+        audio: [
+          { track_id: "A1", clips: [{ timeline_in_frame: 0, timeline_duration_frames: 120 }] },
+          { track_id: "A2", clips: [{ timeline_in_frame: 72, timeline_duration_frames: 48 }] },
+        ],
+      },
+    }), "utf8");
+    fs.writeFileSync(assemblyPath, "stub-assembly", "utf8");
+    const plan = {
+      version: "audio-render-plan/v1",
+      project_id: "shared-audio-pipeline",
+      strategy: "explicit_music_cues_v2",
+      timeline: {
+        path: timelinePath,
+        version: "7",
+        content_hash: `sha256:${"a".repeat(64)}`,
+        duration_frames: 120,
+        fps: { num: 24, den: 1 },
+      },
+      inputs: {},
+      dialogue: { source_track_id: "A1", clips: [], finish_scope: "a1_only" },
+      music: { enabled: true, source_track_id: "A2", cues: [] },
+      final_mastering: {
+        loudness_target_lufs: -16,
+        lra_target: 7,
+        true_peak_target_dbtp: -1.5,
+        count: 1,
+        stage: "after_mix",
+      },
+      expected_artifacts: {
+        dialogue_stem: "raw_dialogue.wav",
+        final_mix: "final_mix.wav",
+        report: "audio-mix-report.json",
+      },
+      warnings: [],
+    } as AudioRenderPlan;
+    const executeAudioRenderPlanImpl = vi.fn(async (options) => {
+      const outputs = options.outputPaths!;
+      for (const outputPath of Object.values(outputs) as string[]) {
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, "shared-audio", "utf8");
+      }
+      return {
+        planHash: `sha256:${"b".repeat(64)}`,
+        rawDialoguePath: outputs.rawDialoguePath,
+        finalMixPath: outputs.finalMixPath,
+        reportPath: outputs.reportPath,
+        report: {
+          version: "audio-mix-report/v2",
+          dialogue_finish_scope: "a1_only",
+          mastering_count: 1,
+        },
+      };
+    });
+
+    const result = await runRenderPipeline({
+      projectDir: tmpDir,
+      timelinePath,
+      assemblyPath,
+      audioRenderPlan: plan,
+      assertAudioRenderPlanFreshImpl: () => undefined,
+      executeAudioRenderPlanImpl:
+        executeAudioRenderPlanImpl as unknown as NonNullable<
+          Parameters<typeof runRenderPipeline>[0]["executeAudioRenderPlanImpl"]
+        >,
+      captionPolicy: {
+        language: "ja",
+        delivery_mode: "sidecar",
+        source: "none",
+        styling_class: "clean-lower-third",
+      },
+      outputDir,
+      fps: 24,
+    });
+
+    expect(executeAudioRenderPlanImpl).toHaveBeenCalledOnce();
+    expect(result.rawDialoguePath).toBe(path.join(outputDir, "audio", "raw_dialogue.wav"));
+    expect(result.audioMixReportPath).toBe(path.join(outputDir, "logs", "audio-mix-report.json"));
+    const ffmpegCalls = execFileMock.mock.calls.map((call) => call[1] as string[]);
+    expect(ffmpegCalls.some((args) => args.includes("pcm_s16le"))).toBe(false);
+    expect(ffmpegCalls.some((args) =>
+      args.some((arg) => arg.includes("duration-normalized"))
+    )).toBe(false);
   });
 
   it("runRenderPipeline fits raw video to timeline dimensions before final mux", async () => {

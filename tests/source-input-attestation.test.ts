@@ -156,6 +156,28 @@ describe("canonical source-input attestation", () => {
     });
   });
 
+  it("accepts a hash-bound macOS sips full-frame HEIF proxy", () => {
+    const fixture = makeProject(
+      [{ id: "STILL", bytes: "heif-original", mediaKind: "image", declared: true }],
+      timelineWith({ video: ["STILL"] }),
+    );
+    const assetsPath = path.join(fixture.projectDir, "03_analysis/assets.json");
+    const assets = JSON.parse(fs.readFileSync(assetsPath, "utf8"));
+    assets.items[0].still_image.normalization_producer = "macos-sips-heif-normalizer";
+    fs.writeFileSync(assetsPath, JSON.stringify(assets));
+
+    const attestation = createSourceInputAttestation(fixture.projectDir);
+    expect(attestation.source_inputs[0]).toMatchObject({
+      media_kind: "image",
+      identity_status: "verified",
+      render_input_identity: {
+        relationship: "normalized_still_frame",
+        normalization_producer: "macos-sips-heif-normalizer",
+        normalization_producer_version: "1",
+      },
+    });
+  });
+
   it("fails closed for forged normalized identity and rejects every normalized-path symlink component", () => {
     const mutate = (change: (fixture: ReturnType<typeof makeProject>, asset: any) => void, reason: string) => {
       const fixture = makeProject([{ id: "STILL", bytes: "still", mediaKind: "image", declared: true }], timelineWith({ video: ["STILL"] }));

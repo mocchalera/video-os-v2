@@ -13,19 +13,23 @@ export function resolveCaptionApprovalPath(projectDir: string): string | undefin
   return fs.existsSync(legacyPath) ? legacyPath : undefined;
 }
 
-export function resolveProjectCaptionStylePreset(projectDir: string): CaptionStylePreset {
+export function readProjectCaptionStylingClass(projectDir: string): string | undefined {
   const blueprintPath = path.join(projectDir, "04_plan", "edit_blueprint.yaml");
-  if (!fs.existsSync(blueprintPath)) return resolveCaptionStylePreset();
+  if (!fs.existsSync(blueprintPath)) return undefined;
   try {
     const stylingClass = readNestedScalar(
       fs.readFileSync(blueprintPath, "utf-8"),
       "caption_policy",
       "styling_class",
     );
-    return resolveCaptionStylePreset(stylingClass);
+    return stylingClass || undefined;
   } catch {
-    return resolveCaptionStylePreset();
+    return undefined;
   }
+}
+
+export function resolveProjectCaptionStylePreset(projectDir: string): CaptionStylePreset {
+  return resolveCaptionStylePreset(readProjectCaptionStylingClass(projectDir));
 }
 
 /**

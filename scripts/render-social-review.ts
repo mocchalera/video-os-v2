@@ -11,6 +11,8 @@ import {
 } from "../editor/shared/font-contract.js";
 import { resolveAudioFinishPolicy } from "../runtime/audio/dialogue-finishing.js";
 import { finishDialogueAudio } from "../runtime/audio/finish-runner.js";
+import { executeAudioRenderPlan } from "../runtime/audio/render-executor.js";
+import { resolveSharedAudioRenderPlan } from "../runtime/audio/render-route.js";
 import type { CaptionOverlay, TimelineIR } from "../runtime/compiler/types.js";
 import {
   loadContentRenderPlan,
@@ -27,25 +29,46 @@ import {
   readTimeline,
 } from "../runtime/render/assembler.js";
 import { composeFinalVisuals, type FinalVisualLayer } from "../runtime/render/final-visual-compositor.js";
-import {
-  buildAssSubtitleFile,
-  type AssSubtitleStyleOptions,
-} from "../runtime/render/promo-finisher.js";
+import { buildAssSubtitleFile } from "../runtime/render/promo-finisher.js";
+import { resolveProjectSocialReviewCaptionStyle } from "../runtime/render/review-caption-style.js";
 import { renderRemotionContentLayer } from "../runtime/render/remotion/render-remotion.js";
 import { renderRoughCut } from "./render-rough-cut.js";
 
+export {
+  resolveProjectSocialReviewCaptionStyle,
+  resolveSocialReviewCaptionStyle,
+  socialReviewCaptionStyle,
+} from "../runtime/render/review-caption-style.js";
+
 const execFileAsync = promisify(execFile);
 
-interface CaptionPlan {
+interface CaptionPlanV1 {
   version?: string;
   captions: CaptionOverlay[];
 }
 
+interface CaptionPlanV2Cue {
+  text: string;
+  timeline_in_frame: number;
+  timeline_out_frame: number;
+  style?: CaptionOverlay["style"];
+}
+
+interface CaptionPlanV2 {
+  schema_version: "private-caption-plan/v2";
+  cues: CaptionPlanV2Cue[];
+}
+
+type CaptionPlan = CaptionPlanV1 | CaptionPlanV2;
+
 export interface SocialReviewArgs {
   projectDir: string;
+  timelinePath?: string;
   outputPath?: string;
   workDir?: string;
   captionPlanPath: string;
+  musicCuesPath?: string;
+  sfxCuesPath?: string;
 }
 
 export interface SocialVisualLayerRequest {
@@ -71,7 +94,7 @@ interface RenderedSocialVisualLayers {
 }
 
 const USAGE = `Usage:
-  npm run social-review -- --project <dir> --captions <plan.json> [--output <mp4>] [--work-dir <dir>]
+  npm run social-review -- --project <dir> --captions <plan.json> [--timeline <timeline.json>] [--music-cues <music_cues.json>] [--sfx-cues <sfx_cues.json>] [--output <mp4>] [--work-dir <dir>]
 
 Renders a review-only social preview from canonical timeline cuts, registered
 content elements, authored captions, and dialogue audio. It does not approve or
@@ -80,24 +103,33 @@ package a final deliverable.`;
 export function parseSocialReviewArgs(argv: string[]): SocialReviewArgs {
   const values = argv.slice(2);
   let projectDir: string | undefined;
+  let timelinePath: string | undefined;
   let outputPath: string | undefined;
   let workDir: string | undefined;
   let captionPlanPath: string | undefined;
+  let musicCuesPath: string | undefined;
+  let sfxCuesPath: string | undefined;
   for (let index = 0; index < values.length; index += 1) {
     const arg = values[index];
     if (arg === "--help" || arg === "-h") throw new Error(USAGE);
     if (arg === "--project") projectDir = required(values, ++index, arg);
+    else if (arg === "--timeline") timelinePath = required(values, ++index, arg);
     else if (arg === "--output") outputPath = required(values, ++index, arg);
     else if (arg === "--work-dir") workDir = required(values, ++index, arg);
     else if (arg === "--captions") captionPlanPath = required(values, ++index, arg);
+    else if (arg === "--music-cues") musicCuesPath = required(values, ++index, arg);
+    else if (arg === "--sfx-cues") sfxCuesPath = required(values, ++index, arg);
     else throw new Error(`Unknown argument: ${arg}\n${USAGE}`);
   }
   if (!projectDir || !captionPlanPath) throw new Error(USAGE);
   return {
     projectDir: path.resolve(projectDir),
+    timelinePath: timelinePath ? path.resolve(timelinePath) : undefined,
     outputPath: outputPath ? path.resolve(outputPath) : undefined,
     workDir: workDir ? path.resolve(workDir) : undefined,
     captionPlanPath: path.resolve(captionPlanPath),
+    musicCuesPath: musicCuesPath ? path.resolve(musicCuesPath) : undefined,
+    sfxCuesPath: sfxCuesPath ? path.resolve(sfxCuesPath) : undefined,
   };
 }
 
@@ -119,11 +151,32 @@ export function timelineVisualDurationFrames(timeline: TimelineIR): number {
   );
 }
 
-export function validateCaptionPlan(plan: CaptionPlan, durationFrames: number): CaptionOverlay[] {
-  if (!Array.isArray(plan.captions) || plan.captions.length === 0) {
+export function normalizeCaptionPlan(plan: unknown): CaptionOverlay[] {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+    throw new Error("Caption plan must be an object");
+  }
+  const value = plan as Partial<CaptionPlanV1 & CaptionPlanV2>;
+  if (value.schema_version === "private-caption-plan/v2") {
+    if (!Array.isArray(value.cues) || value.cues.length === 0) {
+      throw new Error("private-caption-plan/v2 must contain at least one cue");
+    }
+    return value.cues.map((cue) => ({
+      text: cue.text,
+      in_frame: cue.timeline_in_frame,
+      out_frame: cue.timeline_out_frame,
+      style: cue.style ?? "simple-shadow",
+    }));
+  }
+  if (Array.isArray(value.captions)) return value.captions;
+  throw new Error("Caption plan must contain at least one caption");
+}
+
+export function validateCaptionPlan(plan: unknown, durationFrames: number): CaptionOverlay[] {
+  const normalized = normalizeCaptionPlan(plan);
+  if (normalized.length === 0) {
     throw new Error("Caption plan must contain at least one caption");
   }
-  const captions = [...plan.captions].sort((left, right) =>
+  const captions = [...normalized].sort((left, right) =>
     left.in_frame - right.in_frame || left.out_frame - right.out_frame
   );
   let previousOut = 0;
@@ -141,22 +194,6 @@ export function validateCaptionPlan(plan: CaptionPlan, durationFrames: number): 
     previousOut = caption.out_frame;
   }
   return captions;
-}
-
-export function socialReviewCaptionStyle(
-  width: number,
-  height: number,
-): AssSubtitleStyleOptions {
-  return {
-    fontName: ASS_HEAVY_VIDEO_FONT.family,
-    playResX: width,
-    playResY: height,
-    fontSize: width === 1080 ? 64 : Math.round(width * 0.0593),
-    marginV: height === 1920 ? 300 : Math.round(height * 0.15625),
-    borderStyle: 3,
-    outline: width === 1080 ? 12 : Math.max(8, Math.round(width * 0.0111)),
-    backColor: "&H500B2434",
-  };
 }
 
 export function planSocialVisualLayers(
@@ -287,7 +324,18 @@ async function muxReviewAudio(
 }
 
 export async function renderSocialReview(args: SocialReviewArgs): Promise<Record<string, unknown>> {
-  const timelinePath = path.join(args.projectDir, "05_timeline", "timeline.json");
+  const timelinePath = args.timelinePath
+    ?? path.join(args.projectDir, "05_timeline", "timeline.json");
+  const musicCuesPath = args.musicCuesPath
+    ?? path.join(args.projectDir, "07_package", "music_cues.json");
+  const sfxCuesPath = args.sfxCuesPath
+    ?? path.join(args.projectDir, "07_package", "sfx_cues.json");
+  const sharedAudioPlan = resolveSharedAudioRenderPlan({
+    projectDir: args.projectDir,
+    timelinePath,
+    musicCuesPath,
+    sfxCuesPath,
+  });
   const timeline = readTimeline(timelinePath);
   const fps = getTimelineFps(timeline);
   const durationFrames = timelineVisualDurationFrames(timeline);
@@ -300,16 +348,28 @@ export async function renderSocialReview(args: SocialReviewArgs): Promise<Record
   const assPath = path.join(workDir, "captions.ass");
   const visualPath = path.join(workDir, "visual.mp4");
   const masteredDialoguePath = path.join(workDir, "mastered-dialogue.wav");
+  const sharedAudioDir = path.join(workDir, "audio");
   const layerDir = path.join(workDir, "layers");
   fs.mkdirSync(workDir, { recursive: true });
 
   await renderRoughCut({
     projectPath: args.projectDir,
+    timelinePath,
     outputPath: basePath,
-    noAudio: false,
+    noAudio: Boolean(sharedAudioPlan),
     deferEndingFade: true,
   });
-  const audioFinishPolicy = resolveAudioFinishPolicy(timeline.metadata?.audio_finish);
+  const sharedAudioResult = sharedAudioPlan
+    ? await executeAudioRenderPlan({
+        plan: sharedAudioPlan,
+        outputDir: sharedAudioDir,
+        replaceExisting: true,
+        workDirRoot: workDir,
+      })
+    : undefined;
+  const audioFinishPolicy = sharedAudioPlan
+    ? undefined
+    : resolveAudioFinishPolicy(timeline.metadata?.audio_finish);
   const audioFinishReport = audioFinishPolicy
     ? await finishDialogueAudio({
         inputPath: basePath,
@@ -319,13 +379,16 @@ export async function renderSocialReview(args: SocialReviewArgs): Promise<Record
     : undefined;
 
   const fontPaths = verifyBundledFont();
+  // Blueprint styling_class is canonical. Caption-plan presentation metadata
+  // may be stale; only cue text/timing are adapted above.
+  const captionStyle = resolveProjectSocialReviewCaptionStyle(
+    args.projectDir,
+    timeline.sequence.width,
+    timeline.sequence.height,
+  );
   fs.writeFileSync(
     assPath,
-    buildAssSubtitleFile(
-      captions,
-      fps,
-      socialReviewCaptionStyle(timeline.sequence.width, timeline.sequence.height),
-    ),
+    buildAssSubtitleFile(captions, fps, captionStyle),
     "utf8",
   );
 
@@ -344,7 +407,7 @@ export async function renderSocialReview(args: SocialReviewArgs): Promise<Record
   });
   await muxReviewAudio(
     visualPath,
-    audioFinishReport?.output_path ?? basePath,
+    sharedAudioResult?.finalMixPath ?? audioFinishReport?.output_path ?? basePath,
     outputPath,
     durationSec,
   );
@@ -356,6 +419,20 @@ export async function renderSocialReview(args: SocialReviewArgs): Promise<Record
     timeline_version: timeline.version,
     caption_plan_path: args.captionPlanPath,
     caption_count: captions.length,
+    caption_adapter: {
+      source_schema: "schema_version" in plan && plan.schema_version === "private-caption-plan/v2"
+        ? "private-caption-plan/v2"
+        : "captions/v1-compatible",
+      display_bounds_source: "schema_version" in plan && plan.schema_version === "private-caption-plan/v2"
+        ? "cues[].timeline_in_frame/timeline_out_frame"
+        : "captions[].in_frame/out_frame",
+      rendered_cues: captions.map((caption) => ({
+        text: caption.text,
+        in_frame: caption.in_frame,
+        out_frame: caption.out_frame,
+        style: caption.style,
+      })),
+    },
     duration_frames: durationFrames,
     duration_sec: durationSec,
     fps_num: timeline.sequence.fps_num,
@@ -370,12 +447,22 @@ export async function renderSocialReview(args: SocialReviewArgs): Promise<Record
       path: fontPaths.assHeavyFontPath,
       sha256: sha256(fontPaths.assHeavyFontPath),
     },
+    audio_render_plan: sharedAudioResult ? {
+      plan_hash: sharedAudioResult.planHash,
+      report_path: sharedAudioResult.reportPath,
+      report_sha256: sha256(sharedAudioResult.reportPath),
+      dialogue_finish_scope: sharedAudioResult.report.dialogue_finish_scope,
+      mastering_count: sharedAudioResult.report.mastering_count,
+    } : null,
     audio_finish: audioFinishReport ? {
       preset: audioFinishReport.policy.preset,
       target_lufs: audioFinishReport.policy.loudness_target_lufs,
       target_true_peak_dbtp: audioFinishReport.policy.true_peak_target_dbtp,
       before: audioFinishReport.premaster_measurement,
       after: audioFinishReport.output_measurement,
+    } : sharedAudioResult ? {
+      scope: sharedAudioResult.report.dialogue_finish_scope,
+      mixed_audio_reprocessed: false,
     } : null,
     output_path: outputPath,
     output_sha256: sha256(outputPath),
