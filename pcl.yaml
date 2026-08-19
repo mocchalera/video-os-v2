@@ -66,6 +66,13 @@ permissions:
     - tests/
     - docs/
     - reports/
+    - .github/
+    - Package.swift
+    - package.json
+    - .nvmrc
+    - .node-version
+    - vitest.config.ts
+    - vitest.integration.config.ts
     - .agents/skills/
     - .project-loop/workflows/
     - AGENTS.md

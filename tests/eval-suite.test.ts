@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  DEFAULT_GOLDEN_SUITE_PROJECTS,
   resolveSuiteBriefAlignmentOptions,
   runGoldenEvalSuite,
   type EvalSuiteSummary,
@@ -108,28 +109,14 @@ function visualQA(status: ReviewVisualQA["status"], score?: number, reason?: str
 }
 
 describe("golden eval suite", () => {
-  it("discovers approved checkout-local projects for the default suite", async () => {
-    const repo = makeRepo();
-    try {
-      makeProject(repo, "approved-local", {
-        approved: true,
-        brief: true,
-        selects: true,
-        blueprint: true,
-        timeline: true,
-      });
-      const result = await runGoldenEvalSuite({
-        repoRoot: repo,
-        write: false,
-        evaluateStructure: async () => evalReport("approved-local", 80),
-        evaluateBrief: async () => briefReport("approved-local", 0.8, "deterministic-only"),
-      });
-
-      expect(result.summary.projects_requested).toEqual(["approved-local"]);
-      expect(result.summary.projects[0].project_id).toBe("approved-local");
-    } finally {
-      fs.rmSync(repo, { recursive: true, force: true });
-    }
+  it("includes the operator-approved AX-1 testimonial pair in the default suite", () => {
+    expect(DEFAULT_GOLDEN_SUITE_PROJECTS).toEqual([
+      "fumoto-growth",
+      "togakushi-camp",
+      "ena-promo",
+      "ax1-komatsu-testimonial-d4892",
+      "ax1-female-testimonial-d4892",
+    ]);
   });
 
   it("keeps the brief-alignment judge opt-in for reproducible suite runs", () => {

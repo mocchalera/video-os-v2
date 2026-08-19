@@ -2,11 +2,18 @@
 
 ## Status
 
-This directory is a production specification, not a claim that audio has been generated or accepted.
+This directory remains the authored specification for the 16 families. Generated
+audio stays outside Git and has now been promoted into a technically verified,
+local candidate Pack.
 
 - Catalog design: complete for 16 proposed tracks.
-- Suno production briefs: ready for human generation sessions.
-- Audio generation, selection, editing, mixing, similarity review, and legal approval: not started; human action required.
+- Generated candidate evidence: 105 files across 16 families, promoted
+  deterministically to one technical candidate per family by
+  `npm run bgm:promote-pack`.
+- Candidate Pack: Registry-verifiable for local `preview_internal` selection;
+  this is not musical acceptance or release approval.
+- Musical audition, dialogue-bed, artifact, originality/similarity, external-use,
+  and public-release review remain human gates.
 - No audio, stems, account data, receipts, contracts, or personal information belongs in this directory.
 
 ## Goal
@@ -29,6 +36,10 @@ Each master is designed for 90–150 seconds, editorial cut-downs, looping, clea
 - `track-catalog.yaml`: authoritative musical and edit-delivery specification.
 - `suno-production-briefs.md`: generation prompts and rejection cues for each track.
 - `rights-and-provenance-checklist.md`: human workflow, evidence manifest, review gates, and acceptance criteria.
+- `phase2-cue-v2.md`: explicit selection, hash pinning, music-cues/v2, and A2 projection contract.
+- `phase3-audio-render-plan.md`: shared A1/A2 execution, report v2, and social/final parity contract.
+- `phase4-sfx-a3.md`: rights-aware SFX library/cue pins, A3 projection, and shared A1/A2/A3 execution.
+- `phase5-semantic-sound-design.md`: semantic-first/tempo-secondary decisions, decision-pinned A3 cues, and reusable skill workflow.
 
 ## Production sequence
 
@@ -44,6 +55,40 @@ Work in pairs so the low/high variants share a family identity without becoming 
 8. `playful-bold-low-01` and `playful-bold-high-01`
 
 For each pair: generate candidates, log every candidate, shortlist without overwriting originals, perform human arrangement/editing, run similarity and rights reviews, then mix and derive deliverables. Do not proceed from a generated candidate directly to distribution.
+
+## Technical candidate promotion
+
+The promotion command verifies all recorded source hashes, applies the
+documented duration/BPM technical score, uses stable candidate ID ascending as
+the exact-score tie-break, and writes a new versioned Pack outside the
+repository. It refuses an existing output:
+
+```bash
+npm run bgm:promote-pack -- \
+  --source-root /private/bgm-pack-evidence/batches \
+  --dry-run \
+  --json
+
+npm run bgm:promote-pack -- \
+  --source-root /private/bgm-pack-evidence/batches \
+  --json
+```
+
+The materialized Pack pins the promotion plan, source identity, generation ID
+and timestamp, full mix, deterministic preview, canonical degraded analysis,
+and hash-bound rights register. The local user confirmation is recorded as
+`operator_declared_ok` for `preview_internal` plus the modification needed to
+make a preview. No paid tier, named license, external URL, redistribution
+permission, or public-release approval is inferred.
+
+## Explicit cue planning
+
+Phase 2 consumes the Registry-verified candidate Pack without mutating it.
+`npm run bgm:plan-cues` requires a caller-supplied `track_id`; it never promotes
+the top-ranked suggestion into a final choice. The output is a new,
+fail-closed generation containing a hash-pinned `bgm_selection.json`,
+`music_cues.json` v2, an audition-only decision report, and a timeline with the
+cue projected onto A2. See `phase2-cue-v2.md` for the contract and CLI.
 
 When a generator workstream has produced `technical-shortlist/v1`, verify the
 original private downloads and create the review queue without copying audio:
@@ -90,18 +135,20 @@ for public release.
 
 Start with the Trust / Clarity pair. It is the best calibration unit for speech masking, edit-point regularity, restrained branding, and the distinction between low and high energy.
 
-Human operator inputs required before generation:
+Human operator inputs still required before an accepted or distributable Pack:
 
-- Confirm the Suno account was on an eligible paid plan at the exact generation time.
-- Record the account holder or rights-owning entity in a private evidence store, not Git.
-- Save a PDF or screenshot of the applicable terms and plan page, plus timestamp and URL, outside the repository.
-- Keep tracks Link-Only/private during review; do not enable public remixing or collaboration.
-- Use the two briefs exactly as a baseline, then record any prompt changes and generated track IDs/URLs.
+- Audition musical fit and dialogue-bed behavior.
+- Review artifacts and originality/similarity.
+- Resolve any release-specific license, account-tier, attribution, external-use,
+  and redistribution facts from private evidence rather than inference.
+- Keep generated track IDs, timestamps, and hashes in the private provenance
+  record.
 
 ## Repository boundary
 
-Only specification documents and intake contracts belong here. Candidate audio
-and generated review queues stay in the private evidence workspace. Final
+Only specification documents, promotion code, and intake contracts belong here.
+Candidate audio, generated Pack contents, and review queues stay outside Git in
+the private evidence workspace or the local Video OS Pack Registry. Final
 distributable audio, if later approved, needs a separately agreed asset
 location, license notice, checksums, and release process. Nothing in this
 directory constitutes legal advice or final clearance.

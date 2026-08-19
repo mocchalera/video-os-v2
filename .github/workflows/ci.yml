@@ -6,10 +6,11 @@ on:
     branches:
       - main
       - Dev
+      - public-candidate/**
 
 jobs:
   node-runtime:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -19,16 +20,81 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
 
-      - name: Install media toolchain
+      - name: Assert Node and npm versions
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Resolve pinned media toolchain
+        run: bash scripts/ci-resolve-media-toolchain.sh
+
+      - name: Log runner and media provenance
+        run: |
+          echo "ImageOS=${ImageOS:-unset}"
+          echo "ImageVersion=${ImageVersion:-unset}"
+          uname -srm
+          uname -m
+          node --version
+          npm --version
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version | sed -n '1p'
+          ffprobe -version | sed -n '1p'
+
+      - name: Backport Vitest worker RPC fix
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+
+          const vitestPackage = JSON.parse(
+            readFileSync("node_modules/vitest/package.json", "utf8"),
+          );
+          if (vitestPackage.version !== "3.2.4") {
+            throw new Error(`Unexpected Vitest version: ${vitestPackage.version}`);
+          }
+
+          const chunksDirectory = "node_modules/vitest/dist/chunks";
+          const rpcFiles = readdirSync(chunksDirectory).filter((name) =>
+            /^rpc\..+\.js$/.test(name),
+          );
+          if (rpcFiles.length !== 1) {
+            throw new Error(`Expected exactly one Vitest RPC chunk, found ${rpcFiles.length}`);
+          }
+
+          const rpcPath = join(chunksDirectory, rpcFiles[0]);
+          const source = readFileSync(rpcPath, "utf8");
+          const sourceSha256 = createHash("sha256").update(source).digest("hex");
+          if (sourceSha256 !== "de377d3f6766cc38394adf8886e92fa2d3aabf442f1313ed612f308c625ba8b4") {
+            throw new Error(`Unexpected Vitest RPC source SHA-256: ${sourceSha256}`);
+          }
+
+          const legacyTimeoutBlock = `\t\tonTimeoutError(functionName, args) {
+          \t\t\tlet message = \`[vitest-worker]: Timeout calling "\${functionName}"\`;
+          \t\t\tif (functionName === "fetch" || functionName === "transform" || functionName === "resolveId") message += \` with "\${JSON.stringify(args)}"\`;
+          \t\t\t// JSON.stringify cannot serialize Error instances
+          \t\t\tif (functionName === "onUnhandledError") message += \` with "\${args[0]?.message || args[0]}"\`;
+          \t\t\tthrow new Error(message);
+          \t\t},`;
+          if (source.split(legacyTimeoutBlock).length !== 2) {
+            throw new Error("Vitest worker RPC timeout block did not match exactly once");
+          }
+
+          const patched = source.replace(legacyTimeoutBlock, "\t\ttimeout: -1,");
+          const patchedSha256 = createHash("sha256").update(patched).digest("hex");
+          if (patchedSha256 !== "9a3679f30dc623ddebdd2d2effb5bb537f849358b42d4009466f38a718bb6af0") {
+            throw new Error(`Unexpected patched Vitest RPC SHA-256: ${patchedSha256}`);
+          }
+          writeFileSync(rpcPath, patched);
+          console.log(`Patched Vitest worker RPC timeout: ${rpcFiles[0]} ${patchedSha256}`);
+          NODE
 
       - name: Validate schemas
         run: npm run validate
@@ -37,13 +103,22 @@ jobs:
         run: npm run build
 
       - name: Run tests
-        run: >-
-          npm test --
-          --exclude tests/editor-server-project-health-redaction.test.ts
-          --exclude tests/editor-server-source-map-route-redaction.test.ts
+        run: |
+          npm test -- \
+            --exclude tests/editor-server-project-health-redaction.test.ts \
+            --exclude tests/editor-server-source-map-route-redaction.test.ts \
+            --silent=passed-only \
+            --testTimeout=30000 \
+            --shard=1/2
+          npm test -- \
+            --exclude tests/editor-server-project-health-redaction.test.ts \
+            --exclude tests/editor-server-source-map-route-redaction.test.ts \
+            --silent=passed-only \
+            --testTimeout=30000 \
+            --shard=2/2
 
   schema-contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -53,8 +128,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
+
+      - name: Assert Node and npm versions
+        run: |
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
 
       - name: Install dependencies
         run: npm ci
@@ -63,7 +143,7 @@ jobs:
         run: npm run test:schema-contract
 
   speech-led-contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -73,8 +153,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
+
+      - name: Assert Node and npm versions
+        run: |
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
 
       - name: Install dependencies
         run: npm ci
@@ -83,7 +168,7 @@ jobs:
         run: npm run test:speech-led-contract
 
   event-recap-contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -93,8 +178,13 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
+
+      - name: Assert Node and npm versions
+        run: |
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
 
       - name: Install dependencies
         run: npm ci
@@ -103,7 +193,7 @@ jobs:
         run: npm run test:event-recap-contract
 
   repo-hygiene:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -113,17 +203,25 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
+
+      - name: Assert Node and npm versions
+        run: |
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify Studio contracts
+        run: npm run verify:studio-contracts
 
       - name: Check repository hygiene
         run: npm run verify:repo
 
   editor-server:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -133,11 +231,16 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: |
             package-lock.json
             editor/package-lock.json
+
+      - name: Assert Node and npm versions
+        run: |
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
 
       - name: Install root test tooling
         run: npm ci
@@ -154,7 +257,7 @@ jobs:
         run: npm run test:editor-server-integration
 
   agent-definitions:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -164,7 +267,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .node-version
+
+      - name: Assert Node and npm versions
+        run: |
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -180,19 +288,72 @@ jobs:
   macos-studio:
     runs-on: macos-14
     timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_15.4.app/Contents/Developer
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Swift version
-        run: swift --version
+      - name: Assert Xcode and Swift versions
+        run: |
+          test -d "${DEVELOPER_DIR}"
+          test "$(xcodebuild -version)" = "$(printf 'Xcode 15.4\nBuild version 15F31d')"
+          xcrun swift --version | sed -n '1p' | grep -E '^Apple Swift version 5\.10 '
+
+      - name: Build Studio target
+        run: swift build --target VideoOSStudio
 
       - name: Run SwiftPM tests
         run: swift test
 
       - name: Run Studio CLI smoke
         run: swift run videoos-studio-cli doctor
+
+  render-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Assert Node and npm versions
+        run: |
+          test "$(node -v)" = "v22.23.1"
+          test "$(npm -v)" = "10.9.8"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve pinned media toolchain
+        run: bash scripts/ci-resolve-media-toolchain.sh
+
+      - name: Log render runtime provenance
+        run: |
+          echo "ImageOS=${ImageOS:-unset}"
+          echo "ImageVersion=${ImageVersion:-unset}"
+          uname -srm
+          uname -m
+          node --version
+          npm --version
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version | sed -n '1p'
+          ffprobe -version | sed -n '1p'
+          google-chrome --version
+          node -p '"remotion=" + require("./node_modules/remotion/package.json").version'
+          node -p '"@remotion/renderer=" + require("./node_modules/@remotion/renderer/package.json").version'
+          node -p '"hyperframes=" + require("./node_modules/hyperframes/package.json").version'
+
+      - name: Run real render integration test
+        run: npm run test:render-integration
 
   product-gate:
     if: ${{ always() }}
@@ -205,7 +366,8 @@ jobs:
       - editor-server
       - agent-definitions
       - macos-studio
-    runs-on: ubuntu-latest
+      - render-integration
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
@@ -219,9 +381,10 @@ jobs:
           EDITOR_SERVER: ${{ needs.editor-server.result }}
           AGENT_DEFINITIONS: ${{ needs.agent-definitions.result }}
           MACOS_STUDIO: ${{ needs.macos-studio.result }}
+          RENDER_INTEGRATION: ${{ needs.render-integration.result }}
         run: |
           failed=0
-          for result in "$NODE_RUNTIME" "$SCHEMA_CONTRACT" "$SPEECH_LED_CONTRACT" "$EVENT_RECAP_CONTRACT" "$REPO_HYGIENE" "$EDITOR_SERVER" "$AGENT_DEFINITIONS" "$MACOS_STUDIO"; do
+          for result in "$NODE_RUNTIME" "$SCHEMA_CONTRACT" "$SPEECH_LED_CONTRACT" "$EVENT_RECAP_CONTRACT" "$REPO_HYGIENE" "$EDITOR_SERVER" "$AGENT_DEFINITIONS" "$MACOS_STUDIO" "$RENDER_INTEGRATION"; do
             if [ "$result" != "success" ]; then
               failed=1
             fi
@@ -230,4 +393,4 @@ jobs:
             echo "Product gate blocked: one or more required boundaries did not succeed."
             exit 1
           fi
-          echo "Product gate passed: Node, Swift, schema, preview-server, agent, hygiene, speech-led, and event-recap contract boundaries are green."
+          echo "Product gate passed: Node, Swift, schema, preview-server, agent, hygiene, speech-led, event-recap, and real-render contract boundaries are green."

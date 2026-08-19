@@ -10,6 +10,10 @@ import { computeImageSequenceFrameSetContentSha256 } from "../media/image-sequen
 
 export const NORMALIZED_STILL_RELATIONSHIP = "normalized_still_frame" as const;
 export const NORMALIZED_SEQUENCE_RELATIONSHIP = "normalized_image_sequence_proxy" as const;
+const SUPPORTED_STILL_NORMALIZATION_PRODUCERS = new Set([
+  "ffmpeg-still-normalizer",
+  "macos-sips-heif-normalizer",
+]);
 
 export class CanonicalRenderInputError extends Error {
   constructor(
@@ -489,7 +493,7 @@ export function resolveCanonicalRenderInputs(
     if (!still || !normalizedHash || !producer || !producerVersion) {
       throw new CanonicalRenderInputError("still_image_identity_missing", `Image ${assetId} lacks C2B normalized-frame identity; re-ingest required`, assetId);
     }
-    if (producer !== "ffmpeg-still-normalizer" || producerVersion !== "1") {
+    if (!SUPPORTED_STILL_NORMALIZATION_PRODUCERS.has(producer) || producerVersion !== "1") {
       throw new CanonicalRenderInputError("still_image_normalization_producer_mismatch", `Unsupported normalization producer ${producer}@${producerVersion} for ${assetId}; re-ingest required`, assetId);
     }
     const normalized = secureNormalizedFrame(projectDir, assetId, still.normalized_frame_path);

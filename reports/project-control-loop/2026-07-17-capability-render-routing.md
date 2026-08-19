@@ -70,8 +70,8 @@ npm run eval -- --suite golden --no-write
 fumoto-growth                     52.0
 togakushi-camp                   100.0
 ena-promo                        100.0
-operator-testimonial-a    100.0
-operator-testimonial-b     100.0
+ax1-komatsu-testimonial-d4892    100.0
+ax1-female-testimonial-d4892     100.0
 ```
 
 These scores are identical to the pre-change baseline. Marlin divergence was

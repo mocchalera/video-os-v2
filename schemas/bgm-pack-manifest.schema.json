@@ -211,7 +211,12 @@
       "properties": {
         "producer": { "type": "string", "minLength": 1 },
         "source_type": { "type": "string", "enum": ["bundled_pack", "user_library", "project_local"] },
-        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/relativePath" }, "uniqueItems": true }
+        "evidence_refs": { "type": "array", "items": { "$ref": "#/$defs/relativePath" }, "uniqueItems": true },
+        "evidence_assets": {
+          "description": "Optional hash-and-size pins for provenance members. Legacy manifests may keep path-only evidence_refs.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/dataRef" }
+        }
       }
     },
     "hashPolicy": {

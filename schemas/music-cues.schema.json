@@ -18,6 +18,17 @@
       "type": "string",
       "enum": ["dialogue_first", "balanced", "music_forward"]
     },
+    "selection_ref": { "$ref": "#/$defs/selectionRef" },
+    "timeline_fps": { "$ref": "#/$defs/rationalFps" },
+    "planning_status": {
+      "type": "string",
+      "enum": ["verified", "verified_with_warnings"]
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "music_asset": { "$ref": "#/$defs/musicAsset" },
     "cues": {
       "type": "array",
@@ -25,7 +36,53 @@
     }
   },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "version": { "const": "2.0.0" } },
+        "required": ["version"]
+      },
+      "then": {
+        "required": [
+          "selection_ref",
+          "timeline_fps",
+          "planning_status",
+          "warnings"
+        ],
+        "properties": {
+          "music_asset": { "$ref": "#/$defs/musicAssetV2" },
+          "cues": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/cueV2" }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "contentHash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "selectionRef": {
+      "type": "object",
+      "required": ["path", "content_hash"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "content_hash": { "$ref": "#/$defs/contentHash" }
+      },
+      "additionalProperties": false
+    },
+    "rationalFps": {
+      "type": "object",
+      "required": ["num", "den"],
+      "properties": {
+        "num": { "type": "integer", "minimum": 1 },
+        "den": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
     "musicAsset": {
       "type": "object",
       "required": ["asset_id", "path", "source_hash"],
@@ -33,9 +90,45 @@
         "asset_id": { "type": "string" },
         "path": { "type": "string" },
         "source_hash": { "type": "string" },
-        "analysis_ref": { "type": "string" }
+        "analysis_ref": { "type": "string" },
+        "track_id": { "type": "string" },
+        "pack_id": { "type": "string" },
+        "pack_version": { "type": "string" },
+        "pack_manifest_hash": { "$ref": "#/$defs/contentHash" },
+        "full_mix_content_hash": { "$ref": "#/$defs/contentHash" },
+        "full_mix_size_bytes": { "type": "integer", "minimum": 1 },
+        "analysis_content_hash": { "$ref": "#/$defs/contentHash" },
+        "analysis_size_bytes": { "type": "integer", "minimum": 1 },
+        "analysis_status": {
+          "type": "string",
+          "enum": ["ready", "degraded", "failed", "unavailable"]
+        },
+        "duration_us": { "type": "integer", "minimum": 1 }
       },
       "additionalProperties": false
+    },
+    "musicAssetV2": {
+      "allOf": [
+        { "$ref": "#/$defs/musicAsset" },
+        {
+          "required": [
+            "track_id",
+            "pack_id",
+            "pack_version",
+            "pack_manifest_hash",
+            "full_mix_content_hash",
+            "full_mix_size_bytes",
+            "analysis_ref",
+            "analysis_content_hash",
+            "analysis_size_bytes",
+            "analysis_status",
+            "duration_us"
+          ],
+          "properties": {
+            "source_hash": { "$ref": "#/$defs/contentHash" }
+          }
+        }
+      ]
     },
     "cue": {
       "type": "object",
@@ -58,7 +151,103 @@
         "fade_in_ms": { "type": "number", "minimum": 0 },
         "fade_out_ms": { "type": "number", "minimum": 0 },
         "ducking": { "$ref": "#/$defs/ducking" },
-        "beat_sync": { "$ref": "#/$defs/beatSync" }
+        "beat_sync": { "$ref": "#/$defs/beatSync" },
+        "timeline_track_id": { "const": "A2" },
+        "source_offset_us": { "type": "integer", "minimum": 0 },
+        "source_range": { "$ref": "#/$defs/sourceRange" },
+        "timeline_range": { "$ref": "#/$defs/timelineRange" },
+        "section": { "type": "string", "minLength": 1 },
+        "phase": { "type": "string", "minLength": 1 },
+        "semantic_anchor": { "$ref": "#/$defs/semanticAnchor" },
+        "beat_alignment": { "$ref": "#/$defs/beatAlignment" }
+      },
+      "additionalProperties": false
+    },
+    "cueV2": {
+      "allOf": [
+        { "$ref": "#/$defs/cue" },
+        {
+          "required": [
+            "timeline_track_id",
+            "source_offset_us",
+            "source_range",
+            "timeline_range",
+            "section",
+            "phase",
+            "semantic_anchor",
+            "beat_alignment"
+          ]
+        }
+      ]
+    },
+    "sourceRange": {
+      "type": "object",
+      "required": ["in_us", "out_us"],
+      "properties": {
+        "in_us": { "type": "integer", "minimum": 0 },
+        "out_us": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "timelineRange": {
+      "type": "object",
+      "required": ["in_frame", "out_frame"],
+      "properties": {
+        "in_frame": { "type": "integer", "minimum": 0 },
+        "out_frame": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "semanticAnchor": {
+      "type": "object",
+      "required": ["label", "timeline_frame", "source_onset_us"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "timeline_frame": { "type": "integer", "minimum": 0 },
+        "source_onset_us": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "beatAlignment": {
+      "type": "object",
+      "required": [
+        "requested",
+        "status",
+        "decision",
+        "analysis_status",
+        "confidence",
+        "grid_source",
+        "source_onset_us",
+        "timeline_boundaries_moved",
+        "warnings"
+      ],
+      "properties": {
+        "requested": { "const": "semantic_anchor_source_onset" },
+        "status": { "type": "string", "enum": ["aligned", "degraded"] },
+        "decision": { "const": "explicit_source_onset" },
+        "analysis_status": {
+          "type": "string",
+          "enum": ["ready", "degraded", "failed", "unavailable"]
+        },
+        "confidence": {
+          "anyOf": [
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            { "type": "null" }
+          ]
+        },
+        "grid_source": {
+          "anyOf": [
+            { "const": "canonical_analysis" },
+            { "type": "null" }
+          ]
+        },
+        "source_onset_us": { "type": "integer", "minimum": 0 },
+        "timeline_boundaries_moved": { "const": false },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
       },
       "additionalProperties": false
     },

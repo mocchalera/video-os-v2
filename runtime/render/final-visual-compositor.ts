@@ -3,6 +3,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { INTERMEDIATE_X264, x264Args } from "../../editor/shared/encode-profiles.js";
 import { materializeFileSync } from "../filesystem/materialize-file.js";
+import {
+  assertVisualTemporalCorrespondence,
+  measureVisualTemporalCorrespondence,
+  writeVisualTemporalCorrespondenceEvidence,
+  type VisualCompositeTemporalCorrespondenceResult,
+} from "./visual-composite-temporal-qa.js";
 
 export type FinalVisualRenderer = "hyperframes" | "remotion" | "ffmpeg";
 export type FinalVisualCompositeStage = "under_caption" | "over_caption";
@@ -26,6 +32,14 @@ export interface FinalVisualCompositorOptions {
   fpsNum: number;
   fpsDen: number;
   durationFrames?: number;
+  /**
+   * When true (default for real encodes), fail closed if pre/post composite
+   * frame correspondence exceeds the temporal threshold. Unit tests that only
+   * inspect argv may leave this unset and skip measurement by not encoding.
+   */
+  enforceTemporalCorrespondence?: boolean;
+  temporalCorrespondenceThresholdFrames?: number;
+  temporalCorrespondenceEvidencePath?: string;
 }
 
 function escapeFilterValue(value: string): string {
@@ -45,14 +59,23 @@ function sortedLayers(layers: FinalVisualLayer[]): FinalVisualLayer[] {
   );
 }
 
-function formatFilterNumber(value: number): string {
-  return Number(value.toFixed(9)).toString();
+function fpsFilterExpression(fpsNum: number, fpsDen: number): string {
+  return `fps=${fpsNum}/${fpsDen}`;
 }
 
 /**
  * Build the single delivery-visual encode. Renderer-owned alpha layers and
  * canonical ASS captions are applied in one filter graph, so adding creative
  * overlays never introduces an additional lossy H.264 generation.
+ *
+ * Frame-index contract:
+ * - Every video input is normalized with `fps=num/den` first so cut
+ *   discontinuities cannot collapse or restart PTS segments.
+ * - Do NOT use `setpts=PTS-STARTPTS` / `setpts=N/...` here. On assembled bases
+ *   with still→motion concat discontinuities those expressions re-init PTS at
+ *   segment boundaries and make talking-head content lead by the still length.
+ * - Optional end pad uses tpad after fps; exact length is enforced with
+ *   `-frames:v` so pad never rewrites earlier frame indices.
  */
 export function buildFinalVisualCompositorArgs(
   options: FinalVisualCompositorOptions,
@@ -81,17 +104,18 @@ export function buildFinalVisualCompositorArgs(
   }
 
   const needsAlphaCompositing = layers.length > 0;
-  const targetDurationSec = options.durationFrames === undefined
-    ? undefined
-    : options.durationFrames * options.fpsDen / options.fpsNum;
+  const fpsExpr = fpsFilterExpression(options.fpsNum, options.fpsDen);
   const baseFilters = [
-    "setpts=PTS-STARTPTS",
-    ...(targetDurationSec === undefined
+    fpsExpr,
+    // Infinite end pad after fps keeps frame indices stable; -frames:v trims.
+    ...(options.durationFrames === undefined
       ? []
-      : [`tpad=stop_mode=add:stop_duration=${formatFilterNumber(targetDurationSec)}:color=black`]),
+      : ["tpad=stop_mode=add:stop=-1:color=black"]),
     ...(needsAlphaCompositing ? ["format=rgba"] : []),
   ];
-  const shouldFilterBase = needsAlphaCompositing || targetDurationSec !== undefined;
+  // Always retime through the graph when encoding so VFR/discontinuity bases
+  // and alpha layers share one frame-index timeline.
+  const shouldFilterBase = true;
   const filters: string[] = shouldFilterBase
     ? [`[0:v]${baseFilters.join(",")}[base0]`]
     : [];
@@ -103,7 +127,7 @@ export function buildFinalVisualCompositorArgs(
     const inputIndex = index + 1;
     const layerLabel = `layer${inputIndex}`;
     filters.push(
-      `[${inputIndex}:v]setpts=PTS-STARTPTS,scale=${options.width}:${options.height}:flags=lanczos,format=rgba[${layerLabel}]`,
+      `[${inputIndex}:v]${fpsExpr},scale=${options.width}:${options.height}:flags=lanczos,format=rgba[${layerLabel}]`,
     );
     if (layer.compositeStage === "under_caption") {
       underCount += 1;
@@ -157,13 +181,26 @@ export function buildFinalVisualCompositorArgs(
   return args;
 }
 
+export interface ComposeFinalVisualsResult {
+  outputPath: string;
+  temporalCorrespondence?: VisualCompositeTemporalCorrespondenceResult;
+  temporalCorrespondenceEvidencePath?: string;
+}
+
 export async function composeFinalVisuals(
   options: FinalVisualCompositorOptions,
 ): Promise<string> {
+  const result = await composeFinalVisualsWithEvidence(options);
+  return result.outputPath;
+}
+
+export async function composeFinalVisualsWithEvidence(
+  options: FinalVisualCompositorOptions,
+): Promise<ComposeFinalVisualsResult> {
   fs.mkdirSync(path.dirname(options.outputPath), { recursive: true });
   if (options.layers.length === 0 && !options.assPath && options.durationFrames === undefined) {
     materializeFileSync(options.baseVideoPath, options.outputPath);
-    return options.outputPath;
+    return { outputPath: options.outputPath };
   }
 
   const args = buildFinalVisualCompositorArgs(options);
@@ -176,5 +213,38 @@ export async function composeFinalVisuals(
       resolve();
     });
   });
-  return options.outputPath;
+
+  const enforce = options.enforceTemporalCorrespondence !== false
+    && (options.layers.length > 0 || options.durationFrames !== undefined || Boolean(options.assPath));
+  if (!enforce) {
+    return { outputPath: options.outputPath };
+  }
+
+  let temporalCorrespondence;
+  try {
+    temporalCorrespondence = await measureVisualTemporalCorrespondence({
+      baseVideoPath: options.baseVideoPath,
+      outputVideoPath: options.outputPath,
+      thresholdFrames: options.temporalCorrespondenceThresholdFrames,
+    });
+  } catch (error) {
+    // Probe infrastructure failures on degenerate fixtures must not mask encode
+    // success, but real offset failures still fail closed below.
+    throw new Error(
+      `Final visual compositor temporal correspondence probe failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  const evidencePath = options.temporalCorrespondenceEvidencePath
+    ?? `${options.outputPath}.temporal-correspondence.json`;
+  writeVisualTemporalCorrespondenceEvidence(temporalCorrespondence, evidencePath);
+  if (!temporalCorrespondence.skipped) {
+    assertVisualTemporalCorrespondence(temporalCorrespondence);
+  }
+  return {
+    outputPath: options.outputPath,
+    temporalCorrespondence,
+    temporalCorrespondenceEvidencePath: evidencePath,
+  };
 }

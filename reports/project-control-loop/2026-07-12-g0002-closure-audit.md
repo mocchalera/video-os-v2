@@ -32,7 +32,7 @@ PATH="$HOME/.nvm/versions/node/v22.23.1/bin:$PATH" npm run eval -- --suite golde
 - `--marlin`未指定のためlive Marlinは起動しない。
 - 実行前後の`git status --porcelain` SHA-256は同一:
   `fafce7a689b2e5e7d786f93fb4b93ba8912992a003ec7089103cd6e2183731b6`
-- scores: fumoto 52、togakushi 100、ena 100、testimonial A 100、testimonial B 100。
+- scores: fumoto 52、togakushi 100、ena 100、AX-1小松 100、AX-1女性 100。
 - Marlin未要求は`marlin_qa_score_unavailable`として明示的にskippedとなり、偽のvisual passにはならない。
 
 ### 3. 現行回帰
@@ -50,8 +50,7 @@ commit `fd908164`で`npm run verify -- --full`を実行し、全ゲートが成�
 
 - `lively-alt-vol5`でrights-cleared human golden、resume、Studio exact preview、Premiere XML 12/12 zero-diff round-tripを実証した。
 - AX-1の2話者testimonialをhuman golden化し、speech-led review metrics、2-beat cadence、single-source treatmentを回帰対象にした。
-- 保存済みtestimonialのlive Marlin reportsはA 76、B 92で、どちらも
-  `visual_qa=verified`。警告は隠さず残している。
+- AX-1の保存済みlive Marlin reportsは小松76、女性92で、どちらも`visual_qa=verified`。警告は隠さず残している。
 
 ## Residuals outside the goal
 

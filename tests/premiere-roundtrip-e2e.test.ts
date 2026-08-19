@@ -275,7 +275,10 @@ describe("E2E: diff detection — trim changes (demo project)", () => {
     const trimDiffs = report.diffs.filter((d) => d.kind === "trim_changed");
     const clp0001Diff = trimDiffs.find((d) => d.clip_id === "CLP_0001");
     expect(clp0001Diff).toBeDefined();
-    expect(clp0001Diff!.updated).toBeDefined();
+    if (clp0001Diff?.kind !== "trim_changed") {
+      throw new Error("Expected CLP_0001 to have a trim_changed diff");
+    }
+    expect(clp0001Diff.updated).toBeDefined();
   });
 });
 

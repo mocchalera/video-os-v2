@@ -22,7 +22,7 @@ import { validateProject } from "./validate-schemas.js";
 import { ProgressTracker } from "../runtime/progress.js";
 import { generateTimelineOverview } from "../runtime/preview/timeline-overview.js";
 import { confirmBriefDefaults } from "../runtime/brief-confirmation.js";
-import { inferExistingTimelineFps } from "../runtime/compiler/existing-timeline.js";
+import { inferExistingTimelineRate } from "../runtime/compiler/existing-timeline.js";
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -30,6 +30,7 @@ export interface CompileTimelineArgs {
   projectPath: string;
   patchPath?: string;
   fpsNum?: number;
+  fpsDen?: number;
   sourceMapPath?: string;
   skipPreview?: boolean;
   skipConfirmations?: boolean;
@@ -59,6 +60,7 @@ export function parseArgs(argv: string[] = process.argv): CompileTimelineArgs {
   let projectPath: string | undefined;
   let patchPath: string | undefined;
   let fpsNum: number | undefined;
+  let fpsDen: number | undefined;
   let sourceMapPath: string | undefined;
   let skipPreview = false;
   let skipConfirmations: boolean | undefined;
@@ -68,7 +70,16 @@ export function parseArgs(argv: string[] = process.argv): CompileTimelineArgs {
     if (args[i] === "--patch" && i + 1 < args.length) {
       patchPath = args[++i];
     } else if (args[i] === "--fps" && i + 1 < args.length) {
-      fpsNum = parseInt(args[++i], 10);
+      const value = args[++i];
+      const match = /^([1-9]\d*)(?:\/([1-9]\d*))?$/.exec(value);
+      if (!match) throw new Error("--fps must be a positive integer or rational num/den value");
+      const parsedNum = Number(match[1]);
+      const parsedDen = Number(match[2] ?? "1");
+      if (!Number.isSafeInteger(parsedNum) || !Number.isSafeInteger(parsedDen)) {
+        throw new Error("--fps numerator and denominator must be safe integers");
+      }
+      fpsNum = parsedNum;
+      fpsDen = parsedDen;
     } else if (args[i] === "--source-map" && i + 1 < args.length) {
       sourceMapPath = args[++i];
     } else if (args[i] === "--skip-preview") {
@@ -86,11 +97,11 @@ export function parseArgs(argv: string[] = process.argv): CompileTimelineArgs {
 
   if (!projectPath) {
     throw new Error(
-      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num>] [--source-map <file>] [--skip-preview] [--skip-confirmations true|false]",
+      "Usage: npx tsx scripts/compile-timeline.ts <project-path> [--patch <patch-file>] [--fps <num|num/den>] [--source-map <file>] [--skip-preview] [--skip-confirmations true|false]",
     );
   }
 
-  return { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations };
+  return { projectPath, patchPath, fpsNum, fpsDen, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations };
 }
 
 // ── Compile mode ────────────────────────────────────────────────────
@@ -99,12 +110,17 @@ export async function runCompileTimeline(options: CompileTimelineArgs): Promise<
   const {
     projectPath,
     fpsNum: requestedFpsNum,
+    fpsDen: requestedFpsDen,
     sourceMapPath,
     skipPreview,
     skipConfirmations,
     forceConfirmations,
   } = options;
-  const fpsNum = requestedFpsNum ?? inferExistingTimelineFps(projectPath);
+  const existingRate = requestedFpsNum === undefined
+    ? inferExistingTimelineRate(projectPath)
+    : undefined;
+  const fpsNum = requestedFpsNum ?? existingRate?.fpsNum;
+  const fpsDen = requestedFpsDen ?? existingRate?.fpsDen ?? 1;
   const pt = new ProgressTracker(projectPath, "compile", skipPreview ? 3 : 4);
 
   // Pre-compile validation: check Gate 1
@@ -149,6 +165,7 @@ export async function runCompileTimeline(options: CompileTimelineArgs): Promise<
     projectPath,
     createdAt,
     fpsNum,
+    fpsDen,
     sourceMapPath,
     bgm_duration_us: bgm?.durationUs,
   });
@@ -331,7 +348,7 @@ function runPatch(projectPath: string, patchPath: string, sourceMapPath?: string
 
 export async function main(argv: string[] = process.argv): Promise<number> {
   try {
-    const { projectPath, patchPath, fpsNum, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations } = parseArgs(argv);
+    const { projectPath, patchPath, fpsNum, fpsDen, sourceMapPath, skipPreview, skipConfirmations, forceConfirmations } = parseArgs(argv);
 
     if (patchPath) {
       runPatch(projectPath, patchPath, sourceMapPath);
@@ -339,6 +356,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       await runCompileTimeline({
         projectPath,
         fpsNum,
+        fpsDen,
         sourceMapPath,
         skipPreview,
         skipConfirmations,

@@ -142,7 +142,7 @@ Rough preview and final delivery are intentionally separate:
 
 ## CI ownership
 
-`.github/workflows/ci.yml` protects eight responsibility jobs plus the aggregate
+`.github/workflows/ci.yml` protects nine responsibility jobs plus the aggregate
 `product-gate`:
 
 | Job | Current boundary |
@@ -155,6 +155,7 @@ Rough preview and final delivery are intentionally separate:
 | `editor-server` | supported `editor/server` and `editor/shared` typecheck |
 | `agent-definitions` | generated Claude/Codex agent drift |
 | `macos-studio` | SwiftPM tests and Studio CLI doctor on macOS 14 |
+| `render-integration` | real FFmpeg render integration with pinned runtime provenance |
 
 The scheduled/manual `.github/workflows/speech-led-real-media.yml` is a separate
 self-hosted, rights-cleared, fail-closed live-Marlin regression. Local optional

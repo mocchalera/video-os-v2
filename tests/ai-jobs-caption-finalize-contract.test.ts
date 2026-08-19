@@ -60,7 +60,10 @@ describe("editor job worker phase contract", () => {
     expect(render.result).toMatchObject({ phase: "render", success: false });
     expect(render.result.error).toMatch(/requires state.*intent_pending/);
     expect(render.result.error).not.toContain("timeline not found");
+  });
 
+  it("routes caption-finalize independently when caption approval exists", () => {
+    const projectDir = createWorkerFixture();
     const finalize = runWorker(projectDir, "caption-finalize");
     expect(finalize.status).toBe(1);
     expect(finalize.result).toMatchObject({ phase: "caption-finalize", success: false });

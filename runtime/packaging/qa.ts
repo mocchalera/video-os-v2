@@ -8,6 +8,8 @@
  */
 
 import type { AudioMixReport } from "../audio/mixer.js";
+import type { MusicCuesDoc } from "../audio/music-cues.js";
+import type { SfxCuesDoc } from "../audio/sfx-cues.js";
 import { equivalentFrameRates } from "../../editor/shared/rational-timebase.js";
 import {
   MIN_CAPTION_HARD_FLOOR_MS,
@@ -487,6 +489,8 @@ export function checkAudioMixPolicy(
   report: AudioMixReport | null | undefined,
   expectedHasBgm: boolean,
   requireDialogueFirst = false,
+  expectedMusicCues?: MusicCuesDoc | null,
+  expectedSfxCues?: SfxCuesDoc | null,
 ): QaCheckResult {
   const errors: string[] = [];
   if (!report) {
@@ -497,8 +501,16 @@ export function checkAudioMixPolicy(
     };
   }
 
-  if (report.version !== "audio-mix-report/v1") {
-    errors.push(`version expected=audio-mix-report/v1 actual=${String(report.version)}`);
+  const requireSharedPlan = expectedMusicCues?.version === "2.0.0"
+    || expectedSfxCues?.version === "sfx-cues/v1";
+  if (requireSharedPlan && report.version !== "audio-mix-report/v2") {
+    errors.push(`version expected=audio-mix-report/v2 actual=${String(report.version)}`);
+  } else if (
+    !requireSharedPlan
+    && report.version !== "audio-mix-report/v1"
+    && report.version !== "audio-mix-report/v2"
+  ) {
+    errors.push(`unsupported audio mix report version=${String(report.version)}`);
   }
   if (report.has_bgm !== expectedHasBgm) {
     errors.push(`has_bgm expected=${expectedHasBgm} actual=${report.has_bgm}`);
@@ -515,20 +527,86 @@ export function checkAudioMixPolicy(
   }
 
   if (expectedHasBgm) {
+    if (requireSharedPlan) {
+      if (report.strategy !== "shared_audio_render_plan_v1") {
+        errors.push(`strategy expected=shared_audio_render_plan_v1 actual=${report.strategy}`);
+      }
+      if (!report.plan_hash) errors.push("shared plan_hash is required");
+      if (report.dialogue_finish_scope !== "a1_only" && report.dialogue_finish_scope !== "none") {
+        errors.push(`dialogue_finish_scope must be a1_only or none (actual=${String(report.dialogue_finish_scope)})`);
+      }
+      if (report.mastering_count !== 1 || report.final_mastering?.applied !== true) {
+        errors.push("shared BGM mix must record exactly one final mastering pass");
+      }
+      if (!report.sidechain_evidence || report.sidechain_evidence.per_cue.length === 0) {
+        errors.push("shared BGM mix requires waveform sidechain evidence");
+      }
+      if (report.stems?.some((stem) => stem.role === "music" && stem.finish_applied)) {
+        errors.push("A2 music stems must never receive dialogue finishing");
+      }
+      if (requireDialogueFirst) {
+        for (const cue of report.cues ?? []) {
+          if (cue.applied.base_gain_db > -10) {
+            errors.push(
+              `${cue.cue_id} dialogue-first base gain must be <= -10 dB (actual=${cue.applied.base_gain_db})`,
+            );
+          }
+          if (cue.applied.duck_gain_db > -18) {
+            errors.push(
+              `${cue.cue_id} dialogue-first duck gain must be <= -18 dB (actual=${cue.applied.duck_gain_db})`,
+            );
+          }
+        }
+      }
+      const reportCues = new Map((report.cues ?? []).map((cue) => [cue.cue_id, cue]));
+      for (const cue of expectedMusicCues?.cues ?? []) {
+        const actual = reportCues.get(cue.cue_id);
+        if (!actual) {
+          errors.push(`audio report cue missing=${cue.cue_id}`);
+          continue;
+        }
+        const expectedRange = cue.source_range;
+        const expectedTimeline = cue.timeline_range;
+        const checks: Array<[string, unknown, unknown]> = [
+          ["track_id", cue.track_id, actual.track_id],
+          ["source_in_us", expectedRange?.in_us, actual.source_range_us.in_us],
+          ["source_out_us", expectedRange?.out_us, actual.source_range_us.out_us],
+          ["timeline_in_frame", expectedTimeline?.in_frame, actual.timeline_range.in_frame],
+          ["timeline_out_frame", expectedTimeline?.out_frame, actual.timeline_range.out_frame],
+          ["base_gain_db", cue.ducking.base_gain_db, actual.applied.base_gain_db],
+          ["duck_gain_db", cue.ducking.duck_gain_db, actual.applied.duck_gain_db],
+          ["attack_ms", cue.ducking.attack_ms, actual.applied.attack_ms],
+          ["release_ms", cue.ducking.release_ms, actual.applied.release_ms],
+          ["fade_in_ms", cue.fade_in_ms, actual.applied.fade_in_ms],
+          ["fade_out_ms", cue.fade_out_ms, actual.applied.fade_out_ms],
+          ["pack_manifest_hash", expectedMusicCues?.music_asset.pack_manifest_hash, actual.pins.pack_manifest_hash],
+          ["full_mix_content_hash", expectedMusicCues?.music_asset.full_mix_content_hash, actual.pins.full_mix_content_hash],
+          ["analysis_content_hash", expectedMusicCues?.music_asset.analysis_content_hash, actual.pins.analysis_content_hash],
+        ];
+        for (const [label, expected, value] of checks) {
+          if (expected !== value) {
+            errors.push(`${cue.cue_id}.${label} expected=${String(expected)} actual=${String(value)}`);
+          }
+        }
+      }
+      if ((report.cues?.length ?? 0) !== (expectedMusicCues?.cues.length ?? 0)) {
+        errors.push("shared report cue count does not match music_cues");
+      }
+    }
     const embeddedBgm = report.strategy === "timeline_embedded_bgm_mastering_v1";
-    if (report.strategy !== "waveform_sidechain_v1" && !embeddedBgm) {
+    if (!requireSharedPlan && report.strategy !== "waveform_sidechain_v1" && !embeddedBgm) {
       errors.push(`strategy expected=waveform_sidechain_v1 actual=${report.strategy}`);
     }
     if (embeddedBgm && (!Array.isArray(report.bgm_ownership?.asset_ids) || report.bgm_ownership.asset_ids.length === 0 || report.bgm_ownership.owner !== "timeline_assembler")) {
       errors.push("timeline-embedded BGM requires explicit timeline_assembler ownership evidence");
     }
-    if (!embeddedBgm && report.bgm_reference_mastering?.loudness_target_lufs !== -23) {
+    if (!requireSharedPlan && !embeddedBgm && report.bgm_reference_mastering?.loudness_target_lufs !== -23) {
       errors.push("BGM reference normalization target must be -23 LUFS");
     }
-    if (!embeddedBgm && report.sidechain?.detector !== "dialogue_waveform_rms") {
+    if (!requireSharedPlan && !embeddedBgm && report.sidechain?.detector !== "dialogue_waveform_rms") {
       errors.push("BGM ducking detector must use the dialogue waveform");
     }
-    if (!embeddedBgm && (!report.sidechain || report.sidechain.attack_ms <= 0 || report.sidechain.release_ms <= 0)) {
+    if (!requireSharedPlan && !embeddedBgm && (!report.sidechain || report.sidechain.attack_ms <= 0 || report.sidechain.release_ms <= 0)) {
       errors.push("BGM sidechain attack/release must be positive");
     }
     if (!embeddedBgm && requireDialogueFirst && report.sidechain) {
@@ -539,7 +617,12 @@ export function checkAudioMixPolicy(
         errors.push(`dialogue-first BGM duck gain must be <= -18 dB (actual=${report.sidechain.requested_duck_gain_db})`);
       }
     }
-  } else if (report.strategy !== "dialogue_only_mastering_v1" && !originalPassthrough) {
+  } else if (
+    report.strategy !== "dialogue_only_mastering_v1"
+    && !originalPassthrough
+    && !(expectedSfxCues?.version === "sfx-cues/v1"
+      && report.strategy === "shared_audio_render_plan_v1")
+  ) {
     errors.push(`strategy expected=dialogue_only_mastering_v1 actual=${report.strategy}`);
   }
 
@@ -548,12 +631,196 @@ export function checkAudioMixPolicy(
     passed: errors.length === 0,
     details: errors.length === 0
       ? expectedHasBgm
-        ? requireDialogueFirst
+        ? requireSharedPlan
+          ? "Shared plan pins and applies cue gain/fade/duck values, waveform sidechain, A1-only finishing, and one final mastering pass"
+        : requireDialogueFirst
           ? "BGM dialogue-first limited, reference-normalized, waveform-sidechained, and final-mastered"
           : "BGM reference-normalized, waveform-sidechained, and final-mastered"
         : originalPassthrough
           ? "Original-only dialogue level preserved without mastering"
           : "Dialogue-only mix final-mastered"
+      : errors.join("; "),
+  };
+}
+
+export function checkSfxMixPolicy(
+  report: AudioMixReport | null | undefined,
+  expectedSfxCues?: SfxCuesDoc | null,
+): QaCheckResult {
+  if (!expectedSfxCues) {
+    return {
+      name: "sfx_mix_policy_valid",
+      passed: true,
+      details: "not_applicable: SFX is not required for this project",
+    };
+  }
+  const errors: string[] = [];
+  if (!report) {
+    errors.push("audio-mix-report.json is missing or unreadable");
+  } else {
+    if (report.version !== "audio-mix-report/v2") {
+      errors.push(`version expected=audio-mix-report/v2 actual=${report.version}`);
+    }
+    if (report.strategy !== "shared_audio_render_plan_v1") {
+      errors.push(`strategy expected=shared_audio_render_plan_v1 actual=${report.strategy}`);
+    }
+    if (report.has_sfx !== true) errors.push("has_sfx must be true");
+    if (report.mastering_count !== 1 || report.final_mastering.applied !== true) {
+      errors.push("formal A3 mix must record exactly one final mastering pass");
+    }
+    if (report.stems?.some((stem) => stem.role === "sfx" && stem.finish_applied)) {
+      errors.push("A3 SFX stems must never receive dialogue finishing");
+    }
+    if (
+      expectedSfxCues.decision_ref
+      && report.input_hashes?.sound_design_decision
+        !== expectedSfxCues.decision_ref.content_hash
+    ) {
+      errors.push("sound-design decision content hash does not match sfx_cues");
+    }
+    const evidence = new Map(
+      (report.sfx_sidechain_evidence?.per_cue ?? [])
+        .map((cue) => [cue.cue_id, cue]),
+    );
+    const actualCues = new Map((report.sfx_cues ?? []).map((cue) => [cue.cue_id, cue]));
+    for (const cue of expectedSfxCues.cues) {
+      const actual = actualCues.get(cue.cue_id);
+      if (!actual) {
+        errors.push(`audio report SFX cue missing=${cue.cue_id}`);
+        continue;
+      }
+      for (const [label, expected, value] of [
+        ["asset_id", cue.asset_id, actual.asset_id],
+        ["semantic_role", cue.semantic_role, actual.semantic_role],
+        ["timeline_in_frame", cue.trigger_frame, actual.timeline_range.in_frame],
+        ["source_in_us", cue.source_range.in_us, actual.source_range_us.in_us],
+        ["source_out_us", cue.source_range.out_us, actual.source_range_us.out_us],
+        ["gain_db", cue.gain_db, actual.applied.gain_db],
+        ["fade_in_ms", cue.fade_in_ms, actual.applied.fade_in_ms],
+        ["fade_out_ms", cue.fade_out_ms, actual.applied.fade_out_ms],
+        ["duck_group", cue.duck_group, actual.applied.duck_group],
+        ["duck_gain_db", cue.ducking.duck_gain_db, actual.applied.duck_gain_db],
+        ["attack_ms", cue.ducking.attack_ms, actual.applied.attack_ms],
+        ["release_ms", cue.ducking.release_ms, actual.applied.release_ms],
+        ["requested_tail_frames", cue.tail.max_frames, actual.tail_processing.requested_tail_frames],
+        ["library_id", cue.asset_pin.library_id, actual.pins.library_id],
+        ["library_version", cue.asset_pin.library_version, actual.pins.library_version],
+        ["library_manifest_hash", cue.asset_pin.library_manifest_hash, actual.pins.library_manifest_hash],
+        ["asset_content_hash", cue.asset_pin.asset_content_hash, actual.pins.asset_content_hash],
+        ["asset_size_bytes", cue.asset_pin.asset_size_bytes, actual.pins.asset_size_bytes],
+        ["rights_evidence_ref", cue.asset_pin.rights_evidence_ref, actual.pins.rights_evidence_ref],
+        ["provenance_ref", cue.asset_pin.provenance_ref, actual.pins.provenance_ref],
+      ] as Array<[string, unknown, unknown]>) {
+        if (expected !== value) {
+          errors.push(`${cue.cue_id}.${label} expected=${String(expected)} actual=${String(value)}`);
+        }
+      }
+      if (
+        JSON.stringify(actual.decision_pin)
+        !== JSON.stringify(cue.decision_pin)
+      ) {
+        errors.push(`${cue.cue_id}.decision_pin does not match sfx_cues`);
+      }
+      if (actual.timeline_range.out_frame > actual.timeline_range.in_frame + cue.duration_frames + cue.tail.max_frames) {
+        errors.push(`${cue.cue_id} applied tail exceeds the pinned maximum`);
+      }
+      if (actual.peak_dbtp !== null && actual.peak_dbtp > 0) {
+        errors.push(`${cue.cue_id} A3 peak exceeds 0 dBTP`);
+      }
+      const sidechain = evidence.get(cue.cue_id);
+      if (!sidechain) {
+        errors.push(`${cue.cue_id} SFX sidechain evidence is missing`);
+      } else if (
+        cue.duck_group === "dialogue"
+        && actual.dialogue_overlap_frames > 0
+        && sidechain.sidechain_applied !== true
+      ) {
+        errors.push(`${cue.cue_id} overlaps dialogue but sidechain was not applied`);
+      }
+    }
+    if ((report.sfx_cues?.length ?? 0) !== expectedSfxCues.cues.length) {
+      errors.push("shared report SFX cue count does not match sfx_cues");
+    }
+    const finalPeak = Number.parseFloat(
+      report.final_mastering.output_measurement?.input_tp ?? "NaN",
+    );
+    if (Number.isFinite(finalPeak) && finalPeak > -1.5) {
+      errors.push(`final true peak ${finalPeak} dBTP exceeds -1.5 dBTP`);
+    }
+  }
+  return {
+    name: "sfx_mix_policy_valid",
+    passed: errors.length === 0,
+    details: errors.length === 0
+      ? "A3 library/asset pins, cue range/gain/fade/tail/duck values, headroom, A1-only finishing, and one mastering pass verified"
+      : errors.join("; "),
+  };
+}
+
+export function checkAudioRenderPlanParity(
+  finalReport: AudioMixReport | null | undefined,
+  socialReport: AudioMixReport | null | undefined,
+  requireSharedPlan: boolean,
+): QaCheckResult {
+  if (!requireSharedPlan) {
+    return {
+      name: "audio_render_plan_parity_valid",
+      passed: true,
+      details: "not_applicable: no enabled music-cues/v2 shared plan",
+    };
+  }
+  const errors: string[] = [];
+  if (finalReport?.version !== "audio-mix-report/v2") {
+    errors.push("final audio-mix-report/v2 is missing");
+  }
+  if (socialReport?.version !== "audio-mix-report/v2") {
+    errors.push("social-review audio-mix-report/v2 is missing");
+  }
+  if (finalReport?.plan_hash !== socialReport?.plan_hash) {
+    errors.push(
+      `plan_hash mismatch final=${String(finalReport?.plan_hash)} social=${String(socialReport?.plan_hash)}`,
+    );
+  }
+  if (finalReport?.mastering_count !== 1 || socialReport?.mastering_count !== 1) {
+    errors.push("social and final must each execute one mastering pass");
+  }
+  const cueContract = (report: AudioMixReport | null | undefined): string =>
+    JSON.stringify((report?.cues ?? []).map((cue) => ({
+      cue_id: cue.cue_id,
+      timeline_range: cue.timeline_range,
+      source_range_us: cue.source_range_us,
+      applied: cue.applied,
+      pins: cue.pins,
+    })));
+  if (cueContract(finalReport) !== cueContract(socialReport)) {
+    errors.push("social and final cue gain/fade/duck/pin contracts differ");
+  }
+  const sfxCueContract = (report: AudioMixReport | null | undefined): string =>
+    JSON.stringify((report?.sfx_cues ?? []).map((cue) => ({
+      cue_id: cue.cue_id,
+      semantic_role: cue.semantic_role,
+      asset_id: cue.asset_id,
+      timeline_range: cue.timeline_range,
+      source_range_us: cue.source_range_us,
+      applied: cue.applied,
+      tail_processing: cue.tail_processing,
+      pins: cue.pins,
+      decision_pin: cue.decision_pin,
+      a3_output_content_hash: cue.a3_output_content_hash,
+    })));
+  if (sfxCueContract(finalReport) !== sfxCueContract(socialReport)) {
+    errors.push("social and final SFX cue/tail/duck/pin/A3 contracts differ");
+  }
+  if (finalReport?.output?.content_hash !== socialReport?.output?.content_hash) {
+    errors.push(
+      `final-mix hash mismatch final=${String(finalReport?.output?.content_hash)} social=${String(socialReport?.output?.content_hash)}`,
+    );
+  }
+  return {
+    name: "audio_render_plan_parity_valid",
+    passed: errors.length === 0,
+    details: errors.length === 0
+      ? `social/final AudioRenderPlan parity verified plan_hash=${finalReport?.plan_hash}`
       : errors.join("; "),
   };
 }
@@ -881,6 +1148,8 @@ export function buildQaReport(
 export function getRequiredChecks(
   profile: "engine_render" | "nle_finishing",
   durationMode?: "strict" | "guide",
+  requiresSharedAudioPlan = false,
+  requiresSfx = false,
 ): string[] {
   const checks: string[] = [];
 
@@ -900,6 +1169,12 @@ export function getRequiredChecks(
       "loudness_target_valid",
       "package_completeness_valid",
     );
+    if (requiresSharedAudioPlan) {
+      checks.push("audio_render_plan_parity_valid");
+    }
+    if (requiresSfx) {
+      checks.push("sfx_mix_policy_valid");
+    }
   } else {
     // nle_finishing
     checks.push(

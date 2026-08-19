@@ -107,6 +107,7 @@ export interface BgmPackManifest {
     producer: string;
     source_type: "bundled_pack" | "user_library" | "project_local";
     evidence_refs: string[];
+    evidence_assets?: BgmPackDataRef[];
   };
   hash_policy: {
     algorithm: "sha256";
@@ -127,6 +128,7 @@ export interface PackVerification {
   issues: BgmPackIssue[];
   manifest_state: "valid" | "schema_invalid" | "unreadable" | "missing";
   verified_assets?: Record<string, VerifiedTrackAssets>;
+  verified_provenance_paths?: string[];
 }
 
 export interface VerifiedTrackAssets {

@@ -1,8 +1,9 @@
 schema_version: "1.0"
 pack_id: video-os-core-bgm-v1
-status: production_spec_only
-audio_generated: false
+status: technical_candidate_pack_promoted
+audio_generated: true
 catalog_notes:
+  - "One technically verified candidate per family can be materialized outside Git; musical audition and release approval remain pending."
   - "Durations and bar counts are targets; the accepted master must update actual values without changing the track ID."
   - "Edit points are counted from bar 1 and must be validated against the final bounce."
   - "Cutdown descriptions identify source modules, not literal concatenation lengths; the music editor may replace/overlap a cadence and must deliver 15/30/60/90 seconds to within one audio sample."

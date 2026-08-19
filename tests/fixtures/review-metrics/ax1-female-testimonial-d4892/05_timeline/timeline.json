@@ -1,0 +1,60 @@
+{
+  "version": "1",
+  "project_id": "ax1-female-testimonial-d4892",
+  "created_at": "2000-01-01T00:00:00Z",
+  "sequence": {
+    "name": "Public review-metrics fixture",
+    "fps_num": 24,
+    "fps_den": 1,
+    "width": 1920,
+    "height": 1080,
+    "start_frame": 0
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "CLP_START",
+            "segment_id": "SEG_SYNTH_B",
+            "asset_id": "AST_SYNTH_B",
+            "src_in_us": 1800000,
+            "src_out_us": 4200000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 40,
+            "role": "hero",
+            "motivation": "Synthetic opening select.",
+            "beat_id": "start_beat",
+            "candidate_ref": "CAND_START"
+          },
+          {
+            "clip_id": "CLP_END",
+            "segment_id": "SEG_SYNTH_B",
+            "asset_id": "AST_SYNTH_B",
+            "src_in_us": 22000000,
+            "src_out_us": 27000000,
+            "timeline_in_frame": 40,
+            "timeline_duration_frames": 80,
+            "role": "dialogue",
+            "motivation": "Synthetic closing select.",
+            "beat_id": "end_beat",
+            "candidate_ref": "CAND_END"
+          }
+        ]
+      }
+    ],
+    "audio": []
+  },
+  "markers": [
+    { "frame": 0, "kind": "beat", "label": "start_beat: opening" },
+    { "frame": 40, "kind": "beat", "label": "end_beat: closing" }
+  ],
+  "provenance": {
+    "brief_path": "01_intent/creative_brief.yaml",
+    "blueprint_path": "04_plan/edit_blueprint.yaml",
+    "selects_path": "04_plan/selects_candidates.yaml",
+    "compiler_version": "public-fixture"
+  }
+}

@@ -36,7 +36,7 @@ uxp plugin package /path/to/video-os-v2-spec/premiere-plugin
 1. Premiere Pro でプロジェクトを開く
 2. **Video OS Watcher** パネルを表示
 3. **FCP7 XML Path** にエージェントが出力する XML ファイルのパスを入力
-   - 例: `/Users/you/projects/my-project/09_output/PRJ001_premiere.xml`
+   - 例: `/Users/operator/projects/my-project/09_output/PRJ001_premiere.xml`
 4. **Watch** ボタンで監視開始
 5. エージェントが XML を更新すると、自動的にシーケンスがインポートされる
 

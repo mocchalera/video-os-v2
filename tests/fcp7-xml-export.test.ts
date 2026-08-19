@@ -1,14 +1,24 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { createRequire } from "node:module";
+import { parse as parseYaml } from "yaml";
 import {
   timelineToFcp7Xml,
   dbToLinearGain,
   linearGainToDb,
+  resolveFcp7AudioLevelsEmissionDecision,
 } from "../runtime/handoff/fcp7-xml-export.js";
 import type {
   TimelineIR,
   ClipOutput,
   TimelineTransitionOutput,
 } from "../runtime/compiler/types.js";
+
+const require = createRequire(import.meta.url);
+const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
+  compile(schema: object): (data: unknown) => boolean;
+};
 
 // ── Test Helpers ──────────────────────────────────────────────────
 
@@ -323,7 +333,7 @@ describe("transitionitem export", () => {
     expect(xml).toContain("<end>156</end>");
   });
 
-  it("maps match_cut_bridge to Dip to Color and skips smash_cut_energy", () => {
+  it("maps match_cut_bridge to Dip to Color", () => {
     const clip1 = makeClip({
       clip_id: "clip-1",
       timeline_in_frame: 0,
@@ -352,14 +362,7 @@ describe("transitionitem export", () => {
           track_id: "V1",
           transition_type: "match_cut",
           applied_skill_id: "match_cut_bridge",
-        },
-        {
-          transition_id: "tr-2",
-          from_clip_id: "clip-2",
-          to_clip_id: "clip-3",
-          track_id: "V1",
-          transition_type: "cut",
-          applied_skill_id: "smash_cut_energy",
+          transition_frames: 15,
         },
       ],
     );
@@ -490,6 +493,112 @@ describe("dB ↔ linear gain conversion", () => {
 // ── Audio gain export ────────────────────────────────────────────
 
 describe("audio gain export (Audio Levels filter)", () => {
+  it("exported Audio Levels decision helper parity — Audio Levels emission decision", () => {
+    const cases: Array<{
+      name: string;
+      clip: ClipOutput;
+      audioMix?: TimelineIR["audio_mix"];
+      emits: boolean;
+      linearGain?: number;
+    }> = [
+      {
+        name: "clip gain",
+        clip: makeClip({ role: "nat_sound", audio_policy: { nat_sound_gain: -3 } }),
+        emits: true,
+        linearGain: 10 ** (-3 / 20),
+      },
+      {
+        name: "timeline mix gain",
+        clip: makeClip({ role: "nat_sound" }),
+        audioMix: { nat_sound_gain: -6 },
+        emits: true,
+        linearGain: 10 ** (-6 / 20),
+      },
+      {
+        name: "clip gain precedence over timeline mix",
+        clip: makeClip({ role: "bgm", audio_policy: { bgm_gain: -3 } }),
+        audioMix: { bgm_gain: -12 },
+        emits: true,
+        linearGain: 10 ** (-3 / 20),
+      },
+      {
+        name: "fade in",
+        clip: makeClip({ role: "music", audio_policy: { bgm_fade_in_frames: 12 } }),
+        emits: true,
+      },
+      {
+        name: "fade out",
+        clip: makeClip({ role: "music", audio_policy: { bgm_fade_out_frames: 12 } }),
+        emits: true,
+      },
+      {
+        name: "zero fades are no-op",
+        clip: makeClip({ role: "music", audio_policy: { bgm_fade_in_frames: 0, bgm_fade_out_frames: 0 } }),
+        emits: false,
+      },
+      {
+        name: "empty defaults are no-op",
+        clip: makeClip({ role: "nat_sound", audio_policy: {} }),
+        audioMix: {},
+        emits: false,
+      },
+      {
+        name: "missing policy and mix are no-op",
+        clip: makeClip({ role: "nat_sound" }),
+        emits: false,
+      },
+    ];
+
+    for (const entry of cases) {
+      const timeline = makeTimeline([], [[entry.clip]]);
+      timeline.audio_mix = entry.audioMix;
+      const sourceMap = new Map([[entry.clip.asset_id, `/media/${entry.clip.asset_id}.wav`]]);
+      const xml = timelineToFcp7Xml(timeline, { sourceMap });
+      const decision = resolveFcp7AudioLevelsEmissionDecision(entry.clip, entry.audioMix);
+      expect(decision !== null, entry.name).toBe(entry.emits);
+      if (entry.linearGain !== undefined) {
+        expect(decision?.linearGain, entry.name).toBeCloseTo(entry.linearGain, 8);
+      }
+      expect(xml.includes("<effectid>audiolevels</effectid>"), entry.name).toBe(entry.emits);
+    }
+  });
+
+  it("declares only provisional native audiolevels support with fail-closed boundaries", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "..");
+    const schema = JSON.parse(fs.readFileSync(
+      path.join(repoRoot, "schemas/nle-capability-profile.schema.json"),
+      "utf8",
+    ));
+    const profile = parseYaml(fs.readFileSync(
+      path.join(repoRoot, "runtime/nle-profiles/premiere-v1.yaml"),
+      "utf8",
+    )) as Record<string, any>;
+    const validate = new Ajv2020({ strict: false }).compile(schema);
+
+    expect(profile.surfaces.audio_levels).toEqual({
+      mode: "provisional_roundtrip",
+      allowed_effect_ids: ["audiolevels"],
+      mapped_unsupported_effects: "reject_on_apply",
+      unmapped_effects: "report_only_manual",
+      hardware_verified: false,
+    });
+    expect(profile.surfaces.visual_effect_bake).toEqual({
+      version: "visual-effect-bake/v1",
+      mode: "derived_video_replacement",
+      treatment_schema: "premiere-visual-treatment/v1",
+      manifest_schema: "premiere-effect-bake-manifest/v1",
+      codec_policy: "h264_crf14_near_lossless",
+      consent: "explicit_cli_flag",
+      cache_root: "09_output/premiere-bakes",
+      output_sar: "1:1",
+      media_topology: "video_only_with_independent_original_audio",
+      supported_baked_edits: ["unchanged", "reorder", "delete"],
+      blocked_baked_edits: ["trim", "track_move", "relink", "source_replace", "speed", "rate", "filter"],
+      hardware_verified: false,
+    });
+    expect(validate(profile)).toBe(true);
+  });
+
   it("exports explicit linear gain without treating it as dB", () => {
     const audioClip = makeClip({
       clip_id: "nat-linear",

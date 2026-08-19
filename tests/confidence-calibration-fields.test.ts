@@ -1,15 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { validateProject } from "../scripts/validate-schemas.js";
 
-const tempDirs: string[] = [];
+let suiteWorkspace: string | undefined;
 
 function makeProject(prefix: string, files: Record<string, unknown>): string {
-  const tmpRoot = path.resolve("tmp/p4c-confidence-tests");
-  fs.mkdirSync(tmpRoot, { recursive: true });
-  const dir = fs.mkdtempSync(path.join(tmpRoot, `${prefix}-`));
-  tempDirs.push(dir);
+  if (!suiteWorkspace) throw new Error("P4c confidence test workspace is not initialized");
+  const dir = fs.mkdtempSync(path.join(suiteWorkspace, `${prefix}-`));
   for (const [relPath, content] of Object.entries(files)) {
     const filePath = path.join(dir, relPath);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -38,8 +37,19 @@ function minimalAssets(confidence: Record<string, unknown>): Record<string, unkn
 }
 
 describe("P4c confidence-record optional calibration fields", () => {
-  afterEach(() => {
-    for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  beforeAll(() => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "p4c-confidence-tests-"));
+    try {
+      fs.cpSync(path.resolve("schemas"), path.join(workspace, "schemas"), { recursive: true });
+      suiteWorkspace = workspace;
+    } catch (error) {
+      fs.rmSync(workspace, { recursive: true, force: true });
+      throw error;
+    }
+  });
+
+  afterAll(() => {
+    if (suiteWorkspace) fs.rmSync(suiteWorkspace, { recursive: true, force: true });
   });
 
   it("keeps existing confidence-record fixtures valid when calibration fields are absent", () => {

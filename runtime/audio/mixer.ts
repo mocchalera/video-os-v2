@@ -34,13 +34,171 @@ export interface MixOptions {
 }
 
 export interface AudioMixReport {
-  version: "audio-mix-report/v1";
+  version: "audio-mix-report/v1" | "audio-mix-report/v2";
+  project_id?: string;
+  plan_hash?: string;
   has_bgm: boolean;
+  has_sfx?: boolean;
   strategy:
     | "dialogue_only_mastering_v1"
     | "original_passthrough_v1"
     | "waveform_sidechain_v1"
-    | "timeline_embedded_bgm_mastering_v1";
+    | "timeline_embedded_bgm_mastering_v1"
+    | "shared_audio_render_plan_v1";
+  input_hashes?: {
+    timeline: string;
+    music_cues?: string;
+    sfx_cues?: string;
+    sfx_library_manifest?: string;
+    sound_design_decision?: string;
+    dialogue_sources: Array<{
+      clip_id: string;
+      content_hash: string;
+      size_bytes: number;
+    }>;
+    cue_sources: Array<{
+      cue_id: string;
+      content_hash: string;
+      size_bytes: number;
+    }>;
+    sfx_sources?: Array<{
+      cue_id: string;
+      asset_id: string;
+      content_hash: string;
+      size_bytes: number;
+    }>;
+  };
+  output?: {
+    content_hash: string;
+    size_bytes: number;
+    sample_rate_hz: number;
+    channels: number;
+  };
+  stems?: Array<{
+    stem_id: string;
+    role: "dialogue" | "music" | "sfx";
+    source_track_id: "A1" | "A2" | "A3";
+    content_hash: string;
+    size_bytes: number;
+    finish_applied: boolean;
+  }>;
+  sfx_cues?: Array<{
+    cue_id: string;
+    semantic_role: string;
+    asset_id: string;
+    timeline_range: { in_frame: number; out_frame: number };
+    source_range_us: { in_us: number; out_us: number };
+    dialogue_overlap_frames: number;
+    applied: {
+      gain_db: number;
+      fade_in_ms: number;
+      fade_out_ms: number;
+      duck_group: "dialogue" | "none";
+      duck_gain_db: number;
+      attack_ms: number;
+      release_ms: number;
+    };
+    tail_processing: {
+      requested_tail_frames: number;
+      applied_tail_frames: number;
+      timeline_action: "kept" | "trimmed_to_timeline";
+      source_action: "exact" | "trimmed" | "padded";
+      render_duration_frames: number;
+      render_duration_us: number;
+    };
+    pins: {
+      library_id: string;
+      library_version: string;
+      library_manifest_hash: string;
+      asset_content_hash: string;
+      asset_size_bytes: number;
+      rights_evidence_ref: string;
+      provenance_ref: string;
+      rights_basis: string;
+      rights_usage_scope: string;
+      provenance_origin: string;
+      generated_at: string | null;
+      generation_id?: string | null;
+    };
+    decision_pin?: {
+      candidate_id: string;
+      decision_hash: string;
+      resolved_frame: number;
+      semantic_role: string;
+      asset_id: string;
+    };
+    rendered_content_hash: string;
+    a3_output_content_hash: string;
+    peak_dbtp: number | null;
+    headroom_db: number | null;
+  }>;
+  cues?: Array<{
+    cue_id: string;
+    track_id: string;
+    timeline_range: { in_frame: number; out_frame: number };
+    source_range_us: { in_us: number; out_us: number };
+    applied: {
+      base_gain_db: number;
+      duck_gain_db: number;
+      fade_in_ms: number;
+      fade_out_ms: number;
+      attack_ms: number;
+      release_ms: number;
+    };
+    pins: {
+      pack_id: string;
+      pack_version: string;
+      pack_manifest_hash: string;
+      full_mix_content_hash: string;
+      full_mix_size_bytes: number;
+      analysis_content_hash: string;
+      analysis_size_bytes: number;
+      analysis_status: string;
+    };
+    rendered_content_hash: string;
+    sidechain_content_hash: string;
+  }>;
+  dialogue_finish_scope?: "a1_only" | "none" | "none_original_passthrough" | "none_mixed_legacy";
+  mastering_count?: number;
+  execution_strategy?: {
+    id: "shared_audio_render_plan_executor_v1";
+    stages: string[];
+    deterministic_input_order: string[];
+  };
+  sidechain_evidence?: {
+    detector: "dialogue_waveform_rms";
+    dialogue_stem_content_hash: string;
+    threshold: number;
+    per_cue: Array<{
+      cue_id: string;
+      ratio: number;
+      attack_ms: number;
+      release_ms: number;
+      requested_duck_gain_db: number;
+      sidechain_output_content_hash: string;
+    }>;
+  };
+  sfx_sidechain_evidence?: {
+    detector: "dialogue_waveform_rms";
+    dialogue_stem_content_hash: string;
+    threshold: number;
+    per_cue: Array<{
+      cue_id: string;
+      duck_group: "dialogue" | "none";
+      ratio: number;
+      attack_ms: number;
+      release_ms: number;
+      requested_duck_gain_db: number;
+      dialogue_overlap_frames: number;
+      sidechain_applied: boolean;
+      a3_output_content_hash: string;
+    }>;
+  };
+  sfx_peak?: {
+    maximum_peak_dbtp: number | null;
+    minimum_headroom_db: number | null;
+  };
+  warnings?: string[];
   bgm_ownership?: {
     owner: "timeline_assembler";
     asset_ids: string[];
@@ -51,6 +209,7 @@ export interface AudioMixReport {
     lra_target: number;
     true_peak_target_dbtp: number;
     premaster_measurement: LoudnormMeasurement;
+    output_measurement?: LoudnormMeasurement;
   };
   bgm_reference_mastering?: {
     loudness_target_lufs: number;

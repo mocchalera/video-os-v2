@@ -17,6 +17,15 @@ import { packageCommand } from "../runtime/commands/package.js";
 import { ingestAsset } from "../runtime/connectors/ffprobe.js";
 import { approveFinalRenderChecklist } from "../runtime/packaging/final-render-approval.js";
 import { verifyExistingPackage } from "../runtime/packaging/package-verification.js";
+import { computeSha256 } from "../runtime/packaging/manifest.js";
+import {
+  liveRendererVersionProvider,
+} from "../runtime/packaging/renderer-version-provider.js";
+
+interface PackageFixtureCase {
+  id: string;
+  files: Record<string, string>;
+}
 
 const tempDirs: string[] = [];
 
@@ -40,6 +49,35 @@ function writeJson(filePath: string, value: unknown): void {
 function writeYaml(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, stringifyYaml(value), "utf-8");
+}
+
+function materializePackageFixtureCase(
+  projectDir: string,
+  testCase: PackageFixtureCase,
+  options: {
+    preserveRendererVersionDrift?: boolean;
+    preserveRouteReceiptTamper?: boolean;
+  } = {},
+): void {
+  for (const [relativePath, contents] of Object.entries(testCase.files)) {
+    const filePath = path.join(projectDir, relativePath);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, contents, "utf8");
+  }
+  if (options.preserveRendererVersionDrift) return;
+
+  const receiptPath = path.join(projectDir, "07_package", "logs", "render-route.json");
+  const manifestPath = path.join(projectDir, "07_package", "package_manifest.json");
+  const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const liveVersions = liveRendererVersionProvider.rendererVersionsFor(receipt);
+  receipt.renderer_versions = liveVersions;
+  manifest.provenance.render.renderer_versions = liveVersions;
+  fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  if (!options.preserveRouteReceiptTamper) {
+    manifest.provenance.render.route_receipt.sha256 = computeSha256(receiptPath);
+  }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 }
 
 function writeMinimalTimeline(projectDir: string, version = "1"): string {
@@ -729,11 +767,7 @@ describe("package CLI existing-package verification", () => {
     if (!valid) throw new Error("valid package fixture is missing");
     expect(JSON.parse(valid.files["07_package/package_manifest.json"]).provenance)
       .toHaveProperty("render");
-    for (const [relativePath, contents] of Object.entries(valid.files)) {
-      const filePath = path.join(projectDir, relativePath);
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, contents, "utf8");
-    }
+    materializePackageFixtureCase(projectDir, valid);
     const before = snapshotProjectFiles(projectDir);
     const stdout = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
@@ -760,26 +794,30 @@ describe("package CLI existing-package verification", () => {
       "apps/macos-studio/Tests/VideoOSStudioCoreTests/Fixtures/macos-studio-contract-v1.json",
       "utf8",
     )) as { packageCases: Array<{ id: string; files: Record<string, string> }> };
-    for (const id of [
-      "render_route_receipt_tampered",
-      "render_route_drift",
-      "renderer_version_drift",
-      "encode_pass_drift",
-      "font_receipt_missing",
-      "font_receipt_tampered",
-      "layer_receipt_missing",
-    ]) {
+    const cases: Array<[string, string]> = [
+      ["render_route_receipt_tampered", "render_route_receipt_hash_matches"],
+      ["render_route_drift", "render_route_matches_canonical_inputs"],
+      ["renderer_version_drift", "renderer_versions_match_runtime"],
+      ["encode_pass_drift", "lossy_video_encode_passes_match_execution"],
+      ["font_receipt_missing", "render_font_receipt_presence_matches_route"],
+      ["font_receipt_tampered", "render_font_receipt_hash_matches"],
+      ["layer_receipt_missing", "render_layer_receipts_complete"],
+    ];
+    for (const [id, failedCheckName] of cases) {
       const projectDir = createTempProject(`video-os-package-verification-${id}-`);
       const testCase = fixture.packageCases.find((candidate) => candidate.id === id);
       if (!testCase) throw new Error(`missing fixture case ${id}`);
-      for (const [relativePath, contents] of Object.entries(testCase.files)) {
-        const filePath = path.join(projectDir, relativePath);
-        fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, contents, "utf8");
-      }
+      materializePackageFixtureCase(projectDir, testCase, {
+        preserveRendererVersionDrift: id === "renderer_version_drift",
+        preserveRouteReceiptTamper: id === "render_route_receipt_tampered",
+      });
       const result = verifyExistingPackage(projectDir);
       expect(result.ready, id).toBe(false);
       expect(result.readinessLabel, id).toBe("package contract mismatch");
+      expect(
+        result.checks.some((check) => check.name === failedCheckName && !check.passed),
+        id,
+      ).toBe(true);
     }
   });
 

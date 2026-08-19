@@ -41,7 +41,9 @@ description: Finish an existing Japanese business talking-head, lecture, intervi
    全文字幕はHyperFramesではなくlibassを使い、可変`Noto Sans JP`を
    直接指定しない。検証済み静的700/900 faceをfail-closedで選ぶ。
 8. 会話音声を主役にする。既存の検証済みMAを維持し、BGMはbriefとprovenanceが
-   揃う場合だけ使う。通常は`-16 LUFS`付近、true peakは宣言値以下を確認する。
+    揃う場合だけ使う。BGM、効果音、テンポ調整、意味ベース配置を含む音仕上げが
+    必要なら`$short-sound-design`へrouteする。通常は`-16 LUFS`付近、
+    true peakは宣言値以下を確認する。
 9. rough review outputはfinal packageと区別して書き出す。正式packageは
    `render-video`のGate 10、字幕承認、rights/privacy、publication gateを省略しない。
 10. full decode、rational FPS、総尺、A/V start/end、loudness、代表frame、

@@ -38,6 +38,24 @@
       "$ref": "#/$defs/importPolicy"
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "profile_id": { "const": "adobe_premiere_fcp7xml_v1" } },
+        "required": ["profile_id"]
+      },
+      "then": {
+        "properties": {
+          "surfaces": {
+            "properties": {
+              "simple_transition": { "$ref": "#/$defs/premiereSimpleTransition" }
+            },
+            "required": ["simple_transition", "audio_levels", "visual_effect_bake"]
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false,
   "$defs": {
     "nleInfo": {
@@ -100,12 +118,85 @@
         "mode": { "$ref": "#/$defs/surfaceMode" },
         "tolerance_frames": { "type": "integer", "minimum": 0 },
         "detect_after": { "type": "string" },
+        "export_mode": {
+          "type": "string",
+          "enum": ["blocked", "exact_projection"]
+        },
         "allowed_types": {
           "type": "array",
           "items": { "type": "string" }
         }
       },
       "additionalProperties": false
+    },
+    "premiereSimpleTransition": {
+      "type": "object",
+      "required": ["mode", "allowed_types"],
+      "properties": {
+        "mode": { "const": "report_only" },
+        "allowed_types": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["dissolve", "dip_to_color"] },
+          "allOf": [
+            { "contains": { "const": "dissolve" } },
+            { "contains": { "const": "dip_to_color" } }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "premiereAudioLevels": {
+      "type": "object",
+      "required": [
+        "mode",
+        "allowed_effect_ids",
+        "mapped_unsupported_effects",
+        "unmapped_effects",
+        "hardware_verified"
+      ],
+      "properties": {
+        "mode": { "const": "provisional_roundtrip" },
+        "allowed_effect_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "const": "audiolevels" }
+        },
+        "mapped_unsupported_effects": { "const": "reject_on_apply" },
+        "unmapped_effects": { "const": "report_only_manual" },
+        "hardware_verified": { "const": false }
+      },
+      "additionalProperties": false
+    },
+    "premiereVisualEffectBake": {
+      "type": "object",
+      "required": ["version", "mode", "treatment_schema", "manifest_schema", "codec_policy", "consent", "cache_root", "output_sar", "media_topology", "supported_baked_edits", "blocked_baked_edits", "hardware_verified"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": "visual-effect-bake/v1" },
+        "mode": { "const": "derived_video_replacement" },
+        "treatment_schema": { "const": "premiere-visual-treatment/v1" },
+        "manifest_schema": { "const": "premiere-effect-bake-manifest/v1" },
+        "codec_policy": { "const": "h264_crf14_near_lossless" },
+        "consent": { "const": "explicit_cli_flag" },
+        "cache_root": { "const": "09_output/premiere-bakes" },
+        "output_sar": { "const": "1:1" },
+        "media_topology": { "const": "video_only_with_independent_original_audio" },
+        "supported_baked_edits": {
+          "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true,
+          "items": { "enum": ["unchanged", "reorder", "delete"] },
+          "allOf": [{ "contains": { "const": "unchanged" } }, { "contains": { "const": "reorder" } }, { "contains": { "const": "delete" } }]
+        },
+        "blocked_baked_edits": {
+          "type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true,
+          "items": { "enum": ["trim", "track_move", "relink", "source_replace", "speed", "rate", "filter"] },
+          "allOf": [{ "contains": { "const": "trim" } }, { "contains": { "const": "track_move" } }, { "contains": { "const": "relink" } }, { "contains": { "const": "source_replace" } }, { "contains": { "const": "speed" } }, { "contains": { "const": "rate" } }, { "contains": { "const": "filter" } }]
+        },
+        "hardware_verified": { "const": false }
+      }
     },
     "surfaces": {
       "type": "object",
@@ -119,6 +210,9 @@
         "timeline_marker_add": { "$ref": "#/$defs/surfaceEntry" },
         "clip_marker_add": { "$ref": "#/$defs/surfaceEntry" },
         "note_text_add": { "$ref": "#/$defs/surfaceEntry" },
+        "text_overlay": { "$ref": "#/$defs/surfaceEntry" },
+        "audio_levels": { "$ref": "#/$defs/premiereAudioLevels" },
+        "visual_effect_bake": { "$ref": "#/$defs/premiereVisualEffectBake" },
         "color_finish": { "$ref": "#/$defs/surfaceEntry" },
         "fusion_effect": { "$ref": "#/$defs/surfaceEntry" },
         "fairlight_advanced_audio": { "$ref": "#/$defs/surfaceEntry" }

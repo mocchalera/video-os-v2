@@ -252,6 +252,8 @@ function parseManifest(data: unknown, affectedRef: string): ManifestParseResult 
     && typeof provenance.producer === "string"
     && ["bundled_pack", "user_library", "project_local"].includes(String(provenance.source_type))
     && isStringArray(provenance.evidence_refs)
+    && (provenance.evidence_assets === undefined
+      || (Array.isArray(provenance.evidence_assets) && provenance.evidence_assets.every(parseDataRef)))
     && isRecord(hashPolicy)
     && hashPolicy.algorithm === "sha256"
     && hashPolicy.canonicalization === "normalized-json-v1"
@@ -432,14 +434,14 @@ function safePackRef(manifestPath: string, expectedPackId?: string): string {
 
 function verifyPinnedDataRef(
   packRoot: string,
-  trackId: string,
-  label: "rights" | "analysis",
+  affectedRef: string,
+  label: "rights" | "analysis" | "provenance",
   ref: BgmPackDataRef,
   result: PackVerification,
 ): string | undefined {
   if (!dataRefExtensionSupported(ref)) {
     result.issues.push(packIssue("BGM_PACK_MEMBER_UNSUPPORTED", `Track ${label} reference uses an unsupported or mismatched format.`, {
-      affectedRef: trackId,
+      affectedRef,
       recoverable: false,
       suggestedAction: "Use a pinned JSON or YAML data record inside the pack.",
     }));
@@ -447,7 +449,7 @@ function verifyPinnedDataRef(
   }
   if (refEscapesRoot(packRoot, ref.path)) {
     result.issues.push(packIssue("BGM_PACK_ARCHIVE_UNSAFE", `Track ${label} record resolves outside the pack root.`, {
-      affectedRef: trackId,
+      affectedRef,
       recoverable: false,
       suggestedAction: "Remove the unsafe pack and reinstall it from a trusted archive.",
     }));
@@ -456,7 +458,7 @@ function verifyPinnedDataRef(
   const resolved = resolveContainedFile(packRoot, ref.path);
   if (!resolved) {
     result.issues.push(packIssue("BGM_TRACK_MISSING", `Pinned track ${label} record is missing.`, {
-      affectedRef: trackId,
+      affectedRef,
       recoverable: false,
       suggestedAction: "Reinstall the complete pack from a verified archive.",
     }));
@@ -470,7 +472,7 @@ function verifyPinnedDataRef(
     actualHash = hashFile(resolved);
   } catch {
     result.issues.push(packIssue("BGM_TRACK_MISSING", `Pinned track ${label} record could not be read.`, {
-      affectedRef: trackId,
+      affectedRef,
       recoverable: false,
       suggestedAction: "Check pack permissions or reinstall the complete pack.",
     }));
@@ -481,7 +483,7 @@ function verifyPinnedDataRef(
   if (stats.size !== ref.size_bytes || actualHash !== ref.content_hash.toLowerCase()) {
     // Metadata is optional at selection time, but a declared pin mismatch means the pack itself was altered.
     result.issues.push(packIssue("BGM_PACK_HASH_MISMATCH", `Pinned track ${label} content hash or byte size does not match the manifest.`, {
-      affectedRef: trackId,
+      affectedRef,
       recoverable: false,
       suggestedAction: "Reinstall the pack from a verified archive; do not trust the altered metadata.",
     }));
@@ -589,6 +591,7 @@ export function verifyPack(
     alternate_mix_paths: {},
     stem_paths: {},
   }]));
+  result.verified_provenance_paths = [];
   for (const track of manifest.tracks) {
     if (trackIds.has(track.track_id)) {
       result.issues.push(packIssue("BGM_PACK_INCOMPATIBLE", "Pack contains a duplicate track ID.", {
@@ -726,6 +729,32 @@ export function verifyPack(
           severity: "warning",
         }));
       }
+    }
+  }
+
+  const provenanceAssets = manifest.provenance.evidence_assets ?? [];
+  const provenancePaths = new Set<string>();
+  for (const ref of provenanceAssets) {
+    if (provenancePaths.has(ref.path)) {
+      result.issues.push(packIssue("BGM_PACK_INCOMPATIBLE", "Pack contains a duplicate pinned provenance path.", {
+        affectedRef: manifest.pack_id,
+        recoverable: false,
+        suggestedAction: "Deduplicate provenance pins and rebuild the pack.",
+      }));
+      continue;
+    }
+    provenancePaths.add(ref.path);
+    const resolved = verifyPinnedDataRef(packRoot, manifest.pack_id, "provenance", ref, result);
+    if (resolved) result.verified_provenance_paths.push(resolved);
+  }
+  if (provenanceAssets.length > 0) {
+    const unpinnedRefs = manifest.provenance.evidence_refs.filter((ref) => !provenancePaths.has(ref));
+    if (unpinnedRefs.length > 0) {
+      result.issues.push(packIssue("BGM_PACK_INCOMPATIBLE", "Pack provenance evidence_refs include members without hash-and-size pins.", {
+        affectedRef: manifest.pack_id,
+        recoverable: false,
+        suggestedAction: "Pin every declared provenance member and rebuild the pack.",
+      }));
     }
   }
 

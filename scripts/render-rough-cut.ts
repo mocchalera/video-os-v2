@@ -29,7 +29,7 @@ import {
   SourceInputAttestationError,
   writeRenderFreshnessMetadata,
 } from "../runtime/render/source-input-attestation.js";
-import { computeFileHash } from "../runtime/state/reconcile.js";
+import { sha256FileHex } from "../runtime/source-content-identity.js";
 import { assertTimelineRenderSupported } from "../runtime/render/media-kind-guard.js";
 import { resolveCanonicalRenderInputs } from "../runtime/render/canonical-render-input.js";
 import { assertSafeAudioDelayFilterOrder } from "../runtime/render/audio-filter-safety.js";
@@ -48,6 +48,7 @@ const AUDIO_VIDEO_SYNC_TOLERANCE_SEC = 0.1;
 
 export interface RenderArgs {
   projectPath: string;
+  timelinePath?: string;
   outputPath?: string;
   bgmPath?: string;
   reuseVideoPath?: string;
@@ -283,7 +284,7 @@ export function writeVideoAssemblyTimingManifest(
 ): void {
   const manifest: VideoAssemblyTimingManifest = {
     version: "1",
-    timeline_hash: computeFileHash(timelinePath),
+    timeline_hash: sha256FileHex(timelinePath),
     fps,
     assembly_duration_sec: assemblyDurationSec,
     clips: clips.map((clip) => {
@@ -314,7 +315,7 @@ function loadVideoAssemblyTimingManifest(
     const manifest = readJson<VideoAssemblyTimingManifest>(manifestPath);
     if (
       manifest.version !== "1" ||
-      manifest.timeline_hash !== computeFileHash(timelinePath) ||
+      manifest.timeline_hash !== sha256FileHex(timelinePath) ||
       Math.abs(manifest.fps - fps) > 0.000001 ||
       Math.abs(manifest.assembly_duration_sec - assemblyDurationSec) > DURATION_PARITY_THRESHOLD_SEC ||
       manifest.clips.length !== clips.length
@@ -1538,7 +1539,9 @@ async function assembleVideoFromGroups(
 
 export async function renderRoughCut(args: RenderArgs): Promise<RenderSummary> {
   const projectPath = path.resolve(args.projectPath);
-  const timelinePath = path.join(projectPath, "05_timeline", "timeline.json");
+  const timelinePath = args.timelinePath
+    ? path.resolve(args.timelinePath)
+    : path.join(projectPath, "05_timeline", "timeline.json");
   if (!fs.existsSync(timelinePath)) throw new Error(`Timeline not found: ${timelinePath}`);
 
   const timeline = readJson<TimelineDoc>(timelinePath);

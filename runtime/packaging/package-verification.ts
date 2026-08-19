@@ -19,7 +19,6 @@ import { REMOTION_RENDERER_VERSION } from "../render/remotion/render-remotion.js
 import {
   captionFontContractForReceipt,
 } from "../caption/font-contract.js";
-import { execFileSync } from "node:child_process";
 import {
   assertAlphaLayerMediaContract,
   probeAlphaLayerMediaSync,
@@ -27,6 +26,10 @@ import {
 } from "../render/alpha-layer-contract.js";
 import { loadContentRenderPlan } from "../content/render-plan.js";
 import { verifyDerivedVideoProvenance } from "./derived-video-provenance.js";
+import {
+  liveRendererVersionProvider,
+  type RendererVersionProvider,
+} from "./renderer-version-provider.js";
 
 export interface PackageVerificationCheck {
   name: string;
@@ -74,6 +77,16 @@ export interface PackageVerificationPaths {
 }
 
 export function verifyExistingPackage(projectDir: string): PackageVerificationResult {
+  return verifyExistingPackageWithRendererVersionProvider(
+    projectDir,
+    liveRendererVersionProvider,
+  );
+}
+
+export function verifyExistingPackageWithRendererVersionProvider(
+  projectDir: string,
+  rendererVersionProvider: RendererVersionProvider,
+): PackageVerificationResult {
   const absDir = path.resolve(projectDir);
   try {
     const delivery = resolveDeliveryArtifactPaths(absDir, { verifyHashes: true });
@@ -83,7 +96,7 @@ export function verifyExistingPackage(projectDir: string): PackageVerificationRe
       finalVideoPath: delivery.finalVideoPath,
       captionApprovalPath: delivery.captionApprovalPath,
       allowApprovedState: delivery.source === "active_delivery",
-    });
+    }, rendererVersionProvider);
   } catch (error) {
     return finish(absDir, [{
       name: "package_verification_completed",
@@ -97,9 +110,21 @@ export function verifyPackageGeneration(
   projectDir: string,
   paths: PackageVerificationPaths,
 ): PackageVerificationResult {
+  return verifyPackageGenerationWithRendererVersionProvider(
+    projectDir,
+    paths,
+    liveRendererVersionProvider,
+  );
+}
+
+export function verifyPackageGenerationWithRendererVersionProvider(
+  projectDir: string,
+  paths: PackageVerificationPaths,
+  rendererVersionProvider: RendererVersionProvider,
+): PackageVerificationResult {
   const absDir = path.resolve(projectDir);
   try {
-    return verifyExistingPackageInternal(absDir, paths);
+    return verifyExistingPackageInternal(absDir, paths, rendererVersionProvider);
   } catch (error) {
     return finish(absDir, [{
       name: "package_verification_completed",
@@ -112,6 +137,7 @@ export function verifyPackageGeneration(
 function verifyExistingPackageInternal(
   projectDir: string,
   paths: PackageVerificationPaths,
+  rendererVersionProvider: RendererVersionProvider,
 ): PackageVerificationResult {
   const absDir = path.resolve(projectDir);
   const timelinePath = path.join(absDir, "05_timeline", "timeline.json");
@@ -418,7 +444,13 @@ function verifyExistingPackageInternal(
     }
   }
   if (manifest.source_of_truth === "engine_render") {
-    verifyRenderProvenance(checks, absDir, manifest, finalVideoPath);
+    verifyRenderProvenance(
+      checks,
+      absDir,
+      manifest,
+      finalVideoPath,
+      rendererVersionProvider,
+    );
   }
 
   const qaFailed = !qa.passed || !allQAChecksPassed;
@@ -437,6 +469,7 @@ function verifyRenderProvenance(
   projectDir: string,
   manifest: PackageManifest,
   canonicalFinalVideoPath: string,
+  rendererVersionProvider: RendererVersionProvider,
 ): void {
   const render = manifest.provenance.render;
   if (!render) {
@@ -517,19 +550,7 @@ function verifyRenderProvenance(
     addCheck(checks, "render_route_matches_canonical_inputs", false, errorMessage(error));
   }
 
-  const currentFfmpeg = execFileSync("ffmpeg", ["-version"], {
-    encoding: "utf8",
-  }).split(/\r?\n/, 1)[0].trim();
-  const expectedRendererVersions = {
-    ffmpeg: currentFfmpeg,
-    ...(receipt.visual_layers.some((layer) => layer.renderer === "hyperframes")
-      ? { hyperframes: HYPERFRAMES_RENDERER_VERSION }
-      : {}),
-    ...(receipt.base_engine === "remotion"
-      || receipt.visual_layers.some((layer) => layer.renderer === "remotion")
-      ? { remotion: REMOTION_RENDERER_VERSION }
-      : {}),
-  };
+  const expectedRendererVersions = rendererVersionProvider.rendererVersionsFor(receipt);
   addCheck(
     checks,
     "renderer_versions_match_runtime",

@@ -47,7 +47,7 @@ export const VERIFY_STEPS: Step[] = [
   {
     name: "unit-tests",
     command: "npx",
-    args: ["vitest", "run", "--reporter=dot"],
+    args: ["vitest", "run", "--maxWorkers=4"],
   },
   {
     name: "schema-validation (demo)",

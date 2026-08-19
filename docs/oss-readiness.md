@@ -8,8 +8,7 @@ This checklist documents the minimum bar before publishing RoughCut Agent as a p
 - Contribution, security, and conduct policies are present.
 - CI runs schema validation, tests, and TypeScript build on pull requests.
 - `.env.local`, local media, generated renders, temporary files, and non-demo project outputs are ignored.
-- `projects/_template/`, `projects/demo/`, and `projects/sample/` are the only project directories intended for version control.
-- `npm run verify:repo` enforces that project-directory allowlist.
+- `projects/_template/` and `projects/demo/` are the only project directories intended for version control.
 
 ## Before public announcement
 

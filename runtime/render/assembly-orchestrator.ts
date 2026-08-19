@@ -16,6 +16,11 @@ export interface ProduceAssemblyOptions {
   outputPath: string;
   engine?: AssemblyEngine;
   bundleCacheDir?: string;
+  /**
+   * Shared AudioRenderPlan owns A1/A2 when false. The picture assembly must
+   * then remain video-only so pinned A2 cannot be mixed and finished early.
+   */
+  includeAudio?: boolean;
 }
 
 export interface ProduceAssemblyResult {
@@ -45,6 +50,7 @@ export async function produceAssembly(
   const sourceInputsBefore = createSourceInputAttestation(projectDir, {
     timelinePath: opts.timelinePath,
     sourceOverrides: opts.sourceMap,
+    includeAudio: opts.includeAudio !== false,
   });
   const timeline = JSON.parse(fs.readFileSync(opts.timelinePath, "utf8")) as {
     sequence?: { fps_den?: number };
@@ -59,6 +65,9 @@ export async function produceAssembly(
   ) || typeof timeline.audio_mix?.bgm_asset_id === "string";
   if (engine === "remotion" && hasStill &&
     (timeline.sequence?.fps_den !== 1 || hasExplicitAudio)) {
+    engine = "ffmpeg";
+  }
+  if (opts.includeAudio === false) {
     engine = "ffmpeg";
   }
   if (engine === "remotion") {
@@ -82,6 +91,7 @@ export async function produceAssembly(
     timelinePath: opts.timelinePath,
     outputPath: opts.outputPath,
     sourceOverrides: opts.sourceMap,
+    includeAudio: opts.includeAudio,
     legacyCaptionMode: "reject",
   });
   writeRenderFreshnessMetadata(projectDir, result.outputPath, {

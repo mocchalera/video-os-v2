@@ -242,6 +242,10 @@
             "caption"
           ]
         },
+        "role": {
+          "type": "string",
+          "enum": ["dialogue", "music", "nat_sound", "ambient", "sfx"]
+        },
         "clips": {
           "type": "array",
           "items": {
@@ -308,6 +312,7 @@
             "music",
             "nat_sound",
             "ambient",
+            "sfx",
             "bgm",
             "title",
             "caption"
@@ -352,7 +357,7 @@
         },
         "audio_role": {
           "type": "string",
-          "enum": ["dialogue", "music", "nat_sound", "ambient"]
+          "enum": ["dialogue", "music", "nat_sound", "ambient", "sfx"]
         },
         "still_image": {
           "type": "object",

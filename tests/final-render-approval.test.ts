@@ -38,7 +38,7 @@ describe("final render approval", () => {
     fs.mkdirSync(path.dirname(previewPath), { recursive: true });
     fs.writeFileSync(previewPath, "approved preview");
     const approval = approveFinalRenderChecklist(projectDir, {
-      approvedBy: "operator",
+      approvedBy: "mocchalera",
       approvedAt: "2026-07-23T05:30:00Z",
       checklist: {
         captions: "approved",
@@ -80,7 +80,7 @@ describe("final render approval", () => {
   it("invalidates approval when any bound input changes", () => {
     const projectDir = createProject();
     approveFinalRenderChecklist(projectDir, {
-      approvedBy: "operator",
+      approvedBy: "mocchalera",
       checklist: {
         captions: "approved",
         caption_typography: "approved",
@@ -111,7 +111,7 @@ describe("final render approval", () => {
     const projectDir = createProject();
 
     expect(() => approveFinalRenderChecklist(projectDir, {
-      approvedBy: "operator",
+      approvedBy: "mocchalera",
       checklist: {
         captions: "approved",
         caption_typography: "approved",

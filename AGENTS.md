@@ -47,20 +47,13 @@ Required local toolchain:
 - Tests: `tests/`, `editor/tests/`
 
 <!-- project-loop-harness:start -->
-## Project Loop Harness
+## Project Loop Harness (temporarily paused)
 
-This repository uses Project Loop Harness.
+Project Loop Harness and the `project-control-loop` skill are temporarily
+paused for this repository. Do not invoke the skill or run `pcl` commands
+unless the user explicitly asks to re-enable or use them.
 
-Rules for coding agents:
-
-- Do not edit `.project-loop/project.db` directly.
-- Do not edit `.project-loop/events.jsonl` directly.
-- Do not edit `.project-loop/dashboard/dashboard.html` directly.
-- Use `pcl` commands to mutate project-loop state.
-- After meaningful state changes, run `pcl validate` and `pcl render`.
-- Evidence is required for status changes.
-- Human approval is required for database migrations, dependency additions, auth/billing changes, production config changes, and destructive operations.
-- Preserve this repository's artifact rules: do not commit `.env.local`, source footage, rendered media, or generated project outputs unless explicitly requested.
-- Prefer small, verifiable changes.
-- If the same failure repeats, stop and escalate instead of looping indefinitely.
+The installed `.project-loop/` state and `pcl.yaml` are retained unchanged so
+the harness can be re-enabled later. Never hand-edit their generated or
+database files while the harness is paused.
 <!-- project-loop-harness:end -->

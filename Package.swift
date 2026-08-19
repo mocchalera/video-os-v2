@@ -42,6 +42,11 @@ let package = Package(
             resources: [
                 .copy("Fixtures")
             ]
+        ),
+        .testTarget(
+            name: "VideoOSStudioTests",
+            dependencies: ["VideoOSStudio"],
+            path: "apps/macos-studio/Tests/VideoOSStudioTests"
         )
     ]
 )

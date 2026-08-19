@@ -106,9 +106,9 @@ describe("editor server source_map API redaction", () => {
         {
           asset_id: "AST_001",
           filename: "clip.mov",
-          local_source_path: "/Users/example/private/clip.mov",
+          local_source_path: "/Users/operator/private/clip.mov",
           link_path: "02_media/clip.mov",
-          source_locator: "file:///Users/example/private/clip.mov",
+          source_locator: "file:///Users/operator/private/clip.mov",
           image_sequence: {
             frames: [{ frame_link_path: "02_media/.image-sequence-frames/private/frame-0001.png" }],
           },

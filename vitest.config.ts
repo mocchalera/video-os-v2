@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     globals: false,
     testTimeout: 10000,
-    exclude: [...configDefaults.exclude, "**/.project-loop/**"],
+    exclude: [
+      ...configDefaults.exclude,
+      "**/.project-loop/**",
+      "tests/integration/**",
+    ],
   },
 });

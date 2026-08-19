@@ -31,6 +31,17 @@ import {
   resolveContinuityPolicy,
 } from "./adjacency.js";
 import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
+import { validateArtifact } from "../artifacts/loaders.js";
+import {
+  projectMusicToTimeline,
+  validateMusicCues,
+  type MusicCuesDoc,
+} from "../audio/music-cues.js";
+import {
+  projectSfxToTimeline,
+  resolveSfxCuePlan,
+} from "../audio/sfx-cues.js";
+import type { BgmSelectionArtifact } from "../music/selection-service.js";
 import { loadSourceMap } from "../media/source-map.js";
 import { extractDurationUs, runFfprobe } from "../connectors/ffprobe.js";
 import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
@@ -99,6 +110,124 @@ export type { ReviewPatch, PatchResult, PatchError, PatchOperation } from "./pat
 export type { ResolutionReport } from "./resolve.js";
 
 export const MIN_RENDERABLE_FRAMES = 12;
+
+function isContainedPath(parentPath: string, childPath: string): boolean {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function validateMusicSelectionBinding(
+  projectPath: string,
+  doc: MusicCuesDoc,
+): void {
+  if (doc.version !== "2.0.0") return;
+  if (!doc.selection_ref) {
+    throw new Error("music-cues/v2 requires a hash-pinned bgm_selection reference.");
+  }
+  const projectRealPath = fs.realpathSync(projectPath);
+  const selectionPath = path.resolve(projectRealPath, doc.selection_ref.path);
+  if (!isContainedPath(projectRealPath, selectionPath) || !fs.existsSync(selectionPath)) {
+    throw new Error("music-cues/v2 selection_ref is missing or resolves outside the project.");
+  }
+  const selectionRealPath = fs.realpathSync(selectionPath);
+  if (!isContainedPath(projectRealPath, selectionRealPath)) {
+    throw new Error("music-cues/v2 selection_ref resolves through a symlink outside the project.");
+  }
+  const selectionBytes = fs.readFileSync(selectionRealPath);
+  const selectionHash = `sha256:${createHash("sha256").update(selectionBytes).digest("hex")}`;
+  if (selectionHash !== doc.selection_ref.content_hash) {
+    throw new Error("music-cues/v2 bgm_selection hash pin is stale.");
+  }
+  const selection = validateArtifact<BgmSelectionArtifact>(
+    JSON.parse(selectionBytes.toString("utf8")),
+    "bgm-selection.schema.json",
+  );
+  const pin = selection.selected_track_pin;
+  const asset = doc.music_asset;
+  if (
+    selection.mode !== "operator_locked"
+    || !selection.selected
+    || !pin
+    || selection.selected.track_id !== asset.track_id
+    || pin.track_id !== asset.track_id
+    || pin.pack_id !== asset.pack_id
+    || pin.pack_version !== asset.pack_version
+    || pin.pack_manifest_hash !== asset.pack_manifest_hash
+    || selection.selected.content_hash !== asset.full_mix_content_hash
+    || asset.source_hash !== asset.full_mix_content_hash
+    || pin.full_mix_content_hash !== asset.full_mix_content_hash
+    || pin.full_mix_size_bytes !== asset.full_mix_size_bytes
+    || pin.full_mix_path !== asset.path
+    || pin.analysis_content_hash !== asset.analysis_content_hash
+    || pin.analysis_size_bytes !== asset.analysis_size_bytes
+    || pin.analysis_path !== asset.analysis_ref
+    || pin.analysis_status !== asset.analysis_status
+  ) {
+    throw new Error("music-cues/v2 Pack, track, full-mix, or analysis pins do not match bgm_selection.");
+  }
+}
+
+/**
+ * Compiler-owned music projection. Missing cues are a strict no-op. Legacy
+ * cues stay readable, but an original_only project is unchanged unless a v2
+ * operator_locked selection explicitly authorizes the candidate cue.
+ */
+export function projectProjectMusicCues(
+  timeline: TimelineIR,
+  projectPath: string,
+  audioPolicy: BriefAudioPolicy,
+  fpsNum: number,
+  fpsDen: number,
+): TimelineIR {
+  const cuesPath = path.join(projectPath, "07_package", "music_cues.json");
+  if (!fs.existsSync(cuesPath)) return timeline;
+  const doc = validateArtifact<MusicCuesDoc>(
+    JSON.parse(fs.readFileSync(cuesPath, "utf8")),
+    "music-cues.schema.json",
+  );
+  const validation = validateMusicCues(doc);
+  if (!validation.valid) {
+    throw new Error(`Invalid music_cues: ${validation.errors.join("; ")}`);
+  }
+  if (audioPolicy === "original_only" && doc.version !== "2.0.0") return timeline;
+  if (doc.project_id !== timeline.project_id) {
+    throw new Error("music_cues project_id does not match the compiled timeline.");
+  }
+  if (doc.base_timeline_version !== timeline.version) {
+    throw new Error("music_cues base_timeline_version is stale.");
+  }
+  validateMusicSelectionBinding(projectPath, doc);
+  return projectMusicToTimeline(timeline, doc, { fpsNum, fpsDen }) as TimelineIR;
+}
+
+/**
+ * Compiler-owned SFX projection. An absent artifact is a strict no-op.
+ * original_only remains byte-compatible and never activates A3 SFX.
+ */
+export function projectProjectSfxCues(
+  timeline: TimelineIR,
+  projectPath: string,
+  audioPolicy: BriefAudioPolicy,
+  fpsNum: number,
+  fpsDen: number,
+): TimelineIR {
+  const cuesPath = path.join(projectPath, "07_package", "sfx_cues.json");
+  if (!fs.existsSync(cuesPath) || audioPolicy === "original_only") {
+    return timeline;
+  }
+  if (
+    timeline.sequence.fps_num !== fpsNum
+    || timeline.sequence.fps_den !== fpsDen
+  ) {
+    throw new Error("SFX projection fps arguments do not match the timeline.");
+  }
+  const plan = resolveSfxCuePlan({
+    projectDir: projectPath,
+    timeline,
+    cuesPath,
+  });
+  return projectSfxToTimeline(timeline, plan);
+}
 
 export function isEditorialEyeRelationV1Enabled(
   env: Record<string, string | undefined> = process.env,
@@ -1593,6 +1722,21 @@ export function compile(opts: CompileOptions): CompileResult {
       endingTreatment.extendedFrames,
     );
   }
+
+  timelineIR = projectProjectMusicCues(
+    timelineIR,
+    projectPath,
+    audioPolicy.mode,
+    fpsNum,
+    fpsDen,
+  );
+  timelineIR = projectProjectSfxCues(
+    timelineIR,
+    projectPath,
+    audioPolicy.mode,
+    fpsNum,
+    fpsDen,
+  );
 
   assertStillImageTimelineTruthForTimeline(timelineIR);
 

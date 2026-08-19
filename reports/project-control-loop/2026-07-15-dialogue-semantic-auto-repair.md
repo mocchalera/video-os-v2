@@ -103,8 +103,8 @@ the fade inside the retained source range.
 
 ### Editorial agreement harness
 
-- `npm run eval -- --suite golden --no-write`: exit 0. The two checkout-local
-  testimonial human goldens both remain 100; fixed suite scores are
+- `npm run eval -- --suite golden --no-write`: exit 0. The AX-1 Komatsu and
+  female testimonial human goldens both remain 100; fixed suite scores are
   52 / 100 / 100 / 100 / 100.
 - `npm run eval -- --all --min-score 80`: all speech-led goldens remain 100 and
   `lively-alt-vol5` remains 94.2. The repository-wide command remains non-zero

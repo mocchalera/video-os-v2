@@ -1039,6 +1039,44 @@ export function buildAudioAssemblyPlan(timeline: TimelineIR): AudioClipPlan[] {
   return plans;
 }
 
+export function hasPinnedMusicCueA2(timeline: TimelineIR): boolean {
+  if (timeline.provenance?.audio_policy?.mode === "original_only") return false;
+  return timeline.tracks.audio
+    .filter((track) => track.track_id === "A2")
+    .flatMap((track) => track.clips)
+    .some((clip) => {
+      const metadata = clip.metadata as Record<string, unknown> | undefined;
+      const cue = metadata?.music_cue;
+      const asset = metadata?.music_asset;
+      return Boolean(
+        cue && typeof cue === "object" && !Array.isArray(cue)
+        && typeof (cue as Record<string, unknown>).cue_id === "string"
+        && asset && typeof asset === "object" && !Array.isArray(asset)
+        && typeof (asset as Record<string, unknown>).pack_manifest_hash === "string"
+        && typeof (asset as Record<string, unknown>).full_mix_content_hash === "string",
+      );
+    });
+}
+
+export function hasPinnedSfxCueA3(timeline: TimelineIR): boolean {
+  if (timeline.provenance?.audio_policy?.mode === "original_only") return false;
+  return timeline.tracks.audio
+    .filter((track) => track.track_id === "A3")
+    .flatMap((track) => track.clips)
+    .some((clip) => {
+      const metadata = clip.metadata as Record<string, unknown> | undefined;
+      const cue = metadata?.sfx_cue;
+      const asset = metadata?.sfx_asset;
+      return Boolean(
+        cue && typeof cue === "object" && !Array.isArray(cue)
+        && typeof (cue as Record<string, unknown>).cue_id === "string"
+        && asset && typeof asset === "object" && !Array.isArray(asset)
+        && typeof (asset as Record<string, unknown>).library_manifest_hash === "string"
+        && typeof (asset as Record<string, unknown>).asset_content_hash === "string",
+      );
+    });
+}
+
 export async function assembleTimelineToMp4(
   opts: AssemblerOptions,
 ): Promise<AssemblyResult> {
@@ -1056,6 +1094,15 @@ export async function assembleTimelineToMp4(
   const execFileImpl: ExecFileLike = opts.execFileImpl ?? defaultExecFile;
 
   const timeline = readTimeline(timelinePath);
+  if (
+    opts.includeAudio !== false
+    && (hasPinnedMusicCueA2(timeline) || hasPinnedSfxCueA3(timeline))
+  ) {
+    throw new Error(
+      "pinned_a2_or_a3_requires_shared_audio_render_plan: "
+      + "assemble with includeAudio=false, then execute the shared AudioRenderPlan",
+    );
+  }
   if (opts.legacyCaptionMode === "reject") {
     assertNoLegacyClipCaptionsForPackage(timeline);
   }

@@ -42,4 +42,10 @@ describe("review metrics CLI", () => {
     const step = VERIFY_STEPS.find((item) => item.name === "review-metrics (demo)");
     expect(step?.args).toContain("--no-write");
   });
+
+  it("bounds aggregate workers without changing test selection or functional timeout", () => {
+    const step = VERIFY_STEPS.find((item) => item.name === "unit-tests");
+    expect(step?.args).toEqual(["vitest", "run", "--maxWorkers=4"]);
+    expect(step?.args).not.toContain("--testTimeout");
+  });
 });

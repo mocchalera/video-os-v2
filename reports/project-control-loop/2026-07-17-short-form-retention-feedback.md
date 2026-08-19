@@ -50,7 +50,7 @@ Commands and results:
 - `npm test`: pass (184 files passed, 6 skipped; 2892 tests passed, 41 skipped)
 - `npm run verify`: all gates passed
 - `npm run eval -- --suite golden --no-write`: pass
-- Fixed golden values remained unchanged: fumoto-growth 52, togakushi-camp 100, ena-promo 100, operator-testimonial-a 100, operator-testimonial-b 100.
+- Fixed golden values remained unchanged: fumoto-growth 52, togakushi-camp 100, ena-promo 100, ax1-komatsu-testimonial-d4892 100, ax1-female-testimonial-d4892 100.
 - `git diff --check`: pass
 
 Broader `--all --no-write` discovery reported a pre-existing invalid negative `src_in_us` in `rokutaro-bicycle-growth-20260427`; the fixed regression suite and all tests remain green, and this unrelated golden artifact was not modified.

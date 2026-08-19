@@ -14,6 +14,7 @@ import {
   formatFfmpegTimestamp,
   readTimeline,
   extractEndingVideoFade,
+  hasPinnedMusicCueA2,
 } from "../runtime/render/assembler.js";
 import { buildAspectRatioFitFilter } from "../runtime/render/pipeline.js";
 
@@ -70,6 +71,34 @@ function createExecMock(calls: Array<{ cmd: string; args: string[] }>): ExecFile
 }
 
 describe("ffmpeg assembler", () => {
+  it("identifies pinned A2 that must bypass embedded assembly audio", () => {
+    const timeline = readTimeline(
+      path.join(createTempDemoProject(), "05_timeline", "timeline.json"),
+    );
+    timeline.tracks.audio.push({
+      track_id: "A2",
+      kind: "audio",
+      clips: [{
+        ...timeline.tracks.audio[0].clips[0],
+        clip_id: "A2_MC_MAIN",
+        role: "music",
+        metadata: {
+          music_cue: { cue_id: "MC_MAIN" },
+          music_asset: {
+            pack_manifest_hash: `sha256:${"a".repeat(64)}`,
+            full_mix_content_hash: `sha256:${"b".repeat(64)}`,
+          },
+        },
+      }],
+    });
+    expect(hasPinnedMusicCueA2(timeline)).toBe(true);
+    timeline.provenance.audio_policy = {
+      mode: "original_only",
+      source: "explicit_brief",
+    };
+    expect(hasPinnedMusicCueA2(timeline)).toBe(false);
+  });
+
   it("builds deterministic video/audio plans from projects/demo timeline", () => {
     const timeline = readTimeline(path.resolve("projects/demo/05_timeline/timeline.json"));
 

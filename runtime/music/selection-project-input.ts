@@ -184,11 +184,39 @@ function catalogIdentity(catalog: BgmCatalog): unknown {
   }));
 }
 
-export function loadProjectSelectionSources(projectPath: string, catalog: BgmCatalog): ProjectSelectionSources {
+export function loadProjectSelectionSources(
+  projectPath: string,
+  catalog: BgmCatalog,
+  timelinePath?: string,
+): ProjectSelectionSources {
   const absoluteProjectPath = path.resolve(projectPath);
   const brief = readRequired(absoluteProjectPath, "01_intent/creative_brief.yaml", "yaml");
   const blueprint = readRequired(absoluteProjectPath, "04_plan/edit_blueprint.yaml", "yaml");
-  const timeline = readRequired(absoluteProjectPath, "05_timeline/timeline.json", "json");
+  const timeline = timelinePath
+    ? (() => {
+      const absoluteTimelinePath = path.resolve(timelinePath);
+      if (!fs.existsSync(absoluteTimelinePath)) {
+        throw new BgmSelectionInputError(
+          "BGM_SELECTION_INPUT_MISSING",
+          "timeline",
+          "The explicit BGM selection timeline is missing.",
+        );
+      }
+      try {
+        const bytes = fs.readFileSync(absoluteTimelinePath);
+        return {
+          value: JSON.parse(bytes.toString("utf8")) as unknown,
+          hash: fileHash(bytes),
+        };
+      } catch {
+        throw new BgmSelectionInputError(
+          "BGM_SELECTION_INPUT_INVALID",
+          "timeline",
+          "The explicit BGM selection timeline could not be parsed.",
+        );
+      }
+    })()
+    : readRequired(absoluteProjectPath, "05_timeline/timeline.json", "json");
   return {
     project_id: projectId(brief.value, timeline.value, absoluteProjectPath),
     creative_brief: brief.value,

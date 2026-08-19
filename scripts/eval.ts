@@ -51,7 +51,7 @@ Modes (choose one):
 Options:
   --judge                      Also run the Gemini LLM judge (needs GEMINI_API_KEY)
   --marlin                     Run live Marlin visual QA for suite projects with fresh renders
-  --projects <a,b,c>           Override suite projects (default: discover approved local projects)
+  --projects <a,b,c>           Override suite projects (default: fumoto-growth,togakushi-camp,ena-promo,ax1-komatsu-testimonial-d4892,ax1-female-testimonial-d4892)
   --divergence-threshold <n>   Suite WARNING threshold for structure/video divergence (default: 30)
   --min-score <n>              Exit non-zero when any overall score falls below n (0-100)
   --out <dir>                  Report output directory (default: reports/eval)
