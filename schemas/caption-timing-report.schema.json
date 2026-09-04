@@ -24,6 +24,8 @@
     "question_adjusted_count": { "type": "integer", "minimum": 0 },
     "previous_speech_guard_count": { "type": "integer", "minimum": 0 },
     "gap_tail_hold_count": { "type": "integer", "minimum": 0 },
+    "offset_map_fingerprint": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "dialogue_authority": { "enum": ["A1", "legacy-role"] },
     "unresolved_count": { "type": "integer", "minimum": 0 },
     "issues": {
       "type": "array",
@@ -58,7 +60,9 @@
         "question_caption_count",
         "question_adjusted_count",
         "previous_speech_guard_count",
-        "gap_tail_hold_count"
+        "gap_tail_hold_count",
+        "offset_map_fingerprint",
+        "dialogue_authority"
       ]
     }
   }],

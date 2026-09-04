@@ -322,7 +322,7 @@ export async function probeVideoFrameMetadata(
 }
 
 function parseSignedDbValue(rawValue: string): number {
-  if (rawValue === "-inf") return -99;
+  if (rawValue === "-inf") return Number.NaN;
   const value = parseFloat(rawValue);
   if (!Number.isFinite(value)) {
     throw new Error(`Unable to parse loudness value: ${rawValue}`);
@@ -346,11 +346,7 @@ async function measureLoudness(
     stderr = result.stderr;
   } catch (e: unknown) {
     // ffmpeg may exit non-zero for -f null; try to extract stderr
-    const msg = e instanceof Error ? e.message : "";
-    if (!msg) {
-      return { integratedLufs: -24, truePeakDbtp: -1 };
-    }
-    stderr = msg;
+    stderr = e instanceof Error ? e.message : String(e);
   }
 
   const integratedMatches = Array.from(
@@ -363,8 +359,7 @@ async function measureLoudness(
   const integratedMatch = integratedMatches.at(-1);
   const truePeakMatch = truePeakMatches.at(-1);
   if (!integratedMatch || !truePeakMatch) {
-    // Fallback: return safe defaults instead of throwing
-    return { integratedLufs: -24, truePeakDbtp: -1 };
+    return { integratedLufs: Number.NaN, truePeakDbtp: Number.NaN };
   }
 
   return {
@@ -460,8 +455,8 @@ export function buildQaMeasurementsFromPrecomputed(
     dialogue_window_ms: dialogueWindowMs,
     av_duration_delta_ms: Math.abs(videoDurationMs - audioDurationMs),
     av_drift_ms: Math.abs(videoDurationMs - audioDurationMs),
-    loudness_integrated: metrics.integratedLufs ?? 0,
-    loudness_true_peak: metrics.truePeakDbtp ?? 0,
+    loudness_integrated: metrics.integratedLufs ?? Number.NaN,
+    loudness_true_peak: metrics.truePeakDbtp ?? Number.NaN,
     dialogue_occupancy: dialogueOccupancy,
     observed_non_silent_ms: observedNonSilentMs,
     silence_total_ms: silenceTotalMs,
@@ -535,7 +530,17 @@ export async function measureQaMedia(
         dialoguePath,
         audioDurationMs,
         options.expectedDialogueWindowsMs,
-      )
+      ).catch(() => ({
+        dialogueWindowMs: audioDurationMs,
+        dialogueOccupancy: 0,
+        observedNonSilentMs: 0,
+        silenceTotalMs: audioDurationMs,
+        dialogueOutsideExpectedMs: undefined,
+        dialogueFirstSignalMs: undefined,
+        dialogueLastSignalMs: undefined,
+        expectedDialogueStartMs: undefined,
+        expectedDialogueEndMs: undefined,
+      }))
     : { dialogueWindowMs: 0, dialogueOccupancy: 0, observedNonSilentMs: 0, silenceTotalMs: 0 };
 
   const measurements: QaMeasurements = {
@@ -591,7 +596,8 @@ export function collectQaMeasurementWarnings(
     });
   }
 
-  if (measurements.loudness_integrated <= LOW_LOUDNESS_WARNING_LUFS) {
+  if (Number.isFinite(measurements.loudness_integrated)
+    && measurements.loudness_integrated <= LOW_LOUDNESS_WARNING_LUFS) {
     warnings.push({
       code: "LOW_LOUDNESS_WARNING",
       message:

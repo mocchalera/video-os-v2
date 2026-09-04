@@ -18,6 +18,11 @@ import type {
 } from "../compiler/transition-types.js";
 import { validateAgainstSchema } from "../commands/shared.js";
 import { assessDialogueCompleteness } from "../editorial/dialogue-completeness.js";
+import {
+  evaluateLyricMvCadence,
+  isLyricMvProfile,
+  lyricMvThresholdsFromTimeline,
+} from "./lyric-mv-cadence.js";
 
 export type ReviewMetricTier =
   | "emotion"
@@ -34,6 +39,7 @@ export type ReviewMetricId =
   | "rhythm.beat_duration_deviation"
   | "rhythm.max_shot_length"
   | "rhythm.cadence_distribution"
+  | "rhythm.lyric_mv_composite_cadence"
   | "story.required_roles"
   | "story.chronology"
   | "story.dialogue_completeness"
@@ -258,6 +264,7 @@ export function computeReviewMetrics(input: ReviewMetricsInputs): ReviewMetricsA
     checkBeatDurationDeviation(input),
     checkMaxShotLength(input),
     checkCadenceDistribution(input),
+    ...(isLyricMvProfile(input) ? [checkLyricMvCompositeCadence(input)] : []),
     checkRequiredRoles(input),
     checkChronology(input),
     checkDialogueCompleteness(input),
@@ -450,6 +457,33 @@ function checkMaxShotLength(input: ReviewMetricsInputs): ReviewMetricCheck {
   const clips = getVideoClips(input.timeline);
   if (clips.length === 0) return skipped(id, "rhythm", "No video clips found in timeline.");
 
+  if (isLyricMvProfile(input)) {
+    const overThreshold = clips
+      .filter((clip) => clip.timeline_duration_frames > threshold)
+      .sort(compareClipOrder);
+    const maxFrames = clips.reduce(
+      (max, clip) => Math.max(max, clip.timeline_duration_frames),
+      0,
+    );
+    return check(id, "rhythm", "skipped", {
+      profile_id: "lyric_mv",
+      max_shot_length_frames_observed: maxFrames,
+      clips_over_talking_head_threshold: overThreshold.map((clip) => ({
+        clip_id: clip.clip_id,
+        duration_frames: clip.timeline_duration_frames,
+      })),
+    }, {
+      talking_head_max_shot_length_frames: threshold,
+      not_applicable: true,
+      replacement_check: "rhythm.lyric_mv_composite_cadence",
+    }, [
+      "lyric_mv uses background/caption/music/motion composite cadence; talking-head max_shot_length is not an acceptance failure.",
+      ...(overThreshold.length > 0
+        ? [`${overThreshold.length} clip(s) exceed the retained talking-head threshold; evaluated by lyric_mv cadence and long-hold evidence.`]
+        : ["No clip exceeds the retained talking-head threshold."]),
+    ]);
+  }
+
   const violations = clips
     .filter((clip) => clip.timeline_duration_frames > threshold)
     .sort(compareClipOrder);
@@ -472,6 +506,31 @@ function checkMaxShotLength(input: ReviewMetricsInputs): ReviewMetricCheck {
         `${clip.clip_id}: ${clip.timeline_duration_frames}f exceeds max ${threshold}f`,
       )
     : [`No video clip exceeds max_shot_length_frames=${threshold}.`]);
+}
+
+function checkLyricMvCompositeCadence(input: ReviewMetricsInputs): ReviewMetricCheck {
+  const id: ReviewMetricId = "rhythm.lyric_mv_composite_cadence";
+  if (!input.timeline) return skipped(id, "rhythm", "timeline.json is missing.");
+  const thresholds = lyricMvThresholdsFromTimeline(input.timeline);
+  const report = evaluateLyricMvCadence(input.timeline, thresholds);
+  return check(id, "rhythm", report.status, report as unknown as JsonValue, thresholds as unknown as JsonValue, [
+    `lyric_mv composite cadence combines ${[
+      "background cuts",
+      "caption cue changes",
+      "in-frame motion",
+      "music sections/onsets",
+      "transitions",
+    ].join(", ")}.`,
+    ...(report.composite.max_gap_sec !== null
+      ? [`Maximum composite cue gap is ${report.composite.max_gap_sec}s.`]
+      : []),
+    ...(report.long_holds.length > 0
+      ? report.long_holds.map((hold) => `${hold.clip_id}: long hold ${hold.status}; reason=${hold.reason ?? "missing"}; section=${hold.section_id ?? "missing"}.`)
+      : ["No still exceeds the explicit intentional-long-hold threshold."]),
+    ...(report.degraded_reasons.length > 0
+      ? report.degraded_reasons.map((reason) => `lyric_mv review note: ${reason}`)
+      : []),
+  ]);
 }
 
 function checkCadenceDistribution(input: ReviewMetricsInputs): ReviewMetricCheck {

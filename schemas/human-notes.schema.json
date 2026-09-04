@@ -53,6 +53,14 @@
           "type": "string",
           "enum": ["observation", "suggestion", "concern"]
         },
+        "correction_reason": {
+          "$ref": "#/$defs/correctionReason",
+          "description": "Optional explicit genre-agnostic reason; the review command infers one when omitted."
+        },
+        "domain": {
+          "$ref": "#/$defs/correctionDomain",
+          "description": "Optional bounded correction domain; omitted domains are projected as unknown and are never inferred."
+        },
         "directive_type": {
           "type": "string",
           "enum": [
@@ -72,6 +80,10 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
         "approved_segment_ids": {
           "type": "array",
           "items": { "type": "string" }
@@ -89,6 +101,22 @@
         }
       },
       "additionalProperties": false
+    },
+    "correctionReason": {
+      "type": "string",
+      "enum": [
+        "observation_gap",
+        "unsupported_inference",
+        "identity_confusion",
+        "intent_mismatch",
+        "chronology_context_confusion",
+        "stalled_progression",
+        "missing_whole_cut_evaluation"
+      ]
+    },
+    "correctionDomain": {
+      "type": "string",
+      "enum": ["shot", "b_roll", "caption", "other", "unknown"]
     }
   }
 }

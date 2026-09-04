@@ -1,5 +1,8 @@
 id: lecture-highlight
 default_policy: tutorial
+capabilities:
+  visual_model:
+    requirement: optional
 defaults:
   target_duration_sec: 120
   opening_cadence: "measured"

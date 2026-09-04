@@ -1,7 +1,7 @@
 /**
  * Tests for runtime/progress.ts — ProgressTracker and readProgress.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createRequire } from "node:module";
@@ -10,9 +10,11 @@ import {
   PipelineStageProgressTracker,
   appendPipelineTimingRun,
   estimatePipelineStages,
+  estimateFirstPreviewStageBudget,
   formatPipelineProgress,
   readPipelineTimings,
   readProgress,
+  closeActiveTrackersOnSignal,
   type ProgressReport,
   type ProgressPhase,
 } from "../runtime/progress.js";
@@ -43,10 +45,13 @@ function createProgressValidator() {
 // ── Setup / Teardown ───────────────────────────────────────────────
 
 beforeAll(() => {
+  // sweep residue from any previously interrupted run before recreating
+  fs.rmSync(TMP_DIR, { recursive: true, force: true });
   fs.mkdirSync(TMP_DIR, { recursive: true });
 });
 
 afterAll(() => {
+  closeActiveTrackersOnSignal("SIGTERM");
   fs.rmSync(TMP_DIR, { recursive: true, force: true });
 });
 
@@ -58,6 +63,11 @@ describe("ProgressTracker", () => {
   beforeEach(() => {
     projectDir = path.join(TMP_DIR, `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     fs.mkdirSync(projectDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    closeActiveTrackersOnSignal("SIGTERM");
+    fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
   it("creates progress.json on construction", () => {
@@ -111,6 +121,9 @@ describe("ProgressTracker", () => {
 
   it("advance() with artifact name tracks artifacts_created", () => {
     const pt = new ProgressTracker(projectDir, "compile", 3);
+    fs.mkdirSync(path.join(projectDir, "05_timeline"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "05_timeline/timeline.json"), "{}\n");
+    fs.writeFileSync(path.join(projectDir, "timeline.otio"), "otio\n");
     pt.advance("timeline.json");
     pt.advance("timeline.otio");
     const snap = pt.snapshot();
@@ -127,6 +140,9 @@ describe("ProgressTracker", () => {
 
   it("complete() sets status and maxes out progress", () => {
     const pt = new ProgressTracker(projectDir, "analysis", 10);
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "03_analysis/assets.json"), "{}\n");
+    fs.writeFileSync(path.join(projectDir, "03_analysis/segments.json"), "{}\n");
     pt.advance();
     pt.complete(["assets.json", "segments.json"]);
     const snap = pt.snapshot();
@@ -140,6 +156,9 @@ describe("ProgressTracker", () => {
 
   it("complete() deduplicates artifacts", () => {
     const pt = new ProgressTracker(projectDir, "analysis", 5);
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "03_analysis/assets.json"), "{}\n");
+    fs.writeFileSync(path.join(projectDir, "03_analysis/segments.json"), "{}\n");
     pt.advance("assets.json");
     pt.complete(["assets.json", "segments.json"]);
     const snap = pt.snapshot();
@@ -192,6 +211,8 @@ describe("ProgressTracker", () => {
 
   it("persists to disk and is readable via readProgress()", () => {
     const pt = new ProgressTracker(projectDir, "compile", 3);
+    fs.mkdirSync(path.join(projectDir, "05_timeline"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "05_timeline/timeline.json"), "{}\n");
     pt.advance("timeline.json");
 
     const report = readProgress(projectDir);
@@ -210,6 +231,10 @@ describe("ProgressTracker", () => {
   it("output validates against progress.schema.json", () => {
     const validate = createProgressValidator();
     const pt = new ProgressTracker(projectDir, "analysis", 6);
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "03_analysis/assets.json"), "{}\n");
+    fs.writeFileSync(path.join(projectDir, "03_analysis/segments.json"), "{}\n");
+    fs.writeFileSync(path.join(projectDir, "03_analysis/gap_report.yaml"), "version: 1\n");
     pt.advance("assets.json");
     pt.recordError("vlm", "Rate limit hit", true);
     pt.advance("segments.json");
@@ -221,6 +246,15 @@ describe("ProgressTracker", () => {
       console.error("progress.json validation errors:", validate.errors);
     }
     expect(valid).toBe(true);
+  });
+
+  it("does not report missing artifacts and records a hash for verified files", () => {
+    const pt = new ProgressTracker(projectDir, "compile", 2);
+    pt.advance("missing.json");
+    expect(pt.snapshot().artifacts_created).toEqual([]);
+    fs.writeFileSync(path.join(projectDir, "verified.json"), "verified\n");
+    expect(pt.registerArtifact("verified.json")).toBe(true);
+    expect(pt.snapshot().artifact_hashes?.["verified.json"]).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("multiple trackers for same project overwrite progress.json", () => {
@@ -253,6 +287,11 @@ describe("pipeline stage timings", () => {
   beforeEach(() => {
     projectDir = path.join(TMP_DIR, `timings_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
     fs.mkdirSync(projectDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    closeActiveTrackersOnSignal("SIGTERM");
+    fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
   it("appends pipeline timing runs under 03_analysis", () => {
@@ -314,6 +353,14 @@ describe("pipeline stage timings", () => {
     expect(estimates.get("triage")).toEqual({ estimatedMs: 120_000, source: "history" });
     expect(estimates.get("compile")?.source).toBe("segments");
     expect(estimates.get("compile")?.estimatedMs).toBeGreaterThan(0);
+  });
+
+  it("reserves the 13-segment compile/render estimate before optional fine planning", () => {
+    const budget = estimateFirstPreviewStageBudget(projectDir, 13, true);
+    expect(budget).toEqual({
+      fineEstimateMs: 48_000,
+      compileRenderReserveMs: 63_400,
+    });
   });
 
   it("formats running progress with ETA and total", () => {

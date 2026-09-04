@@ -29,11 +29,17 @@ import type {
   ProjectStateDoc,
   ProjectState,
 } from "../state/reconcile.js";
-import { writeProjectState } from "../state/reconcile.js";
+import { writeProjectState, snapshotArtifacts, computeFileHash, ARTIFACT_IDENTITY_HASH_KEYS, type ArtifactHashes } from "../state/reconcile.js";
 import type { CompileResult, ReviewPatch } from "../compiler/index.js";
-import { compile } from "../compiler/index.js";
+import { runCanonicalCompile } from "../compiler/index.js";
+import type { ReviewReport } from "../commands/review/index.js";
 import type { EditBlueprint } from "../compiler/types.js";
 import { draftAndPromote, type DraftFile } from "../commands/shared.js";
+import {
+  CANONICAL_REVIEW_REPORT_VERSION,
+  enforceCanonicalReviewReportGate,
+  enforceReviewJudgmentIntegrity,
+} from "../commands/review/index.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -328,28 +334,183 @@ function repoRootForReentry(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
-function stageProjectForCompile(projectDir: string): string {
-  const stageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "video-os-reentry-"));
-  const filesToCopy = [
+function isContainedPath(parentPath: string, childPath: string): boolean {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function copyStagedFile(
+  projectRoot: string,
+  stageRoot: string,
+  relativePath: string,
+  options: { allowMissing?: boolean } = {},
+): void {
+  const sourcePath = path.resolve(projectRoot, relativePath);
+  if (!isContainedPath(projectRoot, sourcePath)) {
+    throw new Error(`Reentry compile input escapes the project: ${relativePath}`);
+  }
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(sourcePath);
+  } catch {
+    if (options.allowMissing) return;
+    throw new Error(`Reentry compile input is missing: ${relativePath}`);
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`Reentry compile input is not a regular file: ${relativePath}`);
+  }
+  const realSource = fs.realpathSync(sourcePath);
+  if (!isContainedPath(projectRoot, realSource)) {
+    throw new Error(`Reentry compile input resolves outside the project: ${relativePath}`);
+  }
+  const destinationPath = path.join(stageRoot, relativePath);
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+  fs.copyFileSync(realSource, destinationPath);
+}
+
+interface StagedBgmSource {
+  /** The source selected by the canonical loader, if it needed relocation. */
+  mediaPathOverride?: string;
+}
+
+function copyReferencedBgmMedia(
+  projectRoot: string,
+  stageRoot: string,
+  analysisRelativePath: string,
+  origin: "primary" | "legacy",
+): StagedBgmSource | undefined {
+  const stagedAnalysisPath = path.join(stageRoot, analysisRelativePath);
+  if (!fs.existsSync(stagedAnalysisPath)) return undefined;
+  let analysis: Record<string, unknown>;
+  try {
+    analysis = JSON.parse(fs.readFileSync(stagedAnalysisPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  if (analysis.analysis_status !== "ready") return undefined;
+  const musicAsset = analysis.music_asset;
+  if (!musicAsset || typeof musicAsset !== "object" || Array.isArray(musicAsset)) return {};
+  const declaredPath = (musicAsset as Record<string, unknown>).path;
+  if (typeof declaredPath !== "string" || declaredPath.length === 0) return {};
+  const sourcePath = path.isAbsolute(declaredPath)
+    ? declaredPath
+    : path.resolve(projectRoot, declaredPath);
+  let realSource: string;
+  try {
+    realSource = fs.realpathSync(sourcePath);
+    if (!fs.statSync(realSource).isFile()) return {};
+  } catch {
+    return {};
+  }
+  const projectReal = fs.realpathSync(projectRoot);
+  const sourceInsideProject = isContainedPath(projectReal, realSource);
+  const declaredRelative = path.isAbsolute(declaredPath)
+    ? ""
+    : path.relative(projectRoot, sourcePath).split(path.sep).join("/");
+  if (sourceInsideProject && declaredRelative && !declaredRelative.split("/").includes("..")) {
+    copyStagedFile(projectRoot, stageRoot, declaredRelative);
+    return {};
+  }
+  const sourceIdentity = crypto.createHash("sha256")
+    .update(`${realSource}\0${String((musicAsset as Record<string, unknown>).source_hash ?? "")}`)
+    .digest("hex");
+  const safeBasename = path.basename(realSource).replace(/[^A-Za-z0-9._-]/g, "_");
+  const destinationRelative = path.join(
+    "02_media",
+    ".reentry-sources",
+    `${origin}-${sourceIdentity}-${safeBasename}`,
+  );
+  const destinationPath = path.join(stageRoot, destinationRelative);
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+  fs.copyFileSync(realSource, destinationPath);
+  return { mediaPathOverride: destinationPath };
+}
+
+function copyStagedAnalysisInputs(projectDir: string, stageRoot: string): string | undefined {
+  const projectRoot = fs.realpathSync(path.resolve(projectDir));
+  const requiredFiles = [
+    "project_state.yaml",
     "01_intent/creative_brief.yaml",
     "04_plan/selects_candidates.yaml",
     "04_plan/edit_blueprint.yaml",
+    "02_media/source_map.json",
+    "03_analysis/assets.json",
+    "03_analysis/segments.json",
+    "03_analysis/bgm_analysis.json",
+    "03_analysis/marlin_events.json",
+    "07_package/audio/bgm-analysis.json",
   ];
-
-  for (const relativePath of filesToCopy) {
-    const sourcePath = path.join(projectDir, relativePath);
-    if (!fs.existsSync(sourcePath)) continue;
-    const destinationPath = path.join(stageRoot, relativePath);
-    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-    fs.copyFileSync(sourcePath, destinationPath);
+  for (const relativePath of requiredFiles) {
+    copyStagedFile(projectRoot, stageRoot, relativePath, { allowMissing: true });
   }
 
-  return stageRoot;
+  const analysisDefaults = path.join(repoRootForReentry(), "runtime/analysis-defaults.yaml");
+  fs.mkdirSync(path.join(stageRoot, "runtime"), { recursive: true });
+  fs.copyFileSync(analysisDefaults, path.join(stageRoot, "runtime/analysis-defaults.yaml"));
+
+  const transcriptsDir = path.join(projectRoot, "03_analysis/transcripts");
+  if (fs.existsSync(transcriptsDir)) {
+    const transcriptEntries = fs.readdirSync(transcriptsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => `03_analysis/transcripts/${entry.name}`);
+    for (const relativePath of transcriptEntries) {
+      copyStagedFile(projectRoot, stageRoot, relativePath);
+    }
+  }
+
+  const assetsPath = path.join(projectRoot, "03_analysis/assets.json");
+  if (fs.existsSync(assetsPath)) {
+    try {
+      const assets = JSON.parse(fs.readFileSync(assetsPath, "utf8")) as { items?: unknown[] };
+      for (const item of assets.items ?? []) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+        const still = (item as Record<string, unknown>).still_image;
+        if (!still || typeof still !== "object" || Array.isArray(still)) continue;
+        const framePath = (still as Record<string, unknown>).normalized_frame_path;
+        if (typeof framePath !== "string" || framePath.length === 0 || path.isAbsolute(framePath)) continue;
+        copyStagedFile(projectRoot, stageRoot, path.join("03_analysis", framePath));
+      }
+    } catch {
+      // The canonical compiler owns malformed-artifact handling; retain the
+      // malformed bytes in the stage so direct and reentry routes fail alike.
+    }
+  }
+
+  const primaryBgmSource = copyReferencedBgmMedia(
+    projectRoot,
+    stageRoot,
+    "03_analysis/bgm_analysis.json",
+    "primary",
+  );
+  const legacyBgmSource = copyReferencedBgmMedia(
+    projectRoot,
+    stageRoot,
+    "07_package/audio/bgm-analysis.json",
+    "legacy",
+  );
+  return (primaryBgmSource ?? legacyBgmSource)?.mediaPathOverride;
+}
+
+interface StagedProjectForCompile {
+  projectPath: string;
+  bgmMediaPathOverride?: string;
+}
+
+function stageProjectForCompile(projectDir: string): StagedProjectForCompile {
+  const stageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "video-os-reentry-"));
+  try {
+    const bgmMediaPathOverride = copyStagedAnalysisInputs(projectDir, stageRoot);
+    return { projectPath: stageRoot, bgmMediaPathOverride };
+  } catch (error) {
+    fs.rmSync(stageRoot, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function buildProposalDrafts(
   criticProposal: CriticProposal | null,
   blueprintProposal: BlueprintProposal | null,
+  reviewReportDraft: DraftFile | null,
 ): DraftFile[] {
   const drafts: DraftFile[] = [];
 
@@ -372,13 +533,8 @@ function buildProposalDrafts(
   }
 
   if (criticProposal) {
-    if (criticProposal.reviewReport !== undefined) {
-      drafts.push({
-        relativePath: "06_review/review_report.yaml",
-        schemaFile: "review-report.schema.json",
-        content: criticProposal.reviewReport,
-        format: "yaml",
-      });
+    if (reviewReportDraft) {
+      drafts.push(reviewReportDraft);
     }
 
     drafts.push({
@@ -392,20 +548,152 @@ function buildProposalDrafts(
   return drafts;
 }
 
-function compileProposalArtifacts(
+/**
+ * Artifacts the reentry loop itself legitimately regenerates via the compile
+ * pipeline. Only these may adopt post-compile bytes as evidence identity —
+ * and only after their pre-transform authority was verified against the
+ * recorded project identity.
+ */
+/**
+ * Issue #32 M0 supplemental HOLD fix: anchor every tracked canonical evidence
+ * artifact to the state document's recorded artifact_hashes. Current foreign
+ * bytes are never snapshotted or adopted as new truth — a tracked artifact
+ * whose bytes do not match the recorded identity throws (fail closed).
+ *
+ * The reentry compile writes to a staged project copy; it does not produce
+ * the canonical timeline.json. Timeline evidence therefore stays bound to the
+ * original recorded canonical hash until the exact compiler-produced bytes
+ * are promoted through their own transaction. This closes the ABA window: a
+ * foreign timeline swap during the compile window fails the post-compile
+ * verification even if the attacker restores the original bytes afterwards,
+ * because nothing from the foreign window was ever validated or promoted.
+ */
+export function resolveReentryEvidenceIdentity(
+  projectDir: string,
+  doc: ProjectStateDoc,
+): ArtifactHashes {
+  const recorded = doc.artifact_hashes ?? {};
+  const identity: ArtifactHashes = { ...recorded };
+
+  for (const [relPath, hashKey] of Object.entries(ARTIFACT_IDENTITY_HASH_KEYS)) {
+    const absPath = path.join(projectDir, relPath);
+    if (!fs.existsSync(absPath)) continue;
+    const current = computeFileHash(absPath);
+    const recordedHash = recorded[hashKey];
+    if (recordedHash && current !== recordedHash) {
+      throw new Error(
+        `Refusing to promote canonical review report: tracked artifact ${relPath} does not match the recorded project identity (foreign or stale bytes); current bytes are never adopted as truth`,
+      );
+    }
+    if (recordedHash) {
+      identity[hashKey] = recordedHash;
+    }
+    // No recorded identity: leave the key unset so evidence on this artifact
+    // can only ever be contextual, never measured.
+  }
+
+  return identity;
+}
+
+/**
+ * Derive the authoritative identity a canonical (version 2) review report must
+ * carry: the project id from project state and the current timeline version
+ * from the canonical timeline artifact. Undefined when either is missing —
+ * v2 promotion then fails closed.
+ */
+function canonicalReviewReportIdentity(
+  projectDir: string,
+  doc: ProjectStateDoc,
+): { project_id: string; timeline_version: string } | undefined {
+  const projectId = typeof doc.project_id === "string" ? doc.project_id : "";
+  let timelineVersion = "";
+  const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+  if (fs.existsSync(timelinePath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as { version?: unknown };
+      if (typeof parsed.version === "string" || typeof parsed.version === "number") {
+        timelineVersion = String(parsed.version);
+      }
+    } catch {
+      // Fail closed via undefined identity.
+    }
+  }
+  if (!projectId || !timelineVersion) return undefined;
+  return { project_id: projectId, timeline_version: timelineVersion };
+}
+
+/**
+ * Issue #32 M0 identity + truth-contract gate for the reentry promotion
+ * route — the same canonical contract runReview enforces. A canonical
+ * (version 2) review report may only enter canonical state when it passes the
+ * shared acceptance gate (schema, canonical version, non-empty judgment
+ * envelope, exact project/timeline identity) and then the shared
+ * enforceReviewJudgmentIntegrity normalization against a fresh current
+ * artifact snapshot. Report-supplied visual QA is stripped by the shared gate
+ * and never trusted. Version 2 with foreign identity or invalid structure
+ * throws (fail closed, no canonical mutation); legacy version 1 reports are
+ * non-promotable and are skipped.
+ */
+function gateReviewReportDraft(
+  projectDir: string,
+  doc: ProjectStateDoc,
+  reviewReport: unknown,
+  evidenceIdentity: ArtifactHashes,
+): DraftFile | null {
+  const version = reviewReport && typeof reviewReport === "object" && !Array.isArray(reviewReport)
+    ? (reviewReport as Record<string, unknown>).version
+    : undefined;
+  if (version !== CANONICAL_REVIEW_REPORT_VERSION) {
+    // Legacy (v1) and unknown versions are non-promotable through reentry.
+    return null;
+  }
+  const identity = canonicalReviewReportIdentity(projectDir, doc);
+  if (!identity) {
+    throw new Error("Refusing to promote canonical review report: authoritative project or timeline identity is missing.");
+  }
+  let report: ReviewReport;
+  try {
+    report = enforceCanonicalReviewReportGate(reviewReport, identity);
+  } catch (error) {
+    throw new Error(
+      `Refusing to promote canonical review report: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  // Anchored evidence identity: untouched tracked artifacts are bound to the
+  // recorded project identity (re-verified here), and only the explicitly
+  // regenerated timeline adopts post-compile bytes. Report-supplied visual QA
+  // was already stripped by the shared gate.
+  enforceReviewJudgmentIntegrity(report, projectDir, evidenceIdentity);
+  return {
+    relativePath: "06_review/review_report.yaml",
+    schemaFile: "review-report.schema.json",
+    content: report,
+    format: "yaml",
+    serializedContentGate: (parsed) => {
+      enforceCanonicalReviewReportGate(parsed, identity);
+    },
+  };
+}
+
+async function compileProposalArtifacts(
   projectDir: string,
   createdAt: string,
   criticProposal: CriticProposal | null,
   blueprintProposal: BlueprintProposal | null,
-): CompileResult {
-  const stagedProjectDir = stageProjectForCompile(projectDir);
-  return compile({
-    projectPath: stagedProjectDir,
-    createdAt,
-    repoRoot: repoRootForReentry(),
-    blueprintOverride: blueprintProposal?.editBlueprint,
-    reviewPatch: criticProposal?.reviewPatch,
-  });
+): Promise<CompileResult> {
+  const stagedProject = stageProjectForCompile(projectDir);
+  try {
+    return await runCanonicalCompile({
+      projectPath: stagedProject.projectPath,
+      createdAt,
+      repoRoot: repoRootForReentry(),
+      bgmMediaPathOverride: stagedProject.bgmMediaPathOverride,
+      blueprintOverride: blueprintProposal?.editBlueprint,
+      reviewPatch: criticProposal?.reviewPatch,
+    });
+  } finally {
+    fs.rmSync(stagedProject.projectPath, { recursive: true, force: true });
+  }
 }
 
 // ── Recompile Trigger ──────────────────────────────────────────────
@@ -464,15 +752,51 @@ export async function executeRecompileLoop(
     };
   }
 
-  const compileResult = compileProposalArtifacts(
+  // Pre-transform authority: anchor every tracked canonical artifact to the
+  // recorded project identity BEFORE the recompile runs. Foreign or stale
+  // bytes on any tracked input fail closed here and are never adopted.
+  resolveReentryEvidenceIdentity(projectDir, doc);
+  // Guard baseline for the promotion transaction (taken pre-compile; the
+  // compile itself writes only into the staged copy).
+  const promoteGuardHashes = snapshotArtifacts(projectDir).hashes;
+
+  const compileResult = await compileProposalArtifacts(
     projectDir,
     createdAt ?? new Date().toISOString(),
     criticProposal,
     blueprintProposal,
   );
 
-  const drafts = buildProposalDrafts(criticProposal, blueprintProposal);
-  const promoteResult = draftAndPromote(projectDir, drafts);
+  // Post-compile evidence identity: the reentry compile writes to a staged
+  // copy and does not produce the canonical timeline, so NO artifact adopts
+  // current bytes. Every tracked input — including timeline.json — stays
+  // anchored to the recorded identity and is re-verified here, which closes
+  // the ABA window: a foreign timeline swap during the compile window fails
+  // closed even if the original bytes are restored afterwards.
+  const evidenceIdentity = resolveReentryEvidenceIdentity(projectDir, doc);
+
+  const reviewReportDraft = criticProposal?.reviewReport !== undefined
+    ? gateReviewReportDraft(projectDir, doc, criticProposal.reviewReport, evidenceIdentity)
+    : null;
+  const drafts = buildProposalDrafts(criticProposal, blueprintProposal, reviewReportDraft);
+  // Transactional promotion guard: the reentry door passes the same guard as
+  // runReview — precondition/under-lock/postcondition hash verification with
+  // rollback inside draftAndPromote.
+  const promoteResult = draftAndPromote(projectDir, drafts, {
+    preflightHashes: promoteGuardHashes,
+    guardKeys: [
+      "brief_hash",
+      "blockers_hash",
+      "selects_hash",
+      "blueprint_hash",
+      "uncertainty_hash",
+      "timeline_version",
+      "human_notes_hash",
+      "style_hash",
+      "review_report_version",
+      "review_patch_hash",
+    ],
+  });
   if (!promoteResult.success) {
     writeProjectState(projectDir, doc);
     throw new Error(`Failed to promote re-entry proposal artifacts: ${promoteResult.errors.join("; ")}`);

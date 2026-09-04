@@ -1,5 +1,23 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, afterEach, vi } from "vitest";
+
+// Test-local wrapper seam for node:fs (see review-judgment-integrity.test.ts);
+// production code exposes no hook or option for this.
+const __actualFs = (await import("node:fs")) as typeof import("node:fs");
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  (globalThis as Record<string, unknown>).__realFsModuleCommands = actual;
+  return {
+    ...actual,
+    default: actual,
+    renameSync: vi.fn(((from: fs.PathLike, to: fs.PathLike) =>
+      ((globalThis as Record<string, unknown>).__realFsModuleCommands as typeof fs).renameSync(from, to)) as typeof fs.renameSync),
+  };
+});
+function realCommandsRename(from: fs.PathLike, to: fs.PathLike): void {
+  ((globalThis as Record<string, unknown>).__realFsModuleCommands as typeof fs).renameSync(from, to);
+}
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createRequire } from "node:module";
@@ -45,11 +63,17 @@ import {
   createSourceInputAttestation,
   writeRenderFreshnessMetadata,
 } from "../runtime/render/source-input-attestation.js";
-import { compile } from "../runtime/compiler/index.js";
+import {
+  type WholeCutSemanticProvider,
+  type WholeCutSemanticProviderObservation,
+} from "../runtime/review/whole-cut-semantic.js";
+import type { NormalizedHumanCorrection } from "../runtime/review/human-corrections.js";
+import { runCanonicalCompile } from "../runtime/compiler/index.js";
 import { runPipeline } from "../runtime/pipeline/ingest.js";
 import { discoverRequestedSources } from "../runtime/media/source-discovery.js";
 import { runCompilePhase } from "../runtime/commands/compile.js";
 import { assembleTimelineToMp4 } from "../runtime/render/assembler.js";
+import { closeActiveTrackersOnSignal } from "../runtime/progress.js";
 
 // ── AJV setup for schema validation in tests ─────────────────────
 
@@ -59,6 +83,7 @@ const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) 
     (data: unknown): boolean;
     errors?: Array<{ instancePath: string; message?: string }> | null;
   };
+  addSchema(schema: object): void;
 };
 const addFormats = require("ajv-formats") as (ajv: unknown) => void;
 
@@ -67,6 +92,9 @@ function createValidator(schemaFile: string) {
   const schema = JSON.parse(fs.readFileSync(schemaPath, "utf-8"));
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   addFormats(ajv);
+  if (schemaFile === "review-report.schema.json") {
+    ajv.addSchema(JSON.parse(fs.readFileSync(path.resolve("schemas/whole-cut-semantic-review.schema.json"), "utf-8")));
+  }
   return ajv.compile(schema);
 }
 
@@ -74,6 +102,15 @@ function createValidator(schemaFile: string) {
 
 const SAMPLE_PROJECT = "projects/sample";
 const tempDirs: string[] = [];
+
+function cleanupTempDirs(): void {
+  // Expected command errors can leave a tracker live until process teardown;
+  // close it before removing its fixture so the signal hook cannot recreate it.
+  closeActiveTrackersOnSignal("SIGTERM");
+  for (const d of tempDirs.splice(0)) {
+    if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
+  }
+}
 
 function copyDirSync(src: string, dest: string): void {
   fs.mkdirSync(dest, { recursive: true });
@@ -128,6 +165,8 @@ function createMinimalProject(
 ): string {
   const tmpDir = path.resolve(`test-fixtures-cmd-${name}-${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
+  // Register before writing any files so a failed test still has a cleanup owner.
+  tempDirs.push(tmpDir);
   fs.mkdirSync(path.join(tmpDir, "01_intent"), { recursive: true });
 
   if (opts?.withBrief) {
@@ -181,7 +220,6 @@ function createMinimalProject(
   }
   writeProjectState(tmpDir, stateDoc);
 
-  tempDirs.push(tmpDir);
   return tmpDir;
 }
 
@@ -242,7 +280,10 @@ async function makeGroundedPlanningAgent(projectDir: string, mode: "pure" | "mix
             return {
               candidate_id: `C_${index}`, segment_id: segment.segment_id, asset_id: segment.asset_id,
               src_in_us: segment.src_in_us, src_out_us: segment.src_out_us,
-              role: index === 0 ? "hero" : mediaKind === "audio" ? "dialogue" : "support",
+              // Role assignment must be keyed by media_kind, not segment order:
+              // segment order is not a role signal; bind each source kind directly
+              // to its intended role (Issue #25 PRIMARY_VIDEO_GAP regression).
+              role: mediaKind === "audio" ? "dialogue" : mediaKind === "video" ? "support" : "hero",
               why_it_matches: visual
                 ? "grounded candidate for the summit rescue sequence"
                 : "grounded audio candidate",
@@ -258,11 +299,8 @@ async function makeGroundedPlanningAgent(projectDir: string, mode: "pure" | "mix
   };
 }
 
-afterAll(() => {
-  for (const d of tempDirs) {
-    if (fs.existsSync(d)) fs.rmSync(d, { recursive: true, force: true });
-  }
-});
+afterEach(cleanupTempDirs);
+afterAll(cleanupTempDirs);
 
 // ── Mock Data Factories ──────────────────────────────────────────
 
@@ -646,8 +684,10 @@ describe("command shared infrastructure", () => {
       expect(result.promoted).toHaveLength(1);
       // Verify file exists at canonical path
       expect(fs.existsSync(path.join(tmpDir, "01_intent/creative_brief.yaml"))).toBe(true);
-      // Verify draft file was cleaned up (renamed)
+      // Verify draft file was cleaned up (renamed); transaction-unique
+      // staging never lingers under any naming.
       expect(fs.existsSync(path.join(tmpDir, "01_intent/creative_brief.draft.yaml"))).toBe(false);
+      expect(fs.readdirSync(path.join(tmpDir, "01_intent")).filter((name) => name.includes(".draft-"))).toEqual([]);
     });
 
     it("rejects and cleans up when validation fails", () => {
@@ -665,6 +705,7 @@ describe("command shared infrastructure", () => {
       expect(result.errors.length).toBeGreaterThan(0);
       // Draft should be cleaned up
       expect(fs.existsSync(path.join(tmpDir, "01_intent/creative_brief.draft.yaml"))).toBe(false);
+      expect(fs.readdirSync(path.join(tmpDir, "01_intent")).filter((name) => name.includes(".draft-"))).toEqual([]);
     });
 
     it("rejects all if ANY artifact is invalid (atomic)", () => {
@@ -714,7 +755,7 @@ describe("command shared infrastructure", () => {
       const blockersPath = path.join(tmpDir, "01_intent/unresolved_blockers.yaml");
       const originalBrief = fs.readFileSync(briefPath, "utf-8");
       const originalBlockers = fs.readFileSync(blockersPath, "utf-8");
-      const realRenameSync = fs.renameSync;
+
       const drafts: DraftFile[] = [
         {
           relativePath: "01_intent/creative_brief.yaml",
@@ -730,17 +771,18 @@ describe("command shared infrastructure", () => {
         },
       ];
 
-      const result = draftAndPromote(tmpDir, drafts, {
-        fsOps: {
-          renameSync(oldPath, newPath) {
-            const from = String(oldPath);
-            const to = String(newPath);
-            if (from.endsWith("unresolved_blockers.draft.yaml") && to.endsWith("unresolved_blockers.yaml")) {
-              throw new Error("simulated promote failure");
-            }
-            return realRenameSync(oldPath, newPath);
-          },
-        },
+      vi.mocked(fs.renameSync).mockImplementation((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+        const from = String(oldPath);
+        const to = String(newPath);
+        if (/unresolved_blockers\.draft-[^/]+\.yaml$/.test(from) && to.endsWith("unresolved_blockers.yaml")) {
+          throw new Error("simulated promote failure");
+        }
+        realCommandsRename(oldPath, newPath);
+      });
+      const result = draftAndPromote(tmpDir, drafts);
+      // Restore the passthrough for the remainder of the suite.
+      vi.mocked(fs.renameSync).mockImplementation((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+        realCommandsRename(oldPath, newPath);
       });
       expect(result.success).toBe(false);
       expect(result.failure_kind).toBe("promote");
@@ -774,6 +816,7 @@ describe("command shared infrastructure", () => {
       expect(result.failure_kind).toBe("concurrent_edit");
       expect(result.errors[0]).toContain("brief_hash changed");
       expect(fs.existsSync(path.join(tmpDir, "01_intent/unresolved_blockers.draft.yaml"))).toBe(false);
+      expect(fs.readdirSync(path.join(tmpDir, "01_intent")).filter((name) => name.includes(".draft-"))).toEqual([]);
     });
   });
 
@@ -1011,6 +1054,31 @@ describe("/triage command", () => {
     expect(fs.existsSync(path.join(projectDir, "04_plan/selects_candidates.yaml"))).toBe(false);
   });
 
+  it("closes progress as failed when triage execution throws unexpectedly", async () => {
+    const projectDir = createMinimalProject("triage-unexpected-error", {
+      withBrief: true,
+      withAnalysis: true,
+      state: "intent_locked",
+    });
+    const failureMessage = "controlled triage execution failure";
+    const agent: TriageAgent = {
+      async run() {
+        throw new Error(failureMessage);
+      },
+    };
+
+    await expect(runTriage(projectDir, agent)).rejects.toThrow(failureMessage);
+
+    const progress = JSON.parse(
+      fs.readFileSync(path.join(projectDir, "progress.json"), "utf-8"),
+    ) as { status: string; errors: Array<{ stage: string; message: string }> };
+    expect(progress.status).toBe("failed");
+    expect(progress.errors.at(-1)).toMatchObject({
+      stage: "triage",
+      message: failureMessage,
+    });
+  });
+
   it("canonicalizes an agent-mislabeled video candidate before image grounding", async () => {
     const projectDir = createMinimalProject("triage-canonical-video-kind", {
       withBrief: true, withAnalysis: true, state: "intent_locked", autonomyMode: "full",
@@ -1080,6 +1148,26 @@ describe("/triage command", () => {
       mode: "guide", source: "global_default", target_source: "material_total", target_duration_sec: mode === "pure" ? 3 : mode === "sequence" ? 2 : 5,
       min_duration_sec: 0, max_duration_sec: null, hard_gate: false, protect_vlm_peaks: true,
     };
+    // Issue #6 P0: these command-chain fixtures exercise still-image and
+    // sequence routing and do not model primary audio at all, so they declare
+    // an explicit primary-audio mix policy instead of wall-to-wall A1 coverage.
+    blueprint.audio_mix_policy = {
+      policy: "primary-audio-mix/v1",
+      mode: "selective_authorization",
+      authority: "operator",
+      reason: "command-chain fixture focuses on media-kind routing, not primary-audio continuity",
+    };
+    if (mode === "mixed") {
+      blueprint.timeline_operations = [{
+        operation_id: "OP_MIXED_STILL_FIXTURE_TAIL",
+        type: "gap",
+        track_id: "V1",
+        start_frame: 96,
+        duration_frames: 24,
+        authority: "operator",
+        reason: "fixture intentionally leaves the unused tail outside the authored visual clip",
+      }];
+    }
     const blueprintResult = await runBlueprint(
       projectDir,
       createMockBlueprintAgent({ blueprint }),
@@ -1095,12 +1183,14 @@ describe("/triage command", () => {
       else tamperedImage.media_kind = "video";
     }
     fs.writeFileSync(selectsPath, stringifyYaml(tamperedSelects));
-    const compiled = compile({
+    const compileOptions = {
       projectPath: projectDir, repoRoot: path.resolve("."), createdAt: "2026-01-01T00:00:00.000Z",
-    });
+    } as const;
+    const assertionMode: string = mode;
+    const compiled = await runCanonicalCompile(compileOptions);
     const imageClip = compiled.timeline.tracks.video.flatMap((track) => track.clips)
       .find((clip) => clip.media_kind === "image");
-    if (mode === "sequence") {
+    if (assertionMode === "sequence") {
       const sequenceClip = compiled.timeline.tracks.video.flatMap((track) => track.clips)
         .find((clip) => clip.media_kind === "sequence");
       expect(sequenceClip).toMatchObject({ src_in_us: 0, src_out_us: 2_000_000, timeline_duration_frames: 48 });
@@ -1111,28 +1201,28 @@ describe("/triage command", () => {
     }
     const imageAssetId = imageClip?.asset_id;
     const audioClips = compiled.timeline.tracks.audio.flatMap((track) => track.clips);
-    if (mode === "pure" || mode === "sequence") expect(audioClips).toHaveLength(0);
+    if (assertionMode === "pure" || assertionMode === "sequence") expect(audioClips).toHaveLength(0);
     expect(audioClips.filter((clip) => clip.asset_id === imageAssetId)).toHaveLength(0);
 
-    const renderedPath = path.join(projectDir, "05_timeline", `command-chain-${mode}.mp4`);
+    const renderedPath = path.join(projectDir, "05_timeline", `command-chain-${assertionMode}.mp4`);
     await assembleTimelineToMp4({
       projectDir,
       timelinePath: path.join(projectDir, "05_timeline/timeline.json"),
       outputPath: renderedPath,
-      includeAudio: mode === "mixed",
+      includeAudio: assertionMode === "mixed",
     });
     const renderedStreams = JSON.parse(execFileSync("ffprobe", [
       "-v", "error", "-show_entries", "stream=codec_type", "-of", "json", renderedPath,
     ], { encoding: "utf8" })).streams.map((stream: any) => stream.codec_type);
     expect(renderedStreams).toContain("video");
-    if (mode === "pure" || mode === "sequence") expect(renderedStreams).toEqual(["video"]);
-    if (mode === "mixed") {
+    if (assertionMode === "pure" || assertionMode === "sequence") expect(renderedStreams).toEqual(["video"]);
+    if (assertionMode === "mixed") {
       expect(compiled.timeline.tracks.video.flatMap((track) => track.clips).map((clip) => clip.media_kind))
         .toEqual(expect.arrayContaining(["image", "video"]));
       expect(renderedStreams).toContain("audio");
     }
 
-    if (mode === "pure") {
+    if (assertionMode === "pure") {
       fs.writeFileSync(selectsPath, stringifyYaml(persistedSelects));
       const expectedHold = Math.round(3 * 30000 / 1001);
       const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
@@ -1189,9 +1279,9 @@ describe("/triage command", () => {
       const strippedSource = sourceMap.items.find((entry: any) => entry.asset_id === imageAssetId);
       delete strippedSource.media_kind;
       fs.writeFileSync(sourceMapPath, JSON.stringify(sourceMap));
-      expect(() => compile({
+      await expect(runCanonicalCompile({
         projectPath: projectDir, repoRoot: path.resolve("."), createdAt: "2026-01-01T00:00:00.000Z",
-      })).toThrow(/still_image_grounding_invalid/);
+      })).rejects.toThrow(/still_image_grounding_invalid/);
     }
   }, 30_000);
 
@@ -1491,6 +1581,18 @@ describe("/status command", () => {
     expect(result.nextCommand).toBeDefined();
   });
 
+  it("reconciles an external project using repository schemas", () => {
+    const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "video-os-status-external-"));
+    const externalProject = path.join(externalRoot, "project");
+    copyDirSync(path.resolve(SAMPLE_PROJECT), externalProject);
+    tempDirs.push(externalRoot);
+
+    const result = runStatus(externalProject);
+
+    expect(result.success).toBe(true);
+    expect(result.gates?.analysis_gate).toBe("ready");
+  });
+
   it("recommends /intent for intent_pending", () => {
     const tmpDir = createMinimalProject("status-pending", { state: "intent_pending" });
 
@@ -1680,6 +1782,40 @@ describe("integration: intent → triage pipeline", () => {
 // ══════════════════════════════════════════════════════════════════
 
 describe("/blueprint command", () => {
+  it("rejects a creator narrative mode combined with credibility-first before invoking the agent", async () => {
+    const tmpDir = createMinimalProject("blueprint-creator-credibility-conflict", {
+      withBrief: true,
+      withAnalysis: true,
+      withSelects: true,
+      state: "selects_ready",
+    });
+    const briefPath = path.join(tmpDir, "01_intent/creative_brief.yaml");
+    const brief = parseYaml(fs.readFileSync(briefPath, "utf-8")) as Record<string, unknown>;
+    brief.narrative_mode = "day_log";
+    brief.editorial = { hook_priority: "credibility_first" };
+    fs.writeFileSync(briefPath, stringifyYaml(brief), "utf-8");
+
+    let agentCalls = 0;
+    const agent: BlueprintAgent = {
+      async run(ctx) {
+        agentCalls += 1;
+        return createMockBlueprintAgent().run(ctx);
+      },
+    };
+    const statePath = path.join(tmpDir, "project_state.yaml");
+    const stateBefore = fs.readFileSync(statePath);
+
+    const result = await runBlueprint(tmpDir, agent, { iterativeEngine: false });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe("VALIDATION_FAILED");
+    expect(result.error?.message).toContain("creative_brief.yaml validation failed");
+    expect(agentCalls).toBe(0);
+    expect(fs.readFileSync(statePath)).toEqual(stateBefore);
+    expect(fs.existsSync(path.join(tmpDir, "progress.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "04_plan/edit_blueprint.yaml"))).toBe(false);
+  });
+
   it("rejects ungrounded project and candidate sequence claims", async () => {
     const projectBlocked = createMinimalProject("blueprint-sequence-project", {
       withBrief: true, withAnalysis: true, withSelects: true, state: "selects_ready",
@@ -2391,7 +2527,7 @@ function makeMockReviewReport(
   overrides?: Partial<ReviewReport>,
 ): ReviewReport {
   return {
-    version: "1",
+    version: "2",
     project_id: projectId,
     timeline_version: "1",
     summary_judgment: {
@@ -2415,7 +2551,23 @@ function makeMockReviewReport(
       goal: "Tighten hook and review wind issues.",
       actions: ["Trim CLP_0001", "Check wind in b03"],
     },
+    editorial_judgments: [makeCanonicalJudgment()],
     ...overrides,
+  };
+}
+
+// Canonical v2 judgment anchored to an artifact that exists in every sample
+// project copy, so evidence binding passes in runReview-based tests.
+function makeCanonicalJudgment() {
+  return {
+    observation: "The hook beat holds a wide view before the subject enters the frame.",
+    inference: "The delay before the subject appears weakens the opening engagement.",
+    editorial_intent: "Trim the opening so the subject arrives earlier in the hook.",
+    evidence: [
+      { kind: "artifact_ref" as const, ref: "01_intent/creative_brief.yaml" },
+    ],
+    confidence: 0.6,
+    confidence_basis: "measured" as const,
   };
 }
 
@@ -2505,6 +2657,56 @@ function makeMockMarlinQAReport(
   };
 }
 
+function passingWholeCutSemanticOptions(
+  durationSec = 28,
+): NonNullable<Parameters<typeof runReview>[2]> {
+  const provider: WholeCutSemanticProvider = {
+    id: "commands-test-semantic-provider",
+    capability: "available",
+    async observeWindow(input) {
+      const observation: WholeCutSemanticProviderObservation = {
+        observation_id: `semantic-${input.start_sec}`,
+        start_sec: input.start_sec,
+        end_sec: input.end_sec,
+        observation: "The full-cut fixture presents an observable action and its stated result.",
+        inference: "The observed sequence supports the brief without an unsupported identity or chronology claim.",
+        confidence: 0.85,
+        confidence_basis: "measured",
+        evidence: {
+          render: {
+            path: input.render_path,
+            start_sec: input.start_sec,
+            end_sec: input.end_sec,
+            sha256: input.render_sha256,
+          },
+          source_clip_ids: input.active_clip_ids,
+        },
+        axis_results: input.axes.map((axis) => ({
+          axis_id: axis.axis_id,
+          outcome: "pass" as const,
+          confidence: 0.85,
+          confidence_basis: "measured" as const,
+          brief_refs: axis.brief_refs,
+          rationale: "The axis is supported by the complete test window.",
+        })),
+        story_progression: {
+          score: 0.85,
+          confidence: 0.85,
+          confidence_basis: "measured",
+        },
+      };
+      return { observations: [observation], problem_ranges: [] };
+    },
+  };
+  return {
+    wholeCutSemantic: {
+      durationSec,
+      probeRenderDurationImpl: async () => durationSec,
+      provider,
+    },
+  };
+}
+
 function writeFreshReviewRender(projectDir: string): void {
   const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
   const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
@@ -2550,6 +2752,7 @@ function visualQATestOptions(
   return {
     requireCompiledTimeline: true,
     skipPreview: true,
+    ...passingWholeCutSemanticOptions(),
     visualQA: {
       runDeterministicOutputQAImpl: async () => ({
         status: "verified",
@@ -2573,6 +2776,7 @@ function visualQAWaiverOptions(
     visualQaWaiverReason: reason,
     requireCompiledTimeline: true,
     skipPreview: true,
+    ...passingWholeCutSemanticOptions(),
     visualQA: {
       runDeterministicOutputQAImpl: async () => ({
         status: "verified",
@@ -2605,6 +2809,192 @@ function createReviewReadyProject(
 }
 
 describe("/review command", () => {
+  it("passes full-cut semantic context to the production critic route and persists it", async () => {
+    const tmpDir = createReviewReadyProject("whole-cut-public-route");
+    writeFreshReviewRender(tmpDir);
+    let receivedContext: Parameters<ReviewAgent["run"]>[0] | undefined;
+    const agent: ReviewAgent = {
+      async run(ctx) {
+        receivedContext = ctx;
+        return {
+          report: makeMockApprovedReport("sample-mountain-reset"),
+          patch: makeMockReviewPatch(),
+        };
+      },
+    };
+
+    const result = await runReview(tmpDir, agent, {
+      createdAt: "2026-03-21T05:00:00Z",
+      ...visualQATestOptions(90),
+      operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.newState).toBe("approved");
+    expect(receivedContext?.wholeCutRenderPath).toBe(path.join(tmpDir, "09_output/rough-cut.mp4"));
+    expect(receivedContext?.wholeCutSemantic.render.path).toBe("09_output/rough-cut.mp4");
+    expect(receivedContext?.wholeCutSemantic.coverage.status).toBe("complete");
+    expect(receivedContext?.briefDerivedAxes.length).toBeGreaterThanOrEqual(8);
+    expect(receivedContext?.visualQASceneReport).toHaveLength(1);
+    const persisted = parseYaml(fs.readFileSync(path.join(tmpDir, "06_review/review_report.yaml"), "utf-8")) as ReviewReport;
+    expect(persisted.whole_cut_semantic?.coverage.status).toBe("complete");
+    expect(persisted.whole_cut_semantic?.render.path).toBe("09_output/rough-cut.mp4");
+  });
+
+  it("keeps command-owned HOLD evidence immutable when a hostile critic tries to approve it", async () => {
+    const tmpDir = createReviewReadyProject("whole-cut-hostile-mutation", {
+      "06_review/human_notes.yaml": {
+        version: "1",
+        project_id: "sample-mountain-reset",
+        notes: [{
+          id: "HN_HOSTILE",
+          timestamp: "2026-03-21T04:00:00Z",
+          reviewer: "director",
+          observation: "The hook stalls before the change is clear.",
+          severity: "concern",
+          correction_reason: "stalled_progression",
+          directive_type: "trim_segment",
+          clip_ids: ["CLP_0001"],
+          evidence_refs: ["05_timeline/timeline.json#CLP_0001"],
+        }],
+      },
+    });
+    writeFreshReviewRender(tmpDir);
+    let mutationAttempted = false;
+    const agent: ReviewAgent = {
+      async run(ctx) {
+        expect(Object.isFrozen(ctx)).toBe(true);
+        expect(Object.isFrozen(ctx.wholeCutSemantic)).toBe(true);
+        expect(Object.isFrozen(ctx.wholeCutSemantic.coverage)).toBe(true);
+        expect(Object.isFrozen(ctx.normalizedHumanCorrections)).toBe(true);
+        mutationAttempted = true;
+        const attempt = (operation: () => void): void => {
+          try {
+            operation();
+          } catch {
+            // A hostile provider may try ordinary mutation; the command must
+            // remain safe even when the frozen view rejects it.
+          }
+        };
+        attempt(() => { ctx.wholeCutSemantic.status = "verified"; });
+        attempt(() => { ctx.wholeCutSemantic.provider.capability = "available"; });
+        attempt(() => { ctx.wholeCutSemantic.coverage = {
+          ...ctx.wholeCutSemantic.coverage,
+          status: "complete",
+          expected_duration_sec: 30,
+          covered_duration_sec: 30,
+          intervals: [{ start_sec: 0, end_sec: 30 }],
+          uncovered_ranges: [],
+        }; });
+        attempt(() => {
+          ctx.wholeCutSemantic.axis_results = ctx.wholeCutSemantic.axis_results.map((axis) => ({
+            ...axis,
+            outcome: "pass",
+            confidence: 0.9,
+            confidence_basis: "measured",
+            coverage: {
+              ...axis.coverage,
+              status: "complete",
+              expected_duration_sec: 30,
+              covered_duration_sec: 30,
+              intervals: [{ start_sec: 0, end_sec: 30 }],
+              uncovered_ranges: [],
+            },
+          }));
+        });
+        attempt(() => { ctx.wholeCutSemantic.story_progression = {
+          ...ctx.wholeCutSemantic.story_progression,
+          status: "measured",
+          score: 0.9,
+          confidence: 0.9,
+          confidence_basis: "measured",
+          relationship: "aligned",
+        }; });
+        attempt(() => { ctx.wholeCutSemantic.message_retention = {
+          ...ctx.wholeCutSemantic.message_retention,
+          status: "retained",
+          confidence: 0.9,
+          confidence_basis: "measured",
+        }; });
+        attempt(() => { ctx.wholeCutSemantic.semantic_outcome = {
+          ...ctx.wholeCutSemantic.semantic_outcome,
+          status: "pass",
+          confidence: 0.9,
+          confidence_basis: "measured",
+        }; });
+        attempt(() => { delete ctx.wholeCutSemantic.human_hold; });
+        attempt(() => {
+          if (ctx.normalizedHumanCorrections[0]) {
+            ctx.normalizedHumanCorrections[0].reason = "identity_confusion";
+          }
+        });
+        return {
+          report: makeMockApprovedReport(ctx.projectId),
+          patch: makeMockReviewPatch(),
+        };
+      },
+    };
+    const options = visualQATestOptions(95);
+    options.wholeCutSemantic = { probeRenderDurationImpl: async () => 30 };
+
+    const result = await runReview(tmpDir, agent, {
+      createdAt: "2026-03-21T05:00:00Z",
+      ...options,
+      operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
+    });
+
+    expect(mutationAttempted).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.newState).toBe("critique_ready");
+    expect(result.report?.whole_cut_semantic?.status).toBe("unavailable");
+    expect(result.report?.whole_cut_semantic?.semantic_outcome.status).toBe("blocked");
+    expect(result.report?.summary_judgment.status).toBe("blocked");
+    expect(result.report?.normalized_human_corrections?.[0].reason).toBe("stalled_progression");
+  });
+
+  it("does not let verified visual QA or scene evidence approve unsupported semantics", async () => {
+    const tmpDir = createReviewReadyProject("whole-cut-semantic-hold");
+    writeFreshReviewRender(tmpDir);
+    const agent = createMockReviewAgent({
+      report: makeMockApprovedReport("sample-mountain-reset"),
+    });
+    const visualOnlyOptions = visualQATestOptions(95);
+    visualOnlyOptions.wholeCutSemantic = undefined;
+
+    const result = await runReview(tmpDir, agent, {
+      createdAt: "2026-03-21T05:00:00Z",
+      ...visualOnlyOptions,
+      operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.newState).toBe("critique_ready");
+    expect(result.report?.visual_qa?.status).toBe("verified");
+    expect(result.report?.whole_cut_semantic?.provider.capability).toBe("unavailable_optional");
+    expect(result.report?.summary_judgment.status).toBe("blocked");
+    expect(result.report?.summary_judgment.confidence).toBeLessThanOrEqual(0.5);
+    expect(result.report?.summary_judgment.rationale).toMatch(/scene counts cannot substitute/i);
+  });
+
+  it("validates the nested whole-cut semantic contract in canonical review reports", async () => {
+    const tmpDir = createReviewReadyProject("nested-whole-cut-schema");
+    writeFreshReviewRender(tmpDir);
+    const result = await runReview(tmpDir, createMockReviewAgent({
+      report: makeMockApprovedReport("sample-mountain-reset"),
+    }), {
+      createdAt: "2026-03-21T05:00:00Z",
+      ...visualQATestOptions(95),
+      operatorAccept: async () => ({ accepted: true, approvedBy: "operator" }),
+    });
+
+    expect(result.success).toBe(true);
+    const validate = createValidator("review-report.schema.json");
+    expect(validate(result.report)).toBe(true);
+    const invalid = structuredClone(result.report!) as ReviewReport;
+    invalid.whole_cut_semantic!.render = {} as NonNullable<ReviewReport["whole_cut_semantic"]>["render"];
+    expect(validate(invalid)).toBe(false);
+  });
+
   describe("compile preflight", () => {
     it("runs compile → preview (degraded) → QC and emits preflight artifacts", async () => {
       const tmpDir = createReviewReadyProject("compile-ok");
@@ -2621,7 +3011,7 @@ describe("/review command", () => {
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/timeline.json"))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, "05_timeline/review-qc-summary.json"))).toBe(true);
       // Preview steps: compile, preview (skipped due to no source files), qc
-      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics", "visual_qa"]);
+      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics", "visual_qa", "whole_cut_semantic"]);
       // No source files in test fixture → preview degrades gracefully
       expect(result.preflight!.steps[1].status).toBe("skipped");
       // Gap report contains overview and/or preview degradation messages
@@ -2642,7 +3032,7 @@ describe("/review command", () => {
 
       expect(result.success).toBe(true);
       expect(result.preflight).toBeDefined();
-      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics", "visual_qa"]);
+      expect(result.preflight!.steps.map((step) => step.step)).toEqual(["compile", "preview", "qc", "metrics", "visual_qa", "whole_cut_semantic"]);
       expect(result.preflight!.steps[1].status).toBe("skipped");
       expect(result.preflight!.steps[1].detail).toContain("--skip-preview");
       expect(result.preflight!.gapReport[0]).toContain("skipped via --skip-preview");
@@ -3334,8 +3724,10 @@ describe("/review command", () => {
             reviewer: "director",
             observation: "The hook feels too slow, tighten it.",
             severity: "concern",
+            correction_reason: "stalled_progression",
             directive_type: "trim_segment",
             clip_ids: ["CLP_0001"],
+            evidence_refs: ["05_timeline/timeline.json#CLP_0001"],
           },
         ],
       };
@@ -3345,9 +3737,11 @@ describe("/review command", () => {
       });
 
       let receivedNotes: HumanNotes | null = null;
+      let receivedNormalized: NormalizedHumanCorrection[] | undefined;
       const agent: ReviewAgent = {
         async run(ctx) {
           receivedNotes = ctx.humanNotes;
+          receivedNormalized = ctx.normalizedHumanCorrections;
           return {
             report: makeMockReviewReport(ctx.projectId),
             patch: makeMockReviewPatch(),
@@ -3363,6 +3757,19 @@ describe("/review command", () => {
       expect(receivedNotes).not.toBeNull();
       expect(receivedNotes!.notes).toHaveLength(1);
       expect(receivedNotes!.notes[0].reviewer).toBe("director");
+      expect(receivedNormalized).toHaveLength(1);
+      expect(receivedNormalized![0].reason).toBe("stalled_progression");
+      expect(receivedNormalized![0].original_feedback).toBe("The hook feels too slow, tighten it.");
+      expect(receivedNormalized![0].evidence_provenance.evidence_refs).toEqual([
+        "05_timeline/timeline.json#CLP_0001",
+      ]);
+      const persisted = parseYaml(
+        fs.readFileSync(path.join(tmpDir, "06_review/review_report.yaml"), "utf-8"),
+      ) as ReviewReport;
+      expect(persisted.normalized_human_corrections?.[0].source_note.correction_reason)
+        .toBe("stalled_progression");
+      expect(persisted.normalized_human_corrections?.[0].evidence_provenance.source_artifact_path)
+        .toBe("06_review/human_notes.yaml");
     });
 
     it("passes null humanNotes when file is absent", async () => {

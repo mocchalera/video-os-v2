@@ -284,6 +284,28 @@ describe("longform transcript reduction", () => {
       result.selects,
       "2026-07-13T00:00:00.000Z",
     );
+    const authoredFrames = blueprint.beats.reduce((sum, beat) => sum + beat.target_duration_frames, 0);
+    const targetFrames = Math.round(65 * 24);
+    if (authoredFrames < targetFrames) {
+      blueprint.timeline_operations = [{
+        operation_id: "OP_LONGFORM_FIXTURE_TAIL",
+        type: "gap",
+        track_id: "V1",
+        start_frame: authoredFrames,
+        duration_frames: targetFrames - authoredFrames,
+        authority: "operator",
+        reason: "fixture explicitly records the short rounding tail outside retained transcript windows",
+      }];
+    }
+    // Issue #6 P0 / #25: this fixture exercises chapter-plan compilation and
+    // does not model primary-audio continuity, so it declares an explicit
+    // primary-audio mix policy instead of wall-to-wall A1 coverage.
+    blueprint.audio_mix_policy = {
+      policy: "primary-audio-mix/v1",
+      mode: "selective_authorization",
+      authority: "operator",
+      reason: "longform fixture models chapter structure, not primary-audio continuity across the authorized visual tail",
+    };
     const tempDir = path.join("tests", `tmp_longform_${process.pid}_${Date.now()}`);
     TMP_DIRS.push(tempDir);
     fs.mkdirSync(path.join(tempDir, "01_intent"), { recursive: true });

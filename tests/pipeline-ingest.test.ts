@@ -259,7 +259,7 @@ describe("Pipeline: merged editorial observation cache reuse", () => {
             camera_axis: "unknown",
             dominant_subject_type: "person",
             dominant_colors: ["green"],
-            confidence: { tags: 0.9, motion: 0.8, framing: 0.8, direction: 0.7, appearance: 0.8 },
+            confidence: { tags: 0.9, motion: 0.8, framing: 0.8, direction: 0.7, appearance: 0.8, text: 0.8 },
           },
         }),
       };
@@ -321,6 +321,66 @@ describe("Pipeline: merged editorial observation cache reuse", () => {
       expect(validateSegments(second.segmentsJson)).toBe(true);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+describe("Pipeline: visual stage absolute deadline", () => {
+  it("does not enter VLM, appraiser, or measurement after the shared deadline", async () => {
+    const projectDir = path.join(import.meta.dirname, `_tmp_visual_deadline_${Date.now()}`);
+    fs.mkdirSync(projectDir, { recursive: true });
+    let vlmCalls = 0;
+    let appraiserCalls = 0;
+    let measurementCalls = 0;
+    try {
+      await runPipeline({
+        sourceFiles: [TEST_CLIP],
+        projectDir,
+        repoRoot: REPO_ROOT,
+        skipStt: true,
+        skipMarlin: true,
+        skipPeak: true,
+        firstPreviewDeadlineAtMs: Date.now() - 1,
+        firstPreviewCompileRenderReserveMs: 0,
+        vlmFn: async () => {
+          vlmCalls += 1;
+          return {
+            rawJson: JSON.stringify({
+              summary: "late",
+              tags: [],
+              interest_points: [],
+              quality_flags: [],
+              confidence: { summary: 0.8, tags: 0.8, quality_flags: 0.8 },
+            }),
+          };
+        },
+        appraiserFn: async () => {
+          appraiserCalls += 1;
+          return {
+            visual_quality: {
+              composition_score: 0.8,
+              light_quality: 0.8,
+              focus_sharpness: 0.8,
+              subject_prominence: 0.8,
+            },
+            extracted_text: [],
+            place_hint: { name: null, category: "unknown", confidence: 0, evidence: [] },
+            aesthetic_notes: [],
+          };
+        },
+        visualQualityAnalyzeFn: async () => {
+          measurementCalls += 1;
+          throw new Error("measurement must not start");
+        },
+      });
+
+      expect({ vlmCalls, appraiserCalls, measurementCalls }).toEqual({
+        vlmCalls: 0,
+        appraiserCalls: 0,
+        measurementCalls: 0,
+      });
+    } finally {
+      fs.rmSync(projectDir, { recursive: true, force: true });
     }
   }, 60_000);
 });

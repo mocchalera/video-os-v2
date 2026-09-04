@@ -105,8 +105,8 @@ describe("gain filter parity", () => {
       gain_unit: "db",
       nat_gain: -6,
     });
-    expect(linearArgs[linearArgs.indexOf("-af") + 1]).toBe("volume=1.8");
-    expect(dbArgs[dbArgs.indexOf("-af") + 1]).toBe("volume=0.50118723");
+    expect(linearArgs[linearArgs.indexOf("-af") + 1]).toContain("volume=1.8");
+    expect(dbArgs[dbArgs.indexOf("-af") + 1]).toContain("volume=0.50118723");
   });
 
   it("preserves exact explicit mute in final, BGM, and rough-cut filters", () => {

@@ -170,11 +170,11 @@ function deriveMotifTags(tags: string[] | undefined): string[] {
 
 function deriveStoryRole(eligibleBeats: string[] | undefined): NonNullable<Candidate["story_role"]> {
   const beats = (eligibleBeats ?? []).map(normalizeTag).filter(isNonEmptyString);
-  const joined = beats.join(" ");
+  const joined = beats.join(" ").replace(/_/g, " ");
   if (/\b(hook|opening)\b/.test(joined)) return "hook";
   if (/\bsetup\b/.test(joined)) return "setup";
-  if (/\b(closing|ending|payoff|release)\b/.test(joined)) return "closing";
-  if (/\b(experience|development|immersion|middle)\b/.test(joined)) return "experience";
+  if (/\b(closing|close|ending|payoff|release)\b/.test(joined)) return "closing";
+  if (/\b(experience|insight|development|immersion|middle)\b/.test(joined)) return "experience";
   return "experience";
 }
 

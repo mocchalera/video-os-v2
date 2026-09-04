@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { readAuthoritativeAssetMediaCapabilities } from "./source-media-capabilities.js";
 
 export interface PeakMaterializationCandidate {
   segment_id: string;
@@ -88,9 +89,17 @@ export function materializePeakSignalsFromSegments(
   }
 
   const byId = new Map((segments.items ?? []).map((segment) => [segment.segment_id, segment]));
+  const capabilities = readAuthoritativeAssetMediaCapabilities(projectDir);
   let changed = false;
 
   for (const candidate of selects.candidates) {
+    const capability = capabilities.get(candidate.asset_id);
+    if (capability && capability.media_kind !== "image" && (
+      capability.media_kind === "audio" || capability.source_capabilities.has_video === false
+    )) {
+      changed = clearVisualPeakMaterialization(candidate) || changed;
+      continue;
+    }
     const segment = byId.get(candidate.segment_id);
     const support = segment?.peak_analysis?.support_signals;
     const moment = segment?.peak_analysis?.peak_moments?.[0];
@@ -141,6 +150,57 @@ export function materializePeakSignalsFromSegments(
       peakType,
     )) {
       changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function clearVisualPeakMaterialization(candidate: PeakMaterializationCandidate): boolean {
+  let changed = false;
+  if (candidate.peak_signals !== undefined) {
+    delete candidate.peak_signals;
+    changed = true;
+  }
+
+  if (candidate.editorial_signals) {
+    const next = { ...candidate.editorial_signals } as Record<string, unknown>;
+    for (const key of ["peak_strength_score", "peak_type", "peak_ref", "peak_source_pass"]) {
+      if (!(key in next)) continue;
+      delete next[key];
+      changed = true;
+    }
+    if (Object.keys(next).length === 0) {
+      delete candidate.editorial_signals;
+      changed = true;
+    } else if (changed) {
+      candidate.editorial_signals = next as PeakMaterializationCandidate["editorial_signals"];
+    }
+  }
+
+  if (candidate.trim_hint) {
+    const next = { ...candidate.trim_hint } as Record<string, unknown>;
+    for (const key of [
+      "source_center_us",
+      "interest_point_label",
+      "interest_point_confidence",
+      "peak_ref",
+      "peak_type",
+      "center_source",
+      "recommended_in_us",
+      "recommended_out_us",
+      "window_start_us",
+      "window_end_us",
+    ]) {
+      if (!(key in next)) continue;
+      delete next[key];
+      changed = true;
+    }
+    if (Object.keys(next).length === 0) {
+      delete candidate.trim_hint;
+      changed = true;
+    } else if (changed) {
+      candidate.trim_hint = next as PeakMaterializationCandidate["trim_hint"];
     }
   }
 

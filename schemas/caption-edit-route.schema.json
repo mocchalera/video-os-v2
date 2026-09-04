@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "caption-edit-route.schema.json",
+  "title": "Caption edit instruction route",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "instruction", "normalized_instruction", "status", "route",
+    "reason_codes", "matched_facets", "evidence_status", "verified",
+    "artifacts_to_write", "owner_boundary"
+  ],
+  "properties": {
+    "version": { "const": "caption-edit-route/v1" },
+    "instruction": { "type": "string", "minLength": 1 },
+    "normalized_instruction": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["routed", "hold", "degraded"] },
+    "route": {
+      "anyOf": [
+        { "enum": ["caption_review_patch", "caption_visual_treatment", "timeline_review_patch"] },
+        { "type": "null" }
+      ]
+    },
+    "reason_codes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "matched_facets": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "evidence_status": { "enum": ["not_required", "available", "subject_evidence_required"] },
+    "verified": { "type": "boolean" },
+    "artifacts_to_write": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "owner_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["speech_caption", "graphical_content", "duplicate_semantic_owner"],
+      "properties": {
+        "speech_caption": { "const": "caption-review-finalize+ffmpeg-libass" },
+        "graphical_content": { "const": "registered-content-element+remotion" },
+        "duplicate_semantic_owner": { "const": "reject" }
+      }
+    }
+  }
+}

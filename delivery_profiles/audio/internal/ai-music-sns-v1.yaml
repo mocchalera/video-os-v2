@@ -1,0 +1,158 @@
+version: audio-delivery-profile/v1
+profile_id: audio-internal-ai-music-sns-v1
+profile_version: v1
+platform: internal
+surface: sns-vertical-music
+release_scope: internal
+delivery_variant: ai-music-mastered
+status: verified
+source_references:
+  - url: https://github.com/mocchalera/video-os-v2-dev/issues/38
+    title: '[Audio Mastering] AI生成音楽向け2-pass MA・ステレオエンハンサー・SNSラウドネス（-13.3 LUFS）自動ノーマライザー'
+    retrieved_at: '2026-08-29'
+    published_date: null
+    owner: Video OS maintainers
+    evidence_kind: internal_policy
+    notes: 'Issue #38 internal SNS mastering decision; not a platform-required value.'
+retrieved_at: '2026-08-29'
+owner: Video OS maintainers
+verification:
+  owner: Video OS maintainers
+  verified_at: '2026-08-29T00:00:00Z'
+  review_due_at: '2027-08-29T00:00:00Z'
+  notes: Internal profile carries a real annual review date; the fixture 2099 sentinel is deliberately not reused.
+supersession:
+  state: active
+assumptions:
+  - 'Values are the Issue #38 internal SNS mastering targets for AI-generated music (Suno/Udio stems).'
+  - '-13.3 LUFS ± 0.5 and true peak <= -1.0 dBTP are enforced by the dedicated ai-music-mastering chain with fail-closed re-measurement.'
+  - 'Loudnorm processes at the separate -2.0 dBTP processing true-peak target so hot material whose limiter engages (plus MP3 inter-sample-peak overshoot) stays inside the -1.0 dBTP acceptance ceiling.'
+  - Platform normalization and platform transcoding are unknown and not simulated; SNS platforms renormalize uploaded audio.
+  - 24-bit WAV (pcm_s24le) and 320 kbps MP3 deliveries are encoded from the same mastered output.
+dialogue_processing:
+  authority_track: A1
+  conflict_policy: dialogue_first
+  finishing_engine: existing_dialogue_finishing
+  optional_stages:
+    - ai_music_tone_chain_when_source_is_ai_music
+    - high_pass_35hz_when_ai_music_policy_requests_it
+    - measured_loudnorm_two_pass_when_standalone_sns_route
+  single_mastering_owner: shared_audio_render_plan
+  single_mastering_stage: after_mix
+  max_mastering_passes: 1
+  notes: The ai-music tone chain is pre-processing; the shared post-mix mastering pass keeps single final mastering ownership.
+measurement_requirements:
+  encoded_result_required: true
+  method:
+    loudness: ffmpeg loudnorm pass 1 on the mastered result (ai-music-mastering receipt)
+    true_peak: ffmpeg loudnorm input_tp on the mastered result (ai-music-mastering receipt)
+    format: ffprobe stream and container inspection
+    duration: ffprobe stream duration
+    av_sync: ffprobe audio duration (music-only master has no video stream)
+  integrated_loudness:
+    status: verified
+    value: -13.3
+    unit: LUFS
+    basis: internal_target
+    source_ref: https://github.com/mocchalera/video-os-v2-dev/issues/38
+    minimum: -13.8
+    maximum: -12.8
+    notes: 'Acceptance band is -13.3 ± 0.5 LUFS per Issue #38; minimum/maximum are the band edges bound to the runtime loudness_tolerance_lufs.'
+  short_term_loudness:
+    status: unknown
+    unit: LUFS
+    basis: unknown
+    notes: The loudnorm pass-1 parser records integrated values only.
+  lra:
+    status: verified
+    value: 11
+    unit: LU
+    basis: internal_target
+    source_ref: https://github.com/mocchalera/video-os-v2-dev/issues/38
+    notes: Chosen high enough to keep linear-mode loudnorm scaling for typical AI-music dynamics.
+  true_peak:
+    status: verified
+    value: -1.0
+    unit: dBTP
+    basis: internal_target
+    source_ref: https://github.com/mocchalera/video-os-v2-dev/issues/38
+    maximum: -1.0
+    notes: 'Acceptance limit is true peak <= -1.0 dBTP per Issue #38; loudnorm itself processes at the separate -2.0 dBTP processing target below.'
+  voice_intelligibility:
+    status: not_claimed
+    basis: unknown
+    proxies:
+      - 3.2 kHz presence and 12 kHz air EQ stages applied by the tone chain
+      - integrated loudness and true-peak measurements only
+    human_required: true
+    notes: Phone-speaker vocal clarity requires a human audition; no automated claim.
+  diagnostics:
+    clipping: loudnorm processing true-peak target plus astats clipped-sample evidence on each deliverable; unavailable clipping evidence fails verification closed
+    silence: not asserted by this profile
+    dropout: not asserted by this profile
+    channel: ffprobe channel count and layout
+    phase: not asserted by this profile
+encoding_requirements:
+  container:
+    status: verified
+    value: wav
+    basis: internal_target
+    source_ref: https://github.com/mocchalera/video-os-v2-dev/issues/38
+  codec:
+    status: verified
+    value: pcm_s24le
+    basis: internal_target
+    source_ref: https://github.com/mocchalera/video-os-v2-dev/issues/38
+    notes: 320 kbps MP3 (libmp3lame) secondary delivery is encoded from the same master when requested.
+  sample_rate_hz:
+    status: verified
+    value: 48000
+    unit: Hz
+    basis: internal_target
+  channels:
+    status: verified
+    value: 2
+    basis: internal_target
+  true_peak_margin_dbtp:
+    status: verified
+    value: 1.0
+    unit: dB
+    basis: internal_target
+    source_ref: https://github.com/mocchalera/video-os-v2-dev/issues/38
+  true_peak_processing_target_dbtp:
+    status: verified
+    value: -2.0
+    unit: dBTP
+    basis: internal_target
+    source_ref: https://github.com/mocchalera/video-os-v2-dev/issues/38
+    notes: 'Separate loudnorm processing target (Claude review C1): 1.0 dB below the -1.0 dBTP acceptance ceiling so limiter overshoot and 320 kbps MP3 inter-sample-peak overshoot stay inside acceptance; the acceptance ceiling itself is unchanged.'
+  encode_preview:
+    status: not_run
+    method: local synthetic AI-music fixture encode
+    human_required: true
+playback_evidence:
+  stereo:
+    status: verified
+    method: ffmpeg extrastereo stage with side-energy measurement on synthetic fixture
+    human_required: true
+  mono_fold_down:
+    status: not_run
+    method: ffmpeg pan mono fold-down on the mastered result
+    human_required: true
+  mobile_fixture:
+    status: unknown
+    method: no device fixture registered
+    human_required: true
+normalization:
+  status: not_applied
+  assumption: 'Platform normalization is opaque and is not applied or simulated; -13.3 LUFS is the local EBU R128 mastering decision from Issue #38.'
+human_preview:
+  required: true
+  gates:
+    - human_audition
+    - mono_mobile_playback
+  status: pending
+fallback:
+  on_missing_tool: hold
+  on_stale_or_unknown: human_hold
+  reason: Missing ffmpeg/ffprobe/filter/encoder tooling holds the route as an explicit capability; a mastered deliverable must never be produced or claimed without the measured evidence chain.

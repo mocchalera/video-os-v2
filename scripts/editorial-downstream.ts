@@ -9,12 +9,14 @@ import type {
   TimelineIR,
 } from "../runtime/artifacts/types.js";
 import { runQALoop, type QALoopResult } from "../runtime/eval/qa-loop.js";
+import { assertDeferredProductionDirectivesSatisfied } from "../runtime/eval/selection-coverage.js";
 import {
   formatStageFailureMessage,
   type PipelineTimingStage,
 } from "../runtime/progress.js";
 import { writeJsonArtifact } from "../runtime/pipeline/editorial-context.js";
 import { FULL_PIPELINE_CANONICAL_OUTPUTS } from "../runtime/pipeline/full-pipeline-contract.js";
+import { readAuthoredCaptionStatus } from "../runtime/caption/authored-lyrics.js";
 import { runEditorialCompile, runEditorialRender } from "./editorial-stages.js";
 
 const [ROUGH_RENDER_ARTIFACT_PATH] = FULL_PIPELINE_CANONICAL_OUTPUTS;
@@ -87,6 +89,11 @@ export interface EditorialDownstreamOptions {
   skipQa?: boolean;
   logPrefix?: string;
   runStage?: <T>(stage: PipelineTimingStage, fn: () => Promise<T>) => Promise<T>;
+  onFirstPreviewReady?: () => void;
+  /** Preserve an already approved authored C1 projection for this run. */
+  shouldSkipCompile?: () => boolean | Promise<boolean>;
+  /** Gate immediately after compile and before any render/review consumer. */
+  beforeRender?: () => Promise<void>;
 }
 
 export interface EditorialDownstreamDeps {
@@ -177,11 +184,33 @@ export async function runEditorialDownstream(
 ): Promise<EditorialPipelineStatusArtifact> {
   const runStage = options.runStage ?? (async <T>(_stage: PipelineTimingStage, fn: () => Promise<T>) => fn());
   const logPrefix = options.logPrefix ?? "editorial";
+  const initialAuthoredCaptionStatus = readAuthoredCaptionStatus(options.projectDir);
+  const authoredCaptionRoute = initialAuthoredCaptionStatus.detected || options.blueprint.caption_policy?.source === "authored";
 
-  await runStage("compile", async () => {
-    console.log(`[${logPrefix}] compile`);
-    await (deps.runCompile ?? runEditorialCompile)(options.projectDir);
-  });
+  const skipCompile = options.shouldSkipCompile
+    ? await options.shouldSkipCompile()
+    : authoredCaptionRoute && initialAuthoredCaptionStatus.status === "ready";
+  if (skipCompile) {
+    console.log(`[${logPrefix}] compile skipped; preserving current approved caption projection`);
+  } else {
+    await runStage("compile", async () => {
+      console.log(`[${logPrefix}] compile`);
+      await (deps.runCompile ?? runEditorialCompile)(options.projectDir);
+    });
+  }
+  const compiledTimeline = JSON.parse(
+    fs.readFileSync(path.join(options.projectDir, "05_timeline", "timeline.json"), "utf-8"),
+  ) as TimelineIR;
+  assertDeferredProductionDirectivesSatisfied(options.brief, options.blueprint, compiledTimeline);
+  await options.beforeRender?.();
+  if (authoredCaptionRoute) {
+    const authoredCaptionStatus = readAuthoredCaptionStatus(options.projectDir);
+    if (authoredCaptionStatus.status !== "ready") {
+      throw new Error(
+        `authored caption gate pending (${authoredCaptionStatus.status}); explicit human approval is required before render/review. Next: ${authoredCaptionStatus.next_command}`,
+      );
+    }
+  }
 
   if (options.skipRender) {
     console.log(`[${logPrefix}] render skipped`);
@@ -190,6 +219,7 @@ export async function runEditorialDownstream(
       console.log(`[${logPrefix}] render`);
       await (deps.runRender ?? runEditorialRender)(options.projectDir);
     });
+    options.onFirstPreviewReady?.();
   }
 
   if (options.skipQa === true || options.qa === false) {

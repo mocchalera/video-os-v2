@@ -36,6 +36,7 @@ export function applyDurationAdjust(
   fpsNum: number,
   fpsDen: number,
   _stillDurationPolicy?: StillDurationPolicy,
+  options: { preserveAuthoredRanges?: boolean } = {},
 ): DurationAdjustResult {
   const result: DurationAdjustResult = {
     adjusted: false,
@@ -45,7 +46,7 @@ export function applyDurationAdjust(
     clip_drops: 0,
   };
 
-  if (!policy || policy.mode !== "strict") {
+  if (!policy || policy.mode !== "strict" || options.preserveAuthoredRanges) {
     return result;
   }
 

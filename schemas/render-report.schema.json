@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "render-report.schema.json",
+  "title": "Canonical render report",
+  "type": "object",
+  "required": ["version", "project_id", "created_at", "route_receipt", "renderer_versions", "inputs", "geometry", "caption_timing_hash", "caption_visual_treatment", "output", "delivery"],
+  "properties": {
+    "version": { "const": "render-report/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "route_receipt": { "$ref": "#/$defs/artifact" },
+    "route_evidence": { "type": "object", "minProperties": 1 },
+    "still_camera_motion": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/stillCameraMotion" }
+    },
+    "renderer_versions": {
+      "type": "object",
+      "required": ["ffmpeg"],
+      "properties": { "ffmpeg": { "type": "string", "minLength": 1 }, "remotion": { "type": "string" }, "hyperframes": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["timeline"],
+      "properties": {
+        "timeline": { "$ref": "#/$defs/artifact" },
+        "caption_approval": { "$ref": "#/$defs/artifact" },
+        "typography_policy": { "$ref": "#/$defs/artifact" },
+        "visual_treatment_patch": { "$ref": "#/$defs/artifact" },
+        "caption_visual_treatment_input": { "$ref": "#/$defs/artifact" }
+      },
+      "additionalProperties": false
+    },
+    "geometry": {
+      "type": "object",
+      "required": ["width", "height", "fps_num", "fps_den", "duration_frames"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 },
+        "fps_num": { "type": "integer", "minimum": 1 }, "fps_den": { "type": "integer", "minimum": 1 },
+        "duration_frames": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "caption_timing_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "caption_visual_treatment": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["status", "approval_hash", "visual_treatment_patch_hash", "typography_policy_hash", "platform_safe_zone_profile_id", "platform_safe_zone_profile_path", "platform_safe_zone_profile_hash", "accessibility", "text_timing_hash", "capability_hash", "resolved_input_hash", "applied_caption_ids", "degraded_reasons", "blocked_reasons"],
+          "properties": {
+            "status": { "enum": ["ready", "fallback", "human_hold", "blocked"] },
+            "approval_hash": { "$ref": "#/$defs/hash" },
+            "visual_treatment_patch_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "typography_policy_hash": { "$ref": "#/$defs/hash" },
+            "platform_safe_zone_profile_id": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+            "platform_safe_zone_profile_path": { "anyOf": [{ "type": "string", "minLength": 1, "pattern": "^[^/].*$" }, { "type": "null" }] },
+            "platform_safe_zone_profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+            "accessibility": {
+              "anyOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "required": ["reduced_motion", "high_contrast", "audio_off", "small_screen"],
+                  "properties": { "reduced_motion": { "type": "boolean" }, "high_contrast": { "type": "boolean" }, "audio_off": { "type": "boolean" }, "small_screen": { "type": "boolean" } },
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "text_timing_hash": { "$ref": "#/$defs/hash" },
+            "capability_hash": { "$ref": "#/$defs/hash" },
+            "resolved_input_hash": { "$ref": "#/$defs/hash" },
+            "applied_caption_ids": { "type": "array", "items": { "type": "string" } },
+            "degraded_reasons": { "$ref": "#/$defs/reasons" },
+            "blocked_reasons": { "$ref": "#/$defs/reasons" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "output": { "type": "object", "required": ["final_video"], "properties": { "final_video": { "$ref": "#/$defs/artifact" } }, "additionalProperties": false },
+    "delivery": {
+      "type": "object",
+      "required": ["compositor", "video_encoder", "lossy_video_encode_passes", "caption_engine", "one_final_composite"],
+      "properties": {
+        "compositor": { "const": "ffmpeg" }, "video_encoder": { "const": "ffmpeg" },
+        "lossy_video_encode_passes": { "type": "integer", "minimum": 1 },
+        "caption_engine": { "enum": ["ffmpeg-libass", "none"] }, "one_final_composite": { "const": true }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "artifact": { "type": "object", "required": ["path", "sha256"], "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/hash" } }, "additionalProperties": false },
+    "reasons": { "type": "array", "items": { "type": "object", "required": ["caption_id", "reason"], "properties": { "caption_id": { "type": "string" }, "reason": { "type": "string" } }, "additionalProperties": false } },
+    "stillCameraMotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "interpolation", "precision", "source_dimensions", "output_dimensions", "fps", "duration_frames"],
+      "properties": {
+        "backend": { "const": "numpy_float64_lanczos_worker" },
+        "interpolation": { "const": "lanczos4" },
+        "precision": { "const": "float64" },
+        "source_dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }
+        },
+        "output_dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }
+        },
+        "fps": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["num", "den"],
+          "properties": { "num": { "type": "integer", "minimum": 1 }, "den": { "type": "integer", "minimum": 1 } }
+        },
+        "duration_frames": { "type": "integer", "minimum": 1 },
+        "clip_id": { "type": "string", "minLength": 1 },
+        "source_still_id": { "type": "string", "minLength": 1 },
+        "still_instance_id": { "type": "string", "minLength": 1 },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "parallax": { "$ref": "#/$defs/stillParallax" },
+        "hold": { "$ref": "#/$defs/stillHoldReceipt" }
+      }
+    },
+    "stillTransform": {
+      "type": "object",
+      "properties": {
+        "crop": {
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "pan": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": -1, "maximum": 1 }, "y": { "type": "number", "minimum": -1, "maximum": 1 } },
+          "additionalProperties": false
+        },
+        "zoom": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "anchor": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "additionalProperties": false
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "stillParallax": {
+      "type": "object",
+      "required": ["amount", "axis"],
+      "properties": {
+        "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.25 },
+        "axis": { "type": "string", "enum": ["horizontal", "vertical", "both"] }
+      },
+      "additionalProperties": false
+    },
+    "stillHoldReceipt": {
+      "type": "object",
+      "required": ["unit", "resolved_frames"],
+      "properties": {
+        "unit": { "type": "string", "enum": ["frames", "seconds", "beats", "section_boundary"] },
+        "resolved_frames": { "type": "integer", "minimum": 1 },
+        "section_id": { "type": "string", "minLength": 1 },
+        "boundary": { "type": "string", "enum": ["start", "end"] },
+        "boundary_frame": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

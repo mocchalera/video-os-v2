@@ -368,9 +368,56 @@ function resolveStatus(observation: EditorialObservation, contributions: Observa
   const groundedVlmSucceeded = observation.provenance.producers.some((producer) =>
     producer.producer === "grounded_vlm" && producer.actual_verified_frame_count > 0
   );
-  return allFieldsObserved && allGroupsGrounded && groundedVlmSucceeded && !hasGap
+  const stillGroundingReady = contributions.some((item) => item.producer.producer === "media_kind_router")
+    ? hasCompleteStillGrounding(observation, contributions)
+    : allGroupsGrounded;
+  return allFieldsObserved && stillGroundingReady && groundedVlmSucceeded && !hasGap
     ? "ready"
     : "partial";
+}
+
+function hasCompleteStillGrounding(
+  observation: EditorialObservation,
+  contributions: ObservationContribution[],
+): boolean {
+  const groundedVlm = contributions.find((item) => item.producer.producer === "grounded_vlm");
+  const measurement = contributions.find((item) => item.producer.producer === "deterministic_measurement");
+  const applicability = contributions.find((item) => item.producer.producer === "media_kind_router");
+  if (
+    groundedVlm?.status !== "ready" ||
+    measurement?.status === "skipped" ||
+    !measurement ||
+    applicability?.status === "skipped" ||
+    !applicability ||
+    observation.warnings.length > 0
+  ) return false;
+
+  const verifiedFrames = groundedVlm.evidence.filter((item) =>
+    item.evidence_type === "verified_frame" &&
+    typeof item.artifact_ref === "string" && item.artifact_ref.length > 0
+  );
+  if (
+    groundedVlm.producer.actual_verified_frame_count < 1 ||
+    verifiedFrames.length !== groundedVlm.producer.actual_verified_frame_count ||
+    !/^[a-f0-9]{64}$/.test(groundedVlm.producer.source_content_sha256 ?? "") ||
+    !groundedVlm.producer.cache_identity
+  ) return false;
+
+  const measuredFields = new Set(measurement.evidence
+    .filter((item) => item.evidence_type === "deterministic_measurement")
+    .flatMap((item) => item.fields));
+  if (measurement.producer.actual_verified_frame_count < 1 || !measuredFields.has("avg_luma")) return false;
+
+  const applicableFields = new Set(applicability.evidence
+    .filter((item) => item.evidence_type === "applicability")
+    .flatMap((item) => item.fields));
+  if (!["motion_type", "camera_motion_direction", "subject_motion_direction"]
+    .every((field) => applicableFields.has(field as ObservationField))) return false;
+
+  const evidencedFields = new Set(observation.evidence
+    .filter((item) => item.evidence_type !== "producer_gap")
+    .flatMap((item) => item.fields));
+  return (Object.keys(FIELD_GROUP) as ObservationField[]).every((field) => evidencedFields.has(field));
 }
 
 function measuredMotionType(energy: number): MotionType {

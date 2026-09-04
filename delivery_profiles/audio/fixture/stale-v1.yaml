@@ -1,0 +1,59 @@
+version: audio-delivery-profile/v1
+profile_id: audio-fixture-stale-v1
+profile_version: v1
+platform: fixture
+surface: fixture
+release_scope: internal
+delivery_variant: stale-evidence
+status: stale
+source_references:
+  - url: https://example.com/video-os/audio-fixture-stale
+    title: Video OS stale audio fixture record
+    retrieved_at: '2025-01-01'
+    published_date: null
+    owner: Video OS maintainers
+    evidence_kind: decision_hold
+retrieved_at: '2025-01-01'
+owner: Video OS maintainers
+verification:
+  owner: Video OS maintainers
+  verified_at: '2025-01-01T00:00:00Z'
+  review_due_at: '2025-02-01T00:00:00Z'
+supersession:
+  state: active
+  reason: Review is overdue.
+assumptions: [Stale fixture values are not trusted.]
+dialogue_processing:
+  authority_track: A1
+  conflict_policy: dialogue_first
+  finishing_engine: existing_dialogue_finishing
+  optional_stages: []
+  single_mastering_owner: shared_audio_render_plan
+  single_mastering_stage: after_mix
+  max_mastering_passes: 1
+measurement_requirements:
+  encoded_result_required: true
+  method: { loudness: ffmpeg loudnorm pass 1, true_peak: ffmpeg loudnorm input_tp, format: ffprobe, duration: ffprobe, av_sync: ffprobe when video exists }
+  integrated_loudness: { status: stale, basis: unknown }
+  short_term_loudness: { status: stale, basis: unknown }
+  lra: { status: stale, basis: unknown }
+  true_peak: { status: stale, basis: unknown }
+  voice_intelligibility: { status: stale, basis: unknown, proxies: [], human_required: true }
+  diagnostics: { clipping: stale, silence: stale, dropout: stale, channel: stale, phase: stale }
+encoding_requirements:
+  container: { status: stale, basis: unknown }
+  codec: { status: stale, basis: unknown }
+  sample_rate_hz: { status: stale, basis: unknown }
+  channels: { status: stale, basis: unknown }
+  true_peak_margin_dbtp: { status: stale, basis: unknown }
+  encode_preview: { status: stale, method: stale fixture, human_required: true }
+playback_evidence:
+  stereo: { status: stale, method: stale fixture, human_required: true }
+  mono_fold_down: { status: stale, method: stale fixture, human_required: true }
+  mobile_fixture: { status: stale, method: stale fixture, human_required: true }
+normalization: { status: unknown, assumption: Stale profile does not establish normalization behavior. }
+human_preview:
+  required: true
+  gates: [human_audition, mono_mobile_playback]
+  status: pending
+fallback: { on_missing_tool: fail_open, on_stale_or_unknown: human_hold, reason: Stale profile requires a fresh review. }

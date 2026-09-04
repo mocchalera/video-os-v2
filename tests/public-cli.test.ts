@@ -2,8 +2,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { initProject, parseArgs as parseInitArgs } from "../scripts/init-project.js";
+import { runCompileTimeline } from "../scripts/compile-timeline.js";
+import { validateProject } from "../scripts/validate-schemas.js";
 import {
   formatStatusResult,
   parseArgs as parseStatusArgs,
@@ -93,16 +95,8 @@ describe("init-project CLI", () => {
     ) as { project_id: string };
     expect(humanNotes.project_id).toBe("onboarding-smoke");
 
-    const seededTimeline = JSON.parse(
-      fs.readFileSync(path.join(result.projectDir, "05_timeline/v001.timeline.json"), "utf-8"),
-    ) as {
-      project_id: string;
-      provenance: { brief_path: string };
-    };
-    expect(seededTimeline.project_id).toBe("onboarding-smoke");
-    expect(seededTimeline.provenance.brief_path).toBe(
-      "projects/onboarding-smoke/01_intent/creative_brief.yaml",
-    );
+    expect(fs.existsSync(path.join(result.projectDir, "04_plan/edit_blueprint.yaml"))).toBe(false);
+    expect(fs.existsSync(path.join(result.projectDir, "05_timeline/v001.timeline.json"))).toBe(false);
 
     const sourceLinkPath = path.join(result.projectDir, "02_media/source");
     expect(fs.lstatSync(sourceLinkPath).isSymbolicLink()).toBe(true);
@@ -137,5 +131,108 @@ describe("status CLI", () => {
     expect(summary).toContain("State:");
     expect(summary).toContain("Gates:");
     expect(summary).toContain("Next:");
+  });
+});
+
+describe("compile-timeline public planning preflight", () => {
+  function prepareCoverageFailure(name: string): string {
+    const workspace = createTempDir(name);
+    const projectDir = path.join(workspace, "sample-project");
+    copyDirSync(path.resolve("projects/sample"), projectDir);
+    fs.rmSync(path.join(projectDir, "05_timeline/timeline.json"), { force: true });
+
+    const sourceItems = ["AST_001", "AST_002", "AST_003", "AST_004", "AST_005", "AST_006"]
+      .map((assetId) => {
+        const relativePath = `02_media/${assetId}.mp4`;
+        fs.mkdirSync(path.dirname(path.join(projectDir, relativePath)), { recursive: true });
+        fs.copyFileSync(
+          path.resolve("tests/fixtures/media/test-clip-5s.mp4"),
+          path.join(projectDir, relativePath),
+        );
+        return {
+          asset_id: assetId,
+          source_locator: relativePath,
+          local_source_path: relativePath,
+          link_path: relativePath,
+        };
+      });
+    fs.writeFileSync(
+      path.join(projectDir, "02_media/source_map.json"),
+      JSON.stringify({
+        version: "1",
+        project_id: "sample-mountain-reset",
+        media_dir: "02_media",
+        generated_at: "2026-08-26T00:00:00.000Z",
+        items: sourceItems,
+      }, null, 2),
+      "utf-8",
+    );
+
+    const selectsPath = path.join(projectDir, "04_plan/selects_candidates.yaml");
+    const selects = parseYaml(fs.readFileSync(selectsPath, "utf-8")) as Record<string, unknown>;
+    selects.coverage = {
+      version: "1",
+      policy: "analysis-defaults.selection",
+      status: "failed",
+      config: {
+        min_candidates_per_cluster: 1,
+        cluster_sampling_scale: "sqrt",
+        max_candidates_per_cluster: 4,
+      },
+      clusters: [],
+      must_have: [],
+      unmet: [{
+        type: "must_have",
+        id: "must_have:finish",
+        message: "must_have finish has no matching non-rejected candidate",
+        must_have: "finish",
+      }],
+    };
+    fs.writeFileSync(selectsPath, stringifyYaml(selects), "utf-8");
+    return projectDir;
+  }
+
+  it("blocks before compile when the required uncertainty register is missing", async () => {
+    const projectDir = prepareCoverageFailure("tmp-compile-missing-register-");
+    fs.rmSync(path.join(projectDir, "04_plan/uncertainty_register.yaml"), { force: true });
+
+    const validation = validateProject(projectDir);
+    expect(validation.valid).toBe(false);
+    expect(validation.compile_gate).toBe("open");
+    await expect(runCompileTimeline({
+      projectPath: projectDir,
+      skipPreview: true,
+      skipConfirmations: true,
+    })).rejects.toThrow(/uncertainty_register/i);
+    expect(fs.existsSync(path.join(projectDir, "05_timeline/timeline.json"))).toBe(false);
+  });
+
+  it("blocks before compile when selects coverage has a planning blocker", async () => {
+    const projectDir = prepareCoverageFailure("tmp-compile-coverage-blocker-");
+    fs.writeFileSync(
+      path.join(projectDir, "04_plan/uncertainty_register.yaml"),
+      stringifyYaml({
+        version: "1",
+        project_id: "sample-mountain-reset",
+        uncertainties: [{
+          id: "U_SELECTS_COVERAGE",
+          type: "coverage",
+          question: "Can approved selects satisfy coverage?",
+          status: "blocker",
+          evidence: ["must_have finish is unmet"],
+          alternatives: [],
+          escalation_required: true,
+        }],
+      }),
+      "utf-8",
+    );
+
+    expect(validateProject(projectDir).compile_gate).toBe("open");
+    await expect(runCompileTimeline({
+      projectPath: projectDir,
+      skipPreview: true,
+      skipConfirmations: true,
+    })).rejects.toThrow("Planning gate BLOCKED. uncertainty_register has status 'blocker' entries.");
+    expect(fs.existsSync(path.join(projectDir, "05_timeline/timeline.json"))).toBe(false);
   });
 });

@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { stringify as stringifyYaml } from "yaml";
-import { compile, ContinuityConstraintError } from "../runtime/compiler/index.js";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { compile } from "../runtime/compiler/index.js";
 import type { Candidate, EditBlueprint } from "../runtime/compiler/types.js";
+import { loadBlueprint } from "../runtime/artifacts/loaders.js";
 
 const repoRoot = path.resolve(".");
 const createdAt = "2026-03-21T00:00:00Z";
@@ -17,6 +18,34 @@ afterEach(() => {
 });
 
 describe("compiler continuity constraints", () => {
+  it("loads Blueprint v2 aliases through schema+s sanitization before compile", () => {
+    const projectDir = createProject({
+      beats: [beat("b01", { required_roles: ["support"] })],
+      candidates: [candidate("SEG_A", "AST_A", "support", ["b01"])],
+    });
+    const blueprintPath = path.join(projectDir, "04_plan/edit_blueprint.yaml");
+    const blueprint = parseYaml(fs.readFileSync(blueprintPath, "utf-8")) as Record<string, unknown>;
+    blueprint.version = "2";
+    blueprint.hook = { sequence_id: "hook-1", shots: [{ shot_id: "shot-hook", candidate_ref: "SEG_A" }] };
+    blueprint.body = { sequence_id: "body-1", shots: [{ shot_id: "shot-body", candidate_ref: "SEG_A" }] };
+    delete blueprint.hook_sequence;
+    delete blueprint.body_sequence;
+    writeYaml(blueprintPath, blueprint);
+
+    expect(() => compile({ projectPath: projectDir, repoRoot, createdAt })).not.toThrow();
+    const loaded = loadBlueprint(blueprintPath);
+    expect(loaded.hook_sequence?.sequence_id).toBe("hook-1");
+    expect(loaded.body_sequence?.sequence_id).toBe("body-1");
+    expect(loaded.hook).toBeUndefined();
+    expect(loaded.body).toBeUndefined();
+
+    writeYaml(blueprintPath, {
+      ...blueprint,
+      hook_sequence: { sequence_id: "different", shots: [{ shot_id: "shot-hook", candidate_ref: "SEG_A" }] },
+    });
+    expect(() => compile({ projectPath: projectDir, repoRoot, createdAt })).toThrow(/hook_sequence conflicts with alias hook/);
+  });
+
   it("orders beat clips by semantic cluster, earliest source time, then src_in_us", () => {
     const projectDir = createProject({
       beats: [beat("b01", { target_duration_frames: 72, required_roles: ["support"] })],
@@ -85,9 +114,34 @@ describe("compiler continuity constraints", () => {
     }));
   });
 
-  it("fails compilation when same-asset repeats are non-adjacent across beats", () => {
+  it("falls back to the next stable candidate when an undeclared asset would repeat across beats", () => {
     const projectDir = createProject({
       beats: [beat("b01"), beat("b02"), beat("b03")],
+      runtimeTargetSec: 3,
+      candidates: [
+        candidate("SEG_A1", "AST_REPEAT", "hero", ["b01"], { semantic_rank: 1 }),
+        candidate("SEG_B", "AST_BREAK", "hero", ["b02"], { semantic_rank: 1 }),
+        candidate("SEG_A2", "AST_REPEAT", "hero", ["b03"], { semantic_rank: 1 }),
+        candidate("SEG_C", "AST_ALT", "hero", ["b03"], { semantic_rank: 2 }),
+      ],
+    });
+
+    const result = compile({ projectPath: projectDir, repoRoot, createdAt });
+    const v1 = result.timeline.tracks.video.find((track) => track.track_id === "V1")!;
+
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["SEG_A1", "SEG_B", "SEG_C"]);
+    expect(result.continuity.errors).toEqual([]);
+  });
+
+  it("keeps cross-beat reuse when the later beat explicitly allows that asset", () => {
+    const projectDir = createProject({
+      beats: [
+        beat("b01"),
+        beat("b02"),
+        beat("b03", {
+          allow_revisit: { asset_ids: ["AST_REPEAT"], reason: "intentional callback" },
+        }),
+      ],
       candidates: [
         candidate("SEG_A1", "AST_REPEAT", "hero", ["b01"], { semantic_rank: 1 }),
         candidate("SEG_B", "AST_BREAK", "hero", ["b02"], { semantic_rank: 1 }),
@@ -95,22 +149,44 @@ describe("compiler continuity constraints", () => {
       ],
     });
 
-    expect(() => compile({ projectPath: projectDir, repoRoot, createdAt })).toThrow(
-      /source asset AST_REPEAT appears in 2 non-adjacent timeline blocks/,
-    );
+    const result = compile({ projectPath: projectDir, repoRoot, createdAt });
+    const v1 = result.timeline.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["SEG_A1", "SEG_B", "SEG_A2"]);
+    expect(result.continuity.errors).toEqual([]);
+  });
 
-    try {
-      compile({ projectPath: projectDir, repoRoot, createdAt });
-    } catch (error) {
-      expect(error).toBeInstanceOf(ContinuityConstraintError);
-      const continuity = (error as ContinuityConstraintError).continuity;
-      expect(continuity.errors[0]).toMatchObject({
-        code: "same_asset_non_adjacent",
-        asset_id: "AST_REPEAT",
-        severity: "error",
-      });
-      expect(continuity.errors[0].suggested_fix).toContain("beat.allow_revisit");
-    }
+  it("skips positive same-beat source overlaps while retaining touching ranges", () => {
+    const projectDir = createProject({
+      beats: [beat("b01", { target_duration_frames: 96, required_roles: ["support"] })],
+      runtimeTargetSec: 4,
+      candidates: [
+        candidate("SEG_BASE", "AST_A", "support", ["b01"], {
+          src_in_us: 0,
+          duration_us: 2_000_000,
+          semantic_rank: 1,
+        }),
+        candidate("SEG_OVERLAP", "AST_A", "support", ["b01"], {
+          src_in_us: 1_000_000,
+          duration_us: 2_000_000,
+          semantic_rank: 2,
+        }),
+        candidate("SEG_TOUCH", "AST_A", "support", ["b01"], {
+          src_in_us: 2_000_000,
+          duration_us: 1_000_000,
+          semantic_rank: 3,
+        }),
+        candidate("SEG_ALT", "AST_B", "support", ["b01"], {
+          src_in_us: 0,
+          duration_us: 1_000_000,
+          semantic_rank: 4,
+        }),
+      ],
+    });
+
+    const result = compile({ projectPath: projectDir, repoRoot, createdAt });
+    const v1 = result.timeline.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["SEG_BASE", "SEG_TOUCH", "SEG_ALT"]);
+    expect(v1.clips.every((clip) => clip.src_out_us > clip.src_in_us)).toBe(true);
   });
 
   it("records same-cluster non-adjacent repeats as warnings in result and timeline metadata", () => {
@@ -400,7 +476,14 @@ describe("compiler continuity constraints", () => {
     fs.writeFileSync(
       path.join(projectDir, "03_analysis", "transcripts", "TR_AST_INTERVIEW.json"),
       JSON.stringify({
+        // Canonical transcript contract (Issue #35 authority): the semantic
+        // repair consumes utterances only from project-bound, schema-valid
+        // evidence.
+        project_id: "continuity-fixture",
+        artifact_version: "analysis-v1",
+        transcript_ref: "TR_AST_INTERVIEW",
         asset_id: "AST_INTERVIEW",
+        word_timing_mode: "none",
         items: [
           {
             start_us: 0,

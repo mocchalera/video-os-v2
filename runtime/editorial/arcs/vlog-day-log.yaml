@@ -1,0 +1,71 @@
+# PROVISIONAL: every ratio, valence, and tempo value below is normalized from
+# one 57-second day-log observation. Calibrate it with real retention data
+# before treating any threshold or proportion as stable policy.
+id: vlog-day-log
+narrative_mode: day_log
+status: provisional
+beats:
+  # Pair a truthful verbal or visual premise with a second movement hook.
+  - id: double_hook
+    ratio: 0.0877
+    story_role: hook
+    required_roles: [hero]
+    tempo: staccato
+    valence: 0.9
+    evidence_required: false
+
+  # Establish the speaker and the gap that makes today's activity worth watching.
+  - id: identity_gap
+    ratio: 0.0684
+    story_role: hook
+    required_roles: [dialogue]
+    tempo: medium
+    valence: 0.5
+    evidence_required: false
+
+  # Explain the environment and purpose on the speaker's face. Do not cover this
+  # setup with indiscriminate action B-roll.
+  - id: setup_purpose
+    ratio: 0.3175
+    story_role: setup
+    required_roles: [dialogue]
+    tempo: slow
+    valence: 0.2
+    evidence_required: false
+
+  # Treat the source-grounded action declaration as the B-roll boundary.
+  - id: kickoff
+    ratio: 0.1404
+    story_role: experience
+    required_roles: [hero]
+    tempo: brisk
+    valence: 0.6
+    evidence_required: false
+
+  # Expand into action coverage, measured data, or a concise inner-voice layer.
+  - id: action_broll
+    ratio: 0.0877
+    story_role: experience
+    required_roles: [support]
+    tempo: brisk
+    valence: 0.5
+    evidence_required: false
+
+  # Hold the genuine action apex long enough for the annotation to register.
+  - id: apex_beat
+    ratio: 0.0526
+    story_role: experience
+    required_roles: [hero]
+    tempo: freeze_hold
+    valence: 0.9
+    evidence_required: false
+
+  # Report the activity outcome, remove post-speech expression noise, and close
+  # on the best truthful expression before a concise invitation.
+  - id: finish_cta
+    ratio: 0.2457
+    story_role: closing
+    required_roles: [dialogue]
+    tempo: medium
+    valence: 0.7
+    evidence_required: false

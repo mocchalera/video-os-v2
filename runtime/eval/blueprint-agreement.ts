@@ -11,12 +11,37 @@ function durationShares(beats: Beat[]): number[] {
   return beats.map((b) => b.target_duration_frames / total);
 }
 
+function orderedAgreement<T>(
+  golden: Beat[],
+  candidate: Beat[],
+  value: (beat: Beat) => T | undefined,
+): number | null {
+  const hasValue = [...golden, ...candidate].some((beat) => value(beat) !== undefined);
+  if (!hasValue) return null;
+  const count = Math.max(golden.length, candidate.length);
+  if (count === 0) return 1;
+  let matches = 0;
+  for (let index = 0; index < count; index += 1) {
+    const goldenBeat = golden[index];
+    const candidateBeat = candidate[index];
+    if (goldenBeat && candidateBeat && value(goldenBeat) === value(candidateBeat)) matches += 1;
+  }
+  return matches / count;
+}
+
 export function evaluateBlueprintAgreement(
   golden: EditBlueprint,
   candidate: EditBlueprint,
 ): BlueprintAgreementReport {
   const gBeats = golden.beats;
   const cBeats = candidate.beats;
+
+  const goldenBeatIds = gBeats.map((beat) => beat.id);
+  const candidateBeatIds = cBeats.map((beat) => beat.id);
+  const beatIdAgreement = Math.max(gBeats.length, cBeats.length) > 0
+    ? longestCommonSubsequenceLength(goldenBeatIds, candidateBeatIds)
+      / Math.max(gBeats.length, cBeats.length)
+    : 1;
 
   const beatCountScore =
     Math.max(gBeats.length, cBeats.length) > 0
@@ -34,6 +59,17 @@ export function evaluateBlueprintAgreement(
       longestCommonSubsequenceLength(gRoles, cRoles) /
       Math.max(gRoles.length, cRoles.length);
   }
+
+  const emotionalValenceAgreement = orderedAgreement(
+    gBeats,
+    cBeats,
+    (beat) => beat.emotional_valence,
+  );
+  const evidenceRequiredAgreement = orderedAgreement(
+    gBeats,
+    cBeats,
+    (beat) => beat.evidence_required,
+  );
 
   // Duration-share deviation over order-aligned beats.
   const gShares = durationShares(gBeats);
@@ -73,6 +109,14 @@ export function evaluateBlueprintAgreement(
     { value: musicAgreement, weight: 0.1 },
   ];
   if (storyRoleAgreement !== null) parts.push({ value: storyRoleAgreement, weight: 0.25 });
+  const hasArcSemantics = emotionalValenceAgreement !== null || evidenceRequiredAgreement !== null;
+  if (hasArcSemantics) parts.push({ value: beatIdAgreement, weight: 0.1 });
+  if (emotionalValenceAgreement !== null) {
+    parts.push({ value: emotionalValenceAgreement, weight: 0.1 });
+  }
+  if (evidenceRequiredAgreement !== null) {
+    parts.push({ value: evidenceRequiredAgreement, weight: 0.1 });
+  }
   const totalWeight = parts.reduce((s, p) => s + p.weight, 0);
   const score = clamp01(parts.reduce((s, p) => s + p.value * p.weight, 0) / totalWeight);
 
@@ -80,7 +124,10 @@ export function evaluateBlueprintAgreement(
     golden_beat_count: gBeats.length,
     candidate_beat_count: cBeats.length,
     beat_count_score: beatCountScore,
+    beat_id_agreement: beatIdAgreement,
     story_role_agreement: storyRoleAgreement,
+    emotional_valence_agreement: emotionalValenceAgreement,
+    evidence_required_agreement: evidenceRequiredAgreement,
     duration_share_score: durationShareScore,
     pacing_agreement: pacingAgreement,
     music_agreement: musicAgreement,

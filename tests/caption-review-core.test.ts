@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateAgainstSchema } from "../runtime/commands/shared.js";
-import type { CaptionDraft, CaptionDraftEntry } from "../runtime/caption/editorial.js";
+import { migrateCaptionDraft, type CaptionDraft, type CaptionDraftEntry } from "../runtime/caption/editorial.js";
 import {
   applyCaptionReviewPatch,
   buildCaptionReviewQueue,
@@ -157,6 +157,7 @@ describe("caption review core", () => {
       timeline_duration_frames: 46,
       review: { state: "verified", edited: true },
     });
+    expect(result.preview.speech_captions[2].parent_ids).toEqual(["SC_0003_A", "SC_0003_B"]);
     expect(result.preview.glossary_proposals).toEqual([{
       canonical: "精神科医Tomy",
       variants: ["静止解富井"],
@@ -203,6 +204,29 @@ describe("caption review core", () => {
     expect(result.preview.speech_captions[1].timing).toMatchObject({
       timelineInFrame: 36,
       timelineDurationFrames: 36,
+    });
+    expect(result.preview.speech_captions[0]).toMatchObject({
+      root_id: "SC_0001",
+      parent_ids: ["SC_0001"],
+      lineage_hash: expect.stringMatching(/^sha256:/),
+    });
+  });
+
+  it("migrates v1 drafts deterministically without changing timing or text", () => {
+    const draft = makeDraft([makeCaption("SC_0001", "字幕です", 10, 20)]);
+    const migrated = migrateCaptionDraft(draft);
+    expect(migrated.speech_captions[0]).toMatchObject({
+      caption_id: "SC_0001",
+      timeline_in_frame: 10,
+      timeline_duration_frames: 20,
+      root_id: "SC_0001",
+      parent_ids: [],
+      lineage_hash: expect.stringMatching(/^sha256:/),
+    });
+    expect(migrated.migration).toEqual({
+      from_version: draft.version,
+      to_version: "caption-draft/v2",
+      migrated_caption_count: 1,
     });
   });
 

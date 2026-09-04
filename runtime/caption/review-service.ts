@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { computeNormalizedJsonHash } from "../artifacts/p1-manifest-coverage.js";
@@ -13,6 +12,7 @@ import {
 } from "../commands/caption.js";
 import {
   createDraftApproval,
+  type CaptionAccessibilitySelection,
   type CaptionApproval,
 } from "./approval.js";
 import {
@@ -40,7 +40,26 @@ import {
   type CaptionApprovalReadiness,
   type SafeBulkReviewAssessment,
 } from "./review-core.js";
+import {
+  applyCaptionVisualTreatmentPatch,
+  captionApprovalBindingHash,
+  captionRendererCapabilitiesForPolicy,
+  captionVisualTreatmentCanonicalInputHash,
+  captionVisualTreatmentPreapprovalReceiptHash,
+  captionVisualTreatmentReceiptSummary,
+  captionVisualTreatmentPatchHash,
+  loadCaptionVisualTreatmentPatch,
+  resolveCaptionVisualTreatmentInput,
+  type CaptionRendererCapabilities,
+  type CaptionVisualTreatmentInput,
+  type CaptionVisualTreatmentPatch,
+  type CaptionVisualTreatmentPreapprovalReceipt,
+} from "./visual-treatment.js";
+import { loadTypographyPolicy, typographyPolicyContentHash } from "./typography-policy.js";
 import { inspectCaptionFontContract, type CaptionFontContract } from "./font-contract.js";
+import { projectCaptionEntry } from "./projection.js";
+import { loadPlatformSafeZoneProfile, type PlatformSafeZoneProfile } from "../platform/safe-zone-profile.js";
+import { computeSha256 } from "../packaging/manifest.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (options: Record<string, unknown>) => {
@@ -60,6 +79,11 @@ export const CAPTION_DRAFT_PATH = "07_package/caption_draft.json";
 export const CAPTION_REVIEW_PATCH_PATH = "07_package/caption_review_patch.json";
 export const CAPTION_REVIEW_PREVIEW_PATH = "07_package/caption_review_preview.json";
 export const CAPTION_APPROVAL_PATH = "07_package/caption_approval.json";
+export const CAPTION_VISUAL_TREATMENT_PATCH_PATH = "07_package/caption_visual_treatment_patch.json";
+export const CAPTION_VISUAL_TREATMENT_INPUT_PATH = "07_package/caption_visual_treatment_input.json";
+export const CAPTION_VISUAL_TREATMENT_PREAPPROVAL_INPUT_PATH = "07_package/caption_visual_treatment_preapproval_input.json";
+export const CAPTION_VISUAL_TREATMENT_PREAPPROVAL_RECEIPT_PATH = "07_package/caption_visual_treatment_preapproval_receipt.json";
+export const CAPTION_VISUAL_TREATMENT_PREVIEW_OUTPUT_PATH = "05_timeline/preview-baseline-fast-full.mp4";
 export const CAPTION_REVIEW_TIMING_REPORT_PATH = "07_package/caption_review_timing_report.json";
 export const TIMELINE_PATH = "05_timeline/timeline.json";
 
@@ -70,6 +94,29 @@ export interface CaptionReviewContext {
   timelineHash: string;
   fps: number;
   protectedTerms: string[];
+}
+
+function resolveProjectArtifactPath(projectDir: string, candidate: string | undefined, defaultRelativePath: string): string {
+  const root = path.resolve(projectDir);
+  const resolved = path.resolve(root, candidate ?? defaultRelativePath);
+  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`caption review artifact path must be project-contained: ${candidate ?? defaultRelativePath}`);
+  }
+  let cursor = root;
+  for (const component of path.relative(root, resolved).split(path.sep)) {
+    cursor = path.join(cursor, component);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(cursor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
+      throw error;
+    }
+    if (stat.isSymbolicLink()) {
+      throw new Error(`caption review artifact path must not contain a symlink: ${candidate ?? defaultRelativePath}`);
+    }
+  }
+  return resolved;
 }
 
 export interface ApplyCaptionReviewResult {
@@ -100,6 +147,60 @@ export interface ApproveCaptionReviewResult {
   patchHash: string;
   validationHash: string;
   approvalHash: string;
+  visualTreatment?: CaptionVisualTreatmentReviewResult;
+}
+
+export interface CaptionVisualTreatmentReviewOptions {
+  reviewer?: string;
+  /** Reject an append/undo when the Studio projection is no longer current. */
+  expectedPatchHash?: string;
+  /** Candidate receipt required by the Studio approval path. */
+  preapprovalReceiptPath?: string;
+  patchPath?: string;
+  typographyPolicyPath?: string;
+  platformSafeZoneProfileHash?: string;
+  platformSafeZoneProfileId?: string;
+  platformSafeZoneProfilePath?: string;
+  platformSafeZoneProfile?: PlatformSafeZoneProfile;
+  capabilities?: CaptionRendererCapabilities;
+  accessibility?: { reduced_motion?: boolean; high_contrast?: boolean; audio_off?: boolean; small_screen?: boolean };
+}
+
+export interface CaptionVisualTreatmentApprovalOptions extends CaptionVisualTreatmentReviewOptions {
+  expectedPatchHash: string;
+  preapprovalReceiptPath: string;
+}
+
+export interface CaptionVisualTreatmentReviewResult {
+  patch: CaptionVisualTreatmentPatch;
+  input: CaptionVisualTreatmentInput;
+  patchPath: string;
+  inputPath: string;
+  patchHash: string;
+  inputHash: string;
+}
+
+export interface CaptionVisualTreatmentPreapprovalResult extends CaptionVisualTreatmentReviewResult {
+  receipt: CaptionVisualTreatmentPreapprovalReceipt;
+  receiptPath: string;
+}
+
+export interface CaptionVisualTreatmentAuthorPreviewResult extends CaptionVisualTreatmentPreapprovalResult {
+  approvalHashBefore: string;
+  approvalHashAfter: string;
+  textTimingHashBefore: string;
+  textTimingHashAfter: string;
+  productionApprovalUnchanged: true;
+}
+
+export interface CaptionVisualTreatmentPreviewOutputBinding {
+  outputPath: string;
+  receiptPath: string;
+  contentType: "video/mp4";
+}
+
+export interface CaptionVisualTreatmentUndoResult extends CaptionVisualTreatmentReviewResult {
+  removedOperationCount: number;
 }
 
 export interface CaptionReviewRecoveryAction {
@@ -314,6 +415,62 @@ export function assertCaptionApprovalCurrent(
   return computeNormalizedJsonHash(approval);
 }
 
+/**
+ * Validate the complete human-reviewed caption contract at an export
+ * boundary.  The approval status is intentionally only one part of this
+ * check: an export must be bound to the current project, timeline, draft,
+ * review patch, and validation result.
+ */
+export function assertCaptionApprovalForExport(
+  projectDir: string,
+  approvalPath = path.join(path.resolve(projectDir), CAPTION_APPROVAL_PATH),
+): {
+  approval: CaptionApproval;
+  timelineHash: string;
+  textTimingHash: string;
+} {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const approval = readJsonFile<CaptionApproval>(path.resolve(approvalPath));
+  assertSchema("caption-approval.schema.json", approval);
+  const context = loadCaptionReviewContext(absoluteProjectDir);
+  assertSchema("timeline-ir.schema.json", context.timeline);
+  const timeline = context.timeline as { project_id?: unknown; version?: unknown };
+  if (approval.approval.status !== "approved") {
+    throw new Error(`caption approval status must be approved, got ${approval.approval.status}`);
+  }
+  if (
+    typeof approval.approval.approved_by !== "string"
+    || approval.approval.approved_by.trim().length === 0
+    || typeof approval.approval.approved_at !== "string"
+    || !Number.isFinite(Date.parse(approval.approval.approved_at))
+  ) {
+    throw new Error("caption approval human reviewer and valid approval time are required");
+  }
+  if (approval.project_id !== context.draft.project_id || approval.project_id !== timeline.project_id) {
+    throw new Error("caption approval project_id does not match the current project/timeline");
+  }
+  if (typeof timeline.version !== "string" || approval.base_timeline_version !== timeline.version) {
+    throw new Error("caption approval base_timeline_version is stale");
+  }
+  if (approval.approval.base_timeline_hash !== context.timelineHash) {
+    throw new Error("caption approval base_timeline_hash is stale");
+  }
+  const provenance = approval.approval;
+  for (const [label, value] of [
+    ["base_caption_draft_hash", provenance.base_caption_draft_hash],
+    ["caption_review_patch_hash", provenance.caption_review_patch_hash],
+    ["validation_hash", provenance.validation_hash],
+  ] as const) {
+    if (typeof value !== "string") throw new Error(`caption approval ${label} provenance is missing`);
+  }
+  assertCaptionApprovalCurrent(absoluteProjectDir, approval);
+  const textTimingHash = computeNormalizedJsonHash(approval.speech_captions.map((caption) => {
+    const { treatment: _treatment, requested_treatment: _requestedTreatment, ...identity } = caption as unknown as Record<string, unknown>;
+    return identity;
+  }));
+  return { approval, timelineHash: context.timelineHash, textTimingHash };
+}
+
 export function prepareCaptionReviewDraft(
   projectDir: string,
   generator?: (stagingProjectDir: string) => CaptionCommandResult,
@@ -325,7 +482,13 @@ export function prepareCaptionReviewDraft(
     return { status: "already_exists", draftPath, draftHash: computeCaptionDraftHash(draft) };
   }
   const expectedHashes = protectedDraftHashes(absoluteProjectDir);
-  const stagingProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), "caption-draft-recovery-"));
+  // captionCommand reconciles and schema-validates the staged project by
+  // walking upward to the repository schemas/ directory. Keep recovery
+  // isolated, but stage it under the repository root so the canonical
+  // generator has the same runtime context as the source project.
+  const stagingProjectDir = fs.mkdtempSync(
+    path.join(path.dirname(SCHEMA_DIR), ".caption-draft-recovery-"),
+  );
   try {
     stageCaptionRecoveryInputs(absoluteProjectDir, stagingProjectDir);
     const runGenerator = generator ?? ((dir: string) => captionCommand(dir, { editorialEnabled: false }));
@@ -437,6 +600,721 @@ export function initializeCaptionReviewPatch(
   assertSchema("caption-review-patch.schema.json", patch);
   atomicWriteJson(patchPath, patch);
   return { patch, patchPath };
+}
+
+/**
+ * Initialize the visual treatment stream independently from text/timing
+ * review. The patch is bound to the current approved caption identity and
+ * timeline, but writing it never changes caption_draft, review_patch, or the
+ * approval record.
+ */
+export function initializeCaptionVisualTreatmentPatch(
+  projectDir: string,
+  reviewer: string,
+  options: { outputPath?: string; now?: string; overwrite?: boolean; approvalPath?: string; typographyPolicyPath?: string } = {},
+): { patch: CaptionVisualTreatmentPatch; patchPath: string } {
+  const actor = reviewer.trim();
+  if (!actor) throw new Error("reviewer is required");
+  const context = loadCaptionReviewContext(projectDir);
+  const absoluteProjectDir = context.projectDir;
+  const approvalPath = resolveProjectArtifactPath(absoluteProjectDir, options.approvalPath, CAPTION_APPROVAL_PATH);
+  const approval = readJsonFile<CaptionApproval>(approvalPath);
+  assertSchema("caption-approval.schema.json", approval);
+  const policyPath = resolveProjectArtifactPath(absoluteProjectDir, options.typographyPolicyPath, "04_plan/typography_policy.json");
+  const policy = loadTypographyPolicy(policyPath);
+  const patchPath = options.outputPath
+    ? resolveProjectArtifactPath(absoluteProjectDir, options.outputPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH)
+    : path.join(absoluteProjectDir, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  if (fs.existsSync(patchPath) && !options.overwrite) {
+    throw new Error(`Caption visual-treatment patch already exists: ${patchPath}`);
+  }
+  const timestamp = options.now ?? new Date().toISOString();
+  const patch: CaptionVisualTreatmentPatch = {
+    version: "caption-visual-treatment-patch/v1",
+    project_id: approval.project_id,
+    base_caption_draft_hash: approval.approval.base_caption_draft_hash ?? computeCaptionDraftHash(context.draft),
+    base_timeline_hash: approval.approval.base_timeline_hash ?? context.timelineHash,
+    typography_policy_hash: typographyPolicyContentHash(policy),
+    caption_approval_hash: captionApprovalBindingHash(approval),
+    operations: [],
+    session: { reviewer: actor, started_at: timestamp, updated_at: timestamp },
+  };
+  assertSchema("caption-visual-treatment-patch.schema.json", patch);
+  atomicWriteJson(patchPath, patch);
+  return { patch, patchPath };
+}
+
+function visualTreatmentApproval(projectDir: string, approvalPath?: string): { approval: CaptionApproval; approvalPath: string } {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const resolvedApprovalPath = resolveProjectArtifactPath(absoluteProjectDir, approvalPath, CAPTION_APPROVAL_PATH);
+  const approval = readJsonFile<CaptionApproval>(resolvedApprovalPath);
+  assertSchema("caption-approval.schema.json", approval);
+  return { approval, approvalPath: resolvedApprovalPath };
+}
+
+function visualTreatmentPolicy(projectDir: string, policyPath?: string) {
+  const resolvedPolicyPath = resolveProjectArtifactPath(projectDir, policyPath, "04_plan/typography_policy.json");
+  if (!fs.existsSync(resolvedPolicyPath)) throw new Error(`Typography policy is required for visual treatment: ${resolvedPolicyPath}`);
+  const policy = loadTypographyPolicy(resolvedPolicyPath);
+  return { policy, hash: typographyPolicyContentHash(policy), path: resolvedPolicyPath };
+}
+
+function visualTreatmentReviewInput(
+  projectDir: string,
+  approval: CaptionApproval,
+  patch: CaptionVisualTreatmentPatch,
+  options: CaptionVisualTreatmentReviewOptions = {},
+): CaptionVisualTreatmentInput {
+  const { policy } = visualTreatmentPolicy(projectDir, options.typographyPolicyPath);
+  const capabilities = options.capabilities ?? captionRendererCapabilitiesForPolicy(policy);
+  const context = resolveVisualTreatmentContext(projectDir, approval, patch, options);
+  return resolveCaptionVisualTreatmentInput({
+    approval,
+    patch,
+    typography_policy: policy,
+    typography_policy_hash: typographyPolicyContentHash(policy),
+    platform_safe_zone_profile_hash: context.safeZoneHash,
+    platform_safe_zone_profile_id: context.safeZoneId,
+    platform_safe_zone_profile_path: context.safeZonePath,
+    platform_safe_zone_profile: context.safeZoneProfile,
+    capabilities,
+    accessibility: context.accessibility,
+    require_approval_binding: false,
+  });
+}
+
+interface ResolvedVisualTreatmentContext {
+  accessibility?: CaptionAccessibilitySelection;
+  safeZoneHash?: string;
+  safeZoneId?: string;
+  safeZonePath?: string;
+  safeZoneProfile?: PlatformSafeZoneProfile;
+}
+
+function normalizeAccessibility(
+  value: CaptionVisualTreatmentReviewOptions["accessibility"] | undefined,
+): CaptionAccessibilitySelection | undefined {
+  if (!value) return undefined;
+  return {
+    reduced_motion: value.reduced_motion === true,
+    high_contrast: value.high_contrast === true,
+    audio_off: value.audio_off === true,
+    small_screen: value.small_screen === true,
+  };
+}
+
+function resolveVisualTreatmentContext(
+  projectDir: string,
+  approval: CaptionApproval,
+  patch: CaptionVisualTreatmentPatch,
+  options: CaptionVisualTreatmentReviewOptions,
+): ResolvedVisualTreatmentContext {
+  const persisted = approval.approval.visual_treatment_context;
+  const safeZonePathCandidate = options.platformSafeZoneProfilePath ?? persisted?.safe_zone_profile?.path;
+  const safeZoneHashCandidate = options.platformSafeZoneProfileHash
+    ?? persisted?.safe_zone_profile?.sha256
+    ?? patch.platform_safe_zone_profile_hash
+    ?? approval.approval.platform_safe_zone_profile_hash;
+  const safeZoneIdCandidate = options.platformSafeZoneProfileId ?? persisted?.safe_zone_profile?.profile_id;
+  let safeZoneProfile = options.platformSafeZoneProfile;
+  let safeZonePath = safeZonePathCandidate;
+  let safeZoneHash = safeZoneHashCandidate;
+  let safeZoneId = safeZoneIdCandidate;
+  if (safeZonePath) {
+    const absolutePath = resolveProjectArtifactPath(projectDir, safeZonePath, safeZonePath);
+    const relativePath = path.relative(path.resolve(projectDir), absolutePath);
+    if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+      throw new Error(`safe-zone profile must be project-contained: ${safeZonePath}`);
+    }
+    const loaded = loadPlatformSafeZoneProfile(absolutePath);
+    if (safeZoneHash && loaded.hash !== safeZoneHash) throw new Error(`safe-zone profile hash mismatch: ${safeZonePath}`);
+    if (safeZoneId && loaded.profile.profile_id !== safeZoneId) throw new Error(`safe-zone profile identity mismatch: ${safeZonePath}`);
+    safeZoneProfile = loaded.profile;
+    safeZoneHash = loaded.hash;
+    safeZoneId = loaded.profile.profile_id;
+    safeZonePath = path.relative(path.resolve(projectDir), absolutePath).split(path.sep).join("/");
+  } else if (safeZoneProfile) {
+    safeZoneId = safeZoneId ?? safeZoneProfile.profile_id;
+  }
+  return {
+    accessibility: normalizeAccessibility(options.accessibility) ?? persisted?.accessibility,
+    ...(safeZoneHash ? { safeZoneHash } : {}),
+    ...(safeZoneId ? { safeZoneId } : {}),
+    ...(safeZonePath ? { safeZonePath } : {}),
+    ...(safeZoneProfile ? { safeZoneProfile } : {}),
+  };
+}
+
+/** Read-only visual status for CLI/operator clients; no artifact is written. */
+export function inspectCaptionVisualTreatment(
+  projectDir: string,
+  options: CaptionVisualTreatmentReviewOptions = {},
+): CaptionVisualTreatmentReviewResult {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const patchPath = resolveProjectArtifactPath(absoluteProjectDir, options.patchPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const patch = loadCaptionVisualTreatmentPatch(patchPath);
+  const { approval } = visualTreatmentApproval(absoluteProjectDir);
+  const input = visualTreatmentReviewInput(absoluteProjectDir, approval, patch, {
+    ...options,
+    accessibility: options.accessibility ?? { reduced_motion: false, high_contrast: false, audio_off: false, small_screen: false },
+  });
+  return {
+    patch,
+    input,
+    patchPath: path.join(absoluteProjectDir, CAPTION_VISUAL_TREATMENT_PATCH_PATH),
+    inputPath: path.join(absoluteProjectDir, CAPTION_VISUAL_TREATMENT_INPUT_PATH),
+    patchHash: captionVisualTreatmentPatchHash(patch),
+    inputHash: input.input_hash,
+  };
+}
+
+function preapprovalReceiptPath(projectDir: string, candidate?: string): string {
+  return resolveProjectArtifactPath(projectDir, candidate, CAPTION_VISUAL_TREATMENT_PREAPPROVAL_RECEIPT_PATH);
+}
+
+function preapprovalInputPath(projectDir: string): string {
+  return path.join(path.resolve(projectDir), CAPTION_VISUAL_TREATMENT_PREAPPROVAL_INPUT_PATH);
+}
+
+function preapprovalReceiptForInput(
+  input: CaptionVisualTreatmentInput,
+  expectedPatchHash: string,
+  previewOutput?: CaptionVisualTreatmentPreapprovalReceipt["preview_output"],
+): CaptionVisualTreatmentPreapprovalReceipt {
+  const receipt = {
+    version: "caption-visual-treatment-preapproval-receipt/v1" as const,
+    project_id: input.project_id,
+    expected_patch_hash: expectedPatchHash,
+    ...captionVisualTreatmentReceiptSummary(input),
+    ...(previewOutput ? { preview_output: previewOutput } : {}),
+  };
+  const resolved = { ...receipt, receipt_hash: captionVisualTreatmentPreapprovalReceiptHash(receipt) };
+  assertSchema("caption-visual-treatment-preapproval-receipt.schema.json", resolved);
+  return resolved;
+}
+
+function assertExistingAuthorPreviewEvidence(
+  projectDir: string,
+  input: CaptionVisualTreatmentInput,
+  patchHash: string,
+): void {
+  const inputPath = preapprovalInputPath(projectDir);
+  const receiptPath = preapprovalReceiptPath(projectDir);
+  const previewPath = path.join(projectDir, CAPTION_VISUAL_TREATMENT_PREVIEW_OUTPUT_PATH);
+  const previewReceiptPath = `${previewPath}.receipt.json`;
+  const paths = [inputPath, receiptPath, previewPath, previewReceiptPath];
+  const present = paths.map((candidate) => fs.existsSync(candidate));
+  if (!present.some(Boolean)) return;
+  if (!present.every(Boolean)) {
+    throw new Error("existing visual author-preview evidence is incomplete or stale");
+  }
+  const existingInput = readJsonFile<CaptionVisualTreatmentInput>(inputPath);
+  assertSchema("caption-visual-treatment-input.schema.json", existingInput);
+  if (computeNormalizedJsonHash(existingInput) !== computeNormalizedJsonHash(input)) {
+    throw new Error("existing visual preapproval input is stale or forged");
+  }
+  const receipt = readJsonFile<CaptionVisualTreatmentPreapprovalReceipt>(receiptPath);
+  assertPreapprovalReceiptMatches(projectDir, receiptPath, receipt, input, patchHash);
+  const preview = receipt.preview_output;
+  if (!preview) throw new Error("existing visual preapproval receipt is missing preview output binding");
+  const expectedPreviewPath = path.relative(projectDir, previewPath).split(path.sep).join("/");
+  const expectedPreviewReceiptPath = path.relative(projectDir, previewReceiptPath).split(path.sep).join("/");
+  if (preview.path !== expectedPreviewPath || preview.receipt_path !== expectedPreviewReceiptPath || preview.content_type !== "video/mp4") {
+    throw new Error("existing visual preview identity is stale or forged");
+  }
+  if (computeSha256(previewPath) !== preview.sha256 || computeSha256(previewReceiptPath) !== preview.receipt_sha256) {
+    throw new Error("existing visual preview bytes are stale or forged");
+  }
+}
+
+function assertPreapprovalReceiptMatches(
+  projectDir: string,
+  receiptPathCandidate: string | undefined,
+  receipt: CaptionVisualTreatmentPreapprovalReceipt,
+  input: CaptionVisualTreatmentInput,
+  expectedPatchHash: string,
+): void {
+  assertSchema("caption-visual-treatment-preapproval-receipt.schema.json", receipt);
+  const receiptPath = preapprovalReceiptPath(projectDir, receiptPathCandidate);
+  const expected = preapprovalReceiptForInput(input, expectedPatchHash);
+  if (receipt.version !== expected.version || receipt.project_id !== expected.project_id) {
+    throw new Error("visual preapproval receipt identity is stale or mismatched");
+  }
+  if (receipt.expected_patch_hash !== expectedPatchHash || receipt.visual_treatment_patch_hash !== expectedPatchHash) {
+    throw new Error(`visual preapproval receipt patch hash mismatch; expected=${expectedPatchHash}`);
+  }
+  if (receipt.receipt_hash !== captionVisualTreatmentPreapprovalReceiptHash(receipt)) {
+    throw new Error("visual preapproval receipt hash is invalid");
+  }
+  const fields: Array<keyof CaptionVisualTreatmentPreapprovalReceipt> = [
+    "approval_hash",
+    "typography_policy_hash",
+    "platform_safe_zone_profile_id",
+    "platform_safe_zone_profile_path",
+    "platform_safe_zone_profile_hash",
+    "accessibility",
+    "text_timing_hash",
+    "capability_hash",
+    "input_hash",
+    "status",
+    "applied_caption_ids",
+    "degraded_reasons",
+    "blocked_reasons",
+  ];
+  for (const field of fields) {
+    if (JSON.stringify(receipt[field]) !== JSON.stringify(expected[field])) {
+      throw new Error(`visual preapproval receipt ${String(field)} is stale or mismatched`);
+    }
+  }
+  if (!fs.existsSync(receiptPath)) throw new Error(`visual preapproval receipt is missing: ${receiptPath}`);
+}
+
+function requireVisualApprovalOptions(
+  options: CaptionVisualTreatmentReviewOptions | undefined,
+): CaptionVisualTreatmentApprovalOptions {
+  if (!options?.expectedPatchHash?.trim()) {
+    throw new Error("expectedPatchHash is required for visual approval");
+  }
+  if (!options.preapprovalReceiptPath?.trim()) {
+    throw new Error("preapprovalReceiptPath is required for visual approval");
+  }
+  return options as CaptionVisualTreatmentApprovalOptions;
+}
+
+/** Resolve and record candidate canonical evidence without changing approval. */
+export function previewCaptionVisualTreatment(
+  projectDir: string,
+  reviewer: string,
+  options: CaptionVisualTreatmentReviewOptions & { expectedPatchHash: string } = { expectedPatchHash: "" },
+): CaptionVisualTreatmentPreapprovalResult {
+  const actor = reviewer.trim();
+  if (!actor) throw new Error("reviewer is required");
+  if (!options.expectedPatchHash) throw new Error("expectedPatchHash is required for visual preapproval preview");
+  const absoluteProjectDir = path.resolve(projectDir);
+  const patchPath = resolveProjectArtifactPath(absoluteProjectDir, options.patchPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const patch = loadCaptionVisualTreatmentPatch(patchPath);
+  const currentPatchHash = captionVisualTreatmentPatchHash(patch);
+  if (options.expectedPatchHash !== currentPatchHash) {
+    throw new Error(`visual treatment patch changed since it was loaded; expected=${options.expectedPatchHash} current=${currentPatchHash}`);
+  }
+  const { approval } = visualTreatmentApproval(absoluteProjectDir);
+  const input = visualTreatmentReviewInput(absoluteProjectDir, approval, patch, {
+    ...options,
+    accessibility: options.accessibility ?? { reduced_motion: false, high_contrast: false, audio_off: false, small_screen: false },
+  });
+  if (input.status === "blocked" || input.status === "human_hold") {
+    throw new Error(`visual preapproval preview cannot be resolved: ${input.status}`);
+  }
+  const receipt = preapprovalReceiptForInput(input, currentPatchHash);
+  const receiptPath = preapprovalReceiptPath(absoluteProjectDir, options.preapprovalReceiptPath);
+  const inputPath = preapprovalInputPath(absoluteProjectDir);
+  atomicWriteJson(inputPath, input);
+  atomicWriteJson(receiptPath, receipt);
+  return {
+    patch,
+    input,
+    patchPath,
+    inputPath,
+    patchHash: currentPatchHash,
+    inputHash: input.input_hash,
+    receipt,
+    receiptPath,
+  };
+}
+
+/**
+ * Atomically validates a visual operation against the approval and current
+ * patch identity before persisting the candidate patch + preapproval evidence.
+ * It never writes caption approval or speech text/timing.
+ */
+export function authorPreviewCaptionVisualTreatment(
+  projectDir: string,
+  reviewer: string,
+  operation: CaptionVisualTreatmentPatch["operations"][number],
+  options: CaptionVisualTreatmentReviewOptions & {
+    expectedPatchHash: string;
+    expectedApprovalHash: string;
+    updatedAt?: string;
+  },
+): CaptionVisualTreatmentAuthorPreviewResult {
+  const actor = reviewer.trim();
+  if (!actor) throw new Error("reviewer is required");
+  if (!options.expectedPatchHash) throw new Error("expectedPatchHash is required for visual author-preview");
+  if (!options.expectedApprovalHash) throw new Error("expectedApprovalHash is required for visual author-preview");
+  const absoluteProjectDir = path.resolve(projectDir);
+  const { approval, approvalPath } = visualTreatmentApproval(absoluteProjectDir);
+  const live = assertCaptionApprovalForExport(absoluteProjectDir, approvalPath);
+  const approvalHashBefore = captionApprovalBindingHash(approval);
+  if (approvalHashBefore !== options.expectedApprovalHash) {
+    throw new Error(`caption approval changed since it was loaded; expected=${options.expectedApprovalHash} current=${approvalHashBefore}`);
+  }
+  if (approval.approval.status !== "approved") throw new Error("caption approval is stale or not approved");
+
+  const context = loadCaptionReviewContext(absoluteProjectDir);
+  const { policy } = visualTreatmentPolicy(absoluteProjectDir, options.typographyPolicyPath);
+  const patchPath = resolveProjectArtifactPath(absoluteProjectDir, options.patchPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const patchExists = fs.existsSync(patchPath);
+  let patch: CaptionVisualTreatmentPatch;
+  if (patchExists) {
+    patch = loadCaptionVisualTreatmentPatch(patchPath);
+    const currentPatchHash = captionVisualTreatmentPatchHash(patch);
+    if (options.expectedPatchHash === "absent" || options.expectedPatchHash !== currentPatchHash) {
+      throw new Error(`visual treatment patch changed since it was loaded; expected=${options.expectedPatchHash} current=${currentPatchHash}`);
+    }
+    if (patch.base_timeline_hash !== live.timelineHash) throw new Error("visual treatment patch base_timeline_hash is stale");
+    if (patch.base_caption_draft_hash !== approval.approval.base_caption_draft_hash) throw new Error("visual treatment patch base_caption_draft_hash is stale");
+    if (patch.caption_approval_hash !== approvalHashBefore) throw new Error("visual treatment patch caption approval binding is stale");
+    const currentInput = visualTreatmentReviewInput(absoluteProjectDir, approval, patch, {
+      ...options,
+      accessibility: options.accessibility ?? { reduced_motion: false, high_contrast: false, audio_off: false, small_screen: false },
+    });
+    assertExistingAuthorPreviewEvidence(absoluteProjectDir, currentInput, currentPatchHash);
+  } else {
+    if (options.expectedPatchHash !== "absent") {
+      throw new Error(`visual treatment patch is absent; expected=${options.expectedPatchHash}`);
+    }
+    const timestamp = options.updatedAt ?? new Date().toISOString();
+    patch = {
+      version: "caption-visual-treatment-patch/v1",
+      project_id: approval.project_id,
+      base_caption_draft_hash: approval.approval.base_caption_draft_hash ?? computeCaptionDraftHash(context.draft),
+      base_timeline_hash: approval.approval.base_timeline_hash ?? context.timelineHash,
+      typography_policy_hash: typographyPolicyContentHash(policy),
+      caption_approval_hash: approvalHashBefore,
+      operations: [],
+      session: { reviewer: actor, started_at: timestamp, updated_at: timestamp },
+    };
+  }
+
+  const currentPatchHash = captionVisualTreatmentPatchHash(patch);
+  if (operation.expected_current_hash && operation.expected_current_hash !== currentPatchHash) {
+    throw new Error(`visual treatment caption ${operation.caption_id} changed since it was loaded; expected=${operation.expected_current_hash} current=${currentPatchHash}`);
+  }
+  patch.operations.push(structuredClone(operation));
+  patch.session.reviewer = actor;
+  patch.session.updated_at = options.updatedAt ?? new Date().toISOString();
+  const history = patch.session.action_operation_counts?.filter((count) => count > 0) ?? [];
+  history.push(1);
+  patch.session.action_operation_counts = history;
+  patch.session.last_action_operation_count = 1;
+  assertSchema("caption-visual-treatment-patch.schema.json", patch);
+
+  const input = visualTreatmentReviewInput(absoluteProjectDir, approval, patch, {
+    ...options,
+    accessibility: options.accessibility ?? { reduced_motion: false, high_contrast: false, audio_off: false, small_screen: false },
+  });
+  if (input.status !== "ready") {
+    throw new Error(`visual author-preview cannot be resolved: ${input.status}: ${input.blocked_reasons.map((item) => item.reason).join("; ")}`);
+  }
+  const patchHash = captionVisualTreatmentPatchHash(patch);
+  const receipt = preapprovalReceiptForInput(input, patchHash);
+  const receiptPath = preapprovalReceiptPath(absoluteProjectDir, options.preapprovalReceiptPath);
+  const inputPath = preapprovalInputPath(absoluteProjectDir);
+
+  // All validation and stale checks complete before the first write.
+  atomicWriteJson(patchPath, patch);
+  atomicWriteJson(inputPath, input);
+  atomicWriteJson(receiptPath, receipt);
+
+  const approvalAfter = readJsonFile<CaptionApproval>(approvalPath);
+  const approvalHashAfter = captionApprovalBindingHash(approvalAfter);
+  if (approvalHashAfter !== approvalHashBefore) {
+    throw new Error("production caption approval changed during visual author-preview");
+  }
+  return {
+    patch,
+    input,
+    patchPath,
+    inputPath,
+    patchHash,
+    inputHash: input.input_hash,
+    receipt,
+    receiptPath,
+    approvalHashBefore,
+    approvalHashAfter,
+    textTimingHashBefore: input.text_timing_hash,
+    textTimingHashAfter: input.text_timing_hash,
+    productionApprovalUnchanged: true,
+  };
+}
+
+export function bindCaptionVisualTreatmentPreviewOutput(
+  projectDir: string,
+  result: CaptionVisualTreatmentAuthorPreviewResult,
+  previewOutput: CaptionVisualTreatmentPreviewOutputBinding,
+): CaptionVisualTreatmentPreapprovalReceipt {
+  const root = path.resolve(projectDir);
+  const outputPath = resolveProjectArtifactPath(root, previewOutput.outputPath, CAPTION_VISUAL_TREATMENT_PREVIEW_OUTPUT_PATH);
+  const previewReceiptPath = resolveProjectArtifactPath(root, previewOutput.receiptPath, `${CAPTION_VISUAL_TREATMENT_PREVIEW_OUTPUT_PATH}.receipt.json`);
+  if (path.extname(outputPath).toLowerCase() !== ".mp4" || previewOutput.contentType !== "video/mp4") {
+    throw new Error("visual preview output must be a canonical video/mp4 artifact");
+  }
+  if (!fs.existsSync(outputPath) || !fs.existsSync(previewReceiptPath)) {
+    throw new Error("visual preview output or canonical preview receipt is missing");
+  }
+  const live = assertCaptionApprovalForExport(root);
+  if (live.timelineHash !== result.patch.base_timeline_hash) throw new Error("live timeline changed during visual preview rendering");
+  const approval = readJsonFile<CaptionApproval>(path.join(root, CAPTION_APPROVAL_PATH));
+  if (captionApprovalBindingHash(approval) !== result.approvalHashBefore) throw new Error("caption approval changed during visual preview rendering");
+  const previewReceipt = readJsonFile<Record<string, any>>(previewReceiptPath);
+  assertSchema("timeline-preview-receipt.schema.json", previewReceipt);
+  const outputHash = computeSha256(outputPath);
+  if (previewReceipt.actual_output?.sha256 !== outputHash) throw new Error("canonical visual preview receipt output hash mismatch");
+  if (previewReceipt.parity?.caption_visual_treatment?.resolved_input_hash !== result.inputHash
+    || previewReceipt.parity?.caption_visual_treatment?.matches !== true
+    || previewReceipt.parity?.caption_visual_treatment?.route !== "ffmpeg-libass") {
+    throw new Error("canonical renderer did not verify the visual-treatment preview");
+  }
+  const binding = {
+    path: path.relative(root, outputPath).split(path.sep).join("/"),
+    sha256: outputHash,
+    content_type: "video/mp4" as const,
+    receipt_path: path.relative(root, previewReceiptPath).split(path.sep).join("/"),
+    receipt_sha256: computeSha256(previewReceiptPath),
+  };
+  const receipt = preapprovalReceiptForInput(result.input, result.patchHash, binding);
+  atomicWriteJson(result.receiptPath, receipt);
+  return receipt;
+}
+
+function persistCaptionVisualTreatmentResult(
+  projectDir: string,
+  patchPath: string,
+  patch: CaptionVisualTreatmentPatch,
+  input: CaptionVisualTreatmentInput,
+): CaptionVisualTreatmentReviewResult {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const canonicalPatchPath = path.join(absoluteProjectDir, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const canonicalInputPath = path.join(absoluteProjectDir, CAPTION_VISUAL_TREATMENT_INPUT_PATH);
+  atomicWriteJson(canonicalPatchPath, patch);
+  atomicWriteJson(canonicalInputPath, input);
+  return {
+    patch,
+    input,
+    patchPath: canonicalPatchPath,
+    inputPath: canonicalInputPath,
+    patchHash: captionVisualTreatmentPatchHash(patch),
+    inputHash: input.input_hash,
+  };
+}
+
+/** Load and resolve the visual stream; a human hold is retained as evidence. */
+export function applyCaptionVisualTreatmentReview(
+  projectDir: string,
+  options: CaptionVisualTreatmentReviewOptions = {},
+): CaptionVisualTreatmentReviewResult {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const patchPath = resolveProjectArtifactPath(absoluteProjectDir, options.patchPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const patch = loadCaptionVisualTreatmentPatch(patchPath);
+  const { approval } = visualTreatmentApproval(absoluteProjectDir);
+  const input = visualTreatmentReviewInput(absoluteProjectDir, approval, patch, options);
+  if (input.status === "blocked") throw new Error(`Caption visual-treatment patch is blocked: ${input.blocked_reasons.map((item) => item.reason).join("; ")}`);
+  return persistCaptionVisualTreatmentResult(absoluteProjectDir, patchPath, patch, input);
+}
+
+/** Append a reviewed visual operation and record an undo boundary. */
+export function appendCaptionVisualTreatmentOperations(
+  projectDir: string,
+  reviewer: string,
+  operations: CaptionVisualTreatmentPatch["operations"],
+  options: CaptionVisualTreatmentReviewOptions & { updatedAt?: string } = {},
+): CaptionVisualTreatmentReviewResult {
+  const actor = reviewer.trim();
+  if (!actor) throw new Error("reviewer is required");
+  if (operations.length === 0) throw new Error("at least one visual-treatment operation is required");
+  const absoluteProjectDir = path.resolve(projectDir);
+  const patchPath = resolveProjectArtifactPath(absoluteProjectDir, options.patchPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const patch = loadCaptionVisualTreatmentPatch(patchPath);
+  const currentPatchHash = captionVisualTreatmentPatchHash(patch);
+  if (options.expectedPatchHash && options.expectedPatchHash !== currentPatchHash) {
+    throw new Error(`visual treatment patch changed since it was loaded; expected=${options.expectedPatchHash} current=${currentPatchHash}`);
+  }
+  for (const operation of operations) {
+    if (operation.expected_current_hash && operation.expected_current_hash !== currentPatchHash) {
+      throw new Error(`visual treatment caption ${operation.caption_id} changed since it was loaded; expected=${operation.expected_current_hash} current=${currentPatchHash}`);
+    }
+  }
+  patch.operations.push(...structuredClone(operations));
+  patch.session.reviewer = actor;
+  patch.session.updated_at = options.updatedAt ?? new Date().toISOString();
+  const history = patch.session.action_operation_counts?.filter((count) => count > 0) ?? [];
+  history.push(operations.length);
+  patch.session.action_operation_counts = history;
+  patch.session.last_action_operation_count = operations.length;
+  assertSchema("caption-visual-treatment-patch.schema.json", patch);
+  const { approval } = visualTreatmentApproval(absoluteProjectDir);
+  const input = visualTreatmentReviewInput(absoluteProjectDir, approval, patch, options);
+  if (input.status === "blocked") throw new Error(`Caption visual-treatment operation is blocked: ${input.blocked_reasons.map((item) => item.reason).join("; ")}`);
+  return persistCaptionVisualTreatmentResult(absoluteProjectDir, patchPath, patch, input);
+}
+
+export function canUndoCaptionVisualTreatment(projectDir: string): boolean {
+  const patchPath = path.join(path.resolve(projectDir), CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  if (!fs.existsSync(patchPath)) return false;
+  const patch = loadCaptionVisualTreatmentPatch(patchPath);
+  return (patch.session.action_operation_counts?.length ?? (patch.session.last_action_operation_count ? 1 : 0)) > 0;
+}
+
+/** Undo only the last visual operation boundary; text/timing review is untouched. */
+export function undoCaptionVisualTreatment(
+  projectDir: string,
+  options: CaptionVisualTreatmentReviewOptions & { updatedAt?: string } = {},
+): CaptionVisualTreatmentUndoResult {
+  const absoluteProjectDir = path.resolve(projectDir);
+  const patchPath = resolveProjectArtifactPath(absoluteProjectDir, options.patchPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const patch = loadCaptionVisualTreatmentPatch(patchPath);
+  const currentPatchHash = captionVisualTreatmentPatchHash(patch);
+  if (options.expectedPatchHash && options.expectedPatchHash !== currentPatchHash) {
+    throw new Error(`visual treatment patch changed since it was loaded; expected=${options.expectedPatchHash} current=${currentPatchHash}`);
+  }
+  const history = patch.session.action_operation_counts?.filter((count) => count > 0) ?? (patch.session.last_action_operation_count ? [patch.session.last_action_operation_count] : []);
+  const removedOperationCount = history.at(-1) ?? 0;
+  if (removedOperationCount <= 0 || removedOperationCount > patch.operations.length) throw new Error("No visual-treatment operation is available to undo");
+  patch.operations.splice(patch.operations.length - removedOperationCount, removedOperationCount);
+  history.pop();
+  patch.session.action_operation_counts = history;
+  patch.session.last_action_operation_count = history.at(-1) ?? 0;
+  if (options.reviewer?.trim()) patch.session.reviewer = options.reviewer.trim();
+  patch.session.updated_at = options.updatedAt ?? new Date().toISOString();
+  assertSchema("caption-visual-treatment-patch.schema.json", patch);
+  const { approval } = visualTreatmentApproval(absoluteProjectDir);
+  const input = visualTreatmentReviewInput(absoluteProjectDir, approval, patch, options);
+  if (input.status === "blocked") throw new Error(`Caption visual-treatment undo is blocked: ${input.blocked_reasons.map((item) => item.reason).join("; ")}`);
+  return { ...persistCaptionVisualTreatmentResult(absoluteProjectDir, patchPath, patch, input), removedOperationCount };
+}
+
+/** Naming alias used by review clients that treat undo as a review action. */
+export const undoCaptionVisualTreatmentReview = undoCaptionVisualTreatment;
+
+interface PreparedCaptionVisualTreatmentApproval {
+  approvalForBinding: CaptionApproval;
+  approvalPath: string;
+  patch: CaptionVisualTreatmentPatch;
+  patchPath: string;
+  input: CaptionVisualTreatmentInput;
+}
+
+/** Validate a visual approval without writing any approval artifact. */
+function prepareCaptionVisualTreatmentApproval(
+  projectDir: string,
+  reviewer: string,
+  options: CaptionVisualTreatmentApprovalOptions,
+  approvalOverride?: CaptionApproval,
+): PreparedCaptionVisualTreatmentApproval {
+  requireVisualApprovalOptions(options);
+  const actor = reviewer.trim();
+  if (!actor) throw new Error("reviewer is required");
+  const absoluteProjectDir = path.resolve(projectDir);
+  const approvalPath = path.join(absoluteProjectDir, CAPTION_APPROVAL_PATH);
+  const approval = approvalOverride ?? visualTreatmentApproval(absoluteProjectDir).approval;
+  if (!approvalOverride && (approval.approval.status !== "approved" || approval.approval.approved_by !== actor)) {
+    throw new Error("visual treatment requires the existing human caption approval and reviewer identity");
+  }
+  const patchPath = resolveProjectArtifactPath(absoluteProjectDir, options.patchPath, CAPTION_VISUAL_TREATMENT_PATCH_PATH);
+  const patch = loadCaptionVisualTreatmentPatch(patchPath);
+  const currentPatchHash = captionVisualTreatmentPatchHash(patch);
+  if (options.expectedPatchHash !== currentPatchHash) {
+    throw new Error(`visual treatment patch changed since it was loaded; expected=${options.expectedPatchHash} current=${currentPatchHash}`);
+  }
+  const candidateReceiptPath = preapprovalReceiptPath(absoluteProjectDir, options.preapprovalReceiptPath);
+  if (!fs.existsSync(candidateReceiptPath)) throw new Error(`visual preapproval receipt is required: ${candidateReceiptPath}`);
+  const candidateReceipt = readJsonFile<CaptionVisualTreatmentPreapprovalReceipt>(candidateReceiptPath);
+  const policyInfo = visualTreatmentPolicy(absoluteProjectDir, options.typographyPolicyPath);
+  const capabilities = options.capabilities ?? captionRendererCapabilitiesForPolicy(policyInfo.policy);
+  const context = resolveVisualTreatmentContext(absoluteProjectDir, approval, patch, options);
+  const accessibility = context.accessibility ?? {
+    reduced_motion: false,
+    high_contrast: false,
+    audio_off: false,
+    small_screen: false,
+  };
+  if (context.safeZoneHash && !context.safeZonePath) {
+    throw new Error("visual treatment safe-zone binding requires a registered profile path");
+  }
+  const approvalForBinding = structuredClone(approval);
+  approvalForBinding.approval.visual_treatment_context = {
+    accessibility,
+    ...(context.safeZoneHash && context.safeZoneId && context.safeZonePath
+      ? { safe_zone_profile: { profile_id: context.safeZoneId, path: context.safeZonePath, sha256: context.safeZoneHash } }
+      : {}),
+  };
+  const candidateInput = visualTreatmentReviewInput(absoluteProjectDir, approvalForBinding, patch, {
+    ...options,
+    accessibility,
+    platformSafeZoneProfileHash: context.safeZoneHash,
+    platformSafeZoneProfileId: context.safeZoneId,
+    platformSafeZoneProfilePath: context.safeZonePath,
+    platformSafeZoneProfile: context.safeZoneProfile,
+  });
+  if (candidateInput.status === "blocked" || candidateInput.status === "human_hold") {
+    throw new Error(`visual treatment cannot be human-approved: ${candidateInput.status}`);
+  }
+  assertPreapprovalReceiptMatches(absoluteProjectDir, options.preapprovalReceiptPath, candidateReceipt, candidateInput, options.expectedPatchHash);
+  const result = applyCaptionVisualTreatmentPatch({
+    approval: approvalForBinding,
+    patch,
+    typography_policy: policyInfo.policy,
+    typography_policy_hash: policyInfo.hash,
+    platform_safe_zone_profile_hash: context.safeZoneHash,
+    platform_safe_zone_profile_id: context.safeZoneId,
+    platform_safe_zone_profile_path: context.safeZonePath,
+    platform_safe_zone_profile: context.safeZoneProfile,
+    capabilities,
+    accessibility,
+    require_approval_binding: false,
+  });
+  if (!result.success || result.input.status === "blocked" || result.input.status === "human_hold") {
+    throw new Error(`visual treatment cannot be human-approved: ${result.success ? result.input.status : result.errors.join("; ")}`);
+  }
+  const inputHash = captionVisualTreatmentCanonicalInputHash({
+    approval: approvalForBinding,
+    patch,
+    typography_policy: policyInfo.policy,
+    typography_policy_hash: policyInfo.hash,
+    platform_safe_zone_profile_hash: context.safeZoneHash,
+    platform_safe_zone_profile_id: context.safeZoneId,
+    platform_safe_zone_profile_path: context.safeZonePath,
+    platform_safe_zone_profile: context.safeZoneProfile,
+    capabilities,
+    accessibility,
+    require_approval_binding: false,
+  });
+  approvalForBinding.approval.typography_policy_hash = policyInfo.hash;
+  if (context.safeZoneHash) approvalForBinding.approval.platform_safe_zone_profile_hash = context.safeZoneHash;
+  approvalForBinding.approval.caption_visual_treatment_patch_hash = captionVisualTreatmentPatchHash(patch);
+  approvalForBinding.approval.visual_treatment_input_hash = inputHash;
+  // Re-read immediately before the only approval write. A concurrent patch
+  // must fail closed and leave the approval artifact byte-for-byte untouched.
+  const finalPatch = loadCaptionVisualTreatmentPatch(patchPath);
+  const finalPatchHash = captionVisualTreatmentPatchHash(finalPatch);
+  if (options.expectedPatchHash !== finalPatchHash) {
+    throw new Error(`visual treatment patch changed since it was loaded; expected=${options.expectedPatchHash} current=${finalPatchHash}`);
+  }
+  const finalReceipt = readJsonFile<CaptionVisualTreatmentPreapprovalReceipt>(candidateReceiptPath);
+  assertPreapprovalReceiptMatches(absoluteProjectDir, options.preapprovalReceiptPath, finalReceipt, candidateInput, finalPatchHash);
+  const input = visualTreatmentReviewInput(absoluteProjectDir, approvalForBinding, patch, {
+    ...options,
+    accessibility,
+    platformSafeZoneProfileHash: context.safeZoneHash,
+    platformSafeZoneProfileId: context.safeZoneId,
+    platformSafeZoneProfilePath: context.safeZonePath,
+    platformSafeZoneProfile: context.safeZoneProfile,
+  });
+  if (input.status !== "ready" && input.status !== "fallback") throw new Error(`visual treatment binding changed during approval: ${input.status}`);
+  assertSchema("caption-approval.schema.json", approvalForBinding);
+  return { approvalForBinding, approvalPath, patch, patchPath, input };
+}
+
+/** Bind a reviewed visual stream to the existing human caption approval. */
+export function approveCaptionVisualTreatment(
+  projectDir: string,
+  reviewer: string,
+  options: CaptionVisualTreatmentApprovalOptions,
+): CaptionVisualTreatmentReviewResult & { approval: CaptionApproval; approvalPath: string; approvalHash: string } {
+  const prepared = prepareCaptionVisualTreatmentApproval(projectDir, reviewer, options);
+  atomicWriteJson(prepared.approvalPath, prepared.approvalForBinding);
+  const persisted = persistCaptionVisualTreatmentResult(path.resolve(projectDir), prepared.patchPath, prepared.patch, prepared.input);
+  return { ...persisted, approval: prepared.approvalForBinding, approvalPath: prepared.approvalPath, approvalHash: computeNormalizedJsonHash(prepared.approvalForBinding) };
 }
 
 export function applyCaptionReview(
@@ -955,7 +1833,7 @@ export function validateCaptionReview(
 export function approveCaptionReview(
   projectDir: string,
   reviewer: string,
-  options: { patchPath?: string; approvedAt?: string } = {},
+  options: { patchPath?: string; approvedAt?: string; visualTreatment?: CaptionVisualTreatmentApprovalOptions; visualTreatmentPatchPath?: string; typographyPolicyPath?: string } = {},
 ): ApproveCaptionReviewResult {
   const actor = reviewer.trim();
   if (!actor) throw new Error("reviewer is required");
@@ -989,35 +1867,37 @@ export function approveCaptionReview(
       base_caption_draft_hash: validation.preview.base_caption_draft_hash,
       caption_review_patch_hash: patchHash,
       validation_hash: validationHash,
+      base_timeline_hash: context.timelineHash,
     },
   );
   assertSchema("caption-approval.schema.json", approval);
   const approvalPath = path.join(context.projectDir, CAPTION_APPROVAL_PATH);
-  atomicWriteJson(approvalPath, approval);
+  const visualTreatmentOptions = options.visualTreatment ?? (options.visualTreatmentPatchPath || options.typographyPolicyPath
+    ? { patchPath: options.visualTreatmentPatchPath, typographyPolicyPath: options.typographyPolicyPath }
+    : undefined);
+  const requiredVisualTreatmentOptions = visualTreatmentOptions
+    ? requireVisualApprovalOptions(visualTreatmentOptions)
+    : undefined;
+  const preparedVisualTreatment = requiredVisualTreatmentOptions
+    ? prepareCaptionVisualTreatmentApproval(context.projectDir, actor, requiredVisualTreatmentOptions, approval)
+    : undefined;
+  atomicWriteJson(approvalPath, preparedVisualTreatment?.approvalForBinding ?? approval);
+  const visualTreatment = preparedVisualTreatment
+    ? persistCaptionVisualTreatmentResult(context.projectDir, preparedVisualTreatment.patchPath, preparedVisualTreatment.patch, preparedVisualTreatment.input)
+    : undefined;
+  const effectiveApproval = preparedVisualTreatment?.approvalForBinding ?? approval;
   return {
-    approval,
+    approval: effectiveApproval,
     approvalPath,
     patchHash,
     validationHash,
-    approvalHash: computeNormalizedJsonHash(approval),
+    approvalHash: preparedVisualTreatment ? computeNormalizedJsonHash(preparedVisualTreatment.approvalForBinding) : computeNormalizedJsonHash(approval),
+    ...(visualTreatment ? { visualTreatment } : {}),
   };
 }
 
 function stripReviewFields(entry: CaptionReviewPreview["speech_captions"][number]): CaptionDraftEntry {
-  return {
-    caption_id: entry.caption_id,
-    asset_id: entry.asset_id,
-    segment_id: entry.segment_id,
-    timeline_in_frame: entry.timeline_in_frame,
-    timeline_duration_frames: entry.timeline_duration_frames,
-    text: entry.text,
-    transcript_ref: entry.transcript_ref,
-    transcript_item_ids: [...entry.transcript_item_ids],
-    source: entry.source,
-    styling_class: entry.styling_class,
-    metrics: { ...entry.metrics },
-    ...(entry.reveal_timing ? { reveal_timing: structuredClone(entry.reveal_timing) } : {}),
-  };
+  return projectCaptionEntry(entry) as CaptionDraftEntry;
 }
 
 function validationErrors(preview: CaptionReviewPreview): string[] {
@@ -1141,8 +2021,13 @@ function stageCaptionRecoveryInputs(projectDir: string, stagingProjectDir: strin
     const source = path.join(projectDir, relativePath);
     if (fs.existsSync(source)) fs.symlinkSync(source, path.join(stagingProjectDir, relativePath), "dir");
   }
-  const statePath = path.join(projectDir, "project_state.yaml");
-  if (fs.existsSync(statePath)) fs.copyFileSync(statePath, path.join(stagingProjectDir, "project_state.yaml"));
+  // Reconcile hashes root-level policy/style files as well as phase folders.
+  // Omitting STYLE.md can demote an otherwise critique-ready staged project to
+  // selects_ready before the caption generator is allowed to run.
+  for (const relativePath of ["project_state.yaml", "STYLE.md", "analysis_policy.yaml"]) {
+    const source = path.join(projectDir, relativePath);
+    if (fs.existsSync(source)) fs.copyFileSync(source, path.join(stagingProjectDir, relativePath));
+  }
   fs.mkdirSync(path.join(stagingProjectDir, "07_package"), { recursive: true });
 }
 

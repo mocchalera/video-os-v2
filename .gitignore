@@ -4,6 +4,8 @@ dist/
 build/
 .venv/
 python/.venv-marlin/
+python/.venv-still-camera/
+.venv-still-camera/
 .tsbuildinfo
 
 # Temporary files
@@ -100,3 +102,7 @@ reports/eval/*/_scratch/
 .project-loop/dashboard/
 .project-loop/reports/
 .project-loop/exports/
+
+# Keep private provider state out of Git and package inputs. This rule is last
+# so later negations cannot re-include root or nested project cache contents.
+**/.video-os/private-cache/

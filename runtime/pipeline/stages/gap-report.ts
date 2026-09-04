@@ -12,6 +12,7 @@ import type { PeakShard } from "./peak.js";
 import type { IngestShard } from "./ingest-map.js";
 import type { GapEntry, GapReport } from "../pipeline-types.js";
 import type { SourceLedger } from "../../artifacts/source-ledger.js";
+import { hasTemporalVideo } from "../../artifacts/source-media-capabilities.js";
 
 export function buildGapReport(
   assets: AssetItem[],
@@ -43,7 +44,7 @@ export function buildGapReport(
     // Report detector failures with stderr summaries
     const failures = detectorFailures.get(asset.asset_id);
     if (failures && failures.length > 0) {
-      const audioFallback = !asset.video_stream && !!asset.audio_stream && (segmentShards.get(asset.asset_id)?.length ?? 0) > 0;
+      const audioFallback = !hasTemporalVideo(asset) && !!asset.audio_stream && (segmentShards.get(asset.asset_id)?.length ?? 0) > 0;
       entries.push({
         stage: "segment",
         asset_id: asset.asset_id,
@@ -79,7 +80,7 @@ export function buildGapReport(
         severity: "warning",
       });
     } else {
-      if (!derivs.posterPath && asset.video_stream) {
+      if (!derivs.posterPath && hasTemporalVideo(asset)) {
         entries.push({
           stage: "derivatives",
           asset_id: asset.asset_id,

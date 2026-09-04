@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social-review-generation-receipt.schema.json",
+  "title": "Immutable social-review generation receipt",
+  "type": "object",
+  "required": ["version", "project_id", "generation_id", "inputs", "input_files", "output", "qa", "qa_artifact", "audio_mastering_receipt", "render_report", "source_input_attestation", "review_ready", "review_only"],
+  "properties": {
+    "version": { "const": "social-review-generation-receipt/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "inputs": {
+      "type": "object",
+      "required": ["canonical_timeline_sha256", "accepted_patch_sha256", "derived_mapping_receipt_sha256", "review_timeline_sha256", "caption_text_timing_sha256", "visual_treatment_sha256", "content_plan_sha256", "audio_plan_sha256", "renderer_capability_sha256", "subject_occupancy_payload_sha256", "vertical_composition_policy_sha256", "source_input_attestation_sha256"],
+      "properties": {
+        "canonical_timeline_sha256": { "$ref": "#/$defs/hash" },
+        "accepted_patch_sha256": { "$ref": "#/$defs/hash" },
+        "derived_mapping_receipt_sha256": { "$ref": "#/$defs/hash" },
+        "review_timeline_sha256": { "$ref": "#/$defs/hash" },
+        "caption_text_timing_sha256": { "$ref": "#/$defs/hash" },
+        "visual_treatment_sha256": { "$ref": "#/$defs/hash" },
+        "content_plan_sha256": { "$ref": "#/$defs/hash" },
+        "audio_plan_sha256": { "$ref": "#/$defs/hash" },
+        "renderer_capability_sha256": { "$ref": "#/$defs/hash" },
+        "subject_occupancy_payload_sha256": { "$ref": "#/$defs/hash" },
+        "vertical_composition_policy_sha256": { "$ref": "#/$defs/hash" },
+        "source_input_attestation_sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "input_files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["logical_path", "locator", "sha256"],
+        "properties": {
+          "logical_path": { "type": "string", "minLength": 1 },
+          "locator": { "type": "string", "pattern": "^(project:|file:).+" },
+          "sha256": { "$ref": "#/$defs/hash" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^09_output/social-review/generations/[a-f0-9]{64}/review\\.mp4$" },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "qa": {
+      "type": "object",
+      "required": ["output", "layout", "audio", "layers"],
+      "properties": {
+        "output": { "$ref": "#/$defs/outputQa" },
+        "layout": { "$ref": "#/$defs/layoutQa" },
+        "audio": { "$ref": "#/$defs/audioQa" },
+        "layers": { "$ref": "#/$defs/layerQa" },
+        "layout_evidence": { "$ref": "#/$defs/layoutEvidence" }
+      },
+      "additionalProperties": false
+    },
+    "qa_artifact": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^09_output/social-review/generations/[a-f0-9]{64}/qa-results\\.json$" },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "audio_mastering_receipt": { "anyOf": [{ "$ref": "#/$defs/boundArtifact" }, { "type": "null" }] },
+    "render_report": { "$ref": "#/$defs/boundArtifact" },
+    "source_input_attestation": { "$ref": "#/$defs/boundArtifact" },
+    "review_ready": { "type": "boolean" },
+    "review_only": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["review_ready"],
+        "properties": { "review_ready": { "const": true } }
+      },
+      "then": {
+        "properties": {
+          "qa": {
+            "required": ["layout_evidence"],
+            "properties": {
+              "layout": { "required": ["subject_collision_binding"] },
+              "audio": {
+                "properties": { "evidence": { "$ref": "#/$defs/boundArtifact" } }
+              },
+              "layout_evidence": {
+                "properties": {
+                  "subject_occupancy": { "$ref": "#/$defs/boundArtifact" },
+                  "vertical_composition_policy": { "$ref": "#/$defs/boundArtifact" }
+                }
+              }
+            }
+          },
+          "audio_mastering_receipt": { "$ref": "#/$defs/boundArtifact" }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "status": { "enum": ["verified", "blocked", "incomplete"] },
+    "detection": {
+      "type": "object",
+      "required": ["start_sec", "end_sec"],
+      "properties": { "start_sec": { "type": "number", "minimum": 0 }, "end_sec": { "type": "number", "minimum": 0 } },
+      "additionalProperties": false
+    },
+    "scan": {
+      "type": "object",
+      "required": ["status", "detections"],
+      "properties": { "status": { "enum": ["complete", "incomplete"] }, "detections": { "type": "array", "items": { "$ref": "#/$defs/detection" } } },
+      "additionalProperties": false
+    },
+    "outputQa": {
+      "type": "object",
+      "required": ["status", "issues", "scans"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "duration_sec": { "type": "number" }, "scanned_duration_sec": { "type": "number" },
+        "width": { "type": "integer" }, "height": { "type": "integer" }, "reason": { "type": "string" },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/outputIssue" } },
+        "scans": {
+          "type": "object",
+          "required": ["decode", "black", "freeze", "layout_inset"],
+          "properties": {
+            "decode": { "type": "object", "required": ["status"], "properties": { "status": { "enum": ["complete", "incomplete"] } }, "additionalProperties": false },
+            "black": { "$ref": "#/$defs/scan" }, "freeze": { "$ref": "#/$defs/scan" }, "layout_inset": { "$ref": "#/$defs/scan" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "layoutQa": {
+      "type": "object",
+      "required": ["version", "status", "snapshot_version", "issues", "review_items"],
+      "properties": {
+        "version": { "const": "deterministic-layout-qa/v2" }, "status": { "enum": ["verified", "blocked", "incomplete", "human_hold"] },
+        "snapshot_version": { "const": "render-layout-snapshot/v1" },
+        "snapshot_sha256": { "type": "string", "pattern": "^(sha256:)?[a-f0-9]{64}$" },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/layoutIssue" } }, "review_items": { "type": "array", "items": { "$ref": "#/$defs/layoutReviewItem" } },
+        "subject_collision_binding": { "$ref": "#/$defs/subjectCollisionBinding" }
+      },
+      "additionalProperties": false
+    },
+    "audioQa": {
+      "type": "object", "required": ["status", "evidence"],
+      "properties": { "status": { "$ref": "#/$defs/status" }, "evidence": { "anyOf": [{ "$ref": "#/$defs/boundArtifact" }, { "type": "null" }] } },
+      "additionalProperties": false
+    },
+    "layerQa": {
+      "type": "object", "required": ["status", "evidence"],
+      "properties": { "status": { "$ref": "#/$defs/status" }, "evidence": { "type": "array", "items": { "$ref": "#/$defs/boundArtifact" } } },
+      "additionalProperties": false
+    },
+    "layoutEvidence": {
+      "type": "object",
+      "required": ["snapshot", "subject_occupancy", "vertical_composition_policy"],
+      "properties": {
+        "snapshot": { "$ref": "#/$defs/boundArtifact" },
+        "subject_occupancy": { "anyOf": [{ "$ref": "#/$defs/boundArtifact" }, { "type": "null" }] },
+        "vertical_composition_policy": { "anyOf": [{ "$ref": "#/$defs/boundArtifact" }, { "type": "null" }] }
+      },
+      "additionalProperties": false
+    },
+    "boundArtifact": {
+      "type": "object", "required": ["path", "sha256"],
+      "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/hash" } },
+      "additionalProperties": false
+    },
+    "outputIssue": {
+      "type": "object", "required": ["kind", "severity", "detail"],
+      "properties": {
+        "kind": { "enum": ["black", "freeze", "inset", "dimensions", "decode"] },
+        "severity": { "const": "blocking" }, "detail": { "type": "string" },
+        "start_sec": { "type": "number" }, "end_sec": { "type": "number" }
+      }, "additionalProperties": false
+    },
+    "layoutIssue": {
+      "type": "object", "required": ["code", "severity", "detail"],
+      "properties": {
+        "code": { "$ref": "#/$defs/layoutCode" }, "severity": { "const": "blocking" }, "detail": { "type": "string" },
+        "layer_ids": { "type": "array", "items": { "type": "string" } },
+        "start_frame": { "type": "integer" }, "end_frame": { "type": "integer" },
+        "generation_id": { "$ref": "#/$defs/hash" }, "caption_id": { "type": "string" },
+        "caption_role": { "enum": ["baseline", "emphasis", "title"] },
+        "collision_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "subject_track_id": { "type": "string" },
+        "candidate_anchors": { "type": "array", "items": { "type": "string" } },
+        "reason": { "type": "string" },
+        "evidence_status": { "enum": ["verified", "incomplete", "human_hold"] }
+      }, "additionalProperties": false
+    },
+    "layoutReviewItem": {
+      "type": "object", "required": ["issue_id", "code", "severity", "title_ja", "remediation_ja", "layer_ids"],
+      "properties": {
+        "issue_id": { "type": "string" }, "code": { "$ref": "#/$defs/layoutCode" }, "severity": { "const": "blocking" },
+        "title_ja": { "type": "string" }, "remediation_ja": { "type": "string" },
+        "layer_ids": { "type": "array", "items": { "type": "string" } },
+        "start_frame": { "type": "integer" }, "end_frame": { "type": "integer" },
+        "start_timecode": { "type": "string" }, "end_timecode": { "type": "string" },
+        "generation_id": { "$ref": "#/$defs/hash" }, "caption_id": { "type": "string" },
+        "caption_role": { "enum": ["baseline", "emphasis", "title"] },
+        "collision_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "subject_track_id": { "type": "string" },
+        "candidate_anchors": { "type": "array", "items": { "type": "string" } },
+        "reason": { "type": "string" },
+        "evidence_status": { "enum": ["verified", "incomplete", "human_hold"] }
+      }, "additionalProperties": false
+    },
+    "subjectCollisionBinding": {
+      "type": "object",
+      "required": ["generation_id", "subject_occupancy_sha256", "subject_occupancy_payload_sha256", "snapshot_sha256", "policy_ref", "policy_sha256", "renderer_capability_sha256", "platform_geometry_status"],
+      "properties": {
+        "generation_id": { "$ref": "#/$defs/hash" },
+        "subject_occupancy_sha256": { "$ref": "#/$defs/hash" },
+        "subject_occupancy_payload_sha256": { "$ref": "#/$defs/hash" },
+        "snapshot_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "policy_ref": { "type": "string", "minLength": 1 },
+        "policy_sha256": { "$ref": "#/$defs/hash" },
+        "renderer_capability_sha256": { "$ref": "#/$defs/hash" },
+        "platform_geometry_status": { "enum": ["unknown", "provisional", "measured"] }
+      },
+      "additionalProperties": false
+    },
+    "layoutCode": { "enum": ["renderer_evidence_incomplete", "caption_outside_safe_area", "glyph_clipped", "font_fallback", "missing_glyph", "duplicate_speech_caption_layer", "caption_visual_collision", "caption_subject_collision", "caption_subject_evidence_incomplete", "end_card_hold_invalid", "final_frame_state_invalid"] }
+  }
+}

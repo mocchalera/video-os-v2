@@ -141,7 +141,10 @@ describe("V1-first track layout", () => {
         "b01",
         [
           score("seg_texture", "AST_C", "texture", 1.0),
-          score("seg_support_same_asset", "AST_A", "support", 0.9),
+          score("seg_support_same_asset", "AST_A", "support", 0.9, "b01", undefined, {
+            src_in_us: 10_000_000,
+            src_out_us: 20_000_000,
+          }),
           score("seg_support_other_asset", "AST_B", "support", 0.3),
           score("seg_hero", "AST_A", "hero", 0.1),
         ],
@@ -343,7 +346,7 @@ describe("V1-first track layout", () => {
     expect(a1.clips.some((clip) => clip.segment_id === "seg_rejected_dialogue")).toBe(false);
   });
 
-  it("uses a competitive support candidate as V1 bridge when dialogue would repeat the previous asset", () => {
+  it("excludes a previously used asset and falls back to the next stable candidate", () => {
     const normalized = makeNormalizedWithBeats([
       { beat_id: "b01", target_duration_frames: 10 },
       { beat_id: "b02", target_duration_frames: 20 },
@@ -358,8 +361,6 @@ describe("V1-first track layout", () => {
         ],
       ],
     ]);
-    table.get("b02")![1].candidate.evidence = ["visual_variety"];
-
     const assembled = assemble(
       normalized,
       table,
@@ -374,12 +375,8 @@ describe("V1-first track layout", () => {
     expect(v1.clips.map((clip) => clip.segment_id)).toEqual([
       "seg_hook_dialogue",
       "seg_value_support",
-      "seg_value_dialogue",
     ]);
-    expect(v1.clips.map((clip) => clip.asset_id)).toEqual(["AST_A", "AST_B", "AST_A"]);
-    expect(v1.clips.slice(1).every((clip, index) =>
-      clip.asset_id !== v1.clips[index].asset_id
-    )).toBe(true);
+    expect(v1.clips.map((clip) => clip.asset_id)).toEqual(["AST_A", "AST_B"]);
   });
 
   it("scales a single over-cap beat before placing clips", () => {
@@ -694,6 +691,214 @@ describe("V1-first track layout", () => {
       "seg_fishing_2",
       "seg_campfire_2",
     ]);
+  });
+
+  it("uses face bookends and 1.5-3.0 second B-roll cutbacks while preserving dialogue VO", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01_hook", target_duration_frames: 60 },
+      { beat_id: "b02_body", target_duration_frames: 180 },
+      { beat_id: "b03_close", target_duration_frames: 60 },
+    ]);
+    const face = (segment: string, asset: string, beat: string) => score(
+      segment,
+      asset,
+      "dialogue",
+      0.7,
+      beat,
+      undefined,
+      {
+        media_kind: "video",
+        source_capabilities: { has_video: true, has_audio: true },
+        editorial_signals: { face_detected: true },
+      },
+    );
+    const broll = (segment: string, asset: string, beat: string, tag: string, scoreValue: number) => score(
+      segment,
+      asset,
+      "support",
+      scoreValue,
+      beat,
+      undefined,
+      {
+        media_kind: "video",
+        source_capabilities: { has_video: true, has_audio: true },
+        editorial_signals: { face_detected: false, visual_tags: [tag], motion_energy_score: scoreValue },
+      },
+    );
+    const table: RankedCandidateTable = new Map([
+      ["b01_hook", [
+        score("hook_hero", "AST_HERO", "hero", 1, "b01_hook"),
+        face("hook_face", "AST_FACE_HOOK", "b01_hook"),
+      ]],
+      ["b02_body", [
+        face("body_vo", "AST_FACE_VO", "b02_body"),
+        broll("run", "AST_RUN", "b02_body", "running road", 0.95),
+        broll("feet", "AST_FEET", "b02_body", "足元", 0.9),
+      ]],
+      ["b03_close", [
+        score("close_hero", "AST_CLOSE_HERO", "hero", 1, "b03_close"),
+        face("close_face", "AST_FACE_CLOSE", "b03_close"),
+      ]],
+    ]);
+
+    const assembled = assemble(normalized, table, params, 30, 1, guidePolicy, {
+      trackLayout: "single",
+      audioPolicy: "ducking",
+      creatorShortVoBroll: {
+        policy: "creator-short-vo-broll/v1",
+        minInsertFrames: 45,
+        maxInsertFrames: 90,
+        kickoffAnchor: null,
+        provenance: {
+          policy: "creator-short-vo-broll/v1",
+          phrase_policy: "creator-short-kickoff-phrases/v1",
+          min_insert_frames: 45,
+          max_insert_frames: 90,
+          audio_mode: "dialogue_voice_over",
+          anchor_status: "degraded_no_kickoff_phrase",
+          degraded: true,
+          degrade_reason: "kickoff_phrase_not_detected",
+        },
+      },
+    });
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!.clips;
+    const body = v1.filter((clip) => clip.beat_id === "b02_body");
+    const a1 = assembled.tracks.audio.find((track) => track.track_id === "A1")!.clips;
+
+    expect(v1.find((clip) => clip.beat_id === "b01_hook")?.segment_id).toBe("hook_face");
+    expect(v1.find((clip) => clip.beat_id === "b03_close")?.segment_id).toBe("close_face");
+    expect(body.map((clip) => clip.segment_id)).toEqual(["run", "feet"]);
+    expect(body.every((clip) => clip.timeline_duration_frames >= 45 && clip.timeline_duration_frames <= 90)).toBe(true);
+    expect(body.every((clip) => clip.src_out_us - clip.src_in_us === clip.timeline_duration_frames * (1_000_000 / 30))).toBe(true);
+    expect(body.every((clip) => clip.metadata?.creator_short_vo_broll)).toBe(true);
+    expect(a1.some((clip) =>
+      clip.beat_id === "b02_body" && clip.segment_id === "body_vo" && clip.role === "dialogue"
+    )).toBe(true);
+  });
+
+  it("keeps support/texture out of beats through the detected kickoff declaration", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01_hook", target_duration_frames: 60 },
+      { beat_id: "b02_pre", target_duration_frames: 60 },
+      { beat_id: "b03_kickoff", target_duration_frames: 60 },
+      { beat_id: "b04_after", target_duration_frames: 60 },
+      { beat_id: "b05_close", target_duration_frames: 60 },
+    ]);
+    const face = (segment: string, beat: string) => score(segment, `AST_${segment}`, "dialogue", 0.8, beat, undefined, {
+      candidate_id: `CAND_${segment}`,
+      media_kind: "video",
+      source_capabilities: { has_video: true, has_audio: true },
+      editorial_signals: { face_detected: true },
+    });
+    const support = (segment: string, beat: string) => score(segment, `AST_${segment}`, "support", 1, beat, undefined, {
+      media_kind: "video",
+      source_capabilities: { has_video: true, has_audio: true },
+      editorial_signals: { visual_tags: ["running"], motion_energy_score: 1 },
+    });
+    const table: RankedCandidateTable = new Map([
+      ["b01_hook", [face("hook", "b01_hook")]],
+      ["b02_pre", [support("pre_run", "b02_pre"), face("pre_talk", "b02_pre")]],
+      ["b03_kickoff", [support("kickoff_run", "b03_kickoff"), face("kickoff", "b03_kickoff")]],
+      ["b04_after", [support("after_run", "b04_after"), face("after_talk", "b04_after")]],
+      ["b05_close", [face("close", "b05_close")]],
+    ]);
+    const kickoffAnchor = {
+      status: "detected" as const,
+      phrasePolicy: "creator-short-kickoff-phrases/v1" as const,
+      matchedPhrase: "始めます",
+      candidateRef: "CAND_kickoff",
+      assetId: "AST_kickoff",
+      sourceTimeUs: 0,
+      detectionSource: "candidate_transcript_excerpt" as const,
+    };
+    const assembled = assemble(normalized, table, params, 30, 1, guidePolicy, {
+      trackLayout: "single",
+      audioPolicy: "ducking",
+      creatorShortVoBroll: {
+        policy: "creator-short-vo-broll/v1",
+        minInsertFrames: 45,
+        maxInsertFrames: 90,
+        kickoffAnchor,
+        provenance: {
+          policy: "creator-short-vo-broll/v1",
+          phrase_policy: "creator-short-kickoff-phrases/v1",
+          min_insert_frames: 45,
+          max_insert_frames: 90,
+          audio_mode: "dialogue_voice_over",
+          anchor_status: "detected",
+          degraded: false,
+          matched_phrase: "始めます",
+          candidate_ref: "CAND_kickoff",
+          asset_id: "AST_kickoff",
+          source_time_us: 0,
+          detection_source: "candidate_transcript_excerpt",
+        },
+      },
+    });
+    const clips = assembled.tracks.video.find((track) => track.track_id === "V1")!.clips;
+
+    expect(clips
+      .filter((clip) => ["b01_hook", "b02_pre", "b03_kickoff"].includes(clip.beat_id))
+      .every((clip) => clip.role !== "support" && clip.role !== "texture"))
+      .toBe(true);
+    expect(clips.find((clip) => clip.beat_id === "b03_kickoff")?.segment_id).toBe("kickoff");
+    expect(clips.find((clip) => clip.beat_id === "b04_after")?.segment_id).toBe("after_run");
+  });
+
+  it("permits touching same-asset ranges in a beat but falls back past positive overlaps", () => {
+    const normalized = makeNormalized(30);
+    const table: RankedCandidateTable = new Map([
+      [
+        "b01",
+        [
+          score("seg_base", "AST_A", "support", 1, "b01", undefined, {
+            src_in_us: 0,
+            src_out_us: 10_000_000,
+          }),
+          score("seg_overlap", "AST_A", "support", 0.9, "b01", undefined, {
+            src_in_us: 5_000_000,
+            src_out_us: 15_000_000,
+          }),
+          score("seg_touch", "AST_A", "support", 0.8, "b01", undefined, {
+            src_in_us: 10_000_000,
+            src_out_us: 20_000_000,
+          }),
+          score("seg_alt", "AST_B", "support", 0.1, "b01"),
+        ],
+      ],
+    ]);
+
+    const assembled = assemble(normalized, table, params, 1, 1, guidePolicy, {
+      audioPolicy: "bgm_only",
+    });
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual([
+      "seg_base",
+      "seg_touch",
+      "seg_alt",
+    ]);
+  });
+
+  it("keeps a fill candidate skipped for one beat available to a later eligible beat", () => {
+    const normalized = makeNormalizedWithBeats([
+      { beat_id: "b01", target_duration_frames: 30 },
+      { beat_id: "b02", target_duration_frames: 30 },
+    ]);
+    const table: RankedCandidateTable = new Map([
+      ["b01", [score("seg_a", "AST_A", "support", 1, "b01")]],
+      ["b02", [score("seg_b", "AST_B", "support", 1, "b02", undefined, {
+        src_in_us: 50_000_000,
+        src_out_us: 60_000_000,
+      })]],
+      ["unused", [score("seg_b_touch", "AST_B", "support", 0.5, "b02")]],
+    ]);
+
+    const assembled = assemble(normalized, table, params, 1, 1, guidePolicy, {
+      audioPolicy: "bgm_only",
+    });
+    const v1 = assembled.tracks.video.find((track) => track.track_id === "V1")!;
+    expect(v1.clips.map((clip) => clip.segment_id)).toEqual(["seg_a", "seg_b", "seg_b_touch"]);
+    expect(v1.clips.map((clip) => clip.beat_id)).toEqual(["b01", "b02", "b02"]);
   });
 
   it("moves a matching next-beat cluster to the boundary for continuity", () => {

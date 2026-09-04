@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/video-reasoning-local-verification.schema.json",
+  "title": "Video OS Local Timestamp and Frame Verification",
+  "description": "Strict M3b derived local evidence. It never becomes timeline, selects, blueprint, or review authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "artifact_version",
+    "artifact_kind",
+    "authority",
+    "provider_evidence_artifact_id",
+    "provider_evidence_artifact_sha256",
+    "source",
+    "verification_status",
+    "extraction",
+    "records"
+  ],
+  "properties": {
+    "artifact_id": { "type": "string", "pattern": "^VLRV_[a-f0-9]{64}$" },
+    "artifact_version": { "const": "video-reasoning-local-verification/v1" },
+    "artifact_kind": { "const": "derived_local_verification" },
+    "authority": { "const": "derived_evidence_only" },
+    "provider_evidence_artifact_id": { "type": "string", "pattern": "^VREA_[a-f0-9]{64}$" },
+    "provider_evidence_artifact_sha256": { "$ref": "#/$defs/hash" },
+    "source": { "$ref": "#/$defs/source" },
+    "verification_status": { "enum": ["verified", "inconclusive", "unavailable"] },
+    "extraction": { "$ref": "#/$defs/extraction" },
+    "records": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/record" }
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "assetId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+    },
+    "range": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 }
+      ],
+      "items": false
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "source_content_sha256", "source_duration_us", "effective_source_range_us"],
+      "properties": {
+        "asset_id": { "$ref": "#/$defs/assetId" },
+        "source_content_sha256": { "$ref": "#/$defs/hash" },
+        "source_duration_us": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "effective_source_range_us": { "$ref": "#/$defs/range" }
+      }
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "failureCode": {
+      "enum": ["ffmpeg_unavailable", "ffmpeg_decode_failed", "frame_not_decoded", "insufficient_frames", "no_provider_observations"]
+    },
+    "extraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "status", "requested_frame_count", "decoded_frame_count", "failed_frame_count", "failure_codes"],
+      "properties": {
+        "tool": { "const": "ffmpeg" },
+        "status": { "enum": ["complete", "partial", "unavailable"] },
+        "requested_frame_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "decoded_frame_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "failed_frame_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "failure_codes": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/failureCode" }
+        }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_observation_id",
+        "asset_id",
+        "source_content_sha256",
+        "source_duration_us",
+        "effective_source_range_us",
+        "provider_requested_range_us",
+        "provider_candidate_range_us",
+        "local_verification_window_us",
+        "local_frame_timestamps_us",
+        "local_verified_range_us",
+        "outcome",
+        "rationale_code",
+        "assessor_evidence_codes",
+        "planned_frame_count",
+        "frame_extraction_status",
+        "frame_extraction_failure_codes"
+      ],
+      "properties": {
+        "provider_observation_id": { "type": "string", "pattern": "^VREO_[a-f0-9]{64}$" },
+        "asset_id": { "$ref": "#/$defs/assetId" },
+        "source_content_sha256": { "$ref": "#/$defs/hash" },
+        "source_duration_us": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "effective_source_range_us": { "$ref": "#/$defs/range" },
+        "provider_requested_range_us": { "$ref": "#/$defs/range" },
+        "provider_candidate_range_us": { "$ref": "#/$defs/range" },
+        "local_verification_window_us": { "$ref": "#/$defs/range" },
+        "local_frame_timestamps_us": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+        },
+        "local_verified_range_us": {
+          "anyOf": [{ "$ref": "#/$defs/range" }, { "type": "null" }]
+        },
+        "outcome": { "enum": ["confirmed", "adjusted", "rejected", "inconclusive"] },
+        "rationale_code": { "$ref": "#/$defs/code" },
+        "assessor_evidence_codes": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/code" }
+        },
+        "planned_frame_count": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "frame_extraction_status": { "enum": ["complete", "partial", "unavailable"] },
+        "frame_extraction_failure_codes": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/failureCode" }
+        }
+      }
+    }
+  }
+}

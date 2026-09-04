@@ -11,6 +11,8 @@ import type {
   PolicyDefinition,
   ResolvedRef,
   ProfileDefaults,
+  BriefAudioPolicy,
+  SourceMediaSummary,
 } from "../compiler/types.js";
 
 // ── Registry Loading ──────────────────────────────────────────────
@@ -80,6 +82,8 @@ export interface ResolutionInput {
   briefEditorial?: EditorialBriefFields;
   editorialSummary?: EditorialSummary;
   runtimeTargetSec?: number;
+  sourceMedia?: SourceMediaSummary;
+  audioPolicy?: BriefAudioPolicy;
 }
 
 export interface ResolutionResult {
@@ -99,6 +103,16 @@ interface InferenceRule {
 }
 
 const INFERENCE_RULES: InferenceRule[] = [
+  {
+    profileId: "lyric_mv",
+    conditions: (i) => {
+      const mediaKinds = i.sourceMedia?.media_kinds ?? [];
+      const stillVisual = mediaKinds.includes("image") && !mediaKinds.includes("video");
+      const musicLane = mediaKinds.includes("audio") &&
+        (i.sourceMedia?.audio_only_candidate_count ?? 0) > 0;
+      return stillVisual && (musicLane || i.audioPolicy === "bgm_only" || i.audioPolicy === "music_master");
+    },
+  },
   {
     profileId: "product-demo",
     conditions: (i) =>
@@ -147,6 +161,7 @@ const INFERENCE_RULES: InferenceRule[] = [
 // ── Default Policy Mapping ────────────────────────────────────────
 
 const PROFILE_TO_POLICY: Record<string, string> = {
+  lyric_mv: "generic",
   "generic-editorial": "generic",
   "interview-highlight": "interview",
   "interview-pro-highlight": "interview",

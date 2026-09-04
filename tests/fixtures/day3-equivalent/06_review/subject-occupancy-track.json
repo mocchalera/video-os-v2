@@ -1,0 +1,34 @@
+{
+  "version": "subject-occupancy-track/v1",
+  "generation_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "source_identity": {
+    "asset_id": "AST_BODY",
+    "segment_id": "SEG_BODY",
+    "source_content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "source_range": { "src_in_us": 0, "src_out_us": 1600000 }
+  },
+  "source_av_geometry": {
+    "video": { "width": 320, "height": 180, "fps_num": 25, "fps_den": 1 },
+    "audio": { "sample_rate": 48000, "channels": 2 }
+  },
+  "provenance": {
+    "source": "manual_annotation",
+    "producer": "fixture",
+    "producer_version": "1",
+    "confidence": 1
+  },
+  "coverage": { "start_frame": 0, "end_frame": 50 },
+  "tracks": [{
+    "track_id": "TRACK_READY",
+    "subject_id": "SUBJECT_TRACK_ONLY",
+    "identity_scope": "track_only_not_person_identity",
+    "motion": "static",
+    "confidence": 1,
+    "samples": [{
+      "start_frame": 0,
+      "end_frame": 50,
+      "bounds": { "x": 0, "y": 0, "width": 0.1, "height": 0.1 },
+      "evidence_roles": ["first", "representative", "last"]
+    }]
+  }]
+}

@@ -36,6 +36,14 @@ import {
   isP4dSearchIndexEnabled,
   readSearchIndexStatus,
 } from "../artifacts/p4d-segment-search-index.js";
+import {
+  inspectOptionalVlmPolicy,
+  type OptionalVlmPolicyStatusSummary,
+} from "../review/optional-vlm-policy.js";
+import {
+  readAuthoredCaptionStatus,
+  type AuthoredCaptionStatus,
+} from "../caption/authored-lyrics.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -100,6 +108,8 @@ export interface StatusResult {
     valid?: boolean;
     errors?: string[];
   };
+  optionalVlmPolicy?: OptionalVlmPolicyStatusSummary;
+  authoredLyrics?: AuthoredCaptionStatus;
   staleArtifacts?: string[];
   selfHealed?: boolean;
   previousState?: ProjectState;
@@ -148,7 +158,14 @@ function recommendNextCommand(
   state: ProjectState,
   gates: GateStatus,
   staleArtifacts: string[],
+  authoredLyrics?: AuthoredCaptionStatus,
 ): { command: string; reason: string } {
+  if (authoredLyrics?.detected && authoredLyrics.status !== "ready") {
+    return {
+      command: authoredLyrics.next_command,
+      reason: `authored lyrics caption gate: ${authoredLyrics.reason}`,
+    };
+  }
   // If downstream artifacts are stale, recommend re-running the relevant command
   if (staleArtifacts.includes("selects") || staleArtifacts.includes("blueprint")) {
     if (staleArtifacts.includes("selects")) {
@@ -202,10 +219,12 @@ export function runStatus(projectDir: string): StatusResult {
   }
 
   const { reconcileResult, doc } = ctx;
+  const authoredLyrics = readAuthoredCaptionStatus(ctx.projectDir);
   const { command, reason } = recommendNextCommand(
     reconcileResult.reconciled_state,
     reconcileResult.gates,
     reconcileResult.stale_artifacts,
+    authoredLyrics,
   );
 
   return {
@@ -227,6 +246,8 @@ export function runStatus(projectDir: string): StatusResult {
     searchIndex: isP4dSearchIndexEnabled()
       ? readSearchIndexStatus(ctx.projectDir)
       : undefined,
+    optionalVlmPolicy: inspectOptionalVlmPolicy(ctx.projectDir),
+    authoredLyrics,
     staleArtifacts: reconcileResult.stale_artifacts,
     selfHealed: reconcileResult.self_healed,
     previousState: reconcileResult.persisted_state,

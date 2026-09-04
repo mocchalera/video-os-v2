@@ -1,0 +1,47 @@
+{
+  "version": "private-pilot-gate-receipt/v1",
+  "pilot_id": "PILOT_RFA016_PENDING",
+  "project_id": "rfa-016-pending",
+  "gate": "platform_preview",
+  "requirement": "required",
+  "status": "pending",
+  "decision": "hold",
+  "evidence": {
+    "record_type": "platform_preview",
+    "summary": "Current-profile human platform preview is pending.",
+    "recorded_at": "2026-08-22T00:00:00Z",
+    "recorded_by": "synthetic-fixture",
+    "artifacts": [
+      { "path": "evidence-platform.json", "sha256": "sha256:7621e74cf87eba8ce232ba1f6ace12419be73b25f43f6c633d539570e376e6fd" }
+    ],
+    "platform_preview": {
+      "platform": "fixture",
+      "surface": "fixture",
+      "profile_id": "synthetic-platform-profile",
+      "profile": { "path": "platform-profile.json", "sha256": "sha256:5b10bd32d54792e868562402f528c2aef7527d76d5558fb68e4e3eed6aa57efd" },
+      "profile_evidence_status": "partial",
+      "profile_supersession_state": "active",
+      "current_profile": false,
+      "human_preview": false,
+      "safe_zone_receipt": { "path": "safe-zone-receipt.json", "sha256": "sha256:3ccbe1079d910f8271254ba10ad621bab793ba09fe68d3e584006095232139bc" }
+    }
+  },
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "pending-metadata",
+    "captured_at": "2026-08-22T00:00:00Z",
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:1fcb423d2644bba0cf1d7dd177bf7336af5bedefa2f1d1614739bf91dd88f246" },
+      { "path": "evidence-platform.json", "sha256": "sha256:7621e74cf87eba8ce232ba1f6ace12419be73b25f43f6c633d539570e376e6fd" }
+    ],
+    "profile": { "path": "platform-profile.json", "sha256": "sha256:5b10bd32d54792e868562402f528c2aef7527d76d5558fb68e4e3eed6aa57efd" },
+    "synthetic_fixture": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-08-22T00:00:00Z",
+    "input_fingerprint": "sha256:d30a205b929fdc8f0f26379ac400a75c67bc3364b654e5d5c44696b2f7b1bdc0",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "reason": "fixture inputs are hash-bound and current"
+  }
+}

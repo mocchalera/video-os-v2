@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -7,7 +8,7 @@ import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { AssetItem } from "../runtime/connectors/ffprobe.js";
 import type { VlmFn } from "../runtime/connectors/gemini-vlm.js";
 import type { PeakDetectionPolicy } from "../runtime/connectors/vlm-peak-detector.js";
-import { inspectPeakPrecisionCache, peakMap } from "../runtime/pipeline/stages/peak.js";
+import { degradedPeakMap, inspectPeakPrecisionCache, peakMap } from "../runtime/pipeline/stages/peak.js";
 import { extractGroundedFrames } from "../runtime/pipeline/stages/grounded-frames.js";
 import { SourceContentIdentityCache } from "../runtime/source-content-identity.js";
 
@@ -161,6 +162,289 @@ function createPeakMock(received: Array<{ prompt: string; paths: string[] }>): V
 }
 
 describe("EYE-001 peak precision grounding", () => {
+  it("bounds peak work with the configured cross-asset concurrency", async () => {
+    const assets = Array.from({ length: 3 }, (_, index): AssetItem => ({
+      ...asset,
+      asset_id: `AST_PARALLEL_${index}`,
+      segment_ids: [`SEG_AST_PARALLEL_${index}_0001`],
+      contact_sheet_ids: [`CS_AST_PARALLEL_${index}_01`],
+    }));
+    const segments = assets.map((parallelAsset, index): SegmentItem => ({
+      ...segment,
+      segment_id: parallelAsset.segment_ids[0],
+      asset_id: parallelAsset.asset_id,
+      filmstrip_path: "filmstrip.jpg",
+      segment_type: "general",
+      provenance: {
+        boundary: {
+          stage: "segment",
+          method: "test",
+          connector_version: "test",
+          policy_hash: "test",
+          request_hash: `test-${index}`,
+        },
+      },
+    }));
+    const derivativeMap = new Map(assets.map((parallelAsset) => [
+      parallelAsset.asset_id,
+      {
+        ...derivatives,
+        contactSheets: [{
+          ...derivatives.contactSheets[0],
+          asset_id: parallelAsset.asset_id,
+          contact_sheet_id: parallelAsset.contact_sheet_ids[0],
+        }],
+      },
+    ]));
+    const sourceFileMap = new Map(assets.map((parallelAsset) => [
+      parallelAsset.asset_id,
+      SOURCE_FIXTURE,
+    ]));
+    let activeCalls = 0;
+    let maxActiveCalls = 0;
+    const delayedVlm: VlmFn = async (_paths, prompt) => {
+      activeCalls += 1;
+      maxActiveCalls = Math.max(maxActiveCalls, activeCalls);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeCalls -= 1;
+      if (prompt.includes("editorial peak discovery")) {
+        return {
+          rawJson: JSON.stringify({
+            coarse_candidates: [{
+              tile_start_index: 0,
+              tile_end_index: 0,
+              likely_peak_type: "visual_peak",
+              confidence: 0.8,
+              rationale: "fixture",
+            }],
+          }),
+        };
+      }
+      return {
+        rawJson: JSON.stringify({
+          summary: "fixture refine",
+          tags: ["landscape"],
+          interest_points: [],
+          visual_energy_curve: [],
+          quality_flags: [],
+          confidence: { summary: 0.8, tags: 0.8, quality_flags: 0.8 },
+          peak_confidence: { vlm: 0.8 },
+        }),
+      };
+    };
+
+    const shards = await peakMap(
+      { project_id: "parallel", artifact_version: "1", items: assets },
+      { project_id: "parallel", artifact_version: "1", items: segments },
+      derivativeMap,
+      sourceFileMap,
+      delayedVlm,
+      { ...policy, peak_precision_mode: "never" },
+      OUTPUT_DIR,
+      undefined,
+      { concurrency: 3 },
+    );
+
+    expect(shards).toHaveLength(3);
+    expect(maxActiveCalls).toBe(3);
+  });
+
+  it("stops dispatching unstarted assets after the stage deadline", async () => {
+    const assets = Array.from({ length: 4 }, (_, index): AssetItem => ({
+      ...asset,
+      asset_id: `AST_DEADLINE_${index}`,
+      segment_ids: [`SEG_AST_DEADLINE_${index}_0001`],
+      contact_sheet_ids: [`CS_AST_DEADLINE_${index}_01`],
+    }));
+    const segments = assets.map((deadlineAsset, index): SegmentItem => ({
+      ...segment,
+      segment_id: deadlineAsset.segment_ids[0],
+      asset_id: deadlineAsset.asset_id,
+      segment_type: "general",
+      provenance: {
+        boundary: {
+          stage: "segment",
+          method: "test",
+          connector_version: "test",
+          policy_hash: "test",
+          request_hash: `deadline-${index}`,
+        },
+      },
+    }));
+    const derivativeMap = new Map(assets.map((deadlineAsset) => [
+      deadlineAsset.asset_id,
+      {
+        ...derivatives,
+        contactSheets: [{
+          ...derivatives.contactSheets[0],
+          asset_id: deadlineAsset.asset_id,
+          contact_sheet_id: deadlineAsset.contact_sheet_ids[0],
+        }],
+      },
+    ]));
+    let calls = 0;
+    let now = 0;
+    let releaseVlm!: () => void;
+    const vlmCompletion = new Promise<void>((resolve) => {
+      releaseVlm = resolve;
+    });
+    const slowVlm: VlmFn = async () => {
+      calls += 1;
+      if (calls === 2) now = 5;
+      await vlmCompletion;
+      return { rawJson: JSON.stringify({ coarse_candidates: [] }) };
+    };
+
+    const run = peakMap(
+      { project_id: "deadline", artifact_version: "1", items: assets },
+      { project_id: "deadline", artifact_version: "1", items: segments },
+      derivativeMap,
+      new Map(assets.map((deadlineAsset) => [deadlineAsset.asset_id, SOURCE_FIXTURE])),
+      slowVlm,
+      { ...policy, peak_precision_mode: "never" },
+      OUTPUT_DIR,
+      undefined,
+      { concurrency: 2, deadlineAtMs: 5, now: () => now },
+    );
+
+    await expect(run).rejects.toThrow("peak stage deadline exceeded");
+    expect(calls).toBe(2);
+    releaseVlm();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(calls).toBe(2);
+  });
+
+  it("bounds degraded audio probes by the same peak-stage deadline", async () => {
+    const assets = Array.from({ length: 4 }, (_, index): AssetItem => ({
+      ...asset,
+      asset_id: `AST_DEGRADED_${index}`,
+      segment_ids: [`SEG_DEGRADED_${index}`],
+      video_stream: { width: 1280, height: 720, fps_num: 24, fps_den: 1, codec: "h264" },
+      audio_stream: { sample_rate: 48_000, channels: 2, codec: "aac" },
+    }));
+    const segments = assets.map((degradedAsset, index): SegmentItem => ({
+      ...segment,
+      segment_id: degradedAsset.segment_ids[0],
+      asset_id: degradedAsset.asset_id,
+      provenance: {
+        boundary: {
+          stage: "segment",
+          method: "test",
+          connector_version: "test",
+          policy_hash: "test",
+          request_hash: `degraded-${index}`,
+        },
+      },
+    }));
+    let audioProbeCalls = 0;
+    const runDegraded = degradedPeakMap as unknown as (
+      ...args: unknown[]
+    ) => Promise<unknown[]>;
+    for (let repetition = 0; repetition < 100; repetition += 1) {
+      let now = 0;
+      const shards = await runDegraded(
+        { project_id: "degraded", artifact_version: "1", items: assets },
+        { project_id: "degraded", artifact_version: "1", items: segments },
+        new Map(assets.map((degradedAsset) => [degradedAsset.asset_id, "unused.mp4"])),
+        {
+          deadlineAtMs: 5,
+          now: () => now,
+          estimateAudioRms: async () => {
+            audioProbeCalls += 1;
+            now = 5;
+            return 0.8;
+          },
+        },
+      );
+
+      expect(shards).toEqual([]);
+    }
+    expect(audioProbeCalls).toBe(100);
+  });
+
+  it("terminates and closes the in-flight degraded audio child at the deadline", async () => {
+    const assets = Array.from({ length: 3 }, (_, index): AssetItem => ({
+      ...asset,
+      asset_id: `AST_AUDIO_CHILD_${index}`,
+      segment_ids: [`SEG_AUDIO_CHILD_${index}`],
+      video_stream: { width: 1280, height: 720, fps_num: 24, fps_den: 1, codec: "h264" },
+      audio_stream: { sample_rate: 48_000, channels: 2, codec: "aac" },
+    }));
+    const segments = assets.map((current, index): SegmentItem => ({
+      ...segment,
+      segment_id: current.segment_ids[0],
+      asset_id: current.asset_id,
+      provenance: {
+        boundary: {
+          stage: "segment",
+          method: "test",
+          connector_version: "test",
+          policy_hash: "test",
+          request_hash: `audio-child-${index}`,
+        },
+      },
+    }));
+    let calls = 0;
+    let killed = 0;
+    let closed = 0;
+    let completed = 0;
+    let now = 0;
+    let killSignal: string | undefined;
+    let closeSignal: string | null | undefined;
+    const deadlineAtMs = 5;
+    let lateCompletion: (() => void) | undefined;
+    const fakeExecFile = (
+      _command: string,
+      _args: string[],
+      _options: Record<string, unknown>,
+      callback: (error: Error | null, stdout: string, stderr: string) => void,
+    ) => {
+      calls += 1;
+      const child = new EventEmitter() as EventEmitter & { kill(signal?: string): boolean };
+      lateCompletion = () => {
+        if (killed > 0) return;
+        completed += 1;
+        callback(null, "", "RMS level dB: -12\n");
+        closed += 1;
+        child.emit("close", 0, null);
+      };
+      child.kill = (signal) => {
+        killed += 1;
+        killSignal = signal;
+        now = deadlineAtMs;
+        queueMicrotask(() => {
+          callback(new Error("terminated"), "", "");
+          closed += 1;
+          closeSignal = "SIGKILL";
+          child.emit("close", null, closeSignal);
+        });
+        return true;
+      };
+      return child;
+    };
+
+    const shards = await (degradedPeakMap as unknown as (...args: unknown[]) => Promise<unknown[]>)(
+      { project_id: "audio-child", artifact_version: "1", items: assets },
+      { project_id: "audio-child", artifact_version: "1", items: segments },
+      new Map(assets.map((current) => [current.asset_id, "unused.mp4"])),
+      { deadlineAtMs, now: () => now, audioRmsExecFile: fakeExecFile },
+    );
+
+    expect({ calls, killed, killSignal, closed, closeSignal, completed, now }).toEqual({
+      calls: 1,
+      killed: 1,
+      killSignal: "SIGKILL",
+      closed: 1,
+      closeSignal: "SIGKILL",
+      completed: 0,
+      now: deadlineAtMs,
+    });
+    expect(shards).toEqual([]);
+    now = deadlineAtMs + 80;
+    lateCompletion?.();
+    expect({ calls, killed, closed, completed }).toEqual({ calls: 1, killed: 1, closed: 1, completed: 0 });
+  });
+
   it("passes only absolute existing non-empty images to coarse, refine, and precision VLM calls", async () => {
     const received: Array<{ prompt: string; paths: string[] }> = [];
     const shards = await peakMap(

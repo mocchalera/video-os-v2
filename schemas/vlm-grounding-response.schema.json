@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/vlm-grounding-response.schema.json",
+  "title": "Video OS grounded VLM response",
+  "description": "Canonical provider response for Gemini still/frame grounding.",
+  "x-schema-version": "1.0.0",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "interest_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "frame_us": { "type": "integer", "minimum": 0 },
+          "label": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "quality_flags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tags": { "type": "number", "minimum": 0, "maximum": 1 },
+        "quality_flags": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "editorial_observation": {
+      "type": "object",
+      "required": ["confidence"],
+      "properties": {
+        "visual_tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "motion_type": {
+          "type": "string",
+          "enum": [
+            "static",
+            "subtle",
+            "continuous",
+            "intermittent",
+            "rapid",
+            "mixed",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "camera_motion_direction": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right",
+            "up",
+            "down",
+            "toward_camera",
+            "away_from_camera",
+            "mixed",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "subject_motion_direction": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right",
+            "up",
+            "down",
+            "toward_camera",
+            "away_from_camera",
+            "mixed",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "shot_scale": {
+          "type": "string",
+          "enum": [
+            "extreme_wide",
+            "wide",
+            "medium_wide",
+            "medium",
+            "medium_close_up",
+            "close_up",
+            "extreme_close_up",
+            "insert",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "composition_anchor": {
+          "type": "string",
+          "enum": [
+            "left",
+            "center",
+            "right",
+            "balanced",
+            "multiple",
+            "full_frame",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "screen_side": {
+          "type": "string",
+          "enum": [
+            "left",
+            "center",
+            "right",
+            "multiple",
+            "full_frame",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "gaze_direction": {
+          "type": "string",
+          "enum": [
+            "screen_left",
+            "screen_right",
+            "camera",
+            "away",
+            "up",
+            "down",
+            "mixed",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "camera_axis": {
+          "type": "string",
+          "enum": [
+            "axis_left",
+            "axis_right",
+            "on_axis",
+            "establishing",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "dominant_subject_type": {
+          "type": "string",
+          "enum": [
+            "person",
+            "group",
+            "animal",
+            "object",
+            "landscape",
+            "architecture",
+            "text_graphic",
+            "mixed",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "dominant_colors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "text_presence": {
+          "type": "string",
+          "enum": ["present", "absent", "unknown", "not_applicable"]
+        },
+        "confidence": {
+          "type": "object",
+          "required": [
+            "tags",
+            "motion",
+            "framing",
+            "direction",
+            "appearance",
+            "text"
+          ],
+          "properties": {
+            "tags": { "type": "number", "minimum": 0, "maximum": 1 },
+            "motion": { "type": "number", "minimum": 0, "maximum": 1 },
+            "framing": { "type": "number", "minimum": 0, "maximum": 1 },
+            "direction": { "type": "number", "minimum": 0, "maximum": 1 },
+            "appearance": { "type": "number", "minimum": 0, "maximum": 1 },
+            "text": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    },
+    "visual_quality": {
+      "type": "object"
+    }
+  }
+}

@@ -4,12 +4,10 @@ import { parse as parseYaml } from "yaml";
 import {
   initCommand,
   isCommandError,
-  reconcileAndPersist,
-  validateAgainstSchema,
   type CommandError,
 } from "./shared.js";
-import { compile, type CompileResult, type ReviewPatch } from "../compiler/index.js";
-import type { ProjectState } from "../state/reconcile.js";
+import { runCanonicalCompile, type CompileResult, type ReviewPatch } from "../compiler/index.js";
+import { readProjectState, reconcileCompiledTimelineState, type ProjectState } from "../state/reconcile.js";
 import { ProgressTracker } from "../progress.js";
 import { confirmBriefDefaults, type BriefConfirmationOptions } from "../brief-confirmation.js";
 import { inferExistingTimelineRate } from "../compiler/existing-timeline.js";
@@ -82,35 +80,25 @@ export async function runCompilePhase(
     const existingRate = options?.fpsNum === undefined
       ? inferExistingTimelineRate(ctx.projectDir)
       : undefined;
-    const compileResult = compile({
+    const compileResult = await runCanonicalCompile({
       projectPath: ctx.projectDir,
       createdAt: options?.createdAt ?? inferCreatedAt(ctx.projectDir),
       fpsNum: options?.fpsNum ?? existingRate?.fpsNum,
       fpsDen: options?.fpsNum !== undefined ? options.fpsDen : existingRate?.fpsDen,
       sourceMapPath: options?.sourceMapPath,
       reviewPatch: options?.reviewPatch,
+      validateSourceArtifacts: true,
+      onArtifactsPromoted: (_receipts, context) => {
+        if (context.duration_policy.hard_gate && !context.resolution.duration_fit) {
+          throw new Error(
+            `Hard duration gate failed during atomic compile: target_frames=${context.resolution.target_frames}`,
+          );
+        }
+        reconcileCompiledTimelineState(ctx.projectDir, "compile-timeline", "/compile");
+      },
     });
     pt.advance("05_timeline/timeline.json");
 
-    const timelineValidation = validateAgainstSchema(
-      JSON.parse(fs.readFileSync(compileResult.outputPath, "utf-8")),
-      "timeline-ir.schema.json",
-    );
-    if (!timelineValidation.valid) {
-      const error: CommandError = {
-        code: "VALIDATION_FAILED",
-        message: `timeline.json failed schema validation: ${timelineValidation.errors.join("; ")}`,
-        details: timelineValidation.errors,
-      };
-      pt.fail("validate", error.message);
-      return { success: false, error, previousState };
-    }
-
-    const reconcileResult = reconcileAndPersist(
-      ctx.projectDir,
-      "compile-timeline",
-      "/compile",
-    );
     pt.advance("05_timeline/preview-manifest.json");
     pt.complete(collectCompileArtifacts(ctx.projectDir));
 
@@ -118,7 +106,7 @@ export async function runCompilePhase(
       success: true,
       compileResult,
       previousState,
-      newState: reconcileResult.reconciled_state,
+      newState: readProjectState(ctx.projectDir)?.current_state,
       progressPath: pt.filePath,
       patchApplied: !!options?.reviewPatch,
     };
@@ -151,5 +139,7 @@ function collectCompileArtifacts(projectDir: string): string[] {
     "05_timeline/timeline.json",
     "05_timeline/timeline.otio",
     "05_timeline/preview-manifest.json",
+    "05_timeline/render-readiness.json",
+    "05_timeline/beat-allocation-report.json",
   ].filter((relativePath) => fs.existsSync(path.join(projectDir, relativePath)));
 }

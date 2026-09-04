@@ -6,6 +6,15 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import type { ClipOutput, TimelineIR } from "../compiler/types.js";
+import { validateAgainstSchema } from "../commands/shared.js";
+import type { AudioMixReport } from "../audio/mixer.js";
+import {
+  assertAudioRenderPlanMatchesCanonical,
+  hashAudioRenderPlan,
+  type AudioRenderPlan,
+} from "../audio/render-plan.js";
+import { resolveSharedAudioRenderPlan } from "../audio/render-route.js";
+import { checkMusicMasterAudioPlan } from "../packaging/qa.js";
 import { resolveFcp7AudioLevelsEmissionDecision } from "./fcp7-xml-export.js";
 import {
   classifyPremiereVideoTreatments,
@@ -112,6 +121,20 @@ export interface PremiereFinishReviewAudioItem {
   action_code: "review_audio_levels_then_wait_for_full_handoff";
 }
 
+export interface PremiereFinishReviewMusicMasterReceipt {
+  role: "music_master";
+  audio_decision: "preserve" | "mastering";
+  plan_hash: string;
+  plan: { path: "07_package/audio-render-plan.json"; sha256: string };
+  report: {
+    path: "07_package/logs/audio-mix-report.json";
+    sha256: string;
+    measurement_status: "measured";
+  };
+  profile_id: string | null;
+  profile_hash: string | null;
+}
+
 export interface PremiereFinishReviewVisualItem {
   kind: "visual_effect";
   target: { track_id: string; clip_id: string; effect_ids: string[] | null };
@@ -135,6 +158,7 @@ export interface PremiereFinishReviewProjection {
   base_timeline_sha256: string;
   hardware_verified: false;
   surfaces: PremiereFinishReviewSurface[];
+  audio_master_receipt?: PremiereFinishReviewMusicMasterReceipt;
 }
 
 export interface PremierePreflightChildResult {
@@ -383,6 +407,78 @@ function currentTimelineIdentity(timelinePath: string): { identity: TimelineIden
   } finally {
     closeSync(fd);
   }
+}
+
+function timelineDeclaresMusicMaster(timeline: TimelineIR): boolean {
+  const policy = timeline.provenance.audio_policy;
+  return policy?.mode === "music_master";
+}
+
+function readMusicMasterFinishReceipt(
+  project: string,
+  timelinePath: string,
+  timeline: TimelineIR,
+): PremiereFinishReviewMusicMasterReceipt | undefined {
+  if (!timelineDeclaresMusicMaster(timeline)) return undefined;
+  const planRelative = "07_package/audio-render-plan.json" as const;
+  const reportRelative = "07_package/logs/audio-mix-report.json" as const;
+  const readArtifact = (relative: string): { bytes: Buffer; sha256: string } => {
+    const artifactPath = path.join(project, relative);
+    assertNoSymlinkComponents(artifactPath);
+    let stat;
+    try {
+      stat = lstatSync(artifactPath);
+    } catch {
+      fail("invalid_projection", `${relative} is required for music_master finish review`);
+    }
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      fail("invalid_projection", `${relative} must be a regular nlink=1 artifact`);
+    }
+    const bytes = readFileSync(artifactPath);
+    return { bytes, sha256: sha256(bytes) };
+  };
+  const planArtifact = readArtifact(planRelative);
+  const reportArtifact = readArtifact(reportRelative);
+  let suppliedPlan: AudioRenderPlan;
+  let report: AudioMixReport;
+  try {
+    suppliedPlan = JSON.parse(planArtifact.bytes.toString("utf8")) as AudioRenderPlan;
+    report = JSON.parse(reportArtifact.bytes.toString("utf8")) as AudioMixReport;
+  } catch {
+    fail("invalid_projection", "music_master plan or audio-mix-report is malformed JSON");
+  }
+  const planSchema = validateAgainstSchema(suppliedPlan, "audio-render-plan.schema.json");
+  if (!planSchema.valid) fail("invalid_projection", `music_master plan schema mismatch: ${planSchema.errors.join("; ")}`);
+  const reportSchema = validateAgainstSchema(report, "audio-mix-report.schema.json");
+  if (!reportSchema.valid) fail("invalid_projection", `music_master report schema mismatch: ${reportSchema.errors.join("; ")}`);
+  let canonicalPlan: AudioRenderPlan;
+  try {
+    canonicalPlan = resolveSharedAudioRenderPlan({ projectDir: project, timelinePath }) as AudioRenderPlan;
+    if (canonicalPlan.strategy !== "music_master") throw new Error("canonical strategy is not music_master");
+    assertAudioRenderPlanMatchesCanonical(suppliedPlan, canonicalPlan);
+  } catch (error) {
+    fail("invalid_projection", `music_master plan is stale or invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const audioContract = checkMusicMasterAudioPlan(
+    canonicalPlan,
+    report,
+    { verifyBoundMedia: false },
+  );
+  if (!audioContract.passed) {
+    fail(
+      "invalid_projection",
+      `music_master finish receipt is not identity-bound or measurement-verified: ${audioContract.details}`,
+    );
+  }
+  return {
+    role: "music_master",
+    audio_decision: canonicalPlan.music_master!.audio_decision,
+    plan_hash: hashAudioRenderPlan(canonicalPlan),
+    plan: { path: planRelative, sha256: planArtifact.sha256 },
+    report: { path: reportRelative, sha256: reportArtifact.sha256, measurement_status: "measured" },
+    profile_id: canonicalPlan.audio_delivery_profile?.profile_id ?? null,
+    profile_hash: canonicalPlan.audio_delivery_profile?.profile_hash ?? null,
+  };
 }
 
 function findRepoRoot(explicit?: string): string {
@@ -768,6 +864,7 @@ export function projectPremiereFinishReview(
   const pinned = readPinnedTimeline(timelinePath, validate.timeline);
   const projectId = nonempty(pinned.timeline.project_id, "invalid_projection", "project_id");
   const expectedTimelineIdentity = wireIdentity(pinned.identity);
+  const audioMasterReceipt = readMusicMasterFinishReceipt(project, timelinePath, pinned.timeline);
 
   const tsx = localExecutable(repoRoot, "node_modules/.bin/tsx");
   const exportScript = path.join(repoRoot, "scripts", "export-premiere-xml.ts");
@@ -803,5 +900,6 @@ export function projectPremiereFinishReview(
     base_timeline_sha256: pinned.sha256,
     hardware_verified: false,
     surfaces,
+    ...(audioMasterReceipt ? { audio_master_receipt: audioMasterReceipt } : {}),
   };
 }

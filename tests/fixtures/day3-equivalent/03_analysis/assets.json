@@ -1,0 +1,11 @@
+{
+  "project_id": "day3-equivalent-fixture",
+  "artifact_version": "assets-v1",
+  "items": [
+    { "asset_id": "AST_BODY", "filename": "day3-source.mp4", "media_kind": "video", "duration_us": 2000000, "has_transcript": false, "transcript_ref": null, "segments": 1, "segment_ids": ["SEG_BODY"], "quality_flags": [], "tags": [] },
+    { "asset_id": "AST_INTRO", "filename": "day3-source.mp4", "media_kind": "video", "duration_us": 2000000, "has_transcript": false, "transcript_ref": null, "segments": 1, "segment_ids": ["SEG_INTRO"], "quality_flags": [], "tags": [] },
+    { "asset_id": "AST_CUTAWAY_1", "filename": "day3-source.mp4", "media_kind": "video", "duration_us": 2000000, "has_transcript": false, "transcript_ref": null, "segments": 1, "segment_ids": ["SEG_CUTAWAY_1"], "quality_flags": [], "tags": [] },
+    { "asset_id": "AST_CUTAWAY_2", "filename": "day3-source.mp4", "media_kind": "video", "duration_us": 2000000, "has_transcript": false, "transcript_ref": null, "segments": 1, "segment_ids": ["SEG_CUTAWAY_2"], "quality_flags": [], "tags": [] },
+    { "asset_id": "AST_CUTAWAY_3", "filename": "day3-source.mp4", "media_kind": "video", "duration_us": 2000000, "has_transcript": false, "transcript_ref": null, "segments": 1, "segment_ids": ["SEG_CUTAWAY_3"], "quality_flags": [], "tags": [] }
+  ]
+}

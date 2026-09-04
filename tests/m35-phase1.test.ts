@@ -119,6 +119,7 @@ function minimalImportReport() {
 }
 
 function minimalHumanRevisionDiff() {
+  // Legacy version 1: schema-valid without identity, but never measured.
   return {
     version: 1,
     project_id: "test-project",
@@ -131,6 +132,23 @@ function minimalHumanRevisionDiff() {
       reorder: 0,
       enable_disable: 0,
       unmapped: 0,
+    },
+  };
+}
+
+function identityBoundHumanRevisionDiff() {
+  return {
+    ...minimalHumanRevisionDiff(),
+    version: 2,
+    identity: {
+      base_timeline: { path: "05_timeline/timeline.json", version: "1", sha256: `sha256:${"b".repeat(64)}` },
+      review_generation: {
+        generation_id: `sha256:${"a".repeat(64)}`,
+        review_identity: `sha256:${"c".repeat(64)}`,
+        output: { path: "09_output/social-review/generations/a/review.mp4", sha256: `sha256:${"9".repeat(64)}` },
+        review_ready_receipt: { path: "09_output/social-review/generations/a/review-ready-receipt.json", sha256: `sha256:${"e".repeat(64)}` },
+      },
+      review_round: { round_index: 1, round_identity: `sha256:${"d".repeat(64)}` },
     },
   };
 }
@@ -332,6 +350,14 @@ describe("human-revision-diff schema", () => {
   it("accepts minimal valid diff", () => {
     const data = minimalHumanRevisionDiff();
     expect(validate(data)).toBe(true);
+  });
+
+  it("accepts version 2 identity-bound diff; identity-bearing v1 stays valid but unmeasured by contract", () => {
+    expect(validate(identityBoundHumanRevisionDiff())).toBe(true);
+    // P1-1: the parent production writer emitted identity-bearing v1, so the
+    // schema must keep accepting that historical shape (measurement stays
+    // unavailable for v1 by the metric contract, not by schema rejection).
+    expect(validate({ ...identityBoundHumanRevisionDiff(), version: 1 })).toBe(true);
   });
 
   it("accepts diff with trim operation", () => {

@@ -8,10 +8,12 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { createHistoryEntry, type HistoryEntry } from "./history.js";
-import { validateProject } from "../validation/schema-validator.js";
+import { findRepoRoot, validateProject } from "../validation/schema-validator.js";
 import { LiveAnalysisRepository } from "../mcp/repository.js";
+import { inspectAnalysisCacheEligibility } from "../pipeline/analysis-cache.js";
 import {
   isP1ManifestCoverageEnabled,
   readCoverageSummary,
@@ -66,7 +68,27 @@ export interface ApprovalRecord {
     // M4: canonical timeline identity for packaging freshness
     base_timeline_version?: string;
     editorial_timeline_hash?: string;
+    human_correction_approval?: HumanCorrectionApprovalBinding;
   };
+}
+
+/**
+ * The canonical approval evidence for a measured human-correction summary.
+ * This is deliberately one nested record so an approval cannot bind a
+ * timeline/notes pair from one review round to a diff from another round.
+ */
+export interface HumanCorrectionApprovalBinding {
+  version: "human-correction-approval/v1";
+  approved_timeline: { path: string; version: string; sha256: string };
+  human_notes: { path: string; sha256: string };
+  review_generation: {
+    generation_id: string;
+    review_identity: string;
+    output: { path: string; sha256: string };
+    review_ready_receipt: { path: string; sha256: string };
+  };
+  review_round: { round_index: number; round_identity: string };
+  human_revision_diff: { path: string; sha256: string; version: 2 };
 }
 
 export interface AnalysisOverride {
@@ -134,7 +156,7 @@ export interface ReconcileResult {
 
 // ── Artifact Paths ─────────────────────────────────────────────────
 
-const ARTIFACT_PATHS: Record<string, { path: string; format: "yaml" | "json" | "md" }> = {
+export const ARTIFACT_PATHS: Record<string, { path: string; format: "yaml" | "json" | "md" }> = {
   brief: { path: "01_intent/creative_brief.yaml", format: "yaml" },
   blockers: { path: "01_intent/unresolved_blockers.yaml", format: "yaml" },
   selects: { path: "04_plan/selects_candidates.yaml", format: "yaml" },
@@ -150,6 +172,29 @@ const ARTIFACT_PATHS: Record<string, { path: string; format: "yaml" | "json" | "
   music_cues: { path: "07_package/music_cues.json", format: "json" },
   qa_report: { path: "07_package/qa-report.json", format: "json" },
   package_manifest: { path: "07_package/package_manifest.json", format: "json" },
+};
+
+/**
+ * Authoritative identity binding: canonical artifact path -> the recorded
+ * hash key in ArtifactHashes. Evidence referencing a tracked artifact is
+ * verified against the hash recorded by the last system command, so stale or
+ * foreign copies that merely self-consistently hash themselves can never pass.
+ */
+export const ARTIFACT_IDENTITY_HASH_KEYS: Record<string, keyof ArtifactHashes> = {
+  [ARTIFACT_PATHS.brief.path]: "brief_hash",
+  [ARTIFACT_PATHS.blockers.path]: "blockers_hash",
+  [ARTIFACT_PATHS.selects.path]: "selects_hash",
+  [ARTIFACT_PATHS.blueprint.path]: "blueprint_hash",
+  [ARTIFACT_PATHS.uncertainty.path]: "uncertainty_hash",
+  [ARTIFACT_PATHS.timeline.path]: "timeline_version",
+  [ARTIFACT_PATHS.review_report.path]: "review_report_version",
+  [ARTIFACT_PATHS.review_patch.path]: "review_patch_hash",
+  [ARTIFACT_PATHS.human_notes.path]: "human_notes_hash",
+  [ARTIFACT_PATHS.style.path]: "style_hash",
+  [ARTIFACT_PATHS.caption_approval.path]: "caption_approval_hash",
+  [ARTIFACT_PATHS.music_cues.path]: "music_cues_hash",
+  [ARTIFACT_PATHS.qa_report.path]: "qa_report_hash",
+  [ARTIFACT_PATHS.package_manifest.path]: "package_manifest_hash",
 };
 
 // ── Invalidation Matrix ────────────────────────────────────────────
@@ -739,6 +784,48 @@ export function reconcile(
   };
 }
 
+/**
+ * Reconcile the state that belongs to a successfully promoted timeline.
+ *
+ * This is intentionally separate from generic startup reconciliation: a
+ * compile transaction has just invalidated any downstream review/approval,
+ * so the successful boundary is always timeline_drafted. The caller invokes
+ * this while the compiler's canonical-artifact backup is still available; a
+ * write failure therefore causes the artifact transaction to roll back.
+ */
+export function reconcileCompiledTimelineState(
+  projectDir: string,
+  actor: string = "compile-timeline",
+  trigger: string = "/compile",
+): ReconcileResult {
+  const result = reconcile(projectDir, actor, trigger);
+  if (result.gates.compile_gate === "blocked" || result.gates.planning_gate === "blocked") {
+    throw new Error("Cannot reconcile a compiled timeline while a compile or planning gate is blocked.");
+  }
+  if (result.gates.timeline_gate !== "open") {
+    throw new Error("Cannot reconcile timeline_drafted without a canonical timeline artifact.");
+  }
+
+  const fromState = result.doc.current_state;
+  if (fromState !== "timeline_drafted") {
+    const entry = createHistoryEntry(
+      fromState,
+      "timeline_drafted",
+      trigger,
+      actor,
+      "compile transaction promoted verified timeline artifacts",
+    );
+    result.doc.history = [...(result.doc.history ?? []), entry];
+    result.history_appended = [...result.history_appended, entry];
+  }
+  result.doc.current_state = "timeline_drafted";
+  result.reconciled_state = "timeline_drafted";
+  result.doc.last_agent = actor;
+  result.doc.last_command = trigger;
+  writeProjectState(projectDir, result.doc);
+  return result;
+}
+
 // ── Gate Computation ───────────────────────────────────────────────
 
 function computeGates(
@@ -749,7 +836,7 @@ function computeGates(
   let analysisGate: GateStatus["analysis_gate"] = "blocked";
   const analysis = computeAnalysisStatus(projectDir, doc.project_id || "");
   const analysisOverrideActive = isAnalysisOverrideActiveForSnapshot(doc, snapshot) &&
-    analysisArtifactsExist(projectDir);
+    analysis.canonicalValid;
   if (analysis.qcStatus === "ready") {
     analysisGate = "ready";
   } else if (analysisOverrideActive) {
@@ -757,9 +844,10 @@ function computeGates(
   }
   if (isP1ManifestCoverageEnabled()) {
     const coverage = readCoverageSummary(projectDir);
-    if (coverage?.status === "ready") {
+    if (analysis.canonicalValid && coverage?.status === "ready") {
       analysisGate = "ready";
     } else if (
+      analysis.canonicalValid &&
       coverage?.status === "partial_override" &&
       analysisOverrideActive
     ) {
@@ -876,36 +964,36 @@ function isAnalysisOverrideActiveForSnapshot(doc: ProjectStateDoc, snapshot: Art
   );
 }
 
-function analysisArtifactsExist(projectDir: string): boolean {
-  return (
-    fs.existsSync(path.join(projectDir, "03_analysis/assets.json")) &&
-    fs.existsSync(path.join(projectDir, "03_analysis/segments.json"))
-  );
-}
-
 function computeAnalysisStatus(
   projectDir: string,
   projectId: string,
 ): {
   artifactVersion?: string;
   qcStatus?: "ready" | "partial" | "blocked";
+  canonicalValid: boolean;
 } {
   const assetsPath = path.join(projectDir, "03_analysis/assets.json");
   const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
   const artifactVersion = readAnalysisArtifactVersion(projectDir);
 
   if (!fs.existsSync(assetsPath) || !fs.existsSync(segmentsPath)) {
-    return { artifactVersion };
+    return { artifactVersion, canonicalValid: false };
   }
 
-  const validation = validateProject(projectDir);
+  const eligibility = inspectAnalysisCacheEligibility(projectDir);
+  if (!eligibility.eligible) {
+    return { artifactVersion, canonicalValid: false };
+  }
+
+  const repoRoot = findRepoRoot(path.dirname(fileURLToPath(import.meta.url)));
+  const validation = validateProject(projectDir, { repoRoot });
   const analysisViolations = validation.violations.filter(
     (violation) =>
       violation.artifact === "analysis_policy.yaml" ||
       violation.artifact.startsWith("03_analysis/"),
   );
   if (analysisViolations.length > 0) {
-    return { artifactVersion };
+    return { artifactVersion, canonicalValid: false };
   }
 
   try {
@@ -913,8 +1001,9 @@ function computeAnalysisStatus(
     return {
       artifactVersion: summary.artifact_version || artifactVersion,
       qcStatus: summary.qc_status,
+      canonicalValid: true,
     };
   } catch {
-    return { artifactVersion };
+    return { artifactVersion, canonicalValid: false };
   }
 }

@@ -23,6 +23,10 @@ import { runIntent, type IntentAgent } from "../runtime/commands/intent.js";
 import { runTriage, type TriageAgent } from "../runtime/commands/triage.js";
 import { runBlueprint, type BlueprintAgent, type EditBlueprint, type UncertaintyRegister } from "../runtime/commands/blueprint.js";
 import { runReview, type ReviewAgent, type ReviewReport, type ReviewPatch } from "../runtime/commands/review.js";
+import {
+  type WholeCutSemanticProvider,
+  type WholeCutSemanticProviderObservation,
+} from "../runtime/review/whole-cut-semantic.js";
 import { runStatus } from "../runtime/commands/status.js";
 import { runExport } from "../runtime/commands/export.js";
 
@@ -34,6 +38,7 @@ const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) 
     (data: unknown): boolean;
     errors?: Array<{ instancePath: string; message?: string }> | null;
   };
+  addSchema(schema: object): void;
 };
 const addFormats = require("ajv-formats") as (ajv: unknown) => void;
 
@@ -42,12 +47,66 @@ function createValidator(schemaFile: string) {
   const schema = JSON.parse(fs.readFileSync(schemaPath, "utf-8"));
   const ajv = new Ajv2020({ allErrors: true, strict: false });
   addFormats(ajv);
+  if (schemaFile === "review-report.schema.json") {
+    ajv.addSchema(JSON.parse(fs.readFileSync(path.resolve("schemas/whole-cut-semantic-review.schema.json"), "utf-8")));
+  }
   return ajv.compile(schema);
 }
 
-function visualQAWaiverOptions() {
+function wholeCutSemanticTestOptions() {
+  const provider: WholeCutSemanticProvider = {
+    id: "e2e-semantic-provider",
+    capability: "available",
+    async observeWindow(input) {
+      const observation: WholeCutSemanticProviderObservation = {
+        observation_id: `e2e-semantic-${input.start_sec}`,
+        start_sec: input.start_sec,
+        end_sec: input.end_sec,
+        observation: "The fixture presents the intended subject, action, and result across the full cut.",
+        inference: "The observed sequence supports the brief without an unsupported chronology claim.",
+        confidence: 0.85,
+        confidence_basis: "measured",
+        evidence: {
+          render: {
+            path: input.render_path,
+            start_sec: input.start_sec,
+            end_sec: input.end_sec,
+            sha256: input.render_sha256,
+          },
+          source_clip_ids: input.active_clip_ids,
+        },
+        axis_results: input.axes.map((axis) => ({
+          axis_id: axis.axis_id,
+          outcome: "pass" as const,
+          confidence: 0.85,
+          confidence_basis: "measured" as const,
+          brief_refs: axis.brief_refs,
+          rationale: "The complete fixture window supports this axis.",
+        })),
+        story_progression: {
+          score: 0.85,
+          confidence: 0.85,
+          confidence_basis: "measured",
+        },
+      };
+      return { observations: [observation], problem_ranges: [] };
+    },
+  };
+  return {
+    wholeCutSemantic: {
+      durationSec: 30,
+      probeRenderDurationImpl: async () => 30,
+      provider,
+    },
+  };
+}
+
+function visualQAWaiverOptions(projectDir?: string) {
+  if (projectDir) ensureE2EReviewTimeline(projectDir);
   return {
     render: true,
+    requireCompiledTimeline: true,
+    ...wholeCutSemanticTestOptions(),
     allowUnverifiedVisual: true,
     visualQaWaiverReason: "E2E fixture approves without local rendered visual QA.",
     visualQA: {
@@ -61,15 +120,15 @@ function visualQAWaiverOptions() {
         return {
           outputPath: resolvedOutput,
           workingDir: path.join(projectDir, ".tmp"),
-          timelineDurationFrames: 300,
+          timelineDurationFrames: 720,
           videoSegmentCount: 1,
           audioClipCount: 0,
         };
       },
       runDeterministicOutputQAImpl: async () => ({
         status: "verified" as const,
-        duration_sec: 10,
-        scanned_duration_sec: 10,
+        duration_sec: 30,
+        scanned_duration_sec: 30,
         width: 1920,
         height: 1080,
         issues: [],
@@ -139,6 +198,43 @@ function createE2EProject(name: string): string {
     path.join(tmpDir, "03_analysis"),
   );
   collapseAnalysisToSingleCoverageCluster(tmpDir);
+  // Issue #35 transcript binding: the consuming project id is authoritative,
+  // so the borrowed analysis transcripts must claim THIS project's id.
+  for (const entry of fs.readdirSync(path.join(tmpDir, "03_analysis", "transcripts"))) {
+    if (!entry.endsWith(".json")) continue;
+    const transcriptPath = path.join(tmpDir, "03_analysis", "transcripts", entry);
+    const transcript = JSON.parse(fs.readFileSync(transcriptPath, "utf-8")) as Record<string, unknown>;
+    transcript.project_id = "e2e-test";
+    fs.writeFileSync(transcriptPath, JSON.stringify(transcript, null, 2), "utf-8");
+  }
+
+  // Give the compiler and whole-cut evaluator a canonical, identity-bound
+  // source map. The bytes are test-only placeholders; the render adapter is
+  // also deterministic, so this fixture never claims real media inspection.
+  const mediaDir = path.join(tmpDir, "02_media");
+  fs.mkdirSync(mediaDir, { recursive: true });
+  const assets = JSON.parse(fs.readFileSync(path.join(tmpDir, "03_analysis/assets.json"), "utf-8")) as {
+    items?: Array<{ asset_id?: string }>;
+  };
+  const sourceItems = (assets.items ?? []).flatMap((asset) => {
+    if (!asset.asset_id) return [];
+    const sourcePath = path.join(mediaDir, `${asset.asset_id}.mov`);
+    fs.writeFileSync(sourcePath, `e2e-source-${asset.asset_id}`, "utf-8");
+    return [{
+      asset_id: asset.asset_id,
+      source_locator: sourcePath,
+      local_source_path: sourcePath,
+      link_path: `02_media/${asset.asset_id}.mov`,
+      media_kind: "video",
+    }];
+  });
+  fs.writeFileSync(path.join(mediaDir, "source_map.json"), JSON.stringify({
+    version: "1",
+    project_id: "e2e-test",
+    media_dir: "02_media",
+    generated_at: "2026-03-21T00:00:00Z",
+    items: sourceItems,
+  }, null, 2), "utf-8");
 
   // Initialize project_state.yaml at intent_pending
   // (reconcile will self-heal to media_analyzed because analysis exists)
@@ -164,6 +260,80 @@ function collapseAnalysisToSingleCoverageCluster(projectDir: string): void {
     tags: ["outdoor", "landscape", "e2e_shared_cluster"],
   }));
   fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+}
+
+/**
+ * The M3 fixture intentionally has no decodable source media. Keep the test
+ * on the public existing-timeline review route by supplying the smallest
+ * schema-valid, identity-bound canonical timeline after blueprint planning.
+ * The production route still rejects an empty timeline for semantic PASS.
+ */
+function ensureE2EReviewTimeline(projectDir: string): void {
+  fs.mkdirSync(path.join(projectDir, "05_timeline"), { recursive: true });
+  const assets = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/assets.json"), "utf-8")) as {
+    items?: Array<{ asset_id?: string }>;
+  };
+  const segments = JSON.parse(fs.readFileSync(path.join(projectDir, "03_analysis/segments.json"), "utf-8")) as {
+    items?: Array<{ asset_id?: string; segment_id?: string; src_in_us?: number; src_out_us?: number }>;
+  };
+  const segment = (segments.items ?? []).find((candidate) =>
+    candidate.asset_id && candidate.segment_id &&
+    Number.isFinite(candidate.src_in_us) && Number.isFinite(candidate.src_out_us) &&
+    (candidate.src_out_us ?? 0) > (candidate.src_in_us ?? 0),
+  );
+  const assetId = segment?.asset_id ?? assets.items?.find((asset) => asset.asset_id)?.asset_id;
+  if (!assetId) throw new Error("E2E fixture has no asset identity for review timeline");
+  const segmentId = segment?.segment_id ?? "E2E_SEGMENT_001";
+  const sourceInUs = segment?.src_in_us ?? 0;
+  const sourceOutUs = segment?.src_out_us ?? sourceInUs + 1_000_000;
+  const timeline = {
+    version: "e2e-review-v2",
+    project_id: "e2e-test",
+    created_at: "2026-03-21T12:00:00.000Z",
+    sequence: {
+      name: "E2E review fixture",
+      fps_num: 24,
+      fps_den: 1,
+      width: 1920,
+      height: 1080,
+      start_frame: 0,
+      output_aspect_ratio: "16:9",
+    },
+    tracks: {
+      video: [{
+        track_id: "V1",
+        kind: "video",
+        clips: [{
+          clip_id: "E2E_CLIP_001",
+          segment_id: segmentId,
+          asset_id: assetId,
+          src_in_us: sourceInUs,
+          src_out_us: sourceOutUs,
+          timeline_in_frame: 0,
+          timeline_duration_frames: 720,
+          role: "hero",
+          motivation: "canonical fixture coverage",
+          beat_id: "B01",
+          fallback_segment_ids: [],
+          confidence: 0.9,
+          quality_flags: [],
+        }],
+      }],
+      audio: [],
+    },
+    markers: [],
+    provenance: {
+      brief_path: "01_intent/creative_brief.yaml",
+      blueprint_path: "04_plan/edit_blueprint.yaml",
+      selects_path: "04_plan/selects_candidates.yaml",
+      compiler_version: "e2e-review-fixture",
+    },
+  };
+  fs.writeFileSync(
+    path.join(projectDir, "05_timeline/timeline.json"),
+    JSON.stringify(timeline, null, 2),
+    "utf-8",
+  );
 }
 
 // ── Mock Agent Factories ─────────────────────────────────────────
@@ -344,7 +514,7 @@ function createE2EReviewAgent(opts?: { withFatal?: boolean }): ReviewAgent {
   return {
     async run(ctx) {
       const report: ReviewReport = {
-        version: "1",
+        version: "2",
         project_id: ctx.projectId,
         timeline_version: ctx.timelineVersion,
         summary_judgment: {
@@ -376,6 +546,18 @@ function createE2EReviewAgent(opts?: { withFatal?: boolean }): ReviewAgent {
           goal: "Tighten hook and review wind.",
           actions: ["Trim CLP_0001", "Check wind in B03"],
         },
+        editorial_judgments: [
+          {
+            observation: "The hook beat holds a wide view before the subject enters the frame.",
+            inference: "The delay before the subject appears weakens the opening engagement.",
+            editorial_intent: "Trim the opening so the subject arrives earlier in the hook.",
+            evidence: [
+              { kind: "artifact_ref" as const, ref: "01_intent/creative_brief.yaml" },
+            ],
+            confidence: 0.6,
+            confidence_basis: "measured" as const,
+          },
+        ],
       };
 
       const patch: ReviewPatch = {
@@ -494,7 +676,7 @@ describe("M3 E2E: full command flow", () => {
       createE2EReviewAgent({ withFatal: false }),
       {
         createdAt: "2026-03-21T12:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(projectDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -567,9 +749,10 @@ describe("M3 E2E: full command flow", () => {
     expect(transitions).toContain("media_analyzed→selects_ready");
     expect(transitions).toContain("selects_ready→blueprint_ready");
 
-    // The final two transitions should be blueprint_ready→approved
+    // A production review consumes a precompiled canonical timeline, so
+    // reconcile records timeline_drafted before the final approval transition.
     const lastTransition = transitions[transitions.length - 1];
-    expect(lastTransition).toBe("blueprint_ready→approved");
+    expect(lastTransition).toBe("timeline_drafted→approved");
 
     // Verify triggers are recorded
     const triggerSet = new Set(history.map((h) => h.trigger));
@@ -643,7 +826,7 @@ describe("M3 E2E: creative override path", () => {
         creativeOverride: true,
         approvedBy: "operator@e2e",
         overrideReason: "Client signed off on missing morning light",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(projectDir),
       },
     );
     expect(reviewResult.success).toBe(true);
@@ -773,7 +956,7 @@ describe("/export command", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(projectDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -803,7 +986,7 @@ describe("/export command", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(projectDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -837,7 +1020,7 @@ describe("export manifest content", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(projectDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );
@@ -869,7 +1052,7 @@ describe("export manifest content", () => {
       createE2EReviewAgent(),
       {
         createdAt: "2026-03-21T12:00:00Z",
-        ...visualQAWaiverOptions(),
+        ...visualQAWaiverOptions(projectDir),
         operatorAccept: async () => ({ accepted: true, approvedBy: "operator@e2e" }),
       },
     );

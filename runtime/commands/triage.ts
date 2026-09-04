@@ -178,6 +178,7 @@ export interface SelectCandidate {
   editorial_signals?: EditorialSignals;
   trim_hint?: TrimHint;
   still_image?: ArtifactSelectsCandidates["candidates"][number]["still_image"];
+  freeze_frame_hold?: ArtifactSelectsCandidates["candidates"][number]["freeze_frame_hold"];
   quality_confidence?: "measured" | "partial" | "appraiser" | "low";
   quality_gate?: ArtifactSelectsCandidates["candidates"][number]["quality_gate"];
 }
@@ -485,7 +486,21 @@ async function runHardCoverageSelection(
       `[triage:coverage] hard round=${attempt} status=${coverage.status} unmet=${coverage.unmet.length}`,
     );
     if (coverage.status === "met") break;
-    if (attempt >= maxRetries) break;
+    if (attempt >= maxRetries) {
+      const supplemented = supplementUnmetClusterCandidates(
+        result.selects,
+        coverage,
+        options.enrichmentSegments,
+      );
+      if (supplemented > 0) {
+        coverage = await materializePostQualityCoverage(result, options);
+        options.log?.(
+          `[triage:coverage] deterministically supplemented ${supplemented} unused cluster candidate(s); ` +
+            `status=${coverage.status}`,
+        );
+      }
+      break;
+    }
     feedback = {
       round: attempt + 1,
       gaps: coverageFeedbackGaps(coverage),
@@ -499,6 +514,74 @@ async function runHardCoverageSelection(
     rounds,
     passed: coverage?.status === "met",
   };
+}
+
+function supplementUnmetClusterCandidates(
+  selects: SelectsCandidates,
+  coverage: SelectsCoverageSummary,
+  segments: EnrichmentSegmentItem[],
+): number {
+  if (!Array.isArray(selects.candidates)) return 0;
+
+  const segmentById = new Map(segments.map((segment) => [segment.segment_id, segment]));
+  const existingSegmentIds = new Set(selects.candidates.map((candidate) => candidate.segment_id));
+  const existingWindows = new Set(selects.candidates.map(candidateWindowKey));
+  let added = 0;
+
+  const clusterGaps = coverage.unmet
+    .filter((item) => item.type === "cluster_minimum")
+    .slice()
+    .sort((left, right) => left.id.localeCompare(right.id));
+  for (const gap of clusterGaps) {
+    let remaining = Math.max(0, (gap.required_count ?? 0) - (gap.selected_count ?? 0));
+    for (const segmentId of [...(gap.unused_segment_ids ?? [])].sort()) {
+      if (remaining === 0) break;
+      if (existingSegmentIds.has(segmentId)) continue;
+      const segment = segmentById.get(segmentId);
+      if (!isUsableCoverageSegment(segment)) continue;
+      const windowKey = `${segment.asset_id}:${segment.src_in_us}:${segment.src_out_us}`;
+      if (existingWindows.has(windowKey)) continue;
+
+      const tags = (segment.tags ?? []).map((tag) => tag.trim()).filter(Boolean);
+      const groundedSummary = segment.summary.trim() || segment.transcript_excerpt.trim();
+      selects.candidates.push({
+        segment_id: segment.segment_id,
+        asset_id: segment.asset_id,
+        src_in_us: Math.trunc(segment.src_in_us),
+        src_out_us: Math.trunc(segment.src_out_us),
+        role: tags.some((tag) => /^(?:landscape|texture|detail)$/i.test(tag)) ? "texture" : "support",
+        why_it_matches: groundedSummary || "Canonical analyzed segment added for cluster coverage.",
+        risks: [...(segment.quality_flags ?? [])],
+        confidence: 0.5,
+        ...(segment.transcript_excerpt.trim()
+          ? { transcript_excerpt: segment.transcript_excerpt.trim() }
+          : {}),
+        ...(tags.length > 0 ? { motif_tags: tags.slice(0, 8) } : {}),
+      });
+      existingSegmentIds.add(segmentId);
+      existingWindows.add(windowKey);
+      remaining -= 1;
+      added += 1;
+    }
+  }
+  return added;
+}
+
+function candidateWindowKey(candidate: SelectCandidate): string {
+  return `${candidate.asset_id}:${candidate.src_in_us}:${candidate.src_out_us}`;
+}
+
+function isUsableCoverageSegment(
+  segment: EnrichmentSegmentItem | undefined,
+): segment is EnrichmentSegmentItem {
+  return Boolean(
+    segment &&
+    segment.segment_id &&
+    segment.asset_id &&
+    Number.isFinite(segment.src_in_us) &&
+    Number.isFinite(segment.src_out_us) &&
+    segment.src_out_us > segment.src_in_us,
+  );
 }
 
 async function materializePostQualityCoverage(
@@ -586,6 +669,7 @@ export async function runTriage(
   assertImageSequenceGrounding(preflightProjectDir);
 
   const pt = new ProgressTracker(preflightProjectDir, "triage", 4);
+  try {
   // 1. Init command (reconcile + state check)
   const ctx = initCommand(preflightProjectDir, "/triage", ALLOWED_STATES);
   if (isCommandError(ctx)) {
@@ -892,6 +976,14 @@ export async function runTriage(
     newState: updatedDoc.current_state,
     promoted: promoteResult.promoted,
   };
+  } catch (error) {
+    // Unexpected execution errors must not leave the command's progress in a
+    // misleading running state. Expected gate returns above already close the
+    // tracker as blocked/failed and do not enter this path.
+    const message = error instanceof Error ? error.message : String(error);
+    pt.fail("triage", message);
+    throw error;
+  }
 }
 
 function loadCoverageBrief(briefPath: string): CreativeBrief | undefined {

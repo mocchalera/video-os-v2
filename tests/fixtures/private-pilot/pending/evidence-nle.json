@@ -1,0 +1,5 @@
+{
+  "gate": "nle_handoff",
+  "fixture": true,
+  "note": "required NLE handoff confirmation is pending"
+}

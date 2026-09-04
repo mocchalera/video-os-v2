@@ -15,6 +15,7 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
+import { stringify as stringifyYaml } from "yaml";
 import type {
   NormalizedClip,
   ClipMapping,
@@ -26,6 +27,7 @@ import type {
   NleCapabilityProfile,
   SurfaceMode,
 } from "./bridge-contract.js";
+import { resolveCanonicalDiffIdentity, type ResolvedDiffRound } from "../eval/review-rounds.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -129,7 +131,25 @@ export interface DiffSummary {
 
 export type DiffStatus = "clean" | "lossy" | "review_required";
 
-export interface HumanRevisionDiff {
+export interface HumanRevisionDiffIdentity {
+  base_timeline: { path: string; version: string; sha256: string };
+  review_generation: {
+    generation_id: string;
+    review_identity: string;
+    output: { path: string; sha256: string };
+    review_ready_receipt: { path: string; sha256: string };
+  };
+  review_round: { round_index: number; round_identity: string };
+}
+
+/**
+ * Legacy version 1 diffs (no identity) remain schema-valid for backward
+ * compatibility but are never measured. Version 2 carries the mandatory
+ * immutable identity bindings (Issue #29 Phase 6).
+ */
+export type HumanRevisionDiff = HumanRevisionDiffV1 | HumanRevisionDiffV2;
+
+export interface HumanRevisionDiffV1 {
   version: 1;
   project_id: string;
   handoff_id: string;
@@ -139,6 +159,20 @@ export interface HumanRevisionDiff {
   summary: DiffSummary;
   operations?: DiffOperation[];
   unmapped_edits?: UnmappedEdit[];
+}
+
+export interface HumanRevisionDiffV2 {
+  version: 2;
+  project_id: string;
+  handoff_id: string;
+  base_timeline_version: string;
+  capability_profile_id: string;
+  status: DiffStatus;
+  summary: DiffSummary;
+  operations?: DiffOperation[];
+  unmapped_edits?: UnmappedEdit[];
+  /** Immutable identity bindings — mandatory for canonical output (Issue #29 Phase 6). */
+  identity: HumanRevisionDiffIdentity;
 }
 
 export class HumanRevisionDiffValidationError extends Error {
@@ -192,6 +226,8 @@ export interface DiffAnalysisInput {
   importedTransitions?: ImportedTransition[];
   /** Optional marker data from imported timeline */
   importedMarkers?: ImportedMarker[];
+  /** Immutable identity bindings (Issue #29 Phase 6) — mandatory. */
+  identity: HumanRevisionDiffIdentity;
 }
 
 export interface ImportedTransition {
@@ -913,13 +949,14 @@ export function analyzeDiffs(input: DiffAnalysisInput): HumanRevisionDiff {
 
   // ── Build result ──
   const diff: HumanRevisionDiff = {
-    version: 1,
+    version: 2,
     project_id: projectId,
     handoff_id: handoffId,
     base_timeline_version: baseTimelineVersion,
     capability_profile_id: capabilityProfileId,
     status,
     summary,
+    identity: input.identity,
   };
 
   if (operations.length > 0) {
@@ -931,4 +968,157 @@ export function analyzeDiffs(input: DiffAnalysisInput): HumanRevisionDiff {
 
   validateHumanRevisionDiff(diff);
   return diff;
+}
+
+interface CanonicalHumanRevisionDiffPlan {
+  root: string;
+  relativePath: string;
+  target: string;
+  bytes: string;
+  identity: HumanRevisionDiffIdentity;
+  round: ResolvedDiffRound;
+}
+
+function prepareCanonicalHumanRevisionDiff(
+  projectDir: string,
+  input: { handoffId: string; diff: HumanRevisionDiff },
+): CanonicalHumanRevisionDiffPlan {
+  const diff = input.diff;
+  validateHumanRevisionDiff(diff);
+  if (diff.version !== 2) {
+    throw new Error("canonical human_revision_diff output requires a version 2 identity-bound artifact; legacy version 1 diffs are never canonical output");
+  }
+  const identity = diff.identity;
+  if (!identity
+    || !identity.base_timeline?.sha256 || !identity.base_timeline?.version
+    || !identity.review_generation?.generation_id || !identity.review_generation?.review_identity
+    || !identity.review_generation?.output?.sha256 || !identity.review_generation?.review_ready_receipt?.sha256
+    || !identity.review_round?.round_identity || typeof identity.review_round?.round_index !== "number") {
+    throw new Error(
+      "canonical human_revision_diff requires immutable identity bindings (base timeline, review generation, and review round); unbound diffs are never canonical output",
+    );
+  }
+  // handoff_id must be ONE safe canonical segment: no slash, backslash, dot,
+  // or traversal of any kind.
+  if (!/^[A-Za-z0-9_-]+$/.test(input.handoffId)) {
+    throw new Error(`canonical human_revision_diff handoff id is not a safe single segment: ${input.handoffId}`);
+  }
+  if (diff.handoff_id !== input.handoffId) {
+    throw new Error(`human_revision_diff handoff id ${diff.handoff_id} does not match the canonical target ${input.handoffId}`);
+  }
+  // Resolution is FIXED to the production resolver against the real project
+  // ledger: the public API never accepts a caller-supplied resolver, so a
+  // forged identity (HND_FAKE, round_index 999, nonexistent hashes) can never
+  // be published through this route.
+  const round = resolveCanonicalDiffIdentity(projectDir, String(diff.project_id), identity);
+  const root = fs.realpathSync(path.resolve(projectDir));
+  const relativePath = `07_handoff/${input.handoffId}/human_revision_diff.yaml`;
+  const target = path.join(root, "07_handoff", input.handoffId, "human_revision_diff.yaml");
+  const bytes = `${stringifyYaml(diff)}\n`;
+  return { root, relativePath, target, bytes, identity, round };
+}
+
+function assertCanonicalHumanRevisionDiffTargetContent(target: string, bytes: string): void {
+  // Idempotent republish: identical bytes are acceptable; any other existing
+  // content is a conflict. Both check mode and the writer use this decision.
+  if (fs.readFileSync(target, "utf8") !== bytes) {
+    throw new Error("canonical human_revision_diff target already exists with different content");
+  }
+}
+
+/**
+ * Check the same immutable canonical target/content compatibility decision as
+ * writeCanonicalHumanRevisionDiff, without creating a project directory,
+ * temporary file, or canonical artifact.
+ */
+export function checkCanonicalHumanRevisionDiffCompatibility(
+  projectDir: string,
+  input: { handoffId: string; diff: HumanRevisionDiff },
+): { relativePath: string; identity: HumanRevisionDiffIdentity; round: ResolvedDiffRound } {
+  const plan = prepareCanonicalHumanRevisionDiff(projectDir, input);
+  try {
+    fs.lstatSync(plan.target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { relativePath: plan.relativePath, identity: plan.identity, round: plan.round };
+    }
+    throw error;
+  }
+  assertCanonicalHumanRevisionDiffTargetContent(plan.target, plan.bytes);
+  return { relativePath: plan.relativePath, identity: plan.identity, round: plan.round };
+}
+
+/**
+ * Canonical production route for identity-bound human_revision_diff output
+ * (Issue #29 Phase 6). Identity bindings are REQUIRED: a diff without a
+ * resolvable base timeline, review generation, and review round identity is
+ * never written as canonical output. The write is atomic (temp + rename).
+ */
+export function writeCanonicalHumanRevisionDiff(
+  projectDir: string,
+  input: { handoffId: string; diff: HumanRevisionDiff },
+): { relativePath: string; identity: HumanRevisionDiffIdentity; round: ResolvedDiffRound } {
+  const plan = prepareCanonicalHumanRevisionDiff(projectDir, input);
+  const { root, relativePath, target, bytes, identity, round } = plan;
+  // Every namespace ancestor is validated fail-closed (never follows
+  // symlinks) and its inode identity is snapshotted for re-verification
+  // after the publish.
+  const components = ["07_handoff", input.handoffId];
+  const ancestorSnapshots: Array<{ path: string; dev: number; ino: number; mode: number }> = [];
+  ancestorSnapshots.push({ path: root, ...fs.lstatSync(root) });
+  let cumulative = root;
+  for (const component of components) {
+    cumulative = path.join(cumulative, component);
+    if (fs.existsSync(cumulative)) {
+      const stats = fs.lstatSync(cumulative);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) {
+        throw new Error(`canonical human_revision_diff namespace component is not a real directory: ${cumulative}`);
+      }
+    } else {
+      fs.mkdirSync(cumulative);
+    }
+    const real = fs.realpathSync(cumulative);
+    if (real !== root && !real.startsWith(`${root}${path.sep}`)) {
+      throw new Error(`canonical human_revision_diff namespace escapes the project: ${cumulative}`);
+    }
+    const stats = fs.lstatSync(cumulative);
+    ancestorSnapshots.push({ path: cumulative, dev: stats.dev, ino: stats.ino, mode: stats.mode });
+  }
+  // Exclusive temp + atomic link publish: link() never follows a symlinked
+  // target and refuses to replace an existing record.
+  const temporary = `${target}.tmp-${process.pid}`;
+  const descriptor = fs.openSync(temporary, "wx");
+  try {
+    fs.writeFileSync(descriptor, bytes, "utf8");
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  try {
+    try {
+      fs.linkSync(temporary, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        assertCanonicalHumanRevisionDiffTargetContent(target, bytes);
+      } else {
+        throw error;
+      }
+    }
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
+  // Re-verify every ancestor inode and the published file after the write.
+  for (const component of ancestorSnapshots) {
+    const stats = fs.lstatSync(component.path);
+    if (stats.dev !== component.dev || stats.ino !== component.ino || stats.mode !== component.mode
+      || stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new Error(`canonical human_revision_diff namespace changed during the write: ${component.path}`);
+    }
+  }
+  const published = fs.lstatSync(target);
+  if (published.isSymbolicLink() || !published.isFile() || published.nlink !== 1
+    || fs.readFileSync(target, "utf8") !== bytes) {
+    throw new Error("canonical human_revision_diff publish did not produce a single-link regular file with the exact bytes");
+  }
+  return { relativePath, identity, round };
 }

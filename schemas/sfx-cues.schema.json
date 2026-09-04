@@ -63,7 +63,8 @@
         "manifest_path": { "type": "string", "minLength": 1 },
         "library_id": { "$ref": "#/$defs/stableId" },
         "library_version": { "type": "string", "minLength": 1 },
-        "manifest_hash": { "$ref": "#/$defs/hash" }
+        "manifest_hash": { "$ref": "#/$defs/hash" },
+        "scope": { "enum": ["repo_common", "project_local"] }
       }
     },
     "sourceRange": {
@@ -149,7 +150,28 @@
         "asset_content_hash": { "$ref": "#/$defs/hash" },
         "asset_size_bytes": { "type": "integer", "minimum": 1 },
         "rights_evidence_ref": { "$ref": "#/$defs/opaqueRef" },
-        "provenance_ref": { "$ref": "#/$defs/opaqueRef" }
+        "provenance_ref": { "$ref": "#/$defs/opaqueRef" },
+        "asset_path": { "type": "string", "minLength": 1 },
+        "rights_status": {
+          "enum": ["confirmed", "cleared", "unknown", "expired", "ambiguous", "blocked", "hold"]
+        },
+        "provenance_status": {
+          "enum": ["verified", "unknown", "ambiguous", "hold"]
+        },
+        "review_status": {
+          "enum": ["approved", "pending", "rejected", "unreviewed", "hold"]
+        },
+        "rights_expires_at": {
+          "anyOf": [
+            { "type": "string", "format": "date-time" },
+            { "type": "null" }
+          ]
+        },
+        "permitted_derivatives": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
       }
     },
     "semanticRole": {

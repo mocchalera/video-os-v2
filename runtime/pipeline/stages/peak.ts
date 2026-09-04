@@ -8,9 +8,10 @@
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import type { DerivativeResults } from "../../connectors/ffmpeg-derivatives.js";
 import type { SegmentItem } from "../../connectors/ffmpeg-segmenter.js";
-import { computeMotionSupportScore } from "../../connectors/ffmpeg-motion.js";
+import { computeMotionSupportScore, hasPositiveMotionContrast } from "../../connectors/ffmpeg-motion.js";
 import {
   type PeakAnalysis,
   type PeakDetectionPolicy,
@@ -39,12 +40,23 @@ import {
 } from "./grounded-frames.js";
 import { SourceContentIdentityCache } from "../../source-content-identity.js";
 import type { AssetsJson, SegmentsJson } from "../pipeline-types.js";
+import { mapWithConcurrency } from "./vlm.js";
+import { hasTemporalVideo } from "../../artifacts/source-media-capabilities.js";
 
 export interface DegradedPeakSignals {
   motion?: number;
   audio_rms?: number;
   speech_keyword?: string[];
 }
+
+/** Measured audio evidence used by the degraded visual-peak fallback. */
+export interface DegradedAudioMeasurement {
+  score: number;
+  timestamp_us?: number;
+}
+
+/** Existing meaningful-support cutoff for degraded peak materialization. */
+export const DEGRADED_PEAK_MEANINGFUL_SUPPORT_THRESHOLD = 0.35;
 
 export interface ResolvedMotionSupport {
   score: number;
@@ -59,11 +71,28 @@ export interface PeakShard {
   error?: string;
 }
 
+export type AudioRmsExecFileLike = (
+  command: string,
+  args: string[],
+  options: { maxBuffer: number },
+  callback: (error: Error | null, stdout: string, stderr: string) => void,
+) => Pick<ChildProcess, "kill" | "once">;
+
 export const PEAK_PROVENANCE_SCHEMA_VERSION = "peak-provenance-v2";
 
 export interface PeakCacheContext {
   policyHash?: string;
   sourceIdentityCache?: SourceContentIdentityCache;
+  concurrency?: number;
+  deadlineAtMs?: number;
+  now?: () => number;
+}
+
+export class PeakStageDeadlineError extends Error {
+  constructor() {
+    super("peak stage deadline exceeded");
+    this.name = "PeakStageDeadlineError";
+  }
 }
 
 export function computePeakCachePolicyHash(policy: PeakDetectionPolicy): string {
@@ -85,20 +114,24 @@ export async function peakMap(
   contentHint?: string,
   cacheContext: PeakCacheContext = {},
 ): Promise<PeakShard[]> {
-  const shards: PeakShard[] = [];
   const sourceIdentityCache = cacheContext.sourceIdentityCache ?? new SourceContentIdentityCache();
   const policyHash = cacheContext.policyHash ?? computePeakCachePolicyHash(policy);
-
-  for (const asset of assetsJson.items) {
-    if (asset.media_kind === "image") continue;
-    if (asset.audio_stream && !asset.video_stream) continue;
+  const now = cacheContext.now ?? Date.now;
+  const assertWithinDeadline = (): void => {
+    if (cacheContext.deadlineAtMs !== undefined && now() >= cacheContext.deadlineAtMs) {
+      throw new PeakStageDeadlineError();
+    }
+  };
+  async function analyzeAsset(asset: AssetsJson["items"][number]): Promise<PeakShard[]> {
+    assertWithinDeadline();
+    const shards: PeakShard[] = [];
     const derivs = derivativeResults.get(asset.asset_id);
-    if (!derivs || derivs.contactSheets.length === 0) continue;
+    if (!derivs || derivs.contactSheets.length === 0) return shards;
 
     const assetSegments = segmentsJson.items.filter(
       (s) => s.asset_id === asset.asset_id,
     );
-    if (assetSegments.length === 0) continue;
+    if (assetSegments.length === 0) return shards;
 
     // Use the first overview contact sheet (preferred) or shot_keyframes
     const overviewCS = derivs.contactSheets.find((cs) => cs.mode === "overview")
@@ -118,7 +151,7 @@ export async function peakMap(
           error: `coarse_frame_missing_or_empty:${absImagePath}`,
         });
       }
-      continue;
+      return shards;
     }
 
     // Build transcript context from segment excerpts
@@ -139,6 +172,7 @@ export async function peakMap(
         ? `Content: ${contentHint}. ${transcriptContext ?? ""}`
         : transcriptContext,
     }, policy);
+    assertWithinDeadline();
 
     if (!coarseResult.success) {
       console.warn(`[peak] Coarse pass failed or no candidates for ${asset.asset_id}: ${coarseResult.error ?? "no candidates"}`);
@@ -148,11 +182,11 @@ export async function peakMap(
           error: `coarse_vlm_failed:${coarseResult.error ?? "unknown"}`,
         });
       }
-      continue;
+      return shards;
     }
     if (coarseResult.candidates.length === 0) {
       console.warn(`[peak] Coarse pass produced no candidates for ${asset.asset_id}`);
-      continue;
+      return shards;
     }
 
     console.log(`[peak] Coarse candidates: ${coarseResult.candidates.length} for ${asset.asset_id}`);
@@ -170,6 +204,7 @@ export async function peakMap(
 
     // Pass 2: Refine each overlapping segment
     for (const overlap of overlaps) {
+      assertWithinDeadline();
       const seg = assetSegments.find((s) => s.segment_id === overlap.segment_id);
       if (!seg) continue;
 
@@ -201,6 +236,7 @@ export async function peakMap(
         coarse_hint: overlap.coarse_candidate,
         transcript_excerpt: seg.transcript_excerpt || undefined,
       }, policy);
+      assertWithinDeadline();
 
       if (!refineResult.success) {
         shards.push({
@@ -239,6 +275,7 @@ export async function peakMap(
           policy,
         )
       ) {
+        assertWithinDeadline();
         console.log(`[peak] Precision pass: ${seg.segment_id}`);
         const precisionFrames = await extractGroundedFrames({
           sourcePath: sourceFileMap.get(asset.asset_id),
@@ -251,6 +288,7 @@ export async function peakMap(
           timestampsUs: filmstripTileMap.map((tile) => tile.frame_us),
           sourceIdentityCache,
         });
+        assertWithinDeadline();
         precisionFrameCount = precisionFrames.framePaths.length;
         precisionSampleTimestampsUs = precisionFrames.sampleTimestampsUs;
         precisionRequestedSampleTimestampsUs = precisionFrames.requestedSampleTimestampsUs;
@@ -276,6 +314,7 @@ export async function peakMap(
             window_end_us: seg.src_out_us,
             refine_peak_timestamp_us: refineResult.peak_moment.timestamp_us,
           }, policy);
+          assertWithinDeadline();
 
           if (precisionResult.success) {
             precisionPeakMoment = precisionResult.peak_moment;
@@ -376,55 +415,162 @@ export async function peakMap(
         ...(precisionFailures.length > 0 ? { error: precisionFailures.join(";") } : {}),
       });
     }
+    return shards;
   }
 
-  return shards;
+  const eligibleAssets = assetsJson.items.filter((asset) =>
+    asset.media_kind !== "image" && (
+      hasTemporalVideo(asset)
+      // Legacy unit fixtures/artifacts may have derivative evidence without
+      // the newer stream/capability fields; preserve their prior peak path.
+      || (!asset.source_capabilities && !asset.video_stream && !asset.audio_stream && asset.contact_sheet_ids.length > 0)
+    )
+  );
+  const shardGroups = cacheContext.deadlineAtMs === undefined
+    ? await mapWithConcurrency(eligibleAssets, cacheContext.concurrency ?? 1, analyzeAsset)
+    : await mapPeakAssetsUntilDeadline(
+        eligibleAssets,
+        cacheContext.concurrency ?? 1,
+        cacheContext.deadlineAtMs,
+        now,
+        analyzeAsset,
+      );
+
+  return shardGroups.flat();
+}
+
+async function mapPeakAssetsUntilDeadline<T, TResult>(
+  items: T[],
+  concurrency: number,
+  deadlineAtMs: number,
+  now: () => number,
+  worker: (item: T) => Promise<TResult>,
+): Promise<TResult[]> {
+  if (items.length === 0) return [];
+  if (now() >= deadlineAtMs) throw new PeakStageDeadlineError();
+
+  const limit = Number.isFinite(concurrency) && concurrency >= 1
+    ? Math.max(1, Math.floor(concurrency))
+    : 2;
+  const results = new Array<TResult>(items.length);
+  let nextIndex = 0;
+  let deadlineExceeded = false;
+
+  async function runWorker(): Promise<void> {
+    while (!deadlineExceeded && now() < deadlineAtMs) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await worker(items[currentIndex]);
+    }
+  }
+
+  const completion = Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => runWorker()),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      completion,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          deadlineExceeded = true;
+          reject(new PeakStageDeadlineError());
+        }, Math.max(0, deadlineAtMs - now()));
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+  return results;
 }
 
 export async function degradedPeakMap(
   assetsJson: AssetsJson,
   segmentsJson: SegmentsJson,
   sourceFileMap: Map<string, string>,
+  options: {
+    deadlineAtMs?: number;
+    now?: () => number;
+    estimateAudioRms?: (
+      sourcePath: string,
+      segment: SegmentItem,
+    ) => Promise<number | DegradedAudioMeasurement | undefined>;
+    audioRmsExecFile?: AudioRmsExecFileLike;
+  } = {},
 ): Promise<PeakShard[]> {
   const shards: PeakShard[] = [];
-  console.log("[peak:fallback] Running degraded peak detection (motion/audio/transcript heuristics)...");
+  const now = options.now ?? Date.now;
+  const deadlineReached = (): boolean =>
+    options.deadlineAtMs !== undefined && now() >= options.deadlineAtMs;
+  if (deadlineReached()) return shards;
+  console.log("[peak:fallback] Running degraded peak detection from measured motion/audio signals...");
 
   for (const asset of assetsJson.items) {
+    if (deadlineReached()) break;
     if (asset.media_kind === "image") continue;
-    if (asset.audio_stream && !asset.video_stream) continue;
+    if (!hasTemporalVideo(asset)) continue;
     const sourcePath = sourceFileMap.get(asset.asset_id);
     const assetSegments = segmentsJson.items.filter((s) => s.asset_id === asset.asset_id);
     if (assetSegments.length === 0) continue;
 
     for (const seg of assetSegments) {
-      const audioRms = sourcePath && asset.audio_stream
-        ? await estimateSegmentAudioRms(sourcePath, seg).catch(() => undefined)
+      if (deadlineReached()) return shards;
+      const audioMeasurement = sourcePath && asset.audio_stream
+        ? options.estimateAudioRms
+          ? normalizeDegradedAudioMeasurement(
+              await estimateDegradedAudioMeasurementBeforeDeadline(
+                options.estimateAudioRms(sourcePath, seg),
+                options.deadlineAtMs,
+                now,
+              ),
+              seg,
+            )
+          : await estimateSegmentAudioRms(
+              sourcePath,
+              seg,
+              options.deadlineAtMs,
+              now,
+              options.audioRmsExecFile,
+            )
         : undefined;
-      const signals = derivePeakSignalsForSegment(seg, audioRms);
-      const strength = Math.max(signals.motion ?? 0, signals.audio_rms ?? 0, (signals.speech_keyword?.length ?? 0) > 0 ? 0.75 : 0);
+      if (deadlineReached()) return shards;
+      // Boundary confidence, transcript keywords, and segment duration are
+      // editorial hints, not measured visual/audio support. They must not
+      // manufacture a visual peak or supply its timestamp.
+      const motionMeasurement = resolveMeasuredMotionSupportForDegradedPeak(seg);
+      const motionScore = motionMeasurement?.score ?? 0;
+      const audioScore = audioMeasurement?.score ?? 0;
+      const strength = Math.max(motionScore, audioScore);
+      if (strength < DEGRADED_PEAK_MEANINGFUL_SUPPORT_THRESHOLD) continue;
 
-      if (strength < 0.35) continue;
-
-      const timestampUs = Math.round((seg.src_in_us + seg.src_out_us) / 2);
+      // Every degraded peak needs a measured local timestamp. The injected
+      // numeric estimator remains a test seam, but cannot authorize a
+      // duration-midpoint proxy without a timestamp of its own.
+      const timestampUs = motionMeasurement?.timestamp_us ?? audioMeasurement?.timestamp_us;
+      if (timestampUs === undefined) continue;
+      const signalSource = motionMeasurement
+        ? "degraded_motion_measurement"
+        : "degraded_audio_measurement";
       shards.push({
         segment_id: seg.segment_id,
         peak_analysis: {
           peak_moments: [{
             peak_ref: `PK_${seg.segment_id}_degraded`,
             timestamp_us: timestampUs,
-            type: (signals.motion ?? 0) >= (signals.audio_rms ?? 0) ? "action_peak" : "emotional_peak",
+            type: motionScore >= audioScore ? "action_peak" : "emotional_peak",
             confidence: round3(Math.min(0.85, Math.max(0.35, strength))),
-            description: "degraded fallback peak from local motion/audio/speech heuristics",
+            description: "degraded fallback peak from measured local motion/audio support",
             source_pass: "degraded_ffmpeg_signals",
           }],
           visual_energy_curve: [
-            { timestamp_us: seg.src_in_us, energy: round3(Math.max(0, (signals.motion ?? 0) * 0.6)), source: "degraded_motion_proxy" },
-            { timestamp_us: timestampUs, energy: round3(signals.motion ?? strength), source: "degraded_motion_proxy" },
-            { timestamp_us: seg.src_out_us, energy: round3(Math.max(0, (signals.motion ?? 0) * 0.6)), source: "degraded_motion_proxy" },
+            { timestamp_us: seg.src_in_us, energy: round3(Math.max(0, motionScore * 0.6)), source: signalSource },
+            { timestamp_us: timestampUs, energy: round3(strength), source: signalSource },
+            { timestamp_us: seg.src_out_us, energy: round3(Math.max(0, motionScore * 0.6)), source: signalSource },
           ],
           support_signals: {
-            motion_support_score: round3(signals.motion ?? 0),
-            audio_support_score: round3(signals.audio_rms ?? 0),
+            motion_support_score: round3(motionScore),
+            motion_support_measured: Boolean(motionMeasurement),
+            audio_support_score: round3(audioScore),
             fused_peak_score: round3(strength),
           },
           provenance: {
@@ -441,6 +587,42 @@ export async function degradedPeakMap(
 
   console.log(`[peak:fallback] Degraded peak detection: ${shards.length}/${segmentsJson.items.length} segments labeled`);
   return shards;
+}
+
+async function estimateDegradedAudioMeasurementBeforeDeadline(
+  measurement: Promise<number | DegradedAudioMeasurement | undefined>,
+  deadlineAtMs: number | undefined,
+  now: () => number,
+): Promise<number | DegradedAudioMeasurement | undefined> {
+  if (deadlineAtMs === undefined) return measurement.catch(() => undefined);
+  const remainingMs = deadlineAtMs - now();
+  if (remainingMs <= 0) return undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      measurement.catch(() => undefined),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), remainingMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function normalizeDegradedAudioMeasurement(
+  value: number | DegradedAudioMeasurement | undefined,
+  segment: SegmentItem,
+): DegradedAudioMeasurement | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? { score: clamp01(value) } : undefined;
+  }
+  if (!value || typeof value.score !== "number" || !Number.isFinite(value.score)) return undefined;
+  const timestampUs = strictLocalTimestamp(value.timestamp_us, segment);
+  return {
+    score: round3(clamp01(value.score)),
+    ...(timestampUs === undefined ? {} : { timestamp_us: timestampUs }),
+  };
 }
 
 export function peakClaimsVisualPrecision(segment: SegmentItem): boolean {
@@ -519,6 +701,11 @@ export function inspectPeakPrecisionCache(
   return { accepted: reasons.length === 0, reasons: [...new Set(reasons)] };
 }
 
+/**
+ * Legacy synthetic-fixture signal adapter. Production degraded detection uses
+ * measured signal records directly and intentionally does not use boundary or
+ * speech heuristics as visual-peak support.
+ */
 export function derivePeakSignalsForSegment(
   segment: SegmentItem,
   audioRms?: number,
@@ -574,6 +761,28 @@ export function resolveMotionSupportForPeak(
   };
 }
 
+function resolveMeasuredMotionSupportForDegradedPeak(
+  segment: SegmentItem,
+): { score: number; timestamp_us: number } | undefined {
+  const measurement = segment.visual_quality_measurements;
+  const shake = measurement?.shake;
+  if (!measurement?.metrics_measured?.shake || !shake?.measured || shake.bins.length === 0) return undefined;
+  if (!Number.isFinite(shake.peak_energy) ||
+      shake.peak_energy < DEGRADED_PEAK_MEANINGFUL_SUPPORT_THRESHOLD ||
+      !Number.isFinite(shake.peak_timestamp_us)) {
+    return undefined;
+  }
+  if (!hasPositiveMotionContrast(shake.bins, shake.peak_timestamp_us)) return undefined;
+  const score = round3(computeMotionSupportScore(shake.bins, shake.peak_timestamp_us));
+  if (score < DEGRADED_PEAK_MEANINGFUL_SUPPORT_THRESHOLD) return undefined;
+  const timestampUs = strictLocalTimestamp(shake.peak_timestamp_us, segment);
+  if (timestampUs === undefined) return undefined;
+  return {
+    score,
+    timestamp_us: timestampUs,
+  };
+}
+
 function extractSpeechKeywords(text: string): string[] {
   const lower = text.toLowerCase();
   const keywords = [
@@ -588,7 +797,10 @@ function extractSpeechKeywords(text: string): string[] {
 async function estimateSegmentAudioRms(
   sourcePath: string,
   segment: SegmentItem,
-): Promise<number | undefined> {
+  deadlineAtMs?: number,
+  now: () => number = Date.now,
+  execFileImpl: AudioRmsExecFileLike = execFile as unknown as AudioRmsExecFileLike,
+): Promise<DegradedAudioMeasurement | undefined> {
   const startSec = segment.src_in_us / 1_000_000;
   const durationSec = Math.max(0.1, segment.duration_us / 1_000_000);
   const { stderr } = await execFilePromise("ffmpeg", [
@@ -597,35 +809,134 @@ async function estimateSegmentAudioRms(
     "-t", String(durationSec),
     "-i", sourcePath,
     "-vn",
-    "-af", "astats=metadata=1:reset=1",
+    "-af", "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level",
     "-f", "null",
     "-",
-  ]);
+  ], { deadlineAtMs, now, execFileImpl });
+  const measuredSamples = parseAudioRmsSamples(stderr, segment);
+  if (measuredSamples.length > 0) {
+    return measuredSamples.reduce((loudest, sample) =>
+      sample.score > loudest.score ? sample : loudest,
+    );
+  }
+
   const matches = [...stderr.matchAll(/RMS level dB:\s*(-?\d+(?:\.\d+)?)/g)];
   const last = matches.at(-1)?.[1];
   if (!last) return undefined;
   const db = Number.parseFloat(last);
   if (!Number.isFinite(db)) return undefined;
-  return Math.max(0, Math.min(1, (db + 60) / 60));
+  // Older/alternate ffmpeg output can expose only the aggregate RMS. Keep it
+  // as measured support for diagnostics, but do not let it create a visual
+  // peak without a measured local timestamp.
+  return { score: Math.max(0, Math.min(1, (db + 60) / 60)) };
+}
+
+function parseAudioRmsSamples(
+  stderr: string,
+  segment: SegmentItem,
+): DegradedAudioMeasurement[] {
+  const samples: DegradedAudioMeasurement[] = [];
+  let pendingTimestampUs: number | undefined;
+  for (const line of stderr.split(/\r?\n/)) {
+    const frame = line.match(/pts_time:(-?\d+(?:\.\d+)?)/);
+    if (frame) {
+      const timestamp = Number.parseFloat(frame[1]);
+      pendingTimestampUs = Number.isFinite(timestamp)
+        ? strictLocalTimestamp(segment.src_in_us + timestamp * 1_000_000, segment)
+        : undefined;
+      continue;
+    }
+    const rms = line.match(/lavfi\.astats\.Overall\.RMS_level=(-?\d+(?:\.\d+)?)/);
+    if (!rms || pendingTimestampUs === undefined) continue;
+    const db = Number.parseFloat(rms[1]);
+    if (Number.isFinite(db)) {
+      samples.push({
+        score: round3(Math.max(0, Math.min(1, (db + 60) / 60))),
+        timestamp_us: pendingTimestampUs,
+      });
+    }
+    pendingTimestampUs = undefined;
+  }
+  return samples;
 }
 
 function execFilePromise(
   cmd: string,
   args: string[],
+  options: {
+    deadlineAtMs?: number;
+    now: () => number;
+    execFileImpl: AudioRmsExecFileLike;
+  },
 ): Promise<{ stdout: string; stderr: string }> {
+  const remainingMs = options.deadlineAtMs === undefined
+    ? undefined
+    : options.deadlineAtMs - options.now();
+  if (remainingMs !== undefined && remainingMs <= 0) {
+    return Promise.resolve({ stdout: "", stderr: "" });
+  }
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err && !stderr) {
-        reject(err);
-        return;
+    let callbackResult: { error: Error | null; stdout: string; stderr: string } | undefined;
+    let closed = false;
+    let timedOut = false;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (): void => {
+      if (settled || !closed || !callbackResult) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (timedOut) {
+        resolve({ stdout: "", stderr: "" });
+      } else if (callbackResult.error && !callbackResult.stderr) {
+        reject(callbackResult.error);
+      } else {
+        resolve({ stdout: callbackResult.stdout, stderr: callbackResult.stderr });
       }
-      resolve({ stdout: stdout ?? "", stderr: stderr ?? "" });
+    };
+
+    let child: Pick<ChildProcess, "kill" | "once">;
+    try {
+      child = options.execFileImpl(
+        cmd,
+        args,
+        { maxBuffer: 50 * 1024 * 1024 },
+        (error, stdout, stderr) => {
+          callbackResult = { error, stdout: stdout ?? "", stderr: stderr ?? "" };
+          finish();
+        },
+      );
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    child.once("close", () => {
+      closed = true;
+      finish();
     });
+    if (remainingMs !== undefined) {
+      timer = setTimeout(() => {
+        if (settled) return;
+        timedOut = true;
+        child.kill("SIGKILL");
+      }, remainingMs);
+    }
   });
 }
 
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function strictLocalTimestamp(timestampUs: number | undefined, segment: SegmentItem): number | undefined {
+  if (typeof timestampUs !== "number" || !Number.isFinite(timestampUs)) return undefined;
+  if (timestampUs <= segment.src_in_us || timestampUs >= segment.src_out_us) return undefined;
+  const rounded = Math.round(timestampUs);
+  return rounded > segment.src_in_us && rounded < segment.src_out_us ? rounded : undefined;
 }
 
 function computePeakCacheIdentity(
@@ -684,6 +995,7 @@ export function peakReduce(
   peakShards: PeakShard[],
   segmentsJson: SegmentsJson,
   segmentsOutputPath: string,
+  assetsJson?: AssetsJson,
 ): SegmentsJson {
   const shardMap = new Map<string, PeakShard>();
   for (const shard of peakShards) {
@@ -696,6 +1008,37 @@ export function peakReduce(
     seg.peak_analysis = shard.peak_analysis;
   }
 
+  if (assetsJson) clearNonTemporalVisualPeakAnalysis(assetsJson, segmentsJson);
+
   atomicWriteJson(segmentsOutputPath, segmentsJson);
   return segmentsJson;
+}
+
+/** Remove stale visual peak artifacts from canonical non-temporal assets. */
+export function clearNonTemporalVisualPeakAnalysis(
+  assetsJson: AssetsJson,
+  segmentsJson: SegmentsJson,
+): number {
+  const nonTemporalAssetIds = new Set(
+    assetsJson.items
+      .filter((asset) => isAuthoritativeNonTemporalAsset(asset))
+      .map((asset) => asset.asset_id),
+  );
+  let removed = 0;
+  for (const segment of segmentsJson.items) {
+    if (!nonTemporalAssetIds.has(segment.asset_id) || segment.peak_analysis === undefined) continue;
+    delete segment.peak_analysis;
+    removed += 1;
+  }
+  return removed;
+}
+
+function isAuthoritativeNonTemporalAsset(asset: AssetsJson["items"][number]): boolean {
+  if (asset.media_kind === "image") return false;
+  if (asset.media_kind === "audio") return true;
+  const declared = asset.source_capabilities?.has_temporal_video;
+  if (typeof declared === "boolean") return !declared;
+  // Legacy fixtures without canonical media metadata may still exercise the
+  // synthetic peak adapter; only an explicit audio kind is fail-closed here.
+  return false;
 }

@@ -27,7 +27,12 @@ export function preflightTransition(
   fps: number,
 ): TransitionPreflightResult {
   const requiresHandles =
-    t.transition_type === "crossfade" || t.transition_type === "match_cut_soft";
+    t.transition_type === "crossfade" ||
+    t.transition_type === "match_cut_soft" ||
+    // Issue #34 A/B roll presets consume head/tail handles too.
+    t.transition_type === "film_crossfade" ||
+    t.transition_type === "light_leak_flash" ||
+    t.transition_type === "dreamy_focus_blur";
   if (!requiresHandles) {
     return {
       transition_id: t.transition_id,

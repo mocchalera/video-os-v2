@@ -302,6 +302,7 @@ function attachQualityGate(candidate: Candidate, record: QualityGateRecord): Can
   } else if (candidate.rejection_reason) {
     next.rejection_reason = candidate.rejection_reason;
   }
+  if (next.role === "reject") next.eligible_beats = [];
 
   return next;
 }
@@ -397,8 +398,53 @@ export function mustHaveMatches(
   ]);
   return mustHaves.filter((item) => {
     const needle = normalizeSearchText([item]);
-    return needle.length > 0 && haystack.includes(needle);
+    if (!needle) return false;
+    if (
+      needle === "one source grounded hook" ||
+      needle === "one evidence backed insight" ||
+      needle === "one clear close"
+    ) {
+      return matchesCanonicalStoryRequirement(needle, candidate, segment);
+    }
+    return haystack.includes(needle);
   });
+}
+
+function matchesCanonicalStoryRequirement(
+  normalizedRequirement: string,
+  candidate: Candidate,
+  segment: QualityGateSegment | undefined,
+): boolean {
+  const storyRole = normalizeSearchText([candidate.story_role]);
+  const beatSignals = normalizeSearchText(candidate.eligible_beats ?? []);
+  const sourceSignals = normalizeSearchText([
+    candidate.why_it_matches,
+    ...(candidate.evidence ?? []),
+    candidate.transcript_excerpt,
+    ...(candidate.motif_tags ?? []),
+    ...(candidate.editorial_signals?.visual_tags ?? []),
+    segment?.summary,
+    segment?.transcript_excerpt,
+    ...(segment?.tags ?? []),
+  ]);
+  if (!sourceSignals) return false;
+
+  if (normalizedRequirement === "one source grounded hook") {
+    return storyRole === "hook" &&
+      /(?:^| )(?:b\d+ )?(?:hook|opening)(?: |$)/.test(beatSignals) &&
+      /\b(?:hook|opening|opener)\b/.test(sourceSignals);
+  }
+  if (normalizedRequirement === "one evidence backed insight") {
+    return storyRole === "experience" &&
+      /(?:^| )(?:b\d+ )?(?:experience|insight)(?: |$)/.test(beatSignals) &&
+      /\b(?:insight|reflection|lesson|learning)\b/.test(sourceSignals);
+  }
+  if (normalizedRequirement === "one clear close") {
+    return storyRole === "closing" &&
+      /(?:^| )(?:b\d+ )?(?:close|closing)(?: |$)/.test(beatSignals) &&
+      /\b(?:close|closing|ending|finish|cta)\b/.test(sourceSignals);
+  }
+  return false;
 }
 
 function buildClusterCounts(

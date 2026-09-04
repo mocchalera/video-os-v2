@@ -1,48 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
-import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  launchEditorServer,
+  stopAllEditorServers,
+} from "./helpers/editor-server-test-rig.js";
 
-const repoRoot = path.resolve(".");
-const children: ChildProcess[] = [];
 const tempDirs: string[] = [];
 
-afterEach(() => {
-  for (const child of children.splice(0)) child.kill("SIGTERM");
+afterEach(async () => {
+  await stopAllEditorServers();
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-
-async function reservePort(): Promise<number> {
-  const server = net.createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Failed to reserve port");
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  return address.port;
-}
-
-async function waitForJson(url: string): Promise<unknown> {
-  const deadline = Date.now() + 10_000;
-  let lastError: unknown;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return await response.json();
-      lastError = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw lastError;
-}
 
 function expectNoLocalPathLeak(value: unknown, forbiddenPrefixes: string[]): void {
   const visit = (current: unknown): void => {
@@ -77,16 +49,10 @@ describe("editor server project and health path redaction", () => {
     fs.writeFileSync(path.join(projectDir, "05_timeline", "timeline.json"), "{}\n");
     fs.mkdirSync(path.join(projectsDir, "not-a-project"), { recursive: true });
 
-    const port = await reservePort();
-    const child = spawn(
-      process.execPath,
-      ["--import", "tsx", "editor/server/index.ts", "--project", projectsDir, "--port", String(port)],
-      { cwd: repoRoot, stdio: "ignore" },
-    );
-    children.push(child);
+    const server = await launchEditorServer({ projectsDir });
 
-    const projects = await waitForJson(`http://127.0.0.1:${port}/api/projects`);
-    const health = await waitForJson(`http://127.0.0.1:${port}/api/health`);
+    const projects = await server.waitForJson("/api/projects");
+    const health = await server.waitForJson("/api/health");
 
     expect(projects).toEqual({
       projects: [{ id: "timeline-project", name: "timeline-project", hasTimeline: true }],

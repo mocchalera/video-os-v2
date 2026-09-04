@@ -9,6 +9,8 @@ export interface OverlayPresetProps {
   writing_mode?: "horizontal_tb" | "vertical_rl" | "vertical_lr";
   anchor?: string;
   safe_area?: { top?: number; bottom?: number; left?: number; right?: number };
+  /** Canonical ContentElement animation.in resolved by overlay-capability. */
+  animation_in?: { preset: string; duration_frames?: number; delay_frames?: number };
   durationInFrames: number;
   fps: number;
 }
@@ -52,6 +54,39 @@ function fadeOpacity(frame: number, durationInFrames: number, fadeFrames: number
   });
 
   return Math.min(fadeIn, fadeOut);
+}
+
+/**
+ * Canonical ContentElement animation.in realized through this module's
+ * existing interpolate-based enter helpers. When an element declares an
+ * animation, it owns the enter opacity/timing (and the fade-rise offset);
+ * preset flourish transforms are suppressed so the drawn frames match the
+ * authored vocabulary. Without animation_in every preset keeps its exact
+ * legacy built-in motion.
+ */
+function canonicalEnterMotion(
+  frame: number,
+  durationInFrames: number,
+  animationIn: OverlayPresetProps["animation_in"],
+): { opacity: number; translateY?: number } | null {
+  if (!animationIn) return null;
+  if (animationIn.preset !== "fade" && animationIn.preset !== "fade-rise") return null;
+  const delay = Math.max(0, Math.floor(animationIn.delay_frames ?? 0));
+  const motion = Math.max(1, Math.floor(animationIn.duration_frames ?? tokens.durations.fade_medium));
+  const start = Math.min(delay, Math.max(0, durationInFrames - 1));
+  const progress = interpolate(frame, [start, start + motion], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
+  return animationIn.preset === "fade-rise"
+    ? { opacity: progress, translateY: Math.round((1 - progress) * 18 * 100) / 100 }
+    : { opacity: progress };
+}
+
+/** Enter transform for a preset under canonical animation control. */
+function canonicalEnterTransform(canonical: { translateY?: number } | null): string | undefined {
+  if (!canonical || canonical.translateY === undefined || canonical.translateY === 0) return undefined;
+  return `translateY(${canonical.translateY}px)`;
 }
 
 function textWritingMode(writingMode: OverlayPresetProps["writing_mode"]): CSSProperties {
@@ -158,17 +193,25 @@ function textElement(text: string, style: CSSProperties): JSX.Element {
 function titleCardRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
-  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_medium);
-  const translateY = interpolate(frame, [0, tokens.durations.fade_medium], [20, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_medium);
+  const translateY = canonical
+    ? (canonical.translateY ?? 0)
+    : interpolate(frame, [0, tokens.durations.fade_medium], [20, 0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      });
+  const transform = canonical
+    ? canonicalEnterTransform(canonical)
+    : `translateY(${translateY}px)`;
 
   return overlayTextBox(
     textElement(props.text, {
       ...textWritingMode(props.writing_mode),
       opacity,
-      transform: `translateY(${translateY}px)`,
+      ...(transform ? { transform } : {}),
       maxWidth: "72%",
       color: tokens.colors.overlay.text,
       fontFamily: tokens.fontFamilies.heading,
@@ -190,21 +233,24 @@ function titleCardRender(props: OverlayPresetProps): JSX.Element {
 function hookTitleRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
   const enterEnd = Math.min(9, Math.max(1, props.durationInFrames - 1));
-  const scale = interpolate(frame, [0, enterEnd], [1.22, 1], {
+  const scale = canonical ? 1 : interpolate(frame, [0, enterEnd], [1.22, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const rotate = interpolate(frame, [0, enterEnd], [-2.4, 0], {
+  const rotate = canonical ? 0 : interpolate(frame, [0, enterEnd], [-2.4, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const opacity = fadeOpacity(frame, props.durationInFrames, 5);
-  const flashOpacity = interpolate(frame, [0, 1, 4], [0.5, 0.18, 0], {
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, 5);
+  const flashOpacity = canonical ? 0 : interpolate(frame, [0, 1, 4], [0.5, 0.18, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const accentWidth = interpolate(frame, [2, enterEnd + 3], [0, 100], {
+  const accentWidth = canonical ? 100 : interpolate(frame, [2, enterEnd + 3], [0, 100], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -216,8 +262,10 @@ function hookTitleRender(props: OverlayPresetProps): JSX.Element {
         ...textWritingMode(props.writing_mode),
         maxWidth: "86%",
         opacity,
-        transform: `scale(${scale}) rotate(${rotate}deg)`,
-        transformOrigin: "left center",
+        transform: canonical
+          ? canonicalEnterTransform(canonical)
+          : `scale(${scale}) rotate(${rotate}deg)`,
+        ...(canonical ? {} : { transformOrigin: "left center" }),
         color: tokens.colors.overlay.text,
         fontFamily: tokens.fontFamilies.heading,
         fontSize: Math.round(tokens.fontSizes.title * 1.18),
@@ -258,11 +306,19 @@ function hookTitleRender(props: OverlayPresetProps): JSX.Element {
 function ctaCardRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
-  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_medium);
-  const translateY = interpolate(frame, [0, tokens.durations.fade_medium], [28, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_medium);
+  const translateY = canonical
+    ? (canonical.translateY ?? 0)
+    : interpolate(frame, [0, tokens.durations.fade_medium], [28, 0], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      });
+  const enterTransform = canonical
+    ? canonicalEnterTransform(canonical)
+    : `translateY(${translateY}px)`;
 
   return createElement(
     AbsoluteFill,
@@ -277,16 +333,16 @@ function ctaCardRender(props: OverlayPresetProps): JSX.Element {
         fontFamily: tokens.fontFamilies.heading,
       },
     },
-    createElement(
-      "div",
-      {
-        style: {
-          width: "100%",
-          maxWidth: 1_340,
-          transform: `translateY(${translateY}px)`,
-          textAlign: "center",
-        },
-      },
+        createElement(
+          "div",
+          {
+            style: {
+              width: "100%",
+              maxWidth: 1_340,
+              ...(enterTransform ? { transform: enterTransform } : {}),
+              textAlign: "center",
+            },
+          },
       props.brand_text
         ? createElement("div", {
             style: {
@@ -334,17 +390,23 @@ function ctaCardRender(props: OverlayPresetProps): JSX.Element {
 function lowerThirdRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
-  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
-  const translateX = interpolate(frame, [0, tokens.durations.fade_medium], [-48, 0], {
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
+  const translateX = canonical ? 0 : interpolate(frame, [0, tokens.durations.fade_medium], [-48, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
+  const enterTransform = canonical
+    ? canonicalEnterTransform(canonical)
+    : `translateX(${translateX}px)`;
 
   return overlayTextBox(
     textElement(props.text, {
       ...textWritingMode(props.writing_mode),
       opacity,
-      transform: `translateX(${translateX}px)`,
+      ...(enterTransform ? { transform: enterTransform } : {}),
       maxWidth: "58%",
       padding: "18px 24px",
       color: tokens.colors.overlay.text,
@@ -365,12 +427,17 @@ function lowerThirdRender(props: OverlayPresetProps): JSX.Element {
 function chapterKickerRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
-  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
+  const enterTransform = canonicalEnterTransform(canonical);
 
   return overlayTextBox(
     textElement(props.text, {
       ...textWritingMode(props.writing_mode),
       opacity,
+      ...(enterTransform ? { transform: enterTransform } : {}),
       maxWidth: "48%",
       color: tokens.colors.overlay.text,
       fontFamily: tokens.fontFamilies.body,
@@ -389,12 +456,17 @@ function chapterKickerRender(props: OverlayPresetProps): JSX.Element {
 function locationTagRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
-  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
+  const enterTransform = canonicalEnterTransform(canonical);
 
   return overlayTextBox(
     textElement(props.text, {
       ...textWritingMode(props.writing_mode),
       opacity,
+      ...(enterTransform ? { transform: enterTransform } : {}),
       maxWidth: "42%",
       padding: "10px 14px",
       color: tokens.colors.overlay.mutedText,
@@ -416,12 +488,17 @@ function locationTagRender(props: OverlayPresetProps): JSX.Element {
 function creditRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
-  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_long);
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_long);
+  const enterTransform = canonicalEnterTransform(canonical);
 
   return overlayTextBox(
     textElement(props.text, {
       ...textWritingMode(props.writing_mode),
       opacity,
+      ...(enterTransform ? { transform: enterTransform } : {}),
       maxWidth: "64%",
       color: tokens.colors.overlay.text,
       fontFamily: tokens.fontFamilies.body,
@@ -440,19 +517,27 @@ function creditRender(props: OverlayPresetProps): JSX.Element {
 function emphasisWordRender(props: OverlayPresetProps): JSX.Element {
   const frame = useCurrentFrame();
   const safeArea = mergedSafeArea(props.safe_area);
-  const opacity = fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
-  const scale = interpolate(
-    frame,
-    [0, Math.min(8, Math.max(1, props.durationInFrames - 1))],
-    [0.72, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
-  );
+  const canonical = canonicalEnterMotion(frame, props.durationInFrames, props.animation_in);
+  const opacity = canonical
+    ? canonical.opacity
+    : fadeOpacity(frame, props.durationInFrames, tokens.durations.fade_short);
+  const scale = canonical
+    ? 1
+    : interpolate(
+        frame,
+        [0, Math.min(8, Math.max(1, props.durationInFrames - 1))],
+        [0.72, 1],
+        { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+      );
+  const enterTransform = canonical
+    ? canonicalEnterTransform(canonical)
+    : `scale(${scale})`;
 
   return overlayTextBox(
     textElement(props.text, {
       ...textWritingMode(props.writing_mode),
       opacity,
-      transform: `scale(${scale})`,
+      ...(enterTransform ? { transform: enterTransform } : {}),
       maxWidth: "76%",
       color: tokens.colors.overlay.accent,
       fontFamily: tokens.fontFamilies.heading,

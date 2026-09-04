@@ -1,0 +1,69 @@
+version: audio-delivery-profile/v1
+profile_id: audio-fixture-partial-v1
+profile_version: v1
+platform: fixture
+surface: fixture
+release_scope: internal
+delivery_variant: partial-evidence
+status: partial
+source_references:
+  - url: https://example.com/video-os/audio-fixture-partial
+    title: Video OS partial audio fixture record
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: Video OS maintainers
+    evidence_kind: synthetic_fixture
+retrieved_at: '2026-08-21'
+owner: Video OS maintainers
+verification:
+  owner: Video OS maintainers
+  verified_at: null
+  review_due_at: null
+supersession:
+  state: active
+assumptions:
+  - Only the encoded inspection path is exercised.
+dialogue_processing:
+  authority_track: A1
+  conflict_policy: dialogue_first
+  finishing_engine: existing_dialogue_finishing
+  optional_stages: []
+  single_mastering_owner: shared_audio_render_plan
+  single_mastering_stage: after_mix
+  max_mastering_passes: 1
+measurement_requirements:
+  encoded_result_required: true
+  method:
+    loudness: ffmpeg loudnorm pass 1
+    true_peak: ffmpeg loudnorm input_tp
+    format: ffprobe
+    duration: ffprobe
+    av_sync: ffprobe when video exists
+  integrated_loudness: { status: partial, basis: unknown, notes: encoded fixture not yet auditioned }
+  short_term_loudness: { status: unknown, basis: unknown }
+  lra: { status: unknown, basis: unknown }
+  true_peak: { status: partial, basis: unknown }
+  voice_intelligibility: { status: not_claimed, basis: unknown, proxies: [], human_required: true }
+  diagnostics: { clipping: not_run, silence: not_run, dropout: not_run, channel: ffprobe, phase: not_run }
+encoding_requirements:
+  container: { status: partial, basis: unknown }
+  codec: { status: partial, basis: unknown }
+  sample_rate_hz: { status: partial, basis: unknown }
+  channels: { status: partial, basis: unknown }
+  true_peak_margin_dbtp: { status: unknown, basis: unknown }
+  encode_preview: { status: not_run, method: pending fixture encode, human_required: true }
+playback_evidence:
+  stereo: { status: partial, method: encoded inspection only, human_required: true }
+  mono_fold_down: { status: unknown, method: not run, human_required: true }
+  mobile_fixture: { status: unknown, method: no fixture, human_required: true }
+normalization:
+  status: unknown
+  assumption: No platform normalization is claimed.
+human_preview:
+  required: true
+  gates: [human_audition, mono_mobile_playback]
+  status: pending
+fallback:
+  on_missing_tool: fail_open
+  on_stale_or_unknown: human_hold
+  reason: Partial fixture evidence requires human audition.

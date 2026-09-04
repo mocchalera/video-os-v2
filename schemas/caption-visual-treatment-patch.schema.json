@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "caption-visual-treatment-patch.schema.json",
+  "title": "Caption visual treatment input patch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "project_id", "base_caption_draft_hash", "base_timeline_hash", "typography_policy_hash", "caption_approval_hash", "operations", "session"],
+  "properties": {
+    "version": { "const": "caption-visual-treatment-patch/v1" }, "project_id": { "type": "string", "minLength": 1 },
+    "base_caption_draft_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "base_timeline_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "typography_policy_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "caption_approval_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "platform_safe_zone_profile_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "operations": { "type": "array", "items": { "$ref": "#/$defs/operation" } },
+    "session": { "type": "object", "additionalProperties": false, "required": ["reviewer", "updated_at"], "properties": { "reviewer": { "type": "string", "minLength": 1 }, "started_at": { "type": "string", "minLength": 1 }, "updated_at": { "type": "string", "minLength": 1 }, "last_action_operation_count": { "type": "integer", "minimum": 0 }, "action_operation_counts": { "type": "array", "items": { "type": "integer", "minimum": 1 } } } }
+  },
+  "$defs": {
+    "rect": { "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"], "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } } },
+    "operation": {
+      "type": "object", "additionalProperties": false, "required": ["caption_id", "stable_root_id", "anchor", "style_ref", "fallback"],
+      "properties": {
+        "caption_id": { "type": "string", "pattern": "^SC_" }, "stable_root_id": { "type": "string", "pattern": "^SC_" }, "expected_current_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }, "anchor": { "enum": ["top_left", "top_center", "top_right", "center", "bottom_left", "bottom_center", "bottom_right"] }, "rect": { "$ref": "#/$defs/rect" }, "style_ref": { "type": "string", "minLength": 1 }, "reference_scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 }, "hierarchy_role": { "enum": ["speech", "keyword", "annotation", "speaker", "cta"] }, "emphasis_ref": { "type": "string", "minLength": 1 }, "animation_ref": { "type": "string", "minLength": 1 }, "effect_ref": { "type": "string", "minLength": 1 }, "fallback": { "enum": ["registered_fallback", "nle_handoff", "blocker"] }
+      }
+    }
+  }
+}

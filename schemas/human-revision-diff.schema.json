@@ -15,8 +15,10 @@
   ],
   "properties": {
     "version": {
-      "type": "integer",
-      "const": 1
+      "enum": [
+        1,
+        2
+      ]
     },
     "project_id": {
       "type": "string",
@@ -35,40 +37,187 @@
     },
     "status": {
       "type": "string",
-      "enum": ["clean", "lossy", "review_required"]
+      "enum": [
+        "clean",
+        "lossy",
+        "review_required"
+      ]
     },
     "summary": {
       "$ref": "#/$defs/diffSummary"
     },
     "operations": {
       "type": "array",
-      "items": { "$ref": "#/$defs/diffOperation" }
+      "items": {
+        "$ref": "#/$defs/diffOperation"
+      }
     },
     "unmapped_edits": {
       "type": "array",
-      "items": { "$ref": "#/$defs/unmappedEdit" }
+      "items": {
+        "$ref": "#/$defs/unmappedEdit"
+      }
+    },
+    "identity": {
+      "$ref": "#/$defs/diffIdentity"
     }
   },
   "additionalProperties": false,
   "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "diffIdentity": {
+      "description": "Immutable identity bindings required before the diff can be linked to review rounds or measured as correction distance.",
+      "type": "object",
+      "required": [
+        "base_timeline",
+        "review_generation",
+        "review_round"
+      ],
+      "properties": {
+        "base_timeline": {
+          "type": "object",
+          "required": [
+            "path",
+            "version",
+            "sha256"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/]"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "$ref": "#/$defs/hash"
+            }
+          },
+          "additionalProperties": false
+        },
+        "review_generation": {
+          "type": "object",
+          "required": [
+            "generation_id",
+            "review_identity",
+            "output",
+            "review_ready_receipt"
+          ],
+          "properties": {
+            "generation_id": {
+              "$ref": "#/$defs/hash"
+            },
+            "review_identity": {
+              "$ref": "#/$defs/hash"
+            },
+            "output": {
+              "type": "object",
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "$ref": "#/$defs/hash"
+                }
+              },
+              "additionalProperties": false
+            },
+            "review_ready_receipt": {
+              "type": "object",
+              "required": [
+                "path",
+                "sha256"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^/]"
+                },
+                "sha256": {
+                  "$ref": "#/$defs/hash"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "review_round": {
+          "type": "object",
+          "required": [
+            "round_index",
+            "round_identity"
+          ],
+          "properties": {
+            "round_index": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "round_identity": {
+              "$ref": "#/$defs/hash"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "diffSummary": {
       "type": "object",
       "properties": {
-        "trim": { "type": "integer", "minimum": 0 },
-        "reorder": { "type": "integer", "minimum": 0 },
-        "enable_disable": { "type": "integer", "minimum": 0 },
-        "track_move": { "type": "integer", "minimum": 0 },
-        "simple_transition": { "type": "integer", "minimum": 0 },
-        "timeline_marker_add": { "type": "integer", "minimum": 0 },
-        "unmapped": { "type": "integer", "minimum": 0 }
+        "trim": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reorder": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enable_disable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "track_move": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "simple_transition": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_marker_add": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unmapped": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
     "diffOperation": {
       "type": "object",
-      "required": ["operation_id", "type", "target"],
+      "required": [
+        "operation_id",
+        "type",
+        "target"
+      ],
       "properties": {
-        "operation_id": { "type": "string" },
+        "operation_id": {
+          "type": "string"
+        },
         "type": {
           "type": "string",
           "enum": [
@@ -80,63 +229,132 @@
             "timeline_marker_add"
           ]
         },
-        "target": { "$ref": "#/$defs/operationTarget" },
-        "before": { "$ref": "#/$defs/clipState" },
-        "after": { "$ref": "#/$defs/clipState" },
-        "delta": { "$ref": "#/$defs/clipDelta" },
-        "mapped_via": { "type": "string" },
+        "target": {
+          "$ref": "#/$defs/operationTarget"
+        },
+        "before": {
+          "$ref": "#/$defs/clipState"
+        },
+        "after": {
+          "$ref": "#/$defs/clipState"
+        },
+        "delta": {
+          "$ref": "#/$defs/clipDelta"
+        },
+        "mapped_via": {
+          "type": "string"
+        },
         "confidence": {
           "type": "string",
-          "enum": ["exact", "fallback", "provisional"]
+          "enum": [
+            "exact",
+            "fallback",
+            "provisional"
+          ]
         },
         "surface": {
           "type": "string",
-          "enum": ["verified_roundtrip", "provisional_roundtrip", "report_only"]
+          "enum": [
+            "verified_roundtrip",
+            "provisional_roundtrip",
+            "report_only"
+          ]
         },
-        "transition_type": { "type": "string" },
-        "transition_duration_frames": { "type": "integer", "minimum": 0 },
-        "marker_frame": { "type": "integer", "minimum": 0 },
-        "marker_label": { "type": "string" },
-        "from_track_id": { "type": "string" },
-        "to_track_id": { "type": "string" },
-        "enabled": { "type": "boolean" }
+        "transition_type": {
+          "type": "string"
+        },
+        "transition_duration_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "marker_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "marker_label": {
+          "type": "string"
+        },
+        "from_track_id": {
+          "type": "string"
+        },
+        "to_track_id": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "operationTarget": {
       "type": "object",
-      "required": ["exchange_clip_id"],
+      "required": [
+        "exchange_clip_id"
+      ],
       "properties": {
-        "exchange_clip_id": { "type": "string" },
-        "clip_id": { "type": "string" },
-        "segment_id": { "type": "string" },
-        "asset_id": { "type": "string" },
-        "track_id": { "type": "string" }
+        "exchange_clip_id": {
+          "type": "string"
+        },
+        "clip_id": {
+          "type": "string"
+        },
+        "segment_id": {
+          "type": "string"
+        },
+        "asset_id": {
+          "type": "string"
+        },
+        "track_id": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "clipState": {
       "type": "object",
       "properties": {
-        "src_in_us": { "type": "integer", "minimum": 0 },
-        "src_out_us": { "type": "integer", "minimum": 0 },
-        "timeline_in_frame": { "type": "integer", "minimum": 0 },
-        "timeline_duration_frames": { "type": "integer", "minimum": 1 }
+        "src_in_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "src_out_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_in_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timeline_duration_frames": {
+          "type": "integer",
+          "minimum": 1
+        }
       },
       "additionalProperties": false
     },
     "clipDelta": {
       "type": "object",
       "properties": {
-        "in_us": { "type": "integer" },
-        "out_us": { "type": "integer" },
-        "duration_frames": { "type": "integer" }
+        "in_us": {
+          "type": "integer"
+        },
+        "out_us": {
+          "type": "integer"
+        },
+        "duration_frames": {
+          "type": "integer"
+        }
       },
       "additionalProperties": false
     },
     "unmappedEdit": {
       "type": "object",
-      "required": ["classification", "item_ref", "review_required", "reason"],
+      "required": [
+        "classification",
+        "item_ref",
+        "review_required",
+        "reason"
+      ],
       "properties": {
         "classification": {
           "type": "string",
@@ -159,19 +377,48 @@
             "unknown_vendor_extension"
           ]
         },
-        "item_ref": { "type": "string" },
+        "item_ref": {
+          "type": "string"
+        },
         "derived_child_ids": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "copy_ids": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "review_required": { "type": "boolean" },
-        "reason": { "type": "string" }
+        "review_required": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "version": {
+            "const": 2
+          }
+        },
+        "required": [
+          "version"
+        ]
+      },
+      "then": {
+        "required": [
+          "identity"
+        ]
+      }
+    }
+  ]
 }

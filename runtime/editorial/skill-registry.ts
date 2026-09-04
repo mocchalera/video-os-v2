@@ -262,6 +262,33 @@ export function getUtteranceSnapConfig(
   };
 }
 
+export function getApexFreezeHoldConfig(
+  activeSkills: string[],
+  fpsNum: number,
+  fpsDen: number,
+  skillsDir?: string,
+): import("../compiler/apex-freeze-hold.js").ApexFreezeHoldConfig | null {
+  const registry = loadSkills(skillsDir);
+  const fps = fpsNum / fpsDen;
+  for (const skillId of [...activeSkills].sort()) {
+    const effects = registry.get(skillId)?.effects;
+    if (!effects?.apex_freeze_hold) continue;
+    const minSec = effects.freeze_hold_min_sec ?? 1;
+    const defaultSec = effects.freeze_hold_default_sec ?? 1.1;
+    const maxSec = effects.freeze_hold_max_sec ?? 1.2;
+    if (!(minSec > 0 && minSec <= defaultSec && defaultSec <= maxSec)) {
+      throw new Error(`apex_freeze_hold_thresholds_invalid:${skillId}`);
+    }
+    return {
+      policy: "apex-freeze-hold/v1",
+      minHoldFrames: Math.max(1, Math.ceil(minSec * fps)),
+      defaultHoldFrames: Math.max(1, Math.round(defaultSec * fps)),
+      maxHoldFrames: Math.max(1, Math.floor(maxSec * fps)),
+    };
+  }
+  return null;
+}
+
 /**
  * Compute a hash of the editorial registry for provenance tracking.
  */

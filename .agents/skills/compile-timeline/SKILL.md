@@ -46,3 +46,4 @@ npx tsx scripts/compile-timeline.ts projects/<project> --patch projects/<project
 - patch mode は `timeline.json` を上書きし、同時に `preview-manifest.json` も再生成する。
 - manifest hashだけを手編集して古いpreviewをfresh扱いにしない。
 - `adjacency_analysis.json` は debug / explanation 用 artifact。常に生成されるわけではない。
+- Rhythm Sync (Issue #35): `03_analysis/bgm_analysis.json`（onset/downbeat/sections）と楽曲アセットの word-level STT（`03_analysis/transcripts/TR_<music_asset>.json` の `items[].words[]`）をリズム証拠として、サビ/ブレイク開始のカット境界を ±1.5秒探索で1フレーム精度スナップする（サビは第一声・ダウンビート優先の Hard Snap）。証拠が無い/曖昧な場合は fail-open で `timeline.metadata.rhythm_sync` に `status: degraded` と理由を明示し、クリップのジオメトリは変更しない。スナップ後は `integrity.gap_frames/overrun_frames = 0` を検証し、`parity` （±2フレーム、サビ頭違反は fail）を `timeline.metadata.rhythm_sync` と `preview-manifest.json.rhythm_sync` の両方へ刻印する。無効化は `runtime/compiler-defaults.yaml` の `rhythm_sync.mode: off`。

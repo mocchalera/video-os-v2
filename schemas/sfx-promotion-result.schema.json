@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/sfx-promotion-result.schema.json",
+  "title": "Video OS SFX promotion result",
+  "description": "Machine-readable validation, promotion, or explicit HOLD status. It records evidence state only.",
+  "type": "object",
+  "required": [
+    "version",
+    "command",
+    "status",
+    "scope",
+    "asset_id",
+    "wrote_files",
+    "reason",
+    "media_validation"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "sfx-promotion-result/v1" },
+    "command": { "const": "sfx-promote" },
+    "status": { "enum": ["HOLD", "validated", "promoted"] },
+    "scope": { "enum": ["repo_common", "project_local"] },
+    "asset_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "wrote_files": { "type": "boolean" },
+    "reason": { "type": "string", "minLength": 1 },
+    "source_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "source_size_bytes": { "type": "integer", "minimum": 1 },
+    "manifest_path": { "type": "string", "minLength": 1 },
+    "manifest_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "asset_path": { "type": "string", "minLength": 1 },
+    "rights_status": {
+      "enum": ["confirmed", "cleared", "unknown", "expired", "ambiguous", "blocked", "hold"]
+    },
+    "rights_evidence_ref": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "provenance_ref": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        { "type": "null" }
+      ]
+    },
+    "media_validation": {
+      "type": "object",
+      "required": ["performed", "available", "decode"],
+      "additionalProperties": false,
+      "properties": {
+        "performed": { "type": "boolean" },
+        "available": { "type": "boolean" },
+        "decode": { "enum": ["not_run", "metadata_only", "decoded", "optional_tool_unavailable"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "promoted" } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "wrote_files": { "const": true },
+          "media_validation": {
+            "properties": {
+              "performed": { "const": true },
+              "available": { "const": true },
+              "decode": { "const": "decoded" }
+            }
+          },
+          "rights_status": { "enum": ["confirmed", "cleared"] },
+          "rights_evidence_ref": { "type": "string", "minLength": 1 },
+          "provenance_ref": { "type": "string", "minLength": 1 }
+        },
+        "required": [
+          "source_hash", "source_size_bytes", "manifest_path", "manifest_hash", "asset_path",
+          "rights_status", "rights_evidence_ref", "provenance_ref"
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["HOLD", "validated"] } }, "required": ["status"] },
+      "then": { "properties": { "wrote_files": { "const": false } } }
+    }
+  ]
+}

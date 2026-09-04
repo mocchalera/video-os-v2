@@ -1,0 +1,16 @@
+{
+  "version": "retention-policy/v1",
+  "policy_id": "fixture-retention-truth-bound-v1",
+  "modes": {
+    "off": { "enabled": true, "requires_source_evidence": false, "requires_payoff": false, "allows_reorder": false },
+    "standard": { "enabled": true, "requires_source_evidence": true, "requires_payoff": false, "allows_reorder": false },
+    "aggressive": { "enabled": true, "requires_source_evidence": true, "requires_payoff": true, "allows_reorder": true },
+    "credibility_first": { "enabled": true, "requires_source_evidence": true, "requires_payoff": true, "allows_reorder": false }
+  },
+  "degrade_order": ["aggressive", "standard", "credibility_first", "off"],
+  "measurements": { "promise": true, "source_evidence": true, "payoff": true, "readability": true, "audibility": true, "accessibility": true, "policy": true, "fatigue": true },
+  "audio_editing": { "preserve_phoneme": true, "preserve_word_onset": true, "preserve_conjunction": true, "preserve_causal_bridge": true, "offset_map_required": true },
+  "tempo": { "envelope_required": true, "meaningful_visual_refresh_required": true, "pause_allowed": true, "sfx_per_cut_forbidden": true },
+  "truth_guards": { "clickbait_forbidden": true, "false_spoiler_forbidden": true, "fabricated_evidence_forbidden": true },
+  "qa": { "short_form_max_duration_sec": 90, "minimum_refresh_duration_sec": 20, "hook_max_start_sec": 2, "hook_max_start_frames": 48, "full_payoff_latest_start_ratio": 0.65, "minimum_beat_duration_frames": 24, "visual_refresh_max_gap_sec": 14, "title_max_display_units": 80, "cta_latest_start_ratio": 0.65, "cta_min_hold_sec": 2 }
+}

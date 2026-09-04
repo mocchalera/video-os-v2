@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/video-reasoning-evidence.schema.json",
+  "title": "Video OS Provider-Neutral Video Reasoning Evidence",
+  "description": "Strict v1 derived provider evidence. This artifact never supersedes canonical selects, blueprint, review, or timeline artifacts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "artifact_version",
+    "artifact_kind",
+    "authority",
+    "provider",
+    "connector_version",
+    "request_hash",
+    "prompt_hash",
+    "model",
+    "task",
+    "contract_version",
+    "response_schema_version",
+    "processing_requested",
+    "processing_observed",
+    "evidence_basis",
+    "source",
+    "observations",
+    "local_verification",
+    "confidence_basis",
+    "outcome",
+    "execution"
+  ],
+  "properties": {
+    "artifact_id": { "type": "string", "pattern": "^VREA_[a-f0-9]{64}$" },
+    "artifact_version": { "const": "video-reasoning-evidence/v1" },
+    "artifact_kind": { "const": "derived_evidence" },
+    "authority": {
+      "const": "derived_evidence_only",
+      "description": "Never a canonical selects, edit_blueprint, review_report, or timeline authority."
+    },
+    "provider": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
+    },
+    "connector_version": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\-]{0,255}$"
+    },
+    "request_hash": { "$ref": "#/$defs/hash" },
+    "prompt_hash": { "$ref": "#/$defs/hash" },
+    "model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "effective_model": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "task": {
+      "enum": [
+        "needle_search",
+        "moment_refine",
+        "trim_refine",
+        "continuity_check",
+        "roughcut_review",
+        "anomaly_inspection"
+      ]
+    },
+    "contract_version": { "const": "video-reasoning/v1" },
+    "response_schema_version": { "const": "video-reasoning-response/v1" },
+    "processing_requested": { "const": "agentic" },
+    "processing_observed": { "enum": ["agentic", "unverified"] },
+    "evidence_basis": { "const": "provider_only" },
+    "provider_request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,255}$"
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "observations": {
+      "type": "array",
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/observation" }
+    },
+    "local_verification": { "$ref": "#/$defs/localVerification" },
+    "confidence_basis": { "enum": ["degraded", "unmeasured"] },
+    "outcome": { "enum": ["completed", "degraded", "failed", "unknown"] },
+    "usage": { "$ref": "#/$defs/usage" },
+    "execution": { "$ref": "#/$defs/execution" }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "source_content_sha256",
+        "submitted_media_content_sha256",
+        "source_duration_us",
+        "effective_source_range_us"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$"
+        },
+        "source_content_sha256": { "$ref": "#/$defs/hash" },
+        "submitted_media_content_sha256": { "$ref": "#/$defs/hash" },
+        "source_duration_us": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "effective_source_range_us": { "$ref": "#/$defs/range" }
+      }
+    },
+    "range": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 }
+      ],
+      "items": false
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_id",
+        "label",
+        "rationale",
+        "observation",
+        "inference",
+        "editorial_intent",
+        "provider_range_us",
+        "confidence",
+        "confidence_basis"
+      ],
+      "properties": {
+        "observation_id": { "type": "string", "pattern": "^VREO_[a-f0-9]{64}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "observation": { "type": "null" },
+        "inference": { "type": "null" },
+        "editorial_intent": { "type": "null" },
+        "provider_range_us": { "$ref": "#/$defs/range" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 0.5 },
+        "confidence_basis": { "enum": ["degraded", "unmeasured"] }
+      }
+    },
+    "localVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "records"],
+      "properties": {
+        "status": { "const": "not_run" },
+        "records": {
+          "type": "array",
+          "maxItems": 0,
+          "items": { "$ref": "#/$defs/localVerificationRecord" }
+        }
+      }
+    },
+    "localVerificationRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_observation_id",
+        "requested_window_us",
+        "frame_timestamps_us",
+        "source_content_sha256",
+        "outcome",
+        "rationale_code"
+      ],
+      "properties": {
+        "provider_observation_id": { "type": "string", "pattern": "^VREO_[a-f0-9]{64}$" },
+        "requested_window_us": { "$ref": "#/$defs/range" },
+        "verified_window_us": { "$ref": "#/$defs/range" },
+        "frame_timestamps_us": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "source_content_sha256": { "$ref": "#/$defs/hash" },
+        "outcome": { "enum": ["confirmed", "adjusted", "rejected", "inconclusive"] },
+        "rationale_code": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "prompt_tokens": { "$ref": "#/$defs/count" },
+        "completion_tokens": { "$ref": "#/$defs/count" },
+        "total_tokens": { "$ref": "#/$defs/count" },
+        "total_thought_tokens": { "$ref": "#/$defs/count" },
+        "total_tool_use_tokens": { "$ref": "#/$defs/count" }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_outcome",
+        "submitted",
+        "processing_call_count",
+        "processing_result_count",
+        "matched_processing_pair_count"
+      ],
+      "properties": {
+        "provider_outcome": { "enum": ["completed", "rejected", "failed", "unknown"] },
+        "submitted": { "type": "boolean" },
+        "error_classification": {
+          "enum": [
+            "invalid_request",
+            "local_only",
+            "cloud_consent_required",
+            "cloud_consent_scope_mismatch",
+            "unsupported_model",
+            "provider_uri_not_allowed",
+            "request_budget_exceeded",
+            "duration_budget_exceeded",
+            "input_read_failed",
+            "input_too_large",
+            "request_too_large",
+            "input_content_hash_mismatch",
+            "api_key_missing",
+            "transport_timeout_unknown",
+            "transport_error_unknown",
+            "provider_http_error",
+            "provider_response_invalid",
+            "provider_response_too_large",
+            "interaction_incomplete",
+            "agentic_steps_missing",
+            "structured_output_invalid"
+          ]
+        },
+        "processing_call_count": { "$ref": "#/$defs/count" },
+        "processing_result_count": { "$ref": "#/$defs/count" },
+        "matched_processing_pair_count": { "$ref": "#/$defs/count" },
+        "elapsed_ms": { "$ref": "#/$defs/count" }
+      }
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000000
+    }
+  }
+}

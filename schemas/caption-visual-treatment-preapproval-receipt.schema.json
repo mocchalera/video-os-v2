@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "caption-visual-treatment-preapproval-receipt.schema.json",
+  "title": "Caption visual treatment preapproval receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "project_id", "expected_patch_hash", "status", "approval_hash",
+    "visual_treatment_patch_hash", "typography_policy_hash", "platform_safe_zone_profile_id",
+    "platform_safe_zone_profile_path", "platform_safe_zone_profile_hash", "accessibility",
+    "text_timing_hash", "capability_hash", "input_hash", "applied_caption_ids",
+    "degraded_reasons", "blocked_reasons", "receipt_hash"
+  ],
+  "properties": {
+    "version": { "const": "caption-visual-treatment-preapproval-receipt/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "expected_patch_hash": { "$ref": "#/$defs/hash" },
+    "status": { "enum": ["ready", "fallback", "human_hold", "blocked"] },
+    "approval_hash": { "$ref": "#/$defs/hash" },
+    "visual_treatment_patch_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "typography_policy_hash": { "$ref": "#/$defs/hash" },
+    "platform_safe_zone_profile_id": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+    "platform_safe_zone_profile_path": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+    "platform_safe_zone_profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "accessibility": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reduced_motion", "high_contrast", "audio_off", "small_screen"],
+          "properties": {
+            "reduced_motion": { "type": "boolean" },
+            "high_contrast": { "type": "boolean" },
+            "audio_off": { "type": "boolean" },
+            "small_screen": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+    "text_timing_hash": { "$ref": "#/$defs/hash" },
+    "capability_hash": { "$ref": "#/$defs/hash" },
+    "input_hash": { "$ref": "#/$defs/hash" },
+    "applied_caption_ids": { "type": "array", "items": { "type": "string", "pattern": "^SC_" }, "uniqueItems": true },
+    "degraded_reasons": { "$ref": "#/$defs/reasons" },
+    "blocked_reasons": { "$ref": "#/$defs/reasons" },
+    "preview_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "content_type", "receipt_path", "receipt_sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" },
+        "content_type": { "const": "video/mp4" },
+        "receipt_path": { "type": "string", "minLength": 1 },
+        "receipt_sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "receipt_hash": { "$ref": "#/$defs/hash" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caption_id", "reason"],
+        "properties": {
+          "caption_id": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

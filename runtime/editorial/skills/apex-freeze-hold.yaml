@@ -1,0 +1,20 @@
+# Provisional thresholds: validate 1.0-1.2s holds against creator-short
+# retention evidence before promoting them to stable editorial policy.
+id: apex_freeze_hold
+category: trim
+primary_phase: assemble
+status: active
+required_signals: []
+when:
+  - "candidate has an explicitly authored freeze_frame_hold source time"
+avoid_when:
+  - "freeze_frame_hold is absent"
+  - "source is a still image"
+effects:
+  apex_freeze_hold: true
+  freeze_hold_min_sec: 1.0
+  freeze_hold_default_sec: 1.1
+  freeze_hold_max_sec: 1.2
+  metadata_tags:
+    - apex_freeze_hold
+    - authored_freeze_frame

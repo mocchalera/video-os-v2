@@ -12,12 +12,38 @@ export type BriefAlignmentJudgeSource = "deterministic" | "llm_artifact" | "vlm"
 
 export type BriefAlignmentCompositeJudgeSource = "deterministic-only" | "llm-assisted";
 
+/**
+ * How a confidence claim is grounded. Canonical truth contract (Issue #32 M0):
+ * only "measured" confidence backed by evidence may be presented as high
+ * confidence. "degraded" and "unmeasured" claims must be capped before they
+ * reach an operator.
+ */
+export type ConfidenceBasis = "measured" | "degraded" | "unmeasured";
+
+/**
+ * Confidence at or above this threshold counts as a high-confidence claim
+ * (boundary inclusive: 0.70 itself is a high-confidence claim) and requires a
+ * measured basis plus evidence. Unsupported claims are demoted.
+ */
+export const HIGH_CONFIDENCE_THRESHOLD = 0.7;
+
+/**
+ * Hard ceiling for degraded or unmeasured confidence claims, e.g. when the
+ * optional judge provider is unavailable or only deterministic heuristics ran.
+ * Such claims must never exceed 0.5.
+ */
+export const DEGRADED_CONFIDENCE_CEILING = 0.5;
+
+/** Ceiling applied to confidence claims that lack a measured, evidenced basis. */
+export const UNSUPPORTED_CONFIDENCE_CEILING = 0.5;
+
 export interface AxisScore {
   score: number;
   confidence: number;
   judge_source: BriefAlignmentJudgeSource;
   evidence: string[];
   gaps: string[];
+  confidence_basis?: ConfidenceBasis;
 }
 
 export interface StageResult {

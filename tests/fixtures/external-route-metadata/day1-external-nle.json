@@ -1,0 +1,114 @@
+{
+  "version": "external-route-metadata/v1",
+  "project_id": "day1-external-nle-fixture",
+  "route_kind": "external_manual_nle",
+  "source_identity": {
+    "timeline": {
+      "path": "05_timeline/timeline.json",
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+    },
+    "source_inputs_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+    "source_assets": [
+      {
+        "asset_id": "AST_DAY1_FIXTURE",
+        "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000003"
+      }
+    ]
+  },
+  "output": {
+    "path": "external/day1-final.mp4",
+    "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000004"
+  },
+  "geometry": {
+    "width": 1080,
+    "height": 1920,
+    "fps_num": 30000,
+    "fps_den": 1001
+  },
+  "caption": {
+    "approval": {
+      "path": "07_package/caption_approval.json",
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000005"
+    },
+    "approval_status": "approved",
+    "text_timing_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000006",
+    "burn_render_owner": "external_manual_nle",
+    "ass_path": {
+      "path": "handoff/speech.approved.ass",
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000007"
+    },
+    "requested_animations": ["\\t", "\\move"],
+    "unsupported_animations": ["\\t"],
+    "capability_status": "nle_handoff",
+    "decision": "nle_handoff"
+  },
+  "visual_treatment": {
+    "input": {
+      "path": "handoff/caption-visual-treatment-input.json",
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000008"
+    },
+    "input_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000009",
+    "profile_hash": "sha256:000000000000000000000000000000000000000000000000000000000000000a",
+    "capability_hash": "sha256:000000000000000000000000000000000000000000000000000000000000000b"
+  },
+  "alpha": {
+    "status": "metadata_only",
+    "source": {
+      "path": "external/day1-alpha.mov",
+      "sha256": "sha256:000000000000000000000000000000000000000000000000000000000000000c"
+    },
+    "output": null,
+    "width": 1080,
+    "height": 1920,
+    "fps_num": 30000,
+    "fps_den": 1001,
+    "codec_name": "prores_ks",
+    "pixel_format": "yuva444p12le",
+    "alpha_mode": "straight",
+    "visual_treatment": {
+      "input_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000009",
+      "profile_hash": "sha256:000000000000000000000000000000000000000000000000000000000000000a",
+      "capability_hash": "sha256:000000000000000000000000000000000000000000000000000000000000000b"
+    },
+    "human_approval": {
+      "status": "pending",
+      "owner": "day1-human-handoff",
+      "receipt": null
+    }
+  },
+  "required_handoff_artifacts": [
+    {
+      "path": "handoff/speech.approved.ass",
+      "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000007"
+    },
+    {
+      "path": "handoff/day1-nle-notes.md",
+      "sha256": "sha256:000000000000000000000000000000000000000000000000000000000000000d"
+    }
+  ],
+  "degradation": [
+    {
+      "code": "unsupported_ass_animation",
+      "reason": "ASS transform animation requires manual NLE handoff on DAY1.",
+      "action": "nle_handoff"
+    }
+  ],
+  "handoff": {
+    "status": "pending",
+    "human_owner": "day1-human-handoff",
+    "human_approval_status": "pending",
+    "artifacts": [
+      {
+        "path": "handoff/day1-nle-notes.md",
+        "sha256": "sha256:000000000000000000000000000000000000000000000000000000000000000d"
+      }
+    ]
+  },
+  "agent_qa": {
+    "status": "not_run"
+  },
+  "human_approval": {
+    "status": "pending",
+    "owner": "day1-human-handoff"
+  }
+}

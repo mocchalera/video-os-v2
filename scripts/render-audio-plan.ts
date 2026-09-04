@@ -14,6 +14,7 @@ import { resolveSharedAudioRenderPlan } from "../runtime/audio/render-route.js";
 
 export interface AudioRenderPlanCliArgs {
   projectDir: string;
+  repoSfxRoot?: string;
   timelinePath: string;
   musicCuesPath?: string;
   sfxCuesPath?: string;
@@ -24,13 +25,14 @@ export interface AudioRenderPlanCliArgs {
 }
 
 const USAGE = `Usage:
-  npm run render-audio-plan -- --project <dir> --timeline <timeline.json> [--music-cues <music_cues.json>] [--sfx-cues <sfx_cues.json>] --route <social-review|final> [--output <new-dir>] [--dry-run] [--keep-work]
+  npm run render-audio-plan -- --project <dir> --timeline <timeline.json> [--repo-sfx-root <repo/resources/sfx>] [--music-cues <music_cues.json>] [--sfx-cues <sfx_cues.json>] --route <social-review|final> [--output <new-dir>] [--dry-run] [--keep-work]
 
 Resolves the pinned shared AudioRenderPlan and, unless --dry-run is set,
-executes A1-only finishing, formal A2/A3 cue gain/fade/waveform ducking, mixing,
-and one final mastering pass. At least one cue artifact is required. Output must
-be a new directory. The route label does not change plan identity or execution
-semantics.`;
+executes the resolved audio route. A music_master preserve declaration remains
+unity/stream-copy; explicit mastering uses the fixed Issue #38 two-pass MVP and
+its WAV24/MP3-320 deliverables. A music_master timeline declaration is also
+executable without a cue artifact. Output must be a new directory. The route
+label does not change plan identity or execution semantics.`;
 
 function required(values: string[], index: number, flag: string): string {
   const value = values[index];
@@ -41,6 +43,7 @@ function required(values: string[], index: number, flag: string): string {
 export function parseAudioRenderPlanArgs(argv: string[]): AudioRenderPlanCliArgs {
   const values = argv.slice(2);
   let projectDir: string | undefined;
+  let repoSfxRoot: string | undefined;
   let timelinePath: string | undefined;
   let musicCuesPath: string | undefined;
   let sfxCuesPath: string | undefined;
@@ -52,6 +55,7 @@ export function parseAudioRenderPlanArgs(argv: string[]): AudioRenderPlanCliArgs
     const arg = values[index];
     if (arg === "--help" || arg === "-h") throw new Error(USAGE);
     if (arg === "--project") projectDir = required(values, ++index, arg);
+    else if (arg === "--repo-sfx-root") repoSfxRoot = required(values, ++index, arg);
     else if (arg === "--timeline") timelinePath = required(values, ++index, arg);
     else if (arg === "--music-cues") musicCuesPath = required(values, ++index, arg);
     else if (arg === "--sfx-cues") sfxCuesPath = required(values, ++index, arg);
@@ -66,7 +70,7 @@ export function parseAudioRenderPlanArgs(argv: string[]): AudioRenderPlanCliArgs
     else if (arg === "--keep-work") keepWork = true;
     else throw new Error(`Unknown argument: ${arg}\n${USAGE}`);
   }
-  if (!projectDir || !timelinePath || (!musicCuesPath && !sfxCuesPath) || !route) {
+  if (!projectDir || !timelinePath || !route) {
     throw new Error(USAGE);
   }
   if (!dryRun && !outputDir) {
@@ -74,6 +78,7 @@ export function parseAudioRenderPlanArgs(argv: string[]): AudioRenderPlanCliArgs
   }
   return {
     projectDir: path.resolve(projectDir),
+    ...(repoSfxRoot ? { repoSfxRoot: path.resolve(repoSfxRoot) } : {}),
     timelinePath: path.resolve(timelinePath),
     musicCuesPath: musicCuesPath ? path.resolve(musicCuesPath) : undefined,
     sfxCuesPath: sfxCuesPath ? path.resolve(sfxCuesPath) : undefined,
@@ -104,12 +109,13 @@ export async function runAudioRenderPlan(
     dependencies.resolveSharedAudioRenderPlanImpl ?? resolveSharedAudioRenderPlan
   )({
     projectDir: args.projectDir,
+    ...(args.repoSfxRoot ? { repoSfxRoot: args.repoSfxRoot } : {}),
     timelinePath: args.timelinePath,
     musicCuesPath: args.musicCuesPath,
     sfxCuesPath: args.sfxCuesPath,
   });
   if (!plan) {
-    throw new Error("an enabled formal A2 music-cues/v2 or A3 sfx-cues/v1 projection is required");
+    throw new Error("an enabled formal audio projection (music_master, A2 music-cues/v2, or A3 sfx-cues/v1) is required");
   }
   const planHash = hashAudioRenderPlan(plan);
   if (args.dryRun) {
@@ -147,6 +153,7 @@ export async function runAudioRenderPlan(
     plan_path: planPath,
     raw_dialogue_path: result.rawDialoguePath,
     final_mix_path: result.finalMixPath,
+    ...(result.masteredMp3Path ? { mastered_mp3_path: result.masteredMp3Path } : {}),
     report_path: result.reportPath,
     ...(result.workDir ? { retained_work_dir: result.workDir } : {}),
     wrote_files: true,

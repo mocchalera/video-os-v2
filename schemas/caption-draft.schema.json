@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/caption-draft.schema.json",
+  "title": "Video OS Caption Draft",
+  "type": "object",
+  "required": ["version", "project_id", "base_timeline_version", "caption_policy", "speech_captions", "text_overlays", "draft_status", "degraded_count"],
+  "properties": {
+    "version": { "type": "string" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "base_timeline_version": { "type": "string", "minLength": 1 },
+    "caption_policy": { "$ref": "#/$defs/captionPolicy" },
+    "speech_captions": { "type": "array", "items": { "$ref": "#/$defs/caption" } },
+    "text_overlays": { "type": "array" },
+    "draft_status": { "enum": ["ready_for_human_approval", "needs_operator_fix"] },
+    "degraded_count": { "type": "integer", "minimum": 0 },
+    "text_authority": { "$ref": "#/$defs/authoredTextAuthority" },
+    "timing_authority": { "$ref": "#/$defs/authoredTimingAuthority" },
+    "migration": {
+      "type": "object",
+      "required": ["from_version", "to_version", "migrated_caption_count"],
+      "properties": {
+        "from_version": { "type": "string" },
+        "to_version": { "const": "caption-draft/v2" },
+        "migrated_caption_count": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "version": { "const": "caption-draft/v2" } } },
+      "then": {
+        "properties": {
+          "speech_captions": { "items": { "$ref": "#/$defs/captionV2" } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "captionPolicy": {
+      "type": "object",
+      "required": ["language", "delivery_mode", "source", "styling_class"],
+      "properties": {
+        "language": { "type": "string", "minLength": 1 },
+        "delivery_mode": { "enum": ["burn_in", "sidecar", "both"] },
+        "source": { "enum": ["transcript", "authored", "none"] },
+        "styling_class": { "type": "string", "minLength": 1 },
+        "semantic_timing": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "caption": {
+      "type": "object",
+      "required": ["caption_id", "asset_id", "segment_id", "timeline_in_frame", "timeline_duration_frames", "text", "transcript_ref", "transcript_item_ids", "source", "styling_class", "metrics"],
+      "properties": {
+        "caption_id": { "type": "string", "pattern": "^SC_" },
+        "asset_id": { "type": "string" },
+        "segment_id": { "type": "string" },
+        "timeline_in_frame": { "type": "integer", "minimum": 0 },
+        "timeline_duration_frames": { "type": "integer", "minimum": 1 },
+        "text": { "type": "string", "minLength": 1 },
+        "transcript_ref": { "type": "string" },
+        "transcript_item_ids": { "type": "array", "items": {} },
+        "source": { "enum": ["transcript", "authored"] },
+        "styling_class": { "type": "string" },
+        "metrics": { "type": "object" },
+        "line_id": { "type": "string", "pattern": "^AL_" },
+        "cue_id": { "type": "string", "pattern": "^AC_" },
+        "root_id": { "type": "string", "pattern": "^SC_" },
+        "parent_ids": { "type": "array", "items": { "type": "string", "pattern": "^SC_" }, "uniqueItems": true },
+        "lineage_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "editorial": { "type": "object" },
+        "timing": { "type": "object" },
+        "reveal_timing": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "captionV2": {
+      "allOf": [
+        { "$ref": "#/$defs/caption" },
+        {
+          "required": ["root_id", "parent_ids", "lineage_hash", "timing"],
+          "properties": {
+            "timing": { "$ref": "#/$defs/timingV2" }
+          }
+        }
+      ]
+    },
+    "timingV2": {
+      "type": "object",
+      "required": ["source", "confidence", "triggeredFallback", "timelineInFrame", "timelineDurationFrames", "offsetMapFingerprint", "authority"],
+      "properties": {
+        "source": { "enum": ["word_remap", "clip_item_remap", "offset_map", "offset_map_fallback", "authored_timing_plan", "authored_stt_word_timing", "authored_onset", "authored_section_cue", "authored_unmatched"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "sourceWordRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["word", "start_us", "end_us"],
+            "properties": {
+              "word": { "type": "string" },
+              "start_us": { "type": "integer", "minimum": 0 },
+              "end_us": { "type": "integer", "minimum": 0 },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "clipMapRefs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "authority": { "enum": ["A1", "legacy-role", "fallback", "authored"] },
+        "offsetMapFingerprint": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "stale": { "type": "boolean" },
+        "triggeredFallback": { "type": "boolean" },
+        "timelineInFrame": { "type": "integer", "minimum": 0 },
+        "timelineDurationFrames": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "authoredTextAuthority": {
+      "type": "object",
+      "required": ["authority", "source_path", "source_sha256", "source_hash", "declared_normalization", "line_ending_mode", "line_count", "body_sha256", "lines"],
+      "properties": {
+        "authority": { "const": "authored" },
+        "source_path": { "type": "string", "minLength": 1 },
+        "source_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "source_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "declared_normalization": { "const": "preserve_bytes" },
+        "line_ending_mode": { "const": "preserved" },
+        "line_count": { "type": "integer", "minimum": 0 },
+        "body_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["line_id", "line_number", "text", "text_sha256"],
+            "properties": {
+              "line_id": { "type": "string", "pattern": "^AL_" },
+              "line_number": { "type": "integer", "minimum": 1 },
+              "text": { "type": "string" },
+              "text_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "authoredTimingAuthority": {
+      "type": "object",
+      "required": ["authority", "source_path", "source_sha256", "source_hash", "declared_normalization", "plan_version", "alignment_version", "confidence_threshold", "cue_count", "matched_count", "pending_count", "unmatched_count", "cues"],
+      "properties": {
+        "authority": { "const": "timing_plan" },
+        "source_path": { "type": "string", "minLength": 1 },
+        "source_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "source_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "declared_normalization": { "const": "preserve_values" },
+        "plan_version": { "type": "string", "minLength": 1 },
+        "alignment_version": { "const": "authored-lyrics-align/v1" },
+        "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cue_count": { "type": "integer", "minimum": 0 },
+        "matched_count": { "type": "integer", "minimum": 0 },
+        "pending_count": { "type": "integer", "minimum": 0 },
+        "unmatched_count": { "type": "integer", "minimum": 0 },
+        "cues": { "type": "array", "items": { "$ref": "#/$defs/authoredTimingCue" } }
+      },
+      "additionalProperties": false
+    },
+    "authoredTimingCue": {
+      "type": "object",
+      "required": ["cue_id", "line_id", "line_number", "status", "confidence", "source_kind", "source_refs", "raw_start_frame", "raw_end_frame", "timeline_in_frame", "timeline_duration_frames", "one_frame_gap_applied", "minimum_display_duration_applied", "cps_before", "cps_after"],
+      "properties": {
+        "cue_id": { "type": "string", "pattern": "^AC_" },
+        "line_id": { "type": "string", "pattern": "^AL_" },
+        "line_number": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["matched", "human_confirmation_pending", "unmatched"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source_kind": { "enum": ["direct_cue", "stt_word_timing", "onset", "section_cue", "unmatched"] },
+        "source_refs": { "type": "array", "items": { "$ref": "#/$defs/authoredSourceRef" } },
+        "raw_start_frame": { "type": "integer", "minimum": 0 },
+        "raw_end_frame": { "type": "integer", "minimum": 1 },
+        "timeline_in_frame": { "type": "integer", "minimum": 0 },
+        "timeline_duration_frames": { "type": "integer", "minimum": 1 },
+        "one_frame_gap_applied": { "type": "boolean" },
+        "minimum_display_duration_applied": { "type": "boolean" },
+        "cps_before": { "type": "number", "minimum": 0 },
+        "cps_after": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "authoredSourceRef": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["timing_plan_cue", "stt_word", "onset", "section_cue"] },
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "start_us": { "type": "number", "minimum": 0 },
+        "end_us": { "type": "number", "minimum": 0 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

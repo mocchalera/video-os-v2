@@ -28,6 +28,18 @@ export const FULL_PIPELINE_CLI_OPTIONS = [
     description: "Context hint for VLM analysis.",
   },
   {
+    flag: "--lyrics",
+    value: "<path>",
+    exampleValue: "lyrics.txt",
+    description: "Authored lyric body; requires --timing-plan and explicit caption approval.",
+  },
+  {
+    flag: "--timing-plan",
+    value: "<path>",
+    exampleValue: "timing-plan.json",
+    description: "Authored caption timing evidence/plan; body text remains authoritative from --lyrics.",
+  },
+  {
     flag: "--from",
     value: "<stage>",
     exampleValue: "QA",

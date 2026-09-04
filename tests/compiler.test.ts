@@ -193,7 +193,31 @@ describe("Timeline Compiler", () => {
         })),
       }));
 
-      const result = compile({ projectPath: mixedProject, createdAt: FIXED_CREATED_AT });
+      const result = compile({
+        projectPath: mixedProject,
+        createdAt: FIXED_CREATED_AT,
+        blueprintOverride: {
+          ...(parseYaml(fs.readFileSync(path.join(mixedProject, "04_plan/edit_blueprint.yaml"), "utf-8")) as any),
+          timeline_operations: [{
+            operation_id: "OP_MIXED_FIXTURE_TAIL",
+            type: "gap",
+            track_id: "V1",
+            start_frame: 48,
+            duration_frames: 48,
+            authority: "operator",
+            reason: "fixture intentionally leaves the unused tail outside the authored visual clip",
+          }],
+          // Issue #6 P0: the authored ambient bed intentionally replaces the
+          // mirrored source audio on A1, so this fixture declares a primary
+          // audio mix policy instead of wall-to-wall A1 coverage.
+          audio_mix_policy: {
+            policy: "primary-audio-mix/v1",
+            mode: "selective_authorization",
+            authority: "operator",
+            reason: "fixture routes the ambient bed over A1 while mirrored talk audio stays off the primary lane",
+          },
+        },
+      });
       expect(result.timeline.tracks.video.find((track) => track.track_id === "V1")?.clips.map((clip) => clip.segment_id)).toEqual(["SEG_VIDEO"]);
       expect(result.timeline.tracks.audio.find((track) => track.track_id === "A3")?.clips.map((clip) => clip.segment_id)).toEqual(["SEG_AUDIO"]);
       const mirrors = result.timeline.tracks.audio.flatMap((track) => track.clips)
@@ -343,11 +367,40 @@ describe("Timeline Compiler", () => {
   });
 
   it("fps_num propagates from --fps option to timeline", () => {
-    const result30 = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT, fpsNum: 30 });
+    const blueprint = parseYaml(fs.readFileSync(path.join(tmpDir, "04_plan/edit_blueprint.yaml"), "utf-8")) as any;
+    const result30 = compile({
+      projectPath: tmpDir,
+      createdAt: FIXED_CREATED_AT,
+      fpsNum: 30,
+      blueprintOverride: {
+        ...blueprint,
+        timeline_operations: [{
+          operation_id: "OP_FPS_FIXTURE_TAIL",
+          type: "gap",
+          track_id: "V1",
+          start_frame: 720,
+          duration_frames: 120,
+          authority: "operator",
+          reason: "fixture intentionally leaves the unused tail outside the authored visual clip",
+        }, {
+          operation_id: "OP_FPS_FIXTURE_TAIL_A1",
+          type: "ambient_continuation",
+          track_id: "A1",
+          start_frame: 720,
+          duration_frames: 120,
+          authority: "operator",
+          reason: "fixture keeps room tone across the intentionally unused audio tail",
+        }],
+      },
+    });
     expect(result30.timeline.sequence.fps_num).toBe(30);
     expect(result30.timeline.sequence.fps_den).toBe(1);
 
-    const result24 = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+    const result24 = compile({
+      projectPath: tmpDir,
+      createdAt: FIXED_CREATED_AT,
+      blueprintOverride: { ...blueprint, timeline_operations: [] },
+    });
     expect(result24.timeline.sequence.fps_num).toBe(24);
   });
 
@@ -733,7 +786,31 @@ describe("Failure paths", () => {
       ],
     });
     try {
-      const result = compile({ projectPath: tmpDir, createdAt: FIXED_CREATED_AT });
+      const blueprint = parseYaml(fs.readFileSync(path.join(tmpDir, "04_plan/edit_blueprint.yaml"), "utf-8")) as any;
+      const result = compile({
+        projectPath: tmpDir,
+        createdAt: FIXED_CREATED_AT,
+      blueprintOverride: {
+        ...blueprint,
+        timeline_operations: [{
+          operation_id: "OP_REQUIRED_ROLE_FIXTURE_TAIL",
+          type: "gap",
+          track_id: "V1",
+          start_frame: 96,
+          duration_frames: 576,
+          authority: "operator",
+          reason: "fixture intentionally leaves the unused tail outside the authored visual clip",
+        }, {
+          operation_id: "OP_REQUIRED_ROLE_FIXTURE_TAIL_A1",
+          type: "ambient_continuation",
+          track_id: "A1",
+          start_frame: 96,
+          duration_frames: 576,
+          authority: "operator",
+          reason: "fixture keeps room tone across the intentionally unused audio tail",
+        }],
+      },
+      });
       const v1 = result.timeline.tracks.video.find((t) => t.track_id === "V1");
       // V1 expects hero clips — should have none since no hero candidates
       const heroClips = v1?.clips.filter((c) => c.role === "hero") ?? [];

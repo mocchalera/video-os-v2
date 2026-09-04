@@ -973,6 +973,7 @@ function validSharedAudioMixReport(
       true_peak_target_dbtp: -1.5,
       premaster_measurement: measurement,
       output_measurement: measurement,
+      stage: "after_mix",
     },
     warnings: [],
   };

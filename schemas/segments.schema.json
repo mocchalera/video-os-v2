@@ -151,6 +151,14 @@
         "avg_luma": { "type": "number", "minimum": 0, "maximum": 1 },
         "dominant_colors": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
         "text_presence": { "type": "string", "enum": ["present", "absent", "unknown", "not_applicable"] },
+        "material_roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["a_roll", "b_roll_action", "b_roll_enactment", "evidence", "archive", "reaction", "texture"]
+          },
+          "uniqueItems": true
+        },
         "confidence": {
           "type": "object",
           "additionalProperties": false,
@@ -406,9 +414,22 @@
                 "type": "string",
                 "enum": ["success", "failed", "skipped"]
               },
-              "message": { "type": "string" }
+              "message": { "type": "string" },
+              "error_kind": {
+                "type": "string",
+                "enum": [
+                  "transport_timeout",
+                  "transport_error",
+                  "json_parse",
+                  "schema_validation"
+                ]
+              }
             }
           }
+        },
+        "author": {
+          "type": "string",
+          "enum": ["llm", "deterministic_fallback", "human", "agent_evidence_synthesis"]
         },
         "fallback_warnings": {
           "type": "array",

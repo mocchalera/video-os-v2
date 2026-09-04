@@ -114,6 +114,7 @@ describe("render pipeline aspect ratio fitting", () => {
       "-c:a", "aac",
       "-b:a", "192k",
       "-ar", "48000",
+      "-ac", "2",
       "final.mp4",
     ]);
   });
@@ -335,20 +336,25 @@ describe("render pipeline aspect ratio fitting", () => {
     } as AudioRenderPlan;
     const executeAudioRenderPlanImpl = vi.fn(async (options) => {
       const outputs = options.outputPaths!;
+      const report = {
+        version: "audio-mix-report/v2",
+        dialogue_finish_scope: "a1_only",
+        mastering_count: 1,
+      };
       for (const outputPath of Object.values(outputs) as string[]) {
         fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-        fs.writeFileSync(outputPath, "shared-audio", "utf8");
+        fs.writeFileSync(
+          outputPath,
+          outputPath === outputs.reportPath ? `${JSON.stringify(report)}\n` : "shared-audio",
+          "utf8",
+        );
       }
       return {
         planHash: `sha256:${"b".repeat(64)}`,
         rawDialoguePath: outputs.rawDialoguePath,
         finalMixPath: outputs.finalMixPath,
         reportPath: outputs.reportPath,
-        report: {
-          version: "audio-mix-report/v2",
-          dialogue_finish_scope: "a1_only",
-          mastering_count: 1,
-        },
+        report,
       };
     });
 
@@ -477,7 +483,7 @@ describe("render pipeline aspect ratio fitting", () => {
       fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
       fs.writeFileSync(layerPath, "alpha");
       fs.writeFileSync(receiptPath, JSON.stringify({
-        version: "remotion-layer-receipt/v2",
+        version: "remotion-layer-receipt/v3",
         renderer: "remotion",
         renderer_version: "4.0.452",
       }));

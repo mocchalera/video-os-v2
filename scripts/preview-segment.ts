@@ -5,6 +5,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { renderBaselineFastPreview } from "../runtime/preview/baseline-fast-preview.js";
 import { renderPreviewSegment } from "../runtime/preview/segment-renderer.js";
 import { generateTimelineOverview } from "../runtime/preview/timeline-overview.js";
 import { loadSourceMap } from "../runtime/media/source-map.js";
@@ -17,10 +18,11 @@ export interface PreviewArgs {
   firstNSec?: number;
   sourceMapPath?: string;
   overviewOnly?: boolean;
+  baselineFast?: boolean;
 }
 
 const USAGE =
-  "Usage: npx tsx scripts/preview-segment.ts <project-path> [--beat <beat-name>] [--first-n-sec 30] [--source-map <file>] [--overview-only]";
+  "Usage: npx tsx scripts/preview-segment.ts <project-path> [--beat <beat-name>] [--first-n-sec 30] [--source-map <file>] [--baseline-fast] [--overview-only]";
 
 export function parseArgs(argv: string[]): PreviewArgs {
   const args = argv.slice(2);
@@ -29,6 +31,7 @@ export function parseArgs(argv: string[]): PreviewArgs {
   let firstNSec: number | undefined;
   let sourceMapPath: string | undefined;
   let overviewOnly = false;
+  let baselineFast = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -46,6 +49,8 @@ export function parseArgs(argv: string[]): PreviewArgs {
       sourceMapPath = args[++i];
     } else if (arg === "--overview-only") {
       overviewOnly = true;
+    } else if (arg === "--baseline-fast") {
+      baselineFast = true;
     } else if (arg.startsWith("-")) {
       throw new Error(`Unknown argument: ${arg}`);
     } else if (!projectPath) {
@@ -59,13 +64,13 @@ export function parseArgs(argv: string[]): PreviewArgs {
     throw new Error("Error: <project-path> is required");
   }
 
-  return { projectPath, beatId, firstNSec, sourceMapPath, overviewOnly };
+  return { projectPath, beatId, firstNSec, sourceMapPath, overviewOnly, baselineFast };
 }
 
 // ── Main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  const { projectPath, beatId, firstNSec, sourceMapPath, overviewOnly } = parseArgs(process.argv);
+  const { projectPath, beatId, firstNSec, sourceMapPath, overviewOnly, baselineFast } = parseArgs(process.argv);
 
   const absProject = path.resolve(projectPath);
   const timelinePath = path.join(absProject, "05_timeline/timeline.json");
@@ -91,8 +96,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Render the preview segment
-  console.log("Rendering preview segment...");
+  // Render the preview segment. The baseline path consumes the same canonical
+  // timeline and existing renderer, but writes an explicit non-final receipt.
+  console.log(baselineFast ? "Rendering baseline fast preview..." : "Rendering preview segment...");
   if (beatId) {
     console.log(`  Beat filter: ${beatId}`);
   }
@@ -100,13 +106,16 @@ async function main(): Promise<void> {
     console.log(`  Duration limit: first ${firstNSec}s`);
   }
 
-  const result = await renderPreviewSegment({
+  const renderOptions = {
     projectDir: absProject,
     timelinePath,
     sourceMap,
     beatId,
     firstNSec,
-  });
+  };
+  const result = baselineFast
+    ? await renderBaselineFastPreview(renderOptions)
+    : await renderPreviewSegment(renderOptions);
 
   console.log(`Preview rendered: ${result.outputPath}`);
   console.log(`  Clips: ${result.clipCount}`);

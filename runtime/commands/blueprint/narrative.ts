@@ -7,12 +7,19 @@ import { buildScriptDraft, type DraftInput } from "../../script/draft.js";
 import { evaluateScript, type EvaluateInput } from "../../script/evaluate.js";
 import type {
   Candidate,
+  CreativeBrief,
   CreativeBriefEditorial,
   EditBlueprint,
   EditorialSummary,
   NormalizedBeat,
+  SelectsCandidates,
 } from "../../artifacts/types.js";
 import { buildDefaultStubBlueprint } from "./stub.js";
+import {
+  evaluateNarrativeArcBlueprintContract,
+  NarrativeArcContractError,
+  type NarrativeArcContractResult,
+} from "../../eval/narrative-arc-contract.js";
 import type {
   BlueprintAgent,
   BlueprintAgentResult,
@@ -36,6 +43,7 @@ interface NarrativeLoopResult {
   confirmResult?: ConfirmResult;
   lastWarnings?: string[];
   errorMessage?: string;
+  contractResult?: NarrativeArcContractResult;
 }
 
 export async function runNarrativeLoop(
@@ -96,7 +104,34 @@ export async function runNarrativeLoop(
     };
   }
 
+  let preApprovalAgentResult: BlueprintAgentResult | undefined;
   if (ctx.autonomyMode === "collaborative" && requireConfirmation) {
+    // Project a read-only provisional blueprint before opening the human
+    // confirmation step. This makes fixed arc violations (for example a
+    // 10-beat draft against a registered 7-beat profile) an approval-time
+    // validation error instead of a compile-time surprise.
+    preApprovalAgentResult = await phases.project(ctx, draftResult, lastEvaluation, frameResult);
+    const contractResult = evaluateNarrativeArcBlueprintContract(
+      ctx.briefContent as CreativeBrief,
+      preApprovalAgentResult.blueprint,
+      ctx.selectsContent as SelectsCandidates,
+    );
+    if (contractResult.status === "fail") {
+      const error = new NarrativeArcContractError(contractResult);
+      return {
+        success: false,
+        errorMessage: error.message,
+        contractResult,
+        loopSummary: {
+          totalIterations: evaluateRejectCount + 1,
+          evaluateRejectCount,
+          humanDeclineCount,
+          finalStatus: "blocked",
+        },
+        evaluateResult: lastEvaluation,
+      };
+    }
+
     lastConfirm = await phases.confirm(ctx, draftResult, lastEvaluation);
     if (lastConfirm.status === "declined") {
       humanDeclineCount++;
@@ -114,7 +149,8 @@ export async function runNarrativeLoop(
     }
   }
 
-  const agentResult = await phases.project(ctx, draftResult, lastEvaluation, frameResult);
+  const agentResult = preApprovalAgentResult
+    ?? await phases.project(ctx, draftResult, lastEvaluation, frameResult);
   return {
     success: true,
     agentResult,

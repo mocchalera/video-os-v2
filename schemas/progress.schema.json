@@ -38,7 +38,11 @@
     },
     "status": {
       "type": "string",
-      "enum": ["running", "completed", "failed", "blocked"]
+      "enum": ["running", "completed", "failed", "blocked", "aborted"]
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 1
     },
     "completed": {
       "type": "integer",
@@ -55,6 +59,10 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "artifact_hashes": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
     "errors": {
       "type": "array",
       "items": {
@@ -68,6 +76,13 @@
     "updated_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "review_identity": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "review_status": {
+      "enum": ["pending", "ready", "failed", "stale"]
     }
   },
   "additionalProperties": false,

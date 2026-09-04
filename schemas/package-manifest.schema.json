@@ -75,6 +75,35 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "source_of_truth": { "const": "nle_finishing" },
+          "provenance": {
+            "properties": { "nle_receipt_required": { "const": true } },
+            "required": ["nle_receipt_required"]
+          }
+        },
+        "required": ["source_of_truth", "provenance"]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "required": ["nle_receipt_required", "route_receipt", "route_evidence"],
+            "properties": {
+              "route_evidence": {
+                "properties": {
+                  "route_kind": { "enum": ["supplied_final", "external_manual_nle"] },
+                  "ownership": { "enum": ["supplied", "external"] },
+                  "canonical_claim": { "const": false }
+                },
+                "required": ["route_kind", "ownership", "canonical_claim"]
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "additionalProperties": false,
@@ -87,6 +116,8 @@
         "raw_video": { "$ref": "#/$defs/artifactRef" },
         "raw_dialogue": { "$ref": "#/$defs/artifactRef" },
         "final_mix": { "$ref": "#/$defs/artifactRef" },
+        "mastered_mp3": { "$ref": "#/$defs/artifactRef" },
+        "audio_mix_report": { "$ref": "#/$defs/artifactRef" },
         "captions": {
           "type": "array",
           "items": { "$ref": "#/$defs/captionArtifactRef" }
@@ -133,8 +164,19 @@
           "type": "string",
           "enum": ["verified", "live_only", "not_applicable"]
         },
-        "source_inputs_freshness_reason": { "type": "string" }
-        ,
+        "source_inputs_freshness_reason": { "type": "string" },
+        "nle_receipt_required": { "const": true },
+        "route_receipt": { "$ref": "#/$defs/artifactRef" },
+        "route_evidence": {
+          "type": "object",
+          "required": ["route_kind", "ownership", "canonical_claim"],
+          "properties": {
+            "route_kind": { "enum": ["canonical_engine_render", "supplied_final", "external_manual_nle"] },
+            "ownership": { "enum": ["canonical", "supplied", "external"] },
+            "canonical_claim": { "type": "boolean" }
+          },
+          "minProperties": 1
+        },
         "render": { "$ref": "#/$defs/renderProvenance" }
       },
       "additionalProperties": false
@@ -215,7 +257,10 @@
           "additionalProperties": false
         },
         "inputs": { "$ref": "#/$defs/renderInputs" },
-        "outputs": { "$ref": "#/$defs/renderOutputs" }
+        "outputs": { "$ref": "#/$defs/renderOutputs" },
+        "route_evidence": { "type": "object", "minProperties": 1 },
+        "caption_visual_treatment": { "$ref": "#/$defs/captionVisualTreatment" },
+        "render_report": { "$ref": "#/$defs/artifactRef" }
       },
       "additionalProperties": false
     },
@@ -224,7 +269,12 @@
       "required": ["timeline"],
       "properties": {
         "timeline": { "$ref": "#/$defs/artifactRef" },
-        "caption_approval": { "$ref": "#/$defs/artifactRef" }
+        "caption_approval": { "$ref": "#/$defs/artifactRef" },
+        "typography_policy": { "$ref": "#/$defs/artifactRef" },
+        "visual_treatment_patch": { "$ref": "#/$defs/artifactRef" },
+        "caption_visual_treatment_input": { "$ref": "#/$defs/artifactRef" },
+        "audio_render_plan": { "$ref": "#/$defs/artifactRef" },
+        "audio_mix_report": { "$ref": "#/$defs/artifactRef" }
       },
       "additionalProperties": false
     },
@@ -233,6 +283,47 @@
       "required": ["final_video"],
       "properties": {
         "final_video": { "$ref": "#/$defs/artifactRef" }
+      },
+      "additionalProperties": false
+    },
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["caption_id", "reason"],
+        "properties": { "caption_id": { "type": "string" }, "reason": { "type": "string" } },
+        "additionalProperties": false
+      }
+    },
+    "captionVisualTreatment": {
+      "type": "object",
+      "required": ["status", "approval_hash", "visual_treatment_patch_hash", "typography_policy_hash", "platform_safe_zone_profile_id", "platform_safe_zone_profile_path", "platform_safe_zone_profile_hash", "accessibility", "text_timing_hash", "capability_hash", "resolved_input_hash", "applied_caption_ids", "degraded_reasons", "blocked_reasons"],
+      "properties": {
+        "status": { "enum": ["ready", "fallback", "human_hold", "blocked"] },
+        "approval_hash": { "$ref": "#/$defs/hash" },
+        "visual_treatment_patch_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "typography_policy_hash": { "$ref": "#/$defs/hash" },
+        "platform_safe_zone_profile_id": { "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "platform_safe_zone_profile_path": { "anyOf": [{ "type": "string", "minLength": 1, "pattern": "^[^/].*$" }, { "type": "null" }] },
+        "platform_safe_zone_profile_hash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "accessibility": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["reduced_motion", "high_contrast", "audio_off", "small_screen"],
+              "properties": { "reduced_motion": { "type": "boolean" }, "high_contrast": { "type": "boolean" }, "audio_off": { "type": "boolean" }, "small_screen": { "type": "boolean" } },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "text_timing_hash": { "$ref": "#/$defs/hash" },
+        "capability_hash": { "$ref": "#/$defs/hash" },
+        "resolved_input_hash": { "$ref": "#/$defs/hash" },
+        "applied_caption_ids": { "type": "array", "items": { "type": "string" } },
+        "degraded_reasons": { "$ref": "#/$defs/reasons" },
+        "blocked_reasons": { "$ref": "#/$defs/reasons" }
       },
       "additionalProperties": false
     }

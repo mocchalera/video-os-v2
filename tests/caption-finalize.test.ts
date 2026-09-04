@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -13,17 +14,17 @@ import {
 import { writeApprovedCaptionDeliveryArtifacts } from "../runtime/caption/delivery-artifacts.js";
 import {
   InvalidActiveDeliveryPointerError,
-  resolveDeliveryArtifactPaths,
+  resolveDeliveryArtifactPathsStrict,
   type ActiveDelivery,
 } from "../runtime/packaging/active-delivery.js";
 import { buildQaReport } from "../runtime/packaging/qa.js";
-import { buildNleFinishingManifest } from "../runtime/packaging/manifest.js";
+import { buildNleFinishingManifest, computeSha256 } from "../runtime/packaging/manifest.js";
 import { computeFileHash } from "../runtime/state/reconcile.js";
 import {
   buildDirectRenderRepairPlan,
   stageDirectRenderOutput,
 } from "../runtime/render/direct-render-staging.js";
-import { packageCommand } from "../runtime/commands/package.js";
+import { packageCommand, type PackageCommandOptions } from "../runtime/commands/package.js";
 import { validateAgainstSchema } from "../runtime/commands/shared.js";
 import { verifyExistingPackage } from "../runtime/packaging/package-verification.js";
 import { runPublicationPreflight } from "../runtime/packaging/publication-preflight.js";
@@ -31,6 +32,7 @@ import { buildPackagePreflight } from "../scripts/package.js";
 import { parseCaptionFinalizeArgs, runCaptionFinalizeCli } from "../scripts/caption-finalize.js";
 import { approveFinalRenderChecklist } from "../runtime/packaging/final-render-approval.js";
 import { writeValidFinalRenderReviewPack } from "./helpers/final-render-review.js";
+import { buildExternalRenderRouteReceipt } from "../runtime/render/route-resolver.js";
 
 const tempDirs: string[] = [];
 
@@ -84,7 +86,7 @@ describe("caption-finalize transaction", () => {
       fontSelectedRole: "ass_heavy" as const,
       fontSelectedSha256: `sha256:${"c".repeat(64)}`,
     };
-    expect(CAPTION_FINALIZE_CONTRACT_VERSION).toBe("v4");
+    expect(CAPTION_FINALIZE_CONTRACT_VERSION).toBe("v5");
     expect(computeGenerationKey(projectDir, base)).not.toBe(computeGenerationKey(projectDir, {
       ...base,
       fontSelectedFamily: "Noto Sans JP",
@@ -105,7 +107,7 @@ describe("caption-finalize transaction", () => {
 
     const result = await runCaptionFinalize(projectDir, {}, { stageRunner: fixtureStageRunner() });
     expect(result.generationId).not.toBe(legacyID);
-    expect(result.receipt.version).toBe("caption-finalize-receipt/v4");
+    expect(result.receipt.version).toBe("caption-finalize-receipt/v5");
     expect(result.receipt.final_render_approval_sha256).toMatch(/^sha256:/);
     expect(result.receipt.generation_key).toMatch(/^sha256:/);
     expect(result.receipt.font_contract).toMatchObject({
@@ -199,13 +201,13 @@ describe("caption-finalize transaction", () => {
       expect(activeHashes(second.activeDelivery)[name], `${name} should refresh`).not.toBe(hash);
     }
     expect(fs.statSync(path.resolve(projectDir, firstIntent)).mode & 0o222).toBe(0);
-    expect(resolveDeliveryArtifactPaths(projectDir, { verifyHashes: true }).finalVideoPath)
+    expect(resolveDeliveryArtifactPathsStrict(projectDir).finalVideoPath)
       .toBe(path.join(second.generationDir, "video", "final.mp4"));
     expect(validateAgainstSchema(second.activeDelivery, "active-delivery.schema.json").valid).toBe(true);
     expect(validateAgainstSchema(second.receipt, "caption-finalize-receipt.schema.json").valid).toBe(true);
   });
 
-  it("preserves the active generation after stage, preflight, and activation write failures", async () => {
+  it("preserves the active generation after stage failures and rejects authority injection", async () => {
     const projectDir = createProject();
     const first = await runCaptionFinalize(projectDir, {}, { stageRunner: fixtureStageRunner() });
     const pointerBefore = fs.readFileSync(first.activeDeliveryPath);
@@ -224,34 +226,34 @@ describe("caption-finalize transaction", () => {
         decision: "blocked",
         issues: ["fixture blocked"],
       }),
-    })).rejects.toThrow("package-preflight/v2 failed");
+    })).rejects.toThrow("packagePreflight is not an authorized runtime seam");
     expect(fs.readFileSync(first.activeDeliveryPath)).toEqual(pointerBefore);
 
     updateCaption(projectDir, "disk failure");
     await expect(runCaptionFinalize(projectDir, {}, {
       stageRunner: fixtureStageRunner(),
       activate: () => { throw new Error("ENOSPC fixture"); },
-    })).rejects.toThrow("ENOSPC fixture");
+    })).rejects.toThrow("activate is not an authorized runtime seam");
     expect(fs.readFileSync(first.activeDeliveryPath)).toEqual(pointerBefore);
-    expect(resolveDeliveryArtifactPaths(projectDir).activeDelivery?.generation_id).toBe(first.generationId);
+    // stale-pointer semantics: the old generation predates the current
+    // approval, so the strict authority now rejects it (fail closed)
+    expect(() => resolveDeliveryArtifactPathsStrict(projectDir)).toThrow(/approval does not match/);
     const recovered = await runCaptionFinalize(projectDir, {}, { stageRunner: fixtureStageRunner() });
-    expect(recovered.reused).toBe(true);
+    expect(recovered.reused).toBe(false);
     expect(recovered.generationId).not.toBe(first.generationId);
     expect(fs.existsSync(first.generationDir)).toBe(true);
   });
 
   it("retries a failed generation and idempotently reuses the completed approval/hash", async () => {
     const projectDir = createProject();
-    const stage = vi.fn(fixtureStageRunner());
     let attempts = 0;
+    const stage = vi.fn(async (context: CaptionFinalizeStageContext) => {
+      if (attempts++ === 0) throw new Error("fixture stage failed before package verification");
+      return fixtureStageRunner()(context);
+    });
     await expect(runCaptionFinalize(projectDir, {}, {
       stageRunner: stage,
-      packagePreflight: () => ({
-        version: "package-preflight/v2",
-        decision: attempts++ === 0 ? "blocked" : "ready_to_run",
-        issues: attempts === 1 ? ["retry"] : [],
-      }),
-    })).rejects.toThrow("package-preflight/v2 failed");
+    })).rejects.toThrow("fixture stage failed before package verification");
 
     const completed = await runCaptionFinalize(projectDir, {}, { stageRunner: stage });
     const activeBeforeBlockedRetry = fs.readFileSync(completed.activeDeliveryPath);
@@ -262,7 +264,7 @@ describe("caption-finalize transaction", () => {
         decision: "blocked",
         issues: ["transient policy block"],
       }),
-    })).rejects.toThrow("refuses to replace generation referenced by the active pointer");
+    })).rejects.toThrow("packagePreflight is not an authorized runtime seam");
     expect(fs.readFileSync(completed.activeDeliveryPath)).toEqual(activeBeforeBlockedRetry);
     expect(fs.existsSync(completed.generationDir)).toBe(true);
     const reused = await runCaptionFinalize(projectDir, {}, { stageRunner: stage });
@@ -288,7 +290,7 @@ describe("caption-finalize transaction", () => {
 
     expect(rebuilt.reused).toBe(false);
     expect(rebuilt.generationId).toBe(completed.generationId);
-    expect(rebuilt.receipt.version).toBe("caption-finalize-receipt/v4");
+    expect(rebuilt.receipt.version).toBe("caption-finalize-receipt/v5");
     expect(stage).toHaveBeenCalledTimes(2);
   });
 
@@ -322,12 +324,12 @@ describe("caption-finalize transaction", () => {
     const projectDir = createProject();
     const legacyFinal = path.join(projectDir, "09_output", "final.mp4");
     writeFile(legacyFinal, "legacy-final");
-    expect(resolveDeliveryArtifactPaths(projectDir).source).toBe("legacy");
+    expect(resolveDeliveryArtifactPathsStrict(projectDir).source).toBe("legacy");
     writeJson(path.join(projectDir, "07_package", "active_delivery.json"), {
       version: "active-delivery/v1",
       generation_id: "broken",
     });
-    expect(() => resolveDeliveryArtifactPaths(projectDir)).toThrow(InvalidActiveDeliveryPointerError);
+    expect(() => resolveDeliveryArtifactPathsStrict(projectDir)).toThrow(InvalidActiveDeliveryPointerError);
     expect(fs.readFileSync(legacyFinal, "utf8")).toBe("legacy-final");
   });
 
@@ -340,6 +342,24 @@ describe("caption-finalize transaction", () => {
 
     await expect(runCaptionFinalize(projectDir, {}, { stageRunner: fixtureStageRunner() }))
       .rejects.toThrow("human approved_by");
+    expect(fs.existsSync(path.join(projectDir, "07_package", "caption-finalize", "intents"))).toBe(false);
+  });
+
+  it("rejects an approval artifact outside the project before staging", async () => {
+    const projectDir = createProject();
+    const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), "caption-finalize-external-"));
+    tempDirs.push(externalDir);
+    const externalApprovalPath = path.join(externalDir, "caption_approval.json");
+    fs.copyFileSync(
+      path.join(projectDir, "07_package", "caption_approval.json"),
+      externalApprovalPath,
+    );
+    const stageRunner = vi.fn(fixtureStageRunner());
+
+    await expect(runCaptionFinalize(projectDir, {
+      approvalPath: externalApprovalPath,
+    }, { stageRunner })).rejects.toThrow("caption approval escaped the project directory");
+    expect(stageRunner).not.toHaveBeenCalled();
     expect(fs.existsSync(path.join(projectDir, "07_package", "caption-finalize", "intents"))).toBe(false);
   });
 
@@ -395,23 +415,41 @@ describe("caption-finalize transaction", () => {
     const base = await runCaptionFinalize(projectDir, {}, {
       stageRunner: fixtureStageRunner(),
     });
-    const legacyReceiptPath = path.join(projectDir, "legacy-v3-caption-receipt.json");
-    const legacyReceipt = JSON.parse(fs.readFileSync(
+    // the input caption-finalize receipt must be CURRENT (v5): v3/v4 inputs
+    // are rejected by verifySuppliedFinalProvenance (downgrade prevention)
+    const legacyReceiptPath = path.join(projectDir, "input-caption-receipt.json");
+    writeJson(legacyReceiptPath, JSON.parse(fs.readFileSync(
       path.join(base.generationDir, "caption-finalize-receipt.json"),
       "utf8",
-    ));
-    legacyReceipt.version = "caption-finalize-receipt/v3";
-    delete legacyReceipt.final_render_approval_sha256;
-    writeJson(legacyReceiptPath, legacyReceipt);
+    )));
+    const baseFinalPath = path.join(base.generationDir, "video", "final.mp4");
+    execFileSync("ffmpeg", [
+      "-v", "error", "-nostdin", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=24:d=1",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-y", baseFinalPath,
+    ]);
+    const currentReceipt = JSON.parse(fs.readFileSync(legacyReceiptPath, "utf8")) as {
+      artifacts: { final_video: { sha256: string } };
+    };
+    currentReceipt.artifacts.final_video.sha256 = computeSha256(baseFinalPath);
+    writeJson(legacyReceiptPath, currentReceipt);
     const supplied = path.join(projectDir, "nle-export.mp4");
-    writeFile(supplied, "fixture-nle-export");
+    fs.copyFileSync(baseFinalPath, supplied);
+    const routeReceiptPath = path.join(projectDir, "nle-route-receipt.json");
+    writeSuppliedRouteReceipt(
+      "caption-finalize-test",
+      path.join(projectDir, "05_timeline", "timeline.json"),
+      supplied,
+      routeReceiptPath,
+    );
 
     const result = await runCaptionFinalize(projectDir, {
-      suppliedFinalPath: supplied,
-      suppliedFinalReceiptPath: legacyReceiptPath,
-      packageOptions: { skipRender: true, precomputedMetrics: fixtureMetrics() },
-    }, {
-      videoStreamHasher: () => `sha256:${"7".repeat(64)}`,
+      suppliedFinalPath: path.relative(projectDir, supplied),
+      suppliedFinalReceiptPath: path.relative(projectDir, legacyReceiptPath),
+      renderRouteReceiptPath: path.relative(projectDir, routeReceiptPath),
+      packageOptions: {
+        skipRender: true,
+        precomputedMetrics: fixtureMetrics(),
+      },
     });
 
     expect(result.reused).toBe(false);
@@ -421,10 +459,43 @@ describe("caption-finalize transaction", () => {
     )).toBe(true);
     expect(result.receipt.artifacts.supplied_final_provenance?.sha256)
       .toMatch(/^sha256:/);
-    expect(fs.readFileSync(path.join(result.generationDir, "video", "final.mp4"), "utf8"))
-      .toBe("fixture-nle-export");
-    expect(resolveDeliveryArtifactPaths(projectDir, { verifyHashes: true }).finalVideoPath)
+    expect(computeSha256(path.join(result.generationDir, "video", "final.mp4")))
+      .toBe(computeSha256(supplied));
+    expect(resolveDeliveryArtifactPathsStrict(projectDir).finalVideoPath)
       .toBe(path.join(result.generationDir, "video", "final.mp4"));
+  });
+
+  it("rejects a v3-downgraded input caption receipt for supplied-final provenance", async () => {
+    const projectDir = createProject();
+    const base = await runCaptionFinalize(projectDir, {}, {
+      stageRunner: fixtureStageRunner(),
+    });
+    const downgradedPath = path.join(projectDir, "downgraded-v3-receipt.json");
+    const downgraded = JSON.parse(fs.readFileSync(
+      path.join(base.generationDir, "caption-finalize-receipt.json"),
+      "utf8",
+    ));
+    downgraded.version = "caption-finalize-receipt/v3";
+    writeJson(downgradedPath, downgraded);
+    const supplied = path.join(projectDir, "nle-export.mp4");
+    writeFile(supplied, "fixture-nle-export");
+    const routeReceiptPath = path.join(projectDir, "nle-route-receipt.json");
+    writeSuppliedRouteReceipt(
+      "caption-finalize-test",
+      path.join(projectDir, "05_timeline", "timeline.json"),
+      supplied,
+      routeReceiptPath,
+    );
+
+    await expect(runCaptionFinalize(projectDir, {
+      suppliedFinalPath: supplied,
+      suppliedFinalReceiptPath: downgradedPath,
+      renderRouteReceiptPath: routeReceiptPath,
+      packageOptions: {
+        skipRender: true,
+        precomputedMetrics: fixtureMetrics(),
+      },
+    }, { stageRunner: fixtureStageRunner() })).rejects.toThrow(); // fail-closed: a v3 input receipt cannot bind the fresh generation
   });
 
   it("rejects a supplied final without caption and font provenance", async () => {
@@ -458,12 +529,10 @@ describe("caption-finalize transaction", () => {
       ),
       packageOptions: { skipRender: true, precomputedMetrics: fixtureMetrics() },
     }, {
-      videoStreamHasher: (filePath) => filePath === supplied
+      videoStreamHasher: (filePath: string) => filePath === supplied
         ? `sha256:${"8".repeat(64)}`
         : `sha256:${"7".repeat(64)}`,
-    })).rejects.toThrow(
-      "supplied final video stream differs from its caption/font provenance generation",
-    );
+    })).rejects.toThrow("not an authorized runtime seam");
     expect(fs.existsSync(base.activeDeliveryPath)).toBe(true);
   });
 
@@ -472,7 +541,7 @@ describe("caption-finalize transaction", () => {
     const finalized = await runCaptionFinalize(projectDir, {}, { stageRunner: fixtureStageRunner() });
     fs.appendFileSync(path.resolve(projectDir, finalized.activeDelivery.artifacts.caption_ass.path), "X");
 
-    expect(() => resolveDeliveryArtifactPaths(projectDir, { verifyHashes: true }))
+    expect(() => resolveDeliveryArtifactPathsStrict(projectDir))
       .toThrow(InvalidActiveDeliveryPointerError);
     expect(verifyExistingPackage(projectDir).ready).toBe(false);
     expect(() => buildPackagePreflight(projectDir)).toThrow(InvalidActiveDeliveryPointerError);
@@ -481,11 +550,7 @@ describe("caption-finalize transaction", () => {
     expect(publication.checks[0]).toMatchObject({ name: "active_delivery_pointer_valid", passed: false });
     const stateBeforePackageGate = fs.readFileSync(path.join(projectDir, "project_state.yaml"), "utf8");
     expect(stateBeforePackageGate).toContain("current_state: approved");
-    await expect(packageCommand(projectDir, {
-      skipRender: true,
-      deferActivation: true,
-      deliveryOutputDir: path.join(projectDir, "07_package", "caption-finalize", "tamper-gate"),
-    }))
+    await expect(packageCommand(projectDir, { skipRender: true }))
       .rejects.toThrow(InvalidActiveDeliveryPointerError);
     expect(fs.readFileSync(path.join(projectDir, "project_state.yaml"), "utf8"))
       .toBe(stateBeforePackageGate);
@@ -550,20 +615,22 @@ describe("caption-finalize transaction", () => {
     writeFile(path.join(generationDir, "captions", "speech.vtt"), "WEBVTT\n");
     const suppliedFinal = path.join(projectDir, "direct-source.mp4");
     writeFile(suppliedFinal, "fixture-direct-source");
+    const routeReceiptPath = path.join(projectDir, "nle-route-receipt.json");
+    writeSuppliedRouteReceipt(
+      "caption-finalize-test",
+      path.join(projectDir, "05_timeline", "timeline.json"),
+      suppliedFinal,
+      routeReceiptPath,
+    );
 
-    const result = await packageCommand(projectDir, {
+    await expect(packageCommand(projectDir, {
       suppliedFinalPath: suppliedFinal,
-      deliveryOutputDir: generationDir,
-      captionApprovalPath: path.join(projectDir, "07_package", "caption_approval.json"),
-      deferActivation: true,
+      renderRouteReceiptPath: routeReceiptPath,
       skipRender: true,
       precomputedMetrics: fixtureMetrics(),
-    });
+    } as PackageCommandOptions)).rejects.toThrow(/unknown option|renderRouteReceiptPath/);
 
-    expect(result.success, JSON.stringify(result)).toBe(true);
-    expect(fs.existsSync(path.join(generationDir, "package_manifest.json"))).toBe(true);
-    expect(fs.readFileSync(path.join(generationDir, "music_cues.json"), "utf8"))
-      .toContain("stale-generation-copy");
+    expect(fs.existsSync(path.join(generationDir, "package_manifest.json"))).toBe(false);
   });
 });
 
@@ -601,6 +668,43 @@ function fixtureStageRunner(): (context: CaptionFinalizeStageContext) => Promise
     const text = context.approval.speech_captions.map((caption) => caption.text).join("|");
     const finalPath = path.join(context.generationDir, "video", "final.mp4");
     writeFile(finalPath, `fixture-final:${text}`);
+    const timelinePath = path.join(context.projectDir, "05_timeline", "timeline.json");
+    const handoffArtifact = { path: "handoff/nle-notes.md", sha256: `sha256:${"a".repeat(64)}` };
+    // the finalize binds its own route evidence (copied from
+    // renderRouteReceiptPath); the fixture only supplies a route when the
+    // finalize did not
+    const routeReceiptPath = path.join(context.generationDir, "logs", "render-route.json");
+    if (!fs.existsSync(routeReceiptPath)) writeJson(routeReceiptPath, buildExternalRenderRouteReceipt({
+      version: "external-route-metadata/v1",
+      project_id: context.approval.project_id,
+      route_kind: "external_manual_nle",
+      source_identity: {
+        timeline: { path: timelinePath, sha256: computeSha256(timelinePath) },
+        source_inputs_hash: computeSha256(timelinePath),
+        source_assets: [],
+      },
+      output: { path: finalPath, sha256: computeSha256(finalPath) },
+      geometry: { width: 1920, height: 1080, fps_num: 30, fps_den: 1001 },
+      caption: {
+        approval: { path: context.approvalIntentPath, sha256: computeSha256(context.approvalIntentPath) },
+        approval_status: "approved",
+        text_timing_hash: computeSha256(context.approvalIntentPath),
+        burn_render_owner: "none",
+        requested_animations: [],
+        unsupported_animations: [],
+        capability_status: "not_applicable",
+        decision: "not_applicable",
+      },
+      required_handoff_artifacts: [handoffArtifact],
+      handoff: {
+        status: "confirmed",
+        human_owner: "operator",
+        human_approval_status: "approved",
+        artifacts: [handoffArtifact],
+      },
+      agent_qa: { status: "passed" },
+      human_approval: { status: "approved", owner: "operator" },
+    }));
     const approvalHash = computeFileHash(context.approvalIntentPath);
     const qaPath = path.join(context.generationDir, "qa-report.json");
     const qa = buildQaReport(
@@ -621,11 +725,42 @@ function fixtureStageRunner(): (context: CaptionFinalizeStageContext) => Promise
       captionPolicy: context.approval.caption_policy,
       finalVideoPath: finalPath,
       qaReportPath: qaPath,
+      routeReceiptPath,
       sidecarPaths: [path.join(context.generationDir, "captions", "speech.approved.srt")],
       createdAt: context.createdAt,
     });
     writeJson(path.join(context.generationDir, "package_manifest.json"), manifest);
   };
+}
+
+function writeSuppliedRouteReceipt(
+  projectId: string,
+  timelinePath: string,
+  outputPath: string,
+  receiptPath: string,
+): void {
+  const handoffArtifact = { path: "handoff/nle-notes.md", sha256: `sha256:${"a".repeat(64)}` };
+  writeJson(receiptPath, buildExternalRenderRouteReceipt({
+    version: "external-route-metadata/v1",
+    project_id: projectId,
+    route_kind: "supplied_final",
+    source_identity: {
+      timeline: { path: timelinePath, sha256: computeSha256(timelinePath) },
+      source_inputs_hash: computeSha256(timelinePath),
+      source_assets: [],
+    },
+    output: { path: outputPath, sha256: computeSha256(outputPath) },
+    geometry: { width: 1920, height: 1080, fps_num: 30, fps_den: 1001 },
+    required_handoff_artifacts: [handoffArtifact],
+    handoff: {
+      status: "confirmed",
+      human_owner: "operator",
+      human_approval_status: "approved",
+      artifacts: [handoffArtifact],
+    },
+    agent_qa: { status: "passed" },
+    human_approval: { status: "approved", owner: "operator" },
+  }));
 }
 
 function fixtureMetrics() {

@@ -1,0 +1,42 @@
+{
+  "version": "private-pilot-gate-receipt/v1",
+  "pilot_id": "PILOT_RFA016_PENDING",
+  "project_id": "rfa-016-pending",
+  "gate": "human_visual_audio",
+  "requirement": "required",
+  "status": "pending",
+  "decision": "hold",
+  "evidence": {
+    "record_type": "human_visual_audio",
+    "summary": "Human visual and audio approval has not been recorded.",
+    "recorded_at": "2026-08-22T00:00:00Z",
+    "recorded_by": "synthetic-fixture",
+    "artifacts": [
+      { "path": "evidence-human.json", "sha256": "sha256:4025657a3a5fbd29340298f2e38445d6864f8d9f48636ae5003b0131c7b41b50" }
+    ],
+    "human_review": {
+      "reviewed": false,
+      "reviewer": "pending",
+      "visual": false,
+      "audio": false,
+      "decision": "pending"
+    }
+  },
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "pending-metadata",
+    "captured_at": "2026-08-22T00:00:00Z",
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:1fcb423d2644bba0cf1d7dd177bf7336af5bedefa2f1d1614739bf91dd88f246" },
+      { "path": "evidence-human.json", "sha256": "sha256:4025657a3a5fbd29340298f2e38445d6864f8d9f48636ae5003b0131c7b41b50" }
+    ],
+    "synthetic_fixture": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-08-22T00:00:00Z",
+    "input_fingerprint": "sha256:a5fb47f5ffac96b43c03a12f0b5576de2d1e17cd77297b7753a6621a8643e123",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "reason": "fixture inputs are hash-bound and current"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "version": "private-pilot-manifest/v1",
+  "pilot_id": "PILOT_RFA016_READY_SYNTHETIC",
+  "project_id": "rfa-016-ready-synthetic",
+  "created_at": "2026-08-22T00:00:00Z",
+  "receipts": [
+    { "gate": "agent_qa", "path": "receipts/agent-qa.json", "sha256": "sha256:fb179d406e2e2ed722e8da90e5d5dbf4cd06290f73fa19d3ed233959f6fc13f2" },
+    { "gate": "human_visual_audio", "path": "receipts/human-visual-audio.json", "sha256": "sha256:da03c52003585680e948592d1ebd3a1ad19fff1a54f878a2f517da73706cffbd" },
+    { "gate": "nle_handoff", "path": "receipts/nle-handoff.json", "sha256": "sha256:dd32d7ae55c0a042b7e467aa765b9fec9dbe26e9b3949ea5446bc6067d63f546" },
+    { "gate": "platform_preview", "path": "receipts/platform-preview.json", "sha256": "sha256:bc53e9b4c2280ef1dec57d69982314822e30f75aa641eb46d7d372c9b7449572" }
+  ],
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "metadata-only-pilot-index",
+    "synthetic_fixture": true,
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:5cf5e994cc07f0c4701454c8798a61be5b6f962cca356f7e8a896721b489be54" }
+    ]
+  },
+  "public_promotion": "out_of_scope"
+}

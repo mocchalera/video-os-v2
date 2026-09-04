@@ -1,0 +1,8 @@
+version: "1"
+policy: creator-short-kickoff-phrases/v1
+phrases:
+  - 行ってきます
+  - いってきます
+  - やってみた
+  - スタート
+  - 始めます

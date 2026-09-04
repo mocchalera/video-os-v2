@@ -24,6 +24,26 @@ function copyProject(): string {
   const project = path.join(root, "sample");
   fs.cpSync(SAMPLE_PROJECT, project, { recursive: true });
   fs.rmSync(path.join(project, "05_timeline", "timeline.json"), { force: true });
+  const blueprintPath = path.join(project, "04_plan", "edit_blueprint.yaml");
+  const blueprint = parseYaml(fs.readFileSync(blueprintPath, "utf8")) as Record<string, unknown>;
+  blueprint.timeline_operations = [{
+    operation_id: "OP_MUSIC_CUE_FIXTURE_TAIL",
+    type: "gap",
+    track_id: "V1",
+    start_frame: 720,
+    duration_frames: 119,
+    authority: "operator",
+    reason: "fixture intentionally leaves the unselected tail outside the authored visual clips",
+  }, {
+    operation_id: "OP_MUSIC_CUE_FIXTURE_TAIL_A1",
+    type: "ambient_continuation",
+    track_id: "A1",
+    start_frame: 720,
+    duration_frames: 119,
+    authority: "operator",
+    reason: "fixture keeps room tone across the intentionally unused audio tail",
+  }];
+  fs.writeFileSync(blueprintPath, stringifyYaml(blueprint));
   return project;
 }
 

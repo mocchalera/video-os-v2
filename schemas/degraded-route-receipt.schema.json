@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "degraded-route-receipt.schema.json",
+  "title": "Review-only degraded route receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version", "project_id", "replaced_canonical", "reason", "input", "output",
+    "actor", "created_at", "scope", "production_approval"
+  ],
+  "properties": {
+    "version": { "const": "degraded-route-receipt/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "replaced_canonical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "capability"],
+      "properties": {
+        "command": { "const": "npx tsx scripts/caption-review.ts visual-author-preview --project <project>" },
+        "capability": { "const": "caption-visual-treatment-preview/v1" }
+      }
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "input": { "$ref": "#/$defs/artifact" },
+    "output": { "$ref": "#/$defs/artifact" },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "tool"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "tool": { "const": "video-os-project-output-writer/v1" }
+      }
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "scope": { "const": "review_only_degraded" },
+    "production_approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "path", "sha256"],
+      "properties": {
+        "status": { "const": "unchanged" },
+        "path": { "const": "07_package/caption_approval.json" },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+  }
+}

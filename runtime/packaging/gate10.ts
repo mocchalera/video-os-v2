@@ -11,6 +11,15 @@ import {
   reviewVisualQAGateReason,
   type ReviewVisualQAGateReport,
 } from "../review/visual-qa.js";
+import {
+  canSubstituteBlockedOptionalVlmVisualQA,
+  hasCompleteOptionalVlmGateContext,
+  loadProjectOptionalVlmCapability,
+  optionalVlmPolicyGateReason,
+  type OptionalVlmCapability,
+  type OptionalVlmPolicyArtifact,
+  type OptionalVlmGateContext,
+} from "../review/optional-vlm-policy.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -56,6 +65,9 @@ export interface Gate10Options {
   } | null;
   reviewReport?: Gate10ReviewReport | null;
   visualQaApplicable?: boolean;
+  optionalVlmCapability?: Pick<OptionalVlmCapability, "requirement"> | null;
+  optionalVlmPolicy?: OptionalVlmPolicyArtifact | null;
+  optionalVlmContext?: OptionalVlmGateContext;
 }
 
 function buildAutoHandoffResolution(
@@ -211,11 +223,39 @@ export function checkGate10(projectState: {
       );
     }
 
+    if (options?.optionalVlmCapability?.requirement === "required" && !options.optionalVlmPolicy) {
+      errors.push("required visual_model capability policy is missing");
+    }
+    let optionalVlmVisualSubstitution = false;
+    if (options?.optionalVlmPolicy) {
+      if (options.optionalVlmCapability
+        && options.optionalVlmPolicy.capability.requirement !== options.optionalVlmCapability.requirement) {
+        errors.push("optional_vlm_policy capability declaration does not match the profile");
+      }
+      if (!hasCompleteOptionalVlmGateContext(options.optionalVlmContext)) {
+        errors.push("optional_vlm_policy current review-ready identity is missing");
+      } else {
+        if (options.reviewReport.visual_qa?.video_hash !== options.optionalVlmContext.video_sha256
+          || options.reviewReport.visual_qa?.timeline_hash !== options.optionalVlmContext.timeline_sha256) {
+          errors.push("optional_vlm_policy review_report identity is missing or stale");
+        }
+        const optionalVlmReason = optionalVlmPolicyGateReason(
+          options.optionalVlmPolicy,
+          options.optionalVlmContext,
+        );
+        if (optionalVlmReason) errors.push(optionalVlmReason);
+        optionalVlmVisualSubstitution = canSubstituteBlockedOptionalVlmVisualQA(
+          options.reviewReport.visual_qa,
+          options.optionalVlmPolicy,
+          options.optionalVlmContext,
+        );
+      }
+    }
     const visualReason = reviewVisualQAGateReason(
       options.reviewReport,
       options.visualQaApplicable ?? true,
     );
-    if (visualReason) {
+    if (visualReason && !optionalVlmVisualSubstitution) {
       errors.push(visualReason);
     }
   }

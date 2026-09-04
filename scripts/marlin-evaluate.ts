@@ -181,6 +181,7 @@ export async function runMarlinEvaluate(options: MarlinEvaluateOptions): Promise
       marlinFn,
       model,
       queries: marlinQueriesFromEnvironment(projectDir, repoRoot),
+      repoRoot,
       skipExisting: options.skipExisting,
       maxSources: options.maxSources,
       captionOnly: options.captionOnly,

@@ -6,6 +6,7 @@
 export {
   DEFAULT_VLM_CONCURRENCY,
   DEFAULT_VLM_RETRY_POLICY,
+  VLM_M2_MAX_PROVIDER_REQUESTS,
   hydrateCachedVlmSegments,
   mapWithConcurrency,
   runParallelVlmAnalysis,

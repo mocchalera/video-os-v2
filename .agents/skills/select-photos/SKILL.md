@@ -39,6 +39,8 @@ metadata:
 
 ## 推奨出力構成
 
+<!-- artifact-producer: agent -->
+
 ```text
 projects/<project>/
 ├── 02_media/
@@ -46,8 +48,8 @@ projects/<project>/
 ├── 03_analysis/
 │   ├── contact_sheets/            # 全体確認用
 │   ├── photo_metrics.json         # sharpness / exposure などの簡易指標
-│   ├── album_select_contact_sheet.jpg
-│   ├── digest_highlights_contact_sheet.jpg
+│   ├── album_select_contact_sheet_*.jpg
+│   ├── digest_highlights_contact_sheet_*.jpg
 │   ├── low_sharpness_review.jpg   # ブレ/甘ピン疑いの再確認用
 │   ├── eye_review/                # 顔クロップ/目つぶり確認用
 │   └── swap_candidates/           # 差し替え候補の前後連番シート
@@ -77,6 +79,12 @@ projects/<project>/
 - 40 枚前後ごとに 1 シートにすると、場面の流れと重複を見やすい。
 - 写真そのものは加工せず、contact sheet は確認用派生物として `03_analysis/contact_sheets/` に置く。
 
+```bash
+python .agents/skills/select-photos/scripts/make_contact_sheets.py \
+  --input projects/<project>/02_media/originals \
+  --output-dir projects/<project>/03_analysis/contact_sheets
+```
+
 ### Step 3: 品質指標を作って低品質候補を拾う
 
 最低限、以下を `photo_metrics.json` に記録する。
@@ -95,6 +103,7 @@ projects/<project>/
 python .agents/skills/select-photos/scripts/photo_quality_scan.py \
   --input projects/<project>/02_media/originals \
   --output projects/<project>/03_analysis/photo_metrics.json \
+  --review-dir projects/<project>/03_analysis \
   --eye-review-dir projects/<project>/03_analysis/eye_review
 ```
 
@@ -142,6 +151,16 @@ manifest から delivery を作る場合は `scripts/materialize_selection.py` �
 python .agents/skills/select-photos/scripts/materialize_selection.py \
   --project projects/<project> \
   --manifest projects/<project>/04_plan/photo_selection_manifest.json
+
+python .agents/skills/select-photos/scripts/make_contact_sheets.py \
+  --input projects/<project>/05_delivery/album_select \
+  --output-dir projects/<project>/03_analysis \
+  --prefix album_select_contact_sheet
+
+python .agents/skills/select-photos/scripts/make_contact_sheets.py \
+  --input projects/<project>/05_delivery/digest_highlights \
+  --output-dir projects/<project>/03_analysis \
+  --prefix digest_highlights_contact_sheet
 ```
 
 ### Step 6.5: 目つぶり/表情の差し替え確認を標準で行う
@@ -153,6 +172,13 @@ python .agents/skills/select-photos/scripts/materialize_selection.py \
 - 差し替える場合は、単体のピント/表情だけでなく、イベントの流れと人物の重複も確認する。
 - 差し替えたら `photo_selection_manifest.json` に `eye_recheck_replacements` を残す。
 - 差し替え前後の確認シートを作る。
+
+```bash
+python .agents/skills/select-photos/scripts/make_swap_candidates.py \
+  --input projects/<project>/02_media/originals \
+  --output-dir projects/<project>/03_analysis/swap_candidates \
+  --candidates <comma-separated-filenames>
+```
 
 ### Step 7: 品質チェックして報告する
 
@@ -166,10 +192,12 @@ python .agents/skills/select-photos/scripts/materialize_selection.py \
 
 ## 出力 artifact
 
+<!-- artifact-producer: agent -->
+
 - `03_analysis/contact_sheets/*.jpg`
 - `03_analysis/photo_metrics.json`
-- `03_analysis/album_select_contact_sheet.jpg`
-- `03_analysis/digest_highlights_contact_sheet.jpg`
+- `03_analysis/album_select_contact_sheet_*.jpg`
+- `03_analysis/digest_highlights_contact_sheet_*.jpg`
 - `03_analysis/low_sharpness_review.jpg`
 - `03_analysis/eye_review/*.jpg`
 - `03_analysis/swap_candidates/*.jpg`

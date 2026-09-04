@@ -1,4 +1,5 @@
 export * from "./review/index.js";
+export * from "./review-patch.js";
 
 import * as fs from "node:fs";
 import * as path from "node:path";

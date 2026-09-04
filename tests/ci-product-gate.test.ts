@@ -1,81 +1,52 @@
 import { describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 
-const requiredJobs = [
-  "node-runtime",
-  "schema-contract",
-  "speech-led-contract",
-  "event-recap-contract",
-  "repo-hygiene",
-  "editor-server",
-  "agent-definitions",
-  "macos-studio",
-  "render-integration",
-] as const;
-
-const resultEnvironment = [
-  "NODE_RUNTIME",
-  "SCHEMA_CONTRACT",
-  "SPEECH_LED_CONTRACT",
-  "EVENT_RECAP_CONTRACT",
-  "REPO_HYGIENE",
-  "EDITOR_SERVER",
-  "AGENT_DEFINITIONS",
-  "MACOS_STUDIO",
-  "RENDER_INTEGRATION",
-] as const;
-
-interface ProductGateStep {
+interface WorkflowStep {
   name?: string;
-  env?: Record<string, string>;
   run?: string;
 }
 
-interface ProductGateJob {
+interface WorkflowJob {
+  name?: string;
+  "runs-on"?: string;
   if?: string;
   needs?: string[];
-  steps?: ProductGateStep[];
+  steps?: WorkflowStep[];
 }
 
-const workflowPath = path.resolve(".github/workflows/ci.yml");
-const workflow = parseYaml(fs.readFileSync(workflowPath, "utf8")) as {
-  jobs?: Record<string, ProductGateJob>;
-};
+const workflow = parseYaml(
+  fs.readFileSync(path.resolve(".github/workflows/ci.yml"), "utf8"),
+) as { jobs?: Record<string, WorkflowJob> };
 const productGate = workflow.jobs?.["product-gate"];
-const gateStep = productGate?.steps?.find((step) => step.name === "Require every product boundary");
+const steps = productGate?.steps ?? [];
 
-function runProductGate(overrides: Partial<Record<(typeof resultEnvironment)[number], string>> = {}) {
-  if (!gateStep?.run) throw new Error("CI product-gate script is missing");
-
-  const env = { ...process.env } as Record<string, string>;
-  for (const key of resultEnvironment) env[key] = overrides[key] ?? "success";
-  return spawnSync("bash", ["-c", gateStep.run], { env, encoding: "utf8" });
-}
-
-describe("CI product gate contract", () => {
-  it("depends on every maintained product boundary and runs even after failures", () => {
-    expect(productGate?.if).toBe("${{ always() }}");
-    expect(productGate?.needs).toEqual(requiredJobs);
-    expect(Object.keys(gateStep?.env ?? {})).toEqual(resultEnvironment);
+describe("PR fast product gate contract", () => {
+  it("is a single direct required-check candidate with no skipped dependencies", () => {
+    expect(Object.keys(workflow.jobs ?? {})).toEqual(["product-gate"]);
+    expect(productGate?.if).toBeUndefined();
+    expect(productGate?.needs).toBeUndefined();
+    expect(productGate?.name).toBe("PR fast product gate");
+    expect(productGate?.["runs-on"]).toBe("ubuntu-24.04");
   });
 
-  it("passes only when every required boundary succeeds", () => {
-    const result = runProductGate();
+  it("uses one root install and keeps full-suite/render work out of PRs", () => {
+    expect(steps.filter((step) => step.run === "npm ci")).toHaveLength(1);
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Product gate passed");
+    const runText = steps.map((step) => step.run ?? "").join("\n");
+    expect(runText).toContain("npm run validate");
+    expect(runText).toContain("npm run verify:skill-contracts");
+    expect(runText).toContain("npm run test:schema-contract");
+    expect(runText).toContain("npm run test:speech-led-contract");
+    expect(runText).toContain("npm run test:event-recap-contract");
+    expect(runText).toContain("npm run verify:studio-contracts");
+    expect(runText).toContain("npm run verify:repo");
+    expect(runText).toContain("npm run verify:agents");
+    expect(runText).toContain("npm run build");
+    expect(runText).not.toContain("--shard");
+    expect(runText).not.toContain("test:render-integration");
+    expect(runText).not.toContain("npm --prefix editor ci");
+    expect(runText).not.toContain("swift test");
   });
-
-  for (const nonSuccess of ["failure", "cancelled", "skipped"] as const) {
-    it(`blocks every boundary when its result is ${nonSuccess}`, () => {
-      for (const key of resultEnvironment) {
-        const result = runProductGate({ [key]: nonSuccess });
-        expect(result.status, `${key}=${nonSuccess}`).toBe(1);
-        expect(result.stdout, `${key}=${nonSuccess}`).toContain("Product gate blocked");
-      }
-    });
-  }
 });

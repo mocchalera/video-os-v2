@@ -367,8 +367,35 @@
         "issues": {
           "type": "array",
           "items": { "$ref": "#/$defs/deterministicOutputQAIssue" }
-        }
+        },
+        "scans": { "$ref": "#/$defs/deterministicOutputQAScans" }
       },
+      "additionalProperties": false
+    },
+    "deterministicOutputQAScans": {
+      "type": "object",
+      "required": ["decode", "black", "freeze", "layout_inset"],
+      "properties": {
+        "decode": { "type": "object", "required": ["status"], "properties": { "status": { "enum": ["complete", "incomplete"] } }, "additionalProperties": false },
+        "black": { "$ref": "#/$defs/deterministicOutputQAScan" },
+        "freeze": { "$ref": "#/$defs/deterministicOutputQAScan" },
+        "layout_inset": { "$ref": "#/$defs/deterministicOutputQAScan" }
+      },
+      "additionalProperties": false
+    },
+    "deterministicOutputQAScan": {
+      "type": "object",
+      "required": ["status", "detections"],
+      "properties": {
+        "status": { "enum": ["complete", "incomplete"] },
+        "detections": { "type": "array", "items": { "$ref": "#/$defs/deterministicOutputQADetection" } }
+      },
+      "additionalProperties": false
+    },
+    "deterministicOutputQADetection": {
+      "type": "object",
+      "required": ["start_sec", "end_sec"],
+      "properties": { "start_sec": { "type": "number", "minimum": 0 }, "end_sec": { "type": "number", "minimum": 0 } },
       "additionalProperties": false
     },
     "deterministicOutputQAIssue": {

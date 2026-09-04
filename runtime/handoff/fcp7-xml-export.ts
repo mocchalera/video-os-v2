@@ -48,6 +48,8 @@ export interface Fcp7ExportOptions {
   timelineVersion?: string;
   /** Receipt-bound Premiere roundtrip session ID */
   roundtripId?: string;
+  /** Hash of the canonical export identity sidecar, carried as non-authoritative XML metadata. */
+  exportIdentityHash?: string;
   /** Sample rate for audio (default: 48000) */
   sampleRate?: number;
   /** Audio bit depth (default: 16) */
@@ -563,6 +565,11 @@ class ExportContext {
     lines.push(`    </media>`);
     lines.push(`  </sequence>`);
     lines.push(`</xmeml>`);
+    if (this.opts.exportIdentityHash) {
+      // Keep the legacy header and marker order byte-compatible; this is
+      // non-authoritative metadata and the sidecar remains canonical.
+      lines.push(`<!-- Video OS v2 | export_identity: ${this.escXml(this.opts.exportIdentityHash)} -->`);
+    }
     lines.push(``);
 
     return lines.join("\n");
@@ -877,6 +884,12 @@ class ExportContext {
 
     switch (transition.transition_type) {
       case "crossfade":
+      // Issue #34 presets: Premiere has no native light-leak/blur dissolve,
+      // so handoff uses the closest NLE transition (Cross Dissolve) instead
+      // of silently dropping the A/B overlap.
+      case "film_crossfade":
+      case "light_leak_flash":
+      case "dreamy_focus_blur":
         return { name: "Cross Dissolve", effectId: "CrossDissolve" };
       case "match_cut":
         return { name: "Dip to Color", effectId: "DipToColor" };

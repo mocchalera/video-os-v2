@@ -9,6 +9,7 @@ import {
   validateProject,
   type ValidationResult,
 } from "../scripts/validate-schemas.js";
+import { assertGeneratedTimelineValid } from "../runtime/compiler/index.js";
 
 const SAMPLE_PROJECT = "projects/sample";
 
@@ -143,6 +144,26 @@ describe("validate-schemas", () => {
       expect(result.profile).toBe("manual-render");
       expect(result.violations).toHaveLength(0);
     });
+
+    it("fails closed when the explicit canonical timeline schema is missing or invalid", () => {
+      for (const [name, schemaContent] of [
+        ["missing", undefined],
+        ["invalid", "{ invalid json"],
+      ] as const) {
+        const project = createTempProject(`canonical-schema-${name}`, {});
+        const schemaRoot = fs.mkdtempSync(path.join(os.tmpdir(), `video-os-canonical-schema-${name}-`));
+        const schemaDir = path.join(schemaRoot, "schemas");
+        copyDirSync(path.resolve("schemas"), schemaDir);
+        tempDirs.push(project, schemaRoot);
+        const timelineSchema = path.join(schemaDir, "timeline-ir.schema.json");
+        if (schemaContent === undefined) fs.rmSync(timelineSchema);
+        else fs.writeFileSync(timelineSchema, schemaContent, "utf-8");
+
+        expect(() => assertGeneratedTimelineValid(project, schemaRoot)).toThrow(
+          "Generated timeline.json has validation issues",
+        );
+      }
+    });
   });
 
   // ── 2. src_in_us < src_out_us invariant ──────────────────────────
@@ -251,6 +272,34 @@ describe("validate-schemas", () => {
       );
       expect(astViolations.length).toBeGreaterThanOrEqual(1);
       expect(astViolations[0].message).toContain("AST_FAKE");
+    });
+
+    it("rejects duplicate candidate IDs and blueprint refs to rejected or ineligible candidates", () => {
+      const selects = parseYaml(
+        fs.readFileSync(path.resolve(SAMPLE_PROJECT, "04_plan/selects_candidates.yaml"), "utf-8"),
+      );
+      const blueprint = parseYaml(
+        fs.readFileSync(path.resolve(SAMPLE_PROJECT, "04_plan/edit_blueprint.yaml"), "utf-8"),
+      );
+      selects.candidates[0].candidate_id = "cand_duplicate";
+      selects.candidates[1].candidate_id = "cand_duplicate";
+      selects.candidates[0].role = "reject";
+      selects.candidates[0].eligible_beats = ["b04"];
+      blueprint.beats[0].candidate_plan = {
+        primary_candidate_ref: "cand_duplicate",
+        fallback_candidate_refs: [],
+      };
+
+      const tmp = createTempProject("candidate-ref-integrity", {
+        "04_plan/selects_candidates.yaml": selects,
+        "04_plan/edit_blueprint.yaml": blueprint,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+      expect(result.violations.some((v) => v.rule === "candidate_id_unique")).toBe(true);
+      expect(result.violations.some((v) => v.rule === "blueprint_candidate_ref_non_reject")).toBe(true);
+      expect(result.violations.some((v) => v.rule === "blueprint_candidate_ref_eligible")).toBe(true);
     });
   });
 
@@ -620,6 +669,56 @@ describe("validate-schemas", () => {
       const violations = result.violations.filter((v) => v.rule === "timeline_asset_id_in_source_map");
       expect(violations).toHaveLength(1);
       expect(violations[0].message).toContain("AST_MISSING");
+    });
+
+    it("does not treat an existing empty source_map as an integrity bypass", () => {
+      const timeline = makeTimeline([makeClip({ asset_id: "AST_MISSING" })]);
+      const tmp = createTempProject("tl-source-map-empty", {
+        "05_timeline/timeline.json": timeline,
+        "02_media/source_map.json": {
+          version: "1",
+          project_id: "sample-mountain-reset",
+          media_dir: "02_media",
+          generated_at: "2026-07-09T00:00:00.000Z",
+          items: [],
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+      expect(result.violations.some((v) => v.rule === "timeline_asset_id_in_source_map")).toBe(true);
+      expect(result.violations.some((v) => v.rule === "segment_asset_id_in_source_map")).toBe(true);
+      expect(result.violations.some((v) => v.rule === "asset_id_in_source_map")).toBe(true);
+    });
+
+    it("rejects timeline clips whose segment is missing or mapped to a different asset", () => {
+      const timeline = makeTimeline([
+        makeClip({ clip_id: "CLP_MISSING_SEG", segment_id: "SEG_DOES_NOT_EXIST" }),
+        makeClip({ clip_id: "CLP_ASSET_MISMATCH", asset_id: "AST_001", timeline_in_frame: 120 }),
+      ]);
+      const tmp = createTempProject("tl-segment-integrity", {
+        "05_timeline/timeline.json": timeline,
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+      expect(result.violations.some((v) => v.rule === "timeline_segment_id_exists")).toBe(true);
+      expect(result.violations.some((v) => v.rule === "timeline_segment_asset_match")).toBe(true);
+    });
+
+    it("validates timeline assets against the supported legacy analysis source_map", () => {
+      const tmp = createTempProject("tl-legacy-source-map", {
+        "05_timeline/timeline.json": makeTimeline([makeClip({ asset_id: "AST_005" })]),
+        "03_analysis/source_map.json": {
+          version: "1",
+          project_id: "sample-mountain-reset",
+          items: [{ asset_id: "AST_OTHER" }],
+        },
+      });
+      tempDirs.push(tmp);
+
+      const result = validateProject(tmp);
+      expect(result.violations.some((v) => v.rule === "timeline_asset_id_in_source_map")).toBe(true);
     });
 
     it("accepts authored synthetic assets on an overlay track", () => {

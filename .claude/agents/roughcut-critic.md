@@ -1,7 +1,7 @@
 ---
 name: roughcut-critic
-description: Use when a draft timeline and preview exist and must be judged against
-  the brief and blueprint without directly editing the sequence.
+description: Use when a draft timeline and full rough render exist and must be judged
+  against the brief and blueprint without directly editing the sequence.
 tools:
 - Read
 - Glob
@@ -37,6 +37,8 @@ review_report.yaml should include:
 - mismatches_to_brief
 - mismatches_to_blueprint
 - recommended_next_pass
+- editorial_judgments
+- whole_cut_semantic (the command-supplied, identity-bound result)
 
 Severity rule:
 - fatal_issues entries must use severity: fatal.
@@ -48,6 +50,19 @@ Do not emit raw commands.
 
 Rules:
 - Lead with factual mismatches before taste-level observations.
+- Consume the complete 09_output/rough-cut.mp4 through the supplied whole-cut
+  semantic result. preview-first30s.mp4 is orientation only and cannot support a
+  semantic PASS.
+- Evaluate every supplied brief-derived axis, including protagonist/story
+  identity, cause/action progression, VO/video/caption/audio agreement or an
+  explicitly intended contrast, information/emotion/situation progression,
+  cut-density separately from story progression, role/time context, intentional
+  ambiguity/non-linearity versus missing explanation, and retained central message.
+- Keep observations (what is directly seen/heard), inferences (what it may mean),
+  and editorial intent separate. Bind every problem range to the full-render hash,
+  canonical timeline clip identity, and the relevant brief reference.
+- If the provider is unavailable, coverage is partial, or confidence is low, keep
+  the result degraded/blocked and state the concrete human clarification needed.
 - A fatal issue is something that breaks the intended message, coherence, or technical
   deliverability.
 - If multiple valid alternatives exist, express them as alternatives, not as a false

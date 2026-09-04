@@ -14,7 +14,14 @@ import * as path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { captionCommand, approveCaptions } from "../runtime/commands/caption.js";
+import { computeCaptionCps } from "../runtime/caption/segmenter.js";
+import { validateAgainstSchema } from "../runtime/commands/shared.js";
 import { packageCommand } from "../runtime/commands/package.js";
+import {
+  buildExternalRenderRouteReceipt,
+  type ExternalRouteMetadata,
+} from "../runtime/render/route-resolver.js";
+import { computeSha256 } from "../runtime/packaging/manifest.js";
 import {
   computeFileHash,
   reconcile,
@@ -306,6 +313,43 @@ function restampApproval(
   });
 }
 
+function writeNleRouteReceipt(
+  projectDir: string,
+  finalVideoPath: string,
+  routeKind: "supplied_final" | "external_manual_nle" = "supplied_final",
+): string {
+  const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
+  const handoffNote = {
+    path: "handoff/nle-notes.md",
+    sha256: `sha256:${"a".repeat(64)}`,
+  };
+  const metadata: ExternalRouteMetadata = {
+    version: "external-route-metadata/v1",
+    project_id: "sample-mountain-reset",
+    route_kind: routeKind,
+    source_identity: {
+      timeline: { path: timelinePath, sha256: computeSha256(timelinePath) },
+      source_inputs_hash: computeSha256(timelinePath),
+      source_assets: [],
+    },
+    output: { path: finalVideoPath, sha256: computeSha256(finalVideoPath) },
+    geometry: { width: 1920, height: 1080, fps_num: 24, fps_den: 1 },
+    required_handoff_artifacts: [handoffNote],
+    handoff: {
+      status: "confirmed",
+      human_owner: "operator",
+      human_approval_status: "approved",
+      artifacts: [handoffNote],
+    },
+    agent_qa: { status: "passed" },
+    human_approval: { status: "approved", owner: "operator" },
+  };
+  const receiptPath = path.join(projectDir, "07_package/logs/render-route.json");
+  fs.mkdirSync(path.dirname(receiptPath), { recursive: true });
+  fs.writeFileSync(receiptPath, `${JSON.stringify(buildExternalRenderRouteReceipt(metadata), null, 2)}\n`, "utf-8");
+  return receiptPath;
+}
+
 // ── Caption Command E2E ──────────────────────────────────────────
 
 describe("M4 E2E: captionCommand", () => {
@@ -356,7 +400,7 @@ describe("M4 E2E: captionCommand", () => {
       approvedAt: "2026-03-21T11:00:00Z",
     });
 
-    expect(approvalResult.success).toBe(true);
+    expect(approvalResult.success, approvalResult.error?.message).toBe(true);
     expect(approvalResult.captionApproval).toBeDefined();
     expect(approvalResult.captionApproval!.approval.status).toBe("approved");
     expect(approvalResult.captionApproval!.approval.approved_by).toBe("test-operator");
@@ -367,6 +411,63 @@ describe("M4 E2E: captionCommand", () => {
 
     // Verify timeline was updated
     expect(approvalResult.timelineUpdated).toBe(true);
+  });
+
+  it("approval projection preserves draft lineage and timing provenance", () => {
+    const projDir = createM4Project("caption-provenance", { captionSource: "transcript" });
+    const draftResult = captionCommand(projDir);
+    expect(draftResult.success).toBe(true);
+    const draft = JSON.parse(fs.readFileSync(path.join(projDir, "07_package/caption_draft.json"), "utf-8"));
+    draft.speech_captions = draft.speech_captions.slice(0, 1);
+    const caption = draft.speech_captions[0];
+    draft.draft_status = "ready_for_human_approval";
+    caption.timeline_in_frame = 0;
+    caption.timeline_duration_frames = 60;
+    caption.metrics = { dwell_ms: 2500, cps: Math.round(computeCaptionCps(caption.text, 2500, draft.caption_policy.language) * 100) / 100 };
+    caption.timing = {
+      source: "offset_map",
+      confidence: 1,
+      triggeredFallback: false,
+      timelineInFrame: 0,
+      timelineDurationFrames: 60,
+      offsetMapFingerprint: "sha256:" + "a".repeat(64),
+      authority: "A1",
+    };
+    fs.writeFileSync(path.join(projDir, "07_package/caption_draft.json"), JSON.stringify(draft, null, 2), "utf-8");
+    const approvalResult = approveCaptions(projDir, { approvedBy: "test-operator", approvedAt: "2026-03-21T11:00:00Z" });
+    expect(approvalResult.success, approvalResult.error?.message).toBe(true);
+    expect(approvalResult.captionApproval!.version).toBe(draft.version);
+    for (const draftCaption of draft.speech_captions) {
+      const approvedCaption = approvalResult.captionApproval!.speech_captions.find((caption) => caption.caption_id === draftCaption.caption_id);
+      expect(approvedCaption).toBeDefined();
+      expect(approvedCaption).toMatchObject({
+        root_id: draftCaption.root_id,
+        parent_ids: draftCaption.parent_ids,
+        lineage_hash: draftCaption.lineage_hash,
+        timing: draftCaption.timing,
+      });
+    }
+  });
+
+  it("production Offset Engine drafts are v2 and reject corrupted timing", () => {
+    const projDir = createM4Project("caption-v2-contract", { captionSource: "transcript" });
+    const result = captionCommand(projDir);
+    expect(result.success).toBe(true);
+    expect(result.captionDraft?.version).toBe("caption-draft/v2");
+
+    const draftPath = path.join(projDir, "07_package/caption_draft.json");
+    const draft = JSON.parse(fs.readFileSync(draftPath, "utf-8"));
+    expect(validateAgainstSchema(draft, "caption-draft.schema.json").valid).toBe(true);
+    draft.speech_captions[0].timing.authority = "garbage";
+    expect(validateAgainstSchema(draft, "caption-draft.schema.json").valid).toBe(false);
+    fs.writeFileSync(draftPath, JSON.stringify(draft, null, 2), "utf-8");
+
+    const approvalResult = approveCaptions(projDir, {
+      approvedBy: "test-operator",
+      approvedAt: "2026-03-21T11:00:00Z",
+    });
+    expect(approvalResult.success).toBe(false);
+    expect(approvalResult.error?.message).toContain("Caption draft validation failed");
   });
 });
 
@@ -446,6 +547,7 @@ describe("M4 E2E: packageCommand", () => {
       "mock-nle-video-data",
       "utf-8",
     );
+    writeNleRouteReceipt(projDir, path.join(videoDir, "final.mp4"));
 
     // Run caption command
     const capResult = captionCommand(projDir, {
@@ -486,6 +588,69 @@ describe("M4 E2E: packageCommand", () => {
     );
     const finalState = parseYaml(stateRaw) as { current_state: string };
     expect(finalState.current_state).toBe("packaged");
+  });
+
+  it("blocks a newly generated NLE package when the route receipt is missing", async () => {
+    const projDir = createM4Project("pkg-nle-missing-receipt", {
+      sourceOfTruth: "nle_finishing",
+      captionSource: "none",
+    });
+    const videoDir = path.join(projDir, "07_package/video");
+    fs.mkdirSync(videoDir, { recursive: true });
+    fs.writeFileSync(path.join(videoDir, "final.mp4"), "mock-nle-video-data", "utf-8");
+    const capResult = captionCommand(projDir, {
+      approvedBy: "operator",
+      approvedAt: "2026-03-21T11:00:00Z",
+    });
+    expect(capResult.success).toBe(true);
+    restampApproval(projDir, "nle_finishing");
+
+    await expect(packageCommand(projDir, {
+      skipRender: true,
+      precomputedMetrics: {
+        integratedLufs: -16,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 30000,
+        audioDurationMs: 30002,
+        videoFrame: MATCHING_VIDEO_FRAME,
+      },
+    })).rejects.toThrow("nle_route_receipt_required");
+    expect((parseYaml(fs.readFileSync(path.join(projDir, "project_state.yaml"), "utf-8")) as { current_state: string }).current_state)
+      .toBe("approved");
+  });
+
+  it("blocks an external NLE package when the receipt output hash differs", async () => {
+    const projDir = createM4Project("pkg-nle-external-mismatch", {
+      sourceOfTruth: "nle_finishing",
+      captionSource: "none",
+    });
+    const videoDir = path.join(projDir, "07_package/video");
+    fs.mkdirSync(videoDir, { recursive: true });
+    const finalPath = path.join(videoDir, "final.mp4");
+    fs.writeFileSync(finalPath, "mock-external-nle-video-data", "utf-8");
+    const receiptPath = writeNleRouteReceipt(projDir, finalPath, "external_manual_nle");
+    const tamperedReceipt = JSON.parse(fs.readFileSync(receiptPath, "utf-8")) as { outputs: { final_video: { sha256: string } } };
+    tamperedReceipt.outputs.final_video.sha256 = `sha256:${"f".repeat(64)}`;
+    fs.writeFileSync(receiptPath, `${JSON.stringify(tamperedReceipt, null, 2)}\n`, "utf-8");
+    const capResult = captionCommand(projDir, {
+      approvedBy: "operator",
+      approvedAt: "2026-03-21T11:00:00Z",
+    });
+    expect(capResult.success).toBe(true);
+    restampApproval(projDir, "nle_finishing");
+
+    await expect(packageCommand(projDir, {
+      skipRender: true,
+      precomputedMetrics: {
+        integratedLufs: -16,
+        truePeakDbtp: -1.8,
+        videoDurationMs: 30000,
+        audioDurationMs: 30002,
+        videoFrame: MATCHING_VIDEO_FRAME,
+      },
+    })).rejects.toThrow("nle_route_receipt_must_bind_supplied_or_external_final");
+    expect((parseYaml(fs.readFileSync(path.join(projDir, "project_state.yaml"), "utf-8")) as { current_state: string }).current_state)
+      .toBe("approved");
   });
 
   it("fails if QA fails (bad LUFS)", async () => {

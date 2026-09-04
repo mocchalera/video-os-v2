@@ -1,0 +1,1195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ai-music-mastering-receipt.schema.json",
+  "title": "AI music mastering receipt (Issue #38)",
+  "description": "Evidence receipt for the dedicated AI-generated-music mastering chain: tone filters, optional EBU R128 two-pass loudnorm at the internal SNS target (-13.3 LUFS; loudnorm processes at the separate -2.0 dBTP processing true-peak target while acceptance verifies TP <= -1.0 dBTP), and fail-closed acceptance verification including clipping evidence. Mastered receipts carry the shipped Issue #38 policy values and measured deliverables inside the acceptance band (-13.8..-12.8 LUFS, TP <= -1.0 dBTP); the verification block is pinned to the measured deliverable by the semantic integrity validator instead of duplicated numeric bounds. Failed receipts keep out-of-band evidence. Run-time policy overrides of the contract fields are rejected fail-fast before any processing.",
+  "type": "object",
+  "required": [
+    "version",
+    "state",
+    "route",
+    "policy",
+    "filter_chain",
+    "measurement_filter_chain",
+    "apply_filter_chain",
+    "tool_availability",
+    "input_audio",
+    "output_audio",
+    "mp3_output_audio",
+    "premaster_raw_measurement",
+    "output_raw_measurement",
+    "mp3_raw_measurement",
+    "output_measurement",
+    "mp3_measurement",
+    "premaster_headroom",
+    "output_clipping",
+    "mp3_output_clipping",
+    "verification",
+    "mp3_verification",
+    "shared_mastering",
+    "human_audition",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "ai-music-mastering-receipt/v1"
+    },
+    "state": {
+      "enum": [
+        "mastered",
+        "tone_conditioned",
+        "verification_failed"
+      ]
+    },
+    "route": {
+      "enum": [
+        "standalone_sns_master",
+        "source_premaster"
+      ]
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
+    "filter_chain": {
+      "type": "string",
+      "minLength": 1
+    },
+    "measurement_filter_chain": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "apply_filter_chain": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tool_availability": {
+      "$ref": "#/$defs/toolAvailability"
+    },
+    "input_audio": {
+      "$ref": "#/$defs/audioEvidence"
+    },
+    "output_audio": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/audioEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mp3_output_audio": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/audioEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "premaster_raw_measurement": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rawMeasurement"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output_raw_measurement": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rawMeasurement"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mp3_raw_measurement": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rawMeasurement"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output_measurement": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/measurement"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mp3_measurement": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/measurement"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "premaster_headroom": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/premasterHeadroom"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output_clipping": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/clippingEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mp3_output_clipping": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/clippingEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verification": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/verification"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "mp3_verification": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/verification"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "shared_mastering": {
+      "type": "object",
+      "required": [
+        "single_final_mastering_owner",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "single_final_mastering_owner": {
+          "const": "shared_audio_render_plan"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "human_audition": {
+      "type": "object",
+      "required": [
+        "required",
+        "status",
+        "method",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "const": true
+        },
+        "status": {
+          "const": "pending"
+        },
+        "method": {
+          "const": "human_audition"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "tone_conditioned"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "route": {
+            "const": "source_premaster"
+          },
+          "measurement_filter_chain": {
+            "type": "null"
+          },
+          "apply_filter_chain": {
+            "type": "null"
+          },
+          "premaster_raw_measurement": {
+            "type": "null"
+          },
+          "output_raw_measurement": {
+            "type": "null"
+          },
+          "mp3_raw_measurement": {
+            "type": "null"
+          },
+          "output_measurement": {
+            "type": "null"
+          },
+          "mp3_measurement": {
+            "type": "null"
+          },
+          "premaster_headroom": {
+            "type": "null"
+          },
+          "output_clipping": {
+            "type": "null"
+          },
+          "mp3_output_clipping": {
+            "type": "null"
+          },
+          "verification": {
+            "type": "null"
+          },
+          "mp3_verification": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "mastered"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "route": {
+                "const": "standalone_sns_master"
+              },
+              "policy": {
+                "$ref": "#/$defs/issue38ShippedPolicy"
+              },
+              "measurement_filter_chain": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "apply_filter_chain": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "premaster_raw_measurement": {
+                "$ref": "#/$defs/rawMeasurement"
+              },
+              "output_raw_measurement": {
+                "$ref": "#/$defs/rawMeasurement"
+              },
+              "output_measurement": {
+                "$ref": "#/$defs/acceptanceMeasurement"
+              },
+              "premaster_headroom": {
+                "$ref": "#/$defs/premasterHeadroom"
+              },
+              "output_clipping": {
+                "$ref": "#/$defs/clippingEvidenceClean"
+              }
+            },
+            "required": [
+              "measurement_filter_chain",
+              "apply_filter_chain",
+              "premaster_raw_measurement",
+              "output_raw_measurement",
+              "output_measurement",
+              "premaster_headroom",
+              "output_clipping"
+            ]
+          },
+          {
+            "if": {
+              "properties": {
+                "policy": {
+                  "type": "object",
+                  "properties": {
+                    "encode_mp3_320": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "encode_mp3_320"
+                  ]
+                }
+              },
+              "required": [
+                "policy"
+              ]
+            },
+            "then": {
+              "properties": {
+                "mp3_output_audio": {
+                  "$ref": "#/$defs/audioEvidence"
+                },
+                "mp3_raw_measurement": {
+                  "$ref": "#/$defs/rawMeasurement"
+                },
+                "mp3_measurement": {
+                  "$ref": "#/$defs/acceptanceMeasurement"
+                },
+                "mp3_output_clipping": {
+                  "$ref": "#/$defs/clippingEvidenceClean"
+                },
+                "mp3_verification": {
+                  "$ref": "#/$defs/verificationPassed"
+                }
+              },
+              "required": [
+                "mp3_output_audio",
+                "mp3_raw_measurement",
+                "mp3_measurement",
+                "mp3_output_clipping",
+                "mp3_verification"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "policy": {
+                  "type": "object",
+                  "properties": {
+                    "encode_mp3_320": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "encode_mp3_320"
+                  ]
+                }
+              },
+              "required": [
+                "policy"
+              ]
+            },
+            "then": {
+              "properties": {
+                "mp3_output_audio": {
+                  "type": "null"
+                },
+                "mp3_raw_measurement": {
+                  "type": "null"
+                },
+                "mp3_measurement": {
+                  "type": "null"
+                },
+                "mp3_output_clipping": {
+                  "type": "null"
+                },
+                "mp3_verification": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "verification": {
+                "$ref": "#/$defs/verificationPassed"
+              }
+            },
+            "required": [
+              "verification"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "verification_failed"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "route": {
+                "const": "standalone_sns_master"
+              },
+              "measurement_filter_chain": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "apply_filter_chain": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "premaster_raw_measurement": {
+                "$ref": "#/$defs/rawMeasurement"
+              },
+              "output_raw_measurement": {
+                "$ref": "#/$defs/rawMeasurement"
+              },
+              "output_measurement": {
+                "$ref": "#/$defs/measurement"
+              },
+              "premaster_headroom": {
+                "$ref": "#/$defs/premasterHeadroom"
+              },
+              "output_clipping": {
+                "$ref": "#/$defs/clippingEvidence"
+              }
+            },
+            "required": [
+              "measurement_filter_chain",
+              "apply_filter_chain",
+              "premaster_raw_measurement",
+              "output_raw_measurement",
+              "output_measurement",
+              "premaster_headroom",
+              "output_clipping"
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "properties": {
+                  "verification": {
+                    "$ref": "#/$defs/verificationFailed"
+                  }
+                },
+                "required": [
+                  "verification"
+                ]
+              },
+              {
+                "properties": {
+                  "mp3_verification": {
+                    "$ref": "#/$defs/verificationFailed"
+                  }
+                },
+                "required": [
+                  "mp3_verification"
+                ]
+              },
+              {
+                "properties": {
+                  "output_clipping": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "full_scale_samples_present"
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  }
+                },
+                "required": [
+                  "output_clipping"
+                ]
+              },
+              {
+                "properties": {
+                  "mp3_output_clipping": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "const": "full_scale_samples_present"
+                      }
+                    },
+                    "required": [
+                      "status"
+                    ]
+                  }
+                },
+                "required": [
+                  "mp3_output_clipping"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mp3_verification": {
+            "$ref": "#/$defs/verificationPresent"
+          }
+        },
+        "required": [
+          "mp3_verification"
+        ]
+      },
+      "then": {
+        "properties": {
+          "mp3_output_audio": {
+            "$ref": "#/$defs/audioEvidence"
+          },
+          "mp3_raw_measurement": {
+            "$ref": "#/$defs/rawMeasurement"
+          },
+          "mp3_measurement": {
+            "$ref": "#/$defs/measurement"
+          },
+          "mp3_output_clipping": {
+            "$ref": "#/$defs/clippingEvidence"
+          }
+        },
+        "required": [
+          "mp3_output_audio",
+          "mp3_raw_measurement",
+          "mp3_measurement",
+          "mp3_output_clipping"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "route",
+        "loudness_target_lufs",
+        "lra_target",
+        "true_peak_target_dbtp",
+        "processing_true_peak_target_dbtp",
+        "loudness_tolerance_lufs",
+        "highpass_hz",
+        "mud_cut_hz",
+        "mud_cut_q",
+        "mud_cut_gain_db",
+        "low_tight_hz",
+        "low_tight_q",
+        "low_tight_gain_db",
+        "presence_hz",
+        "presence_q",
+        "presence_gain_db",
+        "air_hz",
+        "air_q",
+        "air_gain_db",
+        "stereo_width",
+        "encode_mp3_320"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "enum": [
+            "standalone_sns_master",
+            "source_premaster"
+          ]
+        },
+        "loudness_target_lufs": {
+          "type": "number"
+        },
+        "lra_target": {
+          "type": "number"
+        },
+        "true_peak_target_dbtp": {
+          "type": "number"
+        },
+        "processing_true_peak_target_dbtp": {
+          "type": "number"
+        },
+        "loudness_tolerance_lufs": {
+          "type": "number"
+        },
+        "highpass_hz": {
+          "type": "number"
+        },
+        "mud_cut_hz": {
+          "type": "number"
+        },
+        "mud_cut_q": {
+          "type": "number"
+        },
+        "mud_cut_gain_db": {
+          "type": "number"
+        },
+        "low_tight_hz": {
+          "type": "number"
+        },
+        "low_tight_q": {
+          "type": "number"
+        },
+        "low_tight_gain_db": {
+          "type": "number"
+        },
+        "presence_hz": {
+          "type": "number"
+        },
+        "presence_q": {
+          "type": "number"
+        },
+        "presence_gain_db": {
+          "type": "number"
+        },
+        "air_hz": {
+          "type": "number"
+        },
+        "air_q": {
+          "type": "number"
+        },
+        "air_gain_db": {
+          "type": "number"
+        },
+        "stereo_width": {
+          "type": "number"
+        },
+        "encode_mp3_320": {
+          "type": "boolean"
+        }
+      }
+    },
+    "toolAvailability": {
+      "type": "object",
+      "required": [
+        "available",
+        "ffmpeg",
+        "ffprobe",
+        "filters",
+        "encoders",
+        "missing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "ffmpeg": {
+          "enum": [
+            "available",
+            "unavailable"
+          ]
+        },
+        "ffprobe": {
+          "enum": [
+            "available",
+            "unavailable"
+          ]
+        },
+        "filters": {
+          "type": "object",
+          "required": [
+            "mcompand",
+            "extrastereo",
+            "loudnorm",
+            "equalizer",
+            "highpass"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mcompand": {
+              "enum": [
+                "available",
+                "unavailable"
+              ]
+            },
+            "extrastereo": {
+              "enum": [
+                "available",
+                "unavailable"
+              ]
+            },
+            "loudnorm": {
+              "enum": [
+                "available",
+                "unavailable"
+              ]
+            },
+            "equalizer": {
+              "enum": [
+                "available",
+                "unavailable"
+              ]
+            },
+            "highpass": {
+              "enum": [
+                "available",
+                "unavailable"
+              ]
+            }
+          }
+        },
+        "encoders": {
+          "type": "object",
+          "required": [
+            "pcm_s24le",
+            "libmp3lame"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "pcm_s24le": {
+              "enum": [
+                "available",
+                "unavailable"
+              ]
+            },
+            "libmp3lame": {
+              "enum": [
+                "available",
+                "unavailable"
+              ]
+            }
+          }
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "tool",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "tool": {
+              "enum": [
+                "ffmpeg",
+                "ffprobe"
+              ]
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "audioEvidence": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256",
+        "duration_ms",
+        "channel_count",
+        "sample_rate_hz",
+        "codec_name",
+        "bit_depth",
+        "bit_rate_bps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "duration_ms": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "channel_count": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sample_rate_hz": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "codec_name": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bit_depth": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bit_rate_bps": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "rawMeasurement": {
+      "type": "object",
+      "required": [
+        "input_i",
+        "input_tp",
+        "input_lra",
+        "input_thresh",
+        "target_offset"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "input_i": {
+          "type": "string"
+        },
+        "input_tp": {
+          "type": "string"
+        },
+        "input_lra": {
+          "type": "string"
+        },
+        "input_thresh": {
+          "type": "string"
+        },
+        "target_offset": {
+          "type": "string"
+        }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "required": [
+        "integrated_lufs",
+        "true_peak_dbtp",
+        "lra_lu"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "integrated_lufs": {
+          "type": "number"
+        },
+        "true_peak_dbtp": {
+          "type": "number"
+        },
+        "lra_lu": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "required": [
+        "method",
+        "integrated_lufs_target",
+        "integrated_lufs_tolerance",
+        "true_peak_limit_dbtp",
+        "integrated_lufs",
+        "true_peak_dbtp",
+        "integrated_lufs_within_target",
+        "true_peak_within_limit",
+        "status",
+        "notes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "ffmpeg_loudnorm_pass1_on_output"
+        },
+        "integrated_lufs_target": {
+          "type": "number"
+        },
+        "integrated_lufs_tolerance": {
+          "type": "number"
+        },
+        "true_peak_limit_dbtp": {
+          "type": "number"
+        },
+        "integrated_lufs": {
+          "type": "number"
+        },
+        "true_peak_dbtp": {
+          "type": "number"
+        },
+        "integrated_lufs_within_target": {
+          "type": "boolean"
+        },
+        "true_peak_within_limit": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_applicable"
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "clippingEvidence": {
+      "type": "object",
+      "required": [
+        "status",
+        "peak_sample_db",
+        "basis",
+        "method"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "no_clipping",
+            "full_scale_samples_present",
+            "unavailable"
+          ]
+        },
+        "peak_sample_db": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1
+        },
+        "method": {
+          "const": "ffmpeg_astats_peak_level"
+        }
+      }
+    },
+    "clippingEvidenceClean": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/clippingEvidence"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "no_clipping"
+            }
+          }
+        }
+      ]
+    },
+    "premasterHeadroom": {
+      "type": "object",
+      "required": [
+        "pre_limiter_true_peak_dbtp",
+        "full_scale_exceeded_pre_limiter",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pre_limiter_true_peak_dbtp": {
+          "type": "number"
+        },
+        "full_scale_exceeded_pre_limiter": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "verificationPresent": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "verificationPassed": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/verification"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "passed"
+            }
+          }
+        }
+      ]
+    },
+    "verificationFailed": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/verification"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "failed"
+            }
+          }
+        }
+      ]
+    },
+    "issue38ShippedPolicy": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/policy"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "loudness_target_lufs": {
+              "const": -13.3
+            },
+            "lra_target": {
+              "const": 11
+            },
+            "true_peak_target_dbtp": {
+              "const": -1.0
+            },
+            "processing_true_peak_target_dbtp": {
+              "const": -2.0
+            },
+            "loudness_tolerance_lufs": {
+              "const": 0.5
+            }
+          }
+        }
+      ]
+    },
+    "acceptanceMeasurement": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/measurement"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "integrated_lufs": {
+              "type": "number",
+              "minimum": -13.8,
+              "maximum": -12.8
+            },
+            "true_peak_dbtp": {
+              "type": "number",
+              "maximum": -1.0
+            }
+          }
+        }
+      ]
+    }
+  }
+}

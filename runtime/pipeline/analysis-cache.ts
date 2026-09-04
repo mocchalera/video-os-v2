@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { sha256FileHex } from "../source-content-identity.js";
+import { ArtifactValidationError, validateArtifact } from "../artifacts/loaders.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -20,6 +21,70 @@ export interface CacheManifestEntry {
   cached_at: string;
   source_path: string;
   source_content_sha256?: string;
+}
+
+export interface AnalysisCacheEligibility {
+  eligible: boolean;
+  violations: Array<{ artifact: string; rule: string; message: string }>;
+}
+
+interface CanonicalAssetsDocument {
+  items: Array<{ asset_id: string }>;
+}
+
+interface CanonicalSegmentsDocument {
+  items: Array<{ asset_id: string }>;
+}
+
+/** Cache reuse is allowed only when both canonical analysis artifacts validate. */
+export function inspectAnalysisCacheEligibility(projectDir: string): AnalysisCacheEligibility {
+  const required = new Set([
+    "03_analysis/assets.json",
+    "03_analysis/segments.json",
+  ]);
+  for (const artifact of required) {
+    if (!fs.existsSync(path.join(projectDir, artifact))) {
+      return {
+        eligible: false,
+        violations: [{ artifact, rule: "cache_artifact_missing", message: `Required cache artifact not found: ${artifact}` }],
+      };
+    }
+  }
+  const violations: AnalysisCacheEligibility["violations"] = [];
+  let assets: CanonicalAssetsDocument | undefined;
+  let segments: CanonicalSegmentsDocument | undefined;
+  for (const artifact of required) {
+    try {
+      const value = JSON.parse(fs.readFileSync(path.join(projectDir, artifact), "utf-8")) as unknown;
+      validateArtifact(value, artifact.endsWith("assets.json") ? "assets.schema.json" : "segments.schema.json");
+      if (artifact.endsWith("assets.json")) {
+        assets = value as CanonicalAssetsDocument;
+      } else {
+        segments = value as CanonicalSegmentsDocument;
+      }
+    } catch (error) {
+      violations.push({
+        artifact,
+        rule: error instanceof SyntaxError ? "parse_error" : "schema",
+        message: error instanceof ArtifactValidationError
+          ? error.validationErrors.join("; ")
+          : error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (assets && segments) {
+    const segmentAssetIds = new Set(segments.items.map((segment) => segment.asset_id));
+    for (const asset of assets.items) {
+      if (!segmentAssetIds.has(asset.asset_id)) {
+        violations.push({
+          artifact: "03_analysis/segments.json",
+          rule: "asset_segments_complete",
+          message: `Canonical asset ${asset.asset_id} has no segment records`,
+        });
+      }
+    }
+  }
+  return { eligible: violations.length === 0, violations };
 }
 
 // ── Hash ───────────────────────────────────────────────────────────

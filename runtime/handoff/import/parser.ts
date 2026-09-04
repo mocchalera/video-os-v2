@@ -9,21 +9,21 @@ import {
 } from "../export.js";
 import type { NormalizedClip } from "./index.js";
 
-interface NormalizedOtioDocument {
+export interface NormalizedOtioDocument {
   project_id: string;
   handoff_id: string;
   timeline_version: string;
   clips: NormalizedClip[];
 }
 
-interface NormalizeOtioSuccess {
+export interface NormalizeOtioSuccess {
   ok: true;
   document: NormalizedOtioDocument;
   fingerprint: BridgeFingerprint;
   warnings: string[];
 }
 
-interface NormalizeOtioFailure {
+export interface NormalizeOtioFailure {
   ok: false;
   error: {
     message: string;
@@ -43,7 +43,7 @@ interface NormalizeOtioFailure {
   };
 }
 
-type NormalizeOtioResult = NormalizeOtioSuccess | NormalizeOtioFailure;
+export type NormalizeOtioResult = NormalizeOtioSuccess | NormalizeOtioFailure;
 
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];

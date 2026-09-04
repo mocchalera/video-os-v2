@@ -19,6 +19,12 @@ import {
 import { getReconcileStatus } from "../services/reconcile-status.js";
 import { getTimelineValidator } from "../middleware/validation.js";
 import type { ProjectSyncSource } from "../services/watch-hub.js";
+import {
+  assertHookTimelineMutationAllowed,
+  HookLockViolationError,
+  hookLockStatus,
+} from "../../../runtime/compiler/hook-lock.js";
+import type { TimelineIR } from "../../../runtime/compiler/types.js";
 
 export type NotifyWriteFn = (
   projectId: string,
@@ -58,6 +64,32 @@ export function createTimelineRouter(
   ensureWatch?: EnsureWatchFn,
 ): Router {
   const router = Router();
+
+  // GET /api/projects/:id/timeline/hook-lock
+  // The status is derived from canonical timeline provenance; Studio does not
+  // maintain a second lock or fingerprint authority.
+  router.get("/:id/timeline/hook-lock", (req, res) => {
+    const projectId = req.params.id as string;
+    const projDir = safeProjectDir(projectsDir, projectId);
+    if (!projDir) {
+      res.status(400).json({ error: "Invalid project ID" });
+      return;
+    }
+    const timelinePath = path.join(projDir, "05_timeline", "timeline.json");
+    if (!fs.existsSync(timelinePath)) {
+      res.status(404).json({ error: "Timeline not found", project: projectId });
+      return;
+    }
+    try {
+      const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as TimelineIR;
+      res.json({ project_id: projectId, ...hookLockStatus(timeline) });
+    } catch (err) {
+      res.status(500).json({
+        error: "Failed to read Hook lock status",
+        details: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 
   // GET /api/projects/:id/timeline
   router.get("/:id/timeline", (req, res) => {
@@ -128,6 +160,7 @@ export function createTimelineRouter(
     }
 
     try {
+      let currentTimeline: TimelineIR | undefined;
       // Server-side Ajv validation — canonical save contract
       const validate = getTimelineValidator();
       if (!validate(req.body)) {
@@ -154,6 +187,7 @@ export function createTimelineRouter(
         }
 
         const currentContent = fs.readFileSync(timelinePath, "utf-8");
+        currentTimeline = JSON.parse(currentContent) as TimelineIR;
         const currentRevision = computeTimelineRevision(currentContent);
         const clientRevision = ifMatch.replace(/^"|"$/g, "");
         if (clientRevision !== currentRevision) {
@@ -178,6 +212,27 @@ export function createTimelineRouter(
           details: validationIssues.map((i) => ({ path: i.path, message: i.message })),
         });
         return;
+      }
+
+      if (currentTimeline) {
+        try {
+          assertHookTimelineMutationAllowed(
+            normalizeTimelineServer(currentTimeline as unknown as TimelineBody) as unknown as TimelineIR,
+            normalized as unknown as TimelineIR,
+          );
+        } catch (err) {
+          if (err instanceof HookLockViolationError) {
+            res.status(423).json({
+              error: "Hook is locked",
+              code: err.code,
+              reason: err.reason,
+              message: err.message,
+              hook_lock: currentTimeline.provenance.hook_lock,
+            });
+            return;
+          }
+          throw err;
+        }
       }
 
       // Create backup if file already exists

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vertical Social Platform Delivery"
+  short_description: "Validate platform delivery profiles and safe-zone evidence"
+  default_prompt: "Select a current platform profile, run safe-zone QA, and record any human preview hold."

@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import VideoOSStudioCore
 
 final class ProjectHandoffExportTests: XCTestCase {
@@ -184,6 +185,10 @@ final class ProjectHandoffExportTests: XCTestCase {
         """.write(to: reviewDir.appendingPathComponent("review_report.yaml"), atomically: true, encoding: .utf8)
         try #"{"timeline_version":"1","operations":[]}"#
             .write(to: reviewDir.appendingPathComponent("review_patch.json"), atomically: true, encoding: .utf8)
+        try ProjectHandoffExportTests.writePremiereExportGraph(
+            at: project,
+            identity: ProjectHandoffExportTests.validPremiereIdentity(projectID: "demo")
+        )
 
         let date = ISO8601DateFormatter().date(from: "2026-05-22T00:00:00Z")!
         let result = try ProjectEditorPacketExporter.export(
@@ -213,6 +218,7 @@ final class ProjectHandoffExportTests: XCTestCase {
             "final_media-final.mp4",
             "ja.srt",
             "manifest.json",
+            "premiere_export_identity-demo_premiere.export-identity.json",
             "preview_media-preview-first30s.mp4",
             "review_patch.json",
             "review_report.yaml"
@@ -251,16 +257,23 @@ final class ProjectHandoffExportTests: XCTestCase {
             "final_media",
             "final_audio",
             "caption_sidecar",
-            "caption_approval"
+            "caption_approval",
+            "premiere_export_identity"
         ])
+        let premiereEntry = try XCTUnwrap(manifest.files.first { $0.kind == "premiere_xml" })
+        XCTAssertTrue(premiereEntry.sourcePath?.contains("premiere-exports/generations/") == true)
+        XCTAssertNotNil(premiereEntry.contentSHA256)
+        let identityEntry = try XCTUnwrap(manifest.files.first { $0.kind == "premiere_export_identity" })
+        XCTAssertTrue(identityEntry.sourcePath?.contains("premiere-exports/generations/") == true)
+        XCTAssertNotNil(identityEntry.contentSHA256)
 
         let verified = ProjectEditorPacketVerificationStatusReader.status(projectURL: project)
         XCTAssertEqual(verified.readinessLabel, "packet verified")
         XCTAssertTrue(verified.packetExists)
         XCTAssertTrue(verified.manifestReadable)
         XCTAssertEqual(verified.manifestProjectID, "demo")
-        XCTAssertEqual(verified.manifestFileCount, 10)
-        XCTAssertEqual(verified.existingFileCount, 10)
+        XCTAssertEqual(verified.manifestFileCount, 11)
+        XCTAssertEqual(verified.existingFileCount, 11)
         XCTAssertEqual(verified.missingFileCount, 0)
         XCTAssertEqual(verified.mediaFileCount, 3)
         XCTAssertTrue(verified.previewMediaIncluded)
@@ -317,6 +330,91 @@ final class ProjectHandoffExportTests: XCTestCase {
         XCTAssertFalse(verified.finalAudioIncluded)
     }
 
+    func testEditorPacketVerificationRejectsTamperedPremiereIdentityChain() throws {
+        let repo = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-editor-packet-identity-\(UUID().uuidString)")
+        let project = repo.appendingPathComponent("projects/demo")
+        try writeHandoffFixtureProject(at: project)
+        let identity = try ProjectHandoffExportTests.validPremiereIdentity(projectID: "demo")
+        try ProjectHandoffExportTests.writePremiereExportGraph(at: project, identity: identity)
+
+        _ = try ProjectEditorPacketExporter.export(
+            repositoryRoot: repo,
+            projectURL: project,
+            exportPremiereXML: false,
+            generatedAt: ISO8601DateFormatter().date(from: "2026-05-22T00:00:00Z")!
+        )
+        let valid = ProjectEditorPacketVerificationStatusReader.status(projectURL: project)
+        XCTAssertTrue(valid.identityChainValid, valid.identityChainIssues.joined(separator: "; "))
+
+        let packetIdentity = project.appendingPathComponent("09_output/editor_packet/receipts/premiere_export_identity-demo_premiere.export-identity.json")
+        var tampered = try Data(contentsOf: packetIdentity)
+        tampered.append(contentsOf: Data("tampered".utf8))
+        try tampered.write(to: packetIdentity, options: .atomic)
+        let invalid = ProjectEditorPacketVerificationStatusReader.status(projectURL: project)
+        XCTAssertFalse(invalid.identityChainValid)
+        XCTAssertEqual(invalid.readinessLabel, "packet identity invalid")
+        XCTAssertTrue(invalid.identityChainIssues.contains { $0.contains("content hash") })
+    }
+
+    func testEditorPacketVerificationRejectsNewPacketWhenCurrentIsMissing() throws {
+        let repo = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-editor-packet-missing-current-\(UUID().uuidString)")
+        let project = repo.appendingPathComponent("projects/demo")
+        try writeHandoffFixtureProject(at: project)
+        let identity = try ProjectHandoffExportTests.validPremiereIdentity(projectID: "demo")
+        try ProjectHandoffExportTests.writePremiereExportGraph(at: project, identity: identity)
+
+        _ = try ProjectEditorPacketExporter.export(
+            repositoryRoot: repo,
+            projectURL: project,
+            exportPremiereXML: false,
+            generatedAt: ISO8601DateFormatter().date(from: "2026-05-22T00:00:00Z")!
+        )
+        let valid = ProjectEditorPacketVerificationStatusReader.status(projectURL: project)
+        XCTAssertTrue(valid.identityChainValid, valid.identityChainIssues.joined(separator: "; "))
+
+        let currentURL = project
+            .appendingPathComponent("09_output/premiere-exports/CURRENT.json")
+        try FileManager.default.removeItem(at: currentURL)
+
+        let invalid = ProjectEditorPacketVerificationStatusReader.status(projectURL: project)
+        XCTAssertFalse(invalid.identityChainValid)
+        XCTAssertEqual(invalid.readinessLabel, "packet identity invalid")
+        XCTAssertTrue(invalid.identityChainIssues.contains { $0.contains("CURRENT") })
+    }
+
+    func testEditorPacketExportRejectsGarbageCurrentWhenCompatibilityArtifactsAgree() throws {
+        let repo = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("videoos-editor-packet-garbage-current-\(UUID().uuidString)")
+        let project = repo.appendingPathComponent("projects/demo")
+        try writeHandoffFixtureProject(at: project)
+        let outputDir = project.appendingPathComponent("09_output")
+        let exportRoot = outputDir.appendingPathComponent("premiere-exports")
+        try FileManager.default.createDirectory(at: exportRoot, withIntermediateDirectories: true)
+        let identity = try ProjectHandoffExportTests.validPremiereIdentity(projectID: "demo")
+        let identityData = try JSONSerialization.data(withJSONObject: identity, options: [.prettyPrinted, .sortedKeys])
+        let identityHash = identity["export_identity_hash"] as! String
+        try identityData.write(to: outputDir.appendingPathComponent("demo_premiere.export-identity.json"), options: .atomic)
+        try "<xmeml version=\"5\"></xmeml>\n<!-- Video OS v2 | export_identity: \(identityHash) -->\n"
+            .write(to: outputDir.appendingPathComponent("demo_premiere.xml"), atomically: true, encoding: .utf8)
+        try Data("not-json\n".utf8).write(to: exportRoot.appendingPathComponent("CURRENT.json"), options: .atomic)
+
+        XCTAssertThrowsError(
+            try ProjectEditorPacketExporter.export(
+                repositoryRoot: repo,
+                projectURL: project,
+                exportPremiereXML: false,
+                generatedAt: ISO8601DateFormatter().date(from: "2026-05-22T00:00:00Z")!
+            )
+        ) { error in
+            guard case let ProjectHandoffExportError.notReady(message) = error else {
+                return XCTFail("expected a not-ready graph failure, got \(error)")
+            }
+            XCTAssertTrue(message.contains("CURRENT"))
+        }
+    }
+
     func testEditorPacketVerificationReadsOlderManifestWithoutSourceMapFields() throws {
         let repo = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("videoos-editor-packet-legacy-manifest-\(UUID().uuidString)")
@@ -354,6 +452,7 @@ final class ProjectHandoffExportTests: XCTestCase {
         XCTAssertFalse(manifest.usesTemporarySourceMap)
         XCTAssertEqual(verified.manifestProjectID, "demo")
         XCTAssertTrue(verified.manifestReadable)
+        XCTAssertTrue(verified.identityChainValid)
         XCTAssertEqual(verified.readinessLabel, "packet has no media")
     }
 
@@ -376,6 +475,122 @@ final class ProjectHandoffExportTests: XCTestCase {
         XCTAssertEqual(item.rawStatus, .reusable)
         XCTAssertEqual(item.target.effectIDs, ["transform.zoom", "effect.contrast"])
         XCTAssertEqual(item.requestSHA256, premiereFinishReviewHash)
+    }
+
+    static func validPremiereIdentity(projectID: String) throws -> [String: Any] {
+        let hash = "sha256:" + String(repeating: "0", count: 64)
+        let artifact: [String: Any] = ["path": "timeline.json", "sha256": hash]
+        var identity: [String: Any] = [
+            "version": "premiere-export-identity/v1",
+            "project_id": projectID,
+            "export_kind": "fcp7_xml",
+            "timeline": artifact,
+            "caption": [
+                "owner": "caption_runtime_review_core_studio",
+                "status": "not_applicable",
+                "approval": NSNull(),
+                "approval_hash": NSNull(),
+                "text_timing_hash": NSNull(),
+            ],
+            "visual_treatment": [
+                "owner": "not_applicable",
+                "status": "not_applicable",
+                "input_hash": NSNull(),
+                "input": NSNull(),
+                "typography_policy_hash": NSNull(),
+                "visual_treatment_patch_hash": NSNull(),
+                "capability_hash": NSNull(),
+            ],
+            "audio": [
+                "owner": "not_applicable",
+                "status": "not_applicable",
+                "plan": NSNull(),
+                "plan_hash": NSNull(),
+                "profile_id": NSNull(),
+                "profile_hash": NSNull(),
+            ],
+            "source_identity": [
+                "status": "declared_reference",
+                "source_map": NSNull(),
+                "source_inputs_hash": hash,
+                "assets": [],
+            ],
+            "route_capability": [
+                "id": "video-os-canonical-export-route/v1",
+                "hash": hash,
+                "assembly_engine": "ffmpeg",
+                "caption_renderer": "none",
+                "content_renderers": [],
+            ],
+            "visual_effects": ["status": "none", "unsupported": [], "baked_clip_ids": []],
+            "human_approval": ["caption_status": "not_applicable", "export_status": "not_requested"],
+        ]
+        let withoutHash = try JSONSerialization.data(withJSONObject: identity, options: [.sortedKeys])
+        identity["export_identity_hash"] = "sha256:" + SHA256.hash(data: withoutHash).map { String(format: "%02x", $0) }.joined()
+        return identity
+    }
+
+    static func writePremiereExportGraph(at project: URL, identity: [String: Any]) throws {
+        let projectID = identity["project_id"] as! String
+        let generationID = "sha256:" + String(repeating: "b", count: 64)
+        let generationHex = String(generationID.dropFirst("sha256:".count))
+        let exportRoot = project.appendingPathComponent("09_output/premiere-exports")
+        let generation = exportRoot.appendingPathComponent("generations/\(generationHex)")
+        try FileManager.default.createDirectory(at: generation, withIntermediateDirectories: true)
+
+        let identityData = try JSONSerialization.data(withJSONObject: identity, options: [.prettyPrinted, .sortedKeys])
+        let identityHash = identity["export_identity_hash"] as! String
+        let xmlData = Data("<xmeml version=\"5\"></xmeml>\n<!-- Video OS v2 | export_identity: \(identityHash) -->\n".utf8)
+        let receiptData = Data("{\"version\":\"premiere-roundtrip-receipt/v2\"}\n".utf8)
+        let indexData = Data("{\"version\":\"premiere-effect-bake-index/v1\",\"entries\":[]}\n".utf8)
+        let xmlPath = "09_output/premiere-exports/generations/\(generationHex)/\(projectID)_premiere.xml"
+        let receiptPath = "09_output/premiere-exports/generations/\(generationHex)/\(projectID)_premiere.roundtrip.json"
+        let indexPath = "09_output/premiere-exports/generations/\(generationHex)/bake-index.json"
+        let identityPath = "09_output/premiere-exports/generations/\(generationHex)/\(projectID)_premiere.export-identity.json"
+        let xmlRef: [String: Any] = ["path": xmlPath, "sha256": testSHA256(xmlData)]
+        let receiptRef: [String: Any] = ["path": receiptPath, "sha256": testSHA256(receiptData)]
+        let indexRef: [String: Any] = ["path": indexPath, "sha256": testSHA256(indexData)]
+        let identityRef: [String: Any] = ["path": identityPath, "sha256": testSHA256(identityData), "identity_hash": identityHash]
+        try xmlData.write(to: generation.appendingPathComponent("\(projectID)_premiere.xml"), options: .atomic)
+        try receiptData.write(to: generation.appendingPathComponent("\(projectID)_premiere.roundtrip.json"), options: .atomic)
+        try indexData.write(to: generation.appendingPathComponent("bake-index.json"), options: .atomic)
+        try identityData.write(to: generation.appendingPathComponent("\(projectID)_premiere.export-identity.json"), options: .atomic)
+
+        let readyPath = generation.appendingPathComponent("READY.json")
+        let ready: [String: Any] = [
+            "version": "premiere-export-ready/v1",
+            "project_id": projectID,
+            "base_timeline_sha256": "sha256:" + String(repeating: "0", count: 64),
+            "roundtrip_id": "sha256:" + String(repeating: "1", count: 64),
+            "export_generation_id": generationID,
+            "xml": xmlRef,
+            "receipt": receiptRef,
+            "bake_index": indexRef,
+            "export_identity": identityRef,
+            "hardware_verified": false
+        ]
+        let readyData = try JSONSerialization.data(withJSONObject: ready, options: [.prettyPrinted, .sortedKeys])
+        try readyData.write(to: readyPath, options: .atomic)
+        let current: [String: Any] = [
+            "version": "premiere-export-current/v1",
+            "project_id": projectID,
+            "base_timeline_sha256": "sha256:" + String(repeating: "0", count: 64),
+            "roundtrip_id": "sha256:" + String(repeating: "1", count: 64),
+            "export_generation_id": generationID,
+            "ready_path": "09_output/premiere-exports/generations/\(generationHex)/READY.json",
+            "ready_sha256": testSHA256(readyData),
+            "xml": xmlRef,
+            "receipt": receiptRef,
+            "bake_index": indexRef,
+            "export_identity": identityRef,
+            "published_at": "2026-05-22T00:00:00Z"
+        ]
+        let currentData = try JSONSerialization.data(withJSONObject: current, options: [.prettyPrinted, .sortedKeys])
+        try currentData.write(to: exportRoot.appendingPathComponent("CURRENT.json"), options: .atomic)
+    }
+
+    private static func testSHA256(_ data: Data) -> String {
+        "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     func testPremiereFinishReviewRejectsUnknownInvalidDuplicateAndUnsortedValues() throws {

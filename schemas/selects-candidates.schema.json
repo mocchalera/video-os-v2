@@ -216,10 +216,23 @@
                 "type": "string",
                 "enum": ["success", "failed", "skipped"]
               },
-              "message": { "type": "string" }
+              "message": { "type": "string" },
+              "error_kind": {
+                "type": "string",
+                "enum": [
+                  "transport_timeout",
+                  "transport_error",
+                  "json_parse",
+                  "schema_validation"
+                ]
+              }
             },
             "additionalProperties": false
           }
+        },
+        "author": {
+          "type": "string",
+          "enum": ["llm", "deterministic_fallback", "human", "agent_evidence_synthesis"]
         },
         "fallback_warnings": {
           "type": "array",
@@ -335,7 +348,23 @@
         },
         "story_role": {
           "type": "string",
-          "enum": ["hook", "setup", "experience", "payoff", "reaction", "closing"],
+          "enum": [
+            "hook",
+            "identity",
+            "setup",
+            "struggle",
+            "turning_point",
+            "crisis",
+            "recovery",
+            "philosophy",
+            "goal",
+            "vulnerability",
+            "payoff",
+            "cta",
+            "closing",
+            "experience",
+            "reaction"
+          ],
           "description": "Primary narrative function of this candidate in the edit"
         },
         "transcript_excerpt": {
@@ -436,11 +465,41 @@
           "type": "object",
           "properties": {
             "hold_duration_sec": { "type": "number", "exclusiveMinimum": 0 },
+            "hold": { "$ref": "#/$defs/stillHoldIntent" },
             "min_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
             "max_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
             "motion_mode": { "type": "string", "enum": ["static", "subtle_ken_burns"] },
-            "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+            "source_still_id": { "type": "string", "minLength": 1 },
+            "still_instance_id": { "type": "string", "minLength": 1 },
+            "reuse": { "type": "string", "enum": ["unique", "intentional"] },
+            "long_hold_reason": { "type": "string", "minLength": 1 },
+            "camera_motion": {
+              "type": "object",
+              "required": ["preset"],
+              "properties": {
+                "preset": { "type": "string", "enum": ["push_in", "pull_out", "horizontal_tracking", "tilt_down", "diagonal_drift", "pan_zoom"] },
+                "easing": { "type": "string", "enum": ["smoothstep", "linear"] },
+                "intensity": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+                "transform": { "$ref": "#/$defs/stillTransform" },
+                "parallax": { "$ref": "#/$defs/stillParallax" }
+              },
+              "additionalProperties": false
+            },
+            "ken_burns": { "$ref": "#/$defs/stillCameraMotionIntent" },
+            "parallax": { "$ref": "#/$defs/stillParallax" },
+            "transform": { "$ref": "#/$defs/stillTransform" },
+            "composition": { "type": "string", "enum": ["fit", "vertical_blur_backdrop"] },
+            "fit_mode": { "type": "string", "enum": ["contain", "cover", "full_bleed"] },
             "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
+          },
+          "additionalProperties": false
+        },
+        "freeze_frame_hold": {
+          "type": "object",
+          "required": ["source_time_us"],
+          "properties": {
+            "source_time_us": { "type": "integer", "minimum": 0 },
+            "hold_frames": { "type": "integer", "minimum": 1 }
           },
           "additionalProperties": false
         },
@@ -456,6 +515,10 @@
         {
           "if": { "required": ["still_image"] },
           "then": { "required": ["media_kind"], "properties": { "media_kind": { "const": "image" } } }
+        },
+        {
+          "if": { "required": ["freeze_frame_hold"] },
+          "then": { "required": ["media_kind"], "properties": { "media_kind": { "const": "video" } } }
         },
         {
           "if": {
@@ -772,6 +835,71 @@
           "type": "string",
           "pattern": "^sha256:[a-f0-9]{64}$"
         }
+      },
+      "additionalProperties": false
+    },
+    "stillHoldIntent": {
+      "type": "object",
+      "required": ["unit"],
+      "properties": {
+        "unit": { "type": "string", "enum": ["frames", "seconds", "beats", "section_boundary"] },
+        "value": { "type": "number", "exclusiveMinimum": 0 },
+        "section_id": { "type": "string", "minLength": 1 },
+        "boundary": { "type": "string", "enum": ["start", "end"] },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "stillTransform": {
+      "type": "object",
+      "properties": {
+        "crop": {
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "pan": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": -1, "maximum": 1 }, "y": { "type": "number", "minimum": -1, "maximum": 1 } },
+          "additionalProperties": false
+        },
+        "zoom": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "anchor": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "additionalProperties": false
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "stillParallax": {
+      "type": "object",
+      "required": ["amount", "axis"],
+      "properties": {
+        "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.25 },
+        "axis": { "type": "string", "enum": ["horizontal", "vertical", "both"] }
+      },
+      "additionalProperties": false
+    },
+    "stillCameraMotionIntent": {
+      "type": "object",
+      "required": ["preset"],
+      "properties": {
+        "preset": { "type": "string", "enum": ["push_in", "pull_out", "horizontal_tracking", "tilt_down", "diagonal_drift", "pan_zoom"] },
+        "easing": { "type": "string", "enum": ["smoothstep", "linear"] },
+        "intensity": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "parallax": { "$ref": "#/$defs/stillParallax" }
       },
       "additionalProperties": false
     },

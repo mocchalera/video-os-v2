@@ -1,13 +1,23 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { atomicWriteJson, readJsonIfExists } from "../pipeline/stages/_util.js";
+import {
+  classifyTransportError,
+  createEditorialStageDeadline,
+  EditorialLlmError,
+  type EditorialLlmErrorKind,
+  type StageDeadline,
+} from "../connectors/editorial-llm.js";
 import {
   MARLIN_CAMERA_MOTION_CONFIDENCE_PENALTY,
   MARLIN_CAMERA_MOTION_START_FLAG,
   describesCameraSetupMotion,
 } from "../analysis/camera-motion.js";
+import { sanitizeStillCameraMotionIntent } from "../render/camera-motion.js";
 import { classifyTranscriptQuality } from "../analysis/transcript-quality.js";
 import { loadCreativeBrief } from "../artifacts/loaders.js";
 import type { CreativeBrief, EditorialSummary } from "../artifacts/types.js";
@@ -20,7 +30,7 @@ import {
 import type { GeminiInlineImageInput } from "../connectors/gemini-json.js";
 import {
   completeEditorialJson,
-  decisionRuntimeRecord,
+  deterministicDecisionRuntime,
   injectedDecisionRuntime,
   type DecisionRuntimeRecord,
   type EditorialLlmConnectorOptions,
@@ -54,8 +64,19 @@ const SEGMENTS_REL = "03_analysis/segments.json";
 const MARLIN_EVENTS_REL = "03_analysis/marlin_events.json";
 const SOURCE_START_TOLERANCE_US = 250_000;
 const FILMSTRIP_MAX_WIDTH_PX = 512;
-const MULTIMODAL_BATCH_SEGMENTS = 15;
+// Bounded batch defaults for both text-only and multimodal triage. Every LLM
+// call sees at most DEFAULT_TRIAGE_BATCH_SEGMENTS segments/images; explicit
+// overrides (option/env) are clamped to MAX_TRIAGE_BATCH_SEGMENTS so that even
+// a maxed-out knob cannot collapse a large multi-material pool (13 images or
+// more) back into a single bulk call.
+const DEFAULT_TRIAGE_BATCH_SEGMENTS = 8;
+const MAX_TRIAGE_BATCH_SEGMENTS = 12;
 const MULTIMODAL_BATCH_DELAY_MS = 5_000;
+const TRIAGE_BATCH_CHECKPOINT_REL = "03_analysis/llm-triage-batches.json";
+const TRIAGE_BATCH_CHECKPOINT_VERSION = "1";
+// Bump when the prompt contract or batch policy changes materially so saved
+// batch results are never reused across incompatible policies.
+const TRIAGE_BATCH_POLICY_VERSION = "triage-batch-v1";
 const MARLIN_REPORTER_METHOD = "marlin_reporter";
 const MARLIN_SUMMARY_PROMPT_TEMPLATE_ID = "marlin-caption-v1";
 const execFileAsync = promisify(execFile);
@@ -153,8 +174,162 @@ export interface CreateLlmTriageAgentOptions {
   model?: string;
   textOnlyTriage?: boolean;
   imagePreparer?: FilmstripImagePreparer;
+  /** Max segments/images per LLM call. Defaults from policy/env, bounded ≥1. */
   multimodalBatchSize?: number;
   editorialLlm?: EditorialLlmConnectorOptions;
+  /**
+   * Whole-stage budget shared by every batch call of this agent instance,
+   * including coverage-feedback retries (an exhausted deadline is never
+   * regenerated while the agent lives). Each batch receives min(per-call
+   * timeout, remaining budget); once exhausted no new batch is called and
+   * remaining batches are recorded as skipped. Defaults from the
+   * editorial-llm stage timeout configuration chain.
+   */
+  stageTimeoutMs?: number;
+}
+
+// ── Bounded batch checkpoint (Issue #5 M3) ──────────────────────
+
+/**
+ * Stable non-secret failure classification for one triage batch. Reuses the
+ * editorial-llm error taxonomy; "stage_deadline_exhausted" marks batches that
+ * were never called because the shared stage budget ran out.
+ */
+export type TriageBatchFailureReason =
+  | EditorialLlmErrorKind
+  | "stage_deadline_exhausted";
+
+interface TriageBatchCheckpointEntry {
+  index: number;
+  segment_ids: string[];
+  signature: string;
+  parsed: Record<string, unknown>;
+  /** Non-secret runtime provenance for the stored completion (e.g. "gemini"). */
+  runtime?: string;
+}
+
+interface TriageBatchCheckpointFile {
+  version: string;
+  plan_signature: string;
+  batch_size: number;
+  batches: TriageBatchCheckpointEntry[];
+}
+
+function stableTriageHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex").slice(0, 16);
+}
+
+/**
+ * Minimal binding signature for a batch plan: project, model, batch policy,
+ * prompt contract version, brief content, and the full compact evidence
+ * input. Any source/policy/model/input change invalidates saved batches so
+ * stale results are never reused.
+ */
+function triagePlanSignature(args: {
+  projectId: string;
+  runtimeSnapshot: Record<string, unknown>;
+  batchSize: number;
+  textOnly: boolean;
+  brief: CreativeBrief;
+  segments: CompactSegmentEvidence[];
+}): string {
+  return stableTriageHash({
+    project_id: args.projectId,
+    runtime_snapshot: args.runtimeSnapshot,
+    batch_size: args.batchSize,
+    text_only: args.textOnly,
+    policy_version: TRIAGE_BATCH_POLICY_VERSION,
+    brief: args.brief,
+    segments: args.segments,
+  });
+}
+
+function triageBatchSignature(
+  planSignature: string,
+  index: number,
+  segmentIds: string[],
+  coverageFeedback: TriageCoverageFeedback | undefined,
+): string {
+  return stableTriageHash({
+    plan_signature: planSignature,
+    index,
+    segment_ids: segmentIds,
+    coverage_feedback: coverageFeedback ?? null,
+  });
+}
+
+function triageBatchCheckpointPath(projectDir: string): string {
+  return path.join(projectDir, TRIAGE_BATCH_CHECKPOINT_REL);
+}
+
+/**
+ * Load completed-batch entries whose plan signature still matches. Entries
+ * are keyed by index+signature so a coverage-feedback round (different
+ * signatures) re-calls the LLM instead of stale-reusing round-0 results.
+ */
+function loadTriageBatchCheckpoint(
+  projectDir: string,
+  planSignature: string,
+): Map<number, TriageBatchCheckpointEntry> {
+  const byIndex = new Map<number, TriageBatchCheckpointEntry>();
+  try {
+    const parsed = readJsonIfExists<TriageBatchCheckpointFile>(triageBatchCheckpointPath(projectDir));
+    if (!parsed || parsed.version !== TRIAGE_BATCH_CHECKPOINT_VERSION) return byIndex;
+    if (parsed.plan_signature !== planSignature || !Array.isArray(parsed.batches)) return byIndex;
+    for (const entry of parsed.batches) {
+      if (
+        typeof entry?.index !== "number" ||
+        !Array.isArray(entry.segment_ids) ||
+        typeof entry.signature !== "string" ||
+        typeof entry.parsed !== "object" ||
+        entry.parsed === null
+      ) continue;
+      byIndex.set(entry.index, entry);
+    }
+  } catch {
+    // Fail open: an unreadable checkpoint just means every batch re-runs.
+  }
+  return byIndex;
+}
+
+function recordTriageBatchCheckpoint(
+  projectDir: string,
+  checkpoint: TriageBatchCheckpointFile,
+): void {
+  try {
+    atomicWriteJson(triageBatchCheckpointPath(projectDir), checkpoint);
+  } catch {
+    // Checkpointing is best-effort resume support only.
+  }
+}
+
+function classifyTriageBatchFailure(error: unknown): TriageBatchFailureReason {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/not valid JSON|JSON parse failed|parseable/i.test(message)) return "json_parse";
+  if (/schema validation failed/i.test(message)) return "schema_validation";
+  return classifyTransportError(error);
+}
+
+/**
+ * Reduce a batch response to canonical selects fields only, reusing the
+ * existing sanitizer/pool-filter. Top-level extras and candidate extras
+ * (raw provider payloads, prompts, errors) are dropped, so nothing
+ * non-canonical can be persisted to or reused from the batch checkpoint.
+ * Returns null when no valid in-pool candidate survives (invalid payload).
+ */
+function canonicalizeTriageBatchParsed(
+  parsed: Record<string, unknown>,
+  projectId: string,
+  batchSegments: CompactSegmentEvidence[],
+): Record<string, unknown> | null {
+  const selects = selectsFromLlmResponse(parsed, projectId, batchSegments);
+  if (!Array.isArray(selects.candidates) || selects.candidates.length === 0) return null;
+  const out: Record<string, unknown> = { candidates: selects.candidates };
+  const selectionNotes = stringArray((parsed as { selection_notes?: unknown }).selection_notes);
+  if (selectionNotes.length > 0) out.selection_notes = selectionNotes;
+  const editorialSummary = sanitizeEditorialSummary((parsed as { editorial_summary?: unknown }).editorial_summary);
+  if (editorialSummary) out.editorial_summary = editorialSummary;
+  return out;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -475,10 +650,6 @@ function applyMarlinCameraMotionQualityHints(
   });
 }
 
-function hasMarlinSceneEvidence(segments: CompactSegmentEvidence[]): boolean {
-  return segments.some((segment) => Boolean(segment.scene_report));
-}
-
 export function loadCompactSegmentEvidence(projectDir: string): CompactSegmentEvidence[] {
   assertProjectPlanningMediaKindsSupported(projectDir);
   const segmentsPath = path.join(projectDir, SEGMENTS_REL);
@@ -687,7 +858,7 @@ export function buildLlmTriagePrompt(input: TriagePromptInput): string {
     "- Include motif_tags with specific visual themes relevant to the brief, not generic tags.",
     "- If segment peak evidence exists (has_peak=true), populate editorial_signals.peak_type and peak_strength_score.",
     "- Include trim_hint.preferred_duration_us when you have a clear sense of how long this clip should be used.",
-    "- For media_kind=image, still_image.hold_duration_sec/min_hold_sec/max_hold_sec are seconds. motion_mode=static is the only executable C2A truth; subtle_ken_burns remains pending EYE-070C2B.",
+    "- For media_kind=image, still_image.hold_duration_sec/min_hold_sec/max_hold_sec are seconds. motion_mode=static is the only executable C2A truth; subtle_ken_burns remains pending EYE-070C2B. To request executable camera work, author still_image.camera_motion with preset from: push_in, pull_out, horizontal_tracking, tilt_down, diagonal_drift, pan_zoom (optional easing smoothstep|linear, optional intensity 0.02..0.6). fit_mode is contain, cover, or full_bleed.",
     "- still_image.background is a color only: black, white, transparent, #RRGGBB, or #RRGGBBAA. Never provide a path, URL, url(), gradient, or function.",
     includesAudioOnly
       ? "- Evidence must include a specific grounded media observation plus a brief-alignment justification. Visual candidates require a visual observation; audio-only candidates require transcript/audio-event/audio-story evidence and must contain no visual claim."
@@ -812,10 +983,39 @@ function sanitizeStillImageIntent(value: unknown): SelectCandidate["still_image"
     if (duration !== undefined && duration > 0) out[key] = duration;
   }
   if (value.motion_mode === "static" || value.motion_mode === "subtle_ken_burns") out.motion_mode = value.motion_mode;
-  if (value.fit_mode === "contain" || value.fit_mode === "cover") out.fit_mode = value.fit_mode;
+  // Camera motion is carried deterministically; malformed model authoring is
+  // dropped at this boundary (artifact schemas still enforce the contract).
+  try {
+    const cameraMotion = sanitizeStillCameraMotionIntent(value.camera_motion);
+    if (cameraMotion) out.camera_motion = cameraMotion;
+  } catch {
+    // lenient at the model boundary
+  }
+  if (value.composition === "fit" || value.composition === "vertical_blur_backdrop") out.composition = value.composition;
+  if (value.fit_mode === "contain" || value.fit_mode === "cover" || value.fit_mode === "full_bleed") out.fit_mode = value.fit_mode;
   const background = sanitizeStillBackground(value.background);
   if (background) out.background = background;
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeFreezeFrameHold(
+  value: unknown,
+  sourceInUs: number,
+  sourceOutUs: number,
+): SelectCandidate["freeze_frame_hold"] | undefined {
+  if (!isRecord(value)) return undefined;
+  const rawSourceTimeUs = integerValue(value.source_time_us);
+  const sourceTimeUs = rawSourceTimeUs !== undefined && rawSourceTimeUs >= 0
+    ? rawSourceTimeUs
+    : undefined;
+  if (sourceTimeUs === undefined || sourceTimeUs < sourceInUs || sourceTimeUs >= sourceOutUs) {
+    return undefined;
+  }
+  const holdFrames = sanitizePositiveInteger(value.hold_frames);
+  return {
+    source_time_us: sourceTimeUs,
+    ...(holdFrames !== undefined ? { hold_frames: holdFrames } : {}),
+  };
 }
 
 export function selectsFromLlmResponse(
@@ -859,6 +1059,13 @@ export function selectsFromLlmResponse(
     if (segment.media_kind === "image") {
       const stillImage = sanitizeStillImageIntent(item.still_image);
       if (stillImage) candidate.still_image = stillImage;
+    } else if (segment.media_kind === "video") {
+      const freezeFrameHold = sanitizeFreezeFrameHold(
+        item.freeze_frame_hold,
+        segment.src_in_us,
+        segment.src_out_us,
+      );
+      if (freezeFrameHold) candidate.freeze_frame_hold = freezeFrameHold;
     }
     const semanticRank = sanitizeSemanticRank(item.semantic_rank);
     if (semanticRank !== undefined) candidate.semantic_rank = semanticRank;
@@ -913,11 +1120,27 @@ async function completeWithSingleJsonRetry(
   llm: LlmCompleter,
   prompt: string,
   images?: LlmImagePart[],
+  deadline?: StageDeadline,
 ): Promise<Record<string, unknown>> {
+  // Never start a new LLM invocation once the shared stage budget is gone.
+  if (deadline?.exhausted) {
+    throw new EditorialLlmError(
+      "transport_timeout",
+      "stage deadline exhausted before triage LLM call",
+    );
+  }
   const first = await llm(prompt, images);
   try {
     return parseLlmTriageResponse(first);
   } catch (firstError) {
+    // The initial await may have consumed the remaining budget: a repair
+    // retry is a new call and must not start after the deadline.
+    if (deadline?.exhausted) {
+      throw new EditorialLlmError(
+        "transport_timeout",
+        "stage deadline exhausted before JSON repair retry",
+      );
+    }
     const second = await llm(buildRepairPrompt(prompt, first, firstError), images);
     try {
       return parseLlmTriageResponse(second);
@@ -1081,31 +1304,146 @@ function mergeDecisionRuntime(
   return {
     runtime,
     role,
+    author: "llm",
     attempted_runtimes: completions.flatMap((completion) => completion.attempts),
     ...(warnings.length > 0 ? { fallback_warnings: warnings } : {}),
   };
 }
 
+function resumedConnectorDecisionRuntime(
+  resumedRuntimes: string[],
+  role: string,
+): DecisionRuntimeRecord | undefined {
+  const connectorRuntimes = uniqueStrings(resumedRuntimes).filter(
+    (runtime) => runtime === "codex_exec" || runtime === "claude_cli" || runtime === "gemini",
+  );
+  if (connectorRuntimes.length === 0) return undefined;
+  return {
+    runtime: connectorRuntimes[0],
+    role,
+    author: "llm",
+    attempted_runtimes: connectorRuntimes.map((runtime) => ({
+      runtime,
+      status: "success" as const,
+      message: "resumed from triage batch checkpoint",
+    })),
+  };
+}
+
 export function createLlmTriageAgent(opts: CreateLlmTriageAgentOptions = {}): TriageAgent {
-  const multimodalBatchSize = Math.max(1, Math.trunc(opts.multimodalBatchSize ?? MULTIMODAL_BATCH_SEGMENTS));
   const imagePreparer = opts.imagePreparer ?? defaultFilmstripImagePreparer;
+
+  // One P0 stage budget per agent instance (the agent is this command/stage's
+  // scope): the initial batch run plus its coverage-feedback retries share it.
+  // An exhausted deadline stays exhausted for this agent — it is returned
+  // as-is and never regenerated, so retries can never mint a fresh budget.
+  const stageDeadlines = new Map<string, StageDeadline>();
+  const stageDeadlineForProject = (projectDir: string): StageDeadline => {
+    const existing = stageDeadlines.get(projectDir);
+    if (existing) return existing;
+    // Budget resolution mirrors the connector chain: top-level option wins,
+    // then nested connector options (incl. their env), then analysis-defaults.
+    const fresh = createEditorialStageDeadline(
+      { stageTimeoutMs: opts.stageTimeoutMs ?? opts.editorialLlm?.stageTimeoutMs },
+      opts.editorialLlm?.env ?? process.env,
+    );
+    stageDeadlines.set(projectDir, fresh);
+    return fresh;
+  };
 
   return {
     async run(ctx: TriageAgentContext) {
       const brief = loadCreativeBrief(path.join(ctx.projectDir, BRIEF_REL));
       const segments = loadCompactSegmentEvidence(ctx.projectDir);
-      const textOnlyTriage = opts.textOnlyTriage ?? hasMarlinSceneEvidence(segments);
-      const segmentBatches = textOnlyTriage || segments.length <= multimodalBatchSize
-        ? [segments]
-        : chunkSegments(segments, multimodalBatchSize);
+      // Multimodal triage is explicit opt-in only (CLI --multimodal /
+      // textOnlyTriage:false). The standard path never attaches images; it
+      // works from Marlin scene/event/caption evidence and other text.
+      const textOnlyTriage = opts.textOnlyTriage ?? true;
+      // Bounded deterministic batching for both modes: every LLM call sees at
+      // most batchSize segments/images; adaptive behavior is confined to
+      // deadline-aware skipping and checkpoint resume (no unlimited retries).
+      const batchSize = resolveTriageBatchSize(opts);
+      const segmentBatches = chunkSegments(segments, batchSize);
+      const totalBatches = segmentBatches.length;
+      const planSignature = triagePlanSignature({
+        projectId: ctx.projectId,
+        runtimeSnapshot: triageRuntimeSnapshot(opts, opts.editorialLlm?.env ?? process.env),
+        batchSize,
+        textOnly: textOnlyTriage,
+        brief,
+        segments,
+      });
+      const completedBatches = loadTriageBatchCheckpoint(ctx.projectDir, planSignature);
+      // Validate every matching completed entry up front so a batch that
+      // fails or is skipped in THIS run cannot evict a batch completed by an
+      // earlier run from the checkpoint. New successes union/upsert into the
+      // same map and every save writes the full index-sorted set.
+      const validatedCompleted = new Map<number, TriageBatchCheckpointEntry>();
+      for (let i = 0; i < totalBatches; i += 1) {
+        const batchSegments = segmentBatches[i];
+        const segmentIds = batchSegments.map((segment) => segment.segment_id);
+        const signature = triageBatchSignature(planSignature, i, segmentIds, ctx.coverageFeedback);
+        const cached = completedBatches.get(i);
+        if (!cached || cached.signature !== signature || !arraysEqual(cached.segment_ids, segmentIds)) continue;
+        const canonicalCached = canonicalizeTriageBatchParsed(cached.parsed, ctx.projectId, batchSegments);
+        if (!canonicalCached) continue;
+        validatedCompleted.set(i, {
+          index: i,
+          segment_ids: segmentIds,
+          signature,
+          parsed: canonicalCached,
+          ...(typeof cached.runtime === "string" ? { runtime: cached.runtime } : {}),
+        });
+      }
+      const savedEntries = new Map<number, TriageBatchCheckpointEntry>(validatedCompleted);
+      const persistCheckpoint = (): void => {
+        recordTriageBatchCheckpoint(ctx.projectDir, {
+          version: TRIAGE_BATCH_CHECKPOINT_VERSION,
+          plan_signature: planSignature,
+          batch_size: batchSize,
+          batches: [...savedEntries.values()].sort((a, b) => a.index - b.index),
+        });
+      };
       const parsedBatches: Array<Record<string, unknown>> = [];
       const runtimeCompletions: EditorialLlmJsonCompletion[] = [];
+      const resumedRuntimes: string[] = [];
+      const batchFailures: Array<{ index: number; reason: TriageBatchFailureReason }> = [];
+      // Whole-stage budget shared by every batch call and every coverage
+      // retry of this project; each call receives only the remaining budget
+      // and no new call starts after exhaustion.
+      const deadline = stageDeadlineForProject(ctx.projectDir);
 
-      for (let i = 0; i < segmentBatches.length; i += 1) {
-        if (i > 0 && !textOnlyTriage) {
-          await new Promise((resolve) => setTimeout(resolve, MULTIMODAL_BATCH_DELAY_MS));
-        }
+      for (let i = 0; i < totalBatches; i += 1) {
         const batchSegments = segmentBatches[i];
+        const segmentIds = batchSegments.map((segment) => segment.segment_id);
+        const batchSignature = triageBatchSignature(planSignature, i, segmentIds, ctx.coverageFeedback);
+
+        // Resume: a validated completed entry (signature + canonical payload)
+        // is never re-called.
+        const cached = validatedCompleted.get(i);
+        if (cached) {
+          parsedBatches.push(cached.parsed);
+          resumedRuntimes.push(cached.runtime ?? "unknown");
+          console.error(`[triage:batch] batch=${i + 1}/${totalBatches} resumed_from_checkpoint segments=${segmentIds.length}`);
+          continue;
+        }
+
+        // Deadline reached: no new calls. The batch is recorded as skipped so
+        // partial results stay visible instead of silently disappearing.
+        if (deadline.exhausted) {
+          batchFailures.push({ index: i, reason: "stage_deadline_exhausted" });
+          console.error(`[triage:batch] batch=${i + 1}/${totalBatches} skipped_after_stage_deadline segments=${segmentIds.length}`);
+          continue;
+        }
+
+        if (i > 0 && !textOnlyTriage) {
+          const delayCompleted = await waitForTriageBatchDelay(deadline);
+          if (!delayCompleted) {
+            batchFailures.push({ index: i, reason: "stage_deadline_exhausted" });
+            console.error(`[triage:batch] batch=${i + 1}/${totalBatches} skipped_after_stage_deadline_during_delay segments=${segmentIds.length}`);
+            continue;
+          }
+        }
         const prepared = textOnlyTriage
           ? { images: [], refs: [] }
           : await prepareFilmstripImages(batchSegments, imagePreparer);
@@ -1114,68 +1452,252 @@ export function createLlmTriageAgent(opts: CreateLlmTriageAgentOptions = {}): Tr
           segments: batchSegments,
           coverageFeedback: ctx.coverageFeedback,
           filmstripImages: prepared.refs,
-          batch: segmentBatches.length > 1 ? { index: i + 1, count: segmentBatches.length } : undefined,
+          batch: totalBatches > 1 ? { index: i + 1, count: totalBatches } : undefined,
         });
         const hasImages = prepared.images.length > 0;
-        console.error(`[triage:multimodal] batch=${i+1}/${segmentBatches.length} segments=${batchSegments.length} images=${prepared.images.length} mode=${hasImages ? "multimodal" : "text-only"}`);
+        // The inter-batch delay and image preparation above may have consumed
+        // the remaining budget: never start a call once the stage deadline is
+        // exhausted.
+        if (deadline.exhausted) {
+          batchFailures.push({ index: i, reason: "stage_deadline_exhausted" });
+          console.error(`[triage:batch] batch=${i + 1}/${totalBatches} skipped_after_stage_deadline_before_call segments=${segmentIds.length}`);
+          continue;
+        }
+        console.error(`[triage:batch] batch=${i + 1}/${totalBatches} segments=${batchSegments.length} images=${prepared.images.length} mode=${hasImages ? "multimodal" : "text-only"}`);
         let batchResult: Record<string, unknown>;
-        if (opts.llm) {
-          batchResult = await completeWithSingleJsonRetry(
-            opts.llm,
-            prompt,
-            hasImages ? prepared.images : undefined,
-          );
-        } else {
-          const completion = await completeEditorialJson({
-            role: "triage-llm",
-            prompt,
-            images: hasImages ? prepared.images : undefined,
-            parseJson: parseLlmTriageResponse,
-            validateJson: validateTriageJson,
-            repairPrompt: buildRepairPrompt,
-          }, {
-            runtime: opts.model === undefined ? undefined : "gemini",
-            geminiModel: opts.model,
-            ...opts.editorialLlm,
-          });
-          if (completion.runtime === "deterministic") {
-            return {
-              selects: deterministicSelects(
-                ctx.projectId,
-                segments,
-                decisionRuntimeRecord(completion, "triage-llm"),
-              ),
-              confirmed: true,
-            };
+        // Non-secret runtime provenance for this batch's completion.
+        let batchRuntime: string | undefined;
+        try {
+          if (opts.llm) {
+            batchRuntime = "injected";
+            batchResult = await completeWithSingleJsonRetry(
+              opts.llm,
+              prompt,
+              hasImages ? prepared.images : undefined,
+              deadline,
+            );
+          } else {
+            const completion = await completeEditorialJson({
+              role: "triage-llm",
+              prompt,
+              images: hasImages ? prepared.images : undefined,
+              parseJson: parseLlmTriageResponse,
+              validateJson: validateTriageJson,
+              repairPrompt: buildRepairPrompt,
+            }, {
+              runtime: opts.model === undefined ? undefined : "gemini",
+              geminiModel: opts.model,
+              // Persist the sanitized attempt journal next to the analysis
+              // artifacts unless the caller already chose a sink.
+              projectDir: ctx.projectDir,
+              ...opts.editorialLlm,
+              // Confine this call to whatever run budget remains.
+              stageTimeoutMs: Math.max(0, Math.floor(deadline.remainingMs())),
+            });
+            if (completion.runtime === "deterministic") {
+              // No live runtime produced usable output for this batch; treat
+              // it as a classified batch failure so partial results stay
+              // visible instead of silently degrading to empty candidates.
+              const fallbackKind = completion.warnings.length > 0
+                ? classifyTriageBatchFailure(new Error(completion.warnings[0]))
+                : "transport_error";
+              throw new EditorialLlmError(
+                fallbackKind === "stage_deadline_exhausted" ? "transport_error" : fallbackKind,
+                `batch fell back to deterministic after ${completion.warnings.length} failed or skipped live attempt(s)`,
+              );
+            }
+            runtimeCompletions.push(completion);
+            batchRuntime = completion.runtime;
+            batchResult = completion.parsed;
           }
-          runtimeCompletions.push(completion);
-          batchResult = completion.parsed;
+        } catch (error) {
+          const reason = classifyTriageBatchFailure(error);
+          batchFailures.push({ index: i, reason });
+          console.error(`[triage:batch] batch=${i + 1}/${totalBatches} failed reason=${reason}`);
+          continue;
         }
         const batchCandidates = Array.isArray(batchResult.candidates) ? batchResult.candidates.length : 0;
-        console.error(`[triage:multimodal] batch=${i+1} parsed_candidates=${batchCandidates}`);
+        console.error(`[triage:batch] batch=${i + 1} parsed_candidates=${batchCandidates}`);
         if (batchCandidates === 0) {
           const keys = Object.keys(batchResult);
           const sample = JSON.stringify(batchResult).slice(0, 500);
-          console.error(`[triage:multimodal] empty batch keys=${keys.join(",")} sample=${sample}`);
-          const rawCands = Array.isArray(batchResult.candidates) ? batchResult.candidates : [];
-          console.error(`[triage:multimodal] raw_candidates_count=${rawCands.length} first=${JSON.stringify(rawCands[0])?.slice(0,300)}`);
+          console.error(`[triage:batch] empty batch keys=${keys.join(",")} sample=${sample}`);
         }
-        parsedBatches.push(batchResult);
+        // Persist only canonical fields: prompts, raw provider responses,
+        // error text, and unknown extras never reach the checkpoint.
+        const canonicalBatchResult = canonicalizeTriageBatchParsed(batchResult, ctx.projectId, batchSegments);
+        if (!canonicalBatchResult) {
+          batchFailures.push({ index: i, reason: "schema_validation" });
+          console.error(`[triage:batch] batch=${i + 1}/${totalBatches} failed reason=schema_validation`);
+          continue;
+        }
+        parsedBatches.push(canonicalBatchResult);
+        savedEntries.set(i, {
+          index: i,
+          segment_ids: segmentIds,
+          signature: batchSignature,
+          parsed: canonicalBatchResult,
+          ...(batchRuntime ? { runtime: batchRuntime } : {}),
+        });
+        // Checkpoint after every completed batch so a resumed run skips it;
+        // previously completed entries are preserved and the set stays
+        // index-sorted.
+        persistCheckpoint();
       }
+
+      // Every batch failed or was skipped without any LLM result: keep the
+      // schema-valid deterministic fallback, but never present it as LLM work.
+      if (parsedBatches.length === 0) {
+        return {
+          selects: deterministicSelects(
+            ctx.projectId,
+            segments,
+            deterministicDecisionRuntime("triage-llm", triageBatchFailureNotes(batchFailures, totalBatches)),
+          ),
+          confirmed: true,
+        };
+      }
+
       const parsed = mergeParsedTriageResponses(parsedBatches);
-      const decisionRuntime = opts.llm
-        ? injectedDecisionRuntime("triage-llm")
-        : mergeDecisionRuntime(
-          runtimeCompletions,
-          "triage-llm",
-        );
-      return {
-        selects: {
-          ...selectsFromLlmResponse(parsed, ctx.projectId, segments),
-          decision_runtime: decisionRuntime,
-        },
-        confirmed: true,
+      const resumedConnectorRuntime = !opts.llm && runtimeCompletions.length === 0
+        ? resumedConnectorDecisionRuntime(resumedRuntimes, "triage-llm")
+        : undefined;
+      let decisionRuntime: DecisionRuntimeRecord = resumedConnectorRuntime
+        ?? (opts.llm
+          ? injectedDecisionRuntime("triage-llm")
+          : mergeDecisionRuntime(runtimeCompletions, "triage-llm"));
+      if (resumedRuntimes.length > 0 && !resumedConnectorRuntime) {
+        // Resumed batches made no live call this run. Keep their stored
+        // non-secret runtime provenance instead of letting an empty live
+        // completion list degrade the record to a synthetic identity.
+        decisionRuntime = {
+          ...decisionRuntime,
+          attempted_runtimes: [
+            ...decisionRuntime.attempted_runtimes,
+            ...uniqueStrings(resumedRuntimes.filter((rt) => rt !== "unknown")).map((rt) => ({
+              runtime: rt,
+              status: "success" as const,
+              message: "resumed from triage batch checkpoint",
+            })),
+          ] as DecisionRuntimeRecord["attempted_runtimes"],
+        };
+      }
+      const selects: SelectsCandidates = {
+        ...selectsFromLlmResponse(parsed, ctx.projectId, segments),
+        decision_runtime: decisionRuntime,
       };
+      if (batchFailures.length > 0) {
+        // Partial failure must stay visible: record stable non-secret reasons
+        // on the decision runtime, notes, and provenance of the artifact.
+        const failureNotes = triageBatchFailureNotes(batchFailures, totalBatches);
+        decisionRuntime = {
+          ...decisionRuntime,
+          attempted_runtimes: [
+            ...decisionRuntime.attempted_runtimes,
+            // "triage_batch" is a per-batch record, not a transport runtime;
+            // the selects schema intentionally accepts any runtime string.
+            ...batchFailures.map((failure) => ({
+              runtime: "triage_batch",
+              status: failure.reason === "stage_deadline_exhausted" ? ("skipped" as const) : ("failed" as const),
+              message: `batch ${failure.index + 1}/${totalBatches}: ${failure.reason}`,
+              ...(failure.reason === "stage_deadline_exhausted"
+                ? {}
+                : { error_kind: failure.reason as EditorialLlmErrorKind }),
+            })),
+          ] as DecisionRuntimeRecord["attempted_runtimes"],
+          fallback_warnings: uniqueStrings([...(decisionRuntime.fallback_warnings ?? []), ...failureNotes]),
+        };
+        selects.decision_runtime = decisionRuntime;
+        selects.selection_notes = uniqueStrings([
+          ...(selects.selection_notes ?? []),
+          `partial triage: ${parsedBatches.length}/${totalBatches} batches succeeded; failed batches retained no silent candidates`,
+        ]);
+        selects.provenance = {
+          ...(selects.provenance ?? {}),
+          triage_batches: {
+            version: TRIAGE_BATCH_CHECKPOINT_VERSION,
+            total_batches: totalBatches,
+            completed_batches: parsedBatches.length,
+            failed_batches: batchFailures.map((failure) => ({
+              batch: failure.index + 1,
+              reason: failure.reason,
+            })),
+          },
+        };
+      }
+      return { selects, confirmed: true };
     },
   };
+}
+
+function resolveTriageBatchSize(opts: CreateLlmTriageAgentOptions): number {
+  const raw = opts.multimodalBatchSize !== undefined
+    ? Math.trunc(opts.multimodalBatchSize)
+    : (() => {
+      const envRaw = Number(process.env.VOS_TRIAGE_BATCH_SEGMENTS);
+      return Number.isFinite(envRaw) && envRaw >= 1 ? Math.trunc(envRaw) : DEFAULT_TRIAGE_BATCH_SEGMENTS;
+    })();
+  // Hard bound: no option/env value can push a batch past the policy max.
+  return Math.min(Math.max(1, raw), MAX_TRIAGE_BATCH_SEGMENTS);
+}
+
+/**
+ * Stable non-secret snapshot of everything that selects the actual runtime
+ * and model behind an undefined opts.model (connector config chain), read
+ * from the SAME effective env the connector will use. Included in the
+ * checkpoint plan signature so saved batches are never reused across a
+ * changed runtime/model configuration.
+ */
+function triageRuntimeSnapshot(
+  opts: CreateLlmTriageAgentOptions,
+  env: NodeJS.ProcessEnv,
+): Record<string, unknown> {
+  return {
+    // An injected completer and the connector path are incompatible
+    // completion sources: their checkpoints must never cross-reuse.
+    completion_path: opts.llm ? "injected" : "connector",
+    model_opt: opts.model ?? null,
+    runtime_opt: opts.editorialLlm?.runtime ?? null,
+    runtime_env: env.VOS_EDITORIAL_LLM ?? null,
+    gemini_model_opt: opts.editorialLlm?.geminiModel ?? null,
+    gemini_model_env: env.EDITORIAL_LLM_GEMINI_MODEL
+      ?? env.UNIFIED_EDITORIAL_MODEL
+      ?? env.BLUEPRINT_MODEL
+      ?? env.TRIAGE_MODEL
+      ?? null,
+    has_gemini_key: Boolean(env.GEMINI_API_KEY),
+  };
+}
+
+function triageBatchDelayMs(): number {
+  const raw = Number(process.env.VOS_TRIAGE_BATCH_DELAY_MS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.trunc(raw);
+  return MULTIMODAL_BATCH_DELAY_MS;
+}
+
+async function waitForTriageBatchDelay(deadline: StageDeadline): Promise<boolean> {
+  const delayMs = triageBatchDelayMs();
+  if (delayMs <= 0) return !deadline.exhausted;
+  const remainingMs = deadline.remainingMs();
+  if (remainingMs <= 0) return false;
+  await new Promise((resolve) => setTimeout(
+    resolve,
+    Math.min(delayMs, Math.max(1, Math.floor(remainingMs))),
+  ));
+  return !deadline.exhausted;
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function triageBatchFailureNotes(
+  failures: Array<{ index: number; reason: TriageBatchFailureReason }>,
+  totalBatches: number,
+): string[] {
+  return failures.map((failure) =>
+    failure.reason === "stage_deadline_exhausted"
+      ? `batch ${failure.index + 1}/${totalBatches} skipped after stage deadline`
+      : `batch ${failure.index + 1}/${totalBatches} failed: ${failure.reason}`,
+  );
 }

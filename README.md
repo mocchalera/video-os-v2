@@ -22,7 +22,7 @@ Premiere Pro との FCP7 XML ラウンドトリップにも対応しており、
 - `editor/shared` は preview と final render の parity contract を支える共有実装としてサポートします。
 - `editor/client` はリタイア済みの旧 Web UI です。新機能・通常保守の対象ではなく、現行 UI の実装先にしないでください。履歴参照のため source は残しています。
 
-CI はこの境界に合わせ、`macos-studio` job で SwiftPM tests と CLI smoke、`editor-server` job で `editor/server` + `editor/shared` の typecheck、Node test job で preview parity と server security regression を実行します。`editor/client` の build は意図的に required CI に含めていません。詳細は [`editor/README.md`](editor/README.md) と [`ARCHITECTURE.md`](ARCHITECTURE.md) を参照してください。
+CI はこの境界に合わせ、PR では [`ci.yml`](.github/workflows/ci.yml) の単一 Ubuntu fast product gate（schema、契約、repo、build）を実行します。Dev / main / public-candidate への protected push と手動 dispatch では [`full-integration.yml`](.github/workflows/full-integration.yml) が全 Node suite、preview server、real render を実行し、手動 dispatch では macOS Studio も含めます。Studio/Swift 関連パスの PR または protected push だけ [`macos-studio.yml`](.github/workflows/macos-studio.yml) が起動します。`editor/client` の build は意図的に required CI に含めていません。実行モードとコスト境界の詳細は [`docs/ci-workflow-modes.md`](docs/ci-workflow-modes.md)、製品境界は [`editor/README.md`](editor/README.md) と [`ARCHITECTURE.md`](ARCHITECTURE.md) を参照してください。
 
 現行正を確認するときは、まず [`docs/CURRENT_ARCHITECTURE.md`](docs/CURRENT_ARCHITECTURE.md) を読み、続けて [`docs/DECISIONS.md`](docs/DECISIONS.md)、[`docs/PIPELINE_STATES.md`](docs/PIPELINE_STATES.md)、[`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)、[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md)、[`docs/DEPRECATED.md`](docs/DEPRECATED.md) を参照してください。過去の design / review 文書は履歴資料であり、これらの現行正、schema、実行コード、CI を上書きしません。
 
@@ -61,6 +61,8 @@ CI はこの境界に合わせ、`macos-studio` job で SwiftPM tests と CLI sm
 ```bash
 npm install
 ```
+
+エディタサーバーを実際に起動するテスト（`npm run test:editor-server-integration` など）を実行する場合は、追加で `npm --prefix editor ci` が必要です。
 
 HyperFrames / Remotion の exact preview は、ローカルに `pyftsubset`
 （FontTools）があれば表示文字だけの WOFF2 を生成・再利用します。未導入でも
@@ -220,19 +222,24 @@ previewの会話と重ねて試聴し、音楽適合・会話適合・生成品�
 | `editorial-pipeline` | retrieval → planning → compile → render → QA の統合実行 | `npx tsx scripts/editorial-pipeline.ts --project projects/<project-id> [--skip-fine] [--skip-render] [--skip-qa]` |
 | `render-rough-cut` | `timeline.json` を BGM 付き MP4 にレンダーし duration parity を記録 | `npx tsx scripts/render-rough-cut.ts --project projects/<project-id> [--output path] [--bgm path]` |
 | `promo-finish` | transcript aligned 字幕、最後の余韻、音声/映像フェード付き宣材MP4を生成 | `npm run promo-finish -- --project projects/<project-id> [--output path]` |
-| `caption-review` | draft復旧、risk queue、安全な一括確認、編集、split / merge、timing、用語候補、検証、人間承認 | `npx tsx scripts/caption-review.ts <queue|prepare|recover|init|verify-safe|edit|split|merge|glossary-propose|undo|apply|validate|approve> --project projects/<project-id> [options]` |
+| `caption-review` | draft復旧、risk queue、安全な一括確認、編集、split / merge、timing、用語候補、検証、人間承認、visual treatmentのinit/status/apply/undo/bind | `npx tsx scripts/caption-review.ts <queue|prepare|recover|init|verify-safe|edit|split|merge|glossary-propose|undo|apply|validate|approve|visual-init|visual-status|visual-apply|visual-undo|visual-approve> --project projects/<project-id> [options]` |
 | `caption-finalize` | 承認intentをimmutable化し、caption-bound納品一式を世代生成・検証してatomicにactive化 | `npm run caption-finalize -- run --project projects/<project-id> [--supplied-final /path/final.mp4]` |
 | `final-render-review-pack` | 長尺final前に本番同等の代表区間review reelを計画・生成・freshness確認 | `npm run final-render-review-pack -- <plan|build|status> --project projects/<project-id> [options]` |
 | `final-render-checklist` | 視覚review reelと音声A/Bをhash-boundし、最終renderを承認 | `npm run final-render-checklist -- <status|approve> --project projects/<project-id> [options]` |
 | `audio-finish-remux` | 承認済み映像streamを再encodeせず、2-pass MA音声だけを再mux・任意でatomic finalize | `npm run audio-finish-remux -- --project projects/<project-id> --source-receipt <receipt.json> [--finalize]` |
+| `ai-music-master` | AI生成音楽向け専用3-stage MA chain（cleanup EQ / presence-air / stereo width + soft-knee multiband compand）+ SNS向け2-pass loudnorm（受入: -13.3±0.5 LUFS / TP <= -1.0 dBTP、loudnorm処理は別管理の-2.0 dBTP processing true-peak target、fail-closed検証receipt付き）。`source_premaster` routeはloudnormなしのtone conditioningのみで、single final mastering契約を保持 | `npm run ai-music-master -- --input <audio> --output-dir <dir> [--route standalone_sns_master\|source_premaster] [--no-mp3] [--policy <policy.json>] [--json]` |
 | `bgm-shortlist` | 生成BGM候補の元音源をSHA照合し、音楽・会話適合・類似性・権利の人間レビューキューを作成・更新 | `npx tsx scripts/bgm-shortlist.ts <verify|prepare-review|review> [options]` |
 | `package` | approved rough cut から final package / QA manifest を作成。`--preflight-only --json`は読み取り専用Gate 10確認 | `npm run package -- projects/<project-id> [options]` |
+| `pilot:verify` | RFA-016のagent QA、human visual/audio、NLE handoff、platform previewを独立receiptとして読み取り専用評価。public promotionは対象外 | `npm run pilot:verify -- --project projects/<project-id> [--json]` |
 | `render-route` | timeline要素から FFmpeg / Remotion / HyperFrames の描画経路を読み取り専用で確認 | `npm run render-route -- projects/<project-id> [--json]` |
 | `status` | Gate 状態と次アクション確認 | `npx tsx scripts/status.ts projects/<project-id>` |
 | `compile` | `timeline.json` と preview manifest 生成 | `npx tsx scripts/compile-timeline.ts projects/<project-id>` |
 | `preview` | preview clip / overview 生成 | `npx tsx scripts/preview-segment.ts projects/<project-id> [--beat <beat-name>]` |
 | `export-premiere` | Premiere 向け FCP7 XML 出力 | `npx tsx scripts/export-premiere-xml.ts projects/<project-id>` |
 | `import-premiere` | Premiere で編集した XML の差分読込 | `npx tsx scripts/import-premiere-xml.ts projects/<project-id> --xml edited.xml [--dry-run]` |
+| `handoff-export` | 承認済み canonical timeline を明示した NLE profile で Resolve OTIO handoff へ出力（`--check` は bridge 実行・project 書込みなし） | `npm run handoff-export -- --project projects/<project-id> --profile runtime/nle-profiles/resolve-v1.yaml [--python <path>] [--check] [--json]` |
+| `handoff-import` | 1 handoff の OTIO import report と identity-bound v2 human revision diff を生成（`--check` は読み取り専用） | `npm run handoff-import -- projects/<project-id> --manifest projects/<project-id>/exports/handoffs/<handoff-id>/handoff_manifest.yaml --imported-otio projects/<project-id>/exports/handoffs/<handoff-id>/imported_handoff.otio --profile <nle-profile.yaml> [--check]` |
+| `review-patch` | 承認済み canonical timeline に対して review-patch/v2 を prepare/check し、明示受諾時だけ `06_review/review_patch.json` へ install（install は `project_state.yaml` の承認 hash/time も更新、prepare/check は project 書込みなし） | `npm run review-patch -- <prepare|check|install> --project projects/<project-id> --input <patch.json> [--output <external-patch.json>] [--accept --approved-by <human>] [--json]` |
 | `smoke-test-qwen3vl.sh` | Qwen3-VL local worker / 2048-dim embedding の確認 | `bash scripts/smoke-test-qwen3vl.sh` |
 | `smoke-test-clap.sh` | CLAP local worker / 512-dim audio embedding の確認 | `bash scripts/smoke-test-clap.sh` |
 

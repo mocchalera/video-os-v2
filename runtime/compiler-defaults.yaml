@@ -12,6 +12,20 @@ beat_sync:
   cut_quantize: auto
   max_shift_frames: 12
 
+# Issue #35 rhythm sync: snap cut boundaries onto music onsets/downbeats and
+# word-level STT heads. search_window_sec governs section-start snaps (Hard
+# Snap at chorus); max_shift_frames guards non-section boundary snaps.
+# parity_gate: "enforce" (default) blocks the canonical compile when a chorus
+# section start misses the nearest primary V1 cut by >= parity_max_offset_
+# frames after snapping. Set parity_gate: "off" to explicitly opt out —
+# parity is still measured and stamped, but never blocks the compile.
+rhythm_sync:
+  mode: auto
+  search_window_sec: 1.5
+  max_shift_frames: 12
+  parity_max_offset_frames: 2
+  min_cue_confidence: 0.6
+
 continuity:
   same_asset_repeat: reorder_or_fail
   same_cluster_repeat: warn

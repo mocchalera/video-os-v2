@@ -1,0 +1,42 @@
+{
+  "version": "private-pilot-gate-receipt/v1",
+  "pilot_id": "PILOT_RFA016_READY_SYNTHETIC",
+  "project_id": "rfa-016-ready-synthetic",
+  "gate": "nle_handoff",
+  "requirement": "not_required",
+  "status": "not_required",
+  "decision": "not_required",
+  "evidence": {
+    "record_type": "nle_handoff",
+    "summary": "NLE handoff is explicitly not required for this synthetic metadata-only case.",
+    "recorded_at": "2026-08-22T00:00:00Z",
+    "recorded_by": "synthetic-fixture",
+    "artifacts": [
+      { "path": "evidence-nle.json", "sha256": "sha256:02629d2c0c1d0eb3e919d51aa55e0115ad3ce214ca0b31cbea6aba95ff6578be" }
+    ],
+    "handoff": {
+      "confirmation": "not_required",
+      "route_kind": "not_applicable",
+      "artifacts": [
+        { "path": "evidence-nle.json", "sha256": "sha256:02629d2c0c1d0eb3e919d51aa55e0115ad3ce214ca0b31cbea6aba95ff6578be" }
+      ]
+    }
+  },
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "explicit-not-required-metadata",
+    "captured_at": "2026-08-22T00:00:00Z",
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:5cf5e994cc07f0c4701454c8798a61be5b6f962cca356f7e8a896721b489be54" },
+      { "path": "evidence-nle.json", "sha256": "sha256:02629d2c0c1d0eb3e919d51aa55e0115ad3ce214ca0b31cbea6aba95ff6578be" }
+    ],
+    "synthetic_fixture": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-08-22T00:00:00Z",
+    "input_fingerprint": "sha256:516c5e72d83cdc45b3b236a890c542887acea24160465ddd06090ef7ab1a44c0",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "reason": "synthetic fixture inputs are hash-bound and current"
+  }
+}

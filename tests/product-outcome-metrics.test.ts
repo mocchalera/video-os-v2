@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
@@ -9,6 +8,7 @@ import {
   writeProductOutcomeMetrics,
 } from "../runtime/eval/product-outcome-metrics.js";
 import { validateAgainstSchema } from "../runtime/commands/shared.js";
+import { createReviewRoundProject, runReviewRound, sha, type RoundProject } from "./helpers/review-round-project.js";
 
 const tempDirs: string[] = [];
 
@@ -17,8 +17,8 @@ afterEach(() => {
 });
 
 describe("product outcome metrics", () => {
-  it("projects measured, estimated, and degraded outcomes from canonical artifacts", () => {
-    const projectDir = fixtureProject(true);
+  it("projects measured, estimated, and degraded outcomes from canonical artifacts", async () => {
+    const projectDir = await fixtureProject(true);
     const report = buildProductOutcomeMetrics(projectDir, "2026-07-10T12:00:00.000Z");
 
     expect(report.metrics.time_to_first_usable_cut).toMatchObject({
@@ -33,8 +33,8 @@ describe("product outcome metrics", () => {
     });
     expect(report.metrics.kept_cut_ratio).toMatchObject({
       value: 1,
-      numerator: 1,
-      denominator: 1,
+      numerator: 2,
+      denominator: 2,
     });
     expect(report.metrics.accepted_proposal_ratio).toMatchObject({
       value: 1,
@@ -57,6 +57,10 @@ describe("product outcome metrics", () => {
       method: "latest_completed_pipeline_timing_run",
     });
     expect(report.metrics.rerun_cost.status).toBe("unavailable");
+    expect(report.metrics.review_rounds).toMatchObject({
+      status: "measured",
+      value: { rounds: [{ round_index: 1 }], completeness: "complete" },
+    });
     expect(report.degraded_run_flags.map((flag) => flag.code)).toEqual([
       "analysis_partial_override",
       "pipeline_stages_degraded",
@@ -72,8 +76,8 @@ describe("product outcome metrics", () => {
     });
   });
 
-  it("reports unavailable metrics instead of inventing missing human or NLE evidence", () => {
-    const projectDir = fixtureProject(false);
+  it("reports unavailable metrics instead of inventing missing human or NLE evidence", async () => {
+    const projectDir = await fixtureProject(false);
     const report = buildProductOutcomeMetrics(projectDir, "2026-07-10T12:00:00.000Z");
 
     expect(report.metrics.human_intervention_minutes.status).toBe("unavailable");
@@ -81,11 +85,13 @@ describe("product outcome metrics", () => {
     expect(report.metrics.accepted_proposal_ratio.status).toBe("unavailable");
     expect(report.metrics.post_export_edit_distance.status).toBe("unavailable");
     expect(report.metrics.rerun_duration.status).toBe("unavailable");
+    expect(report.metrics.review_rounds.status).toBe("unavailable");
+    expect(report.metrics.review_rounds.value).toBeNull();
     expect(report.degraded_run_flags).toEqual([]);
   });
 
-  it("keeps report identity stable across creation timestamps and writes atomically", () => {
-    const projectDir = fixtureProject(true);
+  it("keeps report identity stable across creation timestamps and writes atomically", async () => {
+    const projectDir = await fixtureProject(true);
     const first = buildProductOutcomeMetrics(projectDir, "2026-07-10T12:00:00.000Z");
     const second = buildProductOutcomeMetrics(projectDir, "2026-07-11T12:00:00.000Z");
 
@@ -99,20 +105,35 @@ describe("product outcome metrics", () => {
   });
 });
 
-function fixtureProject(withEvidence: boolean): string {
-  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), "video-os-product-metrics-"));
-  tempDirs.push(projectDir);
-  writeJson(projectDir, "05_timeline/timeline.json", timeline("2", [
-    clip("CLP_1", "SEG_1", "AST_1", 1000000, 4000000, 0, 300),
-    clip("CLP_2", "SEG_2", "AST_2", 5000000, 8000000, 300, 300),
-  ]));
-  if (!withEvidence) return projectDir;
+async function fixtureProject(withEvidence: boolean): Promise<string> {
+  const project = createReviewRoundProject({ projectId: "fixture" });
+  tempDirs.push(project.root);
+  if (!withEvidence) {
+    // Remove the baseline and progress/patch evidence so retention/rerun/proposal have no inputs.
+    fs.rmSync(path.join(project.root, "05_timeline/v001.timeline.json"));
+    fs.rmSync(path.join(project.root, "progress.json"));
+    fs.rmSync(path.join(project.root, "06_review/review_patch.json"));
+    return project.root;
+  }
+  // review_patch.json is a generation input; it must exist before the round
+  // and remain unchanged afterwards.
+  writeJson(project.root, "06_review/review_patch.json", { timeline_version: "2", operations: [] });
+  const round = await runReviewRound(project, { decision: "request_changes" });
+  writeEvidenceArtifacts(project, round);
+  return project.root;
+}
 
-  writeJson(projectDir, "05_timeline/v001.timeline.json", timeline("1", [
-    clip("OLD_1", "SEG_1", "AST_1", 1500000, 3500000, 0, 200),
-  ]));
-  writeYaml(projectDir, "project_state.yaml", {
-    project_id: "fixture",
+function writeEvidenceArtifacts(
+  project: RoundProject,
+  round: Awaited<ReturnType<typeof runReviewRound>>,
+): void {
+  const { root, projectId, paths } = project;
+  writeYaml(root, "project_state.yaml", {
+    version: 1,
+    project_id: projectId,
+    current_state: "review_ready",
+    gates: { analysis_gate: "partial_override", review_gate: "open" },
+    analysis_override: { status: "active", reason: "Optional visual lane unavailable." },
     history: [
       {
         from_state: "intent_pending",
@@ -130,12 +151,10 @@ function fixtureProject(withEvidence: boolean): string {
       },
     ],
     approval_record: { approved_by: "operator", approved_at: "2026-07-10T10:30:00.000Z" },
-    analysis_override: { status: "active", reason: "Optional visual lane unavailable." },
-    gates: { analysis_gate: "partial_override" },
   });
-  writeYaml(projectDir, "06_review/human_notes.yaml", {
+  writeYaml(root, "06_review/human_notes.yaml", {
     version: 1,
-    project_id: "fixture",
+    project_id: projectId,
     notes: [
       {
         id: "HN_1",
@@ -148,10 +167,10 @@ function fixtureProject(withEvidence: boolean): string {
       },
     ],
   });
-  writeYaml(projectDir, "06_review/review_report.yaml", {
+  writeYaml(root, "06_review/review_report.yaml", {
     version: "1",
-    project_id: "fixture",
-    timeline_version: "2",
+    project_id: projectId,
+    timeline_version: round.timelineVersion,
     summary_judgment: { status: "approved", rationale: "Operator approved." },
     strengths: [],
     weaknesses: [{ summary: "Pacing" }],
@@ -170,10 +189,9 @@ function fixtureProject(withEvidence: boolean): string {
     visual_qa_waiver: true,
     visual_qa_waiver_reason: "Operator watched the full video.",
   });
-  writeJson(projectDir, "06_review/review_patch.json", { timeline_version: "2", operations: [] });
-  writeJson(projectDir, "06_review/review_metrics.json", { total_checks: 2 });
-  writeJson(projectDir, "progress.json", {
-    project_id: "fixture",
+  writeJson(root, "06_review/review_metrics.json", { total_checks: 2 });
+  writeJson(root, "progress.json", {
+    project_id: projectId,
     phase: "review",
     gate: 5,
     status: "completed",
@@ -184,13 +202,13 @@ function fixtureProject(withEvidence: boolean): string {
     started_at: "2026-07-10T11:00:00.000Z",
     updated_at: "2026-07-10T11:00:10.000Z",
   });
-  writeJson(projectDir, "03_analysis/pipeline-timings.json", {
+  writeJson(root, "03_analysis/pipeline-timings.json", {
     version: 1,
-    project_id: "fixture",
+    project_id: projectId,
     updated_at: "2026-07-10T11:01:30.000Z",
     runs: [{
       run_id: "RUN_1",
-      project_id: "fixture",
+      project_id: projectId,
       entrypoint: "test",
       status: "completed",
       started_at: "2026-07-10T11:00:00.000Z",
@@ -201,11 +219,12 @@ function fixtureProject(withEvidence: boolean): string {
       ],
     }],
   });
-  writeYaml(projectDir, "07_handoff/HND_1/human_revision_diff.yaml", {
-    version: 1,
-    project_id: "fixture",
+  const generationDir = `09_output/social-review/generations/${round.generationId.slice("sha256:".length)}`;
+  writeYaml(root, "07_handoff/HND_1/human_revision_diff.yaml", {
+    version: 2,
+    project_id: projectId,
     handoff_id: "HND_1",
-    base_timeline_version: "2",
+    base_timeline_version: round.timelineVersion,
     capability_profile_id: "premiere",
     status: "review_required",
     summary: { trim: 1, reorder: 1, unmapped: 1 },
@@ -216,37 +235,20 @@ function fixtureProject(withEvidence: boolean): string {
       delta: { in_us: 100000, out_us: -200000 },
     }],
     unmapped_edits: [{ classification: "split_clip", item_ref: "XCLIP_2", review_required: true, reason: "split" }],
+    identity: {
+      base_timeline: { path: "05_timeline/timeline.json", version: round.timelineVersion, sha256: round.timelineSha256 },
+      review_generation: {
+        generation_id: round.generationId,
+        review_identity: round.reviewIdentity,
+        output: { path: `${generationDir}/review.mp4`, sha256: round.outputSha256 },
+        review_ready_receipt: {
+          path: `${generationDir}/review-ready-receipt.json`,
+          sha256: sha(fs.readFileSync(path.join(root, generationDir, "review-ready-receipt.json"))),
+        },
+      },
+      review_round: { round_index: 1, round_identity: round.roundIdentity },
+    },
   });
-  return projectDir;
-}
-
-function timeline(version: string, clips: unknown[]): Record<string, unknown> {
-  return {
-    version,
-    project_id: "fixture",
-    sequence: { fps_num: 30, fps_den: 1 },
-    tracks: { video: [{ track_id: "V1", clips }], audio: [] },
-  };
-}
-
-function clip(
-  clipId: string,
-  segmentId: string,
-  assetId: string,
-  srcInUs: number,
-  srcOutUs: number,
-  timelineInFrame: number,
-  timelineDurationFrames: number,
-): Record<string, unknown> {
-  return {
-    clip_id: clipId,
-    segment_id: segmentId,
-    asset_id: assetId,
-    src_in_us: srcInUs,
-    src_out_us: srcOutUs,
-    timeline_in_frame: timelineInFrame,
-    timeline_duration_frames: timelineDurationFrames,
-  };
 }
 
 function writeJson(projectDir: string, relativePath: string, data: unknown): void {

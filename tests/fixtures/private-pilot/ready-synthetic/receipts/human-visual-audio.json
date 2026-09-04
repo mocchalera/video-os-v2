@@ -1,0 +1,42 @@
+{
+  "version": "private-pilot-gate-receipt/v1",
+  "pilot_id": "PILOT_RFA016_READY_SYNTHETIC",
+  "project_id": "rfa-016-ready-synthetic",
+  "gate": "human_visual_audio",
+  "requirement": "required",
+  "status": "approved",
+  "decision": "approve",
+  "evidence": {
+    "record_type": "human_visual_audio",
+    "summary": "Approval-shaped human visual/audio metadata for synthetic contract testing only.",
+    "recorded_at": "2026-08-22T00:00:00Z",
+    "recorded_by": "synthetic-fixture",
+    "artifacts": [
+      { "path": "evidence-human.json", "sha256": "sha256:63576b71dbc17362953cad8a156edf5f79464db40a3c13f75763f11d99175c24" }
+    ],
+    "human_review": {
+      "reviewed": true,
+      "reviewer": "synthetic-fixture-reviewer",
+      "visual": true,
+      "audio": true,
+      "decision": "approved"
+    }
+  },
+  "provenance": {
+    "producer": "rfa-016-fixture",
+    "method": "approval-shaped-metadata-only",
+    "captured_at": "2026-08-22T00:00:00Z",
+    "inputs": [
+      { "path": "inputs.json", "sha256": "sha256:5cf5e994cc07f0c4701454c8798a61be5b6f962cca356f7e8a896721b489be54" },
+      { "path": "evidence-human.json", "sha256": "sha256:63576b71dbc17362953cad8a156edf5f79464db40a3c13f75763f11d99175c24" }
+    ],
+    "synthetic_fixture": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-08-22T00:00:00Z",
+    "input_fingerprint": "sha256:7e8364fc71123c821e476ce6cd5f6f87f98a9061554b764b507d4175c53dfa7f",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "reason": "synthetic fixture inputs are hash-bound and current"
+  }
+}

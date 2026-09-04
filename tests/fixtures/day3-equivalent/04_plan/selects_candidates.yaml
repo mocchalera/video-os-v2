@@ -1,0 +1,40 @@
+version: "1"
+project_id: day3-equivalent-fixture
+created_at: "2026-08-31T00:00:00Z"
+candidates:
+  - segment_id: SEG_INTRO
+    asset_id: AST_INTRO
+    src_in_us: 0
+    src_out_us: 400000
+    role: hero
+    why_it_matches: restore the opening beat
+    risks: []
+    confidence: 1
+    media_kind: video
+  - segment_id: SEG_CUTAWAY_1
+    asset_id: AST_CUTAWAY_1
+    src_in_us: 400000
+    src_out_us: 600000
+    role: support
+    why_it_matches: first visual breath
+    risks: []
+    confidence: 1
+    media_kind: video
+  - segment_id: SEG_CUTAWAY_2
+    asset_id: AST_CUTAWAY_2
+    src_in_us: 600000
+    src_out_us: 800000
+    role: support
+    why_it_matches: second visual breath
+    risks: []
+    confidence: 1
+    media_kind: video
+  - segment_id: SEG_CUTAWAY_3
+    asset_id: AST_CUTAWAY_3
+    src_in_us: 800000
+    src_out_us: 1000000
+    role: support
+    why_it_matches: third visual breath
+    risks: []
+    confidence: 1
+    media_kind: video

@@ -8,9 +8,11 @@ import {
 import {
   SHORT_SOUND_DESIGN_AGENT_SKILL_CONTRACT,
   SHORT_SOUND_DESIGN_CLI_FLAGS,
+  SFX_PROMOTION_CLI_FLAGS,
 } from "../runtime/audio/sound-design-contract.js";
 import { parseArgs } from "../scripts/full-pipeline.js";
 import { parsePlanSoundDesignArgs } from "../scripts/plan-sound-design.js";
+import { parsePromoteSfxAssetArgs, SFX_PROMOTION_USAGE } from "../scripts/promote-sfx-asset.js";
 import {
   AGENT_SKILL_CONTRACTS_MANIFEST_PATH,
   serializeAgentSkillContractsManifest,
@@ -116,6 +118,8 @@ describe("Agent Skill executable contracts", () => {
     for (const flag of SHORT_SOUND_DESIGN_CLI_FLAGS) {
       expect(help).toContain(flag);
     }
+    expect(parsePromoteSfxAssetArgs(["node", "script", "--help"]).help).toBe(true);
+    for (const flag of SFX_PROMOTION_CLI_FLAGS) expect(SFX_PROMOTION_USAGE).toContain(flag);
     for (const artifact of contract.producedArtifacts) {
       expect(`${markdown}\n${referenceContents}`).toContain(artifact);
     }

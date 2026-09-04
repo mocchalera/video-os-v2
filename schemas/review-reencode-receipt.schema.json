@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-reencode-receipt.schema.json",
+  "title": "Review-only distribution re-encode receipt",
+  "type": "object",
+  "required": ["version", "generation_id", "source_generation_id", "source_output_sha256", "source_receipt", "transform", "transform_sha256", "output", "review_only"],
+  "properties": {
+    "version": { "const": "review-reencode-receipt/v1" },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "source_generation_id": { "$ref": "#/$defs/hash" },
+    "source_output_sha256": { "$ref": "#/$defs/hash" },
+    "source_receipt": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/hash" } },
+      "additionalProperties": false
+    },
+    "transform": {
+      "type": "object",
+      "required": ["container", "video_codec", "max_width", "crf"],
+      "properties": {
+        "container": { "const": "mp4" },
+        "video_codec": { "const": "h264" },
+        "max_width": { "type": "integer", "minimum": 1 },
+        "crf": { "type": "integer", "minimum": 0, "maximum": 51 }
+      },
+      "additionalProperties": false
+    },
+    "transform_sha256": { "$ref": "#/$defs/hash" },
+    "output": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^09_output/social-review/reencodes/[a-f0-9]{64}/delivery\\.mp4$" },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "review_only": { "const": true }
+  },
+  "additionalProperties": false,
+  "$defs": { "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } }
+}

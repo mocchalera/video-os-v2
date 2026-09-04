@@ -1,0 +1,57 @@
+name: macOS Studio CI
+
+on:
+  pull_request:
+    paths:
+      - Package.swift
+      - Package.resolved
+      - apps/macos-studio/**
+      - .github/workflows/macos-studio.yml
+  push:
+    branches:
+      - main
+      - Dev
+      - public-candidate/**
+    paths:
+      - Package.swift
+      - Package.resolved
+      - apps/macos-studio/**
+      - .github/workflows/macos-studio.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-studio-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Native path filters keep the paid macOS runner off ordinary docs/runtime
+# changes. Manual full integration dispatch is owned by full-integration.yml;
+# this workflow's dispatch remains available for a Studio-only check.
+jobs:
+  studio-product-gate:
+    name: macOS Studio product gate
+    runs-on: macos-14
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_15.4.app/Contents/Developer
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Assert Xcode and Swift versions
+        run: |
+          test -d "${DEVELOPER_DIR}"
+          test "$(xcodebuild -version)" = "$(printf 'Xcode 15.4\nBuild version 15F31d')"
+          xcrun swift --version | sed -n '1p' | grep -E '^Apple Swift version 5\.10 '
+
+      - name: Build Studio target
+        run: swift build --target VideoOSStudio
+
+      - name: Run SwiftPM tests
+        run: swift test
+
+      - name: Run Studio CLI smoke
+        run: swift run videoos-studio-cli doctor

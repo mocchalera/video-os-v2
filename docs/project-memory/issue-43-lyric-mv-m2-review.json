@@ -1,0 +1,39 @@
+{
+  "issue": 43,
+  "profile_id": "lyric_mv",
+  "artifact": "issue-43-lyric-mv-m2-review",
+  "baseline": {
+    "score": 70,
+    "scale": 100,
+    "status": "prior_human_baseline",
+    "source": "live Issue #43 body human approx 70/100 draft",
+    "new_human_score": null
+  },
+  "exact_changes": [
+    "Added a lyric_mv composite cadence report combining background cuts, caption cue changes, in-frame motion, music sections/onsets, and transitions.",
+    "Added explicit reason and section binding checks for intentional long still holds; talking-head max_shot_length is reported as not applicable for lyric_mv.",
+    "Embedded component breakdown and static-region classification in the canonical review metric measured payload.",
+    "Added an executable six-source-still pilot with intentional source reuse, differing per-instance transforms/motion, and frames/seconds/beats/section-boundary holds.",
+    "Preserved the section-boundary hold through normalize, compile, assembly-plan, and bounded renderer receipts."
+  ],
+  "automated_evidence": {
+    "tests": [
+      "tests/issue43-m2.test.ts",
+      "tests/issue43-lyric-mv-pilot.test.ts"
+    ],
+    "pilot": {
+      "source_still_count": 6,
+      "timeline_clip_count": 7,
+      "intentional_reuse": true,
+      "section_boundary_frame": 480,
+      "bounded_render_frame_count": 672
+    }
+  },
+  "human_re_evaluation": {
+    "slot_id": "issue43-m2-human-re-evaluation",
+    "status": "HOLD",
+    "result": null,
+    "reason": "No genuine new human evaluation was supplied; an automated score is not substituted.",
+    "required_input": "A human reviewer must evaluate the M2 review-ready pilot and record a new score/result here."
+  }
+}

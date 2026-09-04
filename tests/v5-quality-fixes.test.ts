@@ -231,7 +231,47 @@ describe("v5 Fix 2: Guide Mode Clip Fill", () => {
 
   beforeAll(() => {
     tmpDir = createTempProject({
-      blueprintOverrides: { track_layout: "multi" },
+      blueprintOverrides: {
+        track_layout: "multi",
+        // Issue #6 P0: this fixture exercises multi-layout guide fill
+        // mechanics and does not model wall-to-wall primary audio, so it
+        // declares an explicit primary-audio mix policy.
+        audio_mix_policy: {
+          policy: "primary-audio-mix/v1",
+          mode: "selective_authorization",
+          authority: "operator",
+          reason: "fixture focuses on guide fill placement, not primary-audio continuity",
+        },
+        timeline_operations: [
+          {
+            operation_id: "OP_V5_GUIDE_GAP_001",
+            type: "gap",
+            track_id: "V1",
+            start_frame: 96,
+            duration_frames: 216,
+            authority: "operator",
+            reason: "fixture intentionally leaves an authored scene gap",
+          },
+          {
+            operation_id: "OP_V5_GUIDE_GAP_002",
+            type: "gap",
+            track_id: "V1",
+            start_frame: 452,
+            duration_frames: 100,
+            authority: "operator",
+            reason: "fixture intentionally leaves an authored scene gap",
+          },
+          {
+            operation_id: "OP_V5_GUIDE_GAP_003",
+            type: "gap",
+            track_id: "V1",
+            start_frame: 668,
+            duration_frames: 4,
+            authority: "operator",
+            reason: "fixture intentionally leaves the unselected tail",
+          },
+        ],
+      },
     });
   });
 

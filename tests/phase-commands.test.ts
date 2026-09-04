@@ -1,10 +1,11 @@
 import { describe, it, expect, afterAll } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { runAnalyze, type AnalyzeRunner } from "../runtime/commands/analyze.js";
 import { buildSourceLedger } from "../runtime/artifacts/source-ledger.js";
+import { computeNormalizedJsonHash } from "../runtime/artifacts/p1-manifest-coverage.js";
 import { discoverRequestedSources } from "../runtime/media/source-discovery.js";
 import type { AssetItem } from "../runtime/connectors/ffprobe.js";
 import { runTriage, type TriageAgent } from "../runtime/commands/triage.js";
@@ -18,6 +19,7 @@ import { runCompilePhase } from "../runtime/commands/compile.js";
 import { runReview, type ReviewAgent, type ReviewReport, type ReviewPatch } from "../runtime/commands/review.js";
 import { runRender } from "../runtime/commands/render.js";
 import { runFullPipeline, type FullPipelineDeps } from "../runtime/commands/full-pipeline.js";
+import { runStatus } from "../runtime/commands/status.js";
 import { readProgress } from "../runtime/progress.js";
 import { approveFinalRenderChecklist } from "../runtime/packaging/final-render-approval.js";
 import {
@@ -109,19 +111,34 @@ function createProject(
 
 function materializeTimelineSources(projectDir: string): void {
   const timelinePath = path.join(projectDir, "05_timeline/timeline.json");
-  if (!fs.existsSync(timelinePath)) return;
-  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8")) as {
-    tracks?: {
-      video?: Array<{ clips?: Array<{ asset_id?: string }> }>;
-      audio?: Array<{ clips?: Array<{ asset_id?: string }> }>;
+  const assetIds = new Set<string>();
+  if (fs.existsSync(timelinePath)) {
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf8")) as {
+      tracks?: {
+        video?: Array<{ clips?: Array<{ asset_id?: string }> }>;
+        audio?: Array<{ clips?: Array<{ asset_id?: string }> }>;
+      };
+      audio_mix?: { bgm_asset_id?: string };
     };
-    audio_mix?: { bgm_asset_id?: string };
-  };
-  const assetIds = new Set([
-    ...(timeline.tracks?.video ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
-    ...(timeline.tracks?.audio ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
-    timeline.audio_mix?.bgm_asset_id,
-  ].filter((value): value is string => typeof value === "string"));
+    for (const assetId of [
+      ...(timeline.tracks?.video ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+      ...(timeline.tracks?.audio ?? []).flatMap((track) => track.clips ?? []).map((clip) => clip.asset_id),
+      timeline.audio_mix?.bgm_asset_id,
+    ]) {
+      if (typeof assetId === "string") assetIds.add(assetId);
+    }
+  } else {
+    const selectsPath = path.join(projectDir, "04_plan/selects_candidates.yaml");
+    if (fs.existsSync(selectsPath)) {
+      const selects = parseYaml(fs.readFileSync(selectsPath, "utf8")) as {
+        candidates?: Array<{ asset_id?: unknown }>;
+      };
+      for (const candidate of selects.candidates ?? []) {
+        if (typeof candidate.asset_id === "string") assetIds.add(candidate.asset_id);
+      }
+    }
+  }
+  if (assetIds.size === 0) return;
   const mediaDir = path.join(projectDir, "02_media");
   fs.mkdirSync(mediaDir, { recursive: true });
   const items = [...assetIds].sort().map((assetId) => {
@@ -202,7 +219,7 @@ function makeUncertaintyRegister(): UncertaintyRegister {
 
 function makeReviewReport(): ReviewReport {
   return {
-    version: "1",
+    version: "2",
     project_id: "sample-mountain-reset",
     timeline_version: "1",
     summary_judgment: {
@@ -219,6 +236,18 @@ function makeReviewReport(): ReviewReport {
       goal: "Tighten the opening beat.",
       actions: ["Trim the first shot slightly."],
     },
+    editorial_judgments: [
+      {
+        observation: "The opening beat holds a wide establishing view before the subject enters.",
+        inference: "The delay before the subject appears weakens the opening engagement.",
+        editorial_intent: "Trim the opening so the hook arrives earlier.",
+        evidence: [
+          { kind: "artifact_ref" as const, ref: "01_intent/creative_brief.yaml" },
+        ],
+        confidence: 0.6,
+        confidence_basis: "measured" as const,
+      },
+    ],
   };
 }
 
@@ -456,6 +485,126 @@ describe("phase commands", () => {
     expect(result.error?.code).toBe("STATE_CHECK_FAILED");
   });
 
+  it("full-pipeline cannot enter editorial phases when ready coverage masks invalid segments", async () => {
+    const tmpDir = createProject("pipeline-invalid-analysis", {
+      state: "media_analyzed",
+      removals: ["04_plan", "05_timeline", "06_review"],
+      patches: {
+        "03_analysis/analysis_coverage_report.json": JSON.parse(fs.readFileSync(
+          path.resolve("tests/fixtures/analysis_coverage_report/valid_ready_all_lanes.json"),
+          "utf-8",
+        )),
+      },
+    });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as Record<string, unknown>;
+    segments.invalid_cached_shape = true;
+    fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+    let triageCalls = 0;
+    const triageAgent = createTriageAgent();
+    const deps: FullPipelineDeps = {
+      intentAgent: createIntentAgent(),
+      triageAgent: {
+        async run(ctx) {
+          triageCalls += 1;
+          return triageAgent.run(ctx);
+        },
+      },
+      blueprintAgent: createBlueprintAgent(),
+      reviewAgent: createReviewAgent(),
+      analyzeRunner: createAnalyzeRunner(),
+    };
+
+    const previous = process.env.ENABLE_P1_MANIFEST_COVERAGE;
+    process.env.ENABLE_P1_MANIFEST_COVERAGE = "1";
+    try {
+      const result = await runFullPipeline(tmpDir, deps, { from: "triage", target: "roughcut" });
+      expect(result.success).toBe(false);
+      expect(result.completedPhases).toEqual([]);
+      expect(triageCalls).toBe(0);
+    } finally {
+      if (previous === undefined) delete process.env.ENABLE_P1_MANIFEST_COVERAGE;
+      else process.env.ENABLE_P1_MANIFEST_COVERAGE = previous;
+    }
+  });
+
+  it("full-pipeline blocks Gate 1 before triage when one asset has no canonical segments", async () => {
+    const manifest = JSON.parse(fs.readFileSync(
+      path.resolve("tests/fixtures/source_media_manifest/valid_minimal.json"),
+      "utf-8",
+    )) as {
+      project_id: string;
+      provenance: { hash_policy: { excluded_fields: string[] } };
+    };
+    const coverage = JSON.parse(fs.readFileSync(
+      path.resolve("tests/fixtures/analysis_coverage_report/valid_ready_all_lanes.json"),
+      "utf-8",
+    )) as { project_id: string; source_media_manifest_hash: string };
+    manifest.project_id = "sample-mountain-reset";
+    coverage.project_id = "sample-mountain-reset";
+    coverage.source_media_manifest_hash = computeNormalizedJsonHash(
+      manifest,
+      manifest.provenance.hash_policy.excluded_fields,
+    );
+    const tmpDir = createProject("pipeline-incomplete-analysis", {
+      state: "media_analyzed",
+      removals: [
+        "03_analysis/audio_story_graph.json",
+        "03_analysis/continuity_graph.json",
+        "04_plan",
+        "05_timeline",
+        "06_review",
+      ],
+      patches: {
+        "02_media/source_media_manifest.json": manifest,
+        "03_analysis/analysis_coverage_report.json": coverage,
+      },
+    });
+    const segmentsPath = path.join(tmpDir, "03_analysis/segments.json");
+    const segments = JSON.parse(fs.readFileSync(segmentsPath, "utf-8")) as {
+      items: Array<{ asset_id: string }>;
+    };
+    segments.items = segments.items.filter((segment) => segment.asset_id !== "AST_001");
+    fs.writeFileSync(segmentsPath, JSON.stringify(segments, null, 2), "utf-8");
+    const state = readProjectState(tmpDir)!;
+    state.analysis_override = {
+      status: "active",
+      approved_by: "operator",
+      approved_at: "2026-08-25T00:00:00Z",
+      artifact_version: "analysis-v1",
+    };
+    writeProjectState(tmpDir, state);
+
+    let triageCalls = 0;
+    const triageAgent = createTriageAgent();
+    const deps: FullPipelineDeps = {
+      intentAgent: createIntentAgent(),
+      triageAgent: {
+        async run(ctx) {
+          triageCalls += 1;
+          return triageAgent.run(ctx);
+        },
+      },
+      blueprintAgent: createBlueprintAgent(),
+      reviewAgent: createReviewAgent(),
+      analyzeRunner: createAnalyzeRunner(),
+    };
+
+    const previous = process.env.ENABLE_P1_MANIFEST_COVERAGE;
+    process.env.ENABLE_P1_MANIFEST_COVERAGE = "1";
+    try {
+      const status = runStatus(tmpDir);
+      const result = await runFullPipeline(tmpDir, deps, { from: "triage", target: "roughcut" });
+      expect(status.gates?.analysis_gate).toBe("blocked");
+      expect(result.success).toBe(false);
+      expect(result.completedPhases).toEqual([]);
+      expect(triageCalls).toBe(0);
+    } finally {
+      if (previous === undefined) delete process.env.ENABLE_P1_MANIFEST_COVERAGE;
+      else process.env.ENABLE_P1_MANIFEST_COVERAGE = previous;
+    }
+  });
+
   it("blueprint phase errors when selects are missing", async () => {
     const tmpDir = createProject("blueprint-missing-selects", {
       copySample: false,
@@ -644,5 +793,22 @@ describe("phase commands", () => {
       code: "GATE_CHECK_FAILED",
     });
     expect(result.error?.message).toContain("Final render approval is missing");
+  });
+
+  it("render phase closes progress when packaging throws", async () => {
+    const tmpDir = createProject("render-malformed-timeline", {
+      state: "approved",
+    });
+    stampApprovedState(tmpDir);
+    approveCurrentFinalRender(tmpDir);
+    fs.writeFileSync(path.join(tmpDir, "05_timeline/timeline.json"), "{ malformed timeline", "utf-8");
+
+    await expect(runRender(tmpDir)).rejects.toThrow(/JSON|Unexpected token/);
+    expect(readProgress(tmpDir)).toMatchObject({
+      phase: "render",
+      status: "failed",
+      errors: [{ stage: "render" }],
+    });
+    expect(readProgress(tmpDir)?.errors[0]?.message.length).toBeLessThanOrEqual(1000);
   });
 });

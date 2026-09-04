@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "source-input-attestation.schema.json",
+  "type": "object",
+  "required": ["version", "status", "source_inputs_hash", "source_inputs", "source_input_count", "persisted_source_input_count", "source_inputs_truncated", "warnings", "warning_count", "warnings_suppressed", "usage_policy", "timeline_hash"],
+  "properties": {
+    "version": { "const": "source-input-attestation/v3" },
+    "status": { "enum": ["verified", "live_only", "not_applicable"] },
+    "source_inputs_hash": { "$ref": "#/$defs/rawHash" },
+    "source_inputs": { "type": "array", "items": { "$ref": "#/$defs/source" } },
+    "source_input_count": { "type": "integer", "minimum": 0 },
+    "persisted_source_input_count": { "type": "integer", "minimum": 0 },
+    "source_inputs_truncated": { "type": "boolean" },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "warning_count": { "type": "integer", "minimum": 0 },
+    "warnings_suppressed": { "type": "integer", "minimum": 0 },
+    "usage_policy": { "type": "object", "required": ["include_video", "include_audio"], "properties": { "include_video": { "type": "boolean" }, "include_audio": { "type": "boolean" } }, "additionalProperties": false },
+    "timeline_hash": { "type": "string", "pattern": "^[a-f0-9]{16}$" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "rawHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "source": {
+      "type": "object",
+      "required": ["asset_id", "media_kind", "content_sha256", "identity_status", "render_input_identity"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "media_kind": { "type": "string", "minLength": 1 },
+        "content_sha256": { "$ref": "#/$defs/rawHash" },
+        "identity_status": { "enum": ["verified", "live_only"] },
+        "render_input_identity": { "$ref": "#/$defs/renderIdentity" }
+      },
+      "additionalProperties": false
+    },
+    "renderIdentity": {
+      "oneOf": [
+        { "type": "object", "required": ["relationship", "content_sha256"], "properties": { "relationship": { "const": "same_as_original" }, "content_sha256": { "$ref": "#/$defs/rawHash" } }, "additionalProperties": false },
+        { "type": "object", "required": ["relationship", "content_sha256", "original_content_sha256", "analysis_path", "normalization_producer", "normalization_producer_version"], "properties": { "relationship": { "const": "normalized_still_frame" }, "content_sha256": { "$ref": "#/$defs/rawHash" }, "original_content_sha256": { "$ref": "#/$defs/rawHash" }, "analysis_path": { "type": "string", "minLength": 1 }, "normalization_producer": { "type": "string", "minLength": 1 }, "normalization_producer_version": { "type": "string", "minLength": 1 } }, "additionalProperties": false },
+        { "type": "object", "required": ["relationship", "content_sha256", "original_frame_set_content_sha256", "frame_count", "analysis_path", "normalization_producer", "normalization_producer_version"], "properties": { "relationship": { "const": "normalized_image_sequence_proxy" }, "content_sha256": { "$ref": "#/$defs/rawHash" }, "original_frame_set_content_sha256": { "$ref": "#/$defs/rawHash" }, "frame_count": { "type": "integer", "minimum": 1 }, "analysis_path": { "type": "string", "minLength": 1 }, "normalization_producer": { "type": "string", "minLength": 1 }, "normalization_producer_version": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
+      ]
+    }
+  }
+}

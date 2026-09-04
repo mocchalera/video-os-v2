@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-round-event.schema.json",
+  "title": "Review Round History Event",
+  "description": "Immutable append-only review round history record. Identity is sha256 of the canonical JSON of the record; the filename must be the identity without prefix.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ask"
+    },
+    {
+      "$ref": "#/$defs/response"
+    },
+    {
+      "$ref": "#/$defs/superseded"
+    }
+  ],
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "binding": {
+      "type": "object",
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/]"
+        },
+        "sha256": {
+          "$ref": "#/$defs/hash"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ask": {
+      "type": "object",
+      "required": [
+        "version",
+        "project_id",
+        "generation_id",
+        "review_identity",
+        "review_ready_receipt",
+        "qa_receipt",
+        "output",
+        "timeline",
+        "ask_id",
+        "ask_payload_sha256",
+        "predecessor"
+      ],
+      "properties": {
+        "version": {
+          "const": "review-round-ask/v1"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generation_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "review_identity": {
+          "$ref": "#/$defs/hash"
+        },
+        "review_ready_receipt": {
+          "$ref": "#/$defs/binding"
+        },
+        "qa_receipt": {
+          "type": "object",
+          "required": [
+            "path",
+            "sha256",
+            "status"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/]"
+            },
+            "sha256": {
+              "$ref": "#/$defs/hash"
+            },
+            "status": {
+              "enum": [
+                "pass",
+                "warning",
+                "blocker"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "output": {
+          "$ref": "#/$defs/binding"
+        },
+        "timeline": {
+          "type": "object",
+          "required": [
+            "path",
+            "version",
+            "hash"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/]"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hash": {
+              "$ref": "#/$defs/hash"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ask_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ask_payload_sha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "predecessor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/hash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "version",
+        "project_id",
+        "generation_id",
+        "review_identity",
+        "ask_event",
+        "ask_id",
+        "decision",
+        "text",
+        "response_sha256",
+        "artifact",
+        "predecessor"
+      ],
+      "properties": {
+        "version": {
+          "const": "review-round-response/v1"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generation_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "ask_event": {
+          "$ref": "#/$defs/hash"
+        },
+        "ask_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "decision": {
+          "enum": [
+            "approve",
+            "request_changes",
+            "free_text"
+          ]
+        },
+        "response_sha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "predecessor": {
+          "$ref": "#/$defs/hash"
+        },
+        "review_identity": {
+          "$ref": "#/$defs/hash"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "artifact": {
+          "$ref": "#/$defs/binding"
+        }
+      },
+      "additionalProperties": false
+    },
+    "superseded": {
+      "type": "object",
+      "required": [
+        "version",
+        "project_id",
+        "generation_id",
+        "review_identity",
+        "ask_event",
+        "ask_id",
+        "reason",
+        "predecessor"
+      ],
+      "properties": {
+        "version": {
+          "const": "review-round-superseded/v1"
+        },
+        "project_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generation_id": {
+          "$ref": "#/$defs/hash"
+        },
+        "review_identity": {
+          "$ref": "#/$defs/hash"
+        },
+        "ask_event": {
+          "$ref": "#/$defs/hash"
+        },
+        "ask_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "predecessor": {
+          "$ref": "#/$defs/hash"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

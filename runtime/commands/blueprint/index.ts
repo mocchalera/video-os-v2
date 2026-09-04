@@ -20,6 +20,7 @@ import {
   isCommandError,
   resolveProjectRoot,
   transitionState,
+  validateAgainstSchema,
   type CommandError,
   type DraftFile,
 } from "../shared.js";
@@ -58,6 +59,11 @@ import {
   buildLongformBlueprint,
   isLongformEventBrief,
 } from "../../editorial/longform-event.js";
+import {
+  evaluateNarrativeArcBlueprintContract,
+  NarrativeArcContractError,
+  narrativeArcContractMessages,
+} from "../../eval/narrative-arc-contract.js";
 
 export type { EditBlueprint, Beat, ConfirmedPreferences };
 
@@ -239,6 +245,24 @@ const ALLOWED_STATES: ProjectState[] = [
   "packaged",
 ];
 
+function readCanonicalBrief(briefPath: string): { content?: unknown; errors: string[] } {
+  try {
+    const content = parseYaml(fs.readFileSync(briefPath, "utf-8"));
+    // narrative_mode is additive. Validate its complete canonical brief while
+    // preserving the established command ordering for legacy briefs that omit it.
+    const hasNarrativeMode = typeof content === "object"
+      && content !== null
+      && Object.prototype.hasOwnProperty.call(content, "narrative_mode");
+    if (hasNarrativeMode) {
+      const validation = validateAgainstSchema(content, "creative-brief.schema.json");
+      if (!validation.valid) return { errors: validation.errors };
+    }
+    return { content, errors: [] };
+  } catch (error) {
+    return { errors: [error instanceof Error ? error.message : String(error)] };
+  }
+}
+
 export async function runBlueprint(
   projectDir: string,
   agent: BlueprintAgent,
@@ -249,6 +273,20 @@ export async function runBlueprint(
   // Grounding is read-only; run it before ProgressTracker/initCommand persist
   // progress and reconciled project state.
   assertBlueprintGroundingPreflight(preflightProjectDir);
+  const preflightBriefPath = path.join(preflightProjectDir, "01_intent/creative_brief.yaml");
+  if (fs.existsSync(preflightBriefPath)) {
+    const preflightBrief = readCanonicalBrief(preflightBriefPath);
+    if (preflightBrief.errors.length > 0) {
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: `creative_brief.yaml validation failed: ${preflightBrief.errors.join("; ")}`,
+          details: preflightBrief.errors,
+        },
+      };
+    }
+  }
 
   const pt = new ProgressTracker(preflightProjectDir, "blueprint", 5);
   const ctx = initCommand(preflightProjectDir, "/blueprint", ALLOWED_STATES);
@@ -291,8 +329,20 @@ export async function runBlueprint(
       },
     };
   }
-  const briefRaw = fs.readFileSync(briefPath, "utf-8");
-  const briefContent = parseYaml(briefRaw) as {
+  const canonicalBrief = readCanonicalBrief(briefPath);
+  if (canonicalBrief.errors.length > 0) {
+    pt.fail("brief", `creative_brief.yaml validation failed: ${canonicalBrief.errors.join("; ")}`);
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `creative_brief.yaml validation failed: ${canonicalBrief.errors.join("; ")}`,
+        details: canonicalBrief.errors,
+      },
+      previousState,
+    };
+  }
+  const briefContent = canonicalBrief.content as {
     autonomy?: { mode?: "full" | "collaborative"; must_ask?: string[] };
     project?: { runtime_target_sec?: number };
   };
@@ -433,6 +483,20 @@ export async function runBlueprint(
     );
 
     if (!result.success) {
+      if (result.contractResult?.status === "fail") {
+        const contractError = new NarrativeArcContractError(result.contractResult);
+        pt.fail("validate", contractError.message);
+        return {
+          success: false,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: contractError.message,
+            details: result.contractResult,
+          },
+          previousState,
+          loopSummary: result.loopSummary,
+        };
+      }
       persistScriptEvaluation(absDir, projectId, result.evaluateResult, result.loopSummary, result.confirmResult);
 
       if (result.loopSummary?.finalStatus === "rejected_max_iterations") {
@@ -521,6 +585,29 @@ export async function runBlueprint(
       selectsContent,
       styleContent,
     });
+  }
+
+  // This validation deliberately precedes any confirmation/approval handling
+  // for direct, longform, and autonomous paths. The iterative path performs
+  // the same check inside runNarrativeLoop immediately before phases.confirm.
+  const preApprovalContract = evaluateNarrativeArcBlueprintContract(
+    briefContent as CreativeBrief,
+    agentResult.blueprint,
+    selectsContent as SelectsCandidates,
+  );
+  if (preApprovalContract.status === "fail") {
+    const contractError = new NarrativeArcContractError(preApprovalContract);
+    pt.fail("validate", contractError.message);
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: contractError.message,
+        details: preApprovalContract,
+      },
+      previousState,
+      loopSummary,
+    };
   }
 
   if (autonomyMode === "full") {
@@ -633,6 +720,26 @@ export async function runBlueprint(
     }
   } else if (longformMode) {
     console.log("[blueprint:longform] skipped per-candidate craft review; chapter-sampled visual QA remains monitoring.");
+  }
+
+  const narrativeArcContract = evaluateNarrativeArcBlueprintContract(
+    briefContent as CreativeBrief,
+    agentResult.blueprint,
+    selectsContent as SelectsCandidates,
+  );
+  if (narrativeArcContract.status === "fail") {
+    const errors = narrativeArcContractMessages(narrativeArcContract);
+    pt.fail("validate", `Narrative arc contract failed: ${errors.join("; ")}`);
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Narrative arc contract failed: ${errors.join("; ")}`,
+        details: errors,
+      },
+      previousState,
+      loopSummary,
+    };
   }
 
   const drafts: DraftFile[] = [

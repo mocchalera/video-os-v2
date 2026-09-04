@@ -1,6 +1,9 @@
 // Shared types for the timeline compiler.
 // These mirror the YAML/JSON artifact shapes used across phases.
 
+import type { RegisteredVisualIntent, VisualFramingProvenance } from "../visual/types.js";
+import type { ResolutionReport } from "./resolve.js";
+
 // ── Duration Mode types ─────────────────────────────────────────────
 
 export type DurationMode = "strict" | "guide";
@@ -28,7 +31,8 @@ export interface CaptionSemanticTimingPolicy {
   gap_ownership?: "previous" | "blank";
   anchors?: CaptionRevealAnchor[];
 }
-export type BriefAudioPolicy = "ducking" | "bgm_only" | "original_only";
+export type BriefAudioPolicy = "ducking" | "bgm_only" | "original_only" | "music_master";
+export type NarrativeMode = "personal_challenge" | "day_log";
 export type SelectStoryRole = "hook" | "setup" | "experience" | "payoff" | "reaction" | "closing";
 
 export interface DurationPolicy {
@@ -64,6 +68,35 @@ export interface LongformEditConfig {
   silence_gap_cut_sec?: number;
   chapter_max_sec?: number;
   coverage_interval_sec?: number;
+}
+
+/**
+ * Canonical brief-side declaration for an independent full-song master.
+ * The compiler copies this declaration into TimelineIR provenance; the audio
+ * plan resolver then binds it to the project file bytes before rendering.
+ */
+export interface CreativeBriefMusicMaster {
+  asset_id?: string;
+  source_ref: string;
+  source_content_hash: string;
+  source_size_bytes: number;
+  source_duration_us: number;
+  source_range_us?: { in_us: number; out_us: number };
+  timeline_range?: { in_frame: number; out_frame: number };
+  gain_linear?: 1;
+  audio_decision?: "preserve" | "mastering";
+  channel_layout?: string;
+  codec?: string;
+  processing_graph?: {
+    version: "audio-processing-graph/v1";
+    operations: Array<"stream_copy" | "trim_reencode" | "shared_final_mastering">;
+  };
+  measurement_tolerance?: {
+    integrated_lufs_db: number;
+    lra_lu: number;
+    true_peak_dbtp: number;
+  };
+  policy_hash?: string;
 }
 
 export type LongformExclusionReason =
@@ -118,10 +151,12 @@ export interface CreativeBrief {
   project: { id: string; title: string; strategy: string; runtime_target_sec?: number; duration_mode?: DurationMode };
   message: { primary: string; secondary?: string[] };
   emotion_curve: string[];
+  narrative_mode?: NarrativeMode;
   subject?: { birth_date?: string };
   order_policy?: "chronological" | "editorial";
   caption_policy?: BriefCaptionPolicy;
   audio_policy?: BriefAudioPolicy;
+  music_master?: CreativeBriefMusicMaster;
   a1_loudnorm?: boolean;
   editorial?: CreativeBriefEditorial;
   longform?: LongformEditConfig;
@@ -133,6 +168,74 @@ export interface CandidatePlan {
   primary_candidate_ref?: string;
   fallback_candidate_refs?: string[];
   still_image?: StillImageCandidateIntent;
+  freeze_frame_hold?: FreezeFrameHoldIntent;
+}
+
+export type StillCameraMotionPreset =
+  | "push_in"
+  | "pull_out"
+  | "horizontal_tracking"
+  | "tilt_down"
+  | "diagonal_drift"
+  | "pan_zoom";
+
+export type StillHoldUnit = "frames" | "seconds" | "beats" | "section_boundary";
+
+/** Authored hold unit. The original unit is retained through compilation. */
+export interface StillHoldIntent {
+  unit: StillHoldUnit;
+  /** Frames, seconds, or beat count. Section-boundary holds may omit it. */
+  value?: number;
+  section_id?: string;
+  boundary?: "start" | "end";
+  /** Required by lyric_mv when a hold exceeds the normal background cadence. */
+  reason?: string;
+}
+
+/** Resolved frame projection carried beside the authored hold. */
+export interface StillHoldResolution {
+  unit: StillHoldUnit;
+  requested_frames: number;
+  resolved_frames: number;
+  requested_value?: number;
+  section_id?: string;
+  boundary?: "start" | "end";
+  boundary_frame?: number;
+  status: "resolved" | "clamped";
+}
+
+/** Per-instance still framing in normalized source coordinates. */
+export interface StillImageTransform {
+  crop?: { x: number; y: number; width: number; height: number };
+  scale?: number;
+  pan?: { x: number; y: number };
+  zoom?: number;
+  anchor?: { x: number; y: number };
+}
+
+/** Small, explicit in-frame parallax carried into the camera-motion worker. */
+export interface StillParallaxIntent {
+  amount: number;
+  axis: "horizontal" | "vertical" | "both";
+}
+
+export interface StillCameraMotionIntent {
+  preset: StillCameraMotionPreset;
+  easing?: "smoothstep" | "linear";
+  intensity?: number;
+  transform?: StillImageTransform;
+  parallax?: StillParallaxIntent;
+}
+
+/** Readable alias for authored Ken Burns intent in lyric_mv plans. */
+export type StillKenBurnsIntent = StillCameraMotionIntent;
+
+export interface StillCameraMotionPlan extends StillCameraMotionIntent {
+  easing: "smoothstep" | "linear";
+  intensity: number;
+  /** Displayed frame count the motion is synchronized to (== hold_frames). */
+  frame_count: number;
+  policy: "still-camera-motion/v1";
 }
 
 export interface StillImageIntentPolicy {
@@ -140,12 +243,22 @@ export interface StillImageIntentPolicy {
   default_hold_sec?: number;
   max_hold_sec?: number;
   motion_mode?: "static" | "subtle_ken_burns";
-  fit_mode?: "contain" | "cover";
+  camera_motion?: StillCameraMotionIntent;
+  ken_burns?: StillKenBurnsIntent;
+  parallax?: StillParallaxIntent;
+  transform?: StillImageTransform;
+  hold?: StillHoldIntent;
+  long_hold_reason?: string;
+  fit_mode?: "contain" | "cover" | "full_bleed";
   background?: string;
+  composition?: "fit" | "vertical_blur_backdrop";
 }
 
 export interface StillImageCandidateIntent extends StillImageIntentPolicy {
   hold_duration_sec?: number;
+  source_still_id?: string;
+  still_instance_id?: string;
+  reuse?: "unique" | "intentional";
 }
 
 export interface StillDurationPolicy {
@@ -158,7 +271,12 @@ export interface StillDurationPolicy {
   motion_mode: "static";
   requested_motion_mode?: "subtle_ken_burns";
   motion_status?: "pending_EYE-070C2B";
-  fit_mode: "contain" | "cover";
+  camera_motion?: StillCameraMotionIntent;
+  ken_burns?: StillKenBurnsIntent;
+  parallax?: StillParallaxIntent;
+  transform?: StillImageTransform;
+  composition?: "fit" | "vertical_blur_backdrop";
+  fit_mode: "contain" | "cover" | "full_bleed";
   background: string;
 }
 
@@ -168,11 +286,40 @@ export interface StillImageTimelineMetadata {
   max_hold_frames: number;
   hold_source: "candidate_override" | "explicit_brief" | "profile_default" | "global_default";
   policy_clamp: "none" | "min" | "max" | "beat_budget" | "duration_cap";
-  motion_mode: "static";
+  hold?: StillHoldIntent;
+  hold_resolution?: StillHoldResolution;
+  source_still_id?: string;
+  still_instance_id?: string;
+  reuse?: "unique" | "intentional";
+  long_hold_reason?: string;
+  motion_mode: "static" | "camera_motion";
   requested_motion_mode?: "subtle_ken_burns";
   motion_status?: "pending_EYE-070C2B";
-  fit_mode: "contain" | "cover";
+  /** Executable subpixel camera plan; presence means renderers must move. */
+  camera_motion?: StillCameraMotionPlan;
+  ken_burns?: StillCameraMotionPlan;
+  parallax?: StillParallaxIntent;
+  transform?: StillImageTransform;
+  /** Optional authored override of the automatic vertical composition. */
+  composition?: "fit" | "vertical_blur_backdrop";
+  fit_mode: "contain" | "cover" | "full_bleed";
   background: string;
+}
+
+export interface FreezeFrameHoldIntent {
+  /** Absolute source-media time of the authored freeze frame. */
+  source_time_us: number;
+  /** Optional authored hold. The active skill supplies a provisional default. */
+  hold_frames?: number;
+}
+
+export interface FreezeFrameHoldTimelineMetadata {
+  /** Absolute source-media time of the frame duplicated by the renderer. */
+  source_time_us: number;
+  hold_frames: number;
+  hold_source: "candidate_override" | "skill_default";
+  policy_clamp: "none" | "min" | "max";
+  policy: "apex-freeze-hold/v1";
 }
 
 export interface AllowRevisitDirective {
@@ -202,7 +349,11 @@ export type CraftTransition =
   | "dip_to_black"
   | "j_cut"
   | "l_cut"
-  | "match_cut";
+  | "match_cut"
+  // Issue #34 semantic presets (craft directives map 1:1 to transition types)
+  | "film_crossfade"
+  | "light_leak_flash"
+  | "dreamy_focus_blur";
 
 export type CraftRhythm =
   | "accelerando"
@@ -241,6 +392,10 @@ export interface Beat {
   notes?: string;
   // M4.5 additive fields
   story_role?: "hook" | "setup" | "experience" | "closing";
+  /** Provisional emotional position for future curve audits. */
+  emotional_valence?: number;
+  /** Whether this beat's claim must be backed by source-grounded evidence. */
+  evidence_required?: boolean;
   craft?: CraftDirective;
   skill_hints?: string[];
   candidate_plan?: CandidatePlan;
@@ -381,13 +536,118 @@ export interface EditBlueprint {
   // Track layout: single keeps visual story on V1; multi preserves overlay-style V2 inserts.
   track_layout?: TrackLayout;
   longform_plan?: LongformPlan;
+  /** Blueprint v2 policy/profile references. Values stay in their source artifacts. */
+  policy_refs?: BlueprintPolicyRefs;
+  /** Registered visual transforms/cuts; source evidence stays in the Blueprint. */
+  visual_intents?: RegisteredVisualIntent[];
+  /** Optional explicit v2 sequence intent; v1 blueprints do not acquire locks. */
+  hook_sequence?: BlueprintSequence;
+  body_sequence?: BlueprintSequence;
+  /** Short aliases accepted by the v2 sanitizer for hand-authored fixtures. */
+  hook?: BlueprintSequence;
+  body?: BlueprintSequence;
+  /** Explicitly authorized non-coverage operations such as an intentional gap or hold. */
+  timeline_operations?: IntentionalGapOperation[];
+  /** Explicit mix policy authorizing a primary audio lane that is not wall-to-wall. */
+  audio_mix_policy?: PrimaryAudioMixPolicy;
   [key: string]: unknown;
 }
 
+export interface BlueprintPolicyReference {
+  ref: string;
+  version?: string;
+  source_hash?: string;
+  profile_hash?: string;
+}
+
+export interface BlueprintPolicyRefs {
+  composition_policy_ref?: BlueprintPolicyReference;
+  vertical_composition_policy_ref?: BlueprintPolicyReference;
+  retention_policy_ref?: BlueprintPolicyReference;
+  caption_policy_ref?: BlueprintPolicyReference;
+  platform_safe_zone_profile_ref?: BlueprintPolicyReference;
+  audio_delivery_profile_ref?: BlueprintPolicyReference;
+  sfx_library_ref?: BlueprintPolicyReference;
+}
+
+export interface BlueprintShotAnchor {
+  anchor_id: string;
+  asset_id: string;
+  source_content_hash: string;
+  segment_id: string;
+  src_in_us: number;
+  src_out_us: number;
+  transcript_item_ids?: string[];
+  source_start_us?: number;
+  source_end_us?: number;
+}
+
+export interface BlueprintShot {
+  shot_id: string;
+  beat_id?: string;
+  scene_type?: string;
+  shot_anchor?: BlueprintShotAnchor;
+  candidate_ref?: string;
+}
+
+export interface BlueprintSequence {
+  sequence_id: string;
+  locked?: boolean;
+  lock_revision?: number;
+  shots: BlueprintShot[];
+}
+
+export interface ShotAnchorEvidence {
+  source_content_hash: string;
+  source_range: {
+    src_in_us: number;
+    src_out_us: number;
+  };
+  source_identity: {
+    asset_id: string;
+    segment_id: string;
+  };
+  evidence_source: "source_map" | "assets" | "provided";
+}
+
+export interface ResolvedShotAnchor {
+  sequence_id: string;
+  sequence_kind: "hook" | "body";
+  shot_id: string;
+  beat_id?: string;
+  scene_type?: string;
+  anchor_id: string;
+  asset_id: string;
+  segment_id: string;
+  source_content_hash: string;
+  src_in_us: number;
+  src_out_us: number;
+  candidate_ref: string;
+  evidence: ShotAnchorEvidence;
+}
+
+export interface ShotAnchorResolutionProvenance {
+  policy: "shot-anchor-resolution/v1";
+  fingerprint: string;
+  anchors: ResolvedShotAnchor[];
+}
+
+export interface HookLockProvenance {
+  policy: "hook-lock/v1";
+  locked: true;
+  sequence_id: string;
+  lock_revision: number;
+  fingerprint: string;
+  anchor_ids: string[];
+  protected_clip_ids: string[];
+  protected_beat_ids: string[];
+  reason: "explicit_blueprint_lock" | "preserved_existing_lock";
+}
+
 export type Role = "hero" | "support" | "transition" | "texture" | "dialogue";
-export type ClipRole = Role | "music" | "nat_sound" | "bgm" | "sfx" | "title";
+export type ClipRole = Role | "music" | "nat_sound" | "bgm" | "sfx" | "music_master" | "title";
 export type SourceMediaKind = "video" | "audio" | "image" | "sequence" | "unknown";
-export type AudioSemanticRole = "dialogue" | "music" | "nat_sound" | "ambient" | "sfx";
+export type AudioSemanticRole = "dialogue" | "music" | "nat_sound" | "ambient" | "sfx" | "music_master";
 
 export interface SourceCapabilities {
   has_video: boolean;
@@ -580,6 +840,7 @@ export interface Candidate {
   peak_signals?: PeakSignals;
   trim_hint?: TrimHint;
   still_image?: StillImageCandidateIntent;
+  freeze_frame_hold?: FreezeFrameHoldIntent;
   quality_confidence?: QualityConfidence;
   quality_gate?: QualityGateRecord;
 }
@@ -587,10 +848,12 @@ export interface Candidate {
 export interface DecisionRuntimeMetadata {
   runtime: string;
   role?: string;
+  author?: "llm" | "deterministic_fallback" | "human" | "agent_evidence_synthesis";
   attempted_runtimes?: Array<{
     runtime: string;
     status: "success" | "failed" | "skipped";
     message?: string;
+    error_kind?: "transport_timeout" | "transport_error" | "json_parse" | "schema_validation";
   }>;
   fallback_warnings?: string[];
 }
@@ -632,6 +895,11 @@ export interface SkillEffect {
   utterance_boundary_snap?: boolean;
   /** Max distance (us) a clip boundary may move to reach an utterance edge. */
   utterance_snap_tolerance_us?: number;
+  /** Resolve explicitly-authored source freeze frames into timeline holds. */
+  apex_freeze_hold?: boolean;
+  freeze_hold_min_sec?: number;
+  freeze_hold_default_sec?: number;
+  freeze_hold_max_sec?: number;
 }
 
 export interface SkillDefinition {
@@ -643,6 +911,44 @@ export interface SkillDefinition {
   avoid_when: string[];
   effects: SkillEffect;
   status?: "active" | "deferred_ir_required";
+}
+
+export interface LyricMvCadenceThreshold {
+  min_sec: number;
+  target_sec: number;
+  max_sec: number;
+}
+
+export interface LyricMvBackgroundHoldThreshold extends LyricMvCadenceThreshold {
+  intentional_long_hold_sec: number;
+}
+
+/** Typed cadence contract for the music-led still-image lyric_mv profile. */
+export interface LyricMvProfileThresholds {
+  background_hold: LyricMvBackgroundHoldThreshold;
+  caption_cadence: LyricMvCadenceThreshold;
+  music_section_cadence: LyricMvCadenceThreshold;
+  motion_cadence: LyricMvCadenceThreshold;
+}
+
+export interface LyricMvTimelineMetadata {
+  version: "lyric-mv/v1";
+  profile_id: "lyric_mv";
+  thresholds: LyricMvProfileThresholds;
+  music_sections: Array<{
+    id: string;
+    label: string;
+    start_frame: number;
+    end_frame: number;
+    evidence_classification?: "measured" | "synthetic" | "unavailable";
+  }>;
+  music_events: Array<{
+    kind: "onset" | "section_start";
+    frame: number;
+    section_id?: string;
+    provenance: string;
+    evidence_classification?: "measured" | "synthetic" | "unavailable";
+  }>;
 }
 
 export interface ProfileDefaults {
@@ -661,12 +967,25 @@ export interface ProfileDefaults {
   a1_loudnorm?: boolean;
   caption_policy?: BriefCaptionPolicy;
   still_image_intent?: StillImageIntentPolicy;
+  lyric_mv_thresholds?: LyricMvProfileThresholds;
 }
 
 export interface ProfileDefinition {
   id: string;
   defaults: ProfileDefaults;
   default_policy?: string;
+  capabilities?: {
+    visual_model?: {
+      requirement: "required" | "optional";
+      provider?: string;
+      model?: string;
+    };
+    visual_qa?: {
+      requirement: "required" | "optional";
+      provider?: string;
+      model?: string;
+    };
+  };
 }
 
 export interface PolicyDefinition {
@@ -686,6 +1005,23 @@ export interface CompilerDefaults {
   beat_sync?: {
     cut_quantize?: "auto" | "on" | "off";
     max_shift_frames?: number;
+  };
+  /** Issue #35 rhythm sync: multi-source rhythm snap config. */
+  rhythm_sync?: {
+    mode?: "auto" | "on" | "off";
+    search_window_sec?: number;
+    max_shift_frames?: number;
+    parity_max_offset_frames?: number;
+    /** Minimum per-cue confidence for measured onset/section/downbeat snaps. */
+    min_cue_confidence?: number;
+    /**
+     * Chorus parity gate. "enforce" (default): a chorus section whose start
+     * stays beyond parity_max_offset_frames of the nearest primary V1 cut
+     * after snapping blocks the canonical compile (RhythmParityGateError).
+     * "off" is the explicit, documented opt-out: parity is still measured
+     * and stamped honestly, but never blocks the compile.
+     */
+    parity_gate?: "enforce" | "off";
   };
   continuity?: Partial<ContinuityPolicy>;
 }
@@ -757,6 +1093,8 @@ export interface NormalizedBeat {
   purpose: string;
   // Peak-aware extensions (vlm-peak-detection-design.md §11.1)
   story_role?: "hook" | "setup" | "experience" | "closing";
+  emotional_valence?: number;
+  evidence_required?: boolean;
   craft?: CraftDirective;
   skill_hints?: string[];
   candidate_plan?: CandidatePlan;
@@ -823,6 +1161,7 @@ export interface TimelineClip {
   source_capabilities?: SourceCapabilities;
   audio_role?: AudioSemanticRole;
   still_image?: StillImageTimelineMetadata;
+  freeze_frame_hold?: FreezeFrameHoldTimelineMetadata;
   captions?: CaptionOverlay[];
   audio_policy?: AudioPolicy;
   // M4.5 additive fields
@@ -853,6 +1192,35 @@ export interface AssembledTimeline {
     audio: Track[];
   };
   markers: Marker[];
+  operations?: IntentionalGapOperation[];
+}
+
+export type IntentionalGapOperationType =
+  | "gap"
+  | "hold"
+  | "freeze"
+  | "ambient_continuation";
+
+export interface IntentionalGapOperation {
+  operation_id: string;
+  type: IntentionalGapOperationType;
+  track_id: string;
+  start_frame: number;
+  duration_frames: number;
+  authority: "blueprint" | "human_golden_order" | "operator" | "compiler";
+  reason: string;
+}
+
+/**
+ * Explicit primary-audio mix policy (Issue #6 P0). A valid policy declares
+ * that the primary audio lane is intentionally not wall-to-wall, so sparse
+ * A1 coverage is authorized without a per-range timeline operation.
+ */
+export interface PrimaryAudioMixPolicy {
+  policy: "primary-audio-mix/v1";
+  mode: "selective_authorization";
+  authority: "blueprint" | "human_golden_order" | "operator";
+  reason: string;
 }
 
 export interface Marker {
@@ -870,10 +1238,18 @@ export interface TimelineTransitionOutput {
   track_id: string;
   transition_type: string;
   transition_frames?: number;
+  /** Absolute start frame of the transition window (= to_clip.timeline_in_frame for overlap presets). */
+  start_frame?: number;
+  duration_frames?: number;
   transition_params?: Record<string, unknown>;
   applied_skill_id?: string;
   degraded_from_skill_id?: string | null;
   confidence?: number;
+  metadata?: Record<string, unknown>;
+  fallback?: {
+    type: string;
+    reason: string;
+  };
 }
 
 export interface TimelineIR {
@@ -921,13 +1297,89 @@ export interface TimelineIR {
       mode: BriefAudioPolicy;
       source: "explicit_brief" | "profile_default" | "global_default";
       a1_loudnorm?: boolean;
+      audio_decision?: "preserve" | "mastering";
+      music_master?: CreativeBriefMusicMaster;
+    };
+    audio_render_projection?: {
+      version: "audio-render-projection/v1";
+      lane_semantics: {
+        A1: "dialogue_and_natural_sound";
+        A2: "music_bgm";
+        A3: "texture_ambient_and_sfx";
+      };
+      dialogue_authority: "A1";
+      conflict_policy: "dialogue_first";
+      picture_dialogue_caption_timing_immutable: true;
+      audio_displacement_frames: 0;
+      source_refs: Array<{
+        track_id: "A1" | "A2" | "A3";
+        clip_id: string;
+        asset_id: string;
+        timeline_in_frame: number;
+        timeline_duration_frames: number;
+        source_ref?: string;
+        source_content_hash?: string;
+      }>;
     };
     caption_policy?: {
       mode: BriefCaptionPolicy;
       source: "explicit_brief" | "profile_default" | "global_default";
     };
     still_duration_policy?: StillDurationPolicy;
+    creator_short_vo_broll?: CreatorShortVoBrollProvenance;
+    shot_anchor_resolution?: ShotAnchorResolutionProvenance;
+    hook_lock?: HookLockProvenance;
+    visual_framing?: VisualFramingProvenance;
+    vertical_composition?: VerticalCompositionProvenance;
+    retention_policy?: RetentionPolicyProvenance;
+    review_derivation?: {
+      version: "review-derivation/v1";
+      canonical_timeline_sha256: string;
+      canonical_timeline_path: "05_timeline/canonical-timeline.json";
+      accepted_patch_sha256: string;
+      derived_mapping_sha256: string;
+      derived_mapping_path: string;
+      identity_receipt_path: string;
+    };
   };
+}
+
+export interface VerticalCompositionProvenance {
+  policy: "vertical-composition-resolution/v1";
+  policy_ref: string;
+  policy_hash: string;
+  results: Array<{
+    intent_id: string;
+    status: "ready" | "degraded" | "human_hold";
+    receipt_hash: string;
+    reason?: string;
+  }>;
+}
+
+export interface RetentionPolicyProvenance {
+  policy: "retention-policy/v1";
+  policy_ref: string;
+  policy_id: string;
+  policy_hash: string;
+  degrade_order: ShortFormRetentionMode[];
+}
+
+export type ShortFormRetentionMode = "off" | "standard" | "aggressive" | "credibility_first";
+
+export interface CreatorShortVoBrollProvenance {
+  policy: "creator-short-vo-broll/v1";
+  phrase_policy: "creator-short-kickoff-phrases/v1";
+  min_insert_frames: number;
+  max_insert_frames: number;
+  audio_mode: "dialogue_voice_over";
+  anchor_status: "detected" | "degraded_no_kickoff_phrase";
+  degraded: boolean;
+  degrade_reason?: "kickoff_phrase_not_detected";
+  matched_phrase?: string;
+  candidate_ref?: string;
+  asset_id?: string;
+  source_time_us?: number;
+  detection_source?: "transcript_item" | "candidate_transcript_excerpt";
 }
 
 export interface TrackOutput {
@@ -955,6 +1407,7 @@ export interface ClipOutput {
   source_capabilities?: SourceCapabilities;
   audio_role?: AudioSemanticRole;
   still_image?: StillImageTimelineMetadata;
+  freeze_frame_hold?: FreezeFrameHoldTimelineMetadata;
   captions?: CaptionOverlay[];
   audio_policy?: AudioPolicy;
   // M4.5 additive fields
@@ -1005,10 +1458,27 @@ export interface AudioMix {
 
 // ── Compiler options ────────────────────────────────────────────────
 
+export interface CompileArtifactReceipt {
+  relative_path: string;
+  path: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface CompilePromotionContext {
+  timeline: TimelineIR;
+  resolution: ResolutionReport;
+  duration_policy: DurationPolicy;
+}
+
 export interface CompileOptions {
   projectPath: string;
   createdAt: string;
   repoRoot?: string;
+  /** Isolated BGM media path used only to verify a staged rhythm artifact. */
+  bgmMediaPathOverride?: string;
+  /** Explicit repository-common SFX authority root. */
+  repoSfxRoot?: string;
   blueprintOverride?: EditBlueprint;
   reviewPatch?: import("./patch.js").ReviewPatch;
   /** Optional BGM duration cap, in microseconds. When set, assembly will not exceed it. */
@@ -1019,6 +1489,15 @@ export interface CompileOptions {
   fpsDen?: number;
   /** Optional source map override for preview-manifest media locators. */
   sourceMapPath?: string;
+  /**
+   * Shallow override of runtime/compiler-defaults.yaml (e.g. tests opting out
+   * of the Issue #35 chorus parity gate with rhythm_sync.parity_gate: "off").
+   */
+  defaultsOverride?: Partial<CompilerDefaults>;
+  /** Verify every source referenced by the final timeline before promotion. */
+  validateSourceArtifacts?: boolean;
+  /** Hook called while canonical artifact backups are still available for rollback. */
+  onArtifactsPromoted?: (receipts: CompileArtifactReceipt[], context: CompilePromotionContext) => void;
   /** Optional compiler logger for non-fatal compile notes. */
   log?: (message: string) => void;
 }

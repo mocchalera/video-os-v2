@@ -29,7 +29,7 @@ after solver output; rerun the solver with changed raw evidence instead.
 - Treat semantic purpose and evidence as hard prerequisites.
 - Reject excessive congestion before applying density and spacing limits.
 - Rank equal scores by stable candidate ID.
-- Keep snapping within the configured maximum of three frames and within the semantic
+- Keep snapping within the configured maximum from the audio policy and within the semantic
   window. Never cross picture-edit or dialogue boundaries.
 - Treat `snap.applied=false` as a complete decision when beat evidence is unusable or
   moving the cue would weaken meaning.

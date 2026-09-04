@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -209,6 +209,7 @@ describe("createLlmTriageAgent", () => {
     expect(result.selects.decision_runtime).toMatchObject({
       runtime: "codex_exec",
       role: "triage-llm",
+      author: "llm",
     });
     expect(result.selects.decision_runtime?.attempted_runtimes?.[0]).toMatchObject({
       runtime: "codex_exec",
@@ -331,6 +332,7 @@ describe("createLlmTriageAgent", () => {
     let prompt = "";
     let images: LlmImagePart[] | undefined;
     const agent = createLlmTriageAgent({
+      textOnlyTriage: false, // explicit multimodal opt-in
       imagePreparer: async (imagePath, mimeType) => {
         preparedPaths.push(imagePath);
         return { data: Buffer.from(path.basename(imagePath)).toString("base64"), mimeType };
@@ -441,6 +443,7 @@ describe("createLlmTriageAgent", () => {
     writeFilmstrip(projectDir, "filmstrips/SEG_002.png");
     const calls: Array<{ prompt: string; images?: LlmImagePart[] }> = [];
     const agent = createLlmTriageAgent({
+      textOnlyTriage: false, // explicit multimodal opt-in
       multimodalBatchSize: 1,
       imagePreparer: async (imagePath, mimeType) => ({ data: Buffer.from(imagePath).toString("base64"), mimeType }),
       llm: async (nextPrompt, nextImages) => {
@@ -535,6 +538,32 @@ describe("selectsFromLlmResponse", () => {
       min_duration_us: 2_000_000,
       max_duration_us: 4_000_000,
       interest_point_label: "first independent push",
+    });
+  });
+
+  it("preserves an authored freeze at source frame zero for video", () => {
+    const videoSegments = [{
+      ...segments[0],
+      src_in_us: 0,
+      media_kind: "video" as const,
+      source_capabilities: { has_video: true, has_audio: true },
+    }];
+    const result = selectsFromLlmResponse({
+      candidates: [{
+        segment_id: "SEG_001",
+        asset_id: "AST_001",
+        src_in_us: 0,
+        src_out_us: 5000,
+        role: "hero",
+        why_it_matches: "Hold the authored apex.",
+        confidence: 0.9,
+        freeze_frame_hold: { source_time_us: 0, hold_frames: 33 },
+      }],
+    }, "test-project", videoSegments);
+
+    expect(result.candidates[0].freeze_frame_hold).toEqual({
+      source_time_us: 0,
+      hold_frames: 33,
     });
   });
 
@@ -1006,5 +1035,761 @@ describe("triage-llm CLI args", () => {
       model: undefined,
       textOnlyTriage: false,
     });
+  });
+});
+
+function imageSegments(count: number): Array<Record<string, unknown>> {
+  return Array.from({ length: count }, (_unused, index) => {
+    const n = String(index + 1).padStart(3, "0");
+    return {
+      segment_id: `SEG_${n}`,
+      asset_id: `AST_${n}`,
+      src_in_us: (index + 1) * 1000,
+      src_out_us: (index + 1) * 1000 + 4000,
+      summary: `Segment ${n} summary.`,
+      tags: ["batch-fixture"],
+      transcript_excerpt: "",
+      filmstrip_path: `filmstrips/SEG_${n}.png`,
+    };
+  });
+}
+
+interface BatchCall {
+  prompt: string;
+  images?: LlmImagePart[];
+}
+
+/** Responds with one valid candidate for the first segment in each batch. */
+function batchResponder(): { llm: LlmCompleter; calls: BatchCall[] } {
+  const calls: BatchCall[] = [];
+  const llm: LlmCompleter = async (prompt, images) => {
+    calls.push({ prompt, images });
+    const match = prompt.match(/"segment_id": "(SEG_\d+)"/);
+    const segmentId = match?.[1] ?? "SEG_001";
+    return JSON.stringify({
+      candidates: [
+        {
+          segment_id: segmentId,
+          asset_id: segmentId.replace("SEG", "AST"),
+          role: "support",
+          why_it_matches: "bounded batch responder candidate",
+          confidence: 0.8,
+        },
+      ],
+    });
+  };
+  return { llm, calls };
+}
+
+describe("bounded triage batching (Issue #5 M3)", () => {
+  const originalBatchDelay = process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+
+  beforeAll(() => {
+    process.env.VOS_TRIAGE_BATCH_DELAY_MS = "0";
+  });
+
+  afterAll(() => {
+    if (originalBatchDelay === undefined) delete process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    else process.env.VOS_TRIAGE_BATCH_DELAY_MS = originalBatchDelay;
+  });
+
+  it("splits a 13-image pool into multiple bounded batches by default", async () => {
+    const projectDir = createProject("batch-13-images", imageSegments(13));
+    for (let i = 1; i <= 13; i += 1) {
+      writeFilmstrip(projectDir, `filmstrips/SEG_${String(i).padStart(3, "0")}.png`);
+    }
+    const { llm, calls } = batchResponder();
+    const agent = createLlmTriageAgent({
+      textOnlyTriage: false, // explicit multimodal opt-in
+      imagePreparer: async (imagePath, mimeType) => ({
+        data: Buffer.from(path.basename(imagePath)).toString("base64"),
+        mimeType,
+      }),
+      llm,
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(calls).toHaveLength(2); // default bound 8 -> batches of 8 + 5
+    expect(calls[0].images).toHaveLength(8);
+    expect(calls[1].images).toHaveLength(5);
+    expect(calls[0].prompt).toContain("segment batch 1/2");
+    expect(calls[1].prompt).toContain("segment batch 2/2");
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual([
+      "SEG_001",
+      "SEG_009",
+    ]);
+  });
+
+  it("resumes from the batch checkpoint without re-calling completed batches", async () => {
+    const projectDir = createProject("batch-resume", imageSegments(4));
+    for (let i = 1; i <= 4; i += 1) {
+      writeFilmstrip(projectDir, `filmstrips/SEG_${String(i).padStart(3, "0")}.png`);
+    }
+    const first = batchResponder();
+    const firstAgent = createLlmTriageAgent({
+      textOnlyTriage: false, // explicit multimodal opt-in
+      multimodalBatchSize: 2,
+      imagePreparer: async () => null,
+      llm: first.llm,
+    });
+    const firstResult = await firstAgent.run(context(projectDir));
+
+    expect(first.calls).toHaveLength(2);
+    expect(fs.existsSync(path.join(projectDir, "03_analysis/llm-triage-batches.json"))).toBe(true);
+
+    const second = batchResponder();
+    const secondAgent = createLlmTriageAgent({
+      textOnlyTriage: false, // explicit multimodal opt-in
+      multimodalBatchSize: 2,
+      imagePreparer: async () => null,
+      llm: second.llm,
+    });
+    const secondResult = await secondAgent.run(context(projectDir));
+
+    expect(second.calls).toHaveLength(0);
+    expect(secondResult.selects.candidates.map((candidate) => candidate.segment_id)).toEqual(
+      firstResult.selects.candidates.map((candidate) => candidate.segment_id),
+    );
+  });
+
+  it("avoids stale checkpoint reuse when segment input changes", async () => {
+    const segments = imageSegments(2);
+    const projectDir = createProject("batch-stale-input", segments);
+    const first = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: first.llm }).run(context(projectDir));
+    expect(first.calls).toHaveLength(2);
+
+    segments[0].summary = "Segment 001 summary changed.";
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/segments.json"),
+      JSON.stringify({ project_id: "test-project", items: segments }, null, 2),
+      "utf-8",
+    );
+
+    const second = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: second.llm }).run(context(projectDir));
+    expect(second.calls).toHaveLength(2); // stale plan signature -> re-run all batches
+  });
+
+  it("re-calls batches when coverage feedback changes the prompt input", async () => {
+    const projectDir = createProject("batch-coverage-feedback", imageSegments(2));
+    const first = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: first.llm }).run(context(projectDir));
+    expect(first.calls).toHaveLength(2);
+
+    const second = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: second.llm }).run(context(projectDir, {
+      coverageFeedback: {
+        round: 1,
+        gaps: ["selection sparse: 1/2 segments (50%)"],
+        previous_selection_count: 2,
+      },
+    }));
+    expect(second.calls).toHaveLength(2); // different signatures -> no stale reuse
+  });
+
+  it("keeps successful batches and records stable failure reasons on partial failure", async () => {
+    const projectDir = createProject("batch-partial", imageSegments(2));
+    const calls: string[] = [];
+    const agent = createLlmTriageAgent({
+      multimodalBatchSize: 1,
+      llm: async (prompt) => {
+        calls.push(prompt);
+        if (prompt.includes('"segment_id": "SEG_002"')) {
+          throw new Error("LLM triage response was not valid JSON after retry: boom");
+        }
+        return JSON.stringify({
+          candidates: [
+            {
+              segment_id: "SEG_001",
+              asset_id: "AST_001",
+              role: "support",
+              why_it_matches: "surviving batch candidate",
+              confidence: 0.8,
+            },
+          ],
+        });
+      },
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(result.confirmed).toBe(true);
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual(["SEG_001"]);
+    const batchAttempt = result.selects.decision_runtime?.attempted_runtimes?.find(
+      (attempt) => attempt.runtime === "triage_batch",
+    );
+    expect(batchAttempt?.status).toBe("failed");
+    expect(batchAttempt?.message).toContain("json_parse");
+    expect(result.selects.decision_runtime?.fallback_warnings?.join("\n")).toContain("failed: json_parse");
+    expect(result.selects.selection_notes?.join("\n")).toContain("partial triage: 1/2");
+    const provenance = (result.selects as { provenance?: { triage_batches?: { failed_batches?: Array<{ reason: string }> } } }).provenance;
+    expect(provenance?.triage_batches?.failed_batches?.[0]?.reason).toBe("json_parse");
+  });
+
+  it("makes no LLM call after the stage deadline and returns a schema-valid deterministic fallback", async () => {
+    const projectDir = createProject("batch-deadline", imageSegments(13));
+    const { llm, calls } = batchResponder();
+    const agent = createLlmTriageAgent({ stageTimeoutMs: 0, llm });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(calls).toHaveLength(0);
+    expect(result.confirmed).toBe(true);
+    // Deterministic fallback covers every valid segment so the artifact keeps
+    // its schema-valid non-empty candidates array.
+    expect(result.selects.candidates).toHaveLength(13);
+    expect((result.selects.decision_runtime as { author?: string } | undefined)?.author).toBe(
+      "deterministic_fallback",
+    );
+    expect(result.selects.decision_runtime?.fallback_warnings?.join("\n")).toContain(
+      "skipped after stage deadline",
+    );
+  });
+
+  it("keeps standard triage text-only on Marlin evidence while bounding batch size", async () => {
+    const marlinSegments = segmentsWithMarlinProvenance(imageSegments(13)).map((segment) => {
+      const { filmstrip_path: _filmstrip_path, ...rest } = segment;
+      return rest;
+    });
+    const projectDir = createProject("batch-marlin-text", marlinSegments);
+    const { llm, calls } = batchResponder();
+    let imagePreparerCalls = 0;
+    const agent = createLlmTriageAgent({
+      imagePreparer: async () => {
+        imagePreparerCalls += 1;
+        return null;
+      },
+      llm,
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(imagePreparerCalls).toBe(0);
+    expect(calls).toHaveLength(2); // text-only still bounded to 8 per call
+    expect(calls.every((call) => call.images === undefined)).toBe(true);
+    expect(calls[0].prompt).toContain('"scene_report":');
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual([
+      "SEG_001",
+      "SEG_009",
+    ]);
+  });
+});
+
+describe("bounded triage batching guardrails (Issue #5 M3 review fixtures)", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    savedEnv.delay = process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    process.env.VOS_TRIAGE_BATCH_DELAY_MS = "0";
+  });
+
+  afterAll(() => {
+    if (savedEnv.delay === undefined) delete process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    else process.env.VOS_TRIAGE_BATCH_DELAY_MS = savedEnv.delay;
+  });
+
+  it("clamps an oversized batch override so 13 images still split into multiple bounded batches", async () => {
+    const projectDir = createProject("batch-clamp-override", imageSegments(13));
+    for (let i = 1; i <= 13; i += 1) {
+      writeFilmstrip(projectDir, `filmstrips/SEG_${String(i).padStart(3, "0")}.png`);
+    }
+    const { llm, calls } = batchResponder();
+    const agent = createLlmTriageAgent({
+      textOnlyTriage: false, // explicit multimodal opt-in
+      multimodalBatchSize: 1000, // oversized override must be clamped
+      imagePreparer: async (imagePath, mimeType) => ({
+        data: Buffer.from(path.basename(imagePath)).toString("base64"),
+        mimeType,
+      }),
+      llm,
+    });
+
+    await agent.run(context(projectDir));
+
+    expect(calls.length).toBeGreaterThanOrEqual(2); // never a single bulk call
+    expect(calls[0].images!.length).toBeLessThanOrEqual(12);
+    expect(calls[0].images!.length + calls[1].images!.length).toBe(13);
+  });
+
+  it("never regenerates an exhausted stage deadline across coverage retries", async () => {
+    const projectDir = createProject("batch-deadline-retry", imageSegments(2));
+    const calls: string[] = [];
+    const slowLlm: LlmCompleter = async (prompt) => {
+      calls.push(prompt);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return JSON.stringify({
+        candidates: [
+          {
+            segment_id: "SEG_001",
+            asset_id: "AST_001",
+            role: "support",
+            why_it_matches: "slow responder candidate",
+            confidence: 0.8,
+          },
+        ],
+      });
+    };
+    const agent = createLlmTriageAgent({ multimodalBatchSize: 1, stageTimeoutMs: 50, llm: slowLlm });
+
+    // Initial run: the first batch call exhausts the budget, later batches are
+    // skipped without a call.
+    await agent.run(context(projectDir));
+    expect(calls).toHaveLength(1);
+
+    // Coverage retry on the SAME agent instance must reuse the exhausted
+    // deadline: no fresh budget, no new LLM calls.
+    await agent.run(context(projectDir, {
+      coverageFeedback: {
+        round: 1,
+        gaps: ["selection sparse: 1/2 segments (50%)"],
+        previous_selection_count: 1,
+      },
+    }));
+    expect(calls).toHaveLength(1);
+  });
+
+  it("normalizes checkpoint payloads and never repersists raw provider fields", async () => {
+    const projectDir = createProject("batch-checkpoint-purity", imageSegments(2));
+    const first = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: first.llm }).run(context(projectDir));
+    expect(first.calls).toHaveLength(2);
+
+    // Tamper with the persisted checkpoint: inject raw provider payload,
+    // prompt, and error text at top level and inside a candidate; make the
+    // second batch invalid.
+    const checkpointPath = path.join(projectDir, "03_analysis/llm-triage-batches.json");
+    const tampered = JSON.parse(fs.readFileSync(checkpointPath, "utf-8")) as {
+      batches: Array<{ index: number; parsed: Record<string, unknown> }>;
+    };
+    tampered.batches[0].parsed.raw_response = "SECRET-RAW-RESPONSE";
+    tampered.batches[0].parsed.prompt = "SECRET-PROMPT";
+    tampered.batches[0].parsed.error = "SECRET-ERROR";
+    (tampered.batches[0].parsed.candidates as Array<Record<string, unknown>>)[0].raw_response =
+      "SECRET-CANDIDATE-RAW";
+    tampered.batches[1].parsed = { candidates: [] }; // invalid: no canonical candidate
+    fs.writeFileSync(checkpointPath, JSON.stringify(tampered, null, 2), "utf-8");
+
+    const second = batchResponder();
+    const result = await createLlmTriageAgent({ multimodalBatchSize: 1, llm: second.llm }).run(
+      context(projectDir),
+    );
+
+    // Batch 1 reused after sanitization (no re-call); batch 2 invalid -> called.
+    expect(second.calls).toHaveLength(1);
+    const serialized = JSON.stringify(result.selects);
+    expect(serialized).not.toContain("SECRET-RAW-RESPONSE");
+    expect(serialized).not.toContain("SECRET-PROMPT");
+    expect(serialized).not.toContain("SECRET-ERROR");
+    expect(serialized).not.toContain("SECRET-CANDIDATE-RAW");
+
+    // The rewritten checkpoint is clean too.
+    const rewritten = fs.readFileSync(checkpointPath, "utf-8");
+    expect(rewritten).not.toContain("SECRET-RAW-RESPONSE");
+    expect(rewritten).not.toContain("SECRET-PROMPT");
+    expect(rewritten).not.toContain("SECRET-CANDIDATE-RAW");
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual([
+      "SEG_001",
+      "SEG_002",
+    ]);
+  });
+
+  it("never attaches images in standard triage even when filmstrips exist", async () => {
+    const projectDir = createProject("batch-default-no-images", imageSegments(2));
+    for (let i = 1; i <= 2; i += 1) {
+      writeFilmstrip(projectDir, `filmstrips/SEG_${String(i).padStart(3, "0")}.png`);
+    }
+    let imagePreparerCalls = 0;
+    const { llm, calls } = batchResponder();
+    const agent = createLlmTriageAgent({
+      imagePreparer: async () => {
+        imagePreparerCalls += 1;
+        return null;
+      },
+      llm,
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(imagePreparerCalls).toBe(0);
+    expect(calls.every((call) => call.images === undefined)).toBe(true);
+    // Single bounded batch (2 <= default 8): one call, one candidate.
+    expect(calls).toHaveLength(1);
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual(["SEG_001"]);
+  });
+});
+
+describe("bounded triage batching runtime binding (Issue #5 M3)", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(() => {
+    savedEnv.delay = process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    savedEnv.triageModel = process.env.TRIAGE_MODEL;
+    process.env.VOS_TRIAGE_BATCH_DELAY_MS = "0";
+    delete process.env.TRIAGE_MODEL;
+  });
+
+  afterAll(() => {
+    if (savedEnv.delay === undefined) delete process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    else process.env.VOS_TRIAGE_BATCH_DELAY_MS = savedEnv.delay;
+    if (savedEnv.triageModel === undefined) delete process.env.TRIAGE_MODEL;
+    else process.env.TRIAGE_MODEL = savedEnv.triageModel;
+  });
+
+  it("avoids checkpoint reuse when the resolved runtime/model configuration changes", async () => {
+    const projectDir = createProject("batch-runtime-snapshot", imageSegments(2));
+    const first = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: first.llm }).run(context(projectDir));
+    expect(first.calls).toHaveLength(2);
+
+    // Same project/input, different effective model configuration: the plan
+    // signature must change so saved batches are never reused across it.
+    process.env.TRIAGE_MODEL = "gemini-2.5-flash";
+    const second = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: second.llm }).run(context(projectDir));
+    expect(second.calls).toHaveLength(2);
+  });
+});
+
+describe("triage batching review fixes (review 3962110b seq1)", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  function candidateResponse(segmentId: string): string {
+    return JSON.stringify({
+      candidates: [
+        {
+          segment_id: segmentId,
+          asset_id: segmentId.replace("SEG", "AST"),
+          role: "support",
+          why_it_matches: "review fixture candidate",
+          confidence: 0.8,
+        },
+      ],
+    });
+  }
+
+  beforeAll(() => {
+    savedEnv.delay = process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    process.env.VOS_TRIAGE_BATCH_DELAY_MS = "0";
+  });
+
+  afterAll(() => {
+    if (savedEnv.delay === undefined) delete process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    else process.env.VOS_TRIAGE_BATCH_DELAY_MS = savedEnv.delay;
+  });
+
+  it("never starts an injected JSON repair call after the stage deadline", async () => {
+    const projectDir = createProject("review-deadline-repair-injected", imageSegments(2));
+    const calls: Array<{ prompt: string }> = [];
+    const agent = createLlmTriageAgent({
+      stageTimeoutMs: 20,
+      llm: async (prompt) => {
+        calls.push({ prompt });
+        await new Promise((resolve) => setTimeout(resolve, 35));
+        return "{not valid json"; // forces the repair path
+      },
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(calls).toHaveLength(1); // initial call only; repair never started
+    expect(result.selects.decision_runtime?.fallback_warnings?.join("\n")).toContain(
+      "failed: transport_timeout",
+    );
+  });
+
+  it("never starts a connector JSON repair call after the stage deadline", async () => {
+    const projectDir = createProject("review-deadline-repair-connector", imageSegments(2));
+    let executorCalls = 0;
+    const agent = createLlmTriageAgent({
+      editorialLlm: {
+        stageTimeoutMs: 20,
+        env: {},
+        commandExists: (command) => command === "codex",
+        executor: async () => {
+          executorCalls += 1;
+          await new Promise((resolve) => setTimeout(resolve, 35));
+          return { stdout: "NOT JSON", stderr: "" }; // forces the repair path
+        },
+      },
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(executorCalls).toBe(1); // initial executor call; repair skipped
+    expect(result.confirmed).toBe(true);
+  });
+
+  it("honors a nested editorialLlm stage timeout of zero with zero executor calls", async () => {
+    const projectDir = createProject("review-nested-timeout-zero", imageSegments(2));
+    let executorCalls = 0;
+    const agent = createLlmTriageAgent({
+      editorialLlm: {
+        stageTimeoutMs: 0,
+        env: {},
+        commandExists: () => false,
+        executor: async () => {
+          executorCalls += 1;
+          return { stdout: "", stderr: "" };
+        },
+      },
+    });
+
+    const result = await agent.run(context(projectDir));
+
+    expect(executorCalls).toBe(0);
+    expect(result.selects.decision_runtime?.fallback_warnings?.join("\n")).toContain(
+      "skipped after stage deadline",
+    );
+  });
+
+  it("keeps the remaining shared budget authoritative over a larger nested stage timeout", async () => {
+    const projectDir = createProject("review-nested-timeout-spread", imageSegments(1));
+    const seenTimeouts: number[] = [];
+    const agent = createLlmTriageAgent({
+      stageTimeoutMs: 50,
+      editorialLlm: {
+        stageTimeoutMs: 999_999,
+        env: {},
+        commandExists: (command) => command === "codex",
+        executor: async (execInput) => {
+          seenTimeouts.push(execInput.timeoutMs);
+          return { stdout: "", stderr: "" };
+        },
+      },
+    });
+
+    await agent.run(context(projectDir));
+
+    // Every executor invocation (initial + repair) receives only the shared
+    // remaining budget, never the larger nested 999_999 value.
+    expect(seenTimeouts.length).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...seenTimeouts)).toBeLessThanOrEqual(50);
+  });
+
+  it("preserves previously completed checkpoint entries when other batches fail or succeed later", async () => {
+    const projectDir = createProject("review-checkpoint-union", imageSegments(2));
+    let failSeg001 = true;
+    const flaky: LlmCompleter = async (prompt) => {
+      if (prompt.includes('"segment_id": "SEG_001"') && failFirst()) return Promise.reject(new Error("flaky batch"));
+      const match = prompt.match(/"segment_id": "(SEG_\d+)"/);
+      return candidateResponse(match?.[1] ?? "SEG_001");
+      function failFirst(): boolean {
+        return failSeg001;
+      }
+    };
+
+    // Run A: batch 1 (SEG_001) fails; only batch 2 reaches the checkpoint.
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: flaky }).run(context(projectDir));
+    const afterA = JSON.parse(
+      fs.readFileSync(path.join(projectDir, "03_analysis/llm-triage-batches.json"), "utf-8"),
+    ) as { batches: Array<{ index: number }> };
+    expect(afterA.batches.map((batch) => batch.index)).toEqual([1]);
+
+    // Run B: batch 1 succeeds now; batch 2 resumes. Both must be persisted.
+    failSeg001 = false;
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: flaky }).run(context(projectDir));
+    const afterB = JSON.parse(
+      fs.readFileSync(path.join(projectDir, "03_analysis/llm-triage-batches.json"), "utf-8"),
+    ) as { batches: Array<{ index: number }> };
+    expect(afterB.batches.map((batch) => batch.index)).toEqual([0, 1]);
+
+    // Run C: fully covered -> zero LLM calls, both candidates present.
+    const thirdCalls: string[] = [];
+    const result = await createLlmTriageAgent({
+      multimodalBatchSize: 1,
+      llm: async (prompt) => {
+        thirdCalls.push(prompt);
+        return candidateResponse("SEG_001");
+      },
+    }).run(context(projectDir));
+    expect(thirdCalls).toHaveLength(0);
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual([
+      "SEG_001",
+      "SEG_002",
+    ]);
+  });
+
+  it("re-calls every batch when the completion path switches from injected to connector", async () => {
+    const projectDir = createProject("review-path-switch", imageSegments(2));
+    const injected = batchResponder();
+    await createLlmTriageAgent({ multimodalBatchSize: 1, llm: injected.llm }).run(context(projectDir));
+    expect(injected.calls).toHaveLength(2);
+
+    const geminiTextCalls: string[] = [];
+    const result = await createLlmTriageAgent({
+      multimodalBatchSize: 1,
+      editorialLlm: {
+        env: { GEMINI_API_KEY: "test-key" },
+        commandExists: () => false,
+        geminiText: async (prompt) => {
+          geminiTextCalls.push(prompt);
+          const match = prompt.match(/"segment_id": "(SEG_\d+)"/);
+          return candidateResponse(match?.[1] ?? "SEG_001");
+        },
+      },
+    }).run(context(projectDir));
+
+    expect(geminiTextCalls).toHaveLength(2); // completion_path mismatch -> no stale reuse
+    expect(result.selects.decision_runtime?.runtime).toBe("gemini");
+  });
+
+  it("keeps codex_exec runtime identity across a fully-resumed connector run", async () => {
+    const projectDir = createProject("review-codex-resume", imageSegments(2));
+    let executorCalls = 0;
+    const codexExecutor = async (execInput: { input?: string }) => {
+      executorCalls += 1;
+      const match = (execInput.input ?? "").match(/"segment_id": "(SEG_\d+)"/);
+      return {
+        stdout: `${JSON.stringify({ type: "item.completed", message: candidateResponse(match?.[1] ?? "SEG_001") })}\n`,
+        stderr: "",
+      };
+    };
+    const connectorOpts = {
+      env: {},
+      commandExists: (command: string) => command === "codex",
+      executor: codexExecutor,
+    };
+
+    await createLlmTriageAgent({ multimodalBatchSize: 1, editorialLlm: connectorOpts }).run(context(projectDir));
+    expect(executorCalls).toBe(2);
+
+    const result = await createLlmTriageAgent({ multimodalBatchSize: 1, editorialLlm: connectorOpts }).run(
+      context(projectDir),
+    );
+
+    expect(executorCalls).toBe(2); // full resume: zero new calls
+    expect(result.selects.candidates.map((candidate) => candidate.segment_id)).toEqual([
+      "SEG_001",
+      "SEG_002",
+    ]);
+    expect(result.selects.decision_runtime).toEqual({
+      runtime: "codex_exec",
+      role: "triage-llm",
+      author: "llm",
+      attempted_runtimes: [{
+        runtime: "codex_exec",
+        status: "success",
+        message: "resumed from triage batch checkpoint",
+      }],
+    });
+  });
+
+  it("keeps deterministic and injected triage provenance distinct from connector resume", async () => {
+    const deterministicProject = createProject("review-resume-negative-deterministic", imageSegments(2));
+    const deterministic = await createLlmTriageAgent({
+      multimodalBatchSize: 1,
+      editorialLlm: { runtime: "deterministic", env: {} },
+    }).run(context(deterministicProject));
+
+    expect(deterministic.selects.decision_runtime).toMatchObject({
+      runtime: "deterministic",
+      role: "triage-llm",
+      author: "deterministic_fallback",
+    });
+
+    const injectedProject = createProject("review-resume-negative-injected", imageSegments(2));
+    const injectedResponder = batchResponder();
+    const injected = await createLlmTriageAgent({
+      multimodalBatchSize: 1,
+      llm: injectedResponder.llm,
+    }).run(context(injectedProject));
+
+    expect(injectedResponder.calls).toHaveLength(2);
+    expect(injected.selects.decision_runtime).toEqual({
+      runtime: "injected",
+      role: "triage-llm",
+      attempted_runtimes: [{
+        runtime: "deterministic",
+        status: "skipped",
+        message: "injected test/runtime completer",
+      }],
+    });
+  });
+});
+
+describe("triage batching nested-env runtime binding (review follow-up)", () => {
+  const savedEnv: Record<string, string | undefined> = {};
+
+  function nestedCandidate(segmentId: string): string {
+    return JSON.stringify({
+      candidates: [
+        {
+          segment_id: segmentId,
+          asset_id: segmentId.replace("SEG", "AST"),
+          role: "support",
+          why_it_matches: "nested env binding candidate",
+          confidence: 0.8,
+        },
+      ],
+    });
+  }
+
+  beforeAll(() => {
+    savedEnv.delay = process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    process.env.VOS_TRIAGE_BATCH_DELAY_MS = "0";
+    delete process.env.TRIAGE_MODEL;
+    delete process.env.GEMINI_API_KEY;
+  });
+
+  afterAll(() => {
+    if (savedEnv.delay === undefined) delete process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    else process.env.VOS_TRIAGE_BATCH_DELAY_MS = savedEnv.delay;
+  });
+
+  it("re-calls every batch when the nested connector env model changes", async () => {
+    const projectDir = createProject("review-nested-env-model-change", imageSegments(2));
+    let geminiTextCalls = 0;
+    const geminiOpts = (triageModel: string) => ({
+      env: { TRIAGE_MODEL: triageModel, GEMINI_API_KEY: "test-key" },
+      commandExists: () => false,
+      geminiText: async (prompt: string) => {
+        geminiTextCalls += 1;
+        const match = prompt.match(/"segment_id": "(SEG_\d+)"/);
+        return nestedCandidate(match?.[1] ?? "SEG_001");
+      },
+    });
+
+    // Run A completes all batches under model-a.
+    await createLlmTriageAgent({ multimodalBatchSize: 1, editorialLlm: geminiOpts("model-a") }).run(
+      context(projectDir),
+    );
+    expect(geminiTextCalls).toBe(2);
+
+    // Run B with the same project/input but nested env model-b must never
+    // stale-resume the model-a results.
+    await createLlmTriageAgent({ multimodalBatchSize: 1, editorialLlm: geminiOpts("model-b") }).run(
+      context(projectDir),
+    );
+    expect(geminiTextCalls).toBe(4);
+  });
+});
+
+describe("triage batch wait deadline", () => {
+  it("caps the multimodal inter-batch wait at the remaining stage budget", async () => {
+    const projectDir = createProject("batch-delay-deadline", imageSegments(2));
+    const originalDelay = process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+    process.env.VOS_TRIAGE_BATCH_DELAY_MS = "1000";
+    const { llm, calls } = batchResponder();
+
+    try {
+      const startedAt = Date.now();
+      const result = await createLlmTriageAgent({
+        textOnlyTriage: false,
+        multimodalBatchSize: 1,
+        stageTimeoutMs: 120,
+        llm,
+      }).run(context(projectDir));
+
+      expect(calls).toHaveLength(1);
+      expect(result.selects.decision_runtime?.fallback_warnings?.join("\n")).toContain(
+        "batch 2/2 skipped after stage deadline",
+      );
+      expect(Date.now() - startedAt).toBeLessThan(500);
+    } finally {
+      if (originalDelay === undefined) delete process.env.VOS_TRIAGE_BATCH_DELAY_MS;
+      else process.env.VOS_TRIAGE_BATCH_DELAY_MS = originalDelay;
+    }
   });
 });

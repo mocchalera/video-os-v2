@@ -35,10 +35,8 @@ final class ProjectStudioSyntheticSmokeTests: XCTestCase {
                 try FileManager.default.createDirectory(at: packageDir.appendingPathComponent("video"), withIntermediateDirectories: true)
                 try FileManager.default.createDirectory(at: packageDir.appendingPathComponent("audio"), withIntermediateDirectories: true)
                 let finalURL = outputDir.appendingPathComponent("final.mp4")
-                let packageFinalURL = packageDir.appendingPathComponent("video/final.mp4")
                 let finalMixURL = packageDir.appendingPathComponent("audio/final_mix.wav")
                 try Data([0x03, 0x04, 0x05]).write(to: finalURL)
-                try Data([0x03, 0x04, 0x05]).write(to: packageFinalURL)
                 try Data([0x06, 0x07, 0x08]).write(to: finalMixURL)
                 try """
                 {
@@ -84,8 +82,10 @@ final class ProjectStudioSyntheticSmokeTests: XCTestCase {
             },
             editorPacketExporter: { root, projectURL in
                 let plan = ProjectEditorPacketExporter.plan(repositoryRoot: root, projectURL: projectURL)
-                try FileManager.default.createDirectory(at: plan.handoffPlan.outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try "<xmeml version=\"5\" />".write(to: plan.handoffPlan.outputURL, atomically: true, encoding: .utf8)
+                try ProjectHandoffExportTests.writePremiereExportGraph(
+                    at: projectURL,
+                    identity: ProjectHandoffExportTests.validPremiereIdentity(projectID: plan.handoffPlan.projectID)
+                )
                 return try ProjectEditorPacketExporter.export(
                     repositoryRoot: root,
                     projectURL: projectURL,

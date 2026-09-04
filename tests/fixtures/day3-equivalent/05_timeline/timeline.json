@@ -1,0 +1,49 @@
+{
+  "version": "1",
+  "project_id": "day3-equivalent-fixture",
+  "created_at": "2026-08-31T00:00:00.000Z",
+  "sequence": {
+    "name": "DAY3 equivalent",
+    "fps_num": 25,
+    "fps_den": 1,
+    "width": 320,
+    "height": 180,
+    "start_frame": 0,
+    "output_aspect_ratio": "16:9"
+  },
+  "tracks": {
+    "video": [
+      {
+        "track_id": "V1",
+        "kind": "video",
+        "clips": [
+          {
+            "clip_id": "BODY_1",
+            "segment_id": "SEG_BODY",
+            "asset_id": "AST_BODY",
+            "src_in_us": 0,
+            "src_out_us": 1600000,
+            "timeline_in_frame": 0,
+            "timeline_duration_frames": 40,
+            "role": "hero",
+            "motivation": "canonical body",
+            "beat_id": "day3",
+            "fallback_segment_ids": [],
+            "confidence": 1,
+            "quality_flags": []
+          }
+        ]
+      }
+    ],
+    "audio": []
+  },
+  "markers": [
+    { "frame": 20, "kind": "beat", "label": "day3:body" }
+  ],
+  "provenance": {
+    "brief_path": "01_intent/creative_brief.yaml",
+    "blueprint_path": "04_plan/edit_blueprint.yaml",
+    "selects_path": "04_plan/selects_candidates.yaml",
+    "compiler_version": "fixture"
+  }
+}

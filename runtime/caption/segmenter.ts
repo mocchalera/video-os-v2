@@ -5,6 +5,10 @@
 
 import { cleanupCaptionText } from "./cleanup.js";
 import { formatCaption } from "./line-breaker.js";
+import { captionLineage, stableCaptionRootId, type CaptionLineage } from "./identity.js";
+import type { TimelineOffsetMap } from "../compiler/timeline-offset-engine.js";
+import { projectSourceRange } from "../compiler/timeline-offset-engine.js";
+import type { CaptionTimingMetadata } from "./projection.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -60,6 +64,13 @@ export interface SpeechCaption {
   source: "transcript" | "authored";
   styling_class: string;
   metrics: { cps: number; dwell_ms: number };
+  /** Stable authored-lyrics identity when the caption source is authored. */
+  line_id?: string;
+  cue_id?: string;
+  root_id?: string;
+  parent_ids?: string[];
+  lineage_hash?: string;
+  timing?: CaptionTimingMetadata;
   reveal_timing?: {
     anchor_id: string;
     role: CaptionRevealRole;
@@ -103,6 +114,10 @@ export interface CaptionSource {
   caption_policy: CaptionPolicy;
   speech_captions: SpeechCaption[];
   text_overlays: TextOverlay[];
+  /** Present only for the Issue #41 authored-lyrics route. */
+  text_authority?: import("./authored-lyrics.js").AuthoredTextAuthority;
+  /** Present only for the Issue #41 authored-lyrics route. */
+  timing_authority?: import("./authored-lyrics.js").AuthoredTimingAuthority;
 }
 
 export interface LanguageCalibration {
@@ -375,6 +390,8 @@ export interface CaptionGenerationOptions {
   protectedTerms?: string[];
   /** Blank frames enforced between adjacent captions. Default: 1. */
   interCaptionGapFrames?: number;
+  /** Canonical source-to-final-timeline projection shared with retime/review. */
+  timelineOffsetMap?: TimelineOffsetMap;
 }
 
 function applyOperatorCorrections(
@@ -597,10 +614,20 @@ export function generateCaptionSource(
       const offsetStartUs = clampedStartUs - clip.src_in_us;
       const offsetEndUs = clampedEndUs - clip.src_in_us;
 
-      const timelineInFrame =
-        clip.timeline_in_frame + usToFrames(offsetStartUs, fps);
-      const timelineOutFrame =
-        clip.timeline_in_frame + usToFrames(offsetEndUs, fps);
+      const projected = options?.timelineOffsetMap
+        ? projectSourceRange(options.timelineOffsetMap, {
+            asset_id: clip.asset_id,
+            segment_id: clip.segment_id,
+            source_start_us: clampedStartUs,
+            source_end_us: clampedEndUs,
+          })
+        : undefined;
+      const timelineInFrame = projected?.status === "exact" && projected.segments.length
+        ? projected.timeline_in_frame
+        : clip.timeline_in_frame + usToFrames(offsetStartUs, fps);
+      const timelineOutFrame = projected?.status === "exact" && projected.segments.length
+        ? projected.timeline_in_frame + projected.timeline_duration_frames
+        : clip.timeline_in_frame + usToFrames(offsetEndUs, fps);
       const durationFrames = Math.max(1, timelineOutFrame - timelineInFrame);
 
       allPending.push({
@@ -639,7 +666,6 @@ export function generateCaptionSource(
     if (seg.length === 0) continue;
 
     captionCounter++;
-    const captionId = `SC_${String(captionCounter).padStart(4, "0")}`;
 
     let text = seg.map((p) => p.item.text).join("");
 
@@ -705,6 +731,26 @@ export function generateCaptionSource(
     const segmentId = firstPending.clip.segment_id;
     const transcriptRef = transcripts.get(assetId)?.transcript_ref ?? "";
 
+    const captionId = `SC_${String(captionCounter).padStart(4, "0")}`;
+    const stableRootId = stableCaptionRootId({
+      asset_id: assetId,
+      segment_id: segmentId,
+      transcript_item_ids: seg.map((p) => p.item.item_id),
+      source_start_us: seg[0].item.start_us,
+      source_end_us: seg[seg.length - 1].item.end_us,
+      semantic_partition: seg.map((p) => `${p.item.item_id}:${p.item.start_us}:${p.item.end_us}`),
+    });
+    const lineage: CaptionLineage = captionLineage({
+      caption_id: captionId,
+      stable_root_id: stableRootId,
+      asset_id: assetId,
+      segment_id: segmentId,
+      transcript_item_ids: seg.map((p) => p.item.item_id),
+      text,
+      timeline_in_frame: inFrame,
+      timeline_duration_frames: durationFrames,
+    });
+
     speechCaptions.push({
       caption_id: captionId,
       asset_id: assetId,
@@ -720,6 +766,7 @@ export function generateCaptionSource(
         cps: Math.round(cps * 100) / 100,
         dwell_ms: Math.round(dwellMs),
       },
+      ...lineage,
     });
   }
 

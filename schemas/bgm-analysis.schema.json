@@ -27,7 +27,8 @@
       "properties": {
         "asset_id": { "type": "string" },
         "path": { "type": "string" },
-        "source_hash": { "type": "string" }
+        "source_hash": { "type": "string" },
+        "source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
       },
       "additionalProperties": false
     },
@@ -51,16 +52,38 @@
       "description": "Beat events with onset strength (0–1). Optional; when present, provides richer data than beats_sec.",
       "items": { "$ref": "#/$defs/beat_event" }
     },
+    "onsets": {
+      "type": "array",
+      "description": "Measured onset cues kept separate from the beat projection.",
+      "items": { "$ref": "#/$defs/beat_event" }
+    },
+    "downbeats": {
+      "type": "array",
+      "description": "Measured downbeat cues with per-cue strength; legacy downbeats_sec has no confidence binding.",
+      "items": { "$ref": "#/$defs/beat_event" }
+    },
     "editorial_arc_map": {
       "type": "array",
       "items": { "$ref": "#/$defs/arc_map_entry" }
     },
     "provenance": {
       "type": "object",
-      "required": ["detector", "sample_rate_hz"],
+      "required": ["detector"],
       "properties": {
         "detector": { "type": "string" },
-        "sample_rate_hz": { "type": "integer", "minimum": 1 }
+        "sample_rate_hz": { "type": "integer", "minimum": 1 },
+        "input_sample_rate_hz": { "type": "integer", "minimum": 1 },
+        "processing_sample_rate_hz": { "type": "integer", "minimum": 1 },
+        "source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "backend_name": { "type": "string", "minLength": 1 },
+        "backend_version": { "type": "string", "minLength": 1, "not": { "const": "unknown" } },
+        "hop_length_samples": { "type": "integer", "minimum": 1 },
+        "window_length_samples": { "type": "integer", "minimum": 1 },
+        "time_unit": { "type": "string", "enum": ["seconds"] },
+        "evidence_classification": { "type": "string", "enum": ["measured", "synthetic", "unavailable"] },
+        "measurement_status": { "type": "string", "enum": ["complete", "partial", "unavailable"] },
+        "tempo_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fallback_used": { "type": "boolean" }
       },
       "additionalProperties": false
     }
@@ -75,7 +98,8 @@
         "label": { "type": "string" },
         "start_sec": { "type": "number", "minimum": 0 },
         "end_sec": { "type": "number", "minimum": 0 },
-        "energy": { "type": "number", "minimum": 0, "maximum": 1 }
+        "energy": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence_classification": { "type": "string", "enum": ["measured", "synthetic", "unavailable"] }
       },
       "additionalProperties": false
     },
@@ -84,7 +108,8 @@
       "required": ["time_sec", "strength"],
       "properties": {
         "time_sec": { "type": "number", "minimum": 0 },
-        "strength": { "type": "number", "minimum": 0, "maximum": 1 }
+        "strength": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence_classification": { "type": "string", "enum": ["measured", "synthetic", "unavailable"] }
       },
       "additionalProperties": false
     },
@@ -100,5 +125,156 @@
       },
       "additionalProperties": false
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["provenance"],
+        "properties": {
+          "provenance": { "required": ["evidence_classification"] }
+        }
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "required": [
+              "evidence_classification",
+              "measurement_status",
+              "tempo_confidence",
+              "fallback_used"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["analysis_status"],
+        "properties": {
+          "analysis_status": { "const": "ready" }
+        },
+        "anyOf": [
+          {
+            "required": ["music_asset"],
+            "properties": {
+              "music_asset": { "required": ["source_content_sha256"] }
+            }
+          },
+          {
+            "required": ["provenance"],
+            "properties": {
+              "provenance": {
+                "anyOf": [
+                  { "required": ["source_content_sha256"] },
+                  { "required": ["backend_name"] },
+                  { "required": ["backend_version"] },
+                  { "required": ["input_sample_rate_hz"] },
+                  { "required": ["processing_sample_rate_hz"] },
+                  { "required": ["hop_length_samples"] },
+                  { "required": ["window_length_samples"] },
+                  { "required": ["evidence_classification"] }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "music_asset": {
+            "required": ["source_hash", "source_content_sha256"],
+            "properties": {
+              "source_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          },
+          "provenance": {
+            "required": [
+              "source_content_sha256",
+              "backend_name",
+              "backend_version",
+              "input_sample_rate_hz",
+              "processing_sample_rate_hz",
+              "hop_length_samples",
+              "window_length_samples",
+              "time_unit",
+              "evidence_classification",
+              "measurement_status",
+              "tempo_confidence",
+              "fallback_used"
+            ],
+            "properties": {
+              "source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "evidence_classification": { "const": "measured" },
+              "measurement_status": { "const": "complete" },
+              "fallback_used": { "const": false }
+            }
+          },
+          "beats": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "allOf": [
+                { "$ref": "#/$defs/beat_event" },
+                {
+                  "required": ["evidence_classification"],
+                  "properties": { "evidence_classification": { "const": "measured" } }
+                }
+              ]
+            }
+          },
+          "onsets": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "allOf": [
+                { "$ref": "#/$defs/beat_event" },
+                {
+                  "required": ["evidence_classification"],
+                  "properties": { "evidence_classification": { "const": "measured" } }
+                }
+              ]
+            }
+          },
+          "sections": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "allOf": [
+                { "$ref": "#/$defs/section" },
+                {
+                  "required": ["evidence_classification"],
+                  "properties": { "evidence_classification": { "const": "measured" } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["analysis_status", "provenance"],
+        "properties": {
+          "analysis_status": { "enum": ["ready", "partial"] },
+          "provenance": { "required": ["evidence_classification"] }
+        }
+      },
+      "then": {
+        "properties": {
+          "music_asset": {
+            "required": ["source_hash", "source_content_sha256"],
+            "properties": {
+              "source_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          },
+          "provenance": {
+            "required": ["source_content_sha256"],
+            "properties": {
+              "source_content_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

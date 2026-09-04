@@ -59,6 +59,25 @@
         "raw": { "type": "string" }
       }
     },
+    "failure-record": {
+      "type": "object",
+      "required": ["stage", "reason_class"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "type": "string", "enum": ["probe", "proxy", "caption", "find"] },
+        "chunk_index": { "type": "integer", "minimum": 0 },
+        "query_index": { "type": "integer", "minimum": 0 },
+        "reason_class": {
+          "type": "string",
+          "enum": [
+            "marlin_worker_timeout",
+            "marlin_model_unavailable",
+            "marlin_worker_unavailable",
+            "marlin_worker_failure"
+          ]
+        }
+      }
+    },
     "marlin-asset-events": {
       "type": "object",
       "required": ["asset_id", "source_path", "scene", "events", "find_results"],
@@ -75,7 +94,18 @@
         "find_results": {
           "type": "array",
           "items": { "$ref": "#/$defs/find-result" }
-        }
+        },
+        "evaluation_status": { "type": "string", "enum": ["complete", "degraded"] },
+        "failures": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/failure-record" }
+        },
+        "completed_chunks": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "checkpoint_signature": { "type": "string", "minLength": 1 }
       }
     }
   }

@@ -5,11 +5,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { LoadedSourceMap } from "../media/source-map.js";
+import { computeSourceMappingHash } from "./render-readiness.js";
 import { computeFileHash16 } from "../preview/playback-contract.js";
 import type {
   AssembledTimeline,
   BriefCaptionPolicy,
   BriefAudioPolicy,
+  CreativeBriefMusicMaster,
   ClipOutput,
   DurationPolicy,
   MarkerOutput,
@@ -17,8 +19,11 @@ import type {
   TimelineTransitionOutput,
   TrackOutput,
   StillDurationPolicy,
+  CreatorShortVoBrollProvenance,
+  RetentionPolicyProvenance,
 } from "./types.js";
 import type { TimelineTransition } from "./transition-types.js";
+import { OVERLAP_TRANSITION_TYPES } from "./transition-types.js";
 
 const COMPILER_VERSION = "1.0.0";
 
@@ -37,12 +42,16 @@ export interface ExportOptions {
     mode: BriefAudioPolicy;
     source: "explicit_brief" | "profile_default" | "global_default";
     a1_loudnorm?: boolean;
+    audio_decision?: "preserve" | "mastering";
+    music_master?: CreativeBriefMusicMaster;
   };
   captionPolicy?: {
     mode: BriefCaptionPolicy;
     source: "explicit_brief" | "profile_default" | "global_default";
   };
   stillDurationPolicy?: StillDurationPolicy;
+  creatorShortVoBrollProvenance?: CreatorShortVoBrollProvenance;
+  retentionPolicyProvenance?: RetentionPolicyProvenance;
   transitions?: TimelineTransition[];
   metadata?: Record<string, unknown>;
   width?: number;
@@ -94,6 +103,22 @@ export function buildTimelineIR(
         if (t.applied_skill_id) out.applied_skill_id = t.applied_skill_id;
         if (t.degraded_from_skill_id !== undefined) out.degraded_from_skill_id = t.degraded_from_skill_id;
         if (t.confidence !== undefined) out.confidence = t.confidence;
+        if (t.fallback) {
+          out.fallback = { type: t.fallback.type, reason: t.fallback.reason };
+        }
+        // Issue #34 overlap presets: record the absolute A/B blend window so
+        // every consumer (Remotion preflight, review tooling) sees the exact
+        // frames without re-deriving clip geometry.
+        if (OVERLAP_TRANSITION_TYPES.has(t.transition_type) && out.transition_frames) {
+          const toClip = assembled.tracks.video
+            .flatMap((track) => track.clips)
+            .find((clip) => clip.clip_id === t.to_clip_id);
+          if (toClip) {
+            out.start_frame = toClip.timeline_in_frame;
+            out.duration_frames = out.transition_frames;
+          }
+        }
+        if (t.metadata) out.metadata = t.metadata;
         return out;
       })
     : undefined;
@@ -118,7 +143,19 @@ export function buildTimelineIR(
     },
     markers,
     ...(transitionOutputs && transitionOutputs.length > 0 ? { transitions: transitionOutputs } : {}),
-    ...(opts.metadata && Object.keys(opts.metadata).length > 0 ? { metadata: opts.metadata } : {}),
+    ...(
+      (opts.metadata && Object.keys(opts.metadata).length > 0) ||
+      (assembled.operations && assembled.operations.length > 0)
+        ? {
+            metadata: {
+              ...(assembled.operations && assembled.operations.length > 0
+                ? { timeline_operations: assembled.operations }
+                : {}),
+              ...(opts.metadata ?? {}),
+            },
+          }
+        : {}
+    ),
     provenance: {
       brief_path: opts.briefRelPath,
       blueprint_path: opts.blueprintRelPath,
@@ -139,6 +176,12 @@ export function buildTimelineIR(
       ...(opts.audioPolicy ? { audio_policy: opts.audioPolicy } : {}),
       ...(opts.captionPolicy ? { caption_policy: opts.captionPolicy } : {}),
       ...(opts.stillDurationPolicy ? { still_duration_policy: opts.stillDurationPolicy } : {}),
+      ...(opts.creatorShortVoBrollProvenance
+        ? { creator_short_vo_broll: opts.creatorShortVoBrollProvenance }
+        : {}),
+      ...(opts.retentionPolicyProvenance
+        ? { retention_policy: opts.retentionPolicyProvenance }
+        : {}),
     },
   };
 }
@@ -146,12 +189,13 @@ export function buildTimelineIR(
 export function writeTimeline(
   timeline: TimelineIR,
   projectPath: string,
+  outputPath?: string,
 ): string {
-  const outDir = path.join(projectPath, "05_timeline");
+  const outPath = outputPath ?? path.join(projectPath, "05_timeline", "timeline.json");
+  const outDir = path.dirname(outPath);
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
   }
-  const outPath = path.join(outDir, "timeline.json");
   fs.writeFileSync(outPath, JSON.stringify(timeline, null, 2), "utf-8");
   return outPath;
 }
@@ -176,15 +220,20 @@ export function writePreviewManifest(
   timeline: TimelineIR,
   projectPath: string,
   sourceMap?: LoadedSourceMap,
+  options?: {
+    outputPath?: string;
+    timelinePath?: string;
+  },
 ): string {
-  const outDir = path.join(projectPath, "05_timeline");
+  const outPath = options?.outputPath ?? path.join(projectPath, "05_timeline", "preview-manifest.json");
+  const outDir = path.dirname(outPath);
   if (!fs.existsSync(outDir)) {
     fs.mkdirSync(outDir, { recursive: true });
   }
 
   // Playback contract: record which timeline.json this manifest was
   // derived from, so review surfaces can detect stale previews.
-  const timelinePath = path.join(outDir, "timeline.json");
+  const timelinePath = options?.timelinePath ?? path.join(projectPath, "05_timeline", "timeline.json");
   const baseTimelineHash = fs.existsSync(timelinePath)
     ? computeFileHash16(timelinePath)
     : null;
@@ -200,6 +249,8 @@ export function writePreviewManifest(
       src_out_us: c.src_out_us,
       timeline_in_frame: c.timeline_in_frame,
       timeline_duration_frames: c.timeline_duration_frames,
+      ...(c.still_image ? { still_image: { ...c.still_image } } : {}),
+      ...(c.freeze_frame_hold ? { freeze_frame_hold: { ...c.freeze_frame_hold } } : {}),
       ...(sourceEntry
         ? {
             source_locator: sourceEntry.source_locator,
@@ -228,6 +279,14 @@ export function writePreviewManifest(
     created_at: timeline.created_at,
     compiler_version: COMPILER_VERSION,
     ...(baseTimelineHash ? { base_timeline_hash: baseTimelineHash } : {}),
+    // Shared source mapping contract (Issue #6 P1): the render route and the
+    // preview manifest must resolve media through the same mapping the
+    // timeline was compiled against.
+    ...(sourceMap ? { source_mapping_hash: computeSourceMappingHash(sourceMap.entries) } : {}),
+    // Rhythm-sync parity contract (Issue #35): the preview route carries the
+    // same ±2-frame section parity result as the final timeline metadata, so
+    // preview and final stay within the parity window by construction.
+    ...(timeline.metadata?.rhythm_sync ? { rhythm_sync: buildPreviewRhythmSyncSummary(timeline.metadata.rhythm_sync) } : {}),
     sequence: timeline.sequence,
     tracks: previewTracks,
     transitions: timeline.transitions ?? [],
@@ -236,9 +295,42 @@ export function writePreviewManifest(
       .concat(previewTracks.audio.flatMap((track) => track.clips)),
   };
 
-  const outPath = path.join(outDir, "preview-manifest.json");
   fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2), "utf-8");
   return outPath;
+}
+
+/**
+ * Projection of the canonical rhythm_sync metadata (Issue #35) into the
+ * preview manifest: the parity contract plus per-section offsets. The full
+ * boundary evidence stays in timeline.metadata.rhythm_sync.
+ */
+function buildPreviewRhythmSyncSummary(rhythmSync: unknown): Record<string, unknown> {
+  const record = (rhythmSync ?? {}) as {
+    version?: string;
+    status?: string;
+    enabled?: boolean;
+    parity?: { status?: string; max_offset_frames?: number; sections?: unknown[] };
+    integrity?: Record<string, unknown>;
+    search_window_sec?: number;
+    parity_gate?: string;
+    parity_recomputed_after_geometry_passes?: boolean;
+    evidence_provenance?: Record<string, unknown>;
+  };
+  return {
+    version: record.version ?? "1",
+    status: record.status,
+    enabled: record.enabled ?? false,
+    parity_status: record.parity?.status ?? "degraded",
+    parity_max_offset_frames: record.parity?.max_offset_frames,
+    parity_gate: record.parity_gate ?? "enforce",
+    ...(record.parity_recomputed_after_geometry_passes === true
+      ? { parity_recomputed_after_geometry_passes: true }
+      : {}),
+    ...(record.evidence_provenance ? { evidence_provenance: record.evidence_provenance } : {}),
+    search_window_sec: record.search_window_sec,
+    sections: record.parity?.sections ?? [],
+    integrity: record.integrity,
+  };
 }
 
 function toClipOutput(clip: {
@@ -261,6 +353,7 @@ function toClipOutput(clip: {
   captions?: ClipOutput["captions"];
   audio_policy?: ClipOutput["audio_policy"];
   still_image?: ClipOutput["still_image"];
+  freeze_frame_hold?: ClipOutput["freeze_frame_hold"];
   candidate_ref?: string;
   fallback_candidate_refs?: string[];
   metadata?: Record<string, unknown>;
@@ -283,6 +376,7 @@ function toClipOutput(clip: {
     ...(clip.source_capabilities ? { source_capabilities: { ...clip.source_capabilities } } : {}),
     ...(clip.audio_role ? { audio_role: clip.audio_role } : {}),
     ...(clip.still_image ? { still_image: { ...clip.still_image } } : {}),
+    ...(clip.freeze_frame_hold ? { freeze_frame_hold: { ...clip.freeze_frame_hold } } : {}),
   };
   if (clip.candidate_ref) {
     output.candidate_ref = clip.candidate_ref;

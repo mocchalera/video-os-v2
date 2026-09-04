@@ -38,6 +38,8 @@ function fixture() {
     version: "sfx-library/v1",
     library_id: "video-os-test-sfx",
     library_version: "1.0.0",
+    scope: "project_local",
+    review_status: "approved",
     assets: [{
       asset_id: "sfx-soft-impact-01",
       semantic_roles: ["hook_impact", "simple_sound"],
@@ -48,14 +50,19 @@ function fixture() {
       rights: {
         status: "confirmed",
         basis: "deterministic_synthesis",
-        usage_scope: "internal_audition",
+        usage_scope: "project_render",
         evidence_ref: "evidence:fixture-synthesis-rights",
+        verified_at: "2026-08-21T00:00:00Z",
+        permitted_derivatives: ["project_render"],
       },
       provenance: {
         origin: "deterministic_synthesis",
         source_ref: "provenance:fixture-soft-impact-v1",
         generated_at: "2026-07-28T00:00:00Z",
+        status: "verified",
+        evidence_ref: "evidence:fixture-synthesis-provenance",
       },
+      review_status: "approved",
     }],
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -119,6 +126,7 @@ function fixture() {
       library_id: manifest.library_id,
       library_version: manifest.library_version,
       manifest_hash: manifestHash,
+      scope: "project_local",
     },
     cues: [{
       cue_id: "SFX_HOOK_000030",

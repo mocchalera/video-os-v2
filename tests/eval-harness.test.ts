@@ -156,6 +156,7 @@ describe("blueprint agreement", () => {
   it("scores an identical blueprint as perfect", () => {
     const report = evaluateBlueprintAgreement(demoBlueprint, clone(demoBlueprint));
     expect(report.beat_count_score).toBe(1);
+    expect(report.beat_id_agreement).toBe(1);
     expect(report.pacing_agreement).toBe(1);
     expect(report.music_agreement).toBe(1);
     expect(report.score).toBe(1);

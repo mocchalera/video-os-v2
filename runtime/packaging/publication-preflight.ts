@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { validateAgainstSchema } from "../commands/shared.js";
 import { computeSha256 } from "./manifest.js";
-import { resolveDeliveryArtifactPaths } from "./active-delivery.js";
+import { resolveDeliveryArtifactPathsStrict } from "./active-delivery.js";
 
 export interface PublicationDestination {
   platform: "youtube" | "vimeo" | "instagram" | "tiktok" | "internal";
@@ -65,9 +65,9 @@ export function runPublicationPreflight(
   const absProjectDir = path.resolve(projectDir);
   const approvalPath = path.join(absProjectDir, "07_package", "publication_approval.yaml");
   const checks: PublicationPreflightCheck[] = [];
-  let delivery: ReturnType<typeof resolveDeliveryArtifactPaths>;
+  let delivery: ReturnType<typeof resolveDeliveryArtifactPathsStrict>;
   try {
-    delivery = resolveDeliveryArtifactPaths(absProjectDir, { verifyHashes: true });
+    delivery = resolveDeliveryArtifactPathsStrict(absProjectDir);
   } catch (error) {
     return {
       ready: false,

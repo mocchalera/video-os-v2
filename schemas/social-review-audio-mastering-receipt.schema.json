@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "social-review-audio-mastering-receipt.schema.json",
+  "title": "Social-review shared audio mastering receipt",
+  "type": "object",
+  "required": ["version", "state", "reason", "generation_id", "shared_audio_plan_sha256", "audio_plan_sha256", "mastering_count", "input_audio", "policy", "measurement_method", "measurement_raw", "measurement", "output_audio", "review_video", "review_video_audio"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "social-review-audio-mastering-receipt/v1" },
+    "state": { "enum": ["mastered", "not_applicable"] },
+    "reason": { "enum": ["shared_audio_render_plan_exactly_once", "shared_audio_render_plan_preserve", "review_video_has_no_audio_stream"] },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "shared_audio_plan_sha256": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "audio_plan_sha256": { "$ref": "#/$defs/hash" },
+    "mastering_count": { "enum": [0, 1] },
+    "input_audio": { "oneOf": [{ "$ref": "#/$defs/file" }, { "type": "null" }] },
+    "policy": {
+      "type": "object",
+      "required": ["values", "profile_sha256", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "values": { "$ref": "#/$defs/policyValues" },
+        "profile_sha256": { "oneOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "measurement_method": { "enum": ["ffmpeg_loudnorm_pass1", "not_applicable"] },
+    "measurement_raw": { "oneOf": [{ "$ref": "#/$defs/rawMeasurement" }, { "type": "null" }] },
+    "measurement": { "oneOf": [{ "$ref": "#/$defs/measurement" }, { "type": "null" }] },
+    "output_audio": { "oneOf": [{ "$ref": "#/$defs/audioFile" }, { "type": "null" }] },
+    "music_master": { "$ref": "#/$defs/musicMasterBinding" },
+    "review_video": { "$ref": "#/$defs/file" },
+    "review_video_audio": { "oneOf": [{ "$ref": "#/$defs/presentAudio" }, { "$ref": "#/$defs/absentAudio" }] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "mastered" } }, "required": ["state"] },
+      "then": {
+        "properties": {
+          "shared_audio_plan_sha256": { "$ref": "#/$defs/hash" },
+          "input_audio": { "$ref": "#/$defs/file" },
+          "measurement_method": { "const": "ffmpeg_loudnorm_pass1" },
+          "measurement_raw": { "$ref": "#/$defs/rawMeasurement" },
+          "measurement": { "$ref": "#/$defs/measurement" },
+          "output_audio": { "$ref": "#/$defs/audioFile" },
+          "review_video_audio": { "$ref": "#/$defs/presentAudio" }
+        }
+      },
+      "else": {
+        "properties": {
+          "reason": { "const": "review_video_has_no_audio_stream" },
+          "shared_audio_plan_sha256": { "type": "null" },
+          "mastering_count": { "const": 0 },
+          "input_audio": { "type": "null" },
+          "measurement_method": { "const": "not_applicable" },
+          "measurement_raw": { "type": "null" },
+          "measurement": { "type": "null" },
+          "output_audio": { "type": "null" },
+          "review_video_audio": { "$ref": "#/$defs/absentAudio" }
+        }
+      }
+    }
+    ,{
+      "if": {
+        "properties": {
+          "state": { "const": "mastered" },
+          "music_master": { "properties": { "audio_decision": { "const": "preserve" } } }
+        },
+        "required": ["state", "music_master"]
+      },
+      "then": {
+        "properties": {
+          "reason": { "const": "shared_audio_render_plan_preserve" },
+          "mastering_count": { "const": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": { "const": "mastered" },
+          "music_master": { "properties": { "audio_decision": { "const": "mastering" } } }
+        },
+        "required": ["state", "music_master"]
+      },
+      "then": {
+        "properties": {
+          "reason": { "const": "shared_audio_render_plan_exactly_once" },
+          "mastering_count": { "const": 1 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "mastered" } },
+        "required": ["state"],
+        "not": { "required": ["music_master"] }
+      },
+      "then": {
+        "properties": {
+          "reason": { "const": "shared_audio_render_plan_exactly_once" },
+          "mastering_count": { "const": 1 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "file": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "additionalProperties": false,
+      "properties": { "path": { "type": "string", "minLength": 1 }, "sha256": { "$ref": "#/$defs/hash" } }
+    },
+    "audioFile": {
+      "type": "object",
+      "required": ["path", "sha256", "content_fingerprint_sha256", "duration_ms", "channel_count", "channel_fingerprint_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" },
+        "content_fingerprint_sha256": { "$ref": "#/$defs/hash" },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "channel_count": { "type": "integer", "minimum": 1 },
+        "channel_fingerprint_sha256": {
+          "type": "array", "minItems": 1,
+          "items": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "musicMasterBinding": {
+      "type": "object",
+      "required": ["role", "audio_decision", "source", "input_audio_hash", "policy_hash", "processing_graph", "codec", "final_mux"],
+      "additionalProperties": false,
+      "properties": {
+        "role": { "const": "music_master" },
+        "audio_decision": { "enum": ["preserve", "mastering"] },
+        "source": {
+          "type": "object",
+          "required": ["role", "asset_id", "source_ref", "source_content_hash", "source_size_bytes", "source_duration_us", "source_range_us", "timeline_range", "gain_linear", "channel_layout", "codec"],
+          "additionalProperties": false,
+          "properties": {
+            "role": { "const": "music_master" },
+            "asset_id": { "type": "string", "minLength": 1 },
+            "source_ref": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+" },
+            "source_content_hash": { "$ref": "#/$defs/hash" },
+            "source_size_bytes": { "type": "integer", "minimum": 1 },
+            "source_duration_us": { "type": "integer", "minimum": 1 },
+            "source_range_us": {
+              "type": "object", "required": ["in_us", "out_us"], "additionalProperties": false,
+              "properties": { "in_us": { "type": "number", "minimum": 0 }, "out_us": { "type": "number", "exclusiveMinimum": 0 } }
+            },
+            "timeline_range": {
+              "type": "object", "required": ["in_frame", "out_frame"], "additionalProperties": false,
+              "properties": { "in_frame": { "type": "integer", "minimum": 0 }, "out_frame": { "type": "integer", "exclusiveMinimum": 0 } }
+            },
+            "gain_linear": { "const": 1 },
+            "channel_layout": { "type": "string", "minLength": 1 },
+            "codec": { "type": "string", "minLength": 1 }
+          }
+        },
+        "input_audio_hash": { "$ref": "#/$defs/hash" },
+        "policy_hash": { "$ref": "#/$defs/hash" },
+        "processing_graph": {
+          "type": "object", "required": ["version", "operations"], "additionalProperties": false,
+          "properties": {
+            "version": { "const": "audio-processing-graph/v1" },
+            "operations": { "type": "array", "minItems": 1, "items": { "enum": ["stream_copy", "trim_reencode", "shared_final_mastering"] } }
+          }
+        },
+        "codec": {
+          "type": "object", "required": ["input", "output", "operation"], "additionalProperties": false,
+          "properties": {
+            "input": { "type": "string", "minLength": 1 },
+            "output": { "type": "string", "minLength": 1 },
+            "operation": { "enum": ["stream_copy", "reencode"] }
+          }
+        },
+        "final_mux": {
+          "type": "object", "required": ["operation", "codec", "output_audio_hash", "output_container_hash"], "additionalProperties": false,
+          "properties": {
+            "operation": { "enum": ["stream_copy", "reencode"] },
+            "codec": { "type": "string", "minLength": 1 },
+            "output_audio_hash": { "$ref": "#/$defs/hash" },
+            "output_container_hash": { "$ref": "#/$defs/hash" }
+          }
+        }
+      }
+    },
+    "presentAudio": {
+      "type": "object",
+      "required": ["state", "content_fingerprint_sha256", "duration_ms", "channel_count", "channel_fingerprint_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "state": { "const": "present" },
+        "content_fingerprint_sha256": { "$ref": "#/$defs/hash" },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "channel_count": { "type": "integer", "minimum": 1 },
+        "channel_fingerprint_sha256": {
+          "type": "array", "minItems": 1,
+          "items": { "$ref": "#/$defs/hash" }
+        }
+      }
+    },
+    "absentAudio": {
+      "type": "object",
+      "required": ["state", "content_fingerprint_sha256", "duration_ms", "channel_count", "channel_fingerprint_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "state": { "const": "absent" },
+        "content_fingerprint_sha256": { "type": "null" },
+        "duration_ms": { "type": "null" },
+        "channel_count": { "type": "null" },
+        "channel_fingerprint_sha256": { "type": "null" }
+      }
+    },
+    "policyValues": {
+      "type": "object",
+      "required": ["loudness_target_lufs", "lra_target", "true_peak_target_dbtp"],
+      "additionalProperties": false,
+      "properties": {
+        "loudness_target_lufs": { "type": "number" },
+        "lra_target": { "type": "number" },
+        "true_peak_target_dbtp": { "type": "number" }
+      }
+    },
+    "rawMeasurement": {
+      "type": "object",
+      "required": ["input_i", "input_tp", "input_lra", "input_thresh", "target_offset"],
+      "additionalProperties": false,
+      "properties": {
+        "input_i": { "type": "string" }, "input_tp": { "type": "string" },
+        "input_lra": { "type": "string" }, "input_thresh": { "type": "string" },
+        "target_offset": { "type": "string" }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "required": ["integrated_lufs", "true_peak_dbtp"],
+      "additionalProperties": false,
+      "properties": { "integrated_lufs": { "type": "number" }, "true_peak_dbtp": { "type": "number" } }
+    }
+  }
+}

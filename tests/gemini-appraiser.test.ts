@@ -20,6 +20,7 @@ import {
 import type { SegmentsJson } from "../runtime/pipeline/pipeline-types.js";
 import { applyQualityGateToSelects } from "../runtime/editorial/quality-gate.js";
 import { parseArgs } from "../scripts/analyze.js";
+import { validateProject } from "../runtime/validation/schema-validator.js";
 
 const tempDirs: string[] = [];
 
@@ -95,6 +96,46 @@ function successfulAppraiser(): AppraiserFn {
     aesthetic_notes: ["strong leading lines"],
   });
 }
+
+it("accepts the shared decision runtime contract in canonical appraiser output", () => {
+  const projectDir = fs.mkdtempSync(path.resolve("test-fixtures-appraiser-schema-"));
+  tempDirs.push(projectDir);
+  const analysisDir = path.join(projectDir, "03_analysis");
+  fs.mkdirSync(analysisDir, { recursive: true });
+  fs.writeFileSync(path.join(analysisDir, "assets.json"), JSON.stringify({
+    project_id: "appraiser-test",
+    artifact_version: "2.0.0",
+    items: [],
+  }));
+  const segment = makeSegment() as SegmentItem & { visual_appraisal?: Record<string, unknown> };
+  segment.visual_appraisal = {
+    status: "ready",
+    appraisal_runtime: {
+      runtime: "gemini",
+      role: "appraiser",
+      author: "llm",
+      attempted_runtimes: [
+        {
+          runtime: "claude_cli",
+          status: "failed",
+          message: "image inputs unsupported",
+          error_kind: "transport_error",
+        },
+        { runtime: "gemini", status: "success" },
+      ],
+    },
+  };
+  fs.writeFileSync(path.join(analysisDir, "segments.json"), JSON.stringify({
+    project_id: "appraiser-test",
+    artifact_version: "2.0.0",
+    items: [segment],
+  }));
+
+  const errors = validateProject(projectDir).violations.filter(
+    (violation) => violation.artifact === "03_analysis/segments.json",
+  );
+  expect(errors).toEqual([]);
+});
 
 function visualMeasurement(overrides: { motion?: number } = {}): VisualQualityMeasurements {
   const motion = overrides.motion ?? 0.42;
@@ -459,6 +500,86 @@ describe("Appraiser pipeline stage", () => {
 
     expect(summary.skippedSegments).toBe(1);
     expect(appraiserCalled).toBe(false);
+  });
+
+  it("does not start frame or appraiser work when the visual deadline is already expired", async () => {
+    const projectDir = makeTempDir();
+    const sourcePath = path.join(projectDir, "source.mp4");
+    fs.writeFileSync(sourcePath, "source");
+    const segmentsJson: SegmentsJson = {
+      project_id: "appraiser-expired",
+      artifact_version: "2.0.0",
+      items: [makeSegment()],
+    };
+    let frameCalls = 0;
+    let appraiserCalls = 0;
+
+    const summary = await runAppraiserStage({
+      segmentsJson,
+      sourceFileMap: new Map([["AST_001", sourcePath]]),
+      outputDir: path.join(projectDir, "03_analysis"),
+      segmentsOutputPath: path.join(projectDir, "03_analysis/segments.json"),
+      policyHash: "policyhash",
+      deadlineAtMs: Date.now() - 1,
+      appraiserFn: async () => {
+        appraiserCalls += 1;
+        return successfulAppraiser()("", "");
+      },
+      execFileImpl: (_command, _args, _options, callback) => {
+        frameCalls += 1;
+        callback(null, "", "");
+      },
+    } as Parameters<typeof runAppraiserStage>[0] & { deadlineAtMs: number });
+
+    expect(frameCalls).toBe(0);
+    expect(appraiserCalls).toBe(0);
+    expect(summary.appraisedSegments).toBe(0);
+    expect(summary.skippedSegments).toBe(1);
+  });
+
+  it("returns at the visual deadline and ignores late appraiser results", async () => {
+    const projectDir = makeTempDir();
+    const sourcePath = path.join(projectDir, "source.mp4");
+    fs.writeFileSync(sourcePath, "source");
+    const segmentsPath = path.join(projectDir, "03_analysis/segments.json");
+    const segment = makeSegment();
+    const segmentsJson: SegmentsJson = {
+      project_id: "appraiser-deadline",
+      artifact_version: "2.0.0",
+      items: [segment],
+    };
+    let appraiserCalls = 0;
+    let completed = 0;
+    let deadlineClock = 0;
+    const startedAt = Date.now();
+
+    const summary = await runAppraiserStage({
+      segmentsJson,
+      sourceFileMap: new Map([["AST_001", sourcePath]]),
+      outputDir: path.join(projectDir, "03_analysis"),
+      segmentsOutputPath: segmentsPath,
+      policyHash: "policyhash",
+      deadlineAtMs: 5,
+      now: () => deadlineClock,
+      appraiserFn: async () => {
+        appraiserCalls += 1;
+        deadlineClock = 5;
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        completed += 1;
+        return successfulAppraiser()("", "");
+      },
+      execFileImpl: createWritingFfmpegMock([]),
+    } as Parameters<typeof runAppraiserStage>[0] & { deadlineAtMs: number });
+
+    expect(Date.now() - startedAt).toBeLessThan(35);
+    expect(appraiserCalls).toBe(1);
+    expect(summary.appraisedSegments).toBe(0);
+    expect((segment as SegmentItem & { visual_appraisal?: unknown }).visual_appraisal).toBeUndefined();
+    expect(fs.existsSync(segmentsPath)).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(completed).toBe(1);
+    expect((segment as SegmentItem & { visual_appraisal?: unknown }).visual_appraisal).toBeUndefined();
+    expect(fs.existsSync(segmentsPath)).toBe(false);
   });
 
   it("records an explicit skip when no image-capable appraiser runtime is available", async () => {

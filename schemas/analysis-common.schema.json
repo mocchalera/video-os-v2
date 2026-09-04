@@ -52,6 +52,31 @@
         "ffmpeg_version": { "type": "string" },
         "provider_request_id": { "type": "string" },
         "frame_count": { "type": "integer", "minimum": 0 },
+        "requested_output_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "finish_reason": {
+          "type": ["string", "null"],
+          "enum": [
+            "STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "LANGUAGE", "OTHER",
+            "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "MALFORMED_FUNCTION_CALL",
+            "EOF", "unrecognized", null
+          ]
+        },
+        "attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "retry_reason": {
+          "type": ["string", "null"],
+          "enum": [
+            "truncated_json", "no_candidate", "no_text", "no_json_span",
+            "json_syntax_error", "schema_invalid", "schema_empty", "call_failure", null
+          ]
+        },
         "sample_timestamps_us": {
           "type": "array",
           "items": { "type": "integer", "minimum": 0 }

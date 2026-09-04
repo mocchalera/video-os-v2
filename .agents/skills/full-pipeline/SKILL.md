@@ -23,7 +23,7 @@ metadata:
 
 - Manifest: `.agents/skills/agent-skill-contracts.json`
 - Commands: `npm run full-pipeline -- --project <project-id> --source-dir <source-dir>`, `npx tsx scripts/analyze.ts`, `npx tsx scripts/editorial-agent-task.ts`, `npx tsx scripts/compile-timeline.ts`, `npm run render-route`, `npm run package`
-- Public flags: `--project`, `--source-dir`, `--content-hint`, `--from`, `--skip-analyze`, `--skip-footage-db`, `--skip-render`, `--skip-qa`, `--no-qwen3vl`, `--no-clap-audio`, `--help`
+- Public flags: `--project`, `--source-dir`, `--content-hint`, `--lyrics`, `--timing-plan`, `--from`, `--skip-analyze`, `--skip-footage-db`, `--skip-render`, `--skip-qa`, `--no-qwen3vl`, `--no-clap-audio`, `--help`
 - Resume stages: `ingest`, `stt`, `marlin`, `visual-quality`, `peak`, `embeddings`, `triage`, `blueprint`, `compile`, `render`, `QA`
 
 上記は生成manifestと契約テストで検証される。`analyze-footage` など個別stageの
@@ -122,6 +122,9 @@ metadata:
 - patch が empty、unsafe、または compile 後 schema invalid の場合は Gate 8 失敗。report の root cause に従って `build-blueprint` か `select-clips` に戻る
 
 ### Step 9: Gate 9 を通す
+
+- authored lyrics のプロジェクトは、`--lyrics` の本文を唯一の text authority として `caption` draft を作り、`caption_preview.json` を人間に提示する。
+- `caption -- approve --approved-by <human>` の明示承認と C1 projection が完了するまで review/render へ進めない。STT/music は timing evidence に限る。
 
 - user が rough cut だけを求めているなら Gate 7 または Gate 8 で止める
 - final output が必要なら `references/gate-conditions.md` の Gate 9 前提を確認する

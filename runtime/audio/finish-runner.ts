@@ -4,6 +4,7 @@ import * as path from "node:path";
 import {
   buildAudioFinishApplyFilter,
   buildAudioFinishPass1Args,
+  buildAudioFinishPreprocessFilter,
   type ResolvedAudioFinishPolicy,
 } from "./dialogue-finishing.js";
 import {
@@ -78,6 +79,29 @@ export async function finishDialogueAudio(input: {
     premaster_measurement: premasterMeasurement,
     output_measurement: parseLoudnormOutput(outputMeasurementResult.stderr),
   };
+}
+
+export async function preprocessDialogueAudio(input: {
+  inputPath: string;
+  outputPath: string;
+  policy: ResolvedAudioFinishPolicy;
+  ffmpegBin?: string;
+  execFileImpl?: AudioFinishExec;
+}): Promise<void> {
+  const inputPath = path.resolve(input.inputPath);
+  const outputPath = path.resolve(input.outputPath);
+  if (!fs.existsSync(inputPath)) throw new Error(`audio finish input is missing: ${inputPath}`);
+  if (inputPath === outputPath) throw new Error("audio finish output must differ from input");
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const filter = buildAudioFinishPreprocessFilter(input.policy);
+  if (!filter) {
+    fs.copyFileSync(inputPath, outputPath);
+    return;
+  }
+  await runFfmpeg(input.execFileImpl ?? execFile, input.ffmpegBin ?? "ffmpeg", [
+    "-y", "-i", inputPath, "-af", filter, "-ar", "48000", outputPath,
+  ]);
+  if (!fs.existsSync(outputPath)) throw new Error(`audio finish output is missing: ${outputPath}`);
 }
 
 function runFfmpeg(

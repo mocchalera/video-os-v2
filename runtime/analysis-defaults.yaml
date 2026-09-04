@@ -43,13 +43,19 @@ vlm:
   prompt_template_id: m2-segment-grounded-v3
   max_frame_width_px: 1024
   segment_visual_token_budget_max: 8192
-  segment_visual_output_tokens_max: 512
+  segment_visual_output_tokens_max: 1024
   segment_visual_frame_cap: 90
   parse_retry_max: 1
 
 editorial_llm:
   runtime: auto
   timeout_ms: 180000
+  # Whole-stage budget shared across every runtime attempt in one editorial
+  # completion (triage, blueprint, appraiser). Each runtime receives
+  # min(timeout_ms, remaining stage budget) as its invocation timeout so a
+  # chain of slow runtimes cannot exceed this deadline; once exhausted, live
+  # runtimes are skipped in favor of deterministic fallback / explicit failure.
+  stage_timeout_ms: 300000
 
 marlin:
   enabled: true
@@ -63,6 +69,13 @@ marlin:
   output_artifact: 03_analysis/marlin_events.json
   chunk_target_us: 120000000
   chunk_overlap_us: 5000000
+  # Bounded caption inference: sources at or below the short-source threshold
+  # use the smaller cap; longer sources and unknown durations use the hard
+  # max. The worker enforces a bound even when this policy is unreachable,
+  # so caption generation is never unbounded.
+  caption_max_new_tokens_short: 512
+  caption_max_new_tokens_max: 2048
+  caption_short_source_max_seconds: 120
   default_find_queries:
     - "the strongest action moment"
     - "the strongest emotional reaction"
@@ -112,6 +125,15 @@ quality_gate:
   appraiser_subject_prominence_reject_below: 0.20
   appraiser_composition_warn_below: 0.35
   appraiser_subject_prominence_warn_below: 0.35
+
+image_qc:
+  # Pre-compile VLM image QC gate for AI-generated still images (Issue 37).
+  # Overall score at or above approve_at_or_above approves an image (when no
+  # critical defect); below it triggers bounded repair-and-regeneration.
+  # Provider unavailability is recorded honestly (fail-open) and never faked.
+  approve_at_or_above: 0.85
+  max_regeneration_attempts: 2
+  critical_defect_rejects: true
 
 selection:
   min_candidates_per_cluster: 1

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "typography-policy.schema.json",
+  "title": "Versioned caption typography policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "profile_id", "caption_mode", "baseline_style_ref", "font_contract_ref", "measurement", "wrapping", "reference_scale", "visual", "hierarchy", "fallback", "accessibility"],
+  "properties": {
+    "version": { "const": "typography-policy/v1" },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "caption_mode": { "enum": ["full_transcript", "keyword_telop", "content_element"] },
+    "baseline_style_ref": { "type": "string", "minLength": 1 },
+    "font_contract_ref": { "const": "existing-caption-font-contract/v1" },
+    "measurement": {
+      "type": "object", "additionalProperties": false, "required": ["method", "full_width_unit", "latin_unit", "max_line_units", "max_lines", "max_cps"],
+      "properties": {
+        "method": { "const": "unicode-display-units/v1" }, "full_width_unit": { "type": "number", "exclusiveMinimum": 0 }, "latin_unit": { "type": "number", "exclusiveMinimum": 0 },
+        "max_line_units": { "type": "number", "exclusiveMinimum": 0 }, "max_lines": { "type": "integer", "minimum": 1 }, "max_cps": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "wrapping": {
+      "type": "object", "additionalProperties": false, "required": ["break_priorities", "protected_terms", "line_start_punctuation", "line_end_punctuation", "orphan_policy", "manual_override"],
+      "properties": {
+        "break_priorities": { "type": "array", "minItems": 1, "items": { "enum": ["punctuation", "word_or_phrase", "lexical_boundary", "balanced_midpoint"] } },
+        "protected_terms": { "type": "array", "items": { "type": "string" } }, "line_start_punctuation": { "type": "array", "items": { "type": "string" } }, "line_end_punctuation": { "type": "array", "items": { "type": "string" } }, "orphan_tokens": { "type": "array", "items": { "type": "string" } },
+        "orphan_policy": { "enum": ["avoid", "allow", "human_review"] }, "manual_override": { "type": "object", "additionalProperties": false, "required": ["source", "allowed"], "properties": { "source": { "const": "caption-review-patch/v1" }, "allowed": { "type": "boolean" } } }
+      }
+    },
+    "reference_scale": {
+      "type": "object", "additionalProperties": false, "required": ["output_width", "output_height", "font_scale_relation", "line_height_relation"],
+      "properties": { "output_width": { "type": "integer", "minimum": 1 }, "output_height": { "type": "integer", "minimum": 1 }, "font_scale_relation": { "type": "string", "minLength": 1 }, "line_height_relation": { "type": "string", "minLength": 1 } }
+    },
+    "visual": {
+      "type": "object", "additionalProperties": false, "required": ["tracking", "outline", "shadow", "panel", "contrast"],
+      "properties": {
+        "tracking": { "type": "number" }, "outline": { "type": "object", "additionalProperties": false, "required": ["enabled", "style_ref"], "properties": { "enabled": { "type": "boolean" }, "style_ref": { "type": "string", "minLength": 1 } } },
+        "shadow": { "type": "object", "additionalProperties": false, "required": ["enabled", "style_ref"], "properties": { "enabled": { "type": "boolean" }, "style_ref": { "type": "string", "minLength": 1 } } },
+        "panel": { "type": "object", "additionalProperties": false, "required": ["enabled", "style_ref"], "properties": { "enabled": { "type": "boolean" }, "style_ref": { "type": "string", "minLength": 1 } } },
+        "contrast": { "type": "object", "additionalProperties": false, "required": ["fill_rgba", "background_rgba", "minimum_ratio"], "properties": { "fill_rgba": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}$" }, "background_rgba": { "type": "string", "pattern": "^[0-9A-Fa-f]{8}$" }, "minimum_ratio": { "type": "number", "exclusiveMinimum": 1 } } }
+      }
+    },
+    "hierarchy": { "type": "object", "additionalProperties": false, "required": ["speech", "keyword", "annotation", "speaker", "cta"], "properties": { "speech": { "type": "string", "minLength": 1 }, "keyword": { "type": "string", "minLength": 1 }, "annotation": { "type": "string", "minLength": 1 }, "speaker": { "type": "string", "minLength": 1 }, "cta": { "type": "string", "minLength": 1 } } },
+    "fallback": { "type": "object", "additionalProperties": false, "required": ["registered_emphasis", "registered_animation", "registered_effect", "unsupported_renderer"], "properties": { "registered_emphasis": { "type": "array", "items": { "type": "string" } }, "registered_animation": { "type": "array", "items": { "type": "string" } }, "registered_effect": { "type": "array", "items": { "type": "string" } }, "unsupported_renderer": { "enum": ["registered_fallback", "nle_handoff", "blocker"] } } },
+    "accessibility": { "type": "object", "additionalProperties": false, "required": ["reduced_motion", "high_contrast", "audio_off", "small_screen"], "properties": { "reduced_motion": { "enum": ["static", "registered_fallback", "human_review"] }, "high_contrast": { "enum": ["registered_fallback", "human_review"] }, "audio_off": { "enum": ["retain_text", "registered_fallback", "human_review"] }, "small_screen": { "enum": ["scale_profile", "registered_fallback", "human_review"] } } }
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "subject-occupancy-track.schema.json",
+  "title": "Generation-bound subject occupancy track",
+  "type": "object",
+  "required": ["version", "generation_id", "source_identity", "source_av_geometry", "provenance", "coverage", "tracks"],
+  "properties": {
+    "version": { "const": "subject-occupancy-track/v1" },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "source_identity": {
+      "type": "object",
+      "required": ["asset_id", "segment_id", "source_content_hash", "source_range"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "segment_id": { "type": "string", "minLength": 1 },
+        "source_content_hash": { "$ref": "#/$defs/hash" },
+        "source_range": {
+          "type": "object",
+          "required": ["src_in_us", "src_out_us"],
+          "properties": {
+            "src_in_us": { "type": "integer", "minimum": 0 },
+            "src_out_us": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "source_av_geometry": {
+      "type": "object",
+      "required": ["video", "audio"],
+      "properties": {
+        "video": {
+          "type": "object",
+          "required": ["width", "height", "fps_num", "fps_den"],
+          "properties": {
+            "width": { "type": "integer", "minimum": 1 },
+            "height": { "type": "integer", "minimum": 1 },
+            "fps_num": { "type": "integer", "minimum": 1 },
+            "fps_den": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "audio": {
+          "type": "object",
+          "required": ["sample_rate", "channels"],
+          "properties": {
+            "sample_rate": { "type": "integer", "minimum": 1 },
+            "channels": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["source", "producer", "producer_version", "confidence"],
+      "properties": {
+        "source": { "enum": ["manual_annotation", "analyzer"] },
+        "producer": { "type": "string", "minLength": 1 },
+        "producer_version": { "type": "string", "minLength": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "coverage": { "$ref": "#/$defs/frameRange" },
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["track_id", "subject_id", "identity_scope", "motion", "confidence", "samples"],
+        "properties": {
+          "track_id": { "type": "string", "minLength": 1 },
+          "subject_id": { "type": "string", "minLength": 1 },
+          "identity_scope": { "const": "track_only_not_person_identity" },
+          "motion": { "enum": ["static", "moving"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "samples": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["start_frame", "end_frame", "bounds", "evidence_roles"],
+              "properties": {
+                "start_frame": { "type": "integer", "minimum": 0 },
+                "end_frame": { "type": "integer", "minimum": 1 },
+                "bounds": { "$ref": "#/$defs/rect" },
+                "evidence_roles": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["first", "representative", "last"] }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "frameRange": {
+      "type": "object",
+      "required": ["start_frame", "end_frame"],
+      "properties": {
+        "start_frame": { "type": "integer", "minimum": 0 },
+        "end_frame": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "rect": {
+      "type": "object",
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

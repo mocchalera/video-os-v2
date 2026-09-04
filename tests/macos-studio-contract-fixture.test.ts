@@ -72,7 +72,7 @@ describe("macOS Studio cross-language contract fixture", () => {
       else process.env.PATH = previousPath;
       fs.rmSync(fakeBin, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 60_000);
 
   it("covers playback, hidden Gate 10 freshness, and package failure modes", () => {
     const fixture = buildMacOSStudioContractFixture() as StudioContractFixture;

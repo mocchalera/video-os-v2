@@ -115,7 +115,92 @@
             "review_report_version": { "type": "string" },
             "review_patch_hash": { "type": "string" },
             "human_notes_hash": { "type": "string" },
-            "style_hash": { "type": "string" }
+            "style_hash": { "type": "string" },
+            "base_timeline_version": { "type": "string" },
+            "editorial_timeline_hash": { "type": "string" },
+            "human_correction_approval": {
+              "$ref": "#/$defs/humanCorrectionApprovalBinding"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "humanCorrectionApprovalBinding": {
+      "type": "object",
+      "required": [
+        "version",
+        "approved_timeline",
+        "human_notes",
+        "review_generation",
+        "review_round",
+        "human_revision_diff"
+      ],
+      "properties": {
+        "version": { "const": "human-correction-approval/v1" },
+        "approved_timeline": {
+          "type": "object",
+          "required": ["path", "version", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        "human_notes": {
+          "type": "object",
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        "review_generation": {
+          "type": "object",
+          "required": ["generation_id", "review_identity", "output", "review_ready_receipt"],
+          "properties": {
+            "generation_id": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "review_identity": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "output": {
+              "type": "object",
+              "required": ["path", "sha256"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1 },
+                "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+              },
+              "additionalProperties": false
+            },
+            "review_ready_receipt": {
+              "type": "object",
+              "required": ["path", "sha256"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1 },
+                "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "review_round": {
+          "type": "object",
+          "required": ["round_index", "round_identity"],
+          "properties": {
+            "round_index": { "type": "integer", "minimum": 1 },
+            "round_identity": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        "human_revision_diff": {
+          "type": "object",
+          "required": ["path", "sha256", "version"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+            "version": { "const": 2 }
           },
           "additionalProperties": false
         }

@@ -1,0 +1,43 @@
+version: platform-safe-zone-profile/v1
+profile_id: fixture-stale-v1
+platform: fixture
+surface: fixture
+delivery_variant: stale
+evidence_status: stale
+source_references:
+  - url: https://www.w3.org/TR/SVG/
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: video-os-test-fixture
+    evidence_kind: synthetic_fixture
+    notes: Deliberately stale fixture; never use as a current platform profile.
+measured_at: null
+geometry:
+  status: stale
+  coordinate_system: normalized_top_left
+  viewport: { status: stale, width: 720, height: 1280, pixel_density: 1, output_width: 720, output_height: 1280 }
+  ui_regions:
+    unknown: false
+    regions:
+      - id: stale-ui
+        kind: ui
+        rect: { x: 0, y: 0.875, width: 1, height: 0.125 }
+        method: synthetic_fixture
+        confidence: low
+  safe_regions:
+    unknown: false
+    regions:
+      - id: stale-safe
+        kind: safe
+        rect: { x: 0.1, y: 0.125, width: 0.8, height: 0.75 }
+        method: synthetic_fixture
+        confidence: low
+  method: synthetic_fixture
+  confidence: low
+device_evidence: { status: stale, device: stale-fixture, os: stale, app_version: stale, locale: und }
+screenshot_evidence: { status: stale }
+supersession: { state: stale, reason: Fixture is intentionally stale. }
+fallback:
+  mode: safe_identity_layout
+  human_preview_required: true
+  reason: Stale geometry may be inspected but cannot clear a platform preview gate.

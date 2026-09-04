@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "distribution-review-override.schema.json", "type": "object",
+  "required": ["version", "actor", "scope", "project_id", "generation_id", "review_identity", "timeline_sha256", "output_sha256", "package_manifest_sha256", "reason", "issued_at", "expires_at"],
+  "properties": {
+    "version": { "const": "distribution-review-override/v1" }, "actor": { "type": "string", "minLength": 1 }, "scope": { "const": "review_only_distribution" }, "project_id": { "type": "string", "minLength": 1 },
+    "generation_id": { "$ref": "#/$defs/hash" }, "review_identity": { "$ref": "#/$defs/hash" }, "timeline_sha256": { "$ref": "#/$defs/hash" }, "output_sha256": { "$ref": "#/$defs/hash" }, "package_manifest_sha256": { "$ref": "#/$defs/hash" },
+    "reason": { "type": "string", "minLength": 1 }, "issued_at": { "type": "string", "format": "date-time" }, "expires_at": { "type": "string", "format": "date-time" }
+  }, "additionalProperties": false, "$defs": { "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } }
+}

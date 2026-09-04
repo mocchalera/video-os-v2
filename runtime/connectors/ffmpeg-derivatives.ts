@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AssetItem } from "./ffprobe.js";
 import type { SegmentItem } from "./ffmpeg-segmenter.js";
+import { hasTemporalVideo } from "../artifacts/source-media-capabilities.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -568,20 +569,21 @@ export async function generateAllDerivatives(
 
   // Visual derivatives are not applicable without a video stream. rep_frame_us
   // remains a timeline representative timestamp, never image evidence.
-  const contactSheets = asset.video_stream
+  const temporalVideo = hasTemporalVideo(asset);
+  const contactSheets = temporalVideo
     ? await generateContactSheets(filePath, asset, segments, outputDir)
     : [];
 
   // Poster
   let posterPath: string | null = null;
-  if (asset.video_stream) {
+  if (temporalVideo) {
     posterPath = await generatePoster(filePath, asset, segments, outputDir);
   }
 
   // Filmstrips
   const filmstripPaths = new Map<string, string>();
   for (const seg of segments) {
-    if (asset.video_stream) {
+    if (temporalVideo) {
       const fPath = await generateFilmstrip(filePath, seg, outputDir);
       filmstripPaths.set(seg.segment_id, fPath);
     }

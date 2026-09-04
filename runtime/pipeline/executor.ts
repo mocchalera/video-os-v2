@@ -12,8 +12,13 @@ import {
 } from "../commands/analyze.js";
 import {
   formatStageFailureMessage,
+  FIRST_PREVIEW_SLA_MS,
+  estimateFirstPreviewStageBudget,
   PipelineStageProgressTracker,
+  readFirstPreviewSlaCheckpoint,
   readSegmentCount,
+  writeFirstPreviewSlaReceipt,
+  type FirstPreviewSlaReceipt,
   type PipelineStageProgress,
   type PipelineTimingStage,
 } from "../progress.js";
@@ -32,6 +37,9 @@ import {
   executePipelinePhases,
   type PipelinePhaseStep,
 } from "./phase-executor.js";
+import { readCoverageSummary } from "../artifacts/p1-manifest-coverage.js";
+import { resolveEditorialStageTimeoutMs } from "../connectors/editorial-llm.js";
+import { readProjectState } from "../state/reconcile.js";
 
 export interface ProjectPipelineOptions {
   project: string;
@@ -44,6 +52,9 @@ export interface ProjectPipelineOptions {
   skipQa: boolean;
   qwen3vlEnabled?: boolean;
   clapAudioEnabled?: boolean;
+  /** Optional Issue #41 authored-caption inputs. */
+  lyricsPath?: string;
+  timingPlanPath?: string;
 }
 
 export interface InitProjectResult {
@@ -57,6 +68,14 @@ export interface RunEditorialPipelineOptions {
   qa?: boolean;
   skipQa?: boolean;
   stageProgress?: PipelineStageProgress;
+  firstPreviewDeadlineAtMs?: number;
+  firstPreviewCompileRenderReserveMs?: number;
+  firstPreviewFineEstimateMs?: number;
+  firstPreviewFineProviderBudgetMs?: number;
+  now?: () => number;
+  onFirstPreviewReady?: () => void;
+  lyricsPath?: string;
+  timingPlanPath?: string;
 }
 
 export interface ProjectPipelineDeps {
@@ -65,6 +84,7 @@ export interface ProjectPipelineDeps {
   buildFootageDb?: (options: BuildFootageDbOptions) => Promise<BuildFootageDbResult>;
   discoverSources?: (locators: string[]) => SourceDiscoveryResult;
   runEditorialPipeline: (options: RunEditorialPipelineOptions) => Promise<void>;
+  now?: () => number;
 }
 
 export interface ProjectPipelineResult {
@@ -73,6 +93,7 @@ export interface ProjectPipelineResult {
   failedStage?: PipelineTimingStage;
   error?: unknown;
   message?: string;
+  firstPreviewSla: FirstPreviewSlaReceipt;
 }
 
 type ProjectPipelinePhase = "analyze" | "footageDb" | "editorial";
@@ -81,13 +102,22 @@ export async function runProjectPipeline(
   options: ProjectPipelineOptions,
   deps: ProjectPipelineDeps,
 ): Promise<ProjectPipelineResult> {
+  if ((options.lyricsPath && !options.timingPlanPath) || (!options.lyricsPath && options.timingPlanPath)) {
+    throw new Error("--lyrics and --timing-plan must be supplied together");
+  }
+  const now = deps.now ?? Date.now;
+  const invokedAtMs = now();
   const projectDir = ensureProject(options, deps);
+  let firstPreviewSla = initializeFirstPreviewSla(projectDir, options, invokedAtMs);
+  writeFirstPreviewSlaReceipt(projectDir, firstPreviewSla);
+  const firstPreviewDeadlineAtMs = firstPreviewSla.deadline_at_ms;
   const stages = buildScriptFullPipelineTimingStages(options);
   const progress = new PipelineStageProgressTracker({
     projectDir,
     entrypoint: "full-pipeline",
     stages,
     segmentCount: readSegmentCount(projectDir),
+    now,
   });
   let currentStage: PipelineTimingStage = stages[0] ?? "triage";
 
@@ -105,13 +135,32 @@ export async function runProjectPipeline(
           if (!fs.existsSync(sourceDirectory)) throw new Error(`Source directory not found: ${sourceDirectory}`);
           const sourceDiscovery = (deps.discoverSources ?? discoverRequestedSources)([sourceDirectory]);
           const sourceFiles = sourceDiscovery.requests.map((request) => request.lexical_path);
+          const initialBudget = estimateFirstPreviewStageBudget(
+            projectDir,
+            readSegmentCount(projectDir) ?? sourceFiles.length,
+            !options.skipRender,
+          );
           const analyze = await (deps.runAnalyze ?? runAnalyze)(projectDir, {
             sourceFiles,
             sourceDiscovery,
             contentHint: options.contentHint,
             stageProgress: progress,
+            firstPreviewDeadlineAtMs,
+            firstPreviewCompileRenderReserveMs: initialBudget.compileRenderReserveMs,
           });
           if (!analyze.success) throw new Error(analyze.error?.message ?? "Analyze failed");
+          const coverage = readCoverageSummary(projectDir);
+          if (coverage) {
+            if (coverage.status === "blocked") {
+              throw new Error(
+                `Analysis coverage is blocked: ${coverage.blockedLaneCount}/${coverage.requiredLaneCount} required lanes are not ready.`,
+              );
+            }
+            const state = readProjectState(projectDir);
+            if (state?.gates?.analysis_gate === "blocked") {
+              throw new Error("Analysis gate is blocked in authoritative project state.");
+            }
+          }
           progress.refreshEstimates(readSegmentCount(projectDir));
         },
       });
@@ -136,21 +185,59 @@ export async function runProjectPipeline(
       phase: "editorial",
       run: async () => {
         currentStage = "triage";
+        const stageBudget = estimateFirstPreviewStageBudget(
+          projectDir,
+          readSegmentCount(projectDir) ?? 0,
+          !options.skipRender,
+        );
+        const fineProviderBudgetMs = resolveEditorialStageTimeoutMs();
+        const fineRequiredMs = Math.max(stageBudget.fineEstimateMs, fineProviderBudgetMs);
+        const skipFineForBudget = now() + fineRequiredMs +
+          stageBudget.compileRenderReserveMs > firstPreviewDeadlineAtMs;
         await deps.runEditorialPipeline({
           projectDir,
-          skipFine: false,
+          skipFine: skipFineForBudget,
           skipRender: options.skipRender,
           qa: !options.skipQa,
           skipQa: options.skipQa,
           stageProgress: progress,
+          firstPreviewDeadlineAtMs,
+          firstPreviewCompileRenderReserveMs: stageBudget.compileRenderReserveMs,
+          firstPreviewFineEstimateMs: stageBudget.fineEstimateMs,
+          firstPreviewFineProviderBudgetMs: fineProviderBudgetMs,
+          now,
+          onFirstPreviewReady: () => {
+            firstPreviewSla = finalizeFirstPreviewSla(projectDir, firstPreviewSla, now());
+            writeFirstPreviewSlaReceipt(projectDir, firstPreviewSla);
+          },
+          ...(options.lyricsPath && options.timingPlanPath ? {
+            lyricsPath: path.resolve(options.lyricsPath),
+            timingPlanPath: path.resolve(options.timingPlanPath),
+          } : {}),
         });
       },
     });
 
     await executePipelinePhases(phaseSteps);
+    if (firstPreviewSla.status === "running") {
+      firstPreviewSla = { ...firstPreviewSla, status: "hold", reason: "preview_missing" };
+      writeFirstPreviewSlaReceipt(projectDir, firstPreviewSla);
+    }
     progress.finish("completed");
-    return { success: true, projectDir };
+    return { success: true, projectDir, firstPreviewSla };
   } catch (error) {
+    if (firstPreviewSla.eligible) {
+      firstPreviewSla = {
+        ...firstPreviewSla,
+        status: "hold",
+        reason: "pipeline_failed",
+        ended_at_ms: now(),
+      };
+      writeFirstPreviewSlaReceipt(projectDir, firstPreviewSla);
+    } else if (firstPreviewSla.status === "not_eligible") {
+      firstPreviewSla = { ...firstPreviewSla, ended_at_ms: now() };
+      writeFirstPreviewSlaReceipt(projectDir, firstPreviewSla);
+    }
     progress.finish("failed");
     return {
       success: false,
@@ -158,7 +245,101 @@ export async function runProjectPipeline(
       failedStage: currentStage,
       error,
       message: formatStageFailureMessage("full-pipeline", projectDir, currentStage, error),
+      firstPreviewSla,
     };
+  }
+}
+
+function initializeFirstPreviewSla(
+  projectDir: string,
+  options: ProjectPipelineOptions,
+  invokedAtMs: number,
+): FirstPreviewSlaReceipt {
+  if (options.from) {
+    const checkpoint = readFirstPreviewSlaCheckpoint(projectDir);
+    if (checkpoint.kind === "valid" && checkpoint.receipt.eligible && checkpoint.receipt.status === "hold") {
+      const {
+        completed_at_ms: _completed,
+        ended_at_ms: _ended,
+        preview_artifact_path: _preview,
+        reason: _reason,
+        ...rest
+      } = checkpoint.receipt;
+      return { ...rest, status: "running" };
+    }
+    if (checkpoint.kind === "valid") return { ...checkpoint.receipt };
+    return {
+      version: 1,
+      original_started_at_ms: invokedAtMs,
+      deadline_at_ms: invokedAtMs + FIRST_PREVIEW_SLA_MS,
+      eligible: false,
+      status: "not_eligible",
+      reason: checkpoint.kind === "invalid"
+        ? "invalid_resume_checkpoint"
+        : "legacy_resume_without_checkpoint",
+    };
+  }
+  if (options.skipRender) {
+    return {
+      version: 1,
+      original_started_at_ms: invokedAtMs,
+      deadline_at_ms: invokedAtMs + FIRST_PREVIEW_SLA_MS,
+      eligible: false,
+      status: "not_eligible",
+      reason: "render_skipped",
+    };
+  }
+  return {
+    version: 1,
+    original_started_at_ms: invokedAtMs,
+    deadline_at_ms: invokedAtMs + FIRST_PREVIEW_SLA_MS,
+    eligible: true,
+    status: "running",
+  };
+}
+
+function finalizeFirstPreviewSla(
+  projectDir: string,
+  receipt: FirstPreviewSlaReceipt,
+  completedAtMs: number,
+): FirstPreviewSlaReceipt {
+  if (!receipt.eligible || receipt.status !== "running") return receipt;
+  if (!hasCanonicalReviewablePreview(projectDir)) {
+    return {
+      ...receipt,
+      status: "hold",
+      reason: "preview_missing",
+    };
+  }
+  const preview_artifact_path = "09_output/rough-cut.mp4";
+  return completedAtMs <= receipt.deadline_at_ms
+    ? {
+        ...receipt,
+        status: "passed",
+        completed_at_ms: completedAtMs,
+        preview_artifact_path,
+      }
+    : {
+        ...receipt,
+        status: "missed",
+        completed_at_ms: completedAtMs,
+        preview_artifact_path,
+        reason: "deadline_exceeded",
+      };
+}
+
+function hasCanonicalReviewablePreview(projectDir: string): boolean {
+  const previewPath = path.join(projectDir, "09_output", "rough-cut.mp4");
+  const reportPath = path.join(projectDir, "09_output", "render-report.json");
+  try {
+    if (!fs.statSync(previewPath).isFile() || fs.statSync(previewPath).size <= 0) return false;
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf-8")) as Record<string, unknown>;
+    return Number.isFinite(report.expected_rendered_sec) &&
+      Number.isFinite(report.actual_rendered_sec) &&
+      Number.isFinite(report.parity_delta_sec) &&
+      report.parity_pass === true;
+  } catch {
+    return false;
   }
 }
 

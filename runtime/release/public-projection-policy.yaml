@@ -12,6 +12,7 @@ include:
   - pattern: agent-src/**
   - pattern: apps/**
   - pattern: contracts/**
+  - pattern: delivery_profiles/**
   - pattern: docs/**
   - pattern: editor/**
   - pattern: premiere-plugin/**

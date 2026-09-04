@@ -10,6 +10,7 @@ import {
   formatRoughFrameReferences,
   parseRoughCutPlanningResponseWithClusters,
   parseRoughCutPlanningResponse,
+  parseFineCutRefinementResponse,
   roughCutPlanning,
 } from "../runtime/agents/unified-editorial-agent.js";
 import { getCandidateRef } from "../runtime/compiler/candidate-ref.js";
@@ -23,6 +24,7 @@ import type {
 } from "../runtime/agents/visual-retrieval-evidence.js";
 import { parseArgs } from "../scripts/editorial-pipeline.js";
 import { ImageSequenceGroundingError } from "../runtime/artifacts/image-sequence-grounding.js";
+import { mustHaveMatches } from "../runtime/editorial/quality-gate.js";
 
 const require = createRequire(import.meta.url);
 const Ajv2020 = require("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -666,6 +668,36 @@ describe("unified editorial agent", () => {
     expect(result.blueprint.beats.length).toBeGreaterThan(0);
   });
 
+  it("keeps failed-runtime error_kind schema-valid when a fallback runtime authors the rough blueprint", async () => {
+    const result = await roughCutPlanning(
+      brief(),
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+      {
+        mode: "headless",
+        editorialLlm: {
+          runtime: "auto",
+          commandExists: (command) => command === "claude",
+          executor: async () => {
+            throw new Error("claude exited with 1");
+          },
+          geminiText: async () => validRoughPlanningResponse(),
+          env: { GEMINI_API_KEY: "test-key" },
+        },
+      },
+    );
+
+    expect(result.blueprint.decision_runtime?.runtime).toBe("gemini");
+    expect(result.blueprint.decision_runtime?.attempted_runtimes).toEqual([
+      expect.objectContaining({ runtime: "claude_cli", status: "failed", error_kind: "transport_error" }),
+      expect.objectContaining({ runtime: "gemini", status: "success" }),
+    ]);
+    const validateBlueprint = createValidator("edit-blueprint.schema.json");
+    expect(validateBlueprint(result.blueprint), JSON.stringify(validateBlueprint.errors, null, 2)).toBe(true);
+  });
+
   it("applies the shared quality gate during rough-pass normalization", () => {
     const badSegments = [
       segment({
@@ -724,6 +756,7 @@ describe("unified editorial agent", () => {
     const bad = result.selects.candidates.find((candidate) => candidate.segment_id === "SEG_BAD");
     expect(bad).toMatchObject({
       role: "reject",
+      eligible_beats: [],
       quality_gate: {
         decision: "reject",
         measurements: { sharpness_score: 0.1 },
@@ -735,6 +768,89 @@ describe("unified editorial agent", () => {
       ...(beat.candidate_plan?.fallback_candidate_refs ?? []),
     ]);
     expect(plannedRefs).not.toContain("SEG_BAD");
+  });
+
+  it("keeps quality-rejected day-log candidates ineligible after fine normalization", () => {
+    const dayLogBrief: CreativeBrief = {
+      ...brief(),
+      narrative_mode: "day_log",
+      must_have: [],
+    };
+    const parsed = JSON.parse(validRoughPlanningResponse()) as {
+      selects: { candidates: Array<Record<string, unknown>> };
+    };
+    parsed.selects.candidates[0].role = "support";
+    parsed.selects.candidates[0].story_role = "experience";
+    const badSegments = segments().map((item) => item.segment_id === "SEG_001"
+      ? {
+        ...item,
+        tags: ["shared_quality_cluster"],
+        visual_quality_measurements: unifiedMeasurement({ sharpness: 0.1 }),
+      }
+      : { ...item, tags: ["shared_quality_cluster"] });
+    const rough = parseRoughCutPlanningResponse(parsed, {
+      brief: dayLogBrief,
+      marlinEvents: marlinEvents(),
+      representativeFrames: representativeFrames(),
+      segments: badSegments,
+      bgmDurationSec: 24,
+    });
+    expect(rough.selects.candidates[0]).toMatchObject({
+      role: "reject",
+      eligible_beats: [],
+    });
+
+    rough.selects.candidates[0].eligible_beats = ["action_broll"];
+    parseFineCutRefinementResponse({}, {
+      brief: dayLogBrief,
+      selects: rough.selects,
+      blueprint: rough.blueprint,
+      marlinEvents: marlinEvents(),
+      keyFrames: keyFrames(),
+      bgmDurationSec: 24,
+    });
+
+    expect(rough.selects.candidates[0]).toMatchObject({
+      role: "reject",
+      eligible_beats: [],
+    });
+  });
+
+  it("deduplicates physical windows before coverage with deterministic role precedence", () => {
+    const parsed = JSON.parse(validRoughPlanningResponse()) as {
+      selects: { candidates: Array<Record<string, unknown>> };
+    };
+    const hero = parsed.selects.candidates[0];
+    parsed.selects.candidates = [
+      { ...hero, role: "support", candidate_id: "cand_support", confidence: 0.99 },
+      { ...hero, role: "hero", candidate_id: "cand_hero", confidence: 0.5 },
+      {
+        ...parsed.selects.candidates[1],
+        role: "reject",
+        candidate_id: "cand_reject",
+      },
+      {
+        ...parsed.selects.candidates[1],
+        role: "support",
+        candidate_id: "cand_non_reject",
+      },
+    ];
+
+    const result = parseRoughCutPlanningResponse(parsed, {
+      brief: brief(),
+      marlinEvents: marlinEvents(),
+      representativeFrames: representativeFrames(),
+      segments: segments(),
+      bgmDurationSec: 24,
+    });
+
+    expect(result.selects.candidates).toHaveLength(2);
+    expect(result.selects.candidates.find((candidate) => candidate.segment_id === "SEG_001")?.role).toBe("hero");
+    expect(result.selects.candidates.find((candidate) => candidate.segment_id === "SEG_002")?.role).toBe("support");
+    expect(result.selects.coverage).toBeDefined();
+    for (const item of result.selects.coverage?.must_have ?? []) {
+      expect(new Set(item.matched_segment_ids).size).toBe(item.matched_segment_ids.length);
+    }
   });
 
   it("assigns capture-time clusters before the rough-pass quality gate protects unique clusters", async () => {
@@ -896,6 +1012,11 @@ describe("unified editorial agent", () => {
     expect(validateSelects(rough.selects), JSON.stringify(validateSelects.errors, null, 2)).toBe(true);
     expect(refined.beats.every((beat) => beat.craft?.in_point && beat.craft.out_point && beat.craft.rhythm)).toBe(true);
     expect(rough.selects.candidates.some((candidate) => candidate.trim_hint?.recommended_in_us !== undefined)).toBe(true);
+    expect(refined.decision_runtime).toMatchObject({
+      runtime: "deterministic",
+      role: "unified-editorial-fine",
+      author: "deterministic_fallback",
+    });
   });
 
   it("fine pass does not introduce candidates outside pass 1 selection", async () => {
@@ -940,16 +1061,175 @@ describe("unified editorial agent", () => {
   });
 
   it("headless fallback is text-only and graceful when no API key is configured", async () => {
-    await expect(roughCutPlanning(
+    const result = await roughCutPlanning(
       brief(),
       marlinEvents(),
       representativeFrames(),
       segments(),
       null,
-    )).resolves.toMatchObject({
+    );
+
+    expect(result).toMatchObject({
       selects: { project_id: "unified-test" },
       blueprint: { project_id: "unified-test" },
     });
+    expect(result.selects.decision_runtime).toMatchObject({
+      runtime: "deterministic",
+      role: "unified-editorial-rough",
+      author: "deterministic_fallback",
+    });
+    expect(result.blueprint.decision_runtime).toMatchObject({
+      runtime: "deterministic",
+      role: "unified-editorial-rough",
+      author: "deterministic_fallback",
+    });
+  });
+
+  it("assigns fallback beats from source story signals instead of score rank", async () => {
+    const sourceSegments = [
+      segment({
+        segment_id: "SEG_INSIGHT",
+        asset_id: "AST_A",
+        summary: "A complete observation explains why the result changed.",
+        transcript_excerpt: "The observation connects the action to its result.",
+        tags: ["insight"],
+      }),
+      segment({
+        segment_id: "SEG_CLOSE",
+        asset_id: "AST_M",
+        summary: "A resolved final statement ends the sequence.",
+        transcript_excerpt: "That is the completed result.",
+        tags: ["closing"],
+      }),
+      segment({
+        segment_id: "SEG_HOOK",
+        asset_id: "AST_Z",
+        summary: "An opening action establishes the immediate question.",
+        transcript_excerpt: "Here is the challenge we are starting with.",
+        tags: ["hook"],
+      }),
+    ];
+
+    const result = await roughCutPlanning(
+      { ...brief(), must_have: [] },
+      { ...marlinEvents(), items: [] },
+      new Map(),
+      sourceSegments,
+      24,
+    );
+    const bySegment = new Map(result.selects.candidates.map((item) => [item.segment_id, item]));
+
+    expect(bySegment.get("SEG_HOOK")).toMatchObject({
+      story_role: "hook",
+      eligible_beats: ["b01_hook"],
+    });
+    expect(bySegment.get("SEG_INSIGHT")).toMatchObject({
+      story_role: "experience",
+      eligible_beats: ["b03_experience"],
+    });
+    expect(bySegment.get("SEG_CLOSE")).toMatchObject({
+      story_role: "closing",
+      eligible_beats: ["b05_closing"],
+    });
+  });
+
+  it("does not turn rank-only fallback roles into grounded canonical coverage", async () => {
+    const sourceSegments = [
+      segment({ segment_id: "SEG_RANK_A", asset_id: "AST_A", summary: "", transcript_excerpt: "", tags: [] }),
+      segment({ segment_id: "SEG_RANK_M", asset_id: "AST_M", summary: "", transcript_excerpt: "", tags: [] }),
+      segment({ segment_id: "SEG_RANK_Z", asset_id: "AST_Z", summary: "", transcript_excerpt: "", tags: [] }),
+    ];
+    const result = await roughCutPlanning(
+      { ...brief(), must_have: [] },
+      { ...marlinEvents(), items: [] },
+      new Map(),
+      sourceSegments,
+      24,
+    );
+    const requirements = new Map([
+      ["hook", "one source-grounded hook"],
+      ["experience", "one evidence-backed insight"],
+      ["closing", "one clear close"],
+    ]);
+
+    for (const candidate of result.selects.candidates) {
+      const requirement = candidate.story_role ? requirements.get(candidate.story_role) : undefined;
+      if (!requirement) continue;
+      expect(mustHaveMatches(
+        candidate,
+        sourceSegments.find((item) => item.segment_id === candidate.segment_id),
+        [requirement],
+      )).toEqual([]);
+    }
+  });
+
+  it("enriches source-grounded provider selects before official rough coverage", async () => {
+    const sourceSegments = [
+      segment({
+        segment_id: "SEG_OPEN",
+        asset_id: "AST_OPEN",
+        summary: "An opening observation establishes the question.",
+        transcript_excerpt: "This opener frames what comes next.",
+        tags: ["opening"],
+      }),
+      segment({
+        segment_id: "SEG_REFLECT",
+        asset_id: "AST_REFLECT",
+        summary: "A reflection explains the lesson from the process.",
+        transcript_excerpt: "The learning connects the action to its result.",
+        tags: ["reflection"],
+      }),
+      segment({
+        segment_id: "SEG_END",
+        asset_id: "AST_END",
+        summary: "A closing statement completes the sequence.",
+        transcript_excerpt: "This ending resolves the final thought.",
+        tags: ["closing"],
+      }),
+    ];
+    const parsed = JSON.parse(validRoughPlanningResponse()) as {
+      selects: { candidates: Array<Record<string, unknown>> };
+    };
+    parsed.selects.candidates = sourceSegments.map((item, index) => ({
+      segment_id: item.segment_id,
+      asset_id: item.asset_id,
+      src_in_us: item.src_in_us,
+      src_out_us: item.src_out_us,
+      role: index === 0 ? "hero" : "support",
+      why_it_matches: "Grounded in the corresponding source segment.",
+      risks: [],
+      confidence: 0.9 - index * 0.05,
+      semantic_rank: index + 1,
+      evidence: [],
+      eligible_beats: [index === 0 ? "b01_hook" : index === 1 ? "b03_insight" : "b05_close"],
+    }));
+
+    const result = await parseRoughCutPlanningResponseWithClusters(parsed, {
+      brief: {
+        ...brief(),
+        must_have: [
+          "one source-grounded hook",
+          "one evidence-backed insight",
+          "one clear close",
+        ],
+      },
+      marlinEvents: { ...marlinEvents(), items: [] },
+      representativeFrames: new Map(),
+      segments: sourceSegments,
+      bgmDurationSec: null,
+    });
+
+    expect(result.selects.candidates.map((candidate) => candidate.story_role)).toEqual([
+      "hook",
+      "experience",
+      "closing",
+    ]);
+    expect(result.selects.coverage?.must_have).toEqual([
+      expect.objectContaining({ item: "one source-grounded hook", status: "met" }),
+      expect.objectContaining({ item: "one evidence-backed insight", status: "met" }),
+      expect.objectContaining({ item: "one clear close", status: "met" }),
+    ]);
+    expect(result.selects.coverage?.status).toBe("met");
   });
 
   it("interactive rough pass returns prompt and absolute frame refs without calling Gemini", async () => {
@@ -1441,6 +1721,54 @@ describe("unified editorial agent", () => {
     expect(retrievalLines).toEqual([
       "Qwen visual retrieval: query=policy_hint_01 qwen_visual=0.880 final=0.910 matched_frame=03_analysis/frames/SEG_001/representative.jpg",
     ]);
+  });
+
+  it("normalizes day-log planning to the registered seven-beat arc and canonical candidate refs", async () => {
+    const dayLogBrief: CreativeBrief = {
+      ...brief(),
+      narrative_mode: "day_log",
+      must_have: [],
+    };
+
+    const rough = await roughCutPlanning(
+      dayLogBrief,
+      marlinEvents(),
+      representativeFrames(),
+      segments(),
+      24,
+    );
+
+    const expectedBeatIds = [
+      "double_hook",
+      "identity_gap",
+      "setup_purpose",
+      "kickoff",
+      "action_broll",
+      "apex_beat",
+      "finish_cta",
+    ];
+    expect(rough.blueprint.beats.map((beat) => beat.id)).toEqual(expectedBeatIds);
+
+    const candidateIds = new Set(rough.selects.candidates.map((candidate) => candidate.candidate_id));
+    const candidatesById = new Map(
+      rough.selects.candidates.map((candidate) => [candidate.candidate_id, candidate]),
+    );
+    expect(candidateIds.size).toBe(rough.selects.candidates.length);
+    for (const candidate of rough.selects.candidates) {
+      expect(candidate.eligible_beats?.every((beatId) => expectedBeatIds.includes(beatId))).toBe(true);
+    }
+    for (const beat of rough.blueprint.beats) {
+      const refs = [
+        beat.candidate_plan?.primary_candidate_ref,
+        ...(beat.candidate_plan?.fallback_candidate_refs ?? []),
+      ].filter((ref): ref is string => Boolean(ref));
+      for (const ref of refs) {
+        const candidate = candidatesById.get(ref);
+        expect(candidate).toBeDefined();
+        expect(candidate?.role).not.toBe("reject");
+        expect(candidate?.eligible_beats).toContain(beat.id);
+      }
+    }
   });
 
   it("formats rough and fine frame references for repo-side agents", async () => {

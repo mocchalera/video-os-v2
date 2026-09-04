@@ -16,10 +16,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { materializeFileSync } from "../filesystem/materialize-file.js";
+import { validateArtifact } from "../artifacts/loaders.js";
 import { assertTimelineRenderSupported } from "../render/media-kind-guard.js";
 import { parse as parseYaml } from "yaml";
 import {
   initCommand,
+  parseJsonRejectDuplicateKeys,
   transitionState,
   validateAgainstSchema,
   type CommandError,
@@ -37,12 +39,20 @@ import {
   type SourceOfTruth,
 } from "../packaging/gate10.js";
 import {
+  loadProjectOptionalVlmCapability,
+  readCurrentOptionalVlmGateContext,
+  readOptionalVlmPolicy,
+  type OptionalVlmPolicyArtifact,
+  type OptionalVlmGateContext,
+} from "../review/optional-vlm-policy.js";
+import {
   buildQaReport,
   checkCaptionDensity,
   checkCaptionAlignment,
   checkAvDrift,
-  checkLoudnessTarget,
+  checkLoudnessTargetForAudioPolicy,
   checkAudioMixPolicy,
+  checkMusicMasterAudioPlan,
   checkAudioRenderPlanParity,
   checkSfxMixPolicy,
   checkPackageCompleteness,
@@ -54,11 +64,12 @@ import {
   checkFinalCaptionStructuralInvariants,
   getRequiredChecks,
   type ExpectedVideoFrameSpec,
+  type ExpectedAudioDeliveryProfileRef,
   type QaReport,
   type QaCheckResult,
 } from "../packaging/qa.js";
 import { hasCaptionStylePreset } from "../../editor/shared/caption-style-tokens.js";
-import { checkSocialRetentionFinishing } from "../packaging/social-retention-qa.js";
+import { checkSocialRetentionFinishing, resolveCompilerRetentionPolicy } from "../packaging/social-retention-qa.js";
 import {
   buildEngineRenderManifest,
   buildNleFinishingManifest,
@@ -90,6 +101,9 @@ import { evaluateSpeechCadenceQA } from "../review/speech-cadence-qa.js";
 import type { AudioEventsArtifact } from "../artifacts/audio-events.js";
 import { resolveSharedAudioRenderPlan } from "../audio/render-route.js";
 import {
+  type AudioRenderPlan,
+} from "../audio/render-plan.js";
+import {
   resolveSfxCuePlan,
   type SfxCuesDoc,
 } from "../audio/sfx-cues.js";
@@ -111,7 +125,18 @@ import { REMOTION_RENDERER_VERSION } from "../render/remotion/render-remotion.js
 import { loadSourceMap } from "../media/source-map.js";
 import { readCreativeBriefAutonomyMode } from "../autonomy.js";
 import { publishFinalVideo } from "../packaging/deliverable.js";
-import { resolveDeliveryArtifactPaths } from "../packaging/active-delivery.js";
+import {
+  resolveDeliveryArtifactPathsStrict,
+  deriveDeliveryIdentityAnchors,
+  type DeliveryArtifactPaths,
+} from "../packaging/active-delivery.js";
+import { computeSha256 } from "../packaging/manifest.js";
+import {
+  generationIdFromKey,
+  generationKeyFromInputs,
+  recomputeCurrentGenerationKeyInputs,
+  type CaptionGenerationKeyInputs,
+} from "../caption/generation-identity.js";
 import {
   getReleaseSafetyMode,
   isP4aReleaseSafetyEnabled,
@@ -136,6 +161,11 @@ import {
   captionFontContractForReceipt,
 } from "../caption/font-contract.js";
 import type { CaptionApproval } from "../caption/approval.js";
+import type { CaptionVisualTreatmentInput } from "../caption/visual-treatment.js";
+import {
+  resolveAndVerifyCanonicalCaptionVisualTreatmentInput,
+  shouldPreflightCanonicalCaptionVisualTreatment,
+} from "../render/canonical-render-input.js";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -151,14 +181,14 @@ export interface PackageCommandResult {
 }
 
 export interface PackageCommandOptions {
+  /** Explicit repository-common SFX authority root. */
+  repoSfxRoot?: string;
   /** Project identity resolved by the package preflight. Direct callers fall back to canonical artifacts. */
   projectId?: string;
   /** Pre-built assembly.mp4 path (skips Remotion) */
   assemblyPath?: string;
   /** Produce assembly through the selected engine instead of prebuilding with FFmpeg. */
   assemblyEngine?: AssemblyEngine;
-  /** Capability-based route resolved by the package CLI. */
-  renderRouteDecision?: RenderRouteDecision;
   /** For nle_finishing: operator-provided final.mp4 */
   suppliedFinalPath?: string;
   /** Timestamp override for testing */
@@ -167,37 +197,114 @@ export interface PackageCommandOptions {
   skipRender?: boolean;
   /** Precomputed metrics for testing (skips ffprobe/ffmpeg measurement) */
   precomputedMetrics?: PrecomputedQaMetrics;
-  /** Internal override used by /render phase wrapper */
-  commandName?: string;
-  /** Internal override used by /render phase wrapper */
-  actorName?: string;
-  /** Internal override used by /render phase wrapper */
+}
+
+/**
+ * MODULE-PRIVATE stage options: internal authority/path/activation overrides are
+ * unreachable from public callers — only this module's routes construct them, and
+ * every value is re-derived from or validated against canonical authority.
+ */
+interface PackageStageInternalOptions extends PackageCommandOptions {
+  /** Internal route metadata is fixed by the owning command wrapper. */
+  commandName: string;
+  actorName: string;
   allowedStates?: ProjectState[];
   /** Transaction-owned package root. Defaults to the legacy 07_package path. */
   deliveryOutputDir?: string;
   /** Explicit immutable approval intent used by a delivery transaction. */
   captionApprovalPath?: string;
+  /** Versioned RFA-020 typography profile and optional human visual-treatment patch. */
+  typographyPolicyPath?: string;
+  visualTreatmentPatchPath?: string;
+  /** Shared canonical RFA-020 input; prevents preview/package re-resolution drift. */
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput;
+  /** Render-pipeline evidence paths passed into the package manifest. */
+  renderReportPath?: string;
+  /** Optional supplied/external route receipt for an NLE finishing handoff. */
+  renderRouteReceiptPath?: string;
   /** Keep project_state and 09_output untouched; the caller owns activation. */
   deferActivation?: boolean;
   /** Verified generation-local font directory for caption-finalize only. */
   captionFontsDir?: string;
-  /** Require the hash-bound user checklist before any final-render side effects. */
+  /** Canonical lyric ASS to burn (caption-finalize lyric deliveries). */
+  /** Internal final-render approval gate used only by /render. */
   requireFinalRenderApproval?: boolean;
 }
 
 // ── Command ─────────────────────────────────────────────────────
 
-export async function packageCommand(
+const CAPTION_FINALIZE_ROOT_RELATIVE_PATH = "07_package/caption-finalize";
+
+
+const PUBLIC_PACKAGE_OPTION_KEYS: ReadonlySet<string> = new Set([
+  "repoSfxRoot", "projectId", "assemblyPath", "assemblyEngine",
+  "suppliedFinalPath", "createdAt", "skipRender", "precomputedMetrics",
+]);
+
+const INTERNAL_PACKAGE_OPTION_KEYS: ReadonlySet<string> = new Set([
+  "commandName", "actorName", "allowedStates", "requireFinalRenderApproval",
+  "deliveryOutputDir", "captionApprovalPath",
+  "typographyPolicyPath", "visualTreatmentPatchPath", "captionVisualTreatmentInput",
+  "renderReportPath", "renderRouteReceiptPath", "deferActivation", "captionFontsDir",
+  "lyricsAssPath", "sourceMap", "assemblyOutputPath", "bundleCacheDir",
+  "musicCuesPath", "sfxCuesPath",
+]);
+
+/**
+ * Runtime mirror of the exported options split: internal authority/path
+ * fields (own OR inherited/prototype keys) and any unknown alias are
+ * rejected BEFORE any read or side effect. Extra own properties that are
+ * not part of the public contract are rejected so serialized/aliased
+ * objects cannot smuggle authority.
+ */
+function assertPublicPackageOptions(
+  options: PackageCommandOptions | undefined,
+  route: string,
+): void {
+  if (options === undefined) return;
+  const value = options as Record<PropertyKey, unknown>;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`${route}: options prototype is not a public option; authority and artifact paths derive from the strict current authority`);
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") {
+      throw new Error(`${route}: unknown option "${String(key)}" (aliases and internal overrides are rejected)`);
+    }
+    if (INTERNAL_PACKAGE_OPTION_KEYS.has(key)) {
+      throw new Error(`${route}: options.${key} is not a public option; authority and artifact paths derive from the strict current authority`);
+    }
+    if (route === "caption-finalize" && key === "suppliedFinalPath") {
+      throw new Error(`${route}: options.${key} is not a public option; the fresh staged route owns the final video`);
+    }
+    if (!PUBLIC_PACKAGE_OPTION_KEYS.has(key)) {
+      throw new Error(`${route}: unknown option "${key}" (aliases and internal overrides are rejected)`);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) {
+      throw new Error(`${route}: options.${key} must be a data property`);
+    }
+  }
+}
+
+/**
+ * The strict current authority is the ONLY entry into packaging: every
+ * public route (packageCommand, the finalize composite, preflight, CLI,
+ * skipRender, deferActivation) resolves its delivery through
+ * resolveDeliveryArtifactPathsStrict or, for the finalize composite, through
+ * canonical recomputation of the fresh staged generation. No caller-supplied
+ * paths, tokens, or internal arguments exist.
+ */
+async function runPackageStage(
   projectDir: string,
-  options?: PackageCommandOptions,
+  options: PackageStageInternalOptions | undefined,
+  resolvedDelivery: DeliveryArtifactPaths,
+  renderLyricsAssPath: string | undefined,
 ): Promise<PackageCommandResult> {
   const allowedStates: ProjectState[] = options?.allowedStates ?? ["approved", "packaged"];
   const commandName = options?.commandName ?? "package";
   const actorName = options?.actorName ?? "package_command";
   const requestedProjectDir = path.resolve(projectDir);
-  // Packaging is a deliberate gate. Validate the active generation before
-  // state reconciliation or any package write so tampering fails closed.
-  const resolvedDelivery = resolveDeliveryArtifactPaths(requestedProjectDir, { verifyHashes: true });
   const deferActivation = options?.deferActivation === true;
   const requestedTimelinePath = path.join(requestedProjectDir, "05_timeline", "timeline.json");
   if (fs.existsSync(requestedTimelinePath)) {
@@ -249,12 +356,20 @@ export async function packageCommand(
   // timeline is already present. Keep one resolved identity throughout QA,
   // manifest generation, and the eventual state transition.
   doc.project_id = projectIdentity.projectId;
-  const timelineRequiresAudio = (timeline.tracks?.audio ?? []).some((track: { clips?: unknown[] }) => (track.clips?.length ?? 0) > 0) ||
+  const baseTimelineRequiresAudio = (timeline.tracks?.audio ?? []).some((track: { clips?: unknown[] }) => (track.clips?.length ?? 0) > 0) ||
     typeof timeline.audio_mix?.bgm_asset_id === "string";
+  const timelineAudioProfileRef = timeline.metadata?.audio_delivery_profile_ref
+    ?? timeline.provenance?.audio_delivery_profile_ref;
+  const expectedAudioProfileRef = timelineAudioProfileRef
+    && typeof timelineAudioProfileRef === "object"
+    && !Array.isArray(timelineAudioProfileRef)
+    ? timelineAudioProfileRef as ExpectedAudioDeliveryProfileRef
+    : typeof timelineAudioProfileRef === "string"
+      ? timelineAudioProfileRef
+      : undefined;
+  const requiresAudioProfilePlan = Boolean(expectedAudioProfileRef);
   const currentTimelineVersion = timeline.version || "1";
   const embeddedMusicAssetIds = timelineEmbeddedMusicAssetIds(timeline);
-  const preserveOriginalAudioLevel = shouldPreserveOriginalAudioLevel(timeline) &&
-    embeddedMusicAssetIds.length === 0;
 
   const blueprintPath = path.join(absDir, "04_plan/edit_blueprint.yaml");
   const blueprint = parseYaml(
@@ -264,13 +379,14 @@ export async function packageCommand(
     ending_policy?: DeterministicEndingIntent;
   };
 
-  const packageDir = options?.deliveryOutputDir
-    ? path.resolve(options.deliveryOutputDir)
+  // delivery paths are AUTHORITY-DERIVED: the stage root/caption approval
+  // come from the resolved delivery (pointer generation, fresh staged
+  // generation, or legacy layout) — never from caller options
+  const packageDir = resolvedDelivery.source === "active_delivery" || resolvedDelivery.source === "fresh_staged"
+    ? path.dirname(resolvedDelivery.packageManifestPath)
     : path.join(absDir, "07_package");
   const inputPackageDir = path.join(absDir, "07_package");
-  const captionApprovalPath = options?.captionApprovalPath
-    ? path.resolve(options.captionApprovalPath)
-    : resolvedDelivery.captionApprovalPath;
+  const captionApprovalPath = resolvedDelivery.captionApprovalPath;
   const captionApproval = fs.existsSync(captionApprovalPath)
     ? JSON.parse(fs.readFileSync(captionApprovalPath, "utf-8"))
     : null;
@@ -282,6 +398,33 @@ export async function packageCommand(
   const sfxCues = fs.existsSync(sfxCuesPath)
     ? JSON.parse(fs.readFileSync(sfxCuesPath, "utf-8")) as SfxCuesDoc
     : null;
+  let canonicalAudioPlan: AudioRenderPlan | undefined;
+  try {
+    canonicalAudioPlan = resolveSharedAudioRenderPlan({
+      projectDir: absDir,
+      ...(options?.repoSfxRoot ? { repoSfxRoot: options.repoSfxRoot } : {}),
+      timelinePath,
+      musicCuesPath: fs.existsSync(musicCuesPath) ? musicCuesPath : undefined,
+      sfxCuesPath: fs.existsSync(sfxCuesPath) ? sfxCuesPath : undefined,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: `Canonical audio render plan failed: ${String(error)}`,
+      },
+    };
+  }
+  const timelineRequiresAudio = baseTimelineRequiresAudio || Boolean(canonicalAudioPlan);
+  const preserveOriginalAudioLevel = (
+    shouldPreserveOriginalAudioLevel(timeline)
+    || (canonicalAudioPlan?.strategy === "music_master"
+      && canonicalAudioPlan.music_master?.audio_decision === "preserve")
+  ) && embeddedMusicAssetIds.length === 0;
+  const canonicalAudioPlanPath = canonicalAudioPlan
+    ? path.join(packageDir, "audio-render-plan.json")
+    : undefined;
   if (
     sfxCues
     && timeline.provenance?.audio_policy?.mode !== "original_only"
@@ -289,6 +432,7 @@ export async function packageCommand(
     try {
       resolveSfxCuePlan({
         projectDir: absDir,
+        ...(options?.repoSfxRoot ? { repoSfxRoot: options.repoSfxRoot } : {}),
         timeline,
         cuesPath: sfxCuesPath,
       });
@@ -319,6 +463,13 @@ export async function packageCommand(
       error: reviewReportResult.error,
     };
   }
+  const optionalVlmPolicyResult = readOptionalVlmPolicyForGate10(absDir);
+  if (optionalVlmPolicyResult.error) {
+    return {
+      success: false,
+      error: optionalVlmPolicyResult.error,
+    };
+  }
 
   // 1. Gate 10 check
   const gate10 = checkGate10(doc, {
@@ -330,6 +481,9 @@ export async function packageCommand(
     musicCues,
     reviewReport: reviewReportResult.reviewReport,
     visualQaApplicable: timelineHasVisualClips(timelinePath),
+    optionalVlmCapability: loadProjectOptionalVlmCapability(absDir).capability,
+    optionalVlmPolicy: optionalVlmPolicyResult.policy,
+    optionalVlmContext: optionalVlmPolicyResult.context,
   });
   if (!gate10.passed) {
     return {
@@ -364,8 +518,10 @@ export async function packageCommand(
   }
   let renderRouteDecision: RenderRouteDecision;
   try {
-    renderRouteDecision = options?.renderRouteDecision
-      ?? resolveProjectRenderRoute(absDir, options?.assemblyEngine ?? "auto");
+    // Route selection is a runtime authority decision.  Public callers may
+    // request an assembly engine, but cannot inject the resolved route or
+    // its provenance into the package stage.
+    renderRouteDecision = resolveProjectRenderRoute(absDir, options?.assemblyEngine ?? "auto");
   } catch (err) {
     return {
       success: false,
@@ -378,7 +534,10 @@ export async function packageCommand(
   }
   let deliverableSourceInputs: ReturnType<typeof createSourceInputAttestation>;
   try {
-    deliverableSourceInputs = createSourceInputAttestation(absDir, { timelinePath });
+    deliverableSourceInputs = createSourceInputAttestation(absDir, {
+      timelinePath,
+      includeAudio: !canonicalAudioPlan,
+    });
   } catch (err) {
     return {
       success: false,
@@ -393,6 +552,13 @@ export async function packageCommand(
   fs.mkdirSync(path.join(packageDir, "audio"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "captions"), { recursive: true });
   fs.mkdirSync(path.join(packageDir, "logs"), { recursive: true });
+  if (canonicalAudioPlan && canonicalAudioPlanPath) {
+    fs.writeFileSync(
+      canonicalAudioPlanPath,
+      `${JSON.stringify(canonicalAudioPlan, null, 2)}\n`,
+      "utf8",
+    );
+  }
   if (sourceOfTruth === "engine_render" && !timelineRequiresAudio) {
     for (const staleAudioArtifact of [
       path.join(packageDir, "audio/raw_dialogue.wav"),
@@ -520,8 +686,11 @@ export async function packageCommand(
   }
   let completenessCheck: QaCheckResult | undefined;
   let audioMixReportPath = path.join(packageDir, "logs/audio-mix-report.json");
+  let finalAudioMixReport: AudioMixReport | null = null;
   let assemblyFreshness: RenderArtifactFreshness | undefined;
   let renderRouteReceiptPath: string | undefined;
+  let renderReportPath: string | undefined;
+  let resolvedCaptionVisualTreatmentInput: CaptionVisualTreatmentInput | undefined = options?.captionVisualTreatmentInput;
 
   // timeline_schema_valid
   const timelineValidation = validateAgainstSchema(timeline, "timeline-ir.schema.json");
@@ -532,8 +701,43 @@ export async function packageCommand(
       ? "timeline-ir.schema.json validation passed"
       : timelineValidation.errors.join("; "),
   });
+  const visualTreatmentArtifactsPresent = shouldPreflightCanonicalCaptionVisualTreatment(absDir, {
+    typographyPolicyPath: options?.typographyPolicyPath,
+    visualTreatmentPatchPath: options?.visualTreatmentPatchPath,
+    approval: captionApproval?.approval,
+  });
   if (renderRouteDecision.genre === "social_talking_head") {
-    checks.push(...checkSocialRetentionFinishing(timeline, creativeBrief));
+    try {
+      const compilerRetentionPolicy = resolveCompilerRetentionPolicy(absDir, timeline);
+      checks.push(...checkSocialRetentionFinishing(timeline, creativeBrief, compilerRetentionPolicy));
+    } catch (error) {
+      checks.push({
+        name: "social_retention_policy_provenance",
+        passed: false,
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (visualTreatmentArtifactsPresent || options?.captionVisualTreatmentInput) {
+    try {
+      resolvedCaptionVisualTreatmentInput = resolveAndVerifyCanonicalCaptionVisualTreatmentInput(absDir, {
+        approvalPath: captionApprovalPath,
+        typographyPolicyPath: options?.typographyPolicyPath ?? "04_plan/typography_policy.json",
+        visualTreatmentPatchPath: options?.visualTreatmentPatchPath,
+        providedInput: options?.captionVisualTreatmentInput,
+      });
+      checks.push({
+        name: "canonical_caption_visual_treatment_input_valid",
+        passed: resolvedCaptionVisualTreatmentInput.status !== "blocked" && resolvedCaptionVisualTreatmentInput.status !== "human_hold",
+        details: `visual-treatment input=${resolvedCaptionVisualTreatmentInput.input_hash} approval=${resolvedCaptionVisualTreatmentInput.approval_hash} profile=${resolvedCaptionVisualTreatmentInput.typography_policy_hash} patch=${resolvedCaptionVisualTreatmentInput.visual_treatment_patch_hash ?? "missing"} status=${resolvedCaptionVisualTreatmentInput.status}`,
+      });
+    } catch (error) {
+      checks.push({
+        name: "canonical_caption_visual_treatment_input_valid",
+        passed: false,
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // caption_policy_valid
@@ -595,11 +799,13 @@ export async function packageCommand(
           };
         }
       }
-      // For testing: create stub files and assume standard artifacts exist
+      // For testing: create visual stubs only. An independent music_master
+      // source must never be replaced by a fictional v1/dialogue receipt.
+      const isMusicMasterPackage = canonicalAudioPlan?.strategy === "music_master";
       const stubs = [
         path.join(packageDir, "video/final.mp4"),
         path.join(packageDir, "video/raw_video.mp4"),
-        ...(timelineRequiresAudio ? [
+        ...(timelineRequiresAudio && !isMusicMasterPackage ? [
           path.join(packageDir, "audio/raw_dialogue.wav"),
           path.join(packageDir, "audio/final_mix.wav"),
         ] : []),
@@ -613,8 +819,8 @@ export async function packageCommand(
       if (captionPolicy.source !== "none") {
         const fontContract = captionFontContractForReceipt(captionPolicy.styling_class);
         fontReceiptPath = path.join(packageDir, "logs", "caption-font-receipt.json");
-        const stagedManifestPath = options?.captionFontsDir
-          ? path.join(path.dirname(options.captionFontsDir), "font-manifest.json")
+        const stagedManifestPath = resolvedDelivery.captionFontsDir
+          ? path.join(resolvedDelivery.captionFontsDir, "font-manifest.json")
           : undefined;
         fs.writeFileSync(fontReceiptPath, `${JSON.stringify({
           version: "caption-font-receipt/v1",
@@ -651,6 +857,16 @@ export async function packageCommand(
         finalVideoPath: path.join(packageDir, "video/final.mp4"),
         fontReceiptPath,
         operations,
+        sourceInputs: deliverableSourceInputs,
+        ...(canonicalAudioPlan ? { audioRenderPlan: canonicalAudioPlan } : {}),
+        ...(canonicalAudioPlanPath ? { audioRenderPlanPath: canonicalAudioPlanPath } : {}),
+        ...(fs.existsSync(audioMixReportPath) ? { audioMixReportPath } : {}),
+        ...(resolvedCaptionVisualTreatmentInput ? {
+          captionVisualTreatment: {
+            inputPath: path.join(packageDir, "caption_visual_treatment_input.json"),
+            input: resolvedCaptionVisualTreatmentInput,
+          },
+        } : {}),
         measurementSource: "execution_plan",
         rendererVersions: {
           ...(renderRouteDecision.visual_layers.some((layer) => layer.renderer === "hyperframes")
@@ -669,6 +885,35 @@ export async function packageCommand(
         existingArtifacts.add("final_mix");
       }
       existingArtifacts.add("qa_report");
+      if (isMusicMasterPackage) {
+        const musicMaster = canonicalAudioPlan!.music_master!;
+        const sourcePath = path.resolve(absDir, musicMaster.source.source_ref);
+        const rawDialoguePath = path.join(packageDir, "audio/raw_dialogue.wav");
+        const finalMixPath = path.join(packageDir, "audio/final_mix.wav");
+        const masteredMp3Path = path.join(packageDir, "audio/music_master_320.mp3");
+        if (!fs.existsSync(rawDialoguePath) && musicMaster.audio_decision === "preserve") {
+          fs.copyFileSync(sourcePath, rawDialoguePath);
+        }
+        if (!fs.existsSync(finalMixPath) && musicMaster.audio_decision === "preserve") {
+          fs.copyFileSync(sourcePath, finalMixPath);
+        }
+        if (!fs.existsSync(rawDialoguePath) || !fs.existsSync(finalMixPath)
+          || !fs.existsSync(audioMixReportPath)
+          || (musicMaster.audio_decision === "mastering" && !fs.existsSync(masteredMp3Path))) {
+          return {
+            success: false,
+            sourceOfTruth,
+            error: {
+              code: "VALIDATION_FAILED",
+              message: "music_master skipRender requires existing plan-bound audio output and receipt; no stub fallback is allowed",
+            },
+          };
+        }
+        existingArtifacts.add("raw_dialogue");
+        existingArtifacts.add("final_mix");
+        existingArtifacts.add("audio_mix_report");
+        if (musicMaster.audio_decision === "mastering") existingArtifacts.add("mastered_mp3");
+      } else {
       const stubMixReport: AudioMixReport = preserveOriginalAudioLevel
         ? {
             version: "audio-mix-report/v1",
@@ -740,6 +985,7 @@ export async function packageCommand(
         fs.writeFileSync(audioMixReportPath, `${JSON.stringify(stubMixReport, null, 2)}\n`, "utf-8");
         existingArtifacts.add("audio_mix_report");
       }
+      }
       if (captionPolicy.source !== "none" &&
           (captionPolicy.delivery_mode === "sidecar" || captionPolicy.delivery_mode === "both")) {
         existingArtifacts.add("srt_sidecar");
@@ -760,8 +1006,9 @@ export async function packageCommand(
 
       try {
         const assemblyEngine = options?.assemblyEngine ?? renderRouteDecision.assembly_engine;
-        const sharedAudioPlan = resolveSharedAudioRenderPlan({
+        const sharedAudioPlan = canonicalAudioPlan ?? resolveSharedAudioRenderPlan({
           projectDir: absDir,
+          ...(options?.repoSfxRoot ? { repoSfxRoot: options.repoSfxRoot } : {}),
           timelinePath,
           musicCuesPath: renderMusicCuesPath,
           sfxCuesPath: renderSfxCuesPath,
@@ -801,9 +1048,17 @@ export async function packageCommand(
           projectDir: absDir,
           timelinePath,
           captionApprovalPath: renderCaptionApprovalPath,
+          ...(resolvedCaptionVisualTreatmentInput ? {
+            ...(visualTreatmentArtifactsPresent ? {
+              typographyPolicyPath: options?.typographyPolicyPath ?? "04_plan/typography_policy.json",
+              visualTreatmentPatchPath: options?.visualTreatmentPatchPath,
+            } : {}),
+            captionVisualTreatmentInput: resolvedCaptionVisualTreatmentInput,
+          } : {}),
           musicCuesPath: renderMusicCuesPath,
           sfxCuesPath: renderSfxCuesPath,
           audioRenderPlan: sharedAudioPlan,
+          ...(canonicalAudioPlanPath ? { audioRenderPlanPath: canonicalAudioPlanPath } : {}),
           assemblyPath,
           ...(!assemblyPath ? {
             assemblyEngine,
@@ -819,7 +1074,8 @@ export async function packageCommand(
           },
           outputDir: packageDir,
           fps,
-          captionFontsDir: options?.captionFontsDir,
+          captionFontsDir: resolvedDelivery.captionFontsDir,
+          lyricsAssPath: renderLyricsAssPath,
         });
         const freshnessArtifactPath = renderRouteDecision.hyperframes_overlay
           ? renderResult.baseAssemblyPath
@@ -832,7 +1088,10 @@ export async function packageCommand(
         } else {
           assertSourceInputsUnchanged(
             sourceInputsBefore,
-            createSourceInputAttestation(absDir, { timelinePath }),
+            createSourceInputAttestation(absDir, {
+              timelinePath,
+              includeAudio: !sharedAudioPlan,
+            }),
           );
         }
         assemblyFreshness = assessRenderArtifactFreshness(absDir, freshnessArtifactPath);
@@ -848,6 +1107,7 @@ export async function packageCommand(
         qaMeasurementDialoguePath = renderResult.rawDialoguePath;
         audioMixReportPath = renderResult.audioMixReportPath;
         renderRouteReceiptPath = renderResult.renderRouteReceiptPath;
+        renderReportPath = renderResult.renderReportPath;
 
         // Check which artifacts the render produced
         if (fs.existsSync(renderResult.finalVideoPath)) existingArtifacts.add("final_video");
@@ -856,6 +1116,11 @@ export async function packageCommand(
         if (fs.existsSync(renderResult.finalMixPath)) existingArtifacts.add("final_mix");
         if (fs.existsSync(renderResult.audioMixReportPath)) {
           existingArtifacts.add("audio_mix_report");
+        }
+        if (canonicalAudioPlan?.strategy === "music_master"
+          && canonicalAudioPlan.music_master?.audio_decision === "mastering"
+          && fs.existsSync(path.join(packageDir, "audio", "music_master_320.mp3"))) {
+          existingArtifacts.add("mastered_mp3");
         }
         for (const sp of renderResult.sidecarPaths) {
           if (sp.endsWith(".srt")) existingArtifacts.add("srt_sidecar");
@@ -873,12 +1138,30 @@ export async function packageCommand(
       }
       existingArtifacts.add("qa_report"); // Will be generated below
     }
-    const finalAudioMixReport = readAudioMixReport(audioMixReportPath);
+    finalAudioMixReport = readAudioMixReport(audioMixReportPath);
+    if (canonicalAudioPlan?.strategy === "music_master") {
+      checks.push(checkMusicMasterAudioPlan(
+        canonicalAudioPlan,
+        finalAudioMixReport,
+        {
+          finalMixPath: path.join(packageDir, "audio", "final_mix.wav"),
+          masteredMp3Path: path.join(packageDir, "audio", "music_master_320.mp3"),
+          finalVideoPath: path.join(packageDir, "video", "final.mp4"),
+          projectDir: absDir,
+        },
+      ));
+    }
     const requiresSharedAudioPlan = (
       musicCues?.version === "2.0.0"
       || sfxCues?.version === "sfx-cues/v1"
+      || requiresAudioProfilePlan
+      || canonicalAudioPlan?.strategy === "music_master"
     )
       && timeline.provenance?.audio_policy?.mode !== "original_only";
+    const requiresSharedAudioCuePlan = (
+      musicCues?.version === "2.0.0"
+      || sfxCues?.version === "sfx-cues/v1"
+    ) && timeline.provenance?.audio_policy?.mode !== "original_only";
     checks.push(timelineRequiresAudio
       ? checkAudioMixPolicy(
           finalAudioMixReport,
@@ -886,6 +1169,8 @@ export async function packageCommand(
           renderRouteDecision.genre === "social_talking_head",
           musicCues,
           sfxCues,
+          expectedAudioProfileRef,
+          absDir,
         )
       : { name: "audio_mix_policy_valid", passed: true, details: "not_applicable: timeline has no audio or BGM" });
     checks.push(checkAudioRenderPlanParity(
@@ -897,7 +1182,7 @@ export async function packageCommand(
         "audio",
         "audio-mix-report.json",
       )),
-      requiresSharedAudioPlan,
+      requiresSharedAudioCuePlan,
     ));
     if (sfxCues?.required === true) {
       checks.push(checkSfxMixPolicy(finalAudioMixReport, sfxCues));
@@ -907,6 +1192,8 @@ export async function packageCommand(
       captionPolicy,
       existingArtifacts,
       timelineRequiresAudio,
+      canonicalAudioPlan?.strategy === "music_master"
+        && canonicalAudioPlan.music_master?.audio_decision === "mastering",
     );
     if (!qaMeasurementVideoPath) {
       qaMeasurementVideoPath = path.join(packageDir, "video/final.mp4");
@@ -923,6 +1210,10 @@ export async function packageCommand(
   } else {
     // nle_finishing checks
     // supplied_export_probe_valid (simplified)
+    renderRouteReceiptPath = resolvedDelivery.renderRouteReceiptPath
+      ?? (fs.existsSync(path.join(packageDir, "logs/render-route.json"))
+        ? path.join(packageDir, "logs/render-route.json")
+        : undefined);
     qaMeasurementVideoPath = options?.suppliedFinalPath ||
       path.join(packageDir, "video/final.mp4");
     finalVideoSourcePath = qaMeasurementVideoPath;
@@ -962,10 +1253,32 @@ export async function packageCommand(
         nleArtifacts.add("vtt_sidecar");
       }
     }
+    if (canonicalAudioPlan?.strategy === "music_master") {
+      const musicMasterReport = readAudioMixReport(audioMixReportPath);
+      const musicMasterFinalMixPath = path.join(packageDir, "audio", "final_mix.wav");
+      checks.push(checkMusicMasterAudioPlan(
+        canonicalAudioPlan,
+        musicMasterReport,
+        {
+          finalMixPath: musicMasterFinalMixPath,
+          masteredMp3Path: path.join(packageDir, "audio", "music_master_320.mp3"),
+          finalVideoPath: qaMeasurementVideoPath,
+          projectDir: absDir,
+        },
+      ));
+      if (fs.existsSync(musicMasterFinalMixPath)) nleArtifacts.add("final_mix");
+      if (fs.existsSync(audioMixReportPath)) nleArtifacts.add("audio_mix_report");
+      if (canonicalAudioPlan.music_master?.audio_decision === "mastering"
+        && fs.existsSync(path.join(packageDir, "audio", "music_master_320.mp3"))) {
+        nleArtifacts.add("mastered_mp3");
+      }
+    }
     completenessCheck = checkPackageCompleteness(
       sourceOfTruth,
       captionPolicy,
       nleArtifacts,
+      canonicalAudioPlan?.strategy === "music_master"
+        && canonicalAudioPlan.music_master?.audio_decision === "mastering",
     );
   }
 
@@ -999,6 +1312,20 @@ export async function packageCommand(
       },
       sourceOfTruth,
     };
+  }
+  const canonicalEncodedLoudness = finalAudioMixReport?.encoded_result?.loudness;
+  if (canonicalEncodedLoudness?.status === "measured"
+    && canonicalEncodedLoudness.integrated_lufs !== null
+    && canonicalEncodedLoudness.true_peak_dbtp !== null) {
+    qaMeasurements = {
+      ...qaMeasurements,
+      // Package loudness QA is authoritative from the encoded deliverable.
+      // In particular, true peak comes from encoded loudnorm input_tp, not an
+      // intended target or a pre-encode stem.
+      loudness_integrated: canonicalEncodedLoudness.integrated_lufs,
+      loudness_true_peak: canonicalEncodedLoudness.true_peak_dbtp,
+    };
+    writeQaMeasurements(path.join(packageDir, "qa-measurements.json"), qaMeasurements);
   }
   logQaMeasurementWarnings(qaMeasurements);
 
@@ -1092,16 +1419,11 @@ export async function packageCommand(
     metrics.av_duration_delta_ms = qaMeasurements.av_duration_delta_ms ?? qaMeasurements.av_drift_ms;
     metrics.av_drift_ms = qaMeasurements.av_drift_ms;
 
-    const loudnessCheck = preserveOriginalAudioLevel
-      ? {
-          name: "loudness_target_valid",
-          passed: true,
-          details: "not_applicable: original_only audio level preservation is explicitly required",
-        }
-      : checkLoudnessTarget(
-          qaMeasurements.loudness_integrated,
-          qaMeasurements.loudness_true_peak,
-        );
+    const loudnessCheck = checkLoudnessTargetForAudioPolicy(
+      preserveOriginalAudioLevel,
+      qaMeasurements.loudness_integrated,
+      qaMeasurements.loudness_true_peak,
+    );
     checks.push(loudnessCheck);
     metrics.integrated_lufs = qaMeasurements.loudness_integrated;
     metrics.true_peak_dbtp = qaMeasurements.loudness_true_peak;
@@ -1126,7 +1448,8 @@ export async function packageCommand(
     metrics.av_duration_delta_ms = qaMeasurements.av_duration_delta_ms ?? qaMeasurements.av_drift_ms;
     metrics.av_drift_ms = qaMeasurements.av_drift_ms;
 
-    const loudnessCheck = checkLoudnessTarget(
+    const loudnessCheck = checkLoudnessTargetForAudioPolicy(
+      preserveOriginalAudioLevel,
       qaMeasurements.loudness_integrated,
       qaMeasurements.loudness_true_peak,
     );
@@ -1232,7 +1555,12 @@ export async function packageCommand(
     ? computeFileHash(renderDefaultsPath)
     : undefined;
   const packageSourceInputs = sourceOfTruth === "engine_render"
-    ? assemblyFreshness?.sourceInputsHash && assemblyFreshness.sourceInputsStatus
+    ? canonicalAudioPlan
+      ? {
+          hash: deliverableSourceInputs.source_inputs_hash,
+          status: deliverableSourceInputs.status,
+        }
+      : assemblyFreshness?.sourceInputsHash && assemblyFreshness.sourceInputsStatus
       ? {
           hash: assemblyFreshness.sourceInputsHash,
           status: assemblyFreshness.sourceInputsStatus,
@@ -1313,6 +1641,9 @@ export async function packageCommand(
         : undefined,
       captionPolicy,
       renderRouteReceiptPath: renderRouteReceiptPath!,
+      ...(resolvedCaptionVisualTreatmentInput ? { captionVisualTreatmentInput: resolvedCaptionVisualTreatmentInput } : {}),
+      ...(renderReportPath ? { renderReportPath } : {}),
+      ...(canonicalAudioPlanPath ? { audioRenderPlanPath: canonicalAudioPlanPath } : {}),
       derivedVideoProvenancePath,
       layoutSnapshotPath,
       finalVideoPath: publishedFinalVideo.path,
@@ -1330,6 +1661,17 @@ export async function packageCommand(
       captionPolicy,
       finalVideoPath: publishedFinalVideo.path,
       qaReportPath: path.join(packageDir, "qa-report.json"),
+      ...(canonicalAudioPlan?.strategy === "music_master" && canonicalAudioPlanPath
+        ? {
+            audioRenderPlanPath: canonicalAudioPlanPath,
+            audioMixReportPath,
+            audioFinalMixPath: path.join(packageDir, "audio", "final_mix.wav"),
+            ...(canonicalAudioPlan.music_master?.audio_decision === "mastering"
+              ? { audioMasteredMp3Path: path.join(packageDir, "audio", "music_master_320.mp3") }
+              : {}),
+          }
+        : {}),
+      routeReceiptPath: renderRouteReceiptPath,
       sidecarPaths: [
         path.join(packageDir, "captions", "speech.approved.srt"),
         path.join(packageDir, "captions", "speech.vtt"),
@@ -1435,8 +1777,23 @@ function readReviewReportForGate10(projectDir: string): {
   }
 
   try {
+    const reviewReport = parseYaml(fs.readFileSync(reportPath, "utf-8")) as Gate10ReviewReport;
+    if (reviewReport.visual_qa?.optional_vlm_classification !== undefined
+      || reviewReport.visual_qa?.optional_vlm_error_code !== undefined) {
+      try {
+        validateArtifact(reviewReport, "review-report.schema.json");
+      } catch {
+        return {
+          reviewReport: null,
+          error: {
+            code: "VALIDATION_FAILED",
+            message: "review_report optional VLM classification/error code is invalid",
+          },
+        };
+      }
+    }
     return {
-      reviewReport: parseYaml(fs.readFileSync(reportPath, "utf-8")) as Gate10ReviewReport,
+      reviewReport,
     };
   } catch (err) {
     return {
@@ -1444,6 +1801,40 @@ function readReviewReportForGate10(projectDir: string): {
       error: {
         code: "VALIDATION_FAILED",
         message: `Failed to parse review_report.yaml: ${err instanceof Error ? err.message : String(err)}`,
+      },
+    };
+  }
+}
+
+function readOptionalVlmPolicyForGate10(projectDir: string): {
+  policy: OptionalVlmPolicyArtifact | null;
+  context?: OptionalVlmGateContext;
+  error?: CommandError;
+} {
+  const policyPath = path.join(projectDir, "06_review/optional-vlm-policy.json");
+  if (!fs.existsSync(policyPath)) return { policy: null };
+  try {
+    const policy = readOptionalVlmPolicy(projectDir);
+    if (!policy) return { policy: null };
+    let context: OptionalVlmGateContext;
+    try {
+      context = readCurrentOptionalVlmGateContext(projectDir);
+    } catch {
+      return {
+        policy: null,
+        error: {
+          code: "VALIDATION_FAILED",
+          message: "optional_vlm_policy current review-ready identity is unavailable",
+        },
+      };
+    }
+    return { policy, context };
+  } catch {
+    return {
+      policy: null,
+      error: {
+        code: "VALIDATION_FAILED",
+        message: "optional_vlm_policy artifact is malformed",
       },
     };
   }
@@ -1458,13 +1849,7 @@ function readAudioMixReport(reportPath: string): AudioMixReport | null {
 }
 
 function stubLoudnormMeasurement(): AudioMixReport["final_mastering"]["premaster_measurement"] {
-  return {
-    input_i: "-16.00",
-    input_tp: "-1.50",
-    input_lra: "7.00",
-    input_thresh: "-26.00",
-    target_offset: "0.00",
-  };
+  return null;
 }
 
 const ASPECT_RATIO_DIMENSIONS: Record<string, { width: number; height: number }> = {
@@ -1771,4 +2156,186 @@ function logQaMeasurementWarnings(measurements: QaMeasurements): void {
   for (const warning of collectQaMeasurementWarnings(measurements)) {
     console.warn(`[package] QA warning: ${warning.message}`);
   }
+}
+
+
+// ── Public authority routes (no internal shortcuts exist) ────────────────
+
+/**
+ * The staged lyric mode of a candidate generation: the canonical request
+ * artifact written before generation is the mode authority.
+ */
+function readStagedLyricMode(generationDir: string): "present" | "absent" {
+  const coreArtifacts = [
+    path.join(generationDir, "captions", "lyrics.ass"),
+    path.join(generationDir, "captions", "lyric-typography-plan.json"),
+  ];
+  const present = coreArtifacts.filter((artifact) => fs.existsSync(artifact));
+  if (present.length === 0 && !fs.existsSync(path.join(generationDir, "captions", "lyrics.lrc"))) return "absent";
+  if (present.length !== coreArtifacts.length) throw new Error(`staged lyric delivery is incomplete in ${generationDir}`);
+  const scriptPath = path.join(generationDir, "captions", "lyrics.lrc");
+  if (fs.existsSync(scriptPath)) return "present";
+  const planPath = path.join(generationDir, "captions", "lyric-typography-plan.json");
+  const plan = parseJsonRejectDuplicateKeys<{ authority?: { kind?: unknown } }>(
+    fs.readFileSync(planPath, "utf8"),
+    planPath,
+  );
+  if (plan.authority?.kind !== "authored_caption_approval") {
+    throw new Error(`staged lyric delivery has no source artifact or authored authority in ${generationDir}`);
+  }
+  return "present";
+}
+
+/** Public package route: strict pointer/current authority, always. */
+export async function packageCommand(
+  projectDir: string,
+  options?: PackageCommandOptions,
+): Promise<PackageCommandResult> {
+  // lyric ASS paths are never caller-selectable: telops are consumed through
+  // the finalize composite (canonical recomputation) or the strict pointer
+  assertPublicPackageOptions(options, "/package");
+  const resolvedDelivery = resolveDeliveryArtifactPathsStrict(path.resolve(projectDir));
+  return runPackageStage(projectDir, {
+    ...options,
+    commandName: "package",
+    actorName: "package_command",
+    allowedStates: ["approved", "packaged"],
+  }, resolvedDelivery, resolvedDelivery.lyricsAssPath);
+}
+
+/** Internal-authority render route used by /render after strict resolution. */
+export async function packageRenderCommand(
+  projectDir: string,
+  options?: PackageCommandOptions,
+): Promise<PackageCommandResult> {
+  assertPublicPackageOptions(options, "/render");
+  const resolvedDelivery = resolveDeliveryArtifactPathsStrict(path.resolve(projectDir));
+  return runPackageStage(projectDir, {
+    ...options,
+    commandName: "/render",
+    actorName: "render-video",
+    allowedStates: ["approved", "packaged"],
+    requireFinalRenderApproval: true,
+  }, resolvedDelivery, resolvedDelivery.lyricsAssPath);
+}
+
+/**
+ * Public finalize-composite route: packages the FRESH staged generation,
+ * derived purely by canonical recomputation (01_intent/lyric_typography_request.json,
+ * 01_intent/lyrics.lrc, staged font bytes, approvals, timeline, music cues,
+ * source attestation). No caller-selected paths, tokens, or internal
+ * arguments exist; a generation whose directory does not match its own
+ * recomputed identity fails closed.
+ */
+export async function packageCaptionFinalizeGeneration(
+  projectDir: string,
+  options?: PackageCommandOptions,
+): Promise<PackageCommandResult> {
+  assertPublicPackageOptions(options, "caption-finalize");
+  const absProject = path.resolve(projectDir);
+  const anchors = deriveDeliveryIdentityAnchors(absProject);
+  const generationsDir = path.join(absProject, CAPTION_FINALIZE_ROOT_RELATIVE_PATH, "generations");
+  if (!fs.existsSync(generationsDir)) {
+    throw new Error(`no staged caption-finalize generations: ${generationsDir}`);
+  }
+  // Among generations whose directory name equals their own recomputed
+  // identity, the MOST RECENTLY STAGED one is the fresh finalize target
+  // (an older generation with identical canonical inputs may legitimately
+  // exist from a prior finalize of the same approval state).
+  let matched: {
+    generationDir: string;
+    generationId: string;
+    generationKey: string;
+    mtimeMs: number;
+    routeEvidence: ReturnType<typeof recomputeCurrentGenerationKeyInputs>["routeEvidence"];
+  } | undefined;
+  for (const entry of fs.readdirSync(generationsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const candidateDir = path.join(generationsDir, entry.name);
+    if (!fs.existsSync(path.join(candidateDir, "font-manifest.json"))) continue;
+    let recomputed: CaptionGenerationKeyInputs;
+    let routeEvidence: ReturnType<typeof recomputeCurrentGenerationKeyInputs>["routeEvidence"];
+    try {
+      ({ inputs: recomputed, routeEvidence } = recomputeCurrentGenerationKeyInputs({
+        projectDir: absProject,
+        generationDir: candidateDir,
+        anchors,
+        expectedProjectId: anchors.expectedProjectId,
+        lyricDeliveryMode: readStagedLyricMode(candidateDir),
+        lyricContract: undefined,
+      }));
+    } catch {
+      continue; // not a viable staged generation under current canonical state
+    }
+    const key = generationKeyFromInputs(recomputed);
+    const id = generationIdFromKey(key);
+    if (entry.name === id) {
+      const mtimeMs = fs.statSync(candidateDir).mtimeMs;
+      if (!matched || mtimeMs > matched.mtimeMs) {
+        matched = { generationDir: candidateDir, generationId: id, generationKey: key, mtimeMs, routeEvidence };
+      }
+    }
+  }
+  if (!matched) {
+    throw new Error("no staged caption-finalize generation matches the current canonical identity");
+  }
+  const generationDir = matched.generationDir;
+  const lyricAssPath = path.join(generationDir, "captions", "lyrics.ass");
+  const routeReceiptPath = path.join(generationDir, "logs", "render-route.json");
+  const suppliedFinalPath = path.join(generationDir, "staging", "direct-render.mp4");
+  const suppliedFinalReceiptPath = path.join(generationDir, "staging", "input-caption-receipt.json");
+  const resolvedDelivery: DeliveryArtifactPaths = {
+    source: "fresh_staged",
+    captionApprovalPath: path.join(generationDir, "caption_approval.json"),
+    captionAssPath: path.join(generationDir, "captions", "speech.ass"),
+    captionSrtPath: path.join(generationDir, "captions", "speech.approved.srt"),
+    finalVideoPath: path.join(generationDir, "video", "final.mp4"),
+    qaReportPath: path.join(generationDir, "qa-report.json"),
+    packageManifestPath: path.join(generationDir, "package_manifest.json"),
+    previewPath: path.join(generationDir, "preview", "final.mp4"),
+    previewReceiptPath: path.join(generationDir, "preview", "receipt.json"),
+    receiptPath: path.join(generationDir, "caption-finalize-receipt.json"),
+    lyricsAssPath: fs.existsSync(lyricAssPath) ? lyricAssPath : undefined,
+    packageFinalVideoPath: path.join(generationDir, "video", "final.mp4"),
+    finalMixPath: path.join(generationDir, "audio", "final_mix.wav"),
+    captionFontsDir: path.join(generationDir, "fonts"),
+    typographyPolicyPath: fs.existsSync(path.join(absProject, "04_plan", "typography_policy.json"))
+      ? path.join(absProject, "04_plan", "typography_policy.json")
+      : undefined,
+    visualTreatmentPatchPath: fs.existsSync(path.join(absProject, "04_plan", "visual-treatment-patch.json"))
+      ? path.join(absProject, "04_plan", "visual-treatment-patch.json")
+      : undefined,
+    renderRouteReceiptPath: fs.existsSync(routeReceiptPath) ? routeReceiptPath : undefined,
+    ...(matched.routeEvidence.route_kind === "supplied_final"
+      ? {
+          suppliedFinalPath,
+          suppliedFinalReceiptPath,
+        }
+      : {}),
+  };
+  const internal: PackageStageInternalOptions = {
+    ...options,
+    commandName: "caption-finalize",
+    actorName: "caption-finalize",
+    allowedStates: ["approved", "packaged"],
+    deferActivation: true,
+    captionApprovalPath: resolvedDelivery.captionApprovalPath,
+    captionFontsDir: resolvedDelivery.captionFontsDir,
+    ...(resolvedDelivery.typographyPolicyPath
+      ? { typographyPolicyPath: resolvedDelivery.typographyPolicyPath }
+      : {}),
+    ...(resolvedDelivery.visualTreatmentPatchPath
+      ? { visualTreatmentPatchPath: resolvedDelivery.visualTreatmentPatchPath }
+      : {}),
+    ...(resolvedDelivery.renderRouteReceiptPath
+      ? { renderRouteReceiptPath: resolvedDelivery.renderRouteReceiptPath }
+      : {}),
+    ...(resolvedDelivery.suppliedFinalPath
+      ? { suppliedFinalPath: resolvedDelivery.suppliedFinalPath }
+      : {}),
+    ...(resolvedDelivery.suppliedFinalReceiptPath
+      ? { suppliedFinalReceiptPath: resolvedDelivery.suppliedFinalReceiptPath }
+      : {}),
+  };
+  return runPackageStage(projectDir, internal, resolvedDelivery, resolvedDelivery.lyricsAssPath);
 }

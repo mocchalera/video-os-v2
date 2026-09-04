@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/derived-frame-mapping.schema.json",
+  "title": "Deterministic derived frame mapping receipt",
+  "type": "object",
+  "required": ["version", "policy", "operations", "entities", "mapping_sha256"],
+  "properties": {
+    "version": { "const": "derived-frame-mapping/v1" },
+    "policy": { "const": "ripple-semantic-anchor/v1" },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["index", "op", "ripple"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "op": { "type": "string", "minLength": 1 },
+          "ripple": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["semantic_anchor", "kind", "before", "after", "status"],
+        "properties": {
+          "semantic_anchor": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["clip", "caption", "marker"] },
+          "before": { "anyOf": [{ "$ref": "#/$defs/range" }, { "type": "null" }] },
+          "after": { "anyOf": [{ "$ref": "#/$defs/range" }, { "type": "null" }] },
+          "status": { "enum": ["preserved", "moved", "removed", "added"] }
+        },
+        "additionalProperties": false
+      }
+    },
+    "mapping_sha256": { "$ref": "#/$defs/hash" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "range": {
+      "type": "object",
+      "required": ["start_frame", "end_frame"],
+      "properties": {
+        "start_frame": { "type": "integer", "minimum": 0 },
+        "end_frame": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

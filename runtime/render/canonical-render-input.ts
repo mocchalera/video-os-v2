@@ -7,6 +7,16 @@ import { loadSourceMap } from "../media/source-map.js";
 import { sha256FileHex } from "../source-content-identity.js";
 import { mediaKindForExtension } from "../media/media-kind-registry.js";
 import { computeImageSequenceFrameSetContentSha256 } from "../media/image-sequence.js";
+import type { CaptionAccessibilitySelection, CaptionApproval } from "../caption/approval.js";
+import { validateArtifact } from "../artifacts/loaders.js";
+import { computeNormalizedJsonHash } from "../artifacts/p1-manifest-coverage.js";
+import { captionRendererCapabilitiesForPolicy, loadCaptionVisualTreatmentPatch, resolveCaptionVisualTreatmentInput, type CaptionRendererCapabilities, type CaptionVisualTreatmentInput } from "../caption/visual-treatment.js";
+import { loadTypographyPolicy } from "../caption/typography-policy.js";
+import { loadPlatformSafeZoneProfile } from "../platform/safe-zone-profile.js";
+import {
+  registerRenderCleanupPath,
+  unregisterRenderCleanupPath,
+} from "./render-cleanup-registry.js";
 
 export const NORMALIZED_STILL_RELATIONSHIP = "normalized_still_frame" as const;
 export const NORMALIZED_SEQUENCE_RELATIONSHIP = "normalized_image_sequence_proxy" as const;
@@ -48,7 +58,11 @@ export class CanonicalRenderInputError extends Error {
       | "image_sequence_snapshot_invalid"
       | "image_sequence_snapshot_hash_mismatch"
       | "source_map_entry_missing"
-      | "source_missing",
+      | "source_missing"
+      | "caption_approval_missing"
+      | "caption_visual_treatment_path_invalid"
+      | "caption_visual_treatment_profile_missing"
+      | "caption_visual_treatment_input_mismatch",
     message: string,
     public readonly assetId?: string,
   ) {
@@ -129,6 +143,57 @@ function sha(value: unknown): string | undefined {
 
 function projectRelativePath(projectDir: string, target: string): string {
   return path.relative(projectDir, target).split(path.sep).join("/");
+}
+
+function isContainedPath(parentPath: string, childPath: string): boolean {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+export interface CaptionVisualTreatmentPreflightOptions {
+  typographyPolicyPath?: string;
+  visualTreatmentPatchPath?: string;
+  approval?: {
+    typography_policy_hash?: string;
+    caption_visual_treatment_patch_hash?: string;
+    visual_treatment_input_hash?: string;
+  };
+}
+
+export interface CanonicalCaptionVisualTreatmentRenderOptions extends CaptionVisualTreatmentPreflightOptions {
+  approvalPath?: string;
+  typographyPolicyPath: string;
+  visualTreatmentPatchPath?: string;
+  platformSafeZoneProfileHash?: string;
+  platformSafeZoneProfileId?: string;
+  platformSafeZoneProfilePath?: string;
+  rendererCapabilities?: CaptionRendererCapabilities;
+  platformSafeZoneProfile?: import("../platform/safe-zone-profile.js").PlatformSafeZoneProfile;
+  accessibility?: CaptionAccessibilitySelection;
+  providedInput?: CaptionVisualTreatmentInput;
+  /** Review-only preview may resolve a patch before its production approval binding exists. */
+  requireApprovalBinding?: boolean;
+}
+
+/** Decide whether the canonical caption visual-treatment preflight is in scope. */
+export function shouldPreflightCanonicalCaptionVisualTreatment(
+  projectDir: string,
+  options: CaptionVisualTreatmentPreflightOptions = {},
+): boolean {
+  const root = path.resolve(projectDir);
+  const defaultTypographyPath = path.resolve(root, "04_plan/typography_policy.json");
+  const defaultPatchPath = path.resolve(root, "07_package/caption_visual_treatment_patch.json");
+  const defaultTypographyArtifactPresent = isContainedPath(root, defaultTypographyPath) && fs.existsSync(defaultTypographyPath);
+  const defaultPatchArtifactPresent = isContainedPath(root, defaultPatchPath) && fs.existsSync(defaultPatchPath);
+  return Boolean(
+    defaultTypographyArtifactPresent
+    || defaultPatchArtifactPresent
+    || options.typographyPolicyPath
+    || options.visualTreatmentPatchPath
+    || options.approval?.typography_policy_hash
+    || options.approval?.caption_visual_treatment_patch_hash
+    || options.approval?.visual_treatment_input_hash,
+  );
 }
 
 export function isImageMediaTruth(...values: unknown[]): boolean {
@@ -534,11 +599,19 @@ export function materializeVerifiedStillSnapshots(
   const tempRoot = options.tempRoot ?? os.tmpdir();
   const snapshotRoot = fs.mkdtempSync(path.join(tempRoot, "vos-still-render-inputs-"));
   fs.chmodSync(snapshotRoot, 0o700);
+  // A public render can receive SIGINT/SIGTERM while the verified snapshot is
+  // still in use. Register the exact root so the shared signal teardown owns
+  // this renderer scratch too; dispose retires ownership only after removal.
+  // A caller-supplied nested tempRoot remains owned by that caller's normal
+  // finally path; the signal registry deliberately does not widen its root.
+  const snapshotRootRegistered = path.dirname(snapshotRoot) === path.resolve(os.tmpdir());
+  if (snapshotRootRegistered) registerRenderCleanupPath(snapshotRoot, "dir");
   let disposed = false;
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
     fs.rmSync(snapshotRoot, { recursive: true, force: true });
+    if (snapshotRootRegistered) unregisterRenderCleanupPath(snapshotRoot);
   };
   const byAssetId = new Map<string, CanonicalRenderInput>();
   const copyFile = options.copyFileImpl ?? ((source: string, destination: string) => {
@@ -601,4 +674,121 @@ export function materializeVerifiedStillSnapshots(
     snapshotRoot,
     dispose,
   };
+}
+
+/** Resolve approved caption visual-treatment input without invoking a compositor. */
+export function resolveCanonicalCaptionVisualTreatmentInput(
+  projectDir: string,
+  options: {
+    approvalPath?: string;
+    typographyPolicyPath: string;
+    visualTreatmentPatchPath?: string;
+    platformSafeZoneProfileHash?: string;
+    platformSafeZoneProfileId?: string;
+    platformSafeZoneProfilePath?: string;
+    rendererCapabilities?: CaptionRendererCapabilities;
+    platformSafeZoneProfile?: import("../platform/safe-zone-profile.js").PlatformSafeZoneProfile;
+    accessibility?: CaptionAccessibilitySelection;
+    requireApprovalBinding?: boolean;
+  },
+): CaptionVisualTreatmentInput {
+  const root = path.resolve(projectDir);
+  const approvalPath = path.resolve(root, options.approvalPath ?? "07_package/caption_approval.json");
+  if (!isContainedPath(root, approvalPath) || !fs.existsSync(approvalPath)) {
+    throw new CanonicalRenderInputError("caption_approval_missing", "approved caption artifact is missing or outside the project");
+  }
+  const typographyPath = path.resolve(root, options.typographyPolicyPath);
+  if (!isContainedPath(root, typographyPath) || !fs.existsSync(typographyPath)) {
+    throw new CanonicalRenderInputError("caption_visual_treatment_profile_missing", "typography policy is missing or outside the project");
+  }
+  const patchCandidate = options.visualTreatmentPatchPath
+    ? path.resolve(root, options.visualTreatmentPatchPath)
+    : path.resolve(root, "07_package/caption_visual_treatment_patch.json");
+  if (options.visualTreatmentPatchPath && (!isContainedPath(root, patchCandidate) || !fs.existsSync(patchCandidate))) {
+    throw new CanonicalRenderInputError("caption_visual_treatment_path_invalid", "visual treatment patch is missing or outside the project");
+  }
+  const patchPath = fs.existsSync(patchCandidate) ? patchCandidate : undefined;
+  if (patchPath && (!isContainedPath(root, patchPath) || !fs.existsSync(patchPath))) {
+    throw new CanonicalRenderInputError("caption_visual_treatment_path_invalid", "visual treatment patch is missing or outside the project");
+  }
+  const approval = validateArtifact<CaptionApproval>(JSON.parse(fs.readFileSync(approvalPath, "utf8")), "caption-approval.schema.json");
+  const typographyPolicy = loadTypographyPolicy(typographyPath);
+  const patch = patchPath ? loadCaptionVisualTreatmentPatch(patchPath) : undefined;
+  const persistedContext = approval.approval.visual_treatment_context;
+  const persistedSafeZone = persistedContext?.safe_zone_profile;
+  const safeZonePath = options.platformSafeZoneProfilePath ?? persistedSafeZone?.path;
+  let effectiveSafeZoneHash = options.platformSafeZoneProfileHash
+    ?? persistedSafeZone?.sha256
+    ?? approval.approval.platform_safe_zone_profile_hash
+    ?? patch?.platform_safe_zone_profile_hash;
+  const safeZoneId = options.platformSafeZoneProfileId ?? persistedSafeZone?.profile_id;
+  let safeZoneProfile = options.platformSafeZoneProfile;
+  if (effectiveSafeZoneHash && !safeZonePath) {
+    throw new CanonicalRenderInputError(
+      "caption_visual_treatment_profile_missing",
+      "safe-zone context has a hash but no approved profile path",
+    );
+  }
+  if (safeZonePath) {
+    const absoluteSafeZonePath = path.resolve(root, safeZonePath);
+    if (!isContainedPath(root, absoluteSafeZonePath) || !fs.existsSync(absoluteSafeZonePath)) {
+      throw new CanonicalRenderInputError(
+        "caption_visual_treatment_profile_missing",
+        `approved safe-zone profile is missing or outside the project: ${safeZonePath}`,
+      );
+    }
+    const loaded = loadPlatformSafeZoneProfile(absoluteSafeZonePath);
+    if (effectiveSafeZoneHash && loaded.hash !== effectiveSafeZoneHash) {
+      throw new CanonicalRenderInputError(
+        "caption_visual_treatment_profile_missing",
+        `approved safe-zone profile hash is stale: ${safeZonePath}`,
+      );
+    }
+    if (safeZoneId && loaded.profile.profile_id !== safeZoneId) {
+      throw new CanonicalRenderInputError(
+        "caption_visual_treatment_profile_missing",
+        `approved safe-zone profile identity is stale: expected ${safeZoneId}, got ${loaded.profile.profile_id}`,
+      );
+    }
+    effectiveSafeZoneHash = loaded.hash;
+    safeZoneProfile = loaded.profile;
+  }
+  const relativeSafeZonePath = safeZonePath
+    ? path.relative(root, path.resolve(root, safeZonePath)).split(path.sep).join("/")
+    : undefined;
+  const accessibility = options.accessibility ?? persistedContext?.accessibility;
+  return resolveCaptionVisualTreatmentInput({
+    approval,
+    patch,
+    typography_policy: typographyPolicy,
+    platform_safe_zone_profile_hash: effectiveSafeZoneHash,
+    platform_safe_zone_profile_id: safeZoneId,
+    platform_safe_zone_profile_path: relativeSafeZonePath,
+    platform_safe_zone_profile: safeZoneProfile,
+    capabilities: options.rendererCapabilities ?? captionRendererCapabilitiesForPolicy(typographyPolicy),
+    accessibility,
+    require_approval_binding: options.requireApprovalBinding,
+  });
+}
+
+/**
+ * Production render/package boundaries always re-resolve live project
+ * artifacts. A supplied input is a test/host seam only when it is schema-valid
+ * and byte-for-byte equivalent in normalized content to that live result.
+ */
+export function resolveAndVerifyCanonicalCaptionVisualTreatmentInput(
+  projectDir: string,
+  options: CanonicalCaptionVisualTreatmentRenderOptions,
+): CaptionVisualTreatmentInput {
+  const canonical = resolveCanonicalCaptionVisualTreatmentInput(projectDir, options);
+  if (options.providedInput !== undefined) {
+    const supplied = validateArtifact<CaptionVisualTreatmentInput>(options.providedInput, "caption-visual-treatment-input.schema.json");
+    if (computeNormalizedJsonHash(supplied) !== computeNormalizedJsonHash(canonical)) {
+      throw new CanonicalRenderInputError(
+        "caption_visual_treatment_input_mismatch",
+        `supplied visual-treatment input does not exactly match the live canonical result: supplied=${supplied.input_hash} canonical=${canonical.input_hash}`,
+      );
+    }
+  }
+  return canonical;
 }

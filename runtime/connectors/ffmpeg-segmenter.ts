@@ -12,6 +12,7 @@ import {
   type AssetItem,
 } from "./ffprobe.js";
 import type { VisualQualityMeasurements } from "./ffmpeg-motion.js";
+import { hasTemporalVideo } from "../artifacts/source-media-capabilities.js";
 import {
   reduceEditorialObservation,
   stillImageApplicabilityContribution,
@@ -84,10 +85,10 @@ export interface SegmentItem {
       request_hash: string;
       ffmpeg_version?: string;
     };
-    summary?: Record<string, string | number | string[] | number[]>;
-    tags?: Record<string, string | number | string[] | number[]>;
-    quality_flags?: Record<string, string | number | string[] | number[]>;
-    visual_quality_measurements?: Record<string, string | number | string[] | number[]>;
+    summary?: Record<string, string | number | string[] | number[] | null>;
+    tags?: Record<string, string | number | string[] | number[] | null>;
+    quality_flags?: Record<string, string | number | string[] | number[] | null>;
+    visual_quality_measurements?: Record<string, string | number | string[] | number[] | null>;
   };
   /** Deterministic ffmpeg-derived shake/sharpness/exposure measurements. */
   visual_quality_measurements?: VisualQualityMeasurements;
@@ -766,7 +767,7 @@ export async function segmentAsset(
     return segmentStillImageAsset(asset, opts);
   }
 
-  if (!asset.video_stream && asset.audio_stream) {
+  if (!hasTemporalVideo(asset) && asset.audio_stream) {
     return segmentAudioOnlyAsset(filePath, asset, thresholds, opts);
   }
 

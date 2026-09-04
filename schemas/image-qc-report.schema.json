@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/image-qc-report.schema.json",
+  "title": "Video OS Image QC Report",
+  "description": "Pre-compile Issue 37 still-image QC report with Issue 44 capability classification and a maximum of two repair retries.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "artifact_version",
+    "created_at",
+    "project_id",
+    "profile_id",
+    "capability",
+    "outcome",
+    "policy",
+    "summary",
+    "assets",
+    "warnings",
+    "provenance"
+  ],
+  "properties": {
+    "version": { "const": "1.2.0" },
+    "artifact_version": { "const": "image-qc-v3" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "profile_id": { "type": "string", "minLength": 1 },
+    "capability": { "$ref": "#/$defs/capability" },
+    "outcome": { "$ref": "#/$defs/outcome" },
+    "policy": { "$ref": "#/$defs/policy" },
+    "summary": { "$ref": "#/$defs/summary" },
+    "assets": { "type": "array", "items": { "$ref": "#/$defs/asset-report" } },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "requirement", "provider", "model"],
+      "properties": {
+        "id": { "const": "visual_model" },
+        "requirement": { "enum": ["required", "optional"] },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "provider", "model", "error_code", "result_fingerprint"],
+      "properties": {
+        "classification": { "enum": ["available", "unavailable_optional", "execution_failed", "invalid_result", "qa_failed"] },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "error_code": {
+          "type": ["string", "null"],
+          "enum": ["HTTP_401", "HTTP_403", "GATED_REPOSITORY", "MODEL_CACHE_MISSING", "OPTIONAL_DEPENDENCY_MISSING", "OPTIONAL_UNAVAILABLE", "EXECUTION_TIMEOUT", "EXECUTION_CRASH", "EXECUTION_ERROR", "MALFORMED_RESPONSE", "MODEL_DETECTED_DEFECT", null]
+        },
+        "result_fingerprint": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approve_at_or_above", "max_regeneration_attempts", "critical_defect_rejects"],
+      "properties": {
+        "approve_at_or_above": { "type": "number", "minimum": 0, "maximum": 1 },
+        "max_regeneration_attempts": { "const": 2 },
+        "critical_defect_rejects": { "type": "boolean" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "image_asset_count", "inspected_assets", "approved_assets", "rejected_assets", "skipped_assets", "regeneration_attempts", "total_attempts"],
+      "properties": {
+        "status": { "enum": ["ready", "blocked", "skipped", "partial"] },
+        "image_asset_count": { "type": "integer", "minimum": 0 },
+        "inspected_assets": { "type": "integer", "minimum": 0 },
+        "approved_assets": { "type": "integer", "minimum": 0 },
+        "rejected_assets": { "type": "integer", "minimum": 0 },
+        "skipped_assets": { "type": "integer", "minimum": 0 },
+        "regeneration_attempts": { "type": "integer", "minimum": 0 },
+        "total_attempts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "asset-report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "frame_path", "frame_content_sha256", "inspected", "status", "overall_score", "attempts", "regeneration_attempts", "regeneration_providers", "regeneration_failures", "regeneration_skipped_reason", "unavailable_reason"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "frame_path": { "type": "string", "pattern": "^(?!/)[^\\u0000]+$" },
+        "frame_content_sha256": { "$ref": "#/$defs/hash" },
+        "inspected": { "type": "boolean" },
+        "status": { "enum": ["approved", "rejected", "skipped"] },
+        "overall_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "attempts": { "type": "array", "items": { "$ref": "#/$defs/attempt" } },
+        "regeneration_attempts": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "regeneration_providers": { "type": "array", "items": { "type": "string", "minLength": 1 }, "maxItems": 2 },
+        "regeneration_failures": { "type": "array", "items": { "enum": ["provider_error", "identical_bytes"] } },
+        "regeneration_skipped_reason": { "type": ["string", "null"] },
+        "unavailable_reason": { "type": ["string", "null"] }
+      }
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempt", "provider", "model", "prompt_sha256", "regeneration", "prompt_template_id", "prompt_hash", "repair_constraints", "inspection", "overall_score", "verdict", "rejection_reasons", "frame_content_sha256"],
+      "properties": {
+        "attempt": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "prompt_sha256": { "$ref": "#/$defs/hash" },
+        "regeneration": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["provider", "model"],
+          "properties": { "provider": { "type": "string", "minLength": 1 }, "model": { "type": "string", "minLength": 1 } }
+        },
+        "prompt_template_id": { "type": "string", "minLength": 1 },
+        "prompt_hash": { "$ref": "#/$defs/hash" },
+        "repair_constraints": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["negative", "positive"],
+          "properties": {
+            "negative": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "positive": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "inspection": { "$ref": "#/$defs/inspection" },
+        "overall_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "verdict": { "enum": ["approved", "rejected"] },
+        "rejection_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "frame_content_sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "inspection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["people_detected", "people_count", "hand_finger_count_check", "composition_artifact_check", "brief_semantic_consistency", "notes"],
+      "properties": {
+        "people_detected": { "type": "boolean" },
+        "people_count": { "type": ["integer", "null"], "minimum": 0 },
+        "hand_finger_count_check": { "$ref": "#/$defs/check-result" },
+        "composition_artifact_check": { "$ref": "#/$defs/check-result" },
+        "brief_semantic_consistency": { "$ref": "#/$defs/check-result" },
+        "notes": { "type": "array", "items": { "type": "string" }, "maxItems": 8 }
+      }
+    },
+    "check-result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluable", "score", "defects", "hands_detected", "expected_hands_max", "fingers_detected_max", "expected_fingers"],
+      "properties": {
+        "evaluable": { "type": "boolean" },
+        "score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "defects": { "type": "array", "items": { "$ref": "#/$defs/defect" } },
+        "hands_detected": { "type": ["integer", "null"], "minimum": 0 },
+        "expected_hands_max": { "type": ["integer", "null"], "minimum": 0 },
+        "fingers_detected_max": { "type": ["integer", "null"], "minimum": 0 },
+        "expected_fingers": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "defect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "description", "severity", "location"],
+      "properties": {
+        "code": { "enum": ["extra_hands", "extra_fingers", "thumb_rotation", "wrist_angle", "limb_anomaly", "unnecessary_frame_border", "grotesque_dense_cluster", "garbled_text", "wardrobe_mismatch", "prop_mismatch", "setting_mismatch", "other"] },
+        "description": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["critical", "major", "minor"] },
+        "location": { "type": ["string", "null"] }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "connector_version", "prompt_template_id", "prompt_hash", "response_format", "policy_hash", "brief_context_sha256", "brief_available", "inspection_provider", "inspection_model", "regeneration_provider", "regeneration_model", "execution_mode", "issue44_handoff"],
+      "properties": {
+        "producer": { "type": "string", "minLength": 1 },
+        "connector_version": { "type": "string", "minLength": 1 },
+        "prompt_template_id": { "type": "string", "minLength": 1 },
+        "prompt_hash": { "$ref": "#/$defs/hash" },
+        "response_format": { "type": "string", "minLength": 1 },
+        "policy_hash": { "$ref": "#/$defs/hash" },
+        "brief_context_sha256": { "$ref": "#/$defs/hash" },
+        "brief_available": { "type": "boolean" },
+        "inspection_provider": { "type": "string", "minLength": 1 },
+        "inspection_model": { "type": "string", "minLength": 1 },
+        "regeneration_provider": { "type": ["string", "null"] },
+        "regeneration_model": { "type": ["string", "null"] },
+        "execution_mode": { "enum": ["production", "test", "untrusted"] },
+        "issue44_handoff": { "type": ["string", "null"], "enum": ["optional_vlm_policy", null] }
+      }
+    }
+  }
+}

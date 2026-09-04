@@ -1,0 +1,13 @@
+{
+  "version": "1",
+  "project_id": "day3-equivalent-fixture",
+  "media_dir": "02_media",
+  "generated_at": "2026-08-31T00:00:00Z",
+  "items": [
+    { "asset_id": "AST_BODY", "source_locator": "day3-source.mp4", "local_source_path": "day3-source.mp4", "link_path": "day3-source.mp4", "kind": "asset", "media_kind": "video" },
+    { "asset_id": "AST_INTRO", "source_locator": "day3-source.mp4", "local_source_path": "day3-source.mp4", "link_path": "day3-source.mp4", "kind": "asset", "media_kind": "video" },
+    { "asset_id": "AST_CUTAWAY_1", "source_locator": "day3-source.mp4", "local_source_path": "day3-source.mp4", "link_path": "day3-source.mp4", "kind": "asset", "media_kind": "video" },
+    { "asset_id": "AST_CUTAWAY_2", "source_locator": "day3-source.mp4", "local_source_path": "day3-source.mp4", "link_path": "day3-source.mp4", "kind": "asset", "media_kind": "video" },
+    { "asset_id": "AST_CUTAWAY_3", "source_locator": "day3-source.mp4", "local_source_path": "day3-source.mp4", "link_path": "day3-source.mp4", "kind": "asset", "media_kind": "video" }
+  ]
+}

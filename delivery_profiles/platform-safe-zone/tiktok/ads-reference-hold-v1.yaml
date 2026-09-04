@@ -1,0 +1,29 @@
+version: platform-safe-zone-profile/v1
+profile_id: tiktok-ads-reference-hold-v1
+platform: tiktok
+surface: ads
+delivery_variant: ads-reference
+evidence_status: partial
+source_references:
+  - url: https://ads.tiktok.com/help/article/tiktok-auction-in-feed-ads?lang=en
+    retrieved_at: '2026-08-21'
+    published_date: null
+    owner: TikTok for Business
+    evidence_kind: official_documentation
+    notes: Ad safe-zone behavior varies by caption, dimension, and format; no device-specific screenshot was retrieved.
+measured_at: null
+geometry:
+  status: unknown
+  coordinate_system: unknown
+  viewport: { status: unknown }
+  ui_regions: { unknown: true, regions: [] }
+  safe_regions: { unknown: true, regions: [] }
+  method: unknown
+  confidence: unknown
+device_evidence: { status: unknown }
+screenshot_evidence: { status: unknown }
+supersession: { state: active }
+fallback:
+  mode: human_platform_preview
+  human_preview_required: true
+  reason: Ads documentation is not a device measurement.

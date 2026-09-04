@@ -13,6 +13,7 @@ import type { SourceContentIdentityCache } from "../source-content-identity.js";
 import { atomicWriteJson, readJsonIfExists } from "./stages/_util.js";
 import {
   applyMarlinEventsToSegments,
+  classifyMarlinFailure,
   extractTagsFromScene,
   MARLIN_REPORTER_METHOD,
   MarlinOptionalAnalysisError,
@@ -39,6 +40,8 @@ export interface MarlinStageOptions {
   marlinQueries?: string[];
   skipMarlin?: boolean;
   vlmOnly?: boolean;
+  /** Repo root for analysis policy resolution (external projects). */
+  repoRoot?: string;
 }
 
 function readCanonicalJsonIfExists<T>(filePath: string): T | undefined {
@@ -110,6 +113,7 @@ export async function runMarlinStage(
       queries: opts.marlinQueries,
       outputPath: stagedArtifactPath,
       applyToSegments: false,
+      repoRoot: opts.repoRoot,
     });
   } catch (error) {
     invalidateFile(stagedArtifactPath, "marlin_staged_artifact_cleanup_failed");
@@ -162,8 +166,19 @@ export async function runMarlinStage(
     throw error;
   }
   const segmentsJson = readCanonicalJsonIfExists<SegmentsJson>(segmentsPath);
+  // Explicit degraded completion: chunk-level failures keep their successful
+  // events in the published artifact, but the stage must not report silent
+  // success — surface the degraded assets through partial readiness.
+  const degradedAssetCount = (stagedArtifact.items ?? [])
+    .filter((item) => item.evaluation_status === "degraded").length;
   return {
-    readiness: { status: "ready", affectedCapabilities: [] },
+    readiness: degradedAssetCount > 0
+      ? {
+        status: "partial",
+        reason: `marlin_degraded_chunks:${degradedAssetCount}`,
+        affectedCapabilities: [...MARLIN_AFFECTED_CAPABILITIES],
+      }
+      : { status: "ready", affectedCapabilities: [] },
     segmentsJson,
   };
 }
@@ -410,18 +425,6 @@ export function appendMarlinGap(
     affected_capabilities: [...readiness.affectedCapabilities],
     attempted_at: new Date().toISOString(),
   });
-}
-
-function classifyMarlinFailure(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/timed?\s*out|timeout/i.test(message)) return "marlin_worker_timeout";
-  if (/model[^\n]*(?:missing|not found|unavailable)|model_not_found/i.test(message)) {
-    return "marlin_model_unavailable";
-  }
-  if (/\bENOENT\b|\bspawn\b|worker[^\n]*(?:missing|not found|unavailable)/i.test(message)) {
-    return "marlin_worker_unavailable";
-  }
-  return "marlin_worker_failure";
 }
 
 function invalidateFile(filePath: string, errorCode: string): void {

@@ -21,6 +21,10 @@ const DIRECTORIES_TO_ENSURE = [
   "07_package",
   "09_output",
 ];
+const GENERATED_TEMPLATE_ARTIFACTS = [
+  "04_plan/edit_blueprint.yaml",
+  "05_timeline/v001.timeline.json",
+] as const;
 
 export interface InitProjectCliArgs {
   projectId: string;
@@ -102,6 +106,12 @@ export function initProject(
   fs.mkdirSync(projectsDir, { recursive: true });
   fs.cpSync(templateDir, projectDir, { recursive: true });
 
+  // The template contains illustrative planning output. A newly initialized
+  // project must not expose those example IDs as canonical generated truth.
+  for (const relativePath of GENERATED_TEMPLATE_ARTIFACTS) {
+    fs.rmSync(path.join(projectDir, relativePath), { force: true });
+  }
+
   for (const relativeDir of DIRECTORIES_TO_ENSURE) {
     fs.mkdirSync(path.join(projectDir, relativeDir), { recursive: true });
   }
@@ -166,7 +176,6 @@ function hydrateTemplatePlaceholders(projectDir: string, projectId: string): voi
   const filesToPatch = [
     "project_state.yaml",
     "01_intent/unresolved_blockers.yaml",
-    "05_timeline/v001.timeline.json",
     "06_review/human_notes.yaml",
   ];
 

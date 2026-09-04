@@ -23,6 +23,7 @@ import {
   defaultOutputPath,
   renderPreviewSegment,
 } from "../runtime/preview/segment-renderer.js";
+import { renderBaselineFastPreview } from "../runtime/preview/baseline-fast-preview.js";
 
 import {
   clipMidpointSec,
@@ -310,11 +311,26 @@ describe("renderPreviewSegment integration", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-preview-"));
     execFileMock.mockReset();
     execFileMock.mockImplementation((
-      _cmd: string,
+      cmd: string,
       args: string[],
       _opts: unknown,
       cb: (err: Error | null, stdout?: string, stderr?: string) => void,
     ) => {
+      if (cmd === "ffprobe") {
+        cb(null, JSON.stringify({
+          streams: [{
+            codec_type: "video",
+            width: 1920,
+            height: 1080,
+            r_frame_rate: "24/1",
+            nb_read_packets: "360",
+            nb_frames: "360",
+            duration: "15.000000",
+          }],
+          format: { duration: "15.000000" },
+        }), "");
+        return;
+      }
       const outputPath = args[args.length - 1];
       if (typeof outputPath === "string" && !outputPath.startsWith("-")) {
         fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -445,6 +461,84 @@ describe("renderPreviewSegment integration", () => {
         sourceMap: emptySourceMap,
       }),
     ).rejects.toThrow("Source file not found for asset AST_001");
+  });
+
+  it("renders the baseline fast preview from canonical timeline inputs and records parity", async () => {
+    const { timelinePath, sourceMap } = setupProject();
+    const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as {
+      tracks: Record<string, unknown>;
+    };
+    fs.writeFileSync(timelinePath, JSON.stringify(timeline, null, 2), "utf-8");
+    fs.mkdirSync(path.join(tmpDir, "07_package"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "07_package/caption_draft.json"), JSON.stringify({ version: "test" }));
+    const ast003 = {
+      asset_id: "AST_003",
+      source_locator: path.join(tmpDir, "media", "ast_003.mov"),
+      local_source_path: path.join(tmpDir, "media", "ast_003.mov"),
+      link_path: "02_media/ast_003.mov",
+      source_content_sha256: `sha256:${"a".repeat(64)}`,
+    };
+    sourceMap.entries.push(ast003);
+    sourceMap.entryMap.set(ast003.asset_id, ast003);
+    fs.writeFileSync(path.join(tmpDir, "media", "ast_003.mov"), "stub", "utf-8");
+    for (const entry of sourceMap.entries) entry.source_content_sha256 = `sha256:${"a".repeat(64)}`;
+
+    const result = await renderBaselineFastPreview({
+      projectDir: tmpDir,
+      timelinePath,
+      sourceMap,
+      execFileImpl: execFileMock as unknown as typeof import("node:child_process").execFile,
+      assertMediaWriteReadyImpl: () => ({ ok: true, checks: [] }),
+    });
+    const receipt = JSON.parse(fs.readFileSync(result.receiptPath, "utf-8"));
+    expect(receipt.inputs.source_assets).toEqual([
+      { asset_id: "AST_001", source_content_sha256: `sha256:${"a".repeat(64)}`, status: "pinned" },
+      { asset_id: "AST_002", source_content_sha256: `sha256:${"a".repeat(64)}`, status: "pinned" },
+      { asset_id: "AST_003", source_content_sha256: `sha256:${"a".repeat(64)}`, status: "pinned" },
+    ]);
+    expect(receipt).toMatchObject({
+      preview_mode: "baseline_fast",
+      approval_status: "not_final_approval",
+      route: {
+        source: "canonical_timeline",
+        caption_layer_engine: "ffmpeg-libass",
+      },
+      inputs: {
+        content: { source: "canonical_timeline" },
+        caption_draft: { kind: "draft", path: "07_package/caption_draft.json" },
+      },
+      render_scope: {
+        video: "canonical_render",
+        captions: "not_requested",
+        content_overlays: "not_requested",
+        audio: "not_requested",
+      },
+      parity: {
+        status: "verified",
+        compared_with: "canonical_timeline",
+        frame_geometry: { expected_width: 1920, expected_height: 1080, matches: true },
+        duration: { canonical_video_frames: 360, selected_video_frames: 360, rendered_frames: 360, matches: true },
+        captions: { expected_clip_ids: [], applied_clip_ids: [], matches: true },
+        audio: { expected_clip_ids: [], applied_clip_ids: [], matches: true },
+        major_overlays: { expected_clip_ids: [], resolved_clip_ids: [], unapplied_clip_ids: [], matches: true },
+      },
+    });
+    expect(receipt.actual_output.ffprobe).toMatchObject({ width: 1920, height: 1080, fps_num: 24, fps_den: 1, duration_sec: 15, video_frame_count: 360 });
+    expect(receipt.applied_layers.content_overlays.status).toBe("not_requested");
+    const fastEncodeCall = execFileMock.mock.calls.find((call) => call[0] === "ffmpeg" && (call[1] as string[]).includes("ultrafast"));
+    expect(fastEncodeCall).toBeDefined();
+    expect((fastEncodeCall![1] as string[])).toContain("-ss");
+  });
+
+  it("surfaces baseline input failures instead of producing a false preview", async () => {
+    const { timelinePath } = setupProject();
+    await expect(renderBaselineFastPreview({
+      projectDir: tmpDir,
+      timelinePath,
+      sourceMap: { locatorMap: new Map(), entryMap: new Map(), entries: [] },
+      execFileImpl: execFileMock as unknown as typeof import("node:child_process").execFile,
+      assertMediaWriteReadyImpl: () => ({ ok: true, checks: [] }),
+    })).rejects.toThrow("Source file not found for asset AST_001");
   });
 });
 

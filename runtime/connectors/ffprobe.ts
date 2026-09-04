@@ -25,6 +25,7 @@ export interface FfprobeStream {
   sample_rate?: string;
   channels?: number;
   r_frame_rate?: string;
+  disposition?: { attached_pic?: number | boolean | string; [key: string]: unknown };
   tags?: { rotate?: string; [key: string]: unknown };
   side_data_list?: Array<{ rotation?: number; [key: string]: unknown }>;
   pix_fmt?: string;
@@ -61,6 +62,13 @@ export interface AudioStream {
   codec: string;
 }
 
+/** Canonical source capability facts emitted into assets.json. */
+export interface CanonicalSourceCapabilities {
+  has_video: boolean;
+  has_audio: boolean;
+  has_temporal_video: boolean;
+}
+
 export interface AssetItem {
   asset_id: string;
   filename: string;
@@ -78,6 +86,7 @@ export interface AssetItem {
   source_fingerprint: string;
   source_locator?: string;
   video_stream?: VideoStream;
+  source_capabilities?: CanonicalSourceCapabilities;
   frame_rate_mode?: "cfr" | "vfr" | "audio_only" | "still_image" | "unknown";
   rotation?: 0 | 90 | 180 | 270 | null;
   audio_stream?: AudioStream;
@@ -292,6 +301,7 @@ export function extractDurationUs(probe: FfprobeOutput): number {
     return Math.round(parseFloat(probe.format.duration) * 1_000_000);
   }
   for (const s of probe.streams) {
+    if (s.codec_type === "video" && !isTemporalVideoStream(s)) continue;
     if ((s as Record<string, unknown>)["duration"]) {
       return Math.round(
         parseFloat(String((s as Record<string, unknown>)["duration"])) * 1_000_000,
@@ -301,11 +311,31 @@ export function extractDurationUs(probe: FfprobeOutput): number {
   return 0;
 }
 
+/** True for ffprobe's still cover-art stream rather than temporal video. */
+export function isAttachedPictureStream(stream: Pick<FfprobeStream, "codec_type" | "disposition">): boolean {
+  if (stream.codec_type !== "video") return false;
+  const attachedPic = stream.disposition?.attached_pic;
+  return attachedPic === 1 || attachedPic === true || attachedPic === "1";
+}
+
+/** True only for a video stream that can carry temporal visual evidence. */
+export function isTemporalVideoStream(stream: Pick<FfprobeStream, "codec_type" | "disposition">): boolean {
+  return stream.codec_type === "video" && !isAttachedPictureStream(stream);
+}
+
+/** Extract the first temporal video stream, ignoring attached cover art. */
+export function extractTemporalVideoStream(probe: FfprobeOutput): FfprobeStream | undefined {
+  return probe.streams.find((stream) => isTemporalVideoStream(stream));
+}
+
 /**
  * Extract video stream info from ffprobe output.
  */
 export function extractVideoStream(probe: FfprobeOutput): VideoStream | undefined {
-  const vs = probe.streams.find((s) => s.codec_type === "video");
+  // Keep an attached picture observable as has_video metadata, but prefer a
+  // temporal stream whenever a container exposes both kinds of video stream.
+  const vs = probe.streams.find((s) => isTemporalVideoStream(s))
+    ?? probe.streams.find((s) => s.codec_type === "video");
   if (!vs || !vs.width || !vs.height) return undefined;
 
   const fps = parseFps(vs.avg_frame_rate ?? "30/1");
@@ -319,7 +349,7 @@ export function extractVideoStream(probe: FfprobeOutput): VideoStream | undefine
 }
 
 export function extractFrameRateMode(probe: FfprobeOutput): "cfr" | "vfr" | "audio_only" | "unknown" {
-  const stream = probe.streams.find((item) => item.codec_type === "video");
+  const stream = extractTemporalVideoStream(probe);
   if (!stream && probe.streams.some((item) => item.codec_type === "audio")) return "audio_only";
   if (!stream?.avg_frame_rate || !stream.r_frame_rate) return "unknown";
   const average = rationalValue(stream.avg_frame_rate);
@@ -329,7 +359,7 @@ export function extractFrameRateMode(probe: FfprobeOutput): "cfr" | "vfr" | "aud
 }
 
 export function extractRotation(probe: FfprobeOutput): 0 | 90 | 180 | 270 | null {
-  const stream = probe.streams.find((item) => item.codec_type === "video");
+  const stream = extractTemporalVideoStream(probe);
   if (!stream) return null;
   const raw = stream.side_data_list?.find((item) => typeof item.rotation === "number")?.rotation
     ?? (stream.tags?.rotate !== undefined ? Number(stream.tags.rotate) : undefined);
@@ -418,6 +448,7 @@ export async function ingestAsset(
   const probedDurationUs = extractDurationUs(probe);
   const durationUs = mediaKind === "image" ? 0 : probedDurationUs;
   const videoStream = extractVideoStream(probe);
+  const temporalVideoStream = extractTemporalVideoStream(probe);
   const frameRateMode = extractFrameRateMode(probe);
   const probedRotation = extractRotation(probe);
   const exifRotation = mediaKind === "image" ? extractJpegExifRotation(absPath) : null;
@@ -496,6 +527,11 @@ export async function ingestAsset(
     source_fingerprint: fingerprint,
     source_locator: sourceLocator,
     video_stream: videoStream,
+    source_capabilities: {
+      has_video: probe.streams.some((stream) => stream.codec_type === "video"),
+      has_audio: probe.streams.some((stream) => stream.codec_type === "audio"),
+      has_temporal_video: mediaKind === "image" ? false : Boolean(temporalVideoStream),
+    },
     frame_rate_mode: mediaKind === "image" ? "still_image" : frameRateMode,
     rotation,
     audio_stream: audioStream,

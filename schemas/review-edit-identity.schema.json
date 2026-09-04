@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/review-edit-identity.schema.json",
+  "title": "Canonical review edit identity receipt",
+  "type": "object",
+  "required": ["version", "project_id", "canonical_timeline", "accepted_patch", "derived_mapping", "review_timeline", "cut_identity"],
+  "properties": {
+    "version": { "const": "review-edit-identity/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "canonical_timeline": { "$ref": "#/$defs/canonicalTimeline" },
+    "accepted_patch": {
+      "type": "object",
+      "required": ["path", "sha256", "version", "status"],
+      "properties": {
+        "path": { "const": "06_review/review_patch.json" },
+        "sha256": { "$ref": "#/$defs/hash" },
+        "version": { "const": "review-patch/v2" },
+        "status": { "const": "accepted" }
+      },
+      "additionalProperties": false
+    },
+    "derived_mapping": {
+      "type": "object",
+      "required": ["path", "version", "sha256"],
+      "properties": {
+        "path": { "const": "05_timeline/derived-frame-mapping.json" },
+        "version": { "const": "derived-frame-mapping/v1" },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "review_timeline": {
+      "allOf": [
+        { "$ref": "#/$defs/timeline" },
+        { "properties": { "path": { "type": "string", "minLength": 1 } }, "required": ["path"] }
+      ]
+    },
+    "cut_identity": { "$ref": "#/$defs/hash" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "timeline": {
+      "type": "object",
+      "required": ["version", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    },
+    "canonicalTimeline": {
+      "type": "object",
+      "required": ["path", "version", "sha256"],
+      "properties": {
+        "path": { "const": "05_timeline/canonical-timeline.json" },
+        "version": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

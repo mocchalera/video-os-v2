@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "private-pilot-gate-receipt.schema.json",
+  "title": "Video OS private pilot gate receipt",
+  "description": "One independent evidence record for one private-pilot gate. Status, decision, evidence, provenance, and freshness are intentionally not shared with other gates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "pilot_id",
+    "project_id",
+    "gate",
+    "requirement",
+    "status",
+    "decision",
+    "evidence",
+    "provenance",
+    "freshness"
+  ],
+  "properties": {
+    "version": { "const": "private-pilot-gate-receipt/v1" },
+    "pilot_id": { "type": "string", "minLength": 1 },
+    "project_id": { "type": "string", "minLength": 1 },
+    "gate": {
+      "enum": ["agent_qa", "human_visual_audio", "nle_handoff", "platform_preview"]
+    },
+    "requirement": { "enum": ["required", "not_required"] },
+    "status": {
+      "enum": [
+        "missing",
+        "pending",
+        "passed",
+        "approved",
+        "confirmed",
+        "not_required",
+        "failed",
+        "rejected",
+        "stale",
+        "mismatched"
+      ]
+    },
+    "decision": {
+      "enum": ["hold", "pass", "approve", "reject", "not_required"]
+    },
+    "evidence": { "$ref": "#/$defs/evidence" },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "freshness": { "$ref": "#/$defs/freshness" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "gate": { "enum": ["agent_qa", "human_visual_audio", "platform_preview"] } },
+        "required": ["gate"]
+      },
+      "then": {
+        "properties": { "requirement": { "const": "required" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate": { "const": "agent_qa" } },
+        "required": ["gate"]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "record_type": { "const": "agent_qa" },
+              "checks": { "$ref": "#/$defs/agentChecks" }
+            },
+            "required": ["checks"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate": { "const": "human_visual_audio" } },
+        "required": ["gate"]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "record_type": { "const": "human_visual_audio" }
+            },
+            "required": ["human_review"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate": { "const": "nle_handoff" } },
+        "required": ["gate"]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "record_type": { "const": "nle_handoff" }
+            },
+            "required": ["handoff"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "gate": { "const": "platform_preview" } },
+        "required": ["gate"]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "record_type": { "const": "platform_preview" }
+            },
+            "required": ["platform_preview"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gate": { "const": "nle_handoff" },
+          "requirement": { "const": "not_required" }
+        },
+        "required": ["gate", "requirement"]
+      },
+      "then": {
+        "properties": {
+          "status": { "const": "not_required" },
+          "decision": { "const": "not_required" },
+          "evidence": {
+            "properties": {
+              "handoff": {
+                "properties": {
+                  "confirmation": { "const": "not_required" },
+                  "route_kind": { "const": "not_applicable" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_type", "summary", "recorded_at", "recorded_by", "artifacts"],
+      "properties": {
+        "record_type": {
+          "enum": ["agent_qa", "human_visual_audio", "nle_handoff", "platform_preview"]
+        },
+        "summary": { "type": "string", "minLength": 1 },
+        "recorded_at": { "type": "string", "format": "date-time" },
+        "recorded_by": { "type": "string", "minLength": 1 },
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/artifactRef" }
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "status", "details"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["pass", "fail", "not_run"] },
+              "details": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "human_review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reviewed", "reviewer", "visual", "audio", "decision"],
+          "properties": {
+            "reviewed": { "type": "boolean" },
+            "reviewer": { "type": "string", "minLength": 1 },
+            "visual": { "type": "boolean" },
+            "audio": { "type": "boolean" },
+            "decision": { "enum": ["approved", "pending", "rejected"] }
+          }
+        },
+        "handoff": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmation", "route_kind", "artifacts"],
+          "properties": {
+            "confirmation": { "enum": ["confirmed", "pending", "rejected", "not_required"] },
+            "route_kind": {
+              "enum": ["canonical_engine_render", "supplied_final", "external_manual_nle", "not_applicable"]
+            },
+            "artifacts": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/artifactRef" }
+            }
+          }
+        },
+        "platform_preview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["platform", "surface", "profile_id", "profile", "profile_evidence_status", "profile_supersession_state", "current_profile", "human_preview", "safe_zone_receipt"],
+          "properties": {
+            "platform": { "enum": ["instagram", "tiktok", "youtube_shorts", "fixture"] },
+            "surface": { "enum": ["organic", "ads", "fixture"] },
+            "profile_id": { "type": "string", "minLength": 1 },
+            "profile": { "$ref": "#/$defs/artifactRef" },
+            "profile_evidence_status": { "enum": ["verified", "partial", "unavailable", "stale"] },
+            "profile_supersession_state": { "enum": ["active", "stale", "superseded", "deprecated"] },
+            "current_profile": { "type": "boolean" },
+            "human_preview": { "type": "boolean" },
+            "safe_zone_receipt": { "$ref": "#/$defs/artifactRef" }
+          }
+        }
+      }
+    },
+    "agentChecks": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "details"],
+        "properties": {
+          "id": { "enum": ["schema", "timing", "caption", "safe-zone", "audio", "SFX", "route", "accessibility"] },
+          "status": { "const": "pass" },
+          "details": { "type": "string", "minLength": 1 }
+        }
+      },
+      "allOf": [
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "schema" } } } },
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "timing" } } } },
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "caption" } } } },
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "safe-zone" } } } },
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "audio" } } } },
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "SFX" } } } },
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "route" } } } },
+        { "contains": { "type": "object", "required": ["id"], "properties": { "id": { "const": "accessibility" } } } }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer", "method", "captured_at", "inputs", "synthetic_fixture"],
+      "properties": {
+        "producer": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "minLength": 1 },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "inputs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/artifactRef" }
+        },
+        "profile": { "$ref": "#/$defs/artifactRef" },
+        "synthetic_fixture": { "type": "boolean" }
+      }
+    },
+    "freshness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "checked_at", "input_fingerprint", "reason"],
+      "properties": {
+        "status": { "enum": ["fresh", "stale", "unknown", "mismatched"] },
+        "checked_at": { "type": "string", "format": "date-time" },
+        "input_fingerprint": { "$ref": "#/$defs/sha256" },
+        "valid_until": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

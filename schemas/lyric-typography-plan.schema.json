@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lyric-typography-plan.schema.json",
+  "title": "Canonical lyric typography plan (Issue 36)",
+  "description": "Measured, sanitized, section-aware telop plan for lyric MVs: two-tier safe-zone layout, poster boundary-cross positioning, font capability receipts, and the removed-metadata audit.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "plan_id", "input_hash", "positioning", "frame", "safe_zone", "boundary", "measurement", "fonts", "cues", "removed_metadata", "violations", "accessibility"],
+  "properties": {
+    "version": { "const": "lyric-typography-plan/v1" },
+    "plan_id": { "type": "string", "pattern": "^LTP_[a-f0-9]{24}$" },
+    "input_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "positioning": { "enum": ["poster_boundary_cross", "bottom_center"] },
+    "measurement": {
+      "type": "object", "additionalProperties": false, "required": ["method"],
+      "properties": { "method": { "enum": ["glyph_advance/v1", "display_units/v1"] } }
+    },
+    "frame": {
+      "type": "object", "additionalProperties": false, "required": ["width", "height"],
+      "properties": { "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 } }
+    },
+    "safe_zone": {
+      "type": "object", "additionalProperties": false, "required": ["left_px", "right_px", "safe_width_px"],
+      "properties": { "left_px": { "type": "number", "minimum": 0 }, "right_px": { "type": "number", "minimum": 0 }, "safe_width_px": { "type": "number", "exclusiveMinimum": 0 } }
+    },
+    "boundary": {
+      "type": "object", "additionalProperties": false, "required": ["artwork_rect", "boundary_y"],
+      "properties": {
+        "artwork_rect": {
+          "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"],
+          "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "width": { "type": "number", "exclusiveMinimum": 0 }, "height": { "type": "number", "exclusiveMinimum": 0 } }
+        },
+        "boundary_y": { "type": "number" }
+      }
+    },
+    "fonts": {
+      "type": "object", "additionalProperties": false, "required": ["verse", "chorus", "punk"],
+      "properties": {
+        "verse": { "$ref": "#/$defs/font_resolution" },
+        "chorus": { "$ref": "#/$defs/font_resolution" },
+        "punk": { "$ref": "#/$defs/font_resolution" }
+      }
+    },
+    "cues": { "type": "array", "items": { "$ref": "#/$defs/cue" } },
+    "removed_metadata": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["line", "reason"],
+        "properties": { "line": { "type": "string" }, "reason": { "type": "string" } }
+      }
+    },
+    "violations": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["code", "message"],
+        "properties": { "code": { "type": "string" }, "message": { "type": "string" } }
+      }
+    },
+    "accessibility": {
+      "type": "object", "additionalProperties": false, "required": ["reduced_motion"],
+      "properties": { "reduced_motion": { "type": "boolean" } }
+    },
+    "authority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "approval_sha256", "timeline_sha256", "text_authority_sha256", "timing_authority_sha256"],
+      "properties": {
+        "kind": { "const": "authored_caption_approval" },
+        "approval_sha256": { "$ref": "#/$defs/sha256" },
+        "timeline_sha256": { "$ref": "#/$defs/sha256" },
+        "text_authority_sha256": { "$ref": "#/$defs/sha256" },
+        "timing_authority_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "font_resolution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requested_family", "resolved_family", "capability", "fallback_used", "reason", "render_binding"],
+      "properties": {
+        "requested_family": { "type": "string", "minLength": 1 },
+        "resolved_family": { "type": "string", "minLength": 1 },
+        "capability": { "enum": ["native", "bundled_fallback"] },
+        "fallback_used": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 1 },
+        "font_path": { "type": "string", "minLength": 1 },
+        "face_index": { "type": "integer", "minimum": 0 },
+        "postscript_name": { "type": "string", "minLength": 1 },
+        "font_sha256": { "type": "string", "minLength": 1 },
+        "render_binding": { "enum": ["binary_bound", "degraded"] }
+      }
+    },
+    "two_tier_line": {
+      "type": "object", "additionalProperties": false,
+      "required": ["text", "tier", "font_size_px", "line_height_px", "measured_width_px", "ink_width_px", "fits_safe_width"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "tier": { "enum": ["main", "sub"] },
+        "font_size_px": { "type": "number", "exclusiveMinimum": 0 },
+        "line_height_px": { "type": "number", "exclusiveMinimum": 0 },
+        "measured_width_px": { "type": "number", "minimum": 0 },
+        "ink_width_px": { "type": "number", "minimum": 0 },
+        "fits_safe_width": { "type": "boolean" }
+      }
+    },
+    "staccato_char": {
+      "type": "object", "additionalProperties": false,
+      "required": ["char", "start_sec", "end_sec", "font_size_px", "measured_width_px", "ink_width_px"],
+      "properties": {
+        "char": { "type": "string", "minLength": 1 },
+        "start_sec": { "type": "number" },
+        "end_sec": { "type": "number" },
+        "font_size_px": { "type": "number", "exclusiveMinimum": 0 },
+        "measured_width_px": { "type": "number", "minimum": 0 },
+        "ink_width_px": { "type": "number", "minimum": 0 }
+      }
+    },
+    "position": {
+      "type": "object", "additionalProperties": false,
+      "required": ["margin_v_px", "margin_v_main_px", "margin_v_sub_px", "text_top_y", "text_bottom_y", "crosses_boundary", "boundary_y", "content_width_px", "left_x", "right_x", "within_safe_zone"],
+      "properties": {
+        "margin_v_px": { "type": "number", "minimum": 0 },
+        "margin_v_main_px": { "type": "number", "minimum": 0 },
+        "margin_v_sub_px": { "type": "number", "minimum": 0 },
+        "text_top_y": { "type": "number" },
+        "text_bottom_y": { "type": "number" },
+        "crosses_boundary": { "type": "boolean" },
+        "boundary_y": { "type": "number" },
+        "content_width_px": { "type": "number", "minimum": 0 },
+        "left_x": { "type": "number" },
+        "right_x": { "type": "number" },
+        "within_safe_zone": { "type": "boolean" }
+      }
+    },
+    "cue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["plan_cue_id", "cue_id", "line_id", "kind", "start_sec", "end_sec", "section_role", "style_name", "position", "raw_text", "sanitized_text", "removed_tokens"],
+      "properties": {
+        "plan_cue_id": { "type": "string", "pattern": "^LTP_[a-f0-9]{24}_C[0-9]{4}$" },
+        "cue_id": { "type": "string", "minLength": 1 },
+        "line_id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["two_tier", "staccato"] },
+        "start_sec": { "type": "number", "minimum": 0 },
+        "end_sec": { "type": "number" },
+        "section_role": { "enum": ["verse", "chorus", "punk"] },
+        "style_name": { "enum": ["LyricVerse", "LyricChorus", "LyricPunk"] },
+        "lines": { "type": "array", "minItems": 1, "maxItems": 2, "items": { "$ref": "#/$defs/two_tier_line" } },
+        "chars": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/staccato_char" } },
+        "glow_color": { "enum": ["cyan", "amber"] },
+        "position": { "$ref": "#/$defs/position" },
+        "raw_text": { "type": "string" },
+        "sanitized_text": { "type": "string" },
+        "removed_tokens": { "type": "array", "items": { "type": "string" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "two_tier" } } },
+          "then": { "required": ["lines"] }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "staccato" } } },
+          "then": { "required": ["chars"] }
+        }
+      ]
+    }
+  }
+}

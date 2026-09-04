@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SegmentItem } from "../runtime/connectors/ffmpeg-segmenter.js";
 import type { AssetItem } from "../runtime/connectors/ffprobe.js";
 import type { VisualQualityMeasurements } from "../runtime/connectors/ffmpeg-motion.js";
@@ -15,6 +15,7 @@ import {
   deterministicObservationContribution,
   removeEditorialObservationProducer,
   reduceEditorialObservation,
+  stillImageApplicabilityContribution,
   type ObservationContribution,
 } from "../runtime/pipeline/stages/editorial-observation.js";
 import {
@@ -25,7 +26,8 @@ import {
 } from "../runtime/pipeline/stages/vlm.js";
 import { mergeAppraiserVisualQuality } from "../runtime/pipeline/stages/appraiser.js";
 import { runVisualQualityMeasurementStage } from "../runtime/pipeline/stages/visual-quality.js";
-import { SourceContentIdentityCache } from "../runtime/source-content-identity.js";
+import { preserveVlmOnlySegmentFields } from "../runtime/pipeline/analysis-artifact-restoration.js";
+import { sha256FileHex, SourceContentIdentityCache } from "../runtime/source-content-identity.js";
 
 const require_ = createRequire(import.meta.url);
 const Ajv2020 = require_("ajv/dist/2020") as new (opts: Record<string, unknown>) => {
@@ -89,6 +91,7 @@ function segment(overrides: Partial<SegmentItem> = {}): SegmentItem {
 const asset: AssetItem = {
   asset_id: "AST_EYE_010A",
   filename: "test-clip-5s.mp4",
+  media_kind: "video",
   duration_us: 5_000_000,
   has_transcript: false,
   transcript_ref: null,
@@ -97,6 +100,11 @@ const asset: AssetItem = {
   quality_flags: [],
   tags: [],
   source_fingerprint: "fixture",
+  source_capabilities: {
+    has_video: true,
+    has_audio: false,
+    has_temporal_video: true,
+  },
   contact_sheet_ids: [],
   analysis_status: "pending",
 };
@@ -104,6 +112,8 @@ const asset: AssetItem = {
 function mockGroundedVlm(options: {
   subjectMotionDirection?: "left" | "right";
   textPresence?: "present" | "absent";
+  includeObservationConfidence?: boolean;
+  omitTextPresence?: boolean;
 } = {}): VlmFn {
   return async (framePaths) => {
     expect(framePaths.length).toBeGreaterThan(0);
@@ -131,15 +141,21 @@ function mockGroundedVlm(options: {
           camera_axis: "unknown",
           dominant_subject_type: "person",
           dominant_colors: ["green", "blue"],
-          text_presence: options.textPresence ?? "absent",
-          confidence: {
-            tags: 0.9,
-            motion: 0.8,
-            framing: 0.85,
-            direction: 0.7,
-            appearance: 0.8,
-            text: 0.75,
-          },
+          ...(!options.omitTextPresence
+            ? { text_presence: options.textPresence ?? "absent" }
+            : {}),
+          ...(options.includeObservationConfidence !== false
+            ? {
+                confidence: {
+                  tags: 0.9,
+                  motion: 0.8,
+                  framing: 0.85,
+                  direction: 0.7,
+                  appearance: 0.8,
+                  text: 0.75,
+                },
+              }
+            : {}),
         },
         visual_quality: {
           scores: {
@@ -167,6 +183,287 @@ beforeAll(() => fs.mkdirSync(OUTPUT_DIR, { recursive: true }));
 afterAll(() => fs.rmSync(OUTPUT_DIR, { recursive: true, force: true }));
 
 describe("EYE-010A editorial observation contract", () => {
+  it("completes truthful still observations before an exhausted video deadline", async () => {
+    const stillFrame = path.join(OUTPUT_DIR, "still-priority-frame.png");
+    fs.copyFileSync(SOURCE_FIXTURE, stillFrame);
+    const sourceSha = sha256FileHex(stillFrame);
+    const videoAssets = Array.from({ length: 13 }, (_, index): AssetItem => ({
+      ...asset,
+      asset_id: `AST_VIDEO_${String(index).padStart(2, "0")}`,
+      filename: `video-${String(index).padStart(2, "0")}.mov`,
+      media_kind: "video",
+      segment_ids: [`SEG_VIDEO_${String(index).padStart(2, "0")}`],
+    }));
+    const stillAssets = Array.from({ length: 3 }, (_, index): AssetItem => ({
+      ...asset,
+      asset_id: `AST_STILL_${index}`,
+      filename: `IMG_963${index}.png`,
+      media_kind: "image",
+      duration_us: 1,
+      segment_ids: [`SEG_STILL_${index}`],
+      source_content_sha256: sourceSha,
+      still_image: {
+        normalization_producer: "ffmpeg-still-normalizer",
+        normalization_producer_version: "1",
+        normalized_frame_path: path.relative(OUTPUT_DIR, stillFrame),
+        normalized_frame_content_sha256: sourceSha,
+        source_width: 1080,
+        source_height: 1920,
+        decoded_width: 1080,
+        decoded_height: 1920,
+        source_pixel_format: "rgb24",
+        normalized_pixel_format: "rgb24",
+        source_has_alpha: false,
+        normalized_has_alpha: false,
+        source_rotation: null,
+        orientation_normalization: {
+          status: "not_needed",
+          method: "none",
+          transform: "none",
+          orientation_source: "none",
+        },
+        color_profile: {
+          icc_profile: "unknown",
+          color_range: null,
+          color_space: null,
+          color_transfer: null,
+          color_primaries: null,
+        },
+      },
+    }));
+    const assets = [...videoAssets, ...stillAssets];
+    const segments = assets.map((item): SegmentItem => segment({
+      segment_id: item.segment_ids[0],
+      asset_id: item.asset_id,
+      src_out_us: item.media_kind === "image" ? 1 : 5_000_000,
+      duration_us: item.media_kind === "image" ? 1 : 5_000_000,
+      rep_frame_us: item.media_kind === "image" ? 0 : 2_500_000,
+      transcript_excerpt: item.asset_id,
+      segment_type: item.media_kind === "image" ? "static" : "general",
+    }));
+    const documents = {
+      assets: { project_id: "still-priority", artifact_version: "1", items: assets },
+      segments: { project_id: "still-priority", artifact_version: "1", items: segments },
+    };
+    const stillIds = new Set(stillAssets.map((item) => item.asset_id));
+    const stillPolicyHash = computeVlmCachePolicyHash(policy, sampling, 100_000);
+    for (const item of documents.segments.items.filter((candidate) => stillIds.has(candidate.asset_id))) {
+      item.editorial_observation = reduceEditorialObservation(
+        item,
+        item.editorial_observation,
+        [stillImageApplicabilityContribution(item)],
+      );
+    }
+    const sourceFileMap = new Map(assets.map((item) => [
+      item.asset_id,
+      item.media_kind === "image" ? stillFrame : SOURCE_FIXTURE,
+    ]));
+
+    await runVisualQualityMeasurementStage({
+      segmentsJson: documents.segments,
+      sourceFileMap,
+      segmentsOutputPath: path.join(OUTPUT_DIR, "still-priority-segments.json"),
+      policyHash: stillPolicyHash,
+      eligibleAssetIds: stillIds,
+      assetMediaKinds: new Map(assets.map((item) => [item.asset_id, item.media_kind ?? "unknown"])),
+      analyzeFn: async () => deterministicStillMeasurement(0.42, "still-priority-test"),
+    });
+    const preVlmStill = structuredClone(
+      documents.segments.items.find((item) => item.asset_id === stillAssets[0].asset_id)!,
+    );
+
+    const callOrder: string[] = [];
+    let schedulerNow = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => schedulerNow);
+    // The canonical #40 response schema requires all editorial confidence
+    // groups, so this fixture supplies the provider-owned confidence fields.
+    const groundedVlm = mockGroundedVlm();
+    const result = await runParallelVlmAnalysis({
+      assets,
+      segments,
+      vlmPolicy: policy,
+      samplingPolicy: sampling,
+      minSegmentDurationUs: 100_000,
+      concurrency: 2,
+      deadlineAtMs: 80,
+      sourceFileMap,
+      outputDir: OUTPUT_DIR,
+      policyHash: stillPolicyHash,
+      sourceIdentityCache: new SourceContentIdentityCache(),
+      frameExecFileImpl: (_command, args, _options, callback) => {
+        fs.writeFileSync(args.at(-1)!, "frame");
+        callback(null, "", "");
+      },
+      vlmFn: async (framePaths, prompt, options) => {
+        const assetId = assets.find((item) => prompt.includes(item.asset_id))!.asset_id;
+        callOrder.push(assetId);
+        if (callOrder.filter((calledAssetId) => stillIds.has(calledAssetId)).length === 3) {
+          schedulerNow = 80;
+        }
+        if (!stillIds.has(assetId)) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        return groundedVlm(framePaths, prompt, options);
+      },
+    });
+    const reduced = vlmReduce(
+      result.shards,
+      documents.assets,
+      documents.segments,
+      stillPolicyHash,
+      policy.response_format,
+      "unused",
+      "unused",
+      false,
+    );
+    nowSpy.mockRestore();
+
+    expect(callOrder).toEqual(stillAssets.map((item) => item.asset_id));
+    for (const still of stillAssets) {
+      const observation = reduced.segments.items.find((item) => item.asset_id === still.asset_id)!
+        .editorial_observation!;
+      expect(observation.status).toBe("ready");
+      expect(Object.keys(observation.confidence).sort()).toEqual([
+        "appearance",
+        "framing",
+        "tags",
+        "text",
+      ]);
+      expect(observation.confidence).toMatchObject({
+        tags: { score: 0.9 },
+        framing: { score: 0.85 },
+        appearance: { score: 0.8 },
+        text: { score: 0.75 },
+      });
+      expect(observation.avg_luma).toBe(0.42);
+      expect(observation.provenance.producers.map((producer) => producer.producer)).toEqual(
+        expect.arrayContaining(["deterministic_measurement", "grounded_vlm"]),
+      );
+    }
+
+    const cachedStill = reduced.segments.items.find((item) => item.asset_id === stillAssets[0].asset_id)!;
+    const cachedCurrent = structuredClone(preVlmStill);
+    const cacheDecisions = new Map();
+    const accepted = hydrateCachedVlmSegments({
+      currentSegments: [cachedCurrent],
+      cachedSegments: [cachedStill],
+      vlmPolicy: policy,
+      policyHash: stillPolicyHash,
+      samplingPolicy: sampling,
+      minSegmentDurationUs: 100_000,
+      sourceFileMap,
+      outputDir: OUTPUT_DIR,
+      sourceIdentityCache: new SourceContentIdentityCache(),
+      cacheDecisions,
+      assets: stillAssets,
+    });
+    expect(accepted.has(cachedCurrent.segment_id), JSON.stringify(cacheDecisions.get(cachedCurrent.segment_id)))
+      .toBe(true);
+    expect(cachedCurrent.editorial_observation?.status).toBe("ready");
+    expect(cachedCurrent.editorial_observation?.producer_snapshots?.grounded_vlm?.producer.cache_decision)
+      .toBe("accepted");
+
+    const vlmOnlyPreserved = preserveVlmOnlySegmentFields(
+      { project_id: "still-priority", artifact_version: "1", items: [structuredClone(cachedStill)] },
+      { project_id: "still-priority", artifact_version: "1", items: [structuredClone(preVlmStill)] },
+    ).items[0];
+    expect(vlmOnlyPreserved.editorial_observation?.status).toBe("ready");
+    expect(vlmOnlyPreserved.editorial_observation?.producer_snapshots?.grounded_vlm?.status).toBe("ready");
+
+    const failedStill = structuredClone(preVlmStill);
+    const failed = await runParallelVlmAnalysis({
+      assets: [stillAssets[0]],
+      segments: [failedStill],
+      vlmPolicy: policy,
+      samplingPolicy: sampling,
+      minSegmentDurationUs: 100_000,
+      sourceFileMap,
+      outputDir: OUTPUT_DIR,
+      vlmFn: async () => { throw new Error("controlled_still_provider_failure"); },
+    });
+    expect(failed.summary.failedAssets[0]?.error).toContain("vlm_call_failed");
+    const failedReduced = vlmReduce(
+      failed.shards,
+      { ...documents.assets, items: [stillAssets[0]] },
+      { ...documents.segments, items: [failedStill] },
+      "still-priority",
+      policy.response_format,
+      "unused",
+      "unused",
+      false,
+    );
+    expect(failedReduced.segments.items[0].editorial_observation?.status).not.toBe("ready");
+    expect(failedReduced.segments.items[0].editorial_observation?.warnings.join(" ")).toContain("grounded_vlm_gap");
+
+    const parseFailedStill = structuredClone(preVlmStill);
+    const parseFailed = await runParallelVlmAnalysis({
+      assets: [stillAssets[0]],
+      segments: [parseFailedStill],
+      vlmPolicy: policy,
+      samplingPolicy: sampling,
+      minSegmentDurationUs: 100_000,
+      sourceFileMap,
+      outputDir: OUTPUT_DIR,
+      vlmFn: async () => ({ rawJson: '{"editorial_observation":' }),
+    });
+    expect(parseFailed.summary.failedAssets[0]?.error).toContain("vlm_response_truncated");
+    const parseFailedReduced = vlmReduce(
+      parseFailed.shards,
+      { ...documents.assets, items: [stillAssets[0]] },
+      { ...documents.segments, items: [parseFailedStill] },
+      "still-priority",
+      policy.response_format,
+      "unused",
+      "unused",
+      false,
+    ).segments.items[0];
+    expect(parseFailedReduced.editorial_observation?.status).not.toBe("ready");
+    expect(parseFailedReduced.editorial_observation?.warnings.join(" ")).toContain("vlm_response_truncated");
+    expect(parseFailedReduced.provenance.tags).toBeUndefined();
+
+    const incompleteStill = structuredClone(preVlmStill);
+    const incomplete = await runParallelVlmAnalysis({
+      assets: [stillAssets[0]],
+      segments: [incompleteStill],
+      vlmPolicy: policy,
+      samplingPolicy: sampling,
+      minSegmentDurationUs: 100_000,
+      sourceFileMap,
+      outputDir: OUTPUT_DIR,
+      vlmFn: mockGroundedVlm({ includeObservationConfidence: false, omitTextPresence: true }),
+    });
+    const incompleteReduced = vlmReduce(
+      incomplete.shards,
+      { ...documents.assets, items: [stillAssets[0]] },
+      { ...documents.segments, items: [incompleteStill] },
+      "still-priority",
+      policy.response_format,
+      "unused",
+      "unused",
+      false,
+    ).segments.items[0];
+    expect(incompleteReduced.editorial_observation?.text_presence).toBeUndefined();
+    expect(incompleteReduced.editorial_observation?.status).not.toBe("ready");
+
+    let expiredCalls = 0;
+    const expired = await runParallelVlmAnalysis({
+      assets: [stillAssets[0]],
+      segments: [structuredClone(failedStill)],
+      vlmPolicy: policy,
+      samplingPolicy: sampling,
+      minSegmentDurationUs: 100_000,
+      deadlineAtMs: Date.now() - 1,
+      sourceFileMap,
+      outputDir: OUTPUT_DIR,
+      vlmFn: async () => {
+        expiredCalls += 1;
+        return { rawJson: "{}" };
+      },
+    });
+    expect(expiredCalls).toBe(0);
+    expect(expired.shards).toEqual([]);
+  });
+
   it("keeps legacy segment fixtures valid and rejects corrupt closed-enum values", () => {
     const validate = createValidator();
     const legacy = { project_id: "eye", artifact_version: "1", items: [segment()] };
@@ -657,5 +954,39 @@ function deterministicMeasurement(
     metrics_measured: { shake: true, sharpness: false, exposure: true },
     shake: { measured: true, score: motion, sample_count: 4, bins: [], average_energy: motion, peak_energy: motion, peak_timestamp_us: 0 },
     exposure: { measured: true, exposure_score: 1, black_clip_ratio: 0, white_clip_ratio: 0, avg_luma: avgLuma, underexposed: false, overexposed: false, sample_count: 4 },
+  };
+}
+
+function deterministicStillMeasurement(
+  avgLuma: number,
+  connectorVersion: string,
+): VisualQualityMeasurements {
+  return {
+    measured: true,
+    connector_version: connectorVersion,
+    method: "ffmpeg_single_frame_signals",
+    sample_fps: 2,
+    max_width: 160,
+    duration_us: 0,
+    metrics_measured: { shake: false, sharpness: true, exposure: true },
+    sharpness: {
+      measured: true,
+      sharpness_score: 0.8,
+      blur_score: 0.2,
+      blur_mean: 4,
+      method: "blurdetect",
+      sample_count: 1,
+    },
+    exposure: {
+      measured: true,
+      exposure_score: 1,
+      black_clip_ratio: 0,
+      white_clip_ratio: 0,
+      avg_luma: avgLuma,
+      underexposed: false,
+      overexposed: false,
+      sample_count: 1,
+    },
+    warnings: ["motion_not_applicable_still_image"],
   };
 }

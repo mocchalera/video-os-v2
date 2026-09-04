@@ -304,6 +304,16 @@ function applyDuplicate(clip: NormalizedClip, afterFrame: number): NormalizedCli
 
 describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
   const PROJECT_ID = "e2e_test_project";
+const SYNTHETIC_DIFF_IDENTITY = {
+  base_timeline: { path: "05_timeline/timeline.json", version: "1.0.0", sha256: `sha256:${"b".repeat(64)}` },
+  review_generation: {
+    generation_id: `sha256:${"a".repeat(64)}`,
+    review_identity: `sha256:${"c".repeat(64)}`,
+    output: { path: "09_output/social-review/generations/g/review.mp4", sha256: `sha256:${"9".repeat(64)}` },
+    review_ready_receipt: { path: "09_output/social-review/generations/g/review-ready-receipt.json", sha256: `sha256:${"e".repeat(64)}` },
+  },
+  review_round: { round_index: 1, round_identity: `sha256:${"d".repeat(64)}` },
+};
   const TIMELINE_VERSION = "1.0.0";
   const HANDOFF_ID = "HND_1.0.0_20250115T100000Z";
 
@@ -422,6 +432,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, [], "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -453,6 +464,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -490,6 +502,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -538,6 +551,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -569,6 +583,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -630,6 +645,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "partial");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -691,6 +707,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "partial");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -751,6 +768,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       } satisfies RoundtripImportReport;
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -827,6 +845,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "partial");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -878,6 +897,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -919,6 +939,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -947,6 +968,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "success");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -982,6 +1004,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
       const report = buildTestReport(oneToMany, unmapped, "partial");
 
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,
@@ -1057,6 +1080,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
         const oneToMany = normalizeOneToMany(mapped);
         const report = buildTestReport(oneToMany, unmapped, "success");
         return analyzeDiffs({
+          identity: SYNTHETIC_DIFF_IDENTITY,
           projectId: PROJECT_ID,
           handoffId: HANDOFF_ID,
           baseTimelineVersion: TIMELINE_VERSION,
@@ -1165,6 +1189,7 @@ describe("M3.5 E2E: Fixture Round-Trip", { timeout: 180_000 }, () => {
 
       // 4. Diff
       const diff = analyzeDiffs({
+        identity: SYNTHETIC_DIFF_IDENTITY,
         projectId: PROJECT_ID,
         handoffId: HANDOFF_ID,
         baseTimelineVersion: TIMELINE_VERSION,

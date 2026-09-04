@@ -29,6 +29,19 @@ export const INTERMEDIATE_X264: X264Profile = {
   crf: 14,
 };
 
+/**
+ * Lossless intermediate generation (qp 0): decode(re-encode(x)) reproduces x
+ * at the exact pixel level, so a frame survives an extra encode generation
+ * without changing a single pixel. Required wherever parity demands byte-level
+ * frame identity across routes — notably the still camera motion pre-render
+ * segments consumed by the transition chain (Issue 33): the standalone route
+ * concatenates its qp0 camera segments with -c copy, so a crf chain encode
+ * would make transitioned camera pixels diverge from the standalone render.
+ */
+export function losslessX264Args(profile: X264Profile = INTERMEDIATE_X264): string[] {
+  return ["-c:v", "libx264", "-preset", profile.preset, "-qp", "0"];
+}
+
 /** Args fragment for ffmpeg: ["-c:v", "libx264", "-preset", ..., "-crf", ...] */
 export function x264Args(profile: X264Profile): string[] {
   return ["-c:v", "libx264", "-preset", profile.preset, "-crf", String(profile.crf)];

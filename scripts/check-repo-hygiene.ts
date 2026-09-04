@@ -52,6 +52,10 @@ function isProjectGeneratedOutput(path: string): boolean {
   return /^projects\/[^/]+\/09_output\//.test(path);
 }
 
+function isPrivateProviderState(path: string): boolean {
+  return /(^|\/)\.video-os\/private-cache(?:\/|$)/.test(path);
+}
+
 function isLargeFileAllowed(path: string): boolean {
   return (
     path.startsWith("docs/ux/screenshots/") ||
@@ -76,6 +80,9 @@ for (const filePath of trackedFiles) {
   }
   if (isProjectGeneratedOutput(filePath)) {
     add(filePath, "tracked project render outputs are not allowed");
+  }
+  if (isPrivateProviderState(filePath)) {
+    add(filePath, "tracked private provider state is not allowed");
   }
 
   const stat = fs.statSync(filePath);

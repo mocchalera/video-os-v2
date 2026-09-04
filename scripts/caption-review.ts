@@ -4,13 +4,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  appendCaptionVisualTreatmentOperations,
   applyCaptionReview,
+  applyCaptionVisualTreatmentReview,
+  authorPreviewCaptionVisualTreatment,
+  bindCaptionVisualTreatmentPreviewOutput,
   approveCaptionReview,
+  approveCaptionVisualTreatment,
+  previewCaptionVisualTreatment,
   canUndoCaptionReview,
   captionGlossaryProposals,
   captionReviewUndoDepth,
   editCaptionReview,
   initializeCaptionReviewPatch,
+  initializeCaptionVisualTreatmentPatch,
+  inspectCaptionVisualTreatment,
   inspectCaptionReviewOperationalState,
   loadCaptionReviewContext,
   mergeCaptionReview,
@@ -20,9 +28,14 @@ import {
   retimeCaptionReview,
   splitCaptionReview,
   undoCaptionReview,
+  undoCaptionVisualTreatment,
   validateCaptionReview,
   verifySafeCaptionReview,
+  CAPTION_VISUAL_TREATMENT_PREVIEW_OUTPUT_PATH,
 } from "../runtime/caption/review-service.js";
+import { loadPlatformSafeZoneProfile } from "../runtime/platform/safe-zone-profile.js";
+import { captionRendererCapabilitiesForPolicy } from "../runtime/caption/visual-treatment.js";
+import { loadTypographyPolicy } from "../runtime/caption/typography-policy.js";
 import type {
   CaptionReviewQueueItem,
   CaptionReviewSeverity,
@@ -31,9 +44,20 @@ import {
   resolveCaptionStylePreset,
   type CaptionStylePreset,
 } from "../editor/shared/caption-style-tokens.js";
+import { renderBaselineFastPreview } from "../runtime/preview/baseline-fast-preview.js";
+import { loadSourceMap } from "../runtime/media/source-map.js";
+import type { CaptionVisualTreatmentInput } from "../runtime/caption/visual-treatment.js";
 
-type CaptionReviewCommand = "queue" | "prepare" | "recover" | "init" | "verify-safe" | "edit" | "split" | "merge" | "retime" | "glossary-propose" | "undo" | "apply" | "validate" | "approve";
+type CaptionReviewCommand = "queue" | "prepare" | "recover" | "init" | "verify-safe" | "edit" | "split" | "merge" | "retime" | "glossary-propose" | "undo" | "apply" | "validate" | "approve" | "visual-init" | "visual-status" | "visual-preview" | "visual-author-preview" | "visual-apply" | "visual-undo" | "visual-approve";
 type QueueFormat = "json" | "csv" | "html";
+
+export interface CaptionReviewCliDependencies {
+  renderVisualPreview?: (input: {
+    projectDir: string;
+    timelinePath: string;
+    visualTreatmentInput: CaptionVisualTreatmentInput;
+  }) => Promise<{ outputPath: string; receiptPath: string; contentType: "video/mp4" }>;
+}
 
 export interface CaptionReviewCliArgs {
   command: CaptionReviewCommand;
@@ -61,6 +85,16 @@ export interface CaptionReviewCliArgs {
   outputPath?: string;
   limit?: number;
   severity: CaptionReviewSeverity | "all";
+  typographyPolicyPath?: string;
+  platformSafeZoneProfilePath?: string;
+  visualOperationJSON?: string;
+  expectedPatchHash?: string;
+  expectedApprovalHash?: string;
+  preapprovalReceiptPath?: string;
+  reducedMotion: boolean;
+  highContrast: boolean;
+  audioOff: boolean;
+  smallScreen: boolean;
 }
 
 const USAGE = `Usage:
@@ -77,12 +111,19 @@ const USAGE = `Usage:
   npx tsx scripts/caption-review.ts undo --project <dir>
   npx tsx scripts/caption-review.ts apply --project <dir> [--patch <file>]
   npx tsx scripts/caption-review.ts validate --project <dir> [--patch <file>]
-  npx tsx scripts/caption-review.ts approve --project <dir> --reviewer <name> [--patch <file>]`;
+  npx tsx scripts/caption-review.ts approve --project <dir> --reviewer <name> [--patch <file>]
+  npx tsx scripts/caption-review.ts visual-init --project <dir> --reviewer <name> [--typography-policy <file>]
+  npx tsx scripts/caption-review.ts visual-status --project <dir> [--typography-policy <file>] [--safe-zone-profile <file>] [--reduced-motion] [--high-contrast] [--audio-off] [--small-screen]
+  npx tsx scripts/caption-review.ts visual-preview --project <dir> --reviewer <name> --expected-patch-hash <hash> [--preapproval-receipt <file>] [visual context options]
+  npx tsx scripts/caption-review.ts visual-author-preview --project <dir> --reviewer <name> --visual-operation-json <json> --expected-patch-hash <hash|absent> --expected-approval-hash <hash> [visual context options]
+  npx tsx scripts/caption-review.ts visual-apply --project <dir> --reviewer <name> [--patch <file>] [--visual-operation-json <json> --expected-patch-hash <hash>] [visual context options]
+  npx tsx scripts/caption-review.ts visual-undo --project <dir> --reviewer <name> [--patch <file>] [--expected-patch-hash <hash>] [visual context options]
+  npx tsx scripts/caption-review.ts visual-approve --project <dir> --reviewer <name> --expected-patch-hash <hash> --preapproval-receipt <file> [--patch <file>] [visual context options]`;
 
 export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
   const args = argv.slice(2);
   const command = args.shift() as CaptionReviewCommand | undefined;
-  if (!command || !["queue", "prepare", "recover", "init", "verify-safe", "edit", "split", "merge", "retime", "glossary-propose", "undo", "apply", "validate", "approve"].includes(command)) {
+  if (!command || !["queue", "prepare", "recover", "init", "verify-safe", "edit", "split", "merge", "retime", "glossary-propose", "undo", "apply", "validate", "approve", "visual-init", "visual-status", "visual-preview", "visual-author-preview", "visual-apply", "visual-undo", "visual-approve"].includes(command)) {
     throw new Error(`A valid command is required.\n${USAGE}`);
   }
 
@@ -110,6 +151,16 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
   let outputPath: string | undefined;
   let limit: number | undefined;
   let severity: CaptionReviewSeverity | "all" = "warn";
+  let typographyPolicyPath: string | undefined;
+  let platformSafeZoneProfilePath: string | undefined;
+  let visualOperationJSON: string | undefined;
+  let expectedPatchHash: string | undefined;
+  let expectedApprovalHash: string | undefined;
+  let preapprovalReceiptPath: string | undefined;
+  let reducedMotion = false;
+  let highContrast = false;
+  let audioOff = false;
+  let smallScreen = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -158,13 +209,23 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
       const value = requiredValue(args, ++index, arg);
       if (!isSeverity(value)) throw new Error(`Unsupported severity: ${value}`);
       severity = value;
-    } else {
+    } else if (arg === "--typography-policy") typographyPolicyPath = requiredValue(args, ++index, arg);
+    else if (arg === "--safe-zone-profile") platformSafeZoneProfilePath = requiredValue(args, ++index, arg);
+    else if (arg === "--visual-operation-json") visualOperationJSON = requiredValue(args, ++index, arg);
+    else if (arg === "--expected-patch-hash") expectedPatchHash = requiredValue(args, ++index, arg);
+    else if (arg === "--expected-approval-hash") expectedApprovalHash = requiredValue(args, ++index, arg);
+    else if (arg === "--preapproval-receipt") preapprovalReceiptPath = requiredValue(args, ++index, arg);
+    else if (arg === "--reduced-motion") reducedMotion = true;
+    else if (arg === "--high-contrast") highContrast = true;
+    else if (arg === "--audio-off") audioOff = true;
+    else if (arg === "--small-screen") smallScreen = true;
+    else {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
 
   if (!projectDir) throw new Error(`--project is required.\n${USAGE}`);
-  if ((command === "init" || command === "approve" || command === "verify-safe" || command === "retime") && !reviewer?.trim()) {
+  if ((command === "init" || command === "approve" || command === "verify-safe" || command === "retime" || command === "visual-init" || command === "visual-preview" || command === "visual-author-preview" || command === "visual-apply" || command === "visual-undo" || command === "visual-approve") && !reviewer?.trim()) {
     throw new Error(`--reviewer is required for ${command}`);
   }
   if (command === "verify-safe" && (!baseCaptionDraftHash || Object.keys(captionTextHashes).length === 0)) {
@@ -203,6 +264,18 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
   if (command !== "queue" && (format !== "json" || limit !== undefined || severity !== "warn")) {
     throw new Error("--format, --limit, and --severity are only valid for queue");
   }
+  const visualCommands: CaptionReviewCommand[] = ["visual-init", "visual-status", "visual-preview", "visual-author-preview", "visual-apply", "visual-undo", "visual-approve"];
+  if (!visualCommands.includes(command) && (typographyPolicyPath || platformSafeZoneProfilePath || reducedMotion || highContrast || audioOff || smallScreen)) {
+    throw new Error("visual context arguments are only valid for visual caption-review commands");
+  }
+  if (command !== "visual-apply" && command !== "visual-author-preview" && visualOperationJSON) throw new Error("--visual-operation-json is only valid for visual-apply or visual-author-preview");
+  if (command !== "visual-apply" && command !== "visual-author-preview" && command !== "visual-undo" && command !== "visual-preview" && command !== "visual-approve" && expectedPatchHash) throw new Error("--expected-patch-hash is only valid for visual-apply, visual-author-preview, visual-undo, visual-preview, or visual-approve");
+  if (command !== "visual-author-preview" && expectedApprovalHash) throw new Error("--expected-approval-hash is only valid for visual-author-preview");
+  if (command !== "visual-preview" && command !== "visual-approve" && preapprovalReceiptPath) throw new Error("--preapproval-receipt is only valid for visual-preview or visual-approve");
+  if (command === "visual-preview" && !expectedPatchHash) throw new Error("visual-preview requires --expected-patch-hash");
+  if (command === "visual-author-preview" && (!visualOperationJSON || !expectedPatchHash || !expectedApprovalHash)) throw new Error("visual-author-preview requires --visual-operation-json, --expected-patch-hash, and --expected-approval-hash");
+  if (command === "visual-approve" && !expectedPatchHash) throw new Error("visual-approve requires --expected-patch-hash");
+  if (command === "visual-approve" && !preapprovalReceiptPath) throw new Error("visual-approve requires --preapproval-receipt");
 
   return {
     command,
@@ -230,13 +303,65 @@ export function parseCaptionReviewArgs(argv: string[]): CaptionReviewCliArgs {
     outputPath: outputPath ? path.resolve(outputPath) : undefined,
     limit,
     severity,
+    typographyPolicyPath: typographyPolicyPath ? path.resolve(typographyPolicyPath) : undefined,
+    platformSafeZoneProfilePath: platformSafeZoneProfilePath ? path.resolve(platformSafeZoneProfilePath) : undefined,
+    visualOperationJSON,
+    expectedPatchHash,
+    expectedApprovalHash,
+    preapprovalReceiptPath: preapprovalReceiptPath ? path.resolve(preapprovalReceiptPath) : undefined,
+    reducedMotion,
+    highContrast,
+    audioOff,
+    smallScreen,
   };
+}
+
+function visualTreatmentOptions(args: CaptionReviewCliArgs) {
+  const accessibility = args.reducedMotion || args.highContrast || args.audioOff || args.smallScreen
+    ? {
+        reduced_motion: args.reducedMotion,
+        high_contrast: args.highContrast,
+        audio_off: args.audioOff,
+        small_screen: args.smallScreen,
+      }
+    : undefined;
+  const profile = args.platformSafeZoneProfilePath
+    ? loadPlatformSafeZoneProfile(args.platformSafeZoneProfilePath)
+    : undefined;
+  const typographyPolicyPath = args.typographyPolicyPath
+    ?? path.join(args.projectDir, "04_plan/typography_policy.json");
+  const capabilities = captionRendererCapabilitiesForPolicy(loadTypographyPolicy(typographyPolicyPath));
+  return {
+    typographyPolicyPath: args.typographyPolicyPath,
+    capabilities,
+    platformSafeZoneProfilePath: args.platformSafeZoneProfilePath,
+    ...(profile
+      ? {
+          platformSafeZoneProfile: profile.profile,
+          platformSafeZoneProfileHash: profile.hash,
+          platformSafeZoneProfileId: profile.profile.profile_id,
+        }
+      : {}),
+    ...(accessibility ? { accessibility } : {}),
+  };
+}
+
+function visualSafeZoneProfile(
+  projectDir: string,
+  input: { platform_safe_zone_profile_path?: string },
+  options: { platformSafeZoneProfile?: unknown },
+) {
+  if (options.platformSafeZoneProfile) return options.platformSafeZoneProfile;
+  if (!input.platform_safe_zone_profile_path) return undefined;
+  const profilePath = path.resolve(projectDir, input.platform_safe_zone_profile_path);
+  return fs.existsSync(profilePath) ? loadPlatformSafeZoneProfile(profilePath).profile : undefined;
 }
 
 export function runCaptionReviewCli(
   argv = process.argv,
   write: (message: string) => void = (message) => console.log(message),
-): number {
+  dependencies: CaptionReviewCliDependencies = {},
+): number | Promise<number> {
   if (argv.slice(2).some((value) => value === "--help" || value === "-h")) {
     write(USAGE);
     return 0;
@@ -455,6 +580,203 @@ export function runCaptionReviewCli(
       }, null, 2));
       return 0;
     }
+    case "visual-init": {
+      const result = initializeCaptionVisualTreatmentPatch(args.projectDir, args.reviewer!, {
+        typographyPolicyPath: args.typographyPolicyPath,
+      });
+      write(JSON.stringify({ command: args.command, patch_path: result.patchPath, operation_count: result.patch.operations.length, patch: result.patch }, null, 2));
+      return 0;
+    }
+    case "visual-status": {
+      const options = visualTreatmentOptions(args);
+      const result = inspectCaptionVisualTreatment(args.projectDir, options);
+      write(JSON.stringify({
+        command: args.command,
+        patch_path: result.patchPath,
+        input_path: result.inputPath,
+        patch_hash: result.patchHash,
+        input_hash: result.inputHash,
+        status: result.input.status,
+        applied_caption_ids: result.input.applied_caption_ids,
+        degraded_reasons: result.input.degraded_reasons,
+        blocked_reasons: result.input.blocked_reasons,
+        patch: result.patch,
+        input: result.input,
+        capabilities: options.capabilities,
+        safe_zone_profile: visualSafeZoneProfile(args.projectDir, result.input, options) ?? null,
+      }, null, 2));
+      return 0;
+    }
+    case "visual-preview": {
+      const options = visualTreatmentOptions(args);
+      const result = previewCaptionVisualTreatment(args.projectDir, args.reviewer!, {
+        ...options,
+        patchPath: args.patchPath,
+        expectedPatchHash: args.expectedPatchHash!,
+        preapprovalReceiptPath: args.preapprovalReceiptPath,
+      });
+      write(JSON.stringify({
+        command: args.command,
+        patch_path: result.patchPath,
+        input_path: result.inputPath,
+        patch_hash: result.patchHash,
+        input_hash: result.inputHash,
+        receipt_path: result.receiptPath,
+        receipt_hash: result.receipt.receipt_hash,
+        expected_patch_hash: result.receipt.expected_patch_hash,
+        status: result.input.status,
+        patch: result.patch,
+        input: result.input,
+        preapproval_receipt: result.receipt,
+        capabilities: options.capabilities,
+        safe_zone_profile: visualSafeZoneProfile(args.projectDir, result.input, options) ?? null,
+      }, null, 2));
+      return 0;
+    }
+    case "visual-author-preview": {
+      return (async () => {
+        const options = visualTreatmentOptions(args);
+        const previewPath = path.join(args.projectDir, CAPTION_VISUAL_TREATMENT_PREVIEW_OUTPUT_PATH);
+        const watchedPaths = [
+          args.patchPath ?? path.join(args.projectDir, "07_package/caption_visual_treatment_patch.json"),
+          path.join(args.projectDir, "07_package/caption_visual_treatment_preapproval_input.json"),
+          args.preapprovalReceiptPath ?? path.join(args.projectDir, "07_package/caption_visual_treatment_preapproval_receipt.json"),
+          previewPath,
+          `${previewPath}.receipt.json`,
+          `${previewPath}.render-route.json`,
+          `${previewPath}.caption-visual-treatment-input.json`,
+        ];
+        const snapshots = watchedPaths.map((filePath) => ({
+          filePath,
+          bytes: fs.existsSync(filePath) ? fs.readFileSync(filePath) : null,
+        }));
+        try {
+          const result = authorPreviewCaptionVisualTreatment(
+            args.projectDir,
+            args.reviewer!,
+            JSON.parse(args.visualOperationJSON!),
+            {
+              ...options,
+              patchPath: args.patchPath,
+              expectedPatchHash: args.expectedPatchHash!,
+              expectedApprovalHash: args.expectedApprovalHash!,
+              preapprovalReceiptPath: args.preapprovalReceiptPath,
+            },
+          );
+          const render = dependencies.renderVisualPreview ?? (async (input) => {
+            const rendered = await renderBaselineFastPreview({
+              projectDir: input.projectDir,
+              timelinePath: input.timelinePath,
+              sourceMap: loadSourceMap(input.projectDir),
+              captionVisualTreatmentInput: input.visualTreatmentInput,
+              captionVisualTreatmentReviewOnlyPreapproval: true,
+            });
+            return { outputPath: rendered.outputPath, receiptPath: rendered.receiptPath, contentType: "video/mp4" as const };
+          });
+          const rendered = await render({
+            projectDir: args.projectDir,
+            timelinePath: path.join(args.projectDir, "05_timeline/timeline.json"),
+            visualTreatmentInput: result.input,
+          });
+          const boundReceipt = bindCaptionVisualTreatmentPreviewOutput(args.projectDir, result, rendered);
+          write(JSON.stringify({
+            command: args.command,
+            project: args.projectDir,
+            patch_path: result.patchPath,
+            patch_hash: result.patchHash,
+            input_path: result.inputPath,
+            input_hash: result.inputHash,
+            preview_output_path: path.resolve(rendered.outputPath),
+            preview_output_hash: boundReceipt.preview_output!.sha256,
+            preview_output_content_type: boundReceipt.preview_output!.content_type,
+            preview_receipt_path: path.resolve(rendered.receiptPath),
+            preview_receipt_hash: boundReceipt.preview_output!.receipt_sha256,
+            receipt_path: result.receiptPath,
+            receipt_hash: boundReceipt.receipt_hash,
+            approval_hash_before: result.approvalHashBefore,
+            approval_hash_after: result.approvalHashAfter,
+            text_timing_hash_before: result.textTimingHashBefore,
+            text_timing_hash_after: result.textTimingHashAfter,
+            production_approval_unchanged: result.productionApprovalUnchanged,
+            status: result.input.status,
+            caption_identity: result.input.caption_identity,
+            owner_boundary: result.input.renderer_route,
+          }, null, 2));
+          return 0;
+        } catch (error) {
+          for (const snapshot of snapshots) {
+            if (snapshot.bytes === null) {
+              if (fs.existsSync(snapshot.filePath)) fs.unlinkSync(snapshot.filePath);
+            } else {
+              fs.mkdirSync(path.dirname(snapshot.filePath), { recursive: true });
+              fs.writeFileSync(snapshot.filePath, snapshot.bytes);
+            }
+          }
+          throw error;
+        }
+      })();
+    }
+    case "visual-apply": {
+      const options = visualTreatmentOptions(args);
+      const result = args.visualOperationJSON
+        ? appendCaptionVisualTreatmentOperations(
+            args.projectDir,
+            args.reviewer!,
+            [JSON.parse(args.visualOperationJSON)],
+            { ...options, patchPath: args.patchPath, expectedPatchHash: args.expectedPatchHash },
+          )
+        : applyCaptionVisualTreatmentReview(args.projectDir, { ...options, patchPath: args.patchPath });
+      write(JSON.stringify({
+        command: args.command,
+        patch_path: result.patchPath,
+        input_path: result.inputPath,
+        patch_hash: result.patchHash,
+        input_hash: result.inputHash,
+        status: result.input.status,
+        patch: result.patch,
+        input: result.input,
+        capabilities: options.capabilities,
+        safe_zone_profile: visualSafeZoneProfile(args.projectDir, result.input, options) ?? null,
+      }, null, 2));
+      return 0;
+    }
+    case "visual-undo": {
+      const options = visualTreatmentOptions(args);
+      const result = undoCaptionVisualTreatment(args.projectDir, { ...options, patchPath: args.patchPath, reviewer: args.reviewer, expectedPatchHash: args.expectedPatchHash });
+      write(JSON.stringify({
+        command: args.command,
+        patch_path: result.patchPath,
+        input_path: result.inputPath,
+        patch_hash: result.patchHash,
+        input_hash: result.inputHash,
+        removed_operation_count: result.removedOperationCount,
+        status: result.input.status,
+        patch: result.patch,
+        input: result.input,
+        capabilities: options.capabilities,
+        safe_zone_profile: visualSafeZoneProfile(args.projectDir, result.input, options) ?? null,
+      }, null, 2));
+      return 0;
+    }
+    case "visual-approve": {
+      const options = visualTreatmentOptions(args);
+      const result = approveCaptionVisualTreatment(args.projectDir, args.reviewer!, { ...options, patchPath: args.patchPath, expectedPatchHash: args.expectedPatchHash!, preapprovalReceiptPath: args.preapprovalReceiptPath! });
+      write(JSON.stringify({
+        command: args.command,
+        approval_path: result.approvalPath,
+        patch_path: result.patchPath,
+        input_path: result.inputPath,
+        approval_hash: result.approvalHash,
+        input_hash: result.inputHash,
+        status: result.input.status,
+        approved_by: result.approval.approval.approved_by,
+        patch: result.patch,
+        input: result.input,
+        capabilities: options.capabilities,
+        safe_zone_profile: visualSafeZoneProfile(args.projectDir, result.input, options) ?? null,
+      }, null, 2));
+      return 0;
+    }
   }
 }
 
@@ -615,7 +937,15 @@ const isMain = process.argv[1]
 
 if (isMain) {
   try {
-    process.exitCode = runCaptionReviewCli(process.argv);
+    const result = runCaptionReviewCli(process.argv);
+    if (result instanceof Promise) {
+      void result.then((code) => { process.exitCode = code; }).catch((error) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+      });
+    } else {
+      process.exitCode = result;
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

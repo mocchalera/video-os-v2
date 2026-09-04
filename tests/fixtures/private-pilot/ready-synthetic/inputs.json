@@ -1,0 +1,5 @@
+{
+  "fixture": "rfa-016-ready-synthetic",
+  "scope": "metadata-only",
+  "warning": "synthetic evidence only; no real human, NLE, device, or platform action"
+}

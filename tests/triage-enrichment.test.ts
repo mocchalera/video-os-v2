@@ -248,6 +248,31 @@ describe("enrichSelectsFromAnalysis", () => {
     ]);
   });
 
+  it("normalizes provider insight and close beat aliases to canonical story roles", () => {
+    const enriched = enrichSelectsFromAnalysis(
+      selects([
+        candidate("SEG_INSIGHT_ID", { eligible_beats: ["b03_insight"] }),
+        candidate("SEG_CLOSE_ID", { eligible_beats: ["b05_close"] }),
+        candidate("SEG_INSIGHT_ALIAS", { eligible_beats: ["insight"] }),
+        candidate("SEG_CLOSE_ALIAS", { eligible_beats: ["close"] }),
+      ]),
+      [
+        segment("SEG_INSIGHT_ID"),
+        segment("SEG_CLOSE_ID"),
+        segment("SEG_INSIGHT_ALIAS"),
+        segment("SEG_CLOSE_ALIAS"),
+      ],
+      { applyQualityGate: false },
+    );
+
+    expect(enriched.candidates.map((item) => item.story_role)).toEqual([
+      "experience",
+      "closing",
+      "experience",
+      "closing",
+    ]);
+  });
+
   it("does not overwrite LLM-populated scalar fields or motif tags", () => {
     const enriched = enrichSelectsFromAnalysis(
       selects([

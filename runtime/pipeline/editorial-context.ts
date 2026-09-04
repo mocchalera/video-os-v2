@@ -9,6 +9,7 @@ import { assertStillImageSegmentGrounding } from "../artifacts/still-image-groun
 import type { CreativeBrief } from "../artifacts/types.js";
 import type { SegmentItem } from "../connectors/ffmpeg-segmenter.js";
 import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
+import { readProjectState } from "../state/reconcile.js";
 import {
   loadSourceMap,
   type MediaSourceMapEntry,
@@ -37,14 +38,30 @@ export function loadEditorialPlanningContext(
   const resolvedProjectDir = path.resolve(projectDir);
   assertProjectPlanningMediaKindsSupported(resolvedProjectDir);
   assertStillImageSegmentGrounding(resolvedProjectDir);
+  const brief = loadCreativeBrief(path.join(resolvedProjectDir, "01_intent", "creative_brief.yaml"));
+  assertCreativeBriefProjectIdentity(resolvedProjectDir, brief);
 
   return {
     projectDir: resolvedProjectDir,
-    brief: loadCreativeBrief(path.join(resolvedProjectDir, "01_intent", "creative_brief.yaml")),
+    brief,
     marlinEvents: loadMarlinEvents(resolvedProjectDir, options.warn),
     segments: loadSegments(resolvedProjectDir),
     sourceMap: loadSourceMap(resolvedProjectDir).entryMap,
   };
+}
+
+function assertCreativeBriefProjectIdentity(projectDir: string, brief: CreativeBrief): void {
+  const expectedProjectId = readProjectState(projectDir)?.project_id;
+  if (!expectedProjectId) return;
+
+  const declaredProjectIds = [brief.project_id, brief.project?.id]
+    .filter((value): value is string => typeof value === "string" && value.length > 0);
+  const mismatch = declaredProjectIds.find((value) => value !== expectedProjectId);
+  if (mismatch) {
+    throw new Error(
+      `creative_brief.yaml project_id mismatch: expected ${expectedProjectId}, got ${mismatch}`,
+    );
+  }
 }
 
 export function loadSegments(projectDir: string): SegmentItem[] {

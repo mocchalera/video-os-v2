@@ -10,7 +10,7 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import { compile } from "../runtime/compiler/index.js";
+import { runCanonicalCompile } from "../runtime/compiler/index.js";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const projectPath = path.join(repoRoot, "projects/demo");
@@ -65,7 +65,7 @@ export async function runDemo(): Promise<void> {
   // ── Compile ───────────────────────────────────────────────────────
   console.log("[2/3] Running deterministic compiler (Phase 0.5 → 5)...");
 
-  const result = compile({
+  const result = await runCanonicalCompile({
     projectPath,
     repoRoot,
     createdAt: new Date().toISOString(),

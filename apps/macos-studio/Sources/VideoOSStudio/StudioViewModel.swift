@@ -250,8 +250,19 @@ final class StudioViewModel: ObservableObject {
     @Published var projectInitializationStatus = "新規作成するか、既存プロジェクトを選んで開始してください。"
     @Published var isInitializingProject = false
     @Published var selectedSurface: StudioAgentSurface = .intent
+    private var bypassTimelineHookLock = false
     @Published var timeline: TimelineDocument? {
         didSet {
+            if !bypassTimelineHookLock,
+               let oldValue,
+               let timeline,
+               let rejection = oldValue.hookLockRejection(to: timeline) {
+                bypassTimelineHookLock = true
+                self.timeline = oldValue
+                bypassTimelineHookLock = false
+                roughCutCompileStatus = rejection
+                return
+            }
             timelineSkimPreview = nil
             sourceBinSkimPreview = nil
             timelineRollTrimViewerPreview = nil
@@ -1681,19 +1692,21 @@ final class StudioViewModel: ObservableObject {
 
     var activeInterviewVisualTransformPreview: ReviewVisualTransform? {
         guard let activeClipID = activeViewerSelection?.clip.id,
-              activeClipID == selectedTimelineClipID,
-              interviewFinishZoom > 1.0001
-                || abs(interviewFinishPositionX) > 0.1
-                || abs(interviewFinishPositionY) > 0.1 else {
+              activeClipID == selectedTimelineClipID else {
             return nil
         }
-        return ReviewVisualTransform(
-            zoom: interviewFinishZoom,
-            position: .init(
-                x: min(interviewMaximumPanX, max(-interviewMaximumPanX, interviewFinishPositionX)),
-                y: min(interviewMaximumPanY, max(-interviewMaximumPanY, interviewFinishPositionY))
+        if interviewFinishZoom > 1.0001
+            || abs(interviewFinishPositionX) > 0.1
+            || abs(interviewFinishPositionY) > 0.1 {
+            return ReviewVisualTransform(
+                zoom: interviewFinishZoom,
+                position: .init(
+                    x: min(interviewMaximumPanX, max(-interviewMaximumPanX, interviewFinishPositionX)),
+                    y: min(interviewMaximumPanY, max(-interviewMaximumPanY, interviewFinishPositionY))
+                )
             )
-        )
+        }
+        return selectedTimelineClip?.clip.visualTransform
     }
 
     var sourceMonitorMediaReference: ProjectMediaReference? {
@@ -2180,6 +2193,11 @@ final class StudioViewModel: ObservableObject {
         if feedbackSession.baseTimelineHash == nil || feedbackSession.baseTimelineVersion == nil {
             feedbackSession.captureBaseline(from: timeline)
         }
+        guard feedbackSession.addOps(plan.operations, against: timeline) else {
+            roughCutCompileStatus = feedbackSession.hookLockRejectionReason
+                ?? "AI編集候補の混在batchを原子的に拒否しました。"
+            return
+        }
 
         timelineClipMoveViewerPreview = nil
         timelineTransitionDurationPreview = nil
@@ -2189,10 +2207,6 @@ final class StudioViewModel: ObservableObject {
         timelineSkimPreview = nil
         sourceBinSkimPreview = nil
         sourceMonitorAssetID = nil
-
-        for operation in plan.operations {
-            feedbackSession.addOp(operation)
-        }
 
         self.timeline = plan.updatedTimeline
         setTimelineTransitionSelection(plan.selectedTransitionID)
@@ -2604,6 +2618,12 @@ final class StudioViewModel: ObservableObject {
         }
     }
 
+    private func replaceTimelineFromDisk(_ loadedTimeline: TimelineDocument?) {
+        bypassTimelineHookLock = true
+        timeline = loadedTimeline
+        bypassTimelineHookLock = false
+    }
+
     func loadTimelineForSelection() {
         guard let project = selectedProject else {
             feedbackSession.clearAll()
@@ -2787,7 +2807,7 @@ final class StudioViewModel: ObservableObject {
         }
 
         do {
-            timeline = try TimelineDocument.load(projectURL: project.path)
+            replaceTimelineFromDisk(try TimelineDocument.load(projectURL: project.path))
             if let timeline {
                 if !feedbackSession.isDirty {
                     feedbackSession.captureBaseline(from: timeline)
@@ -6638,6 +6658,12 @@ final class StudioViewModel: ObservableObject {
         }
 
         let envelope = feedbackSession.serialize(projectID: selectedProject.id)
+        if let rejection = envelope.patch.operations
+            .compactMap({ timeline.hookLockRejection(for: $0) })
+            .first {
+            roughCutCompileStatus = rejection
+            return
+        }
         let projectURL = selectedProject.path
         let timelineURL = TimelineDocument.timelineURL(for: projectURL)
         let preflightPlan = ProjectRoughCutCompilePlanner.plan(
@@ -6845,7 +6871,7 @@ final class StudioViewModel: ObservableObject {
         }
         do {
             let reloadedTimeline = try TimelineDocument.load(projectURL: selectedProject.path)
-            timeline = reloadedTimeline
+            replaceTimelineFromDisk(reloadedTimeline)
             reconcileTimelineClipSelection(with: reloadedTimeline)
             loadEditorAnnotations(project: selectedProject, timeline: reloadedTimeline)
             setPlayheadFrame(min(playheadFrame, reloadedTimeline.totalFrames), forceSeek: true)

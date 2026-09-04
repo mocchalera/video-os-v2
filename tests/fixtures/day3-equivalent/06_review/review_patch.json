@@ -1,0 +1,87 @@
+{
+  "patch_version": "review-patch/v2",
+  "timeline_version": "1",
+  "base_timeline_sha256": "sha256:022b08de25ad44065e40c7f2270a49b21ca0b3674d00b582db0fe95b60a3007c",
+  "status": "accepted",
+  "operations": [
+    {
+      "op": "insert_segment",
+      "with_segment_id": "SEG_INTRO",
+      "target_track_id": "V1",
+      "new_timeline_in_frame": 0,
+      "new_duration_frames": 10,
+      "role": "hero",
+      "beat_id": "day3",
+      "ripple": true,
+      "reason": "restore intro"
+    },
+    {
+      "op": "insert_segment",
+      "with_segment_id": "SEG_CUTAWAY_1",
+      "target_track_id": "V2",
+      "new_timeline_in_frame": 10,
+      "new_duration_frames": 5,
+      "role": "support",
+      "beat_id": "day3",
+      "reason": "first cutaway"
+    },
+    {
+      "op": "insert_segment",
+      "with_segment_id": "SEG_CUTAWAY_2",
+      "target_track_id": "V2",
+      "new_timeline_in_frame": 20,
+      "new_duration_frames": 5,
+      "role": "support",
+      "beat_id": "day3",
+      "reason": "second cutaway"
+    },
+    {
+      "op": "insert_segment",
+      "with_segment_id": "SEG_CUTAWAY_3",
+      "target_track_id": "V2",
+      "new_timeline_in_frame": 30,
+      "new_duration_frames": 5,
+      "role": "support",
+      "beat_id": "day3",
+      "reason": "third cutaway"
+    },
+    {
+      "op": "add_overlay",
+      "reason": "first hook title",
+      "overlay": {
+        "clip_id": "HOOK_TITLE_1",
+        "timeline_in_frame": 0,
+        "timeline_duration_frames": 8,
+        "beat_id": "day3",
+        "content_element": {
+          "version": "content-element/v1",
+          "element_id": "hook-title-1",
+          "kind": "template",
+          "template_ref": "vos:content.hook-title/v1",
+          "props": { "title": "INTRO" },
+          "layout": { "anchor": "top_center", "x": 0.5, "y": 0.08, "width": 0.9, "height": 0.2, "scale": 1, "rotation_deg": 0, "opacity": 1, "safe_area": true, "z_index": 100 },
+          "renderer_hint": "remotion"
+        }
+      }
+    },
+    {
+      "op": "add_overlay",
+      "reason": "second hook title",
+      "overlay": {
+        "clip_id": "HOOK_TITLE_2",
+        "timeline_in_frame": 25,
+        "timeline_duration_frames": 8,
+        "beat_id": "day3",
+        "content_element": {
+          "version": "content-element/v1",
+          "element_id": "hook-title-2",
+          "kind": "template",
+          "template_ref": "vos:content.hook-title/v1",
+          "props": { "title": "RESTORE" },
+          "layout": { "anchor": "top_center", "x": 0.5, "y": 0.08, "width": 0.9, "height": 0.2, "scale": 1, "rotation_deg": 0, "opacity": 1, "safe_area": true, "z_index": 100 },
+          "renderer_hint": "remotion"
+        }
+      }
+    }
+  ]
+}

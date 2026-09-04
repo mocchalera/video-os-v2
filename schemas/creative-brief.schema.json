@@ -13,6 +13,39 @@
     "autonomy",
     "resolved_assumptions"
   ],
+  "allOf": [
+    {
+      "description": "Creator narrative modes and the credibility-first lecture/testimonial route are mutually exclusive.",
+      "not": {
+        "required": ["narrative_mode", "editorial"],
+        "properties": {
+          "narrative_mode": {
+            "enum": ["personal_challenge", "day_log"]
+          },
+          "editorial": {
+            "required": ["hook_priority"],
+            "properties": {
+              "hook_priority": { "const": "credibility_first" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "audio_policy": { "const": "music_master" } },
+        "required": ["audio_policy"]
+      },
+      "then": { "required": ["music_master"] }
+    },
+    {
+      "if": { "required": ["music_master"] },
+      "then": {
+        "required": ["audio_policy"],
+        "properties": { "audio_policy": { "const": "music_master" } }
+      }
+    }
+  ],
   "properties": {
     "version": {
       "type": "string"
@@ -115,6 +148,11 @@
         "minLength": 1
       }
     },
+    "narrative_mode": {
+      "type": "string",
+      "enum": ["personal_challenge", "day_log"],
+      "description": "Optional creator-short narrative arc selector. Omit it to preserve the legacy blueprint path. It must not be combined with editorial.hook_priority=credibility_first."
+    },
     "order_policy": {
       "type": "string",
       "enum": ["chronological", "editorial"],
@@ -138,8 +176,66 @@
     },
     "audio_policy": {
       "type": "string",
-      "enum": ["ducking", "bgm_only", "original_only"],
+      "enum": ["ducking", "bgm_only", "original_only", "music_master"],
       "description": "Default final audio policy. If omitted, profile/template defaults may apply."
+    },
+    "music_master": {
+      "type": "object",
+      "required": ["source_ref", "source_content_hash", "source_size_bytes", "source_duration_us"],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "source_ref": { "type": "string", "minLength": 1 },
+        "source_content_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "source_size_bytes": { "type": "integer", "minimum": 1 },
+        "source_duration_us": { "type": "integer", "minimum": 1 },
+        "source_range_us": {
+          "type": "object",
+          "required": ["in_us", "out_us"],
+          "properties": {
+            "in_us": { "type": "integer", "minimum": 0 },
+            "out_us": { "type": "integer", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "timeline_range": {
+          "type": "object",
+          "required": ["in_frame", "out_frame"],
+          "properties": {
+            "in_frame": { "type": "integer", "minimum": 0 },
+            "out_frame": { "type": "integer", "exclusiveMinimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "gain_linear": { "const": 1 },
+        "audio_decision": { "enum": ["preserve", "mastering"] },
+        "channel_layout": { "type": "string", "minLength": 1 },
+        "codec": { "type": "string", "minLength": 1 },
+        "processing_graph": {
+          "type": "object",
+          "required": ["version", "operations"],
+          "properties": {
+            "version": { "const": "audio-processing-graph/v1" },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "enum": ["stream_copy", "trim_reencode", "shared_final_mastering"] }
+            }
+          },
+          "additionalProperties": false
+        },
+        "measurement_tolerance": {
+          "type": "object",
+          "required": ["integrated_lufs_db", "lra_lu", "true_peak_dbtp"],
+          "properties": {
+            "integrated_lufs_db": { "type": "number", "minimum": 0 },
+            "lra_lu": { "type": "number", "minimum": 0 },
+            "true_peak_dbtp": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "policy_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
     },
     "a1_loudnorm": {
       "type": "boolean",
@@ -152,7 +248,36 @@
         "default_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
         "max_hold_sec": { "type": "number", "exclusiveMinimum": 0 },
         "motion_mode": { "type": "string", "enum": ["static", "subtle_ken_burns"] },
-        "fit_mode": { "type": "string", "enum": ["contain", "cover"] },
+        "hold": {
+          "type": "object",
+          "required": ["unit"],
+          "properties": {
+            "unit": { "type": "string", "enum": ["frames", "seconds", "beats", "section_boundary"] },
+            "value": { "type": "number", "exclusiveMinimum": 0 },
+            "section_id": { "type": "string", "minLength": 1 },
+            "boundary": { "type": "string", "enum": ["start", "end"] },
+            "reason": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "long_hold_reason": { "type": "string", "minLength": 1 },
+        "camera_motion": {
+          "type": "object",
+          "required": ["preset"],
+          "properties": {
+            "preset": { "type": "string", "enum": ["push_in", "pull_out", "horizontal_tracking", "tilt_down", "diagonal_drift", "pan_zoom"] },
+            "easing": { "type": "string", "enum": ["smoothstep", "linear"] },
+            "intensity": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+            "transform": { "$ref": "#/$defs/stillTransform" },
+            "parallax": { "$ref": "#/$defs/stillParallax" }
+          },
+          "additionalProperties": false
+        },
+        "ken_burns": { "$ref": "#/$defs/stillCameraMotionIntent" },
+        "parallax": { "$ref": "#/$defs/stillParallax" },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "composition": { "type": "string", "enum": ["fit", "vertical_blur_backdrop"] },
+        "fit_mode": { "type": "string", "enum": ["contain", "cover", "full_bleed"] },
         "background": { "type": "string", "pattern": "^(?:black|white|transparent|#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?)$" }
       },
       "additionalProperties": false
@@ -211,7 +336,7 @@
         "confirmed_at": { "type": "string", "format": "date-time" },
         "source": { "type": "string", "enum": ["interactive_prompt", "non_interactive_default"] },
         "caption_policy": { "type": "string", "enum": ["auto", "manual", "off"] },
-        "audio_policy": { "type": "string", "enum": ["ducking", "bgm_only", "original_only"] },
+        "audio_policy": { "type": "string", "enum": ["ducking", "bgm_only", "original_only", "music_master"] },
         "questions": {
           "type": "array",
           "items": { "type": "string" }
@@ -353,6 +478,61 @@
         "silence_gap_cut_sec": { "type": "number", "minimum": 0.5, "maximum": 30 },
         "chapter_max_sec": { "type": "number", "minimum": 60, "maximum": 3600 },
         "coverage_interval_sec": { "type": "number", "minimum": 30, "maximum": 900 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "stillTransform": {
+      "type": "object",
+      "properties": {
+        "crop": {
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "pan": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": -1, "maximum": 1 }, "y": { "type": "number", "minimum": -1, "maximum": 1 } },
+          "additionalProperties": false
+        },
+        "zoom": { "type": "number", "exclusiveMinimum": 0, "maximum": 8 },
+        "anchor": {
+          "type": "object",
+          "required": ["x", "y"],
+          "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } },
+          "additionalProperties": false
+        }
+      },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "stillParallax": {
+      "type": "object",
+      "required": ["amount", "axis"],
+      "properties": {
+        "amount": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.25 },
+        "axis": { "type": "string", "enum": ["horizontal", "vertical", "both"] }
+      },
+      "additionalProperties": false
+    },
+    "stillCameraMotionIntent": {
+      "type": "object",
+      "required": ["preset"],
+      "properties": {
+        "preset": { "type": "string", "enum": ["push_in", "pull_out", "horizontal_tracking", "tilt_down", "diagonal_drift", "pan_zoom"] },
+        "easing": { "type": "string", "enum": ["smoothstep", "linear"] },
+        "intensity": { "type": "number", "exclusiveMinimum": 0, "maximum": 0.6 },
+        "transform": { "$ref": "#/$defs/stillTransform" },
+        "parallax": { "$ref": "#/$defs/stillParallax" }
       },
       "additionalProperties": false
     }

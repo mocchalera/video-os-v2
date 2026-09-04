@@ -20,7 +20,12 @@ skills, and chronological assembly through the shared profile resolver and
 compiler contracts. It does not introduce an event-specific pipeline and does
 not claim real-media visual quality.
 
-The `product-gate` job depends on the Node runtime, schema contract, editor server, macOS Studio, agent definitions, repository hygiene, speech-led contract, and event-recap contract jobs. Configure `product-gate` as the required branch-protection check for a single fail-closed product boundary.
+The PR `product-gate` job is the single required-check candidate. It runs the
+Node runtime assertion, schema validation, speech-led and event-recap contract
+checks, Studio fixture, repository hygiene, skill contracts, and build in one
+Ubuntu job. The full Node suite, editor-server integration, macOS Studio, and
+real render are intentionally owned by the protected-push/manual full
+integration workflows; see [`docs/ci-workflow-modes.md`](ci-workflow-modes.md).
 
 ## Real-media gate
 

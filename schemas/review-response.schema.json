@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "review-response.schema.json",
+  "type": "object",
+  "required": ["version", "project_id", "review_identity", "generation_id", "video_sha256", "timeline_sha256", "ask_id", "decision", "text", "status", "invalid_for_current", "stale_reason"],
+  "properties": {
+    "version": { "const": "review-response/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "review_identity": { "$ref": "#/$defs/hash" },
+    "generation_id": { "$ref": "#/$defs/hash" },
+    "video_sha256": { "$ref": "#/$defs/hash" },
+    "timeline_sha256": { "$ref": "#/$defs/hash" },
+    "ask_id": { "type": "string", "minLength": 1 },
+    "decision": { "enum": ["approve", "request_changes", "free_text"] },
+    "text": { "type": ["string", "null"] },
+    "status": { "enum": ["current", "stale"] },
+    "invalid_for_current": { "type": "boolean" },
+    "stale_reason": { "type": ["string", "null"] },
+    "round_event_sha256": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "current" } }, "required": ["status"] },
+      "then": { "properties": { "invalid_for_current": { "const": false }, "stale_reason": { "type": "null" } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "stale" } }, "required": ["status"] },
+      "then": { "properties": { "invalid_for_current": { "const": true }, "stale_reason": { "type": "string", "minLength": 1 } } }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": { "hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" } }
+}

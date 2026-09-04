@@ -16,6 +16,12 @@ description: Finish an existing Japanese business talking-head, lecture, intervi
 
 ## Workflow
 
+0. **repo project が無ければ、先に作る**:
+   素材が repo 外のフォルダにあるだけの状態なら、まず
+   `npm run full-pipeline -- --project <project-id> --source-dir <素材ディレクトリ> --content-hint "<内容>"`
+   で project 化する。project 化せずに ffmpeg を直接叩いて動画を組むことは禁止。
+   固有ルール（社名・登壇者名・指定色など）は本SKILL.mdではなく
+   `projects/<project-id>/STYLE.md` に書く。
 1. `creative_brief.yaml`、`timeline.json`、最新preview、transcript、
    `review_report.yaml`を読む。source mapのSHA・size・durationと、
    字幕焼き込みのないクリーン元素材を確認する。

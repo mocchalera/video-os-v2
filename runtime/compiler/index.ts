@@ -6,21 +6,52 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
+import { validateAgainstSchema } from "../commands/shared.js";
+import { validateProject } from "../validation/schema-validator.js";
+import { reconcileCompiledTimelineState } from "../state/reconcile.js";
+import { loadSourceMap } from "../media/source-map.js";
+import {
+  buildDerivedMappingReceipt,
+  buildReviewEditIdentityReceipt,
+  computeArtifactSha256,
+  stampReviewDerivation,
+} from "../review/edit-identity.js";
 import { normalize } from "./normalize.js";
 import { scoreCandidates } from "./score.js";
 import { assemble } from "./assemble.js";
-import { applyAdaptiveTrim, applyUtteranceSnap, compactTrimmedClipsWithinBeats, type UtteranceSpan } from "./trim.js";
+import {
+  applyAdaptiveTrim,
+  applyUtteranceSnap,
+  compactTrimmedClipsWithinBeats,
+  type TrimRangeReport,
+  type UtteranceSpan,
+} from "./trim.js";
 import { applyDurationAdjust } from "./duration-adjust.js";
-import { resolve, type DurationStatus, type ResolutionReport } from "./resolve.js";
-import { buildTimelineIR, exportOtio, writePreviewManifest, writeTimeline } from "./export.js";
+import {
+  resolve,
+  resolveCoverageHorizon,
+  type DurationStatus,
+  type ResolutionReport,
+} from "./resolve.js";
+import { buildTimelineIR, exportOtio } from "./export.js";
+import {
+  finalizeCompileArtifactsAtomically,
+  type AtomicCompileFinalizeResult,
+} from "./atomic-finalize.js";
 import { reorderAssembledSceneContinuity } from "./scene-order.js";
 import { loadVisualCache, type CompileVisualCache } from "./visual-cache.js";
-import { applyPatch } from "./patch.js";
+import { applyPatch, type ReviewPatch } from "./patch.js";
 import { applyEndingTreatment } from "./ending-treatment.js";
 import { applyCutBreathTreatment } from "./cut-breath-treatment.js";
 import { applyDialogueSemanticRepair } from "./dialogue-semantic-repair.js";
 import { resolveDurationPolicyFromBlueprint, resolveOutputDimensions, resolveTimelineOrder } from "./duration-helpers.js";
-import { activateSkills, computeRegistryHash, getSkillMetadataTags, getUtteranceSnapConfig } from "../editorial/skill-registry.js";
+import {
+  activateSkills,
+  computeRegistryHash,
+  getApexFreezeHoldConfig,
+  getSkillMetadataTags,
+  getUtteranceSnapConfig,
+} from "../editorial/skill-registry.js";
 import { loadProfiles } from "../editorial/policy-resolver.js";
 import {
   adjacencyDecide,
@@ -30,8 +61,8 @@ import {
   evaluateTimelineContinuity,
   resolveContinuityPolicy,
 } from "./adjacency.js";
-import { loadBgmAnalysisFromProject } from "../media/bgm-analyzer.js";
-import { validateArtifact } from "../artifacts/loaders.js";
+import { applyTransitionOverlaps } from "./transition-overlap.js";
+import { loadBlueprint, loadBlueprintData, validateArtifact } from "../artifacts/loaders.js";
 import {
   projectMusicToTimeline,
   validateMusicCues,
@@ -40,13 +71,18 @@ import {
 import {
   projectSfxToTimeline,
   resolveSfxCuePlan,
+  type ResolvedSfxCuePlan,
 } from "../audio/sfx-cues.js";
 import type { BgmSelectionArtifact } from "../music/selection-service.js";
-import { loadSourceMap } from "../media/source-map.js";
 import { extractDurationUs, runFfprobe } from "../connectors/ffprobe.js";
 import { attachAutoCaptions, resolveCaptionPolicy } from "../captions/timeline-captions.js";
 import { materializePeakSignalsFromSegments } from "../artifacts/peak-materialization.js";
-import { resolveStillDurationPolicy, resolveStillImageHold } from "../artifacts/still-image-policy.js";
+import {
+  buildStillHoldResolutionContext,
+  resolveStillDurationPolicy,
+  resolveStillImageHold,
+} from "../artifacts/still-image-policy.js";
+import { buildLyricMvTimelineMetadata } from "./lyric-mv.js";
 import {
   assertStillImageCandidateGrounding,
   assertStillImageSegmentGrounding,
@@ -55,11 +91,14 @@ import {
 import { assertImageSequenceCandidateGrounding } from "../artifacts/image-sequence-grounding.js";
 import {
   assertCandidatePlanningMediaKindsSupported,
+  candidateSupportsVisual,
   assertProjectPlanningMediaKindsSupported,
   readAuthoritativeAssetMediaCapabilities,
 } from "../artifacts/source-media-capabilities.js";
 import { resolveProfileAndPolicy } from "../editorial/policy-resolver.js";
 import { assertStillImageTimelineTruthForTimeline, setStillImageHoldFrames } from "./still-image.js";
+import { assertImageQcGateOpen, imageQcAppliesToProject, ImageQcGateError,
+  type ImageQcReport, runImageQcGate } from "../artifacts/image-qc-report.js";
 import { loadSegmentEditorialEvidence } from "../artifacts/segment-editorial-evidence.js";
 import { getCandidateRef } from "./candidate-ref.js";
 import {
@@ -76,6 +115,16 @@ import {
   type BeatSyncCompileMetadata,
 } from "./beat-sync.js";
 import {
+  applyRhythmSyncSnaps,
+  buildRhythmEventGridFromSnapshot,
+  loadRhythmEvidenceSnapshot,
+  loadSourceDurationsFromProject,
+  recomputeAndEnforceRhythmSync,
+  resolveRhythmSyncConfig,
+  type RhythmSyncCompileMetadata,
+} from "./rhythm-sync.js";
+import { hasM2BgmProvenance } from "../media/bgm-analysis-contract.js";
+import {
   isMarlinEventClipTrimPlan,
   planClipTrims,
   type ClipTrimPlan,
@@ -85,6 +134,51 @@ import type { BgmScoringContext } from "./score.js";
 import type { MarlinEventsArtifact } from "../connectors/marlin-types.js";
 import type { SegmentItem } from "../connectors/ffmpeg-segmenter.js";
 import type { TimelineTransition } from "./transition-types.js";
+import { synchronizeSameSourceTalkCuts } from "./av-sync.js";
+import { resolveCreatorShortVoBrollPreset } from "./creator-short-vo-broll.js";
+import { applyApexFreezeHolds, materializeCandidatePlanFreezeHolds } from "./apex-freeze-hold.js";
+import { framingPolicyContentHash, loadFramingPolicy } from "../visual/framing-policy.js";
+import { projectRegisteredVisualIntents } from "../visual/jump-cut-policy.js";
+import { verifyReframeCandidateEvidence, type ReframeCandidateEvidence } from "../visual/reframe.js";
+import { loadVerticalCompositionPolicy, resolveVerticalComposition, verticalCompositionPolicyContentHash } from "../visual/vertical-composition.js";
+import { loadRetentionPolicy, retentionPolicyContentHash } from "../editorial/short-form-retention.js";
+import {
+  assertHookRecompileAllowed,
+  buildHookLockProvenance,
+} from "./hook-lock.js";
+import {
+  bindShotAnchorsToTimeline,
+  computeHookFingerprint,
+  resolveShotAnchors,
+  type ShotAnchorSourceIdentity,
+} from "./shot-anchor-resolver.js";
+import {
+  evaluateNormalizedNarrativeArcContract,
+  NarrativeArcContractError,
+} from "../eval/narrative-arc-contract.js";
+import {
+  GapFreeTimelineError,
+  InsufficientContentError,
+  PrimaryAudioGapError,
+  TimelineOperationError,
+} from "./errors.js";
+import {
+  assertRenderSourceReadiness,
+  buildRenderSourceReadiness,
+  type FormalSfxSourceAuthority,
+  type RenderSourceReadinessReport,
+} from "./render-readiness.js";
+import {
+  buildBeatAllocationReport,
+  type BeatAllocationReport,
+} from "./diagnostics.js";
+import {
+  findPrimaryAudioGaps,
+  findPrimaryVideoGaps,
+  primaryVideoEndFrame,
+  validateIntentionalGapOperation,
+  validatePrimaryAudioMixPolicy,
+} from "./coverage.js";
 import type {
   Candidate,
   CompileOptions,
@@ -92,22 +186,60 @@ import type {
   ContinuityCompileMetadata,
   ContinuityReorderEvent,
   CreativeBrief,
+  CreativeBriefMusicMaster,
   AssembledTimeline,
   BriefAudioPolicy,
   CraftDirective,
   DurationPolicy,
   EditBlueprint,
+  IntentionalGapOperation,
   NormalizedBeat,
   SelectsCandidates,
   TimelineClip,
   TimelineIR,
+  CompileArtifactReceipt,
+  CompilePromotionContext,
   TrimHint,
 } from "./types.js";
 
-export type { TimelineIR, CompileOptions };
+export type { TimelineIR, CompileOptions, CompileArtifactReceipt, CompilePromotionContext };
+export { GapFreeTimelineError, InsufficientContentError, PrimaryAudioGapError, RhythmParityGateError, TimelineOperationError } from "./errors.js";
+export {
+  assertRenderSourceReadiness,
+  buildRenderSourceReadiness,
+  computeSourceMappingHash,
+  evaluateSourceMappingContract,
+  RenderSourceUnresolvedError,
+} from "./render-readiness.js";
+export type {
+  FormalSfxSourceAuthority,
+  RenderSourceReadinessReport,
+  RenderSourceResolution,
+  SourceMappingContractStatus,
+} from "./render-readiness.js";
+export { AtomicArtifactValidationError } from "./atomic-finalize.js";
 export { applyPatch } from "./patch.js";
 export type { ReviewPatch, PatchResult, PatchError, PatchOperation } from "./patch.js";
 export type { ResolutionReport } from "./resolve.js";
+export {
+  buildBeatAllocationReport,
+  classifyRemedy,
+  formatBeatAllocationReport,
+  suggestRecoveryGate,
+} from "./diagnostics.js";
+export type {
+  BeatAllocationReport,
+  BeatAllocationEntry,
+  BeatAllocationGap,
+  RecoverySuggestion,
+  RemedyClass,
+} from "./diagnostics.js";
+export {
+  findPrimaryAudioGaps,
+  primaryAudioTrack,
+  validatePrimaryAudioMixPolicy,
+} from "./coverage.js";
+export type { PrimaryAudioMixPolicy } from "./types.js";
 
 export const MIN_RENDERABLE_FRAMES = 12;
 
@@ -180,7 +312,7 @@ export function projectProjectMusicCues(
   fpsDen: number,
 ): TimelineIR {
   const cuesPath = path.join(projectPath, "07_package", "music_cues.json");
-  if (!fs.existsSync(cuesPath)) return timeline;
+  if (audioPolicy === "music_master" || !fs.existsSync(cuesPath)) return timeline;
   const doc = validateArtifact<MusicCuesDoc>(
     JSON.parse(fs.readFileSync(cuesPath, "utf8")),
     "music-cues.schema.json",
@@ -204,16 +336,17 @@ export function projectProjectMusicCues(
  * Compiler-owned SFX projection. An absent artifact is a strict no-op.
  * original_only remains byte-compatible and never activates A3 SFX.
  */
-export function projectProjectSfxCues(
+function resolveProjectSfxCuePlan(
   timeline: TimelineIR,
   projectPath: string,
   audioPolicy: BriefAudioPolicy,
   fpsNum: number,
   fpsDen: number,
-): TimelineIR {
+  repoSfxRoot?: string,
+): ResolvedSfxCuePlan | undefined {
   const cuesPath = path.join(projectPath, "07_package", "sfx_cues.json");
-  if (!fs.existsSync(cuesPath) || audioPolicy === "original_only") {
-    return timeline;
+  if (!fs.existsSync(cuesPath) || audioPolicy === "original_only" || audioPolicy === "music_master") {
+    return undefined;
   }
   if (
     timeline.sequence.fps_num !== fpsNum
@@ -223,10 +356,168 @@ export function projectProjectSfxCues(
   }
   const plan = resolveSfxCuePlan({
     projectDir: projectPath,
+    ...(repoSfxRoot ? { repoSfxRoot } : {}),
     timeline,
     cuesPath,
   });
-  return projectSfxToTimeline(timeline, plan);
+  return plan;
+}
+
+function buildFormalSfxSourceAuthorities(
+  plan: ResolvedSfxCuePlan,
+  projectPath: string,
+  repoSfxRoot?: string,
+): ReadonlyMap<string, FormalSfxSourceAuthority> {
+  const libraryScope = plan.library.scope;
+  if (!libraryScope) {
+    throw new Error("Formal SFX cue plan requires an explicit library scope.");
+  }
+  const authorityRoot = libraryScope === "repo_common"
+    ? repoSfxRoot
+    : projectPath;
+  if (!authorityRoot) {
+    throw new Error("Formal repo-common SFX requires an explicit repoSfxRoot.");
+  }
+  return new Map(plan.cues.map((cue) => [
+    `A3_${cue.cue_id}`,
+    {
+      cue_id: cue.cue_id,
+      asset_id: cue.asset_id,
+      semantic_role: cue.semantic_role,
+      source_path: cue.source_path,
+      expected_sha256: cue.asset_pin.asset_content_hash,
+      authority_root: path.resolve(authorityRoot),
+      sfx_asset: {
+        asset_id: cue.asset_id,
+        source_path: cue.source_path,
+        library_id: plan.library.library_id,
+        library_version: plan.library.library_version,
+        library_manifest_hash: plan.library.manifest_hash,
+        library_scope: libraryScope,
+        asset_content_hash: cue.asset_pin.asset_content_hash,
+      },
+    },
+  ]));
+}
+
+export function projectProjectSfxCues(
+  timeline: TimelineIR,
+  projectPath: string,
+  audioPolicy: BriefAudioPolicy,
+  fpsNum: number,
+  fpsDen: number,
+  repoSfxRoot?: string,
+): TimelineIR {
+  const plan = resolveProjectSfxCuePlan(
+    timeline,
+    projectPath,
+    audioPolicy,
+    fpsNum,
+    fpsDen,
+    repoSfxRoot,
+  );
+  return plan ? projectSfxToTimeline(timeline, plan) : timeline;
+}
+
+/**
+ * Compiler-owned audio contract projection. This is metadata-only: the
+ * compiler records the semantic lane owners and source pins after A2/A3
+ * projection, but never moves a picture, dialogue, or caption frame to fit
+ * an audio operation.
+ */
+export function projectProjectAudioPolicy(
+  timeline: TimelineIR,
+  audioPolicy: Pick<ResolvedAudioPolicy, "mode" | "a1_loudnorm"> & {
+    source?: "explicit_brief" | "profile_default" | "global_default";
+    audio_decision?: "preserve" | "mastering";
+    music_master?: CreativeBriefMusicMaster;
+  },
+  sourceMap?: ReturnType<typeof loadSourceMap>,
+  sourceHashByAssetId?: ReadonlyMap<string, string>,
+): TimelineIR {
+  const sourceRefs = timeline.tracks.audio.flatMap((track) => {
+    if (track.track_id !== "A1" && track.track_id !== "A2" && track.track_id !== "A3") return [];
+    return track.clips.map((clip) => {
+      const metadata = clip.metadata ?? {};
+      const sourceEntry = sourceMap?.entryMap.get(clip.asset_id);
+      const musicAsset = metadata.music_asset;
+      const sfxAsset = metadata.sfx_asset;
+      const sourceRef = [metadata.source_ref, metadata.source_locator, metadata.source_path, sourceEntry?.source_locator]
+        .find((value): value is string => typeof value === "string" && value.length > 0);
+      const sourceContentHash = [
+        metadata.source_content_hash,
+        metadata.content_hash,
+        typeof musicAsset === "object" && musicAsset !== null && !Array.isArray(musicAsset)
+          ? (musicAsset as Record<string, unknown>).full_mix_content_hash
+          : undefined,
+        typeof sfxAsset === "object" && sfxAsset !== null && !Array.isArray(sfxAsset)
+          ? (sfxAsset as Record<string, unknown>).asset_content_hash
+          : undefined,
+        sourceEntry?.source_content_sha256,
+        sourceHashByAssetId?.get(clip.asset_id),
+      ].map(canonicalAudioProjectionHash)
+        .find((value): value is string => value !== undefined);
+      return {
+        track_id: track.track_id as "A1" | "A2" | "A3",
+        clip_id: clip.clip_id,
+        asset_id: clip.asset_id,
+        timeline_in_frame: clip.timeline_in_frame,
+        timeline_duration_frames: clip.timeline_duration_frames,
+        ...(sourceRef ? { source_ref: sourceRef } : {}),
+        ...(sourceContentHash ? { source_content_hash: sourceContentHash } : {}),
+      };
+    });
+  });
+  const projection = {
+    version: "audio-render-projection/v1" as const,
+    lane_semantics: {
+      A1: "dialogue_and_natural_sound" as const,
+      A2: "music_bgm" as const,
+      A3: "texture_ambient_and_sfx" as const,
+    },
+    dialogue_authority: "A1" as const,
+    conflict_policy: "dialogue_first" as const,
+    picture_dialogue_caption_timing_immutable: true as const,
+    audio_displacement_frames: 0 as const,
+    source_refs: sourceRefs,
+  };
+  return {
+    ...timeline,
+    metadata: {
+      ...(timeline.metadata ?? {}),
+      audio_render_projection: {
+        ...projection,
+        audio_policy_mode: audioPolicy.mode,
+        audio_policy_source: audioPolicy.source ?? "global_default",
+        a1_loudnorm: audioPolicy.a1_loudnorm,
+      },
+    },
+    provenance: {
+      ...timeline.provenance,
+      ...(audioPolicy.mode === "music_master" && audioPolicy.music_master
+        ? {
+            audio_policy: {
+              ...(timeline.provenance.audio_policy ?? {}),
+              mode: "music_master" as const,
+              source: audioPolicy.source ?? "global_default",
+              ...(audioPolicy.a1_loudnorm !== undefined
+                ? { a1_loudnorm: audioPolicy.a1_loudnorm }
+                : {}),
+              audio_decision: audioPolicy.audio_decision ?? "preserve",
+              music_master: structuredClone(audioPolicy.music_master),
+            },
+          }
+        : {}),
+      audio_render_projection: projection,
+    },
+  };
+}
+
+function canonicalAudioProjectionHash(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (/^sha256:[a-f0-9]{64}$/.test(value)) return value;
+  if (/^[a-f0-9]{64}$/.test(value)) return `sha256:${value}`;
+  return undefined;
 }
 
 export function isEditorialEyeRelationV1Enabled(
@@ -259,11 +550,20 @@ export interface CompileResult {
     content_fill_ratio?: number;
     gap_frames?: number;
     gap_count?: number;
+    gap_details?: import("./coverage.js").PrimaryVideoGap[];
+    audio_gap_frames?: number;
+    audio_gap_count?: number;
+    audio_gap_details?: import("./coverage.js").PrimaryAudioGap[];
     beat_fill?: Array<{ beat_id: string; target: number; actual: number; fill_ratio: number }>;
   };
   duration_policy?: DurationPolicy;
   continuity: ContinuityCompileMetadata;
   beat_sync?: BeatSyncCompileMetadata;
+  rhythm_sync?: RhythmSyncCompileMetadata;
+  trim_range_report?: TrimRangeReport[];
+  render_readiness?: RenderSourceReadinessReport;
+  beat_allocation_report?: BeatAllocationReport;
+  artifact_receipts?: CompileArtifactReceipt[];
 }
 
 export class ContinuityConstraintError extends Error {
@@ -298,6 +598,8 @@ interface ResolvedAudioPolicy {
   mode: BriefAudioPolicy;
   source: "explicit_brief" | "profile_default" | "global_default";
   a1_loudnorm: boolean;
+  audio_decision?: "preserve" | "mastering";
+  music_master?: CreativeBriefMusicMaster;
 }
 
 export interface ResolvedUtteranceSnapConfig {
@@ -316,20 +618,23 @@ export interface MicroClipGuardResult {
 }
 
 /**
- * Load transcript utterance spans per asset from 03_analysis/transcripts.
- * Deterministic (files sorted, spans sorted). Returns an empty map when the
- * directory is absent so the compiler stays hermetic for projects without
- * speech analysis. Mirrors the review-side transcript reader.
+ * Pure projection of the compile-entry transcript snapshot: utterance spans
+ * per asset. Deterministic (files sorted, spans sorted). Empty spans are
+ * skipped exactly like the legacy directory-scanning reader; the snapshot
+ * itself guarantees each file was read exactly once at compile entry, so no
+ * consumer re-opens transcript paths (Issue #35 A→B→A protection).
  */
-function loadProjectUtterances(projectPath: string): Map<string, UtteranceSpan[]> {
-  const dir = path.join(projectPath, "03_analysis", "transcripts");
+function utterancesFromTranscriptSnapshot(
+  transcripts: import("./rhythm-sync.js").TranscriptsDirSnapshot,
+): Map<string, UtteranceSpan[]> {
   const map = new Map<string, UtteranceSpan[]>();
-  if (!fs.existsSync(dir)) return map;
-  const files = fs.readdirSync(dir)
-    .filter((f) => f.endsWith(".json"))
-    .sort((a, b) => a.localeCompare(b));
-  for (const file of files) {
-    let parsed: {
+  for (const file of transcripts.files) {
+    // Issue #35 project binding: only transcripts whose snapshotted doc
+    // carried project_id exactly equal to the current project ("bound") may
+    // affect geometry. Missing, foreign, malformed or mixed-in foreign files
+    // are recorded as degraded provenance and contribute NOTHING.
+    if (file.binding !== "bound") continue;
+    const parsed = file.doc as {
       asset_id?: string;
       items?: Array<{
         start_us?: number;
@@ -337,13 +642,8 @@ function loadProjectUtterances(projectPath: string): Map<string, UtteranceSpan[]
         text?: string;
         speaker?: string;
       }>;
-    };
-    try {
-      parsed = JSON.parse(fs.readFileSync(path.join(dir, file), "utf-8"));
-    } catch {
-      continue;
-    }
-    const assetId = parsed.asset_id;
+    } | undefined;
+    const assetId = parsed?.asset_id;
     if (!assetId || !Array.isArray(parsed.items)) continue;
     const spans: UtteranceSpan[] = [];
     for (const item of parsed.items) {
@@ -436,6 +736,185 @@ function findRepoRoot(from: string): string {
 function readYaml<T>(filePath: string): T {
   const raw = fs.readFileSync(filePath, "utf-8");
   return parseYaml(raw) as T;
+}
+
+function readExistingTimeline(projectPath: string): TimelineIR | undefined {
+  const timelinePath = path.join(projectPath, "05_timeline", "timeline.json");
+  if (!fs.existsSync(timelinePath)) return undefined;
+  try {
+    return JSON.parse(fs.readFileSync(timelinePath, "utf-8")) as TimelineIR;
+  } catch (error) {
+    throw new Error(
+      `Cannot inspect the existing canonical timeline for Hook lock enforcement: ${timelinePath}`,
+      { cause: error },
+    );
+  }
+}
+
+function loadShotAnchorSourceIdentities(
+  projectPath: string,
+  sourceMap: ReturnType<typeof loadSourceMap>,
+): Map<string, ShotAnchorSourceIdentity> {
+  const identities = new Map<string, ShotAnchorSourceIdentity>();
+  for (const entry of sourceMap.entries) {
+    if (typeof entry.source_content_sha256 !== "string") continue;
+    identities.set(entry.asset_id, {
+      asset_id: entry.asset_id,
+      source_content_hash: entry.source_content_sha256,
+      ...(entry.source_fingerprint ? { source_fingerprint: entry.source_fingerprint } : {}),
+      evidence_source: "source_map",
+    });
+  }
+
+  const assets = readJsonIfExists<{
+    items?: Array<{
+      asset_id?: unknown;
+      source_content_sha256?: unknown;
+      source_content_hash?: unknown;
+      source_fingerprint?: unknown;
+    }>;
+  }>(path.join(projectPath, "03_analysis", "assets.json"));
+  for (const asset of assets?.items ?? []) {
+    if (typeof asset.asset_id !== "string" || identities.has(asset.asset_id)) continue;
+    const sourceHash = typeof asset.source_content_sha256 === "string"
+      ? asset.source_content_sha256
+      : typeof asset.source_content_hash === "string"
+        ? asset.source_content_hash
+        : undefined;
+    if (!sourceHash) continue;
+    identities.set(asset.asset_id, {
+      asset_id: asset.asset_id,
+      source_content_hash: sourceHash,
+      ...(typeof asset.source_fingerprint === "string"
+        ? { source_fingerprint: asset.source_fingerprint }
+        : {}),
+      evidence_source: "assets",
+    });
+  }
+  return identities;
+}
+
+function resolveFramingPolicyArtifact(
+  projectPath: string,
+  blueprint: EditBlueprint,
+): { policy: ReturnType<typeof loadFramingPolicy>; relativePath: string; contentHash: string } {
+  const reference = blueprint.policy_refs?.composition_policy_ref;
+  if (!reference) {
+    throw new Error("visual_intents require policy_refs.composition_policy_ref pointing to framing_policy.json");
+  }
+  const policyPath = path.resolve(projectPath, reference.ref);
+  if (!isContainedPath(projectPath, policyPath) || !fs.existsSync(policyPath)) {
+    throw new Error(`composition_policy_ref is missing or outside the project: ${reference.ref}`);
+  }
+  const realPolicyPath = fs.realpathSync(policyPath);
+  if (!isContainedPath(fs.realpathSync(projectPath), realPolicyPath)) {
+    throw new Error(`composition_policy_ref resolves through a symlink outside the project: ${reference.ref}`);
+  }
+  if (reference.source_hash) {
+    const actualHash = `sha256:${createHash("sha256").update(fs.readFileSync(realPolicyPath)).digest("hex")}`;
+    if (actualHash !== reference.source_hash) {
+      throw new Error(`composition_policy_ref source hash is stale: ${reference.ref}`);
+    }
+  }
+  const policy = loadFramingPolicy(realPolicyPath);
+  if (reference.version && reference.version !== policy.version) {
+    throw new Error(`composition_policy_ref version mismatch: expected ${reference.version}, found ${policy.version}`);
+  }
+  return {
+    policy,
+    relativePath: path.relative(projectPath, realPolicyPath).split(path.sep).join("/"),
+    contentHash: framingPolicyContentHash(policy),
+  };
+}
+
+function resolveVerticalCompositionPolicyArtifact(
+  projectPath: string,
+  reference: { ref: string; version?: string; source_hash?: string },
+): { policy: ReturnType<typeof loadVerticalCompositionPolicy>; relativePath: string; contentHash: string } {
+  const policyPath = path.resolve(projectPath, reference.ref);
+  if (!isContainedPath(projectPath, policyPath) || !fs.existsSync(policyPath)) {
+    throw new Error(`vertical_composition_policy_ref is missing or outside the project: ${reference.ref}`);
+  }
+  const realPolicyPath = fs.realpathSync(policyPath);
+  if (!isContainedPath(fs.realpathSync(projectPath), realPolicyPath)) {
+    throw new Error(`vertical_composition_policy_ref resolves through a symlink outside the project: ${reference.ref}`);
+  }
+  if (reference.source_hash) {
+    const actualHash = `sha256:${createHash("sha256").update(fs.readFileSync(realPolicyPath)).digest("hex")}`;
+    if (actualHash !== reference.source_hash) throw new Error(`vertical_composition_policy_ref source hash is stale: ${reference.ref}`);
+  }
+  const policy = loadVerticalCompositionPolicy(realPolicyPath);
+  if (reference.version && reference.version !== policy.version) throw new Error(`vertical_composition_policy_ref version mismatch: expected ${reference.version}, found ${policy.version}`);
+  return { policy, relativePath: path.relative(projectPath, realPolicyPath).split(path.sep).join("/"), contentHash: verticalCompositionPolicyContentHash(policy) };
+}
+
+function resolveRetentionPolicyArtifact(
+  projectPath: string,
+  reference: { ref: string; version?: string; source_hash?: string },
+): { policy: ReturnType<typeof loadRetentionPolicy>; relativePath: string; contentHash: string } {
+  const policyPath = path.resolve(projectPath, reference.ref);
+  if (!isContainedPath(projectPath, policyPath) || !fs.existsSync(policyPath)) {
+    throw new Error(`retention_policy_ref is missing or outside the project: ${reference.ref}`);
+  }
+  const realPolicyPath = fs.realpathSync(policyPath);
+  if (!isContainedPath(fs.realpathSync(projectPath), realPolicyPath)) {
+    throw new Error(`retention_policy_ref resolves through a symlink outside the project: ${reference.ref}`);
+  }
+  if (reference.source_hash) {
+    const actualHash = `sha256:${createHash("sha256").update(fs.readFileSync(realPolicyPath)).digest("hex")}`;
+    if (actualHash !== reference.source_hash) throw new Error(`retention_policy_ref source hash is stale: ${reference.ref}`);
+  }
+  const policy = loadRetentionPolicy(realPolicyPath);
+  if (reference.version && reference.version !== policy.version) throw new Error(`retention_policy_ref version mismatch: expected ${reference.version}, found ${policy.version}`);
+  return { policy, relativePath: path.relative(projectPath, realPolicyPath).split(path.sep).join("/"), contentHash: retentionPolicyContentHash(policy) };
+}
+
+function resolveReframeCandidateArtifacts(
+  projectPath: string,
+  intents: EditBlueprint["visual_intents"],
+  framingPolicyHash: string,
+): Map<string, ReframeCandidateEvidence> {
+  const candidates = new Map<string, ReframeCandidateEvidence>();
+  for (const intent of intents ?? []) {
+    const reference = intent.reframe_candidate_ref;
+    const expectedHash = intent.reframe_candidate_hash;
+    if (reference === undefined && expectedHash === undefined) continue;
+    if (typeof reference !== "string" || !reference.trim() || typeof expectedHash !== "string" || !expectedHash.trim()) {
+      throw new Error(`${intent.intent_id}: reframe_candidate_ref and reframe_candidate_hash are required together`);
+    }
+    const candidatePath = path.resolve(projectPath, reference);
+    if (!isContainedPath(projectPath, candidatePath) || !fs.existsSync(candidatePath)) {
+      throw new Error(`${intent.intent_id}: reframe candidate artifact is missing or outside the project: ${reference}`);
+    }
+    const realCandidatePath = fs.realpathSync(candidatePath);
+    if (!isContainedPath(fs.realpathSync(projectPath), realCandidatePath)) {
+      throw new Error(`${intent.intent_id}: reframe candidate artifact resolves through a symlink outside the project: ${reference}`);
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(fs.readFileSync(realCandidatePath, "utf-8"));
+    } catch (error) {
+      throw new Error(`${intent.intent_id}: cannot parse reframe candidate artifact ${reference}`, { cause: error });
+    }
+    let candidate: ReframeCandidateEvidence;
+    try {
+      candidate = verifyReframeCandidateEvidence(raw as ReframeCandidateEvidence);
+    } catch (error) {
+      throw new Error(`${intent.intent_id}: reframe candidate artifact verification failed: ${error instanceof Error ? error.message : "unknown evidence error"}`);
+    }
+    if (candidate.candidate_hash !== expectedHash) {
+      throw new Error(`${intent.intent_id}: reframe candidate hash does not match Blueprint adoption pin: ${reference}`);
+    }
+    if (candidate.framing_policy.content_hash !== framingPolicyHash) {
+      throw new Error(`${intent.intent_id}: reframe candidate framing policy content hash does not match the loaded framing_policy.json`);
+    }
+    const existing = candidates.get(reference);
+    if (existing && existing.candidate_hash !== candidate.candidate_hash) {
+      throw new Error(`${intent.intent_id}: reframe candidate reference is reused with conflicting evidence: ${reference}`);
+    }
+    candidates.set(reference, candidate);
+  }
+  return candidates;
 }
 
 function readJsonIfExists<T>(filePath: string): T | undefined {
@@ -574,6 +1053,60 @@ function applyExactCandidatePlanRevisitExemptions(
         : {}),
       reason: existing?.reason ?? "explicit candidate_plan reprise under human_golden_order",
     };
+  }
+}
+
+/**
+ * Lyric MV still reuse is an authored instance contract, not a broad continuity
+ * waiver. Only a repeated source still explicitly marked intentional receives
+ * an allow_revisit directive; an unmarked duplicate remains a continuity error.
+ */
+export function applyIntentionalStillReuseExemptions(
+  beats: NormalizedBeat[],
+  candidates: Candidate[],
+): void {
+  const candidatesByRef = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    candidatesByRef.set(getCandidateRef(candidate), candidate);
+    if (!candidatesByRef.has(candidate.segment_id)) candidatesByRef.set(candidate.segment_id, candidate);
+  }
+  const seenAssets = new Set<string>();
+  for (const beat of beats) {
+    const refs = [
+      beat.candidate_plan?.primary_candidate_ref,
+      ...(beat.candidate_plan?.fallback_candidate_refs ?? []),
+    ].filter((ref): ref is string => typeof ref === "string" && ref.length > 0);
+    const intentionalAssets = new Set<string>();
+    for (const ref of refs) {
+      const candidate = candidatesByRef.get(ref);
+      if (!candidate || candidate.media_kind !== "image") continue;
+      const planIntent = beat.candidate_plan?.primary_candidate_ref === ref
+        ? beat.candidate_plan.still_image
+        : undefined;
+      const intent = { ...(candidate.still_image ?? {}), ...(planIntent ?? {}) };
+      if (intent.reuse === "intentional" && seenAssets.has(candidate.asset_id)) {
+        intentionalAssets.add(candidate.asset_id);
+      }
+    }
+    if (intentionalAssets.size === 0) {
+      for (const ref of refs) {
+        const candidate = candidatesByRef.get(ref);
+        if (candidate?.media_kind === "image") seenAssets.add(candidate.asset_id);
+      }
+      continue;
+    }
+    const existing = typeof beat.allow_revisit === "object" ? beat.allow_revisit : undefined;
+    const assetIds = new Set(existing?.asset_ids ?? []);
+    for (const assetId of intentionalAssets) assetIds.add(assetId);
+    beat.allow_revisit = {
+      ...(assetIds.size > 0 ? { asset_ids: [...assetIds].sort() } : {}),
+      ...(existing?.semantic_cluster_ids ? { semantic_cluster_ids: [...existing.semantic_cluster_ids] } : {}),
+      reason: existing?.reason ?? "lyric_mv intentional still instance reuse",
+    };
+    for (const ref of refs) {
+      const candidate = candidatesByRef.get(ref);
+      if (candidate?.media_kind === "image") seenAssets.add(candidate.asset_id);
+    }
   }
 }
 
@@ -899,6 +1432,45 @@ function readSourceVideoDimensions(
   }
 }
 
+function readSourceAvGeometry(
+  projectPath: string,
+  assetIds: Set<string>,
+): { video: { width: number; height: number; fps_num: number; fps_den: number }; audio: { sample_rate: number; channels: number } } | undefined {
+  if (assetIds.size === 0) return undefined;
+  const assetsPath = path.join(projectPath, "03_analysis/assets.json");
+  if (!fs.existsSync(assetsPath)) return undefined;
+
+  try {
+    const assetsDoc = JSON.parse(fs.readFileSync(assetsPath, "utf-8")) as {
+      items?: Array<{
+        asset_id?: string;
+        video_stream?: { width?: number; height?: number; fps_num?: number; fps_den?: number };
+        audio_stream?: { sample_rate?: number; channels?: number };
+      }>;
+    };
+    const items = (assetsDoc.items ?? []).filter((item) => typeof item.asset_id === "string" && assetIds.has(item.asset_id));
+    if (items.length !== assetIds.size) return undefined;
+    const geometries = items.map((item) => ({
+      video: {
+        width: item.video_stream?.width ?? 0,
+        height: item.video_stream?.height ?? 0,
+        fps_num: item.video_stream?.fps_num ?? 0,
+        fps_den: item.video_stream?.fps_den ?? 0,
+      },
+      audio: {
+        sample_rate: item.audio_stream?.sample_rate ?? 0,
+        channels: item.audio_stream?.channels ?? 0,
+      },
+    }));
+    if (geometries.some((geometry) => Object.values(geometry.video).some((value) => value <= 0) || Object.values(geometry.audio).some((value) => value <= 0))) return undefined;
+    const [first, ...rest] = geometries;
+    if (!first || rest.some((geometry) => JSON.stringify(geometry) !== JSON.stringify(first))) return undefined;
+    return first;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function detectProjectBgm(
   projectPath: string,
   log: (message: string) => void = console.warn,
@@ -1180,7 +1752,445 @@ function retimeFrameAfterRemovingSpans(
   return frame - removedFrames;
 }
 
+/** Public persisted compile route. The QC report is a canonical artifact:
+ * current frame hashes and the Issue 37/44 gate are checked before mutation. */
 export function compile(opts: CompileOptions): CompileResult {
+  const projectPath = canonicalProjectPath(opts.projectPath);
+  return runSynchronousProjectMutation(canonicalProjectMutationKey(projectPath), () => {
+    if (imageQcAppliesToProject(projectPath)) {
+      assertImageQcGateOpen(projectPath);
+    }
+    return compileCore({ ...opts, projectPath });
+  });
+}
+
+/** Run the public QC route and enforce the persisted report before a patch. */
+async function enforceCanonicalImageQcGateContinuation(projectPath: string) {
+  const outcome = await runImageQcGate({ projectDir: path.resolve(projectPath) });
+  if (outcome.applicable) assertImageQcGateOpen(projectPath);
+  return outcome;
+}
+
+/** Preserve the existing public report-only API. */
+export async function enforceCanonicalImageQcGate(projectPath: string): Promise<ImageQcReport> {
+  const outcome = await enforceCanonicalImageQcGateContinuation(projectPath);
+  return outcome.report as ImageQcReport;
+}
+
+/**
+ * Shared mutation sequencer: BOTH the canonical compile route and the
+ * canonical --patch route enqueue here with the same project key, so two
+ * mutations of one project never interleave, a rejected predecessor never
+ * poisons later callers, and the ledger entry is cleaned up when the last
+ * chained sequence settles.
+ */
+const projectMutationSequences = new Map<string, Promise<unknown>>();
+const synchronousProjectMutations = new Set<string>();
+
+function canonicalProjectPath(projectPath: string): string {
+  const absolute = path.resolve(projectPath);
+  try {
+    return fs.realpathSync(absolute);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return absolute;
+    throw error;
+  }
+}
+
+function canonicalProjectMutationKey(projectPath: string): string {
+  return canonicalProjectPath(projectPath);
+}
+
+function runSynchronousProjectMutation<T>(key: string, task: () => T): T {
+  // A synchronous public compile cannot wait on an async queue without
+  // deadlocking the event loop. It therefore shares the same ledger and fails
+  // closed while an async mutation owns this project.
+  if (synchronousProjectMutations.has(key) || projectMutationSequences.has(key)) {
+    throw new Error(`project mutation already in progress: ${key}`);
+  }
+  synchronousProjectMutations.add(key);
+  try {
+    return task();
+  } finally {
+    synchronousProjectMutations.delete(key);
+  }
+}
+
+function enqueueProjectMutation<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = projectMutationSequences.get(key) ?? Promise.resolve();
+  // A rejected predecessor must not poison the chain: every queued caller
+  // still runs with its own options.
+  const owned = previous.catch(() => undefined).then(task);
+  const settledChain: Promise<unknown> = owned.finally(() => {
+    if (projectMutationSequences.get(key) === settledChain) {
+      projectMutationSequences.delete(key);
+    }
+  });
+  // The ledger entry itself never produces unhandled rejections.
+  settledChain.catch(() => undefined);
+  projectMutationSequences.set(key, settledChain);
+  return owned;
+}
+
+export function assertCompileDurationGate(input: {
+  hardGate: boolean;
+  resolution: CompileResult["resolution"];
+}): void {
+  if (!input.hardGate || input.resolution.duration_fit) return;
+
+  const contentFrames = input.resolution.content_frames ?? input.resolution.total_frames;
+  const minFrames = input.resolution.min_target_frames ?? input.resolution.target_frames;
+  const maxFrames = input.resolution.max_target_frames ?? input.resolution.target_frames;
+  const status = input.resolution.duration_status
+    ?? (contentFrames < minFrames ? "short" : "over");
+
+  throw new Error(
+    `Hard duration gate failed: status=${status} content_frames=${contentFrames} ` +
+    `allowed_frames=${minFrames}..${maxFrames} target_frames=${input.resolution.target_frames}`,
+  );
+}
+
+export function assertGeneratedTimelineValid(projectPath: string, repoRoot?: string): void {
+  const validation = validateProject(projectPath, repoRoot ? { repoRoot } : {});
+  const timelineSchemaInvalid = validation.violations.some(
+    (violation) => violation.artifact === "timeline-ir.schema.json",
+  );
+  if (validation.gate2_timeline_valid && !timelineSchemaInvalid) return;
+  const details = validation.violations
+    .filter((violation) => violation.artifact === "05_timeline/timeline.json")
+    .map((violation) => `[${violation.rule}] ${violation.message}`)
+    .join("; ");
+  throw new Error(`Generated timeline.json has validation issues${details ? `: ${details}` : ""}`);
+}
+
+/**
+ * Private patch mutation core: gate enforcement, binding re-verification,
+ * and the timeline patch application/promotion. Reachable only through
+ * runCanonicalPatch's sequencer slot.
+ */
+async function applyCanonicalPatchMutation(
+  absProject: string,
+  patchPath: string,
+  sourceMapPath?: string,
+  options: { defaultsOverride?: Partial<CompilerDefaults> } = {},
+): Promise<void> {
+  const absPatch = path.resolve(patchPath);
+  // Validate the requested patch bytes and route before project-state checks.
+  // These are stable read-only request failures and must not write a fresh QC
+  // report or depend on a timeline/QC artifact that cannot be patched anyway.
+  let patchRaw: string;
+  try {
+    patchRaw = fs.readFileSync(absPatch, "utf-8");
+  } catch (error) {
+    console.error(`Patch file not found: ${absPatch}`);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`Patch file not found: ${absPatch}`);
+    }
+    throw new Error(`Patch file unreadable: ${absPatch}`);
+  }
+
+  let patch: ReviewPatch;
+  try {
+    patch = JSON.parse(patchRaw) as ReviewPatch;
+  } catch (error) {
+    throw new Error(`Review patch JSON invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const patchValidation = validateAgainstSchema(patch, "review-patch.schema.json");
+  if (!patchValidation.valid) throw new Error(`Review patch schema invalid: ${patchValidation.errors.join("; ")}`);
+  if (patch.patch_version !== "review-patch/v2") {
+    throw new Error("canonical patch route requires patch_version=review-patch/v2");
+  }
+  const canonicalPatchPath = path.join(absProject, "06_review", "review_patch.json");
+  let patchStat: fs.Stats;
+  try {
+    patchStat = fs.lstatSync(absPatch);
+  } catch (error) {
+    throw new Error(`Review patch path invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (patchStat.isSymbolicLink() || !patchStat.isFile()) {
+    throw new Error("review-patch/v2 must be the canonical 06_review/review_patch.json artifact");
+  }
+  let patchRealPath: string;
+  try {
+    patchRealPath = fs.realpathSync(absPatch);
+  } catch (error) {
+    throw new Error(`Review patch path invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (patchRealPath !== canonicalPatchPath) {
+    throw new Error("review-patch/v2 must be the canonical 06_review/review_patch.json artifact");
+  }
+  if (patch.status !== "accepted") throw new Error("review-patch/v2 must have status=accepted before canonical derivation");
+
+  const timelinePath = path.join(absProject, "05_timeline/timeline.json");
+
+  if (!fs.existsSync(timelinePath)) {
+    console.error(`Timeline not found: ${timelinePath}`);
+    console.error("Run compile first before applying a patch.");
+    throw new Error(`Timeline not found: ${timelinePath}`);
+  }
+
+  // Canonical fail-closed Image QC gate BEFORE any output mutation. The
+  // gate re-runs the fresh orchestration; rejected, missing, unavailable,
+  // stale, deleted, or replayed reports throw here and leave the timeline
+  // byte-identical.
+  const timeline = JSON.parse(fs.readFileSync(timelinePath, "utf-8"));
+  const baseTimelineSha256 = computeArtifactSha256(timelinePath);
+  if (patch.base_timeline_sha256 !== baseTimelineSha256) {
+    throw new Error(`canonical timeline hash mismatch: patch=${patch.base_timeline_sha256} current=${baseTimelineSha256}`);
+  }
+
+  // Canonical fail-closed Image QC gate BEFORE any output mutation. Optional
+  // provider absence is a typed Issue 44 handoff; qa_failed and required
+  // capability absence remain blocked.
+  await enforceCanonicalImageQcGateContinuation(absProject);
+  // The gate itself may wait on a provider. Re-check the patch base as soon
+  // as that wait returns, before doing any derived patch/readiness work; a
+  // concurrent writer must not make this operation reason over a stale
+  // timeline even if a later validation would fail for an unrelated reason.
+  const timelineSha256AfterGate = computeArtifactSha256(timelinePath);
+  if (timelineSha256AfterGate !== baseTimelineSha256) {
+    throw new Error(`canonical timeline changed during patch: base=${baseTimelineSha256} current=${timelineSha256AfterGate}`);
+  }
+  if (patch.base_timeline_sha256 !== timelineSha256AfterGate) {
+    throw new Error(`canonical timeline hash mismatch: patch=${patch.base_timeline_sha256} current=${timelineSha256AfterGate}`);
+  }
+  // Retain the exact canonical input bytes beside the derived timeline. The
+  // review identity consumer re-applies the accepted patch to this snapshot,
+  // so a receipt cannot make a hand-written variant appear derivable.
+  const canonicalTimelineBytes = fs.readFileSync(timelinePath, "utf-8");
+
+  const selectsPath = path.join(absProject, "04_plan/selects_candidates.yaml");
+  const selectsRaw = fs.readFileSync(selectsPath, "utf-8");
+  const selects = parseYaml(selectsRaw) as { candidates: Candidate[] };
+
+  const blueprintPath = path.join(absProject, "04_plan/edit_blueprint.yaml");
+  const blueprint = parseYaml(fs.readFileSync(blueprintPath, "utf-8")) as EditBlueprint;
+  const targetDurationFrames = blueprint.beats.reduce(
+    (sum, b) => sum + b.target_duration_frames,
+    0,
+  );
+  const patchDurationPolicy: DurationPolicy = blueprint.duration_policy ?? {
+    mode: "guide",
+    source: "global_default",
+    target_source: "material_total",
+    target_duration_sec: targetDurationFrames / (timeline.sequence.fps_num / timeline.sequence.fps_den),
+    min_duration_sec: 0,
+    max_duration_sec: null,
+    hard_gate: false,
+    protect_vlm_peaks: true,
+  };
+
+  const result = applyPatch(
+    timeline,
+    patch,
+    selects.candidates,
+    targetDurationFrames,
+    patchDurationPolicy,
+    timeline.sequence.fps_num,
+    timeline.sequence.fps_den,
+  );
+
+  if (result.errors.length > 0) {
+    console.error("Patch errors:");
+    for (const err of result.errors) {
+      console.error(`  [op ${err.op_index}] ${err.op}: ${err.message}`);
+    }
+    throw new Error(`Patch failed: ${result.errors.length} operation(s) could not be applied`);
+  }
+
+  const mapping = buildDerivedMappingReceipt(timeline, result.timeline, patch.operations);
+  let identityReceipt: ReturnType<typeof buildReviewEditIdentityReceipt> | undefined;
+  if (mapping) {
+    const patchSha256 = computeArtifactSha256(absPatch);
+    stampReviewDerivation(result.timeline, baseTimelineSha256, patchSha256, mapping);
+  }
+
+  // Issue #35: review-patch geometry changes the primary V1 cuts, so parity
+  // must be recomputed and gated inside this serialized canonical route before
+  // any patched artifact is promoted. Preserve the caller's documented
+  // defaults override while loading the canonical repository defaults here.
+  const rhythmDefaultsPath = path.join(findRepoRoot(absProject), "runtime", "compiler-defaults.yaml");
+  const rhythmDefaults: CompilerDefaults = {
+    ...readYaml<CompilerDefaults>(rhythmDefaultsPath),
+    ...(options.defaultsOverride ?? {}),
+  };
+  const rhythmSyncConfig = resolveRhythmSyncConfig(rhythmDefaults);
+  recomputeAndEnforceRhythmSync(
+    result.timeline,
+    result.timeline.metadata?.rhythm_sync as RhythmSyncCompileMetadata | undefined,
+    rhythmSyncConfig.parityGate,
+  );
+  const patchSourceMap = loadSourceMap(absProject, sourceMapPath);
+  const patchReadiness = buildRenderSourceReadiness({
+    projectPath: absProject,
+    projectId: result.timeline.project_id,
+    createdAt: result.timeline.created_at,
+    timeline: result.timeline,
+    sourceMap: patchSourceMap,
+  });
+  assertRenderSourceReadiness(patchReadiness);
+  result.timeline.metadata = {
+    ...(result.timeline.metadata ?? {}),
+    source_mapping_hash: patchReadiness.source_mapping_hash,
+  };
+  if (mapping) {
+    identityReceipt = buildReviewEditIdentityReceipt({
+      projectDir: absProject,
+      timelinePath,
+      patchPath: absPatch,
+      timeline: result.timeline,
+      mapping,
+    });
+    const mappingValidation = validateAgainstSchema(mapping, "derived-frame-mapping.schema.json");
+    if (!mappingValidation.valid) throw new Error(`Derived mapping schema invalid: ${mappingValidation.errors.join("; ")}`);
+    const identityValidation = validateAgainstSchema(identityReceipt, "review-edit-identity.schema.json");
+    if (!identityValidation.valid) throw new Error(`Review edit identity schema invalid: ${identityValidation.errors.join("; ")}`);
+  }
+  const patchBeatReport = buildBeatAllocationReport({
+    projectId: result.timeline.project_id,
+    timeline: result.timeline,
+    resolution: result.resolution,
+  });
+  // Compare-and-swap immediately before the atomic promotion. Any concurrent
+  // timeline writer that changed the bytes after the initial read invalidates
+  // this patch; the finalizer is never entered with a stale base.
+  const latestTimelineSha256 = computeArtifactSha256(timelinePath);
+  if (latestTimelineSha256 !== baseTimelineSha256) {
+    throw new Error(`canonical timeline changed during patch: base=${baseTimelineSha256} current=${latestTimelineSha256}`);
+  }
+  if (patch.base_timeline_sha256 !== latestTimelineSha256) {
+    throw new Error(`canonical timeline hash mismatch: patch=${patch.base_timeline_sha256} current=${latestTimelineSha256}`);
+  }
+  const finalized = finalizeCompileArtifactsAtomically({
+    projectPath: absProject,
+    timeline: result.timeline,
+    sourceMap: patchSourceMap,
+    targetEndFrame: result.resolution.target_frames,
+    resolution: result.resolution,
+    duration_policy: patchDurationPolicy,
+    validateSourceArtifacts: true,
+    sourceReadiness: patchReadiness,
+    extraArtifacts: [
+      {
+        relativePath: "05_timeline/canonical-timeline.json",
+        content: canonicalTimelineBytes,
+      },
+      {
+        relativePath: "05_timeline/render-readiness.json",
+        content: JSON.stringify(patchReadiness, null, 2),
+      },
+      {
+        relativePath: "05_timeline/beat-allocation-report.json",
+        content: JSON.stringify(patchBeatReport, null, 2),
+      },
+      ...(mapping && identityReceipt ? [
+        {
+          relativePath: "05_timeline/derived-frame-mapping.json",
+          content: `${JSON.stringify(mapping, null, 2)}\n`,
+        },
+        {
+          relativePath: "05_timeline/review-edit-identity.json",
+          content: `${JSON.stringify(identityReceipt, null, 2)}\n`,
+        },
+      ] : []),
+    ],
+    onPromoted: (_receipts, context) => {
+      assertCompileDurationGate({ hardGate: context.duration_policy.hard_gate, resolution: context.resolution });
+      assertGeneratedTimelineValid(absProject);
+      reconcileCompiledTimelineState(absProject, "compile-timeline", "/compile --patch");
+    },
+  });
+  const manifestPath = finalized.previewManifestPath;
+
+  console.log(`Patch applied: ${result.appliedOps}/${patch.operations.length} ops`);
+  console.log(`  Version: ${timeline.version} → ${result.timeline.version}`);
+  console.log(`  Markers: ${result.timeline.markers.length}`);
+  console.log(`  Preview manifest: ${manifestPath}`);
+  console.log(`  Resolution: ${JSON.stringify(result.resolution)}`);
+
+  if (!result.resolution.duration_fit) {
+    console.error(
+      `WARNING: Post-patch duration is outside the target window ` +
+      `(content=${result.resolution.content_frames ?? result.resolution.total_frames} frames, ` +
+      `target=${result.resolution.target_frames} frames)`,
+    );
+  }
+
+  console.log("Schema validation: PASSED");
+}
+
+/**
+ * Public --patch entry (used by the CLI script and hostile tests): thin
+ * delegation to the canonical patch route.
+ */
+export async function runPatch(
+  projectPath: string,
+  patchPath: string,
+  sourceMapPath?: string,
+  options: { defaultsOverride?: Partial<CompilerDefaults> } = {},
+): Promise<void> {
+  await runCanonicalPatch(projectPath, patchPath, sourceMapPath, options);
+}
+
+/**
+ * Canonical --patch route: joins the same project-keyed mutation sequencer
+ * as the compile route and delegates to the private patch mutation.
+ */
+export async function runCanonicalPatch(
+  projectPath: string,
+  patchPath: string,
+  sourceMapPath?: string,
+  options: { defaultsOverride?: Partial<CompilerDefaults> } = {},
+): Promise<void> {
+  // The exported runPatch wrapper lives in scripts/compile-timeline.ts;
+  // this route is the canonical implementation it delegates to.
+  const canonicalProject = canonicalProjectPath(projectPath);
+  const key = canonicalProjectMutationKey(canonicalProject);
+  await enqueueProjectMutation(key, () =>
+    applyCanonicalPatchMutation(canonicalProject, patchPath, sourceMapPath, options));
+}
+
+/** Canonical compile decision: create a report when missing, then consume the
+ * same persisted artifact that the public compile and schema routes inspect. */
+async function decideAndCompileAfterFreshGate(opts: CompileOptions): Promise<CompileResult> {
+  const projectPath = path.resolve(opts.projectPath);
+  const outcome = await runImageQcGate({ projectDir: projectPath });
+  if (!outcome.applicable) {
+    // Gate does not apply to this project's canonical assets: strict result,
+    // the compiler continues.
+    return compileCore(opts);
+  }
+  if (!outcome.report) throw new ImageQcGateError([], ["image_qc_report_missing"]);
+  assertImageQcGateOpen(projectPath);
+  return compileCore(opts);
+}
+
+/**
+ * Deterministic same-project ownership: concurrent canonical compiles on the
+ * exact same project path share one in-flight sequence (serialized);
+ * different projects proceed concurrently. The map entry is cleaned up when
+ * the sequence settles.
+ */
+
+/**
+ * Canonical compile route (no continuation parameters, no capability
+ * passing): runs the fresh image-QC orchestration for the project and lets
+ * the private compiler-local decision function invoke compileCore.
+ *
+ * Same-project concurrency is SERIALIZED with per-caller options: a call
+ * that arrives while another sequence is in flight waits, then runs its own
+ * full QC + compile with its own options — nothing is coalesced and no
+ * caller's options are ignored. The chain entry is cleaned up when the last
+ * sequence in the chain settles.
+ */
+export async function runCanonicalCompile(opts: CompileOptions): Promise<CompileResult> {
+  const projectPath = canonicalProjectPath(opts.projectPath);
+  const key = canonicalProjectMutationKey(projectPath);
+  return enqueueProjectMutation(key, () =>
+    decideAndCompileAfterFreshGate({ ...opts, projectPath }));
+}
+
+function compileCore(opts: CompileOptions): CompileResult {
   const projectPath = path.resolve(opts.projectPath);
   assertProjectPlanningMediaKindsSupported(projectPath);
   assertStillImageSegmentGrounding(projectPath);
@@ -1194,10 +2204,26 @@ export function compile(opts: CompileOptions): CompileResult {
   const blueprintPath = path.join(projectPath, "04_plan/edit_blueprint.yaml");
   const selectsPath = path.join(projectPath, "04_plan/selects_candidates.yaml");
   const defaultsPath = path.join(repoRoot, "runtime/compiler-defaults.yaml");
+  const existingTimeline = readExistingTimeline(projectPath);
+  const sourceMap = loadSourceMap(projectPath, opts.sourceMapPath);
+  const sourceIdentities = loadShotAnchorSourceIdentities(projectPath, sourceMap);
+  const sourceHashByAssetId = new Map(
+    [...sourceIdentities.entries()]
+      .map(([assetId, identity]) => [assetId, canonicalAudioProjectionHash(identity.source_content_hash)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== undefined),
+  );
 
   const brief = readYaml<CreativeBrief>(briefPath);
-  const blueprint = opts.blueprintOverride ?? readYaml<EditBlueprint>(blueprintPath);
+  const blueprint = opts.blueprintOverride
+    ? loadBlueprintData(opts.blueprintOverride)
+    : loadBlueprint(blueprintPath);
   const selects = readYaml<SelectsCandidates>(selectsPath);
+  const shotAnchorResolution = resolveShotAnchors({
+    blueprint,
+    candidates: selects.candidates,
+    sourceIdentities,
+  });
+  assertHookRecompileAllowed(existingTimeline, computeHookFingerprint(blueprint, shotAnchorResolution));
   const authoritativeCapabilities = readAuthoritativeAssetMediaCapabilities(projectPath);
   const groundedStillFrames = readValidatedStillImageFrames(projectPath);
   for (const candidate of selects.candidates) {
@@ -1215,9 +2241,13 @@ export function compile(opts: CompileOptions): CompileResult {
   assertStillImageCandidateGrounding(projectPath, selects.candidates);
   assertImageSequenceCandidateGrounding(projectPath, selects.candidates);
   materializePeakSignalsFromSegments(projectPath, selects);
-  const defaults = readYaml<CompilerDefaults>(defaultsPath);
+  const defaults: CompilerDefaults = {
+    ...readYaml<CompilerDefaults>(defaultsPath),
+    ...(opts.defaultsOverride ?? {}),
+  };
   const continuityPolicy = resolveContinuityPolicy(defaults.continuity);
   const beatSyncConfig = resolveBeatSyncConfig(defaults);
+  const rhythmSyncConfig = resolveRhythmSyncConfig(defaults);
   const continuityReorders: ContinuityReorderEvent[] = [];
 
   const fpsNum = opts.fpsNum ?? 24;
@@ -1227,7 +2257,13 @@ export function compile(opts: CompileOptions): CompileResult {
     briefEditorial: brief.editorial,
     editorialSummary: selects.editorial_summary,
     runtimeTargetSec: brief.project.runtime_target_sec,
+    sourceMedia: selects.source_media,
+    audioPolicy: brief.audio_policy,
   }) : undefined;
+  if (profileResolution) {
+    blueprint.resolved_profile = profileResolution.resolvedProfile;
+    blueprint.resolved_policy = profileResolution.resolvedPolicy;
+  }
   const stillDurationPolicy = !hasImageCandidates
     ? undefined
     : blueprint.still_duration_policy?.fps_num === fpsNum &&
@@ -1256,6 +2292,30 @@ export function compile(opts: CompileOptions): CompileResult {
   // ── Phase 1: Normalize ────────────────────────────────────────────
 
   const normalized = normalize(brief, blueprint);
+  const narrativeArcContract = evaluateNormalizedNarrativeArcContract(brief, normalized, selects);
+  if (narrativeArcContract.status === "fail") {
+    throw new NarrativeArcContractError(narrativeArcContract);
+  }
+
+  // ── Phase 1.2: Rhythm evidence snapshot (Issue #35) ──────────────
+  // The ONE immutable, strict, project-bound rhythm evidence snapshot for the
+  // whole compile: the BGM artifact is read exactly once (bytes → digest →
+  // parsed analysis, resolved path/origin), EVERY transcript file is read
+  // exactly once (digest + parsed doc — feeding both the music word
+  // projection and all utterance projections), and the binding verdict is
+  // computed here. Scoring, creatorShortVoBroll, utterance snap, adjacency,
+  // beat-sync, cut-breath/ending and rhythm-sync all consume THIS snapshot —
+  // no phase re-opens the BGM/transcript artifact paths, so an A→B→A race
+  // cannot make one phase alter V1 with evidence whose provenance describes
+  // other bytes, and missing project ids / source hashes are rejected BEFORE
+  // any geometry-affecting phase runs. Unbound/degraded BGM evidence never
+  // reaches geometry phases.
+  const rhythmEvidence = loadRhythmEvidenceSnapshot(projectPath, {
+    projectId: normalized.project_id,
+    repoRoot,
+    bgmMediaPathOverride: opts.bgmMediaPathOverride,
+  });
+  const projectUtterances = utterancesFromTranscriptSnapshot(rhythmEvidence.transcripts);
 
   // ── Phase 1.5: Skill Activation ──────────────────────────────────
   // Determine which editing skills are active based on blueprint + candidates.
@@ -1265,11 +2325,40 @@ export function compile(opts: CompileOptions): CompileResult {
     ? activateSkills(blueprint, selects.candidates, selects.editorial_summary)
     : [];
   const humanGoldenOrder = activeSkills.includes("human_golden_order");
+  const strictHumanGoldenOrder = durationPolicy.mode === "strict" && humanGoldenOrder;
   const exactCandidatePlanOrder = humanGoldenOrder ||
     activeSkills.includes("longform_reduction");
-  if (exactCandidatePlanOrder) {
+  const apexFreezeHoldConfig = getApexFreezeHoldConfig(activeSkills, fpsNum, fpsDen);
+  const candidatePlanFreezeHolds = apexFreezeHoldConfig
+    ? materializeCandidatePlanFreezeHolds(blueprint, selects.candidates)
+    : [];
+  const creatorShortVoBroll = resolveCreatorShortVoBrollPreset(
+    brief,
+    blueprint,
+    selects,
+    fpsNum,
+    fpsDen,
+    exactCandidatePlanOrder,
+    projectUtterances,
+  );
+  if (exactCandidatePlanOrder && profileResolution?.resolvedProfile.id !== "lyric_mv") {
     applyExactCandidatePlanRevisitExemptions(normalized.beats, selects.candidates);
   }
+  if (profileResolution?.resolvedProfile.id === "lyric_mv") {
+    applyIntentionalStillReuseExemptions(normalized.beats, selects.candidates);
+  }
+  const retentionPolicyProvenance = blueprint.policy_refs?.retention_policy_ref
+    ? (() => {
+      const resolved = resolveRetentionPolicyArtifact(projectPath, blueprint.policy_refs!.retention_policy_ref!);
+      return {
+        policy: "retention-policy/v1" as const,
+        policy_ref: resolved.relativePath,
+        policy_id: resolved.policy.policy_id,
+        policy_hash: resolved.contentHash,
+        degrade_order: resolved.policy.degrade_order,
+      };
+    })()
+    : undefined;
 
   // ── Phase 2: Score ────────────────────────────────────────────────
 
@@ -1281,19 +2370,29 @@ export function compile(opts: CompileOptions): CompileResult {
     ? Math.floor(bgmDurationUs / usPerFrame)
     : undefined;
 
-  // Load BGM analysis for beat-synchronized scoring and snap decisions.
-  // Canonical path is 03_analysis/bgm_analysis.json; the loader keeps a legacy fallback.
-  const bgmAnalysis = loadBgmAnalysisFromProject(projectPath);
+  // The ONE rhythm evidence snapshot was created at compile entry (above);
+  // bgmAnalysis is its bound view — see the entry block for the contract.
+  const bgmAnalysis = rhythmEvidence.bgmBound ? rhythmEvidence.bgm?.analysis : undefined;
+  const stillHoldContext = buildStillHoldResolutionContext(bgmAnalysis, fpsNum, fpsDen);
   let bgmScoringContext: BgmScoringContext | undefined;
   if (bgmAnalysis) {
+    // Defensive copies: phases must not mutate the shared snapshot.
     bgmScoringContext = {
-      downbeats_sec: bgmAnalysis.downbeats_sec,
-      sections: bgmAnalysis.sections,
-      beats: bgmAnalysis.beats,
+      downbeats_sec: [...bgmAnalysis.downbeats_sec],
+      sections: bgmAnalysis.sections.map((section) => ({ ...section })),
+      beats: (bgmAnalysis.beats ?? []).map((beat) => ({ ...beat })),
       fpsNum,
     };
   }
-  const beatSyncGrid = loadBeatSyncGridFromProject(projectPath, fpsNum);
+  const beatSyncGrid = loadBeatSyncGridFromProject(projectPath, fpsNum, {
+    bgmFromSnapshot: bgmAnalysis,
+    snapshotResolved: true,
+    // The guarded Issue #35 route must own admission of M2 cues before any
+    // legacy beats_sec/downbeats_sec or music_cues.json can move geometry.
+    // Route-off and non-M2 evidence retain the explicit legacy behavior.
+    disableLegacyPreQuantization: rhythmSyncConfig.mode !== "off" &&
+      hasM2BgmProvenance(rhythmEvidence.bgm?.analysis),
+  });
 
   const rankedTable = scoreCandidates(
     normalized,
@@ -1305,16 +2404,20 @@ export function compile(opts: CompileOptions): CompileResult {
     durationPolicy,
     bgmScoringContext,
     stillDurationPolicy,
+    stillHoldContext,
   );
 
   // ── Phase 2.5: Resolve Timeline Order & Output Dimensions ────────
   const timelineOrder = resolveTimelineOrder(blueprint, blueprint.resolved_profile?.id, brief);
   const sourceAssetIds = new Set(
     selects.candidates
+      .filter(candidateSupportsVisual)
       .map((candidate) => candidate.asset_id)
       .filter((assetId): assetId is string => typeof assetId === "string" && assetId.length > 0),
   );
-  const sourceDimensions = readSourceVideoDimensions(projectPath, sourceAssetIds);
+  const sourceDimensions = sourceAssetIds.size > 0
+    ? readSourceVideoDimensions(projectPath, sourceAssetIds)
+    : [];
   const outputDims = resolveOutputDimensions(brief.editorial, sourceDimensions);
   const montageOrdering = isMontageOrderingBrief(brief);
 
@@ -1336,7 +2439,30 @@ export function compile(opts: CompileOptions): CompileResult {
     exactCandidatePlanOrder,
     log: opts.log,
     stillDurationPolicy,
+    stillHoldContext,
+    ...(creatorShortVoBroll ? { creatorShortVoBroll } : {}),
   });
+  const intentionalOperations = (blueprint.timeline_operations ?? []) as IntentionalGapOperation[];
+  for (const operation of intentionalOperations) {
+    const validation = validateIntentionalGapOperation(operation);
+    if (!validation.valid) throw new TimelineOperationError(operation, validation.errors);
+  }
+  if (intentionalOperations.length > 0) assembled.operations = intentionalOperations;
+
+  // ── Primary audio mix policy (Issue #6 P0) ────────────────────────
+  // An explicit, authority-bearing mix policy may declare the primary audio
+  // lane intentionally non-continuous. A malformed declaration fails closed.
+  if (blueprint.audio_mix_policy != null) {
+    const policyValidation = validatePrimaryAudioMixPolicy(blueprint.audio_mix_policy);
+    if (!policyValidation.valid) {
+      throw new Error(`invalid_audio_mix_policy: ${policyValidation.errors.join("; ")}`);
+    }
+  }
+  // bgm_only is itself an explicit brief-level mix policy: the music bed is the
+  // program audio and no original-audio mirrors are generated.
+  const primaryAudioCoverageWaived = audioPolicy.mode === "bgm_only" ||
+    audioPolicy.mode === "music_master" ||
+    blueprint.audio_mix_policy?.mode === "selective_authorization";
   const visualCache: CompileVisualCache | null = loadVisualCache(
     projectPath,
     assembled.tracks.video.flatMap((track) => track.clips.map((clip) => clip.segment_id)),
@@ -1370,14 +2496,35 @@ export function compile(opts: CompileOptions): CompileResult {
       ).filter(isMarlinEventClipTrimPlan)
     : [];
   applyClipTrimPlansToCandidates(selects.candidates, clipTrimPlans);
-  applyAdaptiveTrim(trimmableAssembledClips, selects.candidates, blueprint, normalized.beats, usPerFrame, clipTrimPlans);
+  const trimRangeReport: TrimRangeReport[] = [];
+  applyAdaptiveTrim(
+    trimmableAssembledClips,
+    selects.candidates,
+    blueprint,
+    normalized.beats,
+    usPerFrame,
+    clipTrimPlans,
+    {
+      preserveAuthoredRanges: strictHumanGoldenOrder,
+      rangeReport: trimRangeReport,
+    },
+  );
   const v1Track = assembled.tracks.video.find((track) => track.track_id === "V1");
-  if (v1Track) {
+  if (v1Track && !strictHumanGoldenOrder) {
     compactTrimmedClipsWithinBeats(v1Track.clips, normalized.beats, assembled.markers);
   }
 
   // ── Phase 3.5b: Duration Adjustment (strict mode) ───────────────
-  applyDurationAdjust(assembled, normalized.beats, selects.candidates, durationPolicy, fpsNum, fpsDen, stillDurationPolicy);
+  applyDurationAdjust(
+    assembled,
+    normalized.beats,
+    selects.candidates,
+    durationPolicy,
+    fpsNum,
+    fpsDen,
+    stillDurationPolicy,
+    { preserveAuthoredRanges: strictHumanGoldenOrder },
+  );
 
   // ── Phase 3.5c: Utterance-boundary snap ──────────────────────────
   // When a snapping skill is active, or a talking-head project explicitly asks
@@ -1387,8 +2534,8 @@ export function compile(opts: CompileOptions): CompileResult {
   // then sanitizes any overlap. No-op for projects without transcripts or
   // non-talking-head projects without an active snap skill.
   const snapConfig = resolveUtteranceSnapConfig(activeSkills, blueprint, selects);
-  if (snapConfig) {
-    const utteranceMap = loadProjectUtterances(projectPath);
+  if (snapConfig && !strictHumanGoldenOrder) {
+    const utteranceMap = projectUtterances;
     if (utteranceMap.size > 0) {
       const snapClips = selectUtteranceSnapClips(assembled);
       const targetDurationUsByBeat = snapConfig.constrainToBeatDurations
@@ -1432,10 +2579,11 @@ export function compile(opts: CompileOptions): CompileResult {
   if (durationPolicy.mode === "guide" && trackLayout === "single") {
     compactGuideSingleTrackGaps(assembled, normalized.beats);
   }
-
   // ── Phase 4: Resolve constraints ──────────────────────────────────
 
-  const resolution = resolve(assembled, normalized.total_duration_frames, selects.candidates, durationPolicy, fpsNum, fpsDen);
+  const resolution = resolve(assembled, normalized.total_duration_frames, selects.candidates, durationPolicy, fpsNum, fpsDen, {
+    primaryAudioCoverageWaived,
+  });
   if (exactCandidatePlanOrder) {
     assertExactCandidatePlanAgreement(blueprint, selects.candidates, assembled, resolution);
   }
@@ -1445,6 +2593,7 @@ export function compile(opts: CompileOptions): CompileResult {
   // Only runs when active editing skills are available.
 
   let adjacencyTransitions: import("./transition-types.js").TimelineTransition[] = [];
+  let pendingAdjacencyAnalysis: import("./transition-types.js").AdjacencyAnalysis | undefined;
   const segmentEvidenceIndex = isEditorialEyeRelationV1Enabled()
     ? loadSegmentEditorialEvidence(projectPath, opts.log ?? console.warn)
     : undefined;
@@ -1486,7 +2635,7 @@ export function compile(opts: CompileOptions): CompileResult {
         clipMap.set(clip.clip_id, clip);
       }
 
-      for (const tr of adjacencyTransitions) {
+      for (const tr of strictHumanGoldenOrder ? [] : adjacencyTransitions) {
         const snapDelta = tr.transition_params?.snap_delta_frames;
         if (snapDelta && snapDelta !== 0) {
           const left = clipMap.get(tr.from_clip_id);
@@ -1528,11 +2677,11 @@ export function compile(opts: CompileOptions): CompileResult {
       }
       refreshTransitionCutFrames(adjacencyTransitions, assembled);
 
-      // Set project_id on analysis
+      // Set project_id on analysis. The artifact itself is written after the
+      // Issue #34 overlap pass so degradation recorded there lands in the
+      // analysis too (pairs always describe the final transition decisions).
       adjResult.analysis.project_id = normalized.project_id;
-
-      // Write adjacency analysis artifact
-      writeAdjacencyAnalysis(adjResult.analysis, projectPath);
+      pendingAdjacencyAnalysis = adjResult.analysis;
     }
   }
   removeOverlappingGeneratedAudioMirrors(assembled);
@@ -1541,17 +2690,142 @@ export function compile(opts: CompileOptions): CompileResult {
     MIN_RENDERABLE_FRAMES,
     Math.floor(blueprint.trim_policy?.default_min_duration_frames ?? 0),
   );
-  const beatSyncMetadata = applyCutBeatQuantize(assembled, {
-    mode: beatSyncConfig.mode,
-    grid: beatSyncGrid,
-    fpsNum,
-    maxShiftFrames: beatSyncConfig.maxShiftFrames,
-    minDurationFrames: beatSyncMinDurationFrames,
-  });
+  const beatSyncMetadata = strictHumanGoldenOrder
+    ? undefined
+    : applyCutBeatQuantize(assembled, {
+        mode: beatSyncConfig.mode,
+        grid: beatSyncGrid,
+        fpsNum,
+        maxShiftFrames: beatSyncConfig.maxShiftFrames,
+        minDurationFrames: beatSyncMinDurationFrames,
+      });
   if (beatSyncMetadata?.enabled && beatSyncMetadata.counts.quantized > 0) {
     syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
     removeOverlappingGeneratedAudioMirrors(assembled);
     refreshTransitionCutFrames(adjacencyTransitions, assembled);
+  }
+
+  // ── Phase 4.6: Rhythm Sync (Issue #35) ────────────────────────────
+  // Multi-source rhythm snap on the PRIMARY V1 track only: pull canonical cut
+  // boundaries onto music onsets/downbeats and word-level STT heads (±1.5s
+  // search, Hard Snap at chorus section starts), then verify Gap 0f / Overrun
+  // 0f integrity and run the ±2-frame parity gate measured from the actual
+  // section start frames. Fail-open: without rhythm evidence the pass records
+  // an explicit degraded state and changes nothing. With parity_gate
+  // "enforce" (default), a chorus parity failure after post-snap geometry
+  // passes blocks the canonical compile; "off" is the documented opt-out.
+  let rhythmSyncMetadata = strictHumanGoldenOrder
+    ? undefined
+    : applyRhythmSyncSnaps(assembled, {
+        mode: rhythmSyncConfig.mode,
+        grid: rhythmSyncConfig.mode === "off"
+          ? { events: [], majorSections: [], status: "unavailable", sources: { bgm_analysis: false, word_timestamps: false, beat_count: 0, word_count: 0, section_count: 0 }, degraded_reasons: [], evidence: { binding: "unbound", binding_failures: [] } }
+          : buildRhythmEventGridFromSnapshot(rhythmEvidence, fpsNum, fpsDen, rhythmSyncConfig.minCueConfidence),
+        fpsNum,
+        fpsDen,
+        searchWindowSec: rhythmSyncConfig.searchWindowSec,
+        maxShiftFrames: rhythmSyncConfig.maxShiftFrames,
+        minCueConfidence: rhythmSyncConfig.minCueConfidence,
+        parityMaxOffsetFrames: rhythmSyncConfig.parityMaxOffsetFrames,
+        minDurationFrames: beatSyncMinDurationFrames,
+        parityGate: rhythmSyncConfig.parityGate,
+        sourceDurations: loadSourceDurationsFromProject(projectPath),
+      });
+  if (rhythmSyncMetadata?.enabled && rhythmSyncMetadata.counts.snapped > 0) {
+    syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
+    removeOverlappingGeneratedAudioMirrors(assembled);
+    refreshTransitionCutFrames(adjacencyTransitions, assembled);
+  }
+
+  // Authored holds run after every source-boundary adjustment so transition
+  // and beat snapping cannot reinterpret hold frames as source-media frames.
+  const apexFreezeHold = applyApexFreezeHolds(
+    assembled,
+    selects.candidates,
+    apexFreezeHoldConfig,
+    candidatePlanFreezeHolds,
+  );
+  if (apexFreezeHold.total_added_frames > 0) {
+    refreshTransitionCutFrames(adjacencyTransitions, assembled);
+  }
+
+  // ── Phase 4.6: Issue #34 A/B roll overlap geometry ────────────────
+  // Overlap presets (film_crossfade / light_leak_flash / dreamy_focus_blur)
+  // need physical head material on the incoming clip: shift its placement
+  // earlier by transition_frames and extend its source head. Program duration
+  // is unchanged (max end identical), so Gap 0 / Overrun 0 is structural.
+  // Infeasible transitions degrade explicitly to cut with a recorded reason.
+  if (adjacencyTransitions.length > 0 && assembled.tracks.video.length > 0) {
+    const overlapResult = applyTransitionOverlaps(
+      assembled.tracks.video[0],
+      adjacencyTransitions,
+      { fpsNum, fpsDen },
+    );
+    if (overlapResult.applied.length > 0) {
+      syncGeneratedAudioMirrorsWithPrimaryVideo(assembled);
+      removeOverlappingGeneratedAudioMirrors(assembled);
+      refreshTransitionCutFrames(adjacencyTransitions, assembled);
+    }
+    // Propagate degradation into the adjacency analysis so downstream QA and
+    // review tooling see the final transition decisions, not pre-overlap
+    // intent. The pair's transition_type becomes "cut" and a reason code
+    // records exactly why the A/B blend was refused.
+    if (pendingAdjacencyAnalysis && overlapResult.degraded.length > 0) {
+      const degradedByToClip = new Map(overlapResult.degraded.map((d) => [d.to_clip_id, d]));
+      for (const pair of pendingAdjacencyAnalysis.pairs) {
+        if (!pair.right_clip_id) continue;
+        const degraded = degradedByToClip.get(pair.right_clip_id);
+        if (!degraded) continue;
+        pair.transition_type = "cut";
+        pair.selection_rationale?.reason_codes.push(
+          `transition_overlap_degraded:${degraded.reason}`,
+        );
+      }
+    }
+    for (const degraded of overlapResult.degraded) {
+      opts.log?.(`[transition-overlap] degraded ${degraded.transition_id} (${degraded.to_clip_id}): ${degraded.reason}`);
+    }
+  }
+  if (pendingAdjacencyAnalysis) {
+    writeAdjacencyAnalysis(pendingAdjacencyAnalysis, projectPath);
+  }
+
+  // Apex freeze holds ripple later clip positions after the snap pass, so
+  // re-measure chorus/section parity (against actual section starts) and the
+  // Gap 0f / Overrun 0f integrity from the primary V1 geometry before the
+  // parity gate runs. Recompute + gate also run after review patches,
+  // cut-breath and ending treatments so the FINAL stamped metadata reflects
+  // the FINAL V1 cuts.
+  recomputeAndEnforceRhythmSync(assembled, rhythmSyncMetadata, rhythmSyncConfig.parityGate);
+
+  const avSync = synchronizeSameSourceTalkCuts(assembled);
+  const coverageEndFrame = resolveCoverageHorizon(assembled, resolution.target_frames, durationPolicy);
+
+  if (hasVisualProgram(assembled)) {
+    const availableFrames = primaryVideoEndFrame(assembled);
+    const primaryVideoGaps = findPrimaryVideoGaps(assembled, coverageEndFrame);
+    if (durationPolicy.mode === "strict" && primaryVideoGaps.length > 0 && availableFrames < resolution.target_frames) {
+      throw new InsufficientContentError({
+        target_frames: resolution.target_frames,
+        available_frames: availableFrames,
+        shortfall_frames: resolution.target_frames - availableFrames,
+        reason: strictHumanGoldenOrder ? "approved_range" : "renderable_content",
+      });
+    }
+    if (primaryVideoGaps.length > 0) throw new GapFreeTimelineError(primaryVideoGaps);
+  }
+
+  // ── Primary audio coverage invariant (Issue #6 P0) ────────────────
+  // Under picture, the primary audio lane (A1) must be continuous like V1;
+  // without picture, the authored audio lanes together are the program.
+  // Unintended silence fails closed unless a valid explicit operation covers
+  // the range or an explicit mix policy waived continuity above. Rendering a
+  // hole as silent audio is never an implicit compile outcome.
+  const hasPrimaryAudioProgram = hasVisualProgram(assembled) ||
+    assembled.tracks.audio.some((track) => track.clips.length > 0);
+  if (hasPrimaryAudioProgram && !primaryAudioCoverageWaived) {
+    const primaryAudioGaps = findPrimaryAudioGaps(assembled, coverageEndFrame);
+    if (primaryAudioGaps.length > 0) throw new PrimaryAudioGapError(primaryAudioGaps);
   }
 
   const continuity = evaluateTimelineContinuity(assembled.tracks.video, {
@@ -1567,6 +2841,15 @@ export function compile(opts: CompileOptions): CompileResult {
   // ── Phase 5: Export ───────────────────────────────────────────────
 
   assertStillImageTimelineTruthForTimeline(assembled);
+
+  const lyricMvMetadata = profileResolution?.resolvedProfile.id === "lyric_mv"
+    ? buildLyricMvTimelineMetadata(
+        profileResolution.profileDefaults?.lyric_mv_thresholds,
+        bgmAnalysis,
+        fpsNum,
+        fpsDen,
+      )
+    : undefined;
 
   const createdAt = opts.createdAt;
 
@@ -1584,6 +2867,8 @@ export function compile(opts: CompileOptions): CompileResult {
     audioPolicy,
     captionPolicy,
     stillDurationPolicy,
+    creatorShortVoBrollProvenance: creatorShortVoBroll?.provenance,
+    retentionPolicyProvenance,
     transitions: adjacencyTransitions.length > 0 ? adjacencyTransitions : undefined,
     width: outputDims.width,
     height: outputDims.height,
@@ -1591,9 +2876,115 @@ export function compile(opts: CompileOptions): CompileResult {
     letterboxPolicy: outputDims.letterbox_policy,
     metadata: {
       continuity,
+      ...(lyricMvMetadata ? { lyric_mv: lyricMvMetadata } : {}),
       ...(beatSyncMetadata ? { beat_sync: beatSyncMetadata } : {}),
+      ...(rhythmSyncMetadata ? { rhythm_sync: rhythmSyncMetadata } : {}),
+      av_sync: {
+        policy: "same-source-talk-exact/v1",
+        checked_pairs: avSync.checked_pairs,
+        synchronized_clip_ids: avSync.synchronized_clip_ids,
+      },
+      ...(blueprint.policy_refs?.audio_delivery_profile_ref ? {
+        audio_delivery_profile_ref: {
+          ref: blueprint.policy_refs.audio_delivery_profile_ref.ref,
+          ...(blueprint.policy_refs.audio_delivery_profile_ref.version
+            ? { version: blueprint.policy_refs.audio_delivery_profile_ref.version }
+            : {}),
+          ...(blueprint.policy_refs.audio_delivery_profile_ref.source_hash
+            ? { source_hash: blueprint.policy_refs.audio_delivery_profile_ref.source_hash }
+            : {}),
+          ...(blueprint.policy_refs.audio_delivery_profile_ref.profile_hash
+            ? { profile_hash: blueprint.policy_refs.audio_delivery_profile_ref.profile_hash }
+            : {}),
+        },
+      } : {}),
+      ...(trimRangeReport.length > 0 ? { trim_range_report: trimRangeReport } : {}),
+      ...(apexFreezeHold.total_added_frames > 0 ? {
+        apex_freeze_hold: {
+          policy: "apex-freeze-hold/v1",
+          applied_clip_ids: apexFreezeHold.applied_clip_ids,
+          total_added_frames: apexFreezeHold.total_added_frames,
+        },
+      } : {}),
+      ...(creatorShortVoBroll ? {
+        creator_short_vo_broll: creatorShortVoBroll.provenance,
+      } : {}),
+      ...(retentionPolicyProvenance ? {
+        retention_evidence: {
+          producer: "compiler",
+          policy_ref: retentionPolicyProvenance.policy_ref,
+          policy_hash: retentionPolicyProvenance.policy_hash,
+        },
+      } : {}),
     },
   });
+
+  const anchorBindings = bindShotAnchorsToTimeline(shotAnchorResolution, timelineIR);
+  if (shotAnchorResolution) {
+    timelineIR.provenance.shot_anchor_resolution = shotAnchorResolution;
+  }
+  const hookLock = buildHookLockProvenance({
+    blueprint,
+    resolution: shotAnchorResolution,
+    timeline: timelineIR,
+    existingLock: existingTimeline?.provenance.hook_lock,
+  });
+  if (hookLock) timelineIR.provenance.hook_lock = hookLock;
+  if (anchorBindings.length > 0 && timelineIR.metadata) {
+    const existingAnchorMetadata = timelineIR.metadata.shot_anchor as Record<string, unknown> | undefined;
+    timelineIR.metadata.shot_anchor = {
+      ...(existingAnchorMetadata ?? {}),
+      binding_count: anchorBindings.length,
+      clip_ids: anchorBindings.map((binding) => binding.clip_id),
+    };
+  }
+
+  if (blueprint.visual_intents && blueprint.visual_intents.length > 0) {
+    const framingPolicy = resolveFramingPolicyArtifact(projectPath, blueprint);
+    const reframeCandidates = resolveReframeCandidateArtifacts(projectPath, blueprint.visual_intents, framingPolicy.contentHash);
+    timelineIR = projectRegisteredVisualIntents(timelineIR, blueprint.visual_intents, {
+      framing_policy: framingPolicy.policy,
+      framing_policy_ref: framingPolicy.relativePath,
+      source_identities: sourceIdentities,
+      reframe_candidates: reframeCandidates,
+    });
+    const verticalReference = blueprint.policy_refs?.vertical_composition_policy_ref;
+    if (verticalReference) {
+      const verticalPolicy = resolveVerticalCompositionPolicyArtifact(projectPath, verticalReference);
+      const verticalResults = blueprint.visual_intents.map((intent) => {
+        const observations = intent.framing_input?.observations ?? [];
+        const first = observations[0];
+        const last = observations.at(-1) ?? first;
+        const representativeCount = verticalPolicy.policy.frames.representative_count;
+        const representatives = representativeCount > 0
+          ? Array.from({ length: representativeCount }, (_, index) => observations[Math.floor(((index + 1) * observations.length) / (representativeCount + 1))])
+          : [];
+        const candidate = intent.reframe_candidate_ref ? reframeCandidates.get(intent.reframe_candidate_ref) : undefined;
+        const sourceAvGeometry = timelineIR.metadata?.source_av_geometry
+          ?? readSourceAvGeometry(projectPath, new Set(intent.source_evidence.map((evidence) => evidence.asset_id)));
+        const resolution = resolveVerticalComposition({
+          intent,
+          source_identity: intent.source_evidence[0],
+          ...(sourceAvGeometry && typeof sourceAvGeometry === "object" ? { source_av_geometry: sourceAvGeometry as Parameters<typeof resolveVerticalComposition>[0]["source_av_geometry"] } : {}),
+          frames: [
+            ...(first ? [{ role: "first" as const, observation: first }] : []),
+            ...representatives.filter(Boolean).map((observation) => ({ role: "representative" as const, observation })),
+            ...(last ? [{ role: "last" as const, observation: last }] : []),
+          ],
+          framing_policy: framingPolicy.policy,
+          ...(candidate ? { reframe_candidate: candidate } : {}),
+        }, verticalPolicy.policy);
+        const failedFinding = resolution.findings.find((item) => item.status !== "pass");
+        return { intent_id: intent.intent_id, status: resolution.status, receipt_hash: resolution.receipt_hash, ...(failedFinding ? { reason: failedFinding.reason } : {}) };
+      });
+      timelineIR.provenance.vertical_composition = {
+        policy: "vertical-composition-resolution/v1",
+        policy_ref: verticalPolicy.relativePath,
+        policy_hash: verticalPolicy.contentHash,
+        results: verticalResults,
+      };
+    }
+  }
 
   attachAutoCaptions(timelineIR, {
     brief,
@@ -1693,15 +3084,25 @@ export function compile(opts: CompileOptions): CompileResult {
     }
     timelineIR = patchResult.timeline;
     finalResolution = patchResult.resolution;
+    // applyPatch deep-clones the timeline, so the stamped rhythm metadata is
+    // now a detached copy: re-fetch it and re-measure parity/integrity (and
+    // enforce the gate) against the POST-PATCH V1 geometry.
+    rhythmSyncMetadata = recomputeAndEnforceRhythmSync(
+      timelineIR,
+      timelineIR.metadata?.rhythm_sync as RhythmSyncCompileMetadata | undefined,
+      rhythmSyncConfig.parityGate,
+    ) ?? rhythmSyncMetadata;
   }
 
-  const cutBreathTreatment = applyCutBreathTreatment(
-    timelineIR,
-    blueprint.dialogue_policy,
-    loadProjectSegments(projectPath),
-    loadProjectUtterances(projectPath),
-    fpsNum / fpsDen,
-  );
+  const cutBreathTreatment = strictHumanGoldenOrder
+    ? { totalExtendedFrames: 0 }
+    : applyCutBreathTreatment(
+        timelineIR,
+        blueprint.dialogue_policy,
+        loadProjectSegments(projectPath),
+        projectUtterances,
+        fpsNum / fpsDen,
+      );
   if (cutBreathTreatment.totalExtendedFrames > 0) {
     finalResolution = extendResolutionForEnding(
       finalResolution,
@@ -1709,19 +3110,32 @@ export function compile(opts: CompileOptions): CompileResult {
     );
   }
 
-  const endingTreatment = applyEndingTreatment(
-    timelineIR,
-    blueprint.ending_policy,
-    loadProjectSegments(projectPath),
-    fpsNum / fpsDen,
-    loadProjectUtterances(projectPath),
-  );
+  const endingTreatment = strictHumanGoldenOrder
+    ? { extendedFrames: 0 }
+    : applyEndingTreatment(
+        timelineIR,
+        blueprint.ending_policy,
+        loadProjectSegments(projectPath),
+        fpsNum / fpsDen,
+        projectUtterances,
+      );
   if (endingTreatment.extendedFrames > 0) {
     finalResolution = extendResolutionForEnding(
       finalResolution,
       endingTreatment.extendedFrames,
     );
   }
+
+  // ── Rhythm parity: final recompute + gate ─────────────────────────
+  // Review patches, cut-breath and ending treatments all mutate V1 geometry
+  // after the snap pass. Re-measure parity/integrity from the FINAL timeline
+  // and enforce the gate one last time so timeline.metadata.rhythm_sync —
+  // the contract preview and render consume — reflects the final V1 cuts.
+  rhythmSyncMetadata = recomputeAndEnforceRhythmSync(
+    timelineIR,
+    timelineIR.metadata?.rhythm_sync as RhythmSyncCompileMetadata | undefined,
+    rhythmSyncConfig.parityGate,
+  ) ?? rhythmSyncMetadata;
 
   timelineIR = projectProjectMusicCues(
     timelineIR,
@@ -1730,23 +3144,91 @@ export function compile(opts: CompileOptions): CompileResult {
     fpsNum,
     fpsDen,
   );
-  timelineIR = projectProjectSfxCues(
+  const resolvedSfxCuePlan = resolveProjectSfxCuePlan(
     timelineIR,
     projectPath,
     audioPolicy.mode,
     fpsNum,
     fpsDen,
+    opts.repoSfxRoot,
   );
+  if (resolvedSfxCuePlan) {
+    timelineIR = projectSfxToTimeline(timelineIR, resolvedSfxCuePlan);
+  }
+  timelineIR = projectProjectAudioPolicy(timelineIR, {
+    mode: audioPolicy.mode,
+    source: audioPolicy.source,
+    a1_loudnorm: audioPolicy.a1_loudnorm,
+    ...(audioPolicy.audio_decision ? { audio_decision: audioPolicy.audio_decision } : {}),
+    ...(audioPolicy.music_master ? { music_master: audioPolicy.music_master } : {}),
+  }, sourceMap, sourceHashByAssetId);
 
   assertStillImageTimelineTruthForTimeline(timelineIR);
 
-  const outputPath = writeTimeline(timelineIR, projectPath);
-  const otioPath = exportOtio(timelineIR, projectPath);
-  const previewManifestPath = writePreviewManifest(
-    timelineIR,
+  // ── Render source readiness (Issue #6 P1) ─────────────────────────
+  // Resolve every timeline asset back to a source path before promotion so
+  // unresolved/missing/hash-mismatched/unreadable media fail closed ahead of
+  // any render process. External references are recorded with a read-only
+  // canonical source root. Enforcement follows validateSourceArtifacts, the
+  // same flag production render routes already require; the mapping identity
+  // is always stamped so preview and render share one contract.
+  const enforceRenderReadiness = opts.validateSourceArtifacts === true;
+  const renderReadiness = buildRenderSourceReadiness({
     projectPath,
-    loadSourceMap(projectPath, opts.sourceMapPath),
-  );
+    projectId: timelineIR.project_id,
+    createdAt: opts.createdAt,
+    timeline: timelineIR,
+    sourceMap,
+    formalSfxSources: resolvedSfxCuePlan
+      ? buildFormalSfxSourceAuthorities(resolvedSfxCuePlan, projectPath, opts.repoSfxRoot)
+      : undefined,
+  });
+  timelineIR.metadata = {
+    ...(timelineIR.metadata ?? {}),
+    source_mapping_hash: renderReadiness.source_mapping_hash,
+  };
+  if (enforceRenderReadiness) {
+    assertRenderSourceReadiness(renderReadiness);
+  }
+
+  // ── Operator diagnostics (Issue #6 P1) ────────────────────────────
+  // Beat allocation report: target vs resolved frames, gap/overrun, and the
+  // source ranges behind every beat, so problems like a 65-frame hole are
+  // readable without opening timeline.json.
+  const beatAllocationReport = buildBeatAllocationReport({
+    projectId: timelineIR.project_id,
+    timeline: timelineIR,
+    resolution: finalResolution,
+    trimRangeReport,
+  });
+
+  const atomicFinalize: AtomicCompileFinalizeResult = finalizeCompileArtifactsAtomically({
+    projectPath,
+    timeline: timelineIR,
+    sourceMap,
+    targetEndFrame: finalResolution.target_frames,
+    resolution: finalResolution,
+    duration_policy: durationPolicy,
+    validateSourceArtifacts: opts.validateSourceArtifacts,
+    sourceReadiness: enforceRenderReadiness ? renderReadiness : undefined,
+    primaryAudioCoverageWaived,
+    extraArtifacts: enforceRenderReadiness
+      ? [
+          {
+            relativePath: "05_timeline/render-readiness.json",
+            content: JSON.stringify(renderReadiness, null, 2),
+          },
+          {
+            relativePath: "05_timeline/beat-allocation-report.json",
+            content: JSON.stringify(beatAllocationReport, null, 2),
+          },
+        ]
+      : undefined,
+    onPromoted: opts.onArtifactsPromoted,
+  });
+  const outputPath = atomicFinalize.outputPath;
+  const otioPath = exportOtio(timelineIR, projectPath);
+  const previewManifestPath = atomicFinalize.previewManifestPath;
 
   return {
     timeline: timelineIR,
@@ -1756,7 +3238,12 @@ export function compile(opts: CompileOptions): CompileResult {
     resolution: finalResolution,
     duration_policy: durationPolicy,
     continuity,
+    trim_range_report: trimRangeReport,
+    ...(enforceRenderReadiness ? { render_readiness: renderReadiness } : {}),
+    beat_allocation_report: beatAllocationReport,
+    artifact_receipts: atomicFinalize.receipts,
     ...(beatSyncMetadata ? { beat_sync: beatSyncMetadata } : {}),
+    ...(rhythmSyncMetadata ? { rhythm_sync: rhythmSyncMetadata } : {}),
   };
 }
 
@@ -1811,7 +3298,22 @@ function resolveAudioPolicy(
   blueprint: EditBlueprint,
   repoRoot: string,
 ): ResolvedAudioPolicy {
+  if (!brief.audio_policy && brief.music_master) {
+    throw new Error("music_master declaration requires audio_policy=music_master; no fallback is allowed.");
+  }
   if (brief.audio_policy) {
+    if (brief.audio_policy === "music_master") {
+      if (!brief.music_master) {
+        throw new Error("music_master audio policy requires an explicit music_master brief declaration.");
+      }
+      return {
+        mode: "music_master",
+        source: "explicit_brief",
+        a1_loudnorm: resolveA1Loudnorm(brief, blueprint, repoRoot),
+        audio_decision: brief.music_master.audio_decision ?? "preserve",
+        music_master: canonicalBriefMusicMaster(brief.music_master),
+      };
+    }
     return {
       mode: brief.audio_policy,
       source: "explicit_brief",
@@ -1832,6 +3334,43 @@ function resolveAudioPolicy(
   }
 
   return { mode: "ducking", source: "global_default", a1_loudnorm: brief.a1_loudnorm ?? true };
+}
+
+function canonicalBriefMusicMaster(declaration: CreativeBriefMusicMaster): CreativeBriefMusicMaster {
+  const normalizedRef = declaration.source_ref.replace(/\\/g, "/");
+  if (
+    normalizedRef.length === 0
+    || path.isAbsolute(declaration.source_ref)
+    || normalizedRef.startsWith("/")
+    || /^[A-Za-z]:\//.test(normalizedRef)
+    || normalizedRef.split("/").includes("..")
+    || normalizedRef.split("/").some((part) => part.length === 0 || part === ".")
+  ) {
+    throw new Error("music_master source_ref must be a project-relative canonical reference.");
+  }
+  return {
+    asset_id: declaration.asset_id ?? "music_master",
+    source_ref: normalizedRef,
+    source_content_hash: declaration.source_content_hash,
+    source_size_bytes: declaration.source_size_bytes,
+    source_duration_us: declaration.source_duration_us,
+    ...(declaration.source_range_us ? { source_range_us: { ...declaration.source_range_us } } : {}),
+    ...(declaration.timeline_range ? { timeline_range: { ...declaration.timeline_range } } : {}),
+    gain_linear: declaration.gain_linear ?? 1,
+    audio_decision: declaration.audio_decision ?? "preserve",
+    ...(declaration.channel_layout ? { channel_layout: declaration.channel_layout } : {}),
+    ...(declaration.codec ? { codec: declaration.codec } : {}),
+    ...(declaration.processing_graph ? {
+      processing_graph: {
+        version: declaration.processing_graph.version,
+        operations: [...declaration.processing_graph.operations],
+      },
+    } : {}),
+    ...(declaration.measurement_tolerance ? {
+      measurement_tolerance: { ...declaration.measurement_tolerance },
+    } : {}),
+    ...(declaration.policy_hash ? { policy_hash: declaration.policy_hash } : {}),
+  };
 }
 
 function resolveA1Loudnorm(

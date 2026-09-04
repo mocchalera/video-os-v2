@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import {
   buildAnalysisCoverageReport,
+  buildSourceMediaManifest,
   validateAnalysisCoverageReport,
 } from "../runtime/artifacts/p1-manifest-coverage.js";
 import { runAnalyze, type AnalyzeRunner } from "../runtime/commands/analyze.js";
@@ -162,6 +163,79 @@ describe("P1 analysis_coverage_report", () => {
     expect(fs.existsSync(path.join(projectDir, "03_analysis/source_ledger.json"))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, "02_media/source_media_manifest.json"))).toBe(true);
     expect(fs.existsSync(path.join(projectDir, "03_analysis/analysis_coverage_report.json"))).toBe(true);
+  });
+
+  it("keeps the current run's terminal segment coverage after successful segmentation with only non-blocking gaps", async () => {
+    process.env.ENABLE_P1_MANIFEST_COVERAGE = "1";
+    const projectDir = makeProject();
+    const sourceFile = path.join(projectDir, "02_media/source/test.mov");
+    fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
+    fs.writeFileSync(sourceFile, "media", "utf-8");
+    const runner: AnalyzeRunner = {
+      async run(ctx) {
+        const ledger = customRunnerLedger(ctx.projectId, sourceFile);
+        const asset = {
+          ...(readJson(path.join(SAMPLE_PROJECT, "03_analysis/assets.json")) as { items: AssetItem[] }).items[0],
+          asset_id: "AST_CUSTOM",
+          filename: path.basename(sourceFile),
+          segments: 1,
+          segment_ids: ["SEG_CUSTOM_0001"],
+        };
+        const segment = {
+          ...(readJson(path.join(SAMPLE_PROJECT, "03_analysis/segments.json")) as { items: Array<Record<string, unknown>> }).items[0],
+          segment_id: "SEG_CUSTOM_0001",
+          asset_id: asset.asset_id,
+        };
+        fs.writeFileSync(path.join(projectDir, "03_analysis/assets.json"), JSON.stringify({
+          project_id: ctx.projectId,
+          artifact_version: "2.0.0",
+          items: [asset],
+        }));
+        fs.writeFileSync(path.join(projectDir, "03_analysis/segments.json"), JSON.stringify({
+          project_id: ctx.projectId,
+          artifact_version: "2.0.0",
+          items: [segment],
+        }));
+        fs.writeFileSync(
+          path.join(projectDir, "03_analysis/gap_report.yaml"),
+          "version: 1\nentries:\n  - stage: vlm\n    issue: optional_model_unavailable\n    blocking: false\n",
+        );
+        fs.rmSync(path.join(projectDir, "03_analysis/audio_story_graph.json"), { force: true });
+        const manifest = buildSourceMediaManifest({
+          projectDir,
+          projectId: ctx.projectId,
+          ledger,
+          assets: [asset],
+        });
+        return {
+          sourceLedger: ledger,
+          analysisCoverageReport: buildAnalysisCoverageReport({
+            projectId: ctx.projectId,
+            manifest,
+            ledger,
+            analysis: {
+              assets: [asset],
+              segments: [segment as never],
+              sttAttempted: false,
+              vlm: { attempted: false, readyAssetIds: [], failedAssetIds: [] },
+              peaks: { attempted: false, readyAssetIds: [], failedAssetIds: [] },
+              bgm: { attempted: false, readyAssetIds: [], failedAssetIds: [], requestedAssetIds: [], requestedCount: 0, unmatchedRequestedCount: 0 },
+            },
+          }),
+        };
+      },
+    };
+
+    const result = await runAnalyze(projectDir, { sourceFiles: [sourceFile], skipPreflight: true }, runner);
+    const coverage = readJson(path.join(projectDir, "03_analysis/analysis_coverage_report.json")) as {
+      summary: { status: string };
+      lanes: Array<{ lane_id: string; status: string }>;
+    };
+
+    expect(result.success, JSON.stringify(result.error)).toBe(true);
+    expect(coverage.lanes.find((lane) => lane.lane_id === "segments")?.status).toBe("ready");
+    expect(coverage.summary.status).toBe("ready");
+    expect(runStatus(projectDir).gates?.analysis_gate).toBe("ready");
   });
 
   it("writes manifest and coverage from analyze when the P1 flag is on", async () => {

@@ -16,6 +16,11 @@ import { computeTimelineRevision, normalizeTimelineServer } from "./timeline.js"
 import { getTimelineValidator } from "../middleware/validation.js";
 import { validateTimeline } from "../../shared/timeline-validation.js";
 import {
+  assertHookPatchOperationAllowed,
+  HookLockViolationError,
+} from "../../../runtime/compiler/hook-lock.js";
+import type { TimelineIR } from "../../../runtime/compiler/types.js";
+import {
   safeProjectDir,
   acquireProjectLock,
   releaseProjectLock,
@@ -617,6 +622,7 @@ export function createReviewRouter(
       // Apply selected operations
       const appliedOps: number[] = [];
       const rejectedOps: number[] = [];
+      const hookLockRejections: Array<{ operation_index: number; reason: string }> = [];
 
       for (const idx of operation_indexes) {
         if (safetyRejectedSet.has(idx)) {
@@ -624,12 +630,34 @@ export function createReviewRouter(
           continue;
         }
         const op = operations[idx];
+        try {
+          assertHookPatchOperationAllowed(timeline as unknown as TimelineIR, op);
+        } catch (err) {
+          if (err instanceof HookLockViolationError) {
+            rejectedOps.push(idx);
+            hookLockRejections.push({ operation_index: idx, reason: err.reason });
+            continue;
+          }
+          throw err;
+        }
         const applied = applyOperation(timeline, op);
         if (applied) {
           appliedOps.push(idx);
         } else {
           rejectedOps.push(idx);
         }
+      }
+
+      if (hookLockRejections.length > 0 && appliedOps.length === 0) {
+        res.status(423).json({
+          error: "Hook is locked",
+          code: "HOOK_LOCKED",
+          reason: hookLockRejections[0].reason,
+          rejected_operations: rejectedOps,
+          hook_lock_rejections: hookLockRejections,
+          hook_lock: (timeline as { provenance?: { hook_lock?: unknown } }).provenance?.hook_lock,
+        });
+        return;
       }
 
       // Timeline schema validation after patch application (修正R2-1)
@@ -678,6 +706,7 @@ export function createReviewRouter(
         timeline_revision_after: newRevision,
         applied_operation_indexes: appliedOps,
         rejected_operations: rejectedOps,
+        ...(hookLockRejections.length > 0 ? { hook_lock_rejections: hookLockRejections } : {}),
         timeline: normalized,
         ...(status ? { status } : {}),
       });

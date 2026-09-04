@@ -19,8 +19,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: speech-led-real-media
-  cancel-in-progress: false
+  group: speech-led-real-media-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   real-media:

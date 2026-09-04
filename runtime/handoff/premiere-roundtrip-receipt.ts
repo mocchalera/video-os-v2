@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { validateAgainstSchema } from "../commands/shared.js";
 import type { TimelineIR } from "../compiler/types.js";
 import { fcp7ClipItemId, fcp7TextGeneratorItemId } from "./fcp7-xml-export.js";
 import { classifyPremiereVideoTreatments, canonicalJson, validatePremiereBakeArtifactGraph, type PremiereBakedRepresentation, type PremiereEffectBakeIndex } from "./premiere-effect-bake.js";
 import { parseFcp7Sequence, type ParsedFcp7Sequence } from "./fcp7-xml-import.js";
+import { validatePremiereExportIdentity } from "./premiere-export-identity.js";
 
 export const PREMIERE_ROUNDTRIP_RECEIPT_VERSION = "premiere-roundtrip-receipt/v1" as const;
 export const PREMIERE_ROUNDTRIP_RECEIPT_V2_VERSION = "premiere-roundtrip-receipt/v2" as const;
@@ -206,10 +208,10 @@ function validateFixedFile(projectPath: string, fixedRoot: string, relative: str
   return absolute;
 }
 
-function parseClosedJson(file: string, fields: readonly string[], label: string): Record<string, unknown> {
+function parseClosedJson(file: string, fields: readonly string[], label: string, optionalFields: readonly string[] = []): Record<string, unknown> {
   let value: unknown; try { value = JSON.parse(fs.readFileSync(file, "utf8")); } catch { throw new Error(`baked_media_unverified: ${label} malformed`); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`baked_media_unverified: ${label} must be object`);
-  const record = value as Record<string, unknown>; try { exact(record, fields, label); } catch (error) { throw new Error(`baked_media_unverified: ${error instanceof Error ? error.message : String(error)}`); }
+  const record = value as Record<string, unknown>; try { exact(record, [...fields, ...optionalFields].filter((field, index, all) => all.indexOf(field) === index), label); } catch (error) { throw new Error(`baked_media_unverified: ${error instanceof Error ? error.message : String(error)}`); }
   return record;
 }
 
@@ -218,6 +220,46 @@ function exactArtifactRef(value: unknown, label: string): { path: string; sha256
   const ref = value as Record<string, unknown>; exact(ref, ["path", "sha256"], label); nonempty(ref.path, `${label}.path`); hash(ref.sha256, `${label}.sha256`);
   if (unsafePath(ref.path)) throw new Error(`baked_media_unverified: ${label}.path unsafe`);
   return { path: ref.path, sha256: ref.sha256 };
+}
+
+function exactExportIdentityRef(value: unknown, label: string): { path: string; sha256: string; identity_hash: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`baked_media_unverified: ${label} invalid`);
+  const ref = value as Record<string, unknown>;
+  exact(ref, ["path", "sha256", "identity_hash"], label);
+  nonempty(ref.path, `${label}.path`);
+  hash(ref.sha256, `${label}.sha256`);
+  hash(ref.identity_hash, `${label}.identity_hash`);
+  if (unsafePath(ref.path)) throw new Error(`baked_media_unverified: ${label}.path unsafe`);
+  return { path: ref.path, sha256: ref.sha256, identity_hash: ref.identity_hash };
+}
+
+function validateExportIdentityChain(
+  projectPath: string,
+  generationRoot: string,
+  identityRef: { path: string; sha256: string; identity_hash: string },
+  xmlPath: string,
+  expectedProjectId: string,
+): void {
+  const identityPath = validateArtifact(projectPath, generationRoot, identityRef.path, identityRef.sha256);
+  const raw = fs.readFileSync(identityPath, "utf8");
+  let identity: unknown;
+  try {
+    identity = JSON.parse(raw);
+  } catch {
+    throw new Error("baked_media_unverified: export identity sidecar malformed");
+  }
+  const schema = validateAgainstSchema(identity, "premiere-export-identity.schema.json");
+  if (!schema.valid) throw new Error(`baked_media_unverified: export identity schema invalid: ${schema.errors.join("; ")}`);
+  const runtime = validatePremiereExportIdentity(identity);
+  if (!runtime.valid) throw new Error(`baked_media_unverified: export identity invalid: ${runtime.errors.join("; ")}`);
+  const value = identity as { project_id?: unknown; export_identity_hash?: unknown };
+  if (value.project_id !== expectedProjectId || value.export_identity_hash !== identityRef.identity_hash) {
+    throw new Error("baked_media_unverified: export identity project/hash mismatch");
+  }
+  const marker = /<!-- Video OS v2 \| export_identity: (sha256:[0-9a-f]{64}) -->/.exec(fs.readFileSync(xmlPath, "utf8"));
+  if (!marker || marker[1] !== identityRef.identity_hash) {
+    throw new Error("baked_media_unverified: XML export_identity marker mismatch");
+  }
 }
 
 function validateClosedIndex(index: Record<string, unknown>, receipt: PremiereRoundtripReceiptV2, expectedProjectId: string): PremiereEffectBakeIndex {
@@ -240,23 +282,119 @@ function validateClosedIndex(index: Record<string, unknown>, receipt: PremiereRo
 function validateExportArtifactGraph(projectPath: string, receipt: PremiereRoundtripReceiptV2, expectedProjectId: string): PremiereEffectBakeIndex {
   const exportRoot = "09_output/premiere-exports", generationRoot = `${exportRoot}/generations/${receipt.export_generation_id.slice(7)}`;
   const currentPath = validateFixedFile(projectPath, exportRoot, `${exportRoot}/CURRENT.json`);
-  const current = parseClosedJson(currentPath, ["version", "project_id", "base_timeline_sha256", "roundtrip_id", "export_generation_id", "ready_path", "ready_sha256", "xml", "receipt", "bake_index", "published_at"], "CURRENT");
+  const current = parseClosedJson(currentPath, ["version", "project_id", "base_timeline_sha256", "roundtrip_id", "export_generation_id", "ready_path", "ready_sha256", "xml", "receipt", "bake_index", "published_at"], "CURRENT", ["export_identity"]);
   if (current.version !== "premiere-export-current/v1" || current.project_id !== expectedProjectId || current.base_timeline_sha256 !== receipt.base_timeline_sha256 || current.roundtrip_id !== receipt.roundtrip_id || current.export_generation_id !== receipt.export_generation_id || typeof current.ready_path !== "string" || typeof current.ready_sha256 !== "string" || !SHA.test(current.ready_sha256) || typeof current.published_at !== "string" || !Number.isFinite(Date.parse(current.published_at))) throw new Error("baked_media_unverified: CURRENT identity invalid");
   const expectedReadyPath = `${generationRoot}/READY.json`;
   if (current.ready_path !== expectedReadyPath) throw new Error("baked_media_unverified: CURRENT ready path mismatch");
   const readyPath = validateArtifact(projectPath, exportRoot, current.ready_path, current.ready_sha256);
-  const ready = parseClosedJson(readyPath, ["version", "project_id", "base_timeline_sha256", "roundtrip_id", "export_generation_id", "xml", "receipt", "bake_index", "hardware_verified"], "export READY");
+  const ready = parseClosedJson(readyPath, ["version", "project_id", "base_timeline_sha256", "roundtrip_id", "export_generation_id", "xml", "receipt", "bake_index", "hardware_verified"], "export READY", ["export_identity"]);
   if (ready.version !== "premiere-export-ready/v1" || ready.project_id !== expectedProjectId || ready.base_timeline_sha256 !== receipt.base_timeline_sha256 || ready.roundtrip_id !== receipt.roundtrip_id || ready.export_generation_id !== receipt.export_generation_id || ready.hardware_verified !== false) throw new Error("baked_media_unverified: export READY identity invalid");
   const currentXml = exactArtifactRef(current.xml, "CURRENT.xml"), currentReceipt = exactArtifactRef(current.receipt, "CURRENT.receipt"), currentIndex = exactArtifactRef(current.bake_index, "CURRENT.bake_index");
   const readyXml = exactArtifactRef(ready.xml, "READY.xml"), readyReceipt = exactArtifactRef(ready.receipt, "READY.receipt"), readyIndex = exactArtifactRef(ready.bake_index, "READY.bake_index");
   if (canonicalJson(currentXml) !== canonicalJson(readyXml) || canonicalJson(currentReceipt) !== canonicalJson(readyReceipt) || canonicalJson(currentIndex) !== canonicalJson(readyIndex) || canonicalJson(readyXml) !== canonicalJson(receipt.exported_xml) || canonicalJson(readyIndex) !== canonicalJson(receipt.bake_index)) throw new Error("baked_media_unverified: CURRENT/READY/receipt refs disagree");
+  const currentIdentity = current.export_identity == null ? null : exactExportIdentityRef(current.export_identity, "CURRENT.export_identity");
+  const readyIdentity = ready.export_identity == null ? null : exactExportIdentityRef(ready.export_identity, "READY.export_identity");
+  if (Boolean(currentIdentity) !== Boolean(readyIdentity) || (currentIdentity && readyIdentity && canonicalJson(currentIdentity) !== canonicalJson(readyIdentity))) throw new Error("baked_media_unverified: CURRENT/READY export identity refs disagree");
   const xmlPath = validateArtifact(projectPath, generationRoot, readyXml.path, readyXml.sha256), receiptPath = validateArtifact(projectPath, generationRoot, readyReceipt.path, readyReceipt.sha256), indexPath = validateArtifact(projectPath, generationRoot, readyIndex.path, readyIndex.sha256);
+  const expectedIdentityPath = `${generationRoot}/${expectedProjectId}_premiere.export-identity.json`;
   if (readyXml.path !== `${generationRoot}/${expectedProjectId}_premiere.xml` || readyReceipt.path !== `${generationRoot}/${expectedProjectId}_premiere.roundtrip.json` || readyIndex.path !== `${generationRoot}/bake-index.json` || path.dirname(xmlPath) !== path.dirname(readyPath) || path.dirname(receiptPath) !== path.dirname(readyPath) || path.dirname(indexPath) !== path.dirname(readyPath)) throw new Error("baked_media_unverified: export artifacts are not the fixed selected generation files");
-  if (fs.readdirSync(path.dirname(readyPath)).sort().join("|") !== ["READY.json", "bake-index.json", `${expectedProjectId}_premiere.roundtrip.json`, `${expectedProjectId}_premiere.xml`].sort().join("|")) throw new Error("baked_media_unverified: export generation contents are not exact");
+  if (currentIdentity && readyIdentity && readyIdentity.path !== expectedIdentityPath) throw new Error("baked_media_unverified: export identity path mismatch");
+  if (fs.readdirSync(path.dirname(readyPath)).sort().join("|") !== ["READY.json", "bake-index.json", ...(readyIdentity ? [`${expectedProjectId}_premiere.export-identity.json`] : []), `${expectedProjectId}_premiere.roundtrip.json`, `${expectedProjectId}_premiere.xml`].sort().join("|")) throw new Error("baked_media_unverified: export generation contents are not exact");
+  if (readyIdentity) validateExportIdentityChain(projectPath, generationRoot, readyIdentity, xmlPath, expectedProjectId);
+  else if (/<!-- Video OS v2 \| export_identity: sha256:[0-9a-f]{64} -->/.test(fs.readFileSync(xmlPath, "utf8"))) {
+    throw new Error("baked_media_unverified: XML export identity marker has no sidecar");
+  }
   const storedReceipt = parsePremiereRoundtripReceipt(fs.readFileSync(receiptPath, "utf8"));
   if (canonicalJson(storedReceipt) !== canonicalJson(receipt)) throw new Error("baked_media_unverified: selected receipt differs from supplied receipt");
   const index = validateClosedIndex(parseClosedJson(indexPath, ["version", "project_id", "base_timeline_sha256", "entries"], "bake index"), receipt, expectedProjectId);
   return index;
+}
+
+function validateLegacyExportIdentityGraph(
+  projectPath: string,
+  receipt: PremiereRoundtripReceiptV1,
+  expectedProjectId: string,
+): void {
+  const exportRoot = "09_output/premiere-exports";
+  const currentPath = path.join(projectPath, exportRoot, "CURRENT.json");
+  // Older v1 import callers may provide only a project timeline and a
+  // returned XML/receipt. The immutable graph is present only for exports
+  // published by the generation-based exporter; preserve that legacy API
+  // when no published CURRENT exists.
+  if (!fs.existsSync(currentPath)) return;
+  const validatedCurrentPath = validateFixedFile(projectPath, exportRoot, `${exportRoot}/CURRENT.json`);
+  const current = parseClosedJson(
+    validatedCurrentPath,
+    ["version", "project_id", "base_timeline_sha256", "roundtrip_id", "export_generation_id", "ready_path", "ready_sha256", "xml", "receipt", "bake_index", "published_at"],
+    "CURRENT",
+    ["export_identity"],
+  );
+  if (current.version !== "premiere-export-current/v1"
+    || current.project_id !== expectedProjectId
+    || current.base_timeline_sha256 !== receipt.base_timeline_sha256
+    || current.roundtrip_id !== receipt.roundtrip_id
+    || typeof current.export_generation_id !== "string"
+    || !SHA.test(current.export_generation_id)
+    || typeof current.ready_path !== "string"
+    || typeof current.ready_sha256 !== "string"
+    || !SHA.test(current.ready_sha256)
+    || typeof current.published_at !== "string"
+    || !Number.isFinite(Date.parse(current.published_at))) {
+    throw new Error("baked_media_unverified: CURRENT identity invalid");
+  }
+  const generationRoot = `${exportRoot}/generations/${current.export_generation_id.slice(7)}`;
+  if (current.ready_path !== `${generationRoot}/READY.json`) throw new Error("baked_media_unverified: CURRENT ready path mismatch");
+  const readyPath = validateArtifact(projectPath, exportRoot, current.ready_path, current.ready_sha256);
+  const ready = parseClosedJson(
+    readyPath,
+    ["version", "project_id", "base_timeline_sha256", "roundtrip_id", "export_generation_id", "xml", "receipt", "bake_index", "hardware_verified"],
+    "export READY",
+    ["export_identity"],
+  );
+  if (ready.version !== "premiere-export-ready/v1"
+    || ready.project_id !== expectedProjectId
+    || ready.base_timeline_sha256 !== receipt.base_timeline_sha256
+    || ready.roundtrip_id !== receipt.roundtrip_id
+    || ready.export_generation_id !== current.export_generation_id
+    || ready.hardware_verified !== false) {
+    throw new Error("baked_media_unverified: export READY identity invalid");
+  }
+  const currentXml = exactArtifactRef(current.xml, "CURRENT.xml");
+  const currentReceipt = exactArtifactRef(current.receipt, "CURRENT.receipt");
+  const currentIndex = exactArtifactRef(current.bake_index, "CURRENT.bake_index");
+  const readyXml = exactArtifactRef(ready.xml, "READY.xml");
+  const readyReceipt = exactArtifactRef(ready.receipt, "READY.receipt");
+  const readyIndex = exactArtifactRef(ready.bake_index, "READY.bake_index");
+  if (canonicalJson(currentXml) !== canonicalJson(readyXml)
+    || canonicalJson(currentReceipt) !== canonicalJson(readyReceipt)
+    || canonicalJson(currentIndex) !== canonicalJson(readyIndex)) {
+    throw new Error("baked_media_unverified: CURRENT/READY refs disagree");
+  }
+  if (readyXml.path !== `${generationRoot}/${expectedProjectId}_premiere.xml`
+    || readyReceipt.path !== `${generationRoot}/${expectedProjectId}_premiere.roundtrip.json`
+    || readyIndex.path !== `${generationRoot}/bake-index.json`
+    || path.basename(readyXml.path) !== receipt.exported_xml_filename
+    || readyXml.sha256 !== receipt.exported_xml_sha256) {
+    throw new Error("baked_media_unverified: legacy export refs disagree with receipt");
+  }
+  const xmlPath = validateArtifact(projectPath, generationRoot, readyXml.path, readyXml.sha256);
+  validateArtifact(projectPath, generationRoot, readyReceipt.path, readyReceipt.sha256);
+  validateArtifact(projectPath, generationRoot, readyIndex.path, readyIndex.sha256);
+  const currentIdentity = current.export_identity == null ? null : exactExportIdentityRef(current.export_identity, "CURRENT.export_identity");
+  const readyIdentity = ready.export_identity == null ? null : exactExportIdentityRef(ready.export_identity, "READY.export_identity");
+  if (Boolean(currentIdentity) !== Boolean(readyIdentity)
+    || (currentIdentity && readyIdentity && canonicalJson(currentIdentity) !== canonicalJson(readyIdentity))) {
+    throw new Error("baked_media_unverified: CURRENT/READY export identity refs disagree");
+  }
+  const expectedIdentityPath = `${generationRoot}/${expectedProjectId}_premiere.export-identity.json`;
+  if (readyIdentity && readyIdentity.path !== expectedIdentityPath) throw new Error("baked_media_unverified: export identity path mismatch");
+  const expectedFiles = ["READY.json", "bake-index.json", `${expectedProjectId}_premiere.roundtrip.json`, `${expectedProjectId}_premiere.xml`, ...(readyIdentity ? [`${expectedProjectId}_premiere.export-identity.json`] : [])];
+  if (fs.readdirSync(path.dirname(readyPath)).sort().join("|") !== expectedFiles.sort().join("|")) throw new Error("baked_media_unverified: export generation contents are not exact");
+  if (readyIdentity) {
+    validateExportIdentityChain(projectPath, generationRoot, readyIdentity, xmlPath, expectedProjectId);
+  } else if (/<!-- Video OS v2 \| export_identity: sha256:[0-9a-f]{64} -->/.test(fs.readFileSync(xmlPath, "utf8"))) {
+    throw new Error("baked_media_unverified: XML export identity marker has no sidecar");
+  }
 }
 
 export function validatePremiereRoundtripApply(receipt: PremiereRoundtripReceipt, expectedProjectId: string, rawTimeline: Buffer, parsed: ParsedFcp7Sequence, reference: TimelineIR, allowBlockedTextOverlayReportWithoutSessionMarker = false, projectPath?: string): void {
@@ -318,5 +456,10 @@ export function validatePremiereRoundtripApply(receipt: PremiereRoundtripReceipt
     }
     const expectedGeneration = derivePremiereExportGenerationId(receipt.project_id, receipt.base_timeline_sha256, receipt.roundtrip_id, receipt.exported_xml.sha256, receipt.bake_index.sha256);
     if (receipt.export_generation_id !== expectedGeneration) throw new Error("baked_media_unverified: export_generation_id mismatch");
+  } else {
+    // Keep the original v1 apply API usable for callers that only have the
+    // parsed XML/receipt. When a project root is available, validate the
+    // immutable CURRENT/READY/generation identity chain as well.
+    if (projectPath) validateLegacyExportIdentityGraph(projectPath, receipt, expectedProjectId);
   }
 }

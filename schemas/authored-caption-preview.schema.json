@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/authored-caption-preview.schema.json",
+  "title": "Video OS Authored Caption Preapproval Preview",
+  "type": "object",
+  "required": [
+    "version",
+    "project_id",
+    "base_timeline_hash",
+    "projected_timeline_hash",
+    "approval_required",
+    "text_authority",
+    "timing_authority",
+    "changes",
+    "next_command"
+  ],
+  "properties": {
+    "version": { "const": "authored-caption-preview/v1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "base_timeline_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "projected_timeline_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+    "approval_required": { "const": true },
+    "text_authority": { "$ref": "#/$defs/authoredTextAuthority" },
+    "timing_authority": { "$ref": "#/$defs/authoredTimingAuthority" },
+    "changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["one_frame_gap_handling", "minimum_display_duration", "cps"],
+      "properties": {
+        "one_frame_gap_handling": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gap_frames", "adjusted_cue_ids"],
+          "properties": {
+            "gap_frames": { "type": "integer", "minimum": 0 },
+            "adjusted_cue_ids": { "type": "array", "items": { "type": "string", "pattern": "^AC_" } }
+          }
+        },
+        "minimum_display_duration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["target_ms", "hard_floor_ms", "adjusted_cue_ids"],
+          "properties": {
+            "target_ms": { "type": "number", "minimum": 0 },
+            "hard_floor_ms": { "type": "number", "minimum": 0 },
+            "adjusted_cue_ids": { "type": "array", "items": { "type": "string", "pattern": "^AC_" } }
+          }
+        },
+        "cps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cue_id", "before", "after"],
+            "properties": {
+              "cue_id": { "type": "string", "pattern": "^AC_" },
+              "before": { "type": "number", "minimum": 0 },
+              "after": { "type": "number", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "next_command": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "authoredTextAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "source_path", "source_sha256", "source_hash", "declared_normalization", "line_ending_mode", "line_count", "body_sha256", "lines"],
+      "properties": {
+        "authority": { "const": "authored" },
+        "source_path": { "type": "string", "minLength": 1 },
+        "source_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "source_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "declared_normalization": { "const": "preserve_bytes" },
+        "line_ending_mode": { "const": "preserved" },
+        "line_count": { "type": "integer", "minimum": 0 },
+        "body_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "lines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["line_id", "line_number", "text", "text_sha256"],
+            "properties": {
+              "line_id": { "type": "string", "pattern": "^AL_" },
+              "line_number": { "type": "integer", "minimum": 1 },
+              "text": { "type": "string" },
+              "text_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "authoredTimingAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "source_path", "source_sha256", "source_hash", "declared_normalization", "plan_version", "alignment_version", "confidence_threshold", "cue_count", "matched_count", "pending_count", "unmatched_count", "cues"],
+      "properties": {
+        "authority": { "const": "timing_plan" },
+        "source_path": { "type": "string", "minLength": 1 },
+        "source_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "source_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "declared_normalization": { "const": "preserve_values" },
+        "plan_version": { "type": "string", "minLength": 1 },
+        "alignment_version": { "const": "authored-lyrics-align/v1" },
+        "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cue_count": { "type": "integer", "minimum": 0 },
+        "matched_count": { "type": "integer", "minimum": 0 },
+        "pending_count": { "type": "integer", "minimum": 0 },
+        "unmatched_count": { "type": "integer", "minimum": 0 },
+        "cues": { "type": "array", "items": { "$ref": "#/$defs/authoredTimingCue" } }
+      }
+    },
+    "authoredTimingCue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cue_id", "line_id", "line_number", "status", "confidence", "source_kind", "source_refs", "raw_start_frame", "raw_end_frame", "timeline_in_frame", "timeline_duration_frames", "one_frame_gap_applied", "minimum_display_duration_applied", "cps_before", "cps_after"],
+      "properties": {
+        "cue_id": { "type": "string", "pattern": "^AC_" },
+        "line_id": { "type": "string", "pattern": "^AL_" },
+        "line_number": { "type": "integer", "minimum": 1 },
+        "status": { "enum": ["matched", "human_confirmation_pending", "unmatched"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "source_kind": { "enum": ["direct_cue", "stt_word_timing", "onset", "section_cue", "unmatched"] },
+        "source_refs": { "type": "array", "items": { "$ref": "#/$defs/authoredSourceRef" } },
+        "raw_start_frame": { "type": "integer", "minimum": 0 },
+        "raw_end_frame": { "type": "integer", "minimum": 1 },
+        "timeline_in_frame": { "type": "integer", "minimum": 0 },
+        "timeline_duration_frames": { "type": "integer", "minimum": 1 },
+        "one_frame_gap_applied": { "type": "boolean" },
+        "minimum_display_duration_applied": { "type": "boolean" },
+        "cps_before": { "type": "number", "minimum": 0 },
+        "cps_after": { "type": "number", "minimum": 0 }
+      }
+    },
+    "authoredSourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["timing_plan_cue", "stt_word", "onset", "section_cue"] },
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "start_us": { "type": "number", "minimum": 0 },
+        "end_us": { "type": "number", "minimum": 0 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

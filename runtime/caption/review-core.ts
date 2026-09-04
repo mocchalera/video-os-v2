@@ -1,6 +1,7 @@
 import { computeNormalizedJsonHash } from "../artifacts/p1-manifest-coverage.js";
 import type { CaptionDraft, CaptionDraftEntry } from "./editorial.js";
 import { getLayoutPolicy } from "./line-breaker.js";
+import { captionLineage, migrateCaptionLineage } from "./identity.js";
 
 export type CaptionReviewState = "unreviewed" | "verified" | "flagged";
 export type CaptionReviewSeverity = "info" | "warn" | "block";
@@ -431,6 +432,18 @@ function applyOperation(
       ...first.transcript_item_ids,
       ...second.transcript_item_ids,
     ]);
+    Object.assign(merged, captionLineage({
+      caption_id: merged.caption_id,
+      root_id: first.root_id ?? first.caption_id,
+      parent_ids: [first.caption_id, second.caption_id],
+      asset_id: merged.asset_id,
+      segment_id: merged.segment_id,
+      transcript_item_ids: merged.transcript_item_ids,
+      text: merged.text,
+      operation: "merge",
+      timeline_in_frame: merged.timeline_in_frame,
+      timeline_duration_frames: merged.timeline_duration_frames,
+    }));
     merged.review = {
       state: "unreviewed",
       edited: true,
@@ -456,12 +469,14 @@ function applyOperation(
       if (!operation.text.trim()) return { success: false, error: "replacement text is empty" };
       entry.text = operation.text.trim();
       retargetCaptionWordRefs(entry);
+      refreshLineage(entry, "text_edit");
       markEdited(entry);
       break;
     case "set_line_break": {
       const lines = operation.lines.map((line) => line.trim());
       if (lines.some((line) => !line)) return { success: false, error: "line break contains an empty line" };
       entry.text = lines.join("\n");
+      refreshLineage(entry, "text_edit");
       markEdited(entry);
       break;
     }
@@ -475,6 +490,7 @@ function applyOperation(
         entry.timing.timelineInFrame = operation.start_frame;
         entry.timing.timelineDurationFrames = operation.end_frame - operation.start_frame;
       }
+      refreshLineage(entry, "timing_edit");
       markEdited(entry);
       break;
     case "set_review_state":
@@ -501,6 +517,18 @@ function applyOperation(
         split.timeline_in_frame = part.start_frame;
         split.timeline_duration_frames = part.end_frame - part.start_frame;
         split.timing = splitCaptionTiming(entry, part.text, part.start_frame, part.end_frame);
+        Object.assign(split, captionLineage({
+          caption_id: split.caption_id,
+          root_id: entry.root_id ?? entry.caption_id,
+          parent_ids: [entry.caption_id],
+          asset_id: split.asset_id,
+          segment_id: split.segment_id,
+          transcript_item_ids: split.transcript_item_ids,
+          text: split.text,
+          operation: "split",
+          timeline_in_frame: split.timeline_in_frame,
+          timeline_duration_frames: split.timeline_duration_frames,
+        }));
         split.review = {
           state: "unreviewed",
           edited: true,
@@ -616,8 +644,10 @@ function summarizeValidation(entries: ReviewedCaptionEntry[]): CaptionReviewVali
 
 function toReviewedEntry(entry: CaptionDraftEntry): ReviewedCaptionEntry {
   const sourceText = entry.editorial?.sourceText ?? entry.text;
+  const lineage = migrateCaptionLineage(entry);
   return {
     ...structuredClone(entry),
+    ...lineage,
     text_hash: computeCaptionTextHash(entry.text),
     review: { state: "unreviewed", edited: false, source_text: sourceText },
     issues: [],
@@ -722,6 +752,21 @@ function normalizeTimingText(value: string): string {
 function markEdited(entry: ReviewedCaptionEntry): void {
   entry.review.edited = true;
   entry.review.state = "unreviewed";
+}
+
+function refreshLineage(entry: ReviewedCaptionEntry, operation: "text_edit" | "timing_edit"): void {
+  Object.assign(entry, captionLineage({
+    caption_id: entry.caption_id,
+    root_id: entry.root_id ?? entry.caption_id,
+    parent_ids: entry.parent_ids,
+    asset_id: entry.asset_id,
+    segment_id: entry.segment_id,
+    transcript_item_ids: entry.transcript_item_ids,
+    text: entry.text,
+    operation,
+    timeline_in_frame: entry.timeline_in_frame,
+    timeline_duration_frames: entry.timeline_duration_frames,
+  }));
 }
 
 function snapshot(entry: ReviewedCaptionEntry): CaptionReviewDiff["before"][number] {

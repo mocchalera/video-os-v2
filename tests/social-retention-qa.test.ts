@@ -1,5 +1,7 @@
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkSocialRetentionFinishing } from "../runtime/packaging/social-retention-qa.js";
+import { checkSocialRetentionFinishing, resolveCompilerRetentionPolicy } from "../runtime/packaging/social-retention-qa.js";
+import { loadRetentionPolicy, retentionPolicyContentHash } from "../runtime/editorial/short-form-retention.js";
 import type { TimelineIR } from "../runtime/compiler/types.js";
 
 function brief(format = "social_vertical", overrides: Record<string, unknown> = {}): unknown {
@@ -54,7 +56,9 @@ function timeline(withHook: boolean, splitFrames = [0, 300, 600, 900, 1200, 1500
 
 describe("social retention finishing QA", () => {
   it("passes a registered cold open with regular meaningful cuts", () => {
-    expect(checkSocialRetentionFinishing(timeline(true), brief()).every((check) => check.passed)).toBe(true);
+    const checks = checkSocialRetentionFinishing(timeline(true), brief());
+    expect(checks.filter((check) => check.name !== "social_retention_truth_bound").every((check) => check.passed)).toBe(true);
+    expect(checks.find((check) => check.name === "social_retention_truth_bound")?.details).toMatch(/receipt=sha256:[a-f0-9]{64} input=sha256:[a-f0-9]{64}/);
   });
 
   it("fails a missing hook and a long static interval", () => {
@@ -116,5 +120,29 @@ describe("social retention finishing QA", () => {
     overlayTracks[0].clips[0].metadata = { overlay: { styling_class: "vos:overlay.hook-title", text: "長".repeat(81) } };
     const checks = checkSocialRetentionFinishing(longTitle, brief());
     expect(checks.find((check) => check.name === "social_title_copy_fit_valid")?.passed).toBe(false);
+  });
+
+  it("uses the compiler retention policy ref/hash for the QA receipt", () => {
+    const policyRef = "tests/fixtures/rfa-retention/retention-policy.json";
+    const policy = loadRetentionPolicy(path.join(process.cwd(), policyRef));
+    const policyHash = retentionPolicyContentHash(policy);
+    const compiled = timeline(true);
+    compiled.provenance = {
+      retention_policy: {
+        policy: "retention-policy/v1",
+        policy_ref: policyRef,
+        policy_id: policy.policy_id,
+        policy_hash: policyHash,
+        degrade_order: policy.degrade_order,
+      },
+    } as typeof compiled.provenance;
+    compiled.metadata = {
+      retention_evidence: { producer: "compiler", policy_ref: policyRef, policy_hash: policyHash },
+    };
+    const resolved = resolveCompilerRetentionPolicy(process.cwd(), compiled);
+    expect(resolved && retentionPolicyContentHash(resolved)).toBe(policyHash);
+    const receiptCheck = checkSocialRetentionFinishing(compiled, brief(), resolved)
+      .find((check) => check.name === "social_retention_truth_bound");
+    expect(receiptCheck?.details).toContain(`policy=sha256:${policyHash.slice("sha256:".length)}`);
   });
 });

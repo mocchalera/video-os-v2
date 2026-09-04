@@ -27,6 +27,8 @@ export function normalize(
     preferred_roles: b.preferred_roles ? [...b.preferred_roles] : [],
     purpose: b.purpose ?? "",
     story_role: b.story_role,
+    emotional_valence: b.emotional_valence,
+    evidence_required: b.evidence_required,
     craft: b.craft ? { ...b.craft } : undefined,
     skill_hints: b.skill_hints ? [...b.skill_hints] : undefined,
     candidate_plan: b.candidate_plan
@@ -34,6 +36,12 @@ export function normalize(
           primary_candidate_ref: b.candidate_plan.primary_candidate_ref,
           fallback_candidate_refs: b.candidate_plan.fallback_candidate_refs
             ? [...b.candidate_plan.fallback_candidate_refs]
+            : undefined,
+          still_image: b.candidate_plan.still_image
+            ? structuredClone(b.candidate_plan.still_image)
+            : undefined,
+          freeze_frame_hold: b.candidate_plan.freeze_frame_hold
+            ? { ...b.candidate_plan.freeze_frame_hold }
             : undefined,
         }
       : undefined,

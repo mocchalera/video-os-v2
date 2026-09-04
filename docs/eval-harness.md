@@ -78,6 +78,47 @@ selects / blueprint / timeline が揃っていること。
 `--no-write` はsuite summaryとMarlin QA reportの書き込みを抑止する。
 モデル用の一時ファイルや再利用可能なローカルキャッシュはreportには含まれない。
 
+## Assembly loss 診断CLI（非canonical）
+
+M2A の assembly-loss 診断コア（`runtime/eval/assembly-loss.ts`）を
+実プロジェクトのアーティファクトに接続し、hash-pinned な非canonical
+レポート（`assembly-loss-report/v1`）を生成するCLI。
+
+```bash
+# 基本形: 必須4アーティファクト + transcripts を読み reports/eval/ へ出力
+npx tsx scripts/eval-assembly-loss.ts projects/<id>
+
+# 出力先指定 / 書き込みなし評価
+npx tsx scripts/eval-assembly-loss.ts projects/<id> --output-dir /tmp/reports
+npx tsx scripts/eval-assembly-loss.ts projects/<id> --no-write
+
+# 任意証跡とポリシー上書き
+npx tsx scripts/eval-assembly-loss.ts projects/<id> \
+  --causal-refs '[{"from_beat_id":"b1","to_beat_id":"b2"}]' \
+  --human-reference '{"label":"human","clips":[{"segment_id":"seg1"}]}' \
+  --wall-clock '{"select":12.5}' \
+  --asr-tolerance-us 100000 \
+  --analysis-coverage /path/to/coverage.json
+```
+
+- 必須入力は validated loader 経由（brief / selects / blueprint / timeline）。
+  欠落・不正は exit 1。
+- `03_analysis/transcripts/TR_*.json` はファイル名順で読み、無ければ
+  fail-open（unknown）。存在するが不正なら fail-closed。
+- analysis coverage は既存 `analysis-coverage-report.schema.json` で検証し、
+  `summary.status` を core 用の top-level `status` に正規化する。必須 shape
+  欠落は fail-closed。project 外の override ファイルは source_artifacts 上
+  `@external/analysis-coverage` という固定論理ロケータ + raw hash で記録される。
+- `--output-dir` が project root 内（canonical subtree 含む）に解決される場合は
+  書き込み前に拒否する。4出力（JSON/MD/2 sidecar）はローカルトランザクションで
+  書かれ、install 失敗時は新規ファイルを除去して全 backup を復元する。
+- レポートは canonical アーティファクトではなく診断用。JSON+MD+各 `.sha256`
+  sidecar を決定論的な basename で書き出す。同一入力+policy ならバイト一致。
+- envelope とcoreの evaluator/input/policy identity はrender/write前に一致検証し、
+  いずれかのtamperをfail closedで拒否する。
+- coverage 失敗時は verdict `HOLD`（exit 0・有効な診断）。
+  スコアやランキングには使わないこと。
+
 ## LLM ジャッジ（オプション）
 
 構造メトリクスは「何がズレたか」を測るが、そのズレが編集として

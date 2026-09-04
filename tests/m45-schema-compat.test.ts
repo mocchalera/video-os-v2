@@ -154,6 +154,8 @@ describe("Schema Backward Compatibility", () => {
           target_duration_frames: 72,
           required_roles: ["hero"],
           story_role: "hook",
+          emotional_valence: -0.8,
+          evidence_required: true,
           skill_hints: ["build_to_peak"],
           candidate_plan: {
             primary_candidate_ref: "cand_abc",
@@ -409,6 +411,30 @@ describe("Schema Backward Compatibility", () => {
     const valid = validate(brief);
     if (!valid) console.error(validate.errors);
     expect(valid).toBe(true);
+  });
+
+  it("creative-brief accepts optional creator narrative modes", () => {
+    const ajv = createValidator();
+    const schema = loadSchema("creative-brief.schema.json");
+    const validate = ajv.compile(schema);
+    const brief = {
+      project: { title: "Test", strategy: "creator-short" },
+      message: { primary: "Test message" },
+      audience: { primary: "testers" },
+      emotion_curve: ["curiosity", "engagement", "resolution"],
+      narrative_mode: "day_log",
+      must_have: ["authenticity"],
+      must_avoid: ["invented claims"],
+      autonomy: { may_decide: ["pacing"], must_ask: [] },
+      resolved_assumptions: ["All footage is available"],
+    };
+
+    expect(validate(brief), JSON.stringify(validate.errors, null, 2)).toBe(true);
+    expect(validate({ ...brief, narrative_mode: "credibility_first" })).toBe(false);
+    expect(validate({
+      ...brief,
+      editorial: { hook_priority: "credibility_first" },
+    })).toBe(false);
   });
 
   it("creative-brief without editorial field validates (backward compat)", () => {

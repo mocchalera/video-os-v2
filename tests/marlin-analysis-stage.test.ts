@@ -13,9 +13,11 @@ import {
   createMarlinFnFromEnvironment,
   extractTagsFromScene,
   loadMarlinAssetInputs,
+  marlinCheckpointSignature,
   runMarlinAnalysis,
   selectMarlinAssetInputsForRun,
 } from "../runtime/pipeline/stages/marlin.js";
+import { probeVideoDurationSeconds } from "../runtime/pipeline/stages/marlin-proxy.js";
 import { materializePeakSignalsFromSegments } from "../runtime/artifacts/peak-materialization.js";
 
 const require_ = createRequire(import.meta.url);
@@ -468,6 +470,97 @@ describe("Marlin analysis stage", () => {
     }
   });
 
+  it("delivers external project typed policy overrides through runMarlinEvaluate", async () => {
+    // External project (outside the repo) with its own analysis_policy.yaml.
+    const projectDir = makeTempProject();
+    fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "analysis_policy.yaml"),
+      [
+        "marlin:",
+        "  caption_max_new_tokens_short: 4321",
+        "  caption_max_new_tokens_max: 4321",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(projectDir, "03_analysis/assets.json"),
+      JSON.stringify({
+        project_id: path.basename(projectDir),
+        artifact_version: "2.0.0",
+        items: [
+          {
+            asset_id: "AST_OVERRIDE",
+            filename: "clip.mp4",
+            source_locator: path.join(REPO_ROOT, "tests/fixtures/media/test-clip-5s.mp4"),
+          },
+        ],
+      }),
+    );
+
+    // Stub worker process (driven through VOS_MARLIN_PYTHON/VOS_MARLIN_WORKER)
+    // records every JSONL request so the caption token bound is observable
+    // end-to-end without a live model.
+    const logPath = path.join(projectDir, "requests.jsonl");
+    const stubPath = path.join(projectDir, "marlin_stub.cjs");
+    fs.writeFileSync(
+      stubPath,
+      [
+        "const fs = require('node:fs');",
+        "const readline = require('node:readline');",
+        "const rl = readline.createInterface({ input: process.stdin });",
+        "rl.on('line', (line) => {",
+        "  if (!line.trim()) return;",
+        "  if (process.env.MARLIN_REQUEST_LOG) fs.appendFileSync(process.env.MARLIN_REQUEST_LOG, line + '\\n');",
+        "  let req; try { req = JSON.parse(line); } catch { return; }",
+        "  if (req.method === 'shutdown') {",
+        "    process.stdout.write(JSON.stringify({ id: req.id, ok: true, result: {} }) + '\\n');",
+        "    return;",
+        "  }",
+        "  const result = req.method === 'find'",
+        "    ? { query: String(req.params && req.params.event || ''), span: null, format_ok: false }",
+        "    : { scene: 'stub scene', caption: 'stub caption', events: [] };",
+        "  process.stdout.write(JSON.stringify({ id: req.id, ok: true, result }) + '\\n');",
+        "});",
+      ].join("\n"),
+    );
+
+    const previousPython = process.env.VOS_MARLIN_PYTHON;
+    const previousWorker = process.env.VOS_MARLIN_WORKER;
+    const previousLog = process.env.MARLIN_REQUEST_LOG;
+    process.env.VOS_MARLIN_PYTHON = process.execPath;
+    process.env.VOS_MARLIN_WORKER = stubPath;
+    process.env.MARLIN_REQUEST_LOG = logPath;
+    try {
+      await runMarlinEvaluate({
+        projectDir,
+        repoRoot: REPO_ROOT,
+        sourceFiles: [],
+        mock: true,
+        skipExisting: false,
+        captionOnly: false,
+      });
+
+      const requests = fs.readFileSync(logPath, "utf-8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { method: string; params?: { max_new_tokens?: number } });
+      const captions = requests.filter((request) => request.method === "caption");
+      expect(captions.length).toBeGreaterThanOrEqual(1);
+      // Defaults are 512/2048 — only the external project's typed override
+      // reaching runMarlinAnalysis explains 4321 on every caption request.
+      for (const caption of captions) {
+        expect(caption.params?.max_new_tokens).toBe(4321);
+      }
+    } finally {
+      if (previousPython === undefined) delete process.env.VOS_MARLIN_PYTHON;
+      else process.env.VOS_MARLIN_PYTHON = previousPython;
+      if (previousWorker === undefined) delete process.env.VOS_MARLIN_WORKER;
+      else process.env.VOS_MARLIN_WORKER = previousWorker;
+      if (previousLog === undefined) delete process.env.MARLIN_REQUEST_LOG;
+      else process.env.MARLIN_REQUEST_LOG = previousLog;
+    }
+  });
+
   it("writes schema-valid marlin_events.json from caption and find passes", async () => {
     const projectDir = makeTempProject();
     fs.mkdirSync(path.join(projectDir, "03_analysis"), { recursive: true });
@@ -756,6 +849,7 @@ describe("Marlin analysis stage", () => {
         ],
       }),
     );
+    const durationSecA = await probeVideoDurationSeconds(path.join(projectDir, "media/a.mp4"));
     fs.writeFileSync(
       path.join(projectDir, "03_analysis/marlin_events.json"),
       JSON.stringify({
@@ -770,6 +864,13 @@ describe("Marlin analysis stage", () => {
             caption: "existing A caption",
             events: [],
             find_results: [],
+            checkpoint_signature: marlinCheckpointSignature({
+              sourcePath: path.join(projectDir, "media/a.mp4"),
+              durationSec: durationSecA,
+              chunkSeconds: 30,
+              chunkOverlapSeconds: 3,
+              modelSnapshot: MODEL.model_snapshot,
+            }),
           },
         ],
       }),

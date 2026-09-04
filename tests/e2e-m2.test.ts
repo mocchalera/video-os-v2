@@ -182,6 +182,24 @@ function generateBridgeArtifacts(result: PipelineResult, projectDir: string): vo
       final_hold_min_frames: 12,
     },
     rejection_rules: [],
+    timeline_operations: [{
+      operation_id: "OP_E2E_M2_FIXTURE_TAIL",
+      type: "gap",
+      track_id: "V1",
+      start_frame: 48,
+      duration_frames: 192,
+      authority: "operator",
+      reason: "fixture intentionally leaves the unselected tail outside the authored visual clip",
+    }],
+    // Issue #6 P0 / #25: this bridge fixture only models primary audio under
+    // the selected opening clip, so it declares an explicit primary-audio mix
+    // policy instead of wall-to-wall A1 coverage.
+    audio_mix_policy: {
+      policy: "primary-audio-mix/v1",
+      mode: "selective_authorization",
+      authority: "operator",
+      reason: "E2E bridge fixture models primary audio only under the selected clip, not across the authorized visual gap tail",
+    },
   };
   fs.writeFileSync(path.join(planDir, "edit_blueprint.yaml"), stringifyYaml(blueprint));
 

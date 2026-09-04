@@ -15,6 +15,10 @@ import {
   DEFAULT_VIDEO_FONT_ID,
   type VideoFontId,
 } from "./font-contract.js";
+import {
+  escapeAssCaptionText,
+  sanitizeCaptionTextForRendering,
+} from "./caption-text-sanitizer.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -82,6 +86,30 @@ export interface SequenceInfo {
   height: number;
   fps: number;
 }
+
+/** Resolved RFA-020 operation consumed by the existing libass boundary. */
+export interface AssCaptionVisualTreatment {
+  anchor: "top_left" | "top_center" | "top_right" | "center" | "bottom_left" | "bottom_center" | "bottom_right";
+  rect?: { x: number; y: number; width: number; height: number };
+  style_ref: string;
+  reference_scale?: number;
+  hierarchy_role?: "speech" | "keyword" | "annotation" | "speaker" | "cta";
+  emphasis_ref?: string;
+  animation_ref?: string;
+  effect_ref?: string;
+  fallback: "registered_fallback" | "nle_handoff" | "blocker";
+}
+
+/**
+ * Small canonical hierarchy capability registry for the existing ASS route.
+ * Speech keeps the baseline token; keyword has a registered, observable ASS
+ * emphasis. Speaker/annotation/CTA remain explicit fallback/hold candidates
+ * until an existing token can render them without approximation.
+ */
+export const CAPTION_HIERARCHY_CAPABILITY_REGISTRY = {
+  speech: { ass_tags: [] as string[] },
+  keyword: { ass_tags: ["\\b1", "\\fscx110", "\\fscy110"] },
+} as const;
 
 // ── Default preset ───────────────────────────────────────────────────
 
@@ -340,6 +368,9 @@ export interface AssCaptionCue {
   endSec: number;
   /** May contain "\n" for manual line breaks (converted to ASS "\N"). */
   text: string;
+  captionId?: string;
+  stableRootId?: string;
+  visualTreatment?: AssCaptionVisualTreatment;
   /** Content-aware motion remains opt-in at the style-preset boundary. */
   semanticRole?: "question" | "reveal";
 }
@@ -356,6 +387,91 @@ function semanticMotionTag(
     return "{\\fad(80,100)\\fscx105\\fscy105\\t(0,180,\\fscx100\\fscy100)}";
   }
   return "";
+}
+
+function visualTreatmentTags(
+  treatment: AssCaptionVisualTreatment | undefined,
+  basePreset: CaptionStylePreset,
+  sequence: SequenceInfo,
+): string {
+  if (!treatment) return "";
+  const preset = hasCaptionStylePreset(treatment.style_ref)
+    ? resolveCaptionStylePreset(treatment.style_ref)
+    : basePreset;
+  const scale = sequence.height / 1080 * (treatment.reference_scale ?? 1);
+  const fontSize = Math.max(1, Math.round(preset.fontSizePx1080 * scale));
+  const outline = Math.round(preset.outlinePx1080 * scale * 10) / 10;
+  const shadow = Math.round(preset.shadowPx1080 * scale * 10) / 10;
+  const tags: string[] = [
+    `\\fn${preset.assFontFamily ?? preset.fontFamily}`,
+    `\\fs${fontSize}`,
+    `\\bord${outline}`,
+    `\\shad${shadow}`,
+    `\\c${rgbaToAss(preset.fillRgba)}`,
+    `\\3c${rgbaToAss(preset.outlineRgba)}`,
+    `\\an${assAnchorAlignment(treatment.anchor)}`,
+  ];
+  if (treatment.rect) {
+    const point = anchorPoint(treatment.rect, treatment.anchor, sequence);
+    tags.push(`\\pos(${point.x},${point.y})`);
+  }
+  if (treatment.emphasis_ref) {
+    // Registered emphasis is a style-token operation, not a text rewrite.
+    tags.push("\\b1", "\\fscx110", "\\fscy110");
+  }
+  const hierarchyCapability = treatment.hierarchy_role
+    ? CAPTION_HIERARCHY_CAPABILITY_REGISTRY[treatment.hierarchy_role as keyof typeof CAPTION_HIERARCHY_CAPABILITY_REGISTRY]
+    : undefined;
+  if (hierarchyCapability) tags.push(...hierarchyCapability.ass_tags);
+  if (treatment.animation_ref === "semantic-reveal") {
+    tags.push("\\fad(40,80)\\fscx115\\fscy115\\t(0,180,\\fscx100\\fscy100)");
+  } else if (treatment.animation_ref === "semantic-question") {
+    tags.push("\\fad(80,100)\\fscx105\\fscy105\\t(0,180,\\fscx100\\fscy100)");
+  }
+  if (treatment.effect_ref === "shadow" || treatment.effect_ref?.includes("shadow")) {
+    tags.push(`\\shad${Math.max(1, shadow)}`);
+  }
+  if (treatment.effect_ref === "outline" || treatment.effect_ref?.includes("outline")) {
+    tags.push(`\\bord${Math.max(1, outline)}`);
+  }
+  return `{${tags.join("")}}`;
+}
+
+function isPanelTreatment(treatment: AssCaptionVisualTreatment | undefined): boolean {
+  return Boolean(treatment?.effect_ref?.includes("panel"));
+}
+
+function panelStyleName(treatment: AssCaptionVisualTreatment): string {
+  const suffix = treatment.style_ref.replace(/[^A-Za-z0-9_-]/g, "_");
+  return `Panel_${suffix}`;
+}
+
+function assAnchorAlignment(anchor: AssCaptionVisualTreatment["anchor"]): number {
+  switch (anchor) {
+    case "top_left": return 7;
+    case "top_center": return 8;
+    case "top_right": return 9;
+    case "center": return 5;
+    case "bottom_left": return 1;
+    case "bottom_center": return 2;
+    case "bottom_right": return 3;
+  }
+}
+
+function anchorPoint(
+  rect: NonNullable<AssCaptionVisualTreatment["rect"]>,
+  anchor: AssCaptionVisualTreatment["anchor"],
+  sequence: SequenceInfo,
+): { x: number; y: number } {
+  const left = rect.x * sequence.width;
+  const centerX = (rect.x + rect.width / 2) * sequence.width;
+  const right = (rect.x + rect.width) * sequence.width;
+  const top = rect.y * sequence.height;
+  const centerY = (rect.y + rect.height / 2) * sequence.height;
+  const bottom = (rect.y + rect.height) * sequence.height;
+  const x = anchor.endsWith("left") ? left : anchor.endsWith("right") ? right : centerX;
+  const y = anchor.startsWith("top") ? top : anchor.startsWith("bottom") ? bottom : centerY;
+  return { x: Math.round(x), y: Math.round(y) };
 }
 
 /**
@@ -393,8 +509,22 @@ export function buildAssDocument(
     marginV: number;
     fontSize?: number;
     outline?: number;
+    background?: string;
+    borderStyle?: 1 | 3;
+    fontFamily?: string;
+    bold?: number;
   }): string =>
-    `Style: ${input.name},${assFontFamily},${input.fontSize ?? fontSize},${input.fill},${input.fill},${outlineColour},&H00000000,${bold},0,0,0,100,100,0,0,1,${input.outline ?? outline},${shadow},${input.alignment},${marginH},${marginH},${input.marginV},1`;
+    `Style: ${input.name},${input.fontFamily ?? assFontFamily},${input.fontSize ?? fontSize},${input.fill},${input.fill},${outlineColour},${input.background ?? "&H00000000"},${input.bold ?? bold},0,0,0,100,100,0,0,${input.borderStyle ?? 1},${input.outline ?? outline},${shadow},${input.alignment},${marginH},${marginH},${input.marginV},1`;
+
+  const panelTreatments = cues
+    .map((cue) => cue.visualTreatment)
+    .filter((treatment): treatment is AssCaptionVisualTreatment => isPanelTreatment(treatment));
+  const panelStyles = [...new Map(panelTreatments.map((treatment) => {
+    const panelPreset = hasCaptionStylePreset(treatment.style_ref)
+      ? resolveCaptionStylePreset(treatment.style_ref)
+      : preset;
+    return [panelStyleName(treatment), { name: panelStyleName(treatment), preset: panelPreset }];
+  })).values()];
 
   const speaker = preset.speakerSeparation;
   const stacked = speaker?.stackedLabel;
@@ -416,6 +546,18 @@ export function buildAssDocument(
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
     styleRow({ name: "Default", fill: primary, alignment, marginV }),
+    ...panelStyles.map(({ name, preset: panelPreset }) => styleRow({
+      name,
+      fill: rgbaToAss(panelPreset.fillRgba),
+      background: rgbaToAss(panelPreset.outlineRgba),
+      borderStyle: 3,
+      alignment,
+      marginV,
+      fontSize: Math.round(panelPreset.fontSizePx1080 * scale),
+      outline: 0,
+      fontFamily: panelPreset.assFontFamily ?? panelPreset.fontFamily,
+      bold: panelPreset.assSynthesizeBold ?? panelPreset.fontWeight >= 700 ? -1 : 0,
+    })),
     ...(speaker ? [
       styleRow({
         name: "Offscreen",
@@ -454,15 +596,16 @@ export function buildAssDocument(
   ];
 
   for (const cue of cues) {
-    let text = cue.text.replace(/\r?\n/g, "\\N");
+    const sanitizedCueText = sanitizeCaptionTextForRendering(cue.text);
+    let text = escapeAssCaptionText(sanitizedCueText);
     let styleName = "Default";
-    if (speaker && cue.text.includes(speaker.separator)) {
-      const separatorIndex = cue.text.indexOf(speaker.separator);
-      const label = cue.text.slice(0, separatorIndex).trim();
-      const body = cue.text.slice(separatorIndex + speaker.separator.length).trim();
+    if (speaker && sanitizedCueText.includes(speaker.separator)) {
+      const separatorIndex = sanitizedCueText.indexOf(speaker.separator);
+      const label = sanitizedCueText.slice(0, separatorIndex).trim();
+      const body = sanitizedCueText.slice(separatorIndex + speaker.separator.length).trim();
       const isOffscreen = speaker.offscreenLabels.includes(label);
       styleName = isOffscreen ? "Offscreen" : "Onscreen";
-      text = stacked ? body.replace(/\r?\n/g, "\\N") : text;
+      text = stacked ? escapeAssCaptionText(body) : text;
 
       if (stacked) {
         const bodyLineCount = Math.max(1, body.split(/\r?\n/).length);
@@ -478,11 +621,16 @@ export function buildAssDocument(
             );
         const labelStyle = isOffscreen ? "OffscreenLabel" : "OnscreenLabel";
         lines.push(
-          `Dialogue: 1,${assTimestamp(cue.startSec)},${assTimestamp(cue.endSec)},${labelStyle},,0,0,0,,{\\an2\\pos(${Math.round(sequence.width / 2)},${labelY})}${label}`,
+          `Dialogue: 1,${assTimestamp(cue.startSec)},${assTimestamp(cue.endSec)},${labelStyle},,0,0,0,,{\\an2\\pos(${Math.round(sequence.width / 2)},${labelY})}${escapeAssCaptionText(label)}`,
         );
       }
     }
-    text = `${semanticMotionTag(cue, preset)}${text}`;
+    if (cue.visualTreatment && isPanelTreatment(cue.visualTreatment) && !(
+      speaker && sanitizedCueText.includes(speaker.separator)
+    )) {
+      styleName = panelStyleName(cue.visualTreatment);
+    }
+    text = `${visualTreatmentTags(cue.visualTreatment, preset, sequence)}${semanticMotionTag(cue, preset)}${text}`;
     lines.push(
       `Dialogue: 0,${assTimestamp(cue.startSec)},${assTimestamp(cue.endSec)},${styleName},,0,0,0,,${text}`,
     );

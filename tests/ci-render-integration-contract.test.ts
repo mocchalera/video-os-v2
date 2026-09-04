@@ -20,7 +20,7 @@ const packageJson = JSON.parse(
   fs.readFileSync(path.resolve("package.json"), "utf8"),
 ) as { scripts?: Record<string, string> };
 const workflow = parseYaml(
-  fs.readFileSync(path.resolve(".github/workflows/ci.yml"), "utf8"),
+  fs.readFileSync(path.resolve(".github/workflows/full-integration.yml"), "utf8"),
 ) as { jobs?: Record<string, WorkflowJob> };
 
 describe("render integration CI contract", () => {
@@ -47,7 +47,7 @@ describe("render integration CI contract", () => {
   });
 
   it("runs the real-render script in a bounded pinned CI job", () => {
-    const renderJob = workflow.jobs?.["render-integration"];
+    const renderJob = workflow.jobs?.["full-integration"];
     const setupNode = renderJob?.steps?.find(
       (step) => step.uses === "actions/setup-node@v4",
     );
@@ -56,7 +56,7 @@ describe("render integration CI contract", () => {
     );
 
     expect(renderJob?.["runs-on"]).toBe("ubuntu-24.04");
-    expect(renderJob?.["timeout-minutes"]).toBe(10);
+    expect(renderJob?.["timeout-minutes"]).toBe(60);
     expect(setupNode?.with?.["node-version-file"]).toBe(".node-version");
     const mediaStep = renderJob?.steps?.find(
       (step) => step.name === "Resolve pinned media toolchain",

@@ -44,6 +44,8 @@ export function parseArgs(argv: string[]): ProjectPipelineOptions {
   let skipQa = false;
   let qwen3vlEnabled: boolean | undefined;
   let clapAudioEnabled: boolean | undefined;
+  let lyricsPath: string | undefined;
+  let timingPlanPath: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -61,6 +63,16 @@ export function parseArgs(argv: string[]): ProjectPipelineOptions {
     }
     if (arg === "--content-hint") {
       contentHint = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--lyrics") {
+      lyricsPath = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--timing-plan") {
+      timingPlanPath = value;
       index += 1;
       continue;
     }
@@ -114,6 +126,8 @@ export function parseArgs(argv: string[]): ProjectPipelineOptions {
     skipQa,
     qwen3vlEnabled,
     clapAudioEnabled,
+    ...(lyricsPath ? { lyricsPath } : {}),
+    ...(timingPlanPath ? { timingPlanPath } : {}),
   };
 }
 

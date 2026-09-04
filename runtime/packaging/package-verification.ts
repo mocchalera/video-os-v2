@@ -8,12 +8,17 @@ import {
   computeSha256,
   type PackageManifest,
 } from "./manifest.js";
-import { resolveDeliveryArtifactPaths } from "./active-delivery.js";
+import { resolveDeliveryArtifactPathsStrict } from "./active-delivery.js";
 import {
   resolveProjectRenderRoute,
-  type RenderRouteDecision,
+  routeCapabilityHash,
+  type RenderRouteEvidence,
   type RenderRouteReceipt,
+  type RenderRouteDecision,
 } from "../render/route-resolver.js";
+import { resolveCanonicalCaptionVisualTreatmentInput } from "../render/canonical-render-input.js";
+import { computeNormalizedJsonHash } from "../artifacts/p1-manifest-coverage.js";
+import type { CaptionVisualTreatmentInput } from "../caption/visual-treatment.js";
 import { HYPERFRAMES_RENDERER_VERSION } from "../content/hyperframes-renderer.js";
 import { REMOTION_RENDERER_VERSION } from "../render/remotion/render-remotion.js";
 import {
@@ -23,6 +28,7 @@ import {
   assertAlphaLayerMediaContract,
   probeAlphaLayerMediaSync,
   type AlphaLayerMediaContract,
+  validateAlphaOverlayExportReceipt,
 } from "../render/alpha-layer-contract.js";
 import { loadContentRenderPlan } from "../content/render-plan.js";
 import { verifyDerivedVideoProvenance } from "./derived-video-provenance.js";
@@ -30,6 +36,13 @@ import {
   liveRendererVersionProvider,
   type RendererVersionProvider,
 } from "./renderer-version-provider.js";
+import { checkMusicMasterAudioPlan } from "./qa.js";
+import {
+  hashAudioRenderPlan,
+  type AudioRenderPlan,
+} from "../audio/render-plan.js";
+import { resolveSharedAudioRenderPlan } from "../audio/render-route.js";
+import type { AudioMixReport } from "../audio/mixer.js";
 
 export interface PackageVerificationCheck {
   name: string;
@@ -76,6 +89,39 @@ export interface PackageVerificationPaths {
   allowApprovedState?: boolean;
 }
 
+export interface PackageArtifactClosureFailure {
+  kind: "missing" | "empty" | "path_escape" | "hash_mismatch";
+  artifact: string;
+  path: string;
+}
+
+/** Verifies every manifest artifact reference, including caption arrays, against contained current bytes. */
+export function verifyPackageArtifactClosure(projectDirInput: string, manifest: PackageManifest): PackageArtifactClosureFailure[] {
+  const projectDir = fs.realpathSync(path.resolve(projectDirInput));
+  const entries: Array<[string, { path: string; sha256: string }]> = [];
+  for (const [name, value] of Object.entries(manifest.artifacts)) {
+    if (Array.isArray(value)) value.forEach((artifact, index) => entries.push([`${name}[${index}]`, artifact]));
+    else if (value) entries.push([name, value]);
+  }
+  const failures: PackageArtifactClosureFailure[] = [];
+  for (const [name, artifact] of entries) {
+    const lexical = path.isAbsolute(artifact.path) ? path.resolve(artifact.path) : path.resolve(projectDir, artifact.path);
+    if (!fs.existsSync(lexical)) {
+      failures.push({ kind: "missing", artifact: name, path: artifact.path });
+      continue;
+    }
+    let real: string;
+    try { real = fs.realpathSync(lexical); } catch { failures.push({ kind: "missing", artifact: name, path: artifact.path }); continue; }
+    if (!real.startsWith(`${projectDir}${path.sep}`) || !fs.statSync(real).isFile()) {
+      failures.push({ kind: "path_escape", artifact: name, path: artifact.path });
+      continue;
+    }
+    if (fs.statSync(real).size === 0) failures.push({ kind: "empty", artifact: name, path: artifact.path });
+    if (computeSha256(real) !== artifact.sha256) failures.push({ kind: "hash_mismatch", artifact: name, path: artifact.path });
+  }
+  return failures;
+}
+
 export function verifyExistingPackage(projectDir: string): PackageVerificationResult {
   return verifyExistingPackageWithRendererVersionProvider(
     projectDir,
@@ -89,7 +135,7 @@ export function verifyExistingPackageWithRendererVersionProvider(
 ): PackageVerificationResult {
   const absDir = path.resolve(projectDir);
   try {
-    const delivery = resolveDeliveryArtifactPaths(absDir, { verifyHashes: true });
+    const delivery = resolveDeliveryArtifactPathsStrict(absDir);
     return verifyExistingPackageInternal(absDir, {
       qaReportPath: delivery.qaReportPath,
       packageManifestPath: delivery.packageManifestPath,
@@ -199,6 +245,13 @@ function verifyExistingPackageInternal(
     return finish(absDir, checks, "package manifest unreadable", qa.project_id, qa.source_of_truth);
   }
   const manifest = manifestRead.value as PackageManifest;
+  const closureFailures = verifyPackageArtifactClosure(absDir, manifest);
+  addCheck(
+    checks,
+    "package_artifact_closure_valid",
+    closureFailures.length === 0,
+    closureFailures.length === 0 ? "all declared package artifact bytes are present, non-empty, contained, and hash-bound" : closureFailures.map((failure) => `${failure.artifact}:${failure.kind}:${failure.path}`).join("; "),
+  );
 
   const timelineRead = readJson(timelinePath);
   addCheck(
@@ -217,6 +270,15 @@ function verifyExistingPackageInternal(
     timelineSchema.valid,
     timelineSchema.valid ? "schema=timeline-ir" : timelineSchema.errors.join("; "),
   );
+  if (timelineDeclaresMusicMaster(timelineRead.value)) {
+    verifyMusicMasterPackageContract(
+      checks,
+      absDir,
+      timelinePath,
+      manifestPath,
+      finalVideoPath,
+    );
+  }
 
   let state: ReturnType<typeof readProjectState>;
   try {
@@ -319,6 +381,14 @@ function verifyExistingPackageInternal(
         projectDir: absDir,
         provenancePath: derivedProvenancePath,
         expectedFinalVideoPath: finalVideoPath,
+        ...(timelineDeclaresMusicMaster(timelineRead.value)
+          ? {
+              sourceInputs: createSourceInputAttestation(absDir, {
+                timelinePath,
+                includeAudio: false,
+              }),
+            }
+          : {}),
       });
       addCheck(
         checks,
@@ -413,6 +483,11 @@ function verifyExistingPackageInternal(
         && manifest.provenance.handoff_id === state?.handoff_resolution?.handoff_id,
       `manifest=${manifest.provenance.handoff_id ?? "-"} state=${state?.handoff_resolution?.handoff_id ?? "-"}`,
     );
+    if (manifest.provenance.nle_receipt_required === true
+      || manifest.provenance.route_receipt
+      || manifest.provenance.route_evidence) {
+      verifyNleRouteEvidence(checks, absDir, manifest, finalVideoPath);
+    }
   }
   const sourceInputsRequired = manifest.source_of_truth === "engine_render";
   const sourceInputsDeclared = Boolean(
@@ -430,7 +505,9 @@ function verifyExistingPackageInternal(
       );
     } else {
       try {
-        const attestation = createSourceInputAttestation(absDir);
+        const attestation = createSourceInputAttestation(absDir, {
+          includeAudio: !timelineDeclaresMusicMaster(timelineRead.value),
+        });
         addCheck(
           checks,
           "source_inputs_provenance_matches",
@@ -487,6 +564,7 @@ function verifyRenderProvenance(
       ? hashDetails(render.route_receipt.sha256, computeSha256(receiptPath))
       : `missing=${receiptPath}`,
   );
+
   if (!receiptPresent) return;
   const read = readJson(receiptPath);
   if (!read.ok) {
@@ -494,6 +572,31 @@ function verifyRenderProvenance(
     return;
   }
   const receipt = read.value as RenderRouteReceipt;
+  const routeSchema = receipt.route_evidence
+    ? validateAgainstSchema(receipt, "render-route-receipt.schema.json")
+    : { valid: true, errors: [] as string[] };
+  addCheck(
+    checks,
+    "render_route_receipt_schema_valid",
+    routeSchema.valid,
+    routeSchema.valid
+      ? receipt.route_evidence ? "schema=render-route-receipt" : "legacy receipt schema compatibility path"
+      : routeSchema.errors.join("; "),
+  );
+  if (render.caption_visual_treatment) {
+    verifyCaptionVisualTreatmentFreshness(checks, projectDir, render, receipt);
+  } else if (
+    receipt.inputs.typography_policy
+    || receipt.inputs.visual_treatment_patch
+    || receipt.inputs.caption_visual_treatment_input
+  ) {
+    addCheck(
+      checks,
+      "caption_visual_treatment_provenance_complete",
+      false,
+      "visual-treatment artifacts are referenced without a canonical visual-treatment summary",
+    );
+  }
   addCheck(
     checks,
     "render_route_receipt_version_valid",
@@ -507,6 +610,7 @@ function verifyRenderProvenance(
     delivery_execution: receipt.delivery_execution,
     inputs: receipt.inputs,
     outputs: receipt.outputs,
+    route_evidence: receipt.route_evidence,
   }) === JSON.stringify({
     renderer_versions: render.renderer_versions,
     layer_receipts: render.layer_receipts,
@@ -514,6 +618,7 @@ function verifyRenderProvenance(
     delivery_execution: render.delivery_execution,
     inputs: render.inputs,
     outputs: render.outputs,
+    route_evidence: render.route_evidence,
   });
   addCheck(
     checks,
@@ -521,6 +626,25 @@ function verifyRenderProvenance(
     summaryMatches,
     summaryMatches ? "manifest summary is receipt-derived" : "manifest render summary drifted",
   );
+  if (receipt.route_evidence) {
+    verifyRenderRouteEvidence(
+      checks,
+      projectDir,
+      manifest,
+      receipt,
+      canonicalFinalVideoPath,
+    );
+  } else {
+    // Older package-v1 fixtures remain readable. New pipeline receipts always
+    // carry this evidence, and the summary comparison above prevents a newer
+    // manifest from silently dropping it.
+    addCheck(
+      checks,
+      "render_route_evidence_legacy_compatibility",
+      true,
+      "legacy render-route receipt has no RFA-013/014/024 evidence",
+    );
+  }
 
   try {
     const current = resolveProjectRenderRoute(
@@ -715,10 +839,565 @@ function verifyRenderProvenance(
   }
 }
 
+function verifyRenderRouteEvidence(
+  checks: PackageVerificationCheck[],
+  projectDir: string,
+  manifest: PackageManifest,
+  receipt: RenderRouteReceipt,
+  canonicalFinalVideoPath: string,
+): void {
+  const evidence = receipt.route_evidence;
+  if (!evidence) return;
+  const canonical = evidence.route_kind === "canonical_engine_render";
+  addCheck(
+    checks,
+    "render_route_is_canonical_engine_for_engine_package",
+    canonical
+      && evidence.ownership === "canonical"
+      && evidence.canonical_claim === true,
+    `route_kind=${evidence.route_kind} ownership=${evidence.ownership} canonical_claim=${evidence.canonical_claim}`,
+  );
+  addCheck(
+    checks,
+    "render_route_status_allows_engine_package",
+    evidence.status !== "blocked" && (!canonical || evidence.handoff.required === false),
+    `status=${evidence.status} handoff_required=${evidence.handoff.required}`,
+  );
+
+  const timelineMatches = JSON.stringify(evidence.source_identity.timeline)
+    === JSON.stringify(receipt.inputs.timeline);
+  addCheck(
+    checks,
+    "render_route_source_timeline_matches_receipt",
+    timelineMatches,
+    timelineMatches ? "route source identity is receipt-bound" : "route source timeline drifted",
+  );
+  if (canonical) {
+    verifyReceiptArtifact(
+      checks,
+      projectDir,
+      evidence.source_identity.timeline,
+      "render_route_source_timeline",
+    );
+    const canonicalTimelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+    addCheck(
+      checks,
+      "render_route_source_timeline_is_canonical",
+      path.resolve(evidence.source_identity.timeline.path) === path.resolve(canonicalTimelinePath),
+      `route=${path.resolve(evidence.source_identity.timeline.path)} canonical=${path.resolve(canonicalTimelinePath)}`,
+    );
+  }
+
+  const manifestSourceHash = normalizeSha256(manifest.provenance.source_inputs_hash);
+  const routeSourceHash = normalizeSha256(evidence.source_identity.source_inputs_hash);
+  addCheck(
+    checks,
+    "render_route_source_inputs_hash_matches_manifest",
+    !canonical || (manifestSourceHash !== null && routeSourceHash === manifestSourceHash),
+    `manifest=${manifestSourceHash ?? "-"} route=${routeSourceHash ?? "-"}`,
+  );
+
+  const capabilityHash = canonical
+    ? routeCapabilityHash({
+        decision: receipt,
+        visualTreatmentInputHash: evidence.visual_treatment.input_hash,
+        visualTreatmentProfileHash: evidence.visual_treatment.profile_hash,
+        audioPlanHash: evidence.audio.plan_hash,
+      })
+    : null;
+  addCheck(
+    checks,
+    "render_route_capability_hash_matches",
+    !canonical || capabilityHash === evidence.route_capability.hash,
+    `declared=${evidence.route_capability.hash} actual=${capabilityHash ?? "external-route"}`,
+  );
+
+  const captionsEnabled = receipt.caption_layer.engine !== "none";
+  const caption = evidence.caption_ownership;
+  const captionOwnerValid = captionsEnabled
+    ? caption.approval_status === "approved"
+      && caption.burn_render_owner === "ffmpeg-libass"
+      && caption.burn_render_claim === "canonical"
+      && caption.renderer_count === 1
+      && Boolean(caption.approval)
+      && caption.approval_hash === receipt.inputs.caption_approval?.sha256
+    : caption.approval_status === "not_applicable"
+      && caption.renderer_count === 0
+      && caption.burn_render_claim === "not_applicable";
+  addCheck(
+    checks,
+    "render_route_caption_ownership_is_single_canonical_owner",
+    !canonical || captionOwnerValid,
+    `enabled=${captionsEnabled} approval=${caption.approval_status} burn_owner=${caption.burn_render_owner} claim=${caption.burn_render_claim} renderer_count=${caption.renderer_count}`,
+  );
+  if (caption.approval) {
+    verifyReceiptArtifact(checks, projectDir, caption.approval, "render_route_caption_approval");
+    addCheck(
+      checks,
+      "render_route_caption_approval_matches_receipt",
+      JSON.stringify(caption.approval) === JSON.stringify(receipt.inputs.caption_approval),
+      "route caption approval is bound to render receipt input",
+    );
+  }
+
+  if (evidence.visual_treatment.input) {
+    verifyReceiptArtifact(checks, projectDir, evidence.visual_treatment.input, "render_route_visual_treatment_input");
+    addCheck(
+      checks,
+      "render_route_visual_treatment_input_matches_receipt",
+      JSON.stringify(evidence.visual_treatment.input) === JSON.stringify(receipt.inputs.caption_visual_treatment_input),
+      "route visual-treatment input is bound to render receipt input",
+    );
+  }
+
+  const unsupportedAnimations = evidence.ass_capability.unsupported_animations;
+  const unsupportedDecisionRegistered = unsupportedAnimations.length === 0
+    || ["registered_fallback", "nle_handoff", "blocked"].includes(evidence.ass_capability.decision);
+  const unsupportedHasRecord = unsupportedAnimations.length === 0
+    || evidence.degradation.some((item) => item.code === "unsupported_ass_animation");
+  addCheck(
+    checks,
+    "render_route_unsupported_ass_animation_is_explicit",
+    unsupportedDecisionRegistered && unsupportedHasRecord,
+    unsupportedAnimations.length === 0
+      ? "no unsupported ASS animation declared"
+      : `decision=${evidence.ass_capability.decision} degradation_recorded=${unsupportedHasRecord}`,
+  );
+
+  const alphaReceipts = [
+    ...(evidence.alpha ? [evidence.alpha] : []),
+    ...evidence.alpha_overlays.filter((candidate) => candidate !== evidence.alpha),
+  ];
+  alphaReceipts.forEach((alpha, index) => {
+    const validation = validateAlphaOverlayExportReceipt(alpha);
+    addCheck(
+      checks,
+      `render_alpha_receipt_${index}_valid`,
+      validation.valid,
+      validation.valid ? "alpha overlay receipt is structurally valid" : validation.errors.join(","),
+    );
+    const canonicalAlpha = alpha.status === "canonical";
+    addCheck(
+      checks,
+      `render_alpha_receipt_${index}_ownership_truthful`,
+      alpha.canonical_claim === canonicalAlpha
+        && (!canonicalAlpha || (alpha.ownership === "canonical" && alpha.output !== null))
+        && (!canonical || canonicalAlpha),
+      `status=${alpha.status} ownership=${alpha.ownership} canonical_claim=${alpha.canonical_claim}`,
+    );
+    if (canonicalAlpha) {
+      verifyReceiptArtifact(checks, projectDir, alpha.source, `render_alpha_receipt_${index}_source`);
+      if (alpha.output) verifyReceiptArtifact(checks, projectDir, alpha.output, `render_alpha_receipt_${index}_output`);
+    }
+  });
+  addCheck(
+    checks,
+    "render_alpha_receipt_presence_matches_route",
+    evidence.alpha === null
+      ? receipt.visual_layers.every((layer) => layer.embedded_in_base)
+      : evidence.alpha_overlays.length >= receipt.visual_layers.filter((layer) => !layer.embedded_in_base).length,
+    evidence.alpha === null
+      ? "no alpha overlay declared"
+      : `alpha_overlays=${evidence.alpha_overlays.length}`,
+  );
+
+  addCheck(
+    checks,
+    "render_route_agent_qa_separate_from_human_approval",
+    evidence.agent_qa.status !== undefined && evidence.human_approval.status !== undefined,
+    `agent_qa=${evidence.agent_qa.status} human_approval=${evidence.human_approval.status}`,
+  );
+
+  addCheck(
+    checks,
+    "render_route_final_output_is_canonical",
+    !canonical || receipt.outputs.final_video.sha256 === computeSha256(canonicalFinalVideoPath),
+    `route=${receipt.outputs.final_video.path} final=${canonicalFinalVideoPath}`,
+  );
+}
+
+function normalizeSha256(value: string | undefined | null): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (/^sha256:[a-f0-9]{64}$/.test(normalized)) return normalized;
+  if (/^[a-f0-9]{64}$/.test(normalized)) return `sha256:${normalized}`;
+  return null;
+}
+
+function verifyNleRouteEvidence(
+  checks: PackageVerificationCheck[],
+  projectDir: string,
+  manifest: PackageManifest,
+  finalVideoPath: string,
+): void {
+  const receiptRef = manifest.provenance.route_receipt;
+  const evidence = manifest.provenance.route_evidence;
+  addCheck(
+    checks,
+    "nle_route_evidence_present",
+    Boolean(receiptRef && evidence),
+    receiptRef && evidence ? "supplied/external route receipt and evidence are present" : "route receipt and evidence must be supplied together",
+  );
+  if (!receiptRef || !evidence) return;
+  const receiptPath = resolveArtifactPath(projectDir, receiptRef.path);
+  const present = fs.existsSync(receiptPath);
+  addCheck(
+    checks,
+    "nle_route_receipt_hash_matches",
+    present && computeSha256(receiptPath) === receiptRef.sha256,
+    present ? hashDetails(receiptRef.sha256, computeSha256(receiptPath)) : `missing=${receiptPath}`,
+  );
+  if (!present) return;
+  const read = readJson(receiptPath);
+  if (!read.ok) {
+    addCheck(checks, "nle_route_receipt_readable", false, read.error);
+    return;
+  }
+  const receipt = read.value as RenderRouteReceipt;
+  const schema = validateAgainstSchema(receipt, "render-route-receipt.schema.json");
+  addCheck(
+    checks,
+    "nle_route_receipt_schema_valid",
+    schema.valid,
+    schema.valid ? "schema=render-route-receipt" : schema.errors.join("; "),
+  );
+  addCheck(
+    checks,
+    "nle_route_receipt_matches_manifest_evidence",
+    JSON.stringify(receipt.route_evidence) === JSON.stringify(evidence),
+    "manifest route evidence is receipt-derived",
+  );
+  addCheck(
+    checks,
+    "nle_route_is_explicit_external_or_supplied",
+    (evidence.route_kind === "supplied_final" || evidence.route_kind === "external_manual_nle")
+      && evidence.ownership !== "canonical"
+      && evidence.canonical_claim === false,
+    `route_kind=${evidence.route_kind} ownership=${evidence.ownership} canonical_claim=${evidence.canonical_claim}`,
+  );
+  const actualFinalHash = computeSha256(finalVideoPath);
+  const routeOutputHash = receipt.outputs?.final_video?.sha256;
+  addCheck(
+    checks,
+    "nle_route_output_matches_packaged_final",
+    (evidence.route_kind === "supplied_final" || evidence.route_kind === "external_manual_nle")
+      && routeOutputHash === actualFinalHash,
+    hashDetails(routeOutputHash, actualFinalHash),
+  );
+  addCheck(
+    checks,
+    "nle_route_handoff_status_recorded",
+    evidence.handoff.required === true
+      && evidence.handoff.status !== "not_required"
+      && evidence.human_approval.status !== undefined
+      && evidence.agent_qa.status !== undefined,
+    `handoff=${evidence.handoff.status} agent_qa=${evidence.agent_qa.status} human_approval=${evidence.human_approval.status}`,
+  );
+  for (const [index, alpha] of evidence.alpha_overlays.entries()) {
+    const validation = validateAlphaOverlayExportReceipt(alpha);
+    addCheck(
+      checks,
+      `nle_alpha_receipt_${index}_valid`,
+      validation.valid,
+      validation.valid ? "alpha overlay receipt is structurally valid" : validation.errors.join(","),
+    );
+    addCheck(
+      checks,
+      `nle_alpha_receipt_${index}_never_canonical`,
+      alpha.canonical_claim === false && alpha.ownership !== "canonical",
+      `ownership=${alpha.ownership} canonical_claim=${alpha.canonical_claim}`,
+    );
+  }
+}
+
+function visualTreatmentSummary(value: {
+  status: CaptionVisualTreatmentInput["status"];
+  approval_hash: string;
+  visual_treatment_patch_hash: string | null;
+  typography_policy_hash: string;
+  platform_safe_zone_profile_id?: string | null;
+  platform_safe_zone_profile_path?: string | null;
+  platform_safe_zone_profile_hash?: string | null;
+  accessibility?: CaptionVisualTreatmentInput["accessibility"] | null;
+  text_timing_hash: string;
+  capability_hash: string;
+  input_hash: string;
+  applied_caption_ids: string[];
+  degraded_reasons: Array<{ caption_id: string; reason: string }>;
+  blocked_reasons: Array<{ caption_id: string; reason: string }>;
+}) {
+  return {
+    status: value.status,
+    approval_hash: value.approval_hash,
+    visual_treatment_patch_hash: value.visual_treatment_patch_hash,
+    typography_policy_hash: value.typography_policy_hash,
+    platform_safe_zone_profile_id: value.platform_safe_zone_profile_id ?? null,
+    platform_safe_zone_profile_path: value.platform_safe_zone_profile_path ?? null,
+    platform_safe_zone_profile_hash: value.platform_safe_zone_profile_hash ?? null,
+    accessibility: value.accessibility ?? null,
+    text_timing_hash: value.text_timing_hash,
+    capability_hash: value.capability_hash,
+    input_hash: value.input_hash,
+    applied_caption_ids: value.applied_caption_ids,
+    degraded_reasons: value.degraded_reasons,
+    blocked_reasons: value.blocked_reasons,
+  };
+}
+
+function verifyCaptionVisualTreatmentFreshness(
+  checks: PackageVerificationCheck[],
+  projectDir: string,
+  render: NonNullable<PackageManifest["provenance"]["render"]>,
+  receipt: RenderRouteReceipt,
+): void {
+  const summary = render.caption_visual_treatment;
+  if (!summary) return;
+  const inputRef = receipt.inputs.caption_visual_treatment_input;
+  const typographyRef = receipt.inputs.typography_policy;
+  const patchRef = receipt.inputs.visual_treatment_patch;
+  const reportRef = render.render_report;
+  addCheck(
+    checks,
+    "caption_visual_treatment_provenance_complete",
+    Boolean(inputRef && typographyRef && patchRef && reportRef),
+    inputRef && typographyRef && patchRef && reportRef
+      ? "all visual-treatment artifacts and render report are referenced"
+      : "visual-treatment input, typography policy, patch, and render report references are required",
+  );
+  if (!inputRef || !typographyRef || !patchRef || !reportRef) return;
+
+  verifyReceiptArtifact(checks, projectDir, typographyRef, "caption_visual_treatment_typography_policy");
+  verifyReceiptArtifact(checks, projectDir, patchRef, "caption_visual_treatment_patch");
+  verifyReceiptArtifact(checks, projectDir, inputRef, "caption_visual_treatment_input");
+  verifyReceiptArtifact(checks, projectDir, reportRef, "render_report");
+
+  const inputPath = resolveArtifactPath(projectDir, inputRef.path);
+  const inputRead = readJson(inputPath);
+  const inputSchema = inputRead.ok
+    ? validateAgainstSchema(inputRead.value, "caption-visual-treatment-input.schema.json")
+    : { valid: false, errors: [inputRead.error] };
+  addCheck(
+    checks,
+    "caption_visual_treatment_input_schema_valid",
+    inputSchema.valid,
+    inputSchema.valid ? "schema=caption-visual-treatment-input" : inputSchema.errors.join("; "),
+  );
+
+  let canonical: CaptionVisualTreatmentInput | undefined;
+  try {
+    canonical = resolveCanonicalCaptionVisualTreatmentInput(projectDir, {
+      approvalPath: receipt.inputs.caption_approval?.path,
+      typographyPolicyPath: typographyRef.path,
+      visualTreatmentPatchPath: patchRef.path,
+    });
+    addCheck(
+      checks,
+      "caption_visual_treatment_live_canonical_matches",
+      inputRead.ok && computeNormalizedJsonHash(inputRead.value) === computeNormalizedJsonHash(canonical),
+      inputRead.ok
+        ? `artifact=${(inputRead.value as { input_hash?: string }).input_hash ?? "-"} canonical=${canonical.input_hash}`
+        : "caption visual-treatment input is unreadable",
+    );
+    const expectedSummary = visualTreatmentSummary({
+      ...canonical,
+      input_hash: canonical.input_hash,
+    });
+    const receiptSummary = receipt.caption_visual_treatment
+      ? visualTreatmentSummary(receipt.caption_visual_treatment)
+      : undefined;
+    addCheck(
+      checks,
+      "caption_visual_treatment_receipt_matches_canonical",
+      JSON.stringify(expectedSummary) === JSON.stringify(receiptSummary),
+      "route receipt visual-treatment summary matches the live canonical resolver",
+    );
+    addCheck(
+      checks,
+      "caption_visual_treatment_summary_matches_canonical",
+      JSON.stringify(expectedSummary) === JSON.stringify(visualTreatmentSummary({ ...summary, input_hash: summary.resolved_input_hash })),
+      "manifest visual-treatment summary matches the live canonical resolver",
+    );
+  } catch (error) {
+    addCheck(checks, "caption_visual_treatment_live_canonical_matches", false, errorMessage(error));
+    addCheck(checks, "caption_visual_treatment_summary_matches_canonical", false, "canonical visual-treatment input was not available");
+  }
+
+  const reportPath = resolveArtifactPath(projectDir, reportRef.path);
+  const reportRead = readJson(reportPath);
+  const reportSchema = reportRead.ok
+    ? validateAgainstSchema(reportRead.value, "render-report.schema.json")
+    : { valid: false, errors: [reportRead.error] };
+  addCheck(
+    checks,
+    "render_report_schema_valid",
+    reportSchema.valid,
+    reportSchema.valid ? "schema=render-report" : reportSchema.errors.join("; "),
+  );
+  if (reportRead.ok && canonical && reportSchema.valid) {
+    const report = reportRead.value as { caption_visual_treatment?: Omit<CaptionVisualTreatmentInput, "input_hash"> & { resolved_input_hash?: string; input_hash?: string } };
+    const reportSummary = report.caption_visual_treatment
+      ? visualTreatmentSummary({ ...report.caption_visual_treatment, input_hash: report.caption_visual_treatment.resolved_input_hash ?? "" })
+      : undefined;
+    const expectedReportSummary = visualTreatmentSummary({ ...canonical, input_hash: canonical.input_hash });
+    addCheck(
+      checks,
+      "render_report_visual_treatment_matches_canonical",
+      JSON.stringify(reportSummary) === JSON.stringify(expectedReportSummary),
+      "render report visual-treatment summary matches the live canonical input",
+    );
+  }
+}
+
 function resolveArtifactPath(projectDir: string, declaredPath: string): string {
   return path.isAbsolute(declaredPath)
     ? path.resolve(declaredPath)
     : path.resolve(projectDir, declaredPath);
+}
+
+function timelineDeclaresMusicMaster(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const timeline = value as {
+    metadata?: Record<string, unknown>;
+    provenance?: Record<string, unknown>;
+  };
+  const policy = timeline.provenance?.audio_policy;
+  return Boolean((policy && typeof policy === "object" && !Array.isArray(policy)
+    && ((policy as Record<string, unknown>).mode === "music_master"
+      || (policy as Record<string, unknown>).music_master !== undefined))
+    || timeline.provenance?.music_master !== undefined
+    || timeline.metadata?.music_master !== undefined);
+}
+
+function verifyMusicMasterPackageContract(
+  checks: PackageVerificationCheck[],
+  projectDir: string,
+  timelinePath: string,
+  manifestPath: string,
+  finalVideoPath: string,
+): void {
+  let plan: AudioRenderPlan | undefined;
+  try {
+    const resolved = resolveSharedAudioRenderPlan({
+      projectDir,
+      timelinePath,
+      musicCuesPath: fs.existsSync(path.join(projectDir, "07_package", "music_cues.json"))
+        ? path.join(projectDir, "07_package", "music_cues.json")
+        : undefined,
+      sfxCuesPath: fs.existsSync(path.join(projectDir, "07_package", "sfx_cues.json"))
+        ? path.join(projectDir, "07_package", "sfx_cues.json")
+        : undefined,
+    });
+    plan = resolved?.strategy === "music_master" ? resolved : undefined;
+    if (!plan) {
+      addCheck(checks, "music_master_audio_contract_valid", false, "timeline declares music_master but no canonical music_master plan was resolved");
+      return;
+    }
+  } catch (error) {
+    addCheck(checks, "music_master_audio_contract_valid", false, `canonical music_master plan resolution failed: ${errorMessage(error)}`);
+    return;
+  }
+
+  const packageRoot = path.dirname(manifestPath);
+  const manifestRead = readJson(manifestPath);
+  const manifest = manifestRead.ok ? manifestRead.value as PackageManifest : undefined;
+  const planRef = (manifest
+    ? manifest.provenance.render?.inputs.audio_render_plan
+    : undefined);
+  if (!planRef) {
+    addCheck(checks, "music_master_audio_plan_receipt_binding_valid", false, "package manifest render receipt is missing audio_render_plan identity");
+  } else {
+    const planPath = resolveArtifactPath(projectDir, planRef.path);
+    const planRead = readJson(planPath);
+    const schema = planRead.ok
+      ? validateAgainstSchema(planRead.value, "audio-render-plan.schema.json")
+      : { valid: false, errors: [planRead.error] };
+    const planHashMatches = planRead.ok
+      && schema.valid
+      && hashAudioRenderPlan(planRead.value as AudioRenderPlan) === hashAudioRenderPlan(plan)
+      && computeSha256(planPath) === planRef.sha256;
+    addCheck(
+      checks,
+      "music_master_audio_plan_receipt_binding_valid",
+      planHashMatches,
+      planHashMatches
+        ? `package render receipt binds canonical AudioRenderPlan ${hashAudioRenderPlan(plan)}`
+        : `package render receipt audio plan is stale or hash-mismatched path=${planRef.path}`,
+    );
+  }
+
+  const reportPath = path.join(packageRoot, "logs", "audio-mix-report.json");
+  const manifestReportRef = manifest?.artifacts.audio_mix_report;
+  const routeReportRef = manifest?.provenance.render?.inputs.audio_mix_report;
+  const reportRefCheck = (
+    ref: { path: string; sha256: string } | undefined,
+  ): { pathMatches: boolean; hashMatches: boolean } => {
+    if (!ref || typeof ref.path !== "string" || typeof ref.sha256 !== "string") {
+      return { pathMatches: false, hashMatches: false };
+    }
+    let declaredPath: string;
+    try {
+      declaredPath = resolveArtifactPath(projectDir, ref.path);
+    } catch {
+      return { pathMatches: false, hashMatches: false };
+    }
+    return {
+      pathMatches: declaredPath === path.resolve(reportPath),
+      hashMatches: fs.existsSync(reportPath) && computeSha256(reportPath) === ref.sha256,
+    };
+  };
+  const manifestReportCheck = reportRefCheck(manifestReportRef);
+  const routeReportCheck = reportRefCheck(routeReportRef);
+  addCheck(
+    checks,
+    "music_master_audio_report_manifest_artifact_binding_valid",
+    manifestReportCheck.pathMatches && manifestReportCheck.hashMatches,
+    manifestReportRef
+      ? `manifest audio-mix-report path=${manifestReportCheck.pathMatches} hash=${manifestReportCheck.hashMatches}`
+      : "package manifest is missing the canonical audio_mix_report artifact",
+  );
+  addCheck(
+    checks,
+    "music_master_audio_report_route_binding_valid",
+    routeReportCheck.pathMatches && routeReportCheck.hashMatches,
+    routeReportRef
+      ? `route audio-mix-report path=${routeReportCheck.pathMatches} hash=${routeReportCheck.hashMatches}`
+      : "package render receipt is missing the canonical audio_mix_report input",
+  );
+  addCheck(
+    checks,
+    "music_master_audio_report_manifest_route_identity_matches",
+    manifestReportCheck.pathMatches && manifestReportCheck.hashMatches
+      && routeReportCheck.pathMatches && routeReportCheck.hashMatches
+      && manifestReportRef?.path === routeReportRef?.path
+      && manifestReportRef?.sha256 === routeReportRef?.sha256,
+    manifestReportRef && routeReportRef
+      ? "manifest and render route bind the same audio-mix-report path and hash"
+      : "manifest and render route must both bind audio-mix-report",
+  );
+  const reportRead = readJson(reportPath);
+  const reportSchema = reportRead.ok
+    ? validateAgainstSchema(reportRead.value, "audio-mix-report.schema.json")
+    : { valid: false, errors: [reportRead.error] };
+  addCheck(
+    checks,
+    "music_master_audio_receipt_schema_valid",
+    reportSchema.valid,
+    reportSchema.valid ? "schema=audio-mix-report" : reportSchema.errors.join("; "),
+  );
+  const audioContractCheck = reportRead.ok && reportSchema.valid
+    ? checkMusicMasterAudioPlan(plan, reportRead.value as AudioMixReport, {
+        finalMixPath: path.join(packageRoot, "audio", "final_mix.wav"),
+        masteredMp3Path: path.join(packageRoot, "audio", "music_master_320.mp3"),
+        finalVideoPath,
+        projectDir,
+      })
+    : undefined;
+  addCheck(
+    checks,
+    "music_master_audio_contract_valid",
+    audioContractCheck?.passed === true,
+    audioContractCheck?.details ?? "music_master audio-mix-report is missing or schema-invalid",
+  );
 }
 
 function verifyReceiptArtifact(

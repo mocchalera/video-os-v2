@@ -34,6 +34,12 @@ import {
   type DeterministicOutputQAResult,
   type DeterministicTimelineIntent,
 } from "./deterministic-output-qa.js";
+import {
+  classifyOptionalVlmResult,
+  type OptionalVlmClassification,
+  type OptionalVlmClassificationResult,
+  type OptionalVlmErrorCode,
+} from "./optional-vlm-policy.js";
 
 export const DEFAULT_REVIEW_VISUAL_QA_MIN_SCORE = 70;
 
@@ -53,6 +59,8 @@ export interface ReviewVisualQA {
   min_score: number;
   issues: ReviewVisualQAIssueSummary;
   issue_summaries: string[];
+  /** Whole-cut scene windows from the visual provider, when available. */
+  scene_report?: MarlinQAReport["scene_descriptions"];
   video_path?: string;
   video_hash?: string;
   timeline_path?: string;
@@ -64,6 +72,8 @@ export interface ReviewVisualQA {
   render_meta_path?: string;
   deterministic_scan?: DeterministicOutputQAResult;
   marlin_report_path?: string;
+  optional_vlm_classification?: OptionalVlmClassification;
+  optional_vlm_error_code?: OptionalVlmErrorCode;
 }
 
 export interface ReviewVisualQAGateReport {
@@ -287,11 +297,17 @@ export async function evaluateReviewVisualQA(
       deterministicScan,
     });
   } catch (err) {
-    return blockedVisualQA("blocked", `marlin_qa_failed: ${errorMessage(err)}`, minScore, {
+    const optionalVlm = classifyOptionalVlmResult({
+      provider: "marlin-local",
+      model: "NemoStation/Marlin-2B",
+      error: err,
+    });
+    return blockedVisualQA("blocked", `marlin_qa_${optionalVlm.classification}`, minScore, {
       videoPath,
       timelinePath,
       freshness,
       deterministicScan,
+      optionalVlm,
     });
   }
 }
@@ -319,6 +335,7 @@ export function visualQAFromMarlinReport(
     issue_summaries: report.issues.slice(0, 5).map((issue) =>
       `${issue.severity}:${issue.category}@${issue.timestamp_sec}s ${issue.description}`
     ),
+    scene_report: report.scene_descriptions,
     video_path: path.relative(context.projectDir, context.videoPath),
     video_hash: context.freshness.videoHash ?? computeExistingHash(context.videoPath),
     timeline_path: path.relative(context.projectDir, context.timelinePath),
@@ -358,7 +375,15 @@ export function isReviewVisualQAApprovalGrade(
 }
 
 export function hasReviewVisualQAWaiver(report: ReviewVisualQAGateReport): boolean {
-  return report.visual_qa_waiver === true &&
+  const visual = report.visual_qa;
+  const issue44Failure = visual?.optional_vlm_classification === "unavailable_optional"
+    || visual?.optional_vlm_classification === "qa_failed"
+    || visual?.optional_vlm_classification === "execution_failed"
+    || visual?.optional_vlm_classification === "invalid_result"
+    || Boolean(visual?.optional_vlm_error_code)
+    || /(?:unavailable_optional|gated_repository|model_cache_missing|optional_dependency_missing|qa_failed|execution_failed|invalid_result|model_detected_defect|execution_timeout|execution_crash|malformed_response)/i.test(visual?.reason ?? "");
+  return !issue44Failure &&
+    report.visual_qa_waiver === true &&
     typeof report.visual_qa_waiver_reason === "string" &&
     report.visual_qa_waiver_reason.trim().length > 0;
 }
@@ -459,6 +484,7 @@ function blockedVisualQA(
     timelinePath: string;
     freshness?: Partial<RenderFreshness> & { renderMetaPath?: string };
     deterministicScan?: DeterministicOutputQAResult;
+    optionalVlm?: OptionalVlmClassificationResult;
   },
 ): ReviewVisualQA {
   const projectDir = path.dirname(path.dirname(context.timelinePath));
@@ -483,6 +509,14 @@ function blockedVisualQA(
       : {}),
     ...(context.deterministicScan
       ? { deterministic_scan: context.deterministicScan }
+      : {}),
+    ...(context.optionalVlm
+      ? {
+          optional_vlm_classification: context.optionalVlm.classification,
+          ...(context.optionalVlm.error_code
+            ? { optional_vlm_error_code: context.optionalVlm.error_code }
+            : {}),
+        }
       : {}),
   };
 }

@@ -7,6 +7,10 @@ import {
   type RunnerValidationResult,
   type SourceMediaManifest,
 } from "./p1-manifest-coverage.js";
+import {
+  hasM2BgmProvenance,
+  isBgmAnalysisAcceptedForConsumption,
+} from "../media/bgm-analysis-contract.js";
 
 type GraphStatus = "ready" | "partial" | "skipped" | "failed";
 type StoryRole = "hook" | "setup" | "experience" | "payoff" | "reaction" | "closing" | null;
@@ -119,6 +123,7 @@ interface AudioEventsLike {
 }
 
 interface BgmAnalysisLike {
+  analysis_status?: string;
   music_asset?: { asset_id?: string };
   sections?: Array<{
     id?: string;
@@ -139,6 +144,8 @@ export interface BuildAudioStoryGraphOptions {
   transcriptHashes?: string[];
   audioEventsHash?: string | null;
   bgmAnalysisHash?: string | null;
+  /** True when a supplied M2 artifact was rejected by the shared contract. */
+  bgmAnalysisRejected?: boolean;
   coverageReportHash?: string;
   createdAt?: string;
 }
@@ -222,7 +229,11 @@ export function buildAudioStoryGraph(options: BuildAudioStoryGraphOptions): Audi
   const manifestAssetIds = manifestItems
     .map((item) => item.asset_id)
     .filter((id): id is string => typeof id === "string");
-  const bgmAssetId = options.bgmAnalysis?.music_asset?.asset_id;
+  const bgmAccepted = options.bgmAnalysis == null || isBgmAnalysisAcceptedForConsumption(options.bgmAnalysis);
+  const admittedBgmAnalysis = bgmAccepted ? options.bgmAnalysis : null;
+  const bgmAnalysisRejected = options.bgmAnalysisRejected === true
+    || Boolean(options.bgmAnalysis && hasM2BgmProvenance(options.bgmAnalysis) && !bgmAccepted);
+  const bgmAssetId = admittedBgmAnalysis?.music_asset?.asset_id;
   const validationAssetIds = bgmAssetId?.startsWith("BGM_")
     ? [...manifestAssetIds, bgmAssetId]
     : manifestAssetIds;
@@ -232,7 +243,7 @@ export function buildAudioStoryGraph(options: BuildAudioStoryGraphOptions): Audi
   const nodes: AudioStoryGraphNode[] = [
     ...buildTranscriptNodes(options.transcripts ?? []),
     ...buildAudioEventNodes(options.audioEvents),
-    ...buildBgmNodes(options.bgmAnalysis),
+    ...buildBgmNodes(admittedBgmAnalysis),
   ];
   const sorted = sortAudioStoryGraph({
     version: "1.0.0",
@@ -243,12 +254,14 @@ export function buildAudioStoryGraph(options: BuildAudioStoryGraphOptions): Audi
     inputs: {
       transcript_hashes: transcriptHashes,
       audio_events_hash: options.audioEventsHash ?? (options.audioEvents ? computeNormalizedJsonHash(options.audioEvents) : null),
-      bgm_analysis_hash: options.bgmAnalysisHash ?? (options.bgmAnalysis ? computeNormalizedJsonHash(options.bgmAnalysis) : null),
+      bgm_analysis_hash: bgmAccepted
+        ? options.bgmAnalysisHash ?? (admittedBgmAnalysis ? computeNormalizedJsonHash(admittedBgmAnalysis) : null)
+        : null,
       coverage_report_hash: coverageHash,
     },
     nodes,
     edges: buildEdges(nodes),
-    coverage: deriveGraphCoverage(options.coverageReport, nodes),
+    coverage: deriveGraphCoverage(options.coverageReport, nodes, bgmAnalysisRejected),
     provenance: {
       producer: "analysis-pipeline",
       inputs: [
@@ -425,7 +438,8 @@ function buildAudioEventNodes(audioEvents?: AudioEventsLike | null): AudioStoryG
 
 function buildBgmNodes(bgmAnalysis?: BgmAnalysisLike | null): AudioStoryGraphNode[] {
   const assetId = bgmAnalysis?.music_asset?.asset_id;
-  if (!assetId) return [];
+  if (!assetId || (bgmAnalysis.analysis_status !== undefined && bgmAnalysis.analysis_status !== "ready")) return [];
+  if (!isBgmAnalysisAcceptedForConsumption(bgmAnalysis)) return [];
   return (bgmAnalysis.sections ?? []).flatMap((section): AudioStoryGraphNode[] => {
     if (!section.id || typeof section.start_sec !== "number" || typeof section.end_sec !== "number") return [];
     return [{
@@ -479,6 +493,7 @@ function buildEdges(nodes: AudioStoryGraphNode[]): AudioStoryGraphEdge[] {
 function deriveGraphCoverage(
   coverageReport: BuildAudioStoryGraphOptions["coverageReport"],
   nodes: AudioStoryGraphNode[],
+  bgmAnalysisRejected = false,
 ): AudioStoryGraph["coverage"] {
   const laneStatus = (laneId: string): GraphStatus => {
     const status = coverageReport.lanes?.find((lane) => lane.lane_id === laneId)?.status;
@@ -486,7 +501,7 @@ function deriveGraphCoverage(
   };
   const laneNeutral = (laneId: string): boolean => {
     const lane = coverageReport.lanes?.find((item) => item.lane_id === laneId);
-    return lane?.status === "skipped" && [
+    return !bgmAnalysisRejected && lane?.status === "skipped" && [
       "no_explicit_bgm_role_input",
       "not_applicable_silent_audio",
       "not_applicable_no_audio_stream",
@@ -497,7 +512,7 @@ function deriveGraphCoverage(
   };
   const dialogueLane = laneStatus("stt");
   const audioEventLane = laneStatus("audio_events");
-  const musicLane = laneStatus("bgm_analysis");
+  const musicLane = bgmAnalysisRejected ? "failed" : laneStatus("bgm_analysis");
   const statuses = [
     ...(laneNeutral("stt") ? [] : [dialogueLane]),
     ...(laneNeutral("audio_events") ? [] : [audioEventLane]),

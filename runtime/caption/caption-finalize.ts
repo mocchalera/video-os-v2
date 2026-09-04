@@ -6,13 +6,51 @@ import { materializeFileSync } from "../filesystem/materialize-file.js";
 import { computeVideoStreamHash } from "../media/video-stream-hash.js";
 import type { CaptionApproval } from "./approval.js";
 import { writeApprovedCaptionDeliveryArtifacts } from "./delivery-artifacts.js";
-import { packageCommand, type PackageCommandOptions } from "../commands/package.js";
-import { validateAgainstSchema } from "../commands/shared.js";
+import {
+  loadApprovedAuthoredLyricLineInputs,
+  writeApprovedAuthoredLyricTypographyDeliveryArtifacts,
+  writeLyricTypographyDeliveryArtifacts,
+  type ApprovedAuthoredLyricLineInputs,
+  type LyricDeliveryOptions,
+} from "./lyric-delivery.js";
+import { readAuthoredCaptionIdentity } from "./authored-lyrics.js";
+import { resolveLyricFontBindings, type LyricTypographyAuthority } from "./lyric-typography.js";
+import {
+  buildGenerationKeyInputs,
+  recomputeCurrentGenerationKeyInputs,
+  recomputeRouteEvidence,
+  buildLyricRequestArtifact,
+  CAPTION_FINALIZE_CONTRACT_VERSION,
+  canonicalLyricFaceIdentity,
+  canonicalLyricOptionsDigest,
+  computeGenerationKey,
+  generationIdFromKey,
+  generationKeyFromInputs,
+  LYRIC_REQUEST_RELATIVE_PATH,
+  LYRIC_SCRIPT_RELATIVE_PATH,
+  type CanonicalLyricOptions,
+  type CaptionGenerationKeyInputs,
+  type LyricRequestArtifact,
+} from "./generation-identity.js";
+
+export {
+  buildGenerationKeyInputs,
+  CAPTION_FINALIZE_CONTRACT_VERSION,
+  computeGenerationKey,
+  generationKeyFromInputs,
+};
+export type { CaptionGenerationKeyInputs, LyricRequestArtifact };
+import {
+  packageCaptionFinalizeGeneration,
+  type PackageCommandOptions,
+} from "../commands/package.js";
+import { parseJsonRejectDuplicateKeys, validateAgainstSchema } from "../commands/shared.js";
 import {
   ACTIVE_DELIVERY_RELATIVE_PATH,
   CAPTION_FINALIZE_ROOT_RELATIVE_PATH,
   activeDeliveryPath,
-  readActiveDelivery,
+  deriveDeliveryIdentityAnchors,
+  readActiveDeliveryStrict,
   type ActiveDelivery,
   type ActiveDeliveryArtifact,
 } from "../packaging/active-delivery.js";
@@ -20,8 +58,8 @@ import { computeSha256 } from "../packaging/manifest.js";
 import {
   verifyPackageGeneration,
   type PackageVerificationPaths,
-  type PackageVerificationResult,
 } from "../packaging/package-verification.js";
+import { buildFreshGenerationPackagePreflight } from "../packaging/package-preflight-core.js";
 import { createSourceInputAttestation } from "../render/source-input-attestation.js";
 import { stageDirectRenderOutput } from "../render/direct-render-staging.js";
 import { stageBundledFontAssets, type StagedBundledFontPaths } from "../fonts/bundled-font.js";
@@ -30,18 +68,95 @@ import type { CaptionFontContract } from "./font-contract.js";
 import { inspectCaptionFontContract } from "./font-contract.js";
 import { assertCaptionApprovalCurrent } from "./review-service.js";
 import { assertFinalRenderApprovalCurrent } from "../packaging/final-render-approval.js";
+import {
+  resolveCanonicalCaptionVisualTreatmentInput,
+  shouldPreflightCanonicalCaptionVisualTreatment,
+} from "../render/canonical-render-input.js";
+import type { CaptionVisualTreatmentInput } from "./visual-treatment.js";
 
-export const CAPTION_FINALIZE_CONTRACT_VERSION = "v4" as const;
+/** Lyric delivery contract recorded in v5 receipts (Issue 36 follow-up). */
+export interface LyricFinalizeContract {
+  /** Which canonical authority supplied the lyric plan inputs. */
+  source_kind: "lrc_script" | "authored_caption_approval";
+  /** SHA-256 of the lyric script content baked into an LRC generation. */
+  script_sha256?: string;
+  /** The canonical options object the digest is derived from (auditable). */
+  canonical_options: CanonicalLyricOptions;
+  /** SHA-256 of the canonical lyric options JSON (sections, motion, bounds). */
+  options_digest: string;
+  reduced_motion: boolean;
+  tail_sec: number;
+  max_per_char_sec: number;
+  max_hold_sec: number;
+  video_duration_sec?: number;
+  /** #41 approval/timing/body binding for authored-caption generations. */
+  authority?: LyricTypographyAuthority;
+  /**
+   * Exact face bindings used for measurement AND rendering: family,
+   * PostScript name, face index inside the binary, binary path, and binary
+   * hash. The written lyric plan and the staged font copies must match.
+   */
+  faces: Array<{
+    role: "verse" | "chorus" | "punk";
+    family: string;
+    postscript_name: string;
+    face_index: number;
+    font_path: string;
+    font_sha256: string;
+  }>;
+}
+
+
+/**
+ * Derive the rendered video duration from the timeline (video clips span)
+ * so lyric cues can be clamped to the real deliverable length.
+ */
+export function resolveTimelineVideoDurationSec(
+  timeline: Record<string, unknown>,
+): number | undefined {
+  try {
+    const sequence = timeline.sequence as { fps_num?: number; fps_den?: number } | undefined;
+    const tracks = timeline.tracks as { video?: Array<{ timeline_in_frame?: number; timeline_duration_frames?: number }> } | undefined;
+    if (!sequence?.fps_num || !sequence?.fps_den || !Array.isArray(tracks?.video)) return undefined;
+    const fps = sequence.fps_num / sequence.fps_den;
+    if (!(fps > 0)) return undefined;
+    let maxFrame = 0;
+    for (const clip of tracks.video) {
+      if (typeof clip?.timeline_in_frame !== "number" || typeof clip?.timeline_duration_frames !== "number") continue;
+      maxFrame = Math.max(maxFrame, clip.timeline_in_frame + clip.timeline_duration_frames);
+    }
+    return maxFrame > 0 ? maxFrame / fps : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface CaptionFinalizeOptions {
   approvalPath?: string;
   suppliedFinalPath?: string;
   suppliedFinalReceiptPath?: string;
   createdAt?: string;
+  /** Bound OUTPUT render-route receipt for supplied-final finalization. */
+  renderRouteReceiptPath?: string;
   packageOptions?: Pick<
     PackageCommandOptions,
-    "assemblyPath" | "assemblyEngine" | "renderRouteDecision" | "skipRender" | "precomputedMetrics"
+    "assemblyPath" | "assemblyEngine" | "skipRender" | "precomputedMetrics"
   >;
+  typographyPolicyPath?: string;
+  visualTreatmentPatchPath?: string;
+  /**
+   * Optional LRC-style lyric script (Issue 36). When set, the default stage
+   * runner additionally plans the lyric telops and writes the burn-ready
+   * `captions/lyrics.ass` + `captions/lyric-typography-plan.json` into the
+   * generation directory. Delivery fails closed on lyric plan violations.
+   */
+  lyricScriptPath?: string;
+  /**
+   * Lyric delivery options: explicit sections, reduced motion, staccato
+   * bounds, tail, and video duration. Content + options hash into the
+   * generation key, so stale or altered lyrics can never reuse a generation.
+   */
+  lyricOptions?: LyricDeliveryOptions;
 }
 
 export interface CaptionFinalizeStageContext {
@@ -54,7 +169,13 @@ export interface CaptionFinalizeStageContext {
   createdAt: string;
   options: CaptionFinalizeOptions;
   stagedFont: StagedBundledFontPaths;
-  videoStreamHasher?: (filePath: string) => string;
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput;
+  /** Derived plan inputs from the approved #41 authored authority. */
+  authoredLyricInputs?: ApprovedAuthoredLyricLineInputs;
+  /** Derived video duration for lyric cue clamping (when lyric delivery runs). */
+  lyricVideoDurationSec?: number;
+  /** The generation key this stage runner is materializing. */
+  generationKey: string;
 }
 
 export type CaptionFinalizeStageRunner = (context: CaptionFinalizeStageContext) => Promise<void>;
@@ -67,16 +188,6 @@ export interface CaptionFinalizePreflightResult {
 
 export interface CaptionFinalizeDependencies {
   stageRunner?: CaptionFinalizeStageRunner;
-  packageVerifier?: (
-    projectDir: string,
-    paths: PackageVerificationPaths,
-  ) => PackageVerificationResult;
-  packagePreflight?: (
-    projectDir: string,
-    paths: { captionApprovalPath: string; qaReportPath: string; packageManifestPath: string },
-  ) => CaptionFinalizePreflightResult | Promise<CaptionFinalizePreflightResult>;
-  activate?: (pointerPath: string, active: ActiveDelivery) => void;
-  videoStreamHasher?: (filePath: string) => string;
 }
 
 export interface CaptionFinalizeReceipt {
@@ -84,15 +195,41 @@ export interface CaptionFinalizeReceipt {
     | "caption-finalize-receipt/v1"
     | "caption-finalize-receipt/v2"
     | "caption-finalize-receipt/v3"
-    | "caption-finalize-receipt/v4";
+    | "caption-finalize-receipt/v4"
+    | "caption-finalize-receipt/v5";
   project_id: string;
   generation_id: string;
   generation_key: string;
   approval_sha256: string;
   timeline_sha256: string;
   final_render_approval_sha256?: string;
+  caption_visual_treatment?: {
+    status: CaptionVisualTreatmentInput["status"];
+    approval_hash: string;
+    visual_treatment_patch_hash: string | null;
+    typography_policy_hash: string;
+    text_timing_hash: string;
+    capability_hash: string;
+    resolved_input_hash: string;
+    applied_caption_ids: string[];
+    degraded_reasons: Array<{ caption_id: string; reason: string }>;
+    blocked_reasons: Array<{ caption_id: string; reason: string }>;
+  };
   created_at: string;
   font_contract?: CaptionFontContract;
+  /** Explicit lyric mode: "present" requires contract + all three artifacts. */
+  lyric_delivery: "present" | "absent";
+  /** OUTPUT route evidence: recomputed from staged render-route bytes. */
+  route_evidence: { route_kind: "engine_render" | "supplied_final" | "external_manual_nle"; render_route_receipt_sha256: string };
+  /**
+   * The exact generation-key input object (v5). Strict boundaries recompute
+   * the key from these inputs after substituting the externally anchored
+   * fields with CURRENT canonical hashes — an arbitrary or self-rehashed
+   * generation key cannot pass.
+   */
+  generation_key_inputs?: CaptionGenerationKeyInputs;
+  /** Present when the generation includes lyric typography delivery. */
+  lyric_contract?: LyricFinalizeContract;
   artifacts: Record<string, ActiveDeliveryArtifact>;
   verification: {
     qa_passed: true;
@@ -126,6 +263,24 @@ interface GenerationPaths {
   fontAssBold?: string;
   fontAssHeavy?: string;
   suppliedFinalProvenance?: string;
+  lyricsAss?: string;
+  lyricPlan?: string;
+  lyricScript?: string;
+}
+
+interface PreparedCanonicalLyricInputs {
+  request: LyricRequestArtifact;
+  requestBytes: string;
+  requestSha256: string;
+  canonicalRequestPath: string;
+  canonicalScriptPath: string;
+  lyricScriptSourcePath?: string;
+  lyricScriptBytes?: Buffer;
+  copyScriptAfterIdentity: boolean;
+  writeRequestAfterIdentity: boolean;
+  lyricContract?: LyricFinalizeContract;
+  authoredLyricInputs?: ApprovedAuthoredLyricLineInputs;
+  lyricInputDigest?: string;
 }
 
 interface SuppliedFinalProvenanceReceipt {
@@ -143,17 +298,330 @@ interface SuppliedFinalProvenanceReceipt {
   verified_at: string;
 }
 
+function normalizeCaptionFinalizeDependencies(raw: unknown): CaptionFinalizeDependencies {
+  if (raw == null) return {};
+  if (typeof raw !== "object") {
+    throw new Error("caption-finalize dependencies must be an object");
+  }
+  const value = raw as Record<string, unknown>;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error("caption-finalize dependencies must be a plain object");
+  }
+  const allowed = new Set(["stageRunner"]);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string" || !allowed.has(key)) {
+      throw new Error(`caption-finalize dependency ${String(key)} is not an authorized runtime seam`);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !Object.prototype.hasOwnProperty.call(descriptor, "value")) {
+      throw new Error(`caption-finalize dependency ${key} must be a data property`);
+    }
+  }
+  const stageRunner = Object.prototype.hasOwnProperty.call(value, "stageRunner")
+    ? value.stageRunner
+    : undefined;
+  if (stageRunner === undefined) return {};
+  if (typeof stageRunner !== "function") {
+    throw new Error("caption-finalize dependency stageRunner must be a function");
+  }
+  return { stageRunner: stageRunner as CaptionFinalizeStageRunner };
+}
+
+function sha256Text(value: string): string {
+  return `sha256:${crypto.createHash("sha256").update(value, "utf8").digest("hex")}`;
+}
+
+function sha256Bytes(value: Buffer): string {
+  return `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`;
+}
+
+function resolveTimelineFps(timeline: Record<string, unknown>): number {
+  const sequence = timeline.sequence as { fps_num?: unknown; fps_den?: unknown } | undefined;
+  const fpsNum = sequence?.fps_num;
+  const fpsDen = sequence?.fps_den;
+  if (typeof fpsNum !== "number" || typeof fpsDen !== "number" || !Number.isFinite(fpsNum)
+    || !Number.isFinite(fpsDen) || fpsNum <= 0 || fpsDen <= 0) {
+    throw new Error("authored lyric typography requires a finite timeline frame rate");
+  }
+  const fps = fpsNum / fpsDen;
+  if (!Number.isFinite(fps) || fps <= 0) {
+    throw new Error("authored lyric typography requires a positive timeline frame rate");
+  }
+  return fps;
+}
+
+function prepareCanonicalLyricInputs(
+  projectDir: string,
+  options: CaptionFinalizeOptions,
+  approval: CaptionApproval,
+  timeline: Record<string, unknown>,
+  approvalSha256: string,
+  timelineSha256: string,
+): PreparedCanonicalLyricInputs {
+  const canonicalRequestPath = path.join(projectDir, LYRIC_REQUEST_RELATIVE_PATH);
+  const canonicalScriptPath = path.join(projectDir, LYRIC_SCRIPT_RELATIVE_PATH);
+  let lyricScriptSourcePath: string | undefined;
+  let lyricScriptBytes: Buffer | undefined;
+  let copyScriptAfterIdentity = false;
+  let lyricContract: LyricFinalizeContract | undefined;
+  let authoredLyricInputs: ApprovedAuthoredLyricLineInputs | undefined;
+  const hasAuthoredAuthority = approval.text_authority !== undefined || approval.timing_authority !== undefined;
+
+  if (options.lyricScriptPath) {
+    if (hasAuthoredAuthority) {
+      throw new Error("an approved authored caption cannot be combined with a separate lyric script authority");
+    }
+    lyricScriptSourcePath = resolveProjectArtifactPath(
+      projectDir,
+      options.lyricScriptPath,
+      "lyric script",
+    );
+    lyricScriptBytes = fs.readFileSync(lyricScriptSourcePath);
+    const sourceScriptSha = sha256Bytes(lyricScriptBytes);
+    if (fs.existsSync(canonicalScriptPath)) {
+      if (computeSha256(canonicalScriptPath) !== sourceScriptSha) {
+        throw new Error(
+          `canonical lyric script ${canonicalScriptPath} exists with different content; resolve the conflict before finalizing`,
+        );
+      }
+    } else {
+      copyScriptAfterIdentity = true;
+    }
+    const canonicalOptions: CanonicalLyricOptions = {
+      reducedMotion: options.lyricOptions?.reducedMotion ?? false,
+      sections: options.lyricOptions?.sections ?? [],
+      staccatoMaxHoldSec: options.lyricOptions?.staccato?.maxHoldSec ?? null,
+      staccatoMaxPerCharSec: options.lyricOptions?.staccato?.maxPerCharSec ?? null,
+      tailSec: options.lyricOptions?.tailSec ?? null,
+      videoDurationSec: options.lyricOptions?.videoDurationSec ?? null,
+      positioning: options.lyricOptions?.positioning ?? "poster_boundary_cross",
+    };
+    lyricContract = {
+      source_kind: "lrc_script",
+      script_sha256: sourceScriptSha,
+      canonical_options: canonicalOptions,
+      options_digest: canonicalLyricOptionsDigest(canonicalOptions),
+      reduced_motion: Boolean(options.lyricOptions?.reducedMotion),
+      tail_sec: options.lyricOptions?.tailSec ?? 4,
+      max_per_char_sec: options.lyricOptions?.staccato?.maxPerCharSec ?? 0.5,
+      max_hold_sec: options.lyricOptions?.staccato?.maxHoldSec
+        ?? options.lyricOptions?.staccato?.maxPerCharSec ?? 0.5,
+      ...(options.lyricOptions?.videoDurationSec !== undefined
+        ? { video_duration_sec: options.lyricOptions.videoDurationSec }
+        : {}),
+      // Exact face bindings resolved with the same probe the production lyric
+      // planner uses. Missing capabilities remain a fail-open diagnostic in
+      // the planner, but never become an unbound rendering claim.
+      faces: (["verse", "chorus", "punk"] as const).map((role) => {
+        const binding = resolveLyricFontBindings()[role];
+        return {
+          role,
+          family: binding.family,
+          postscript_name: binding.postscript_name ?? "",
+          face_index: binding.face_index ?? -1,
+          font_path: binding.font_path ?? "",
+          font_sha256: binding.font_sha256 ?? "",
+        };
+      }),
+    };
+  } else if (hasAuthoredAuthority) {
+    const authoredIdentity = readAuthoredCaptionIdentity(projectDir);
+    if (!authoredIdentity
+      || authoredIdentity.caption_approval_sha256 !== approvalSha256
+      || authoredIdentity.timeline_sha256 !== timelineSha256) {
+      throw new Error("approved authored caption projection is stale or not bound to the current timeline");
+    }
+    authoredLyricInputs = loadApprovedAuthoredLyricLineInputs({
+      approval,
+      fps: resolveTimelineFps(timeline),
+      approvalSha256,
+      timelineSha256,
+      ...(options.lyricOptions?.sections ? { sections: options.lyricOptions.sections } : {}),
+    });
+    const canonicalOptions: CanonicalLyricOptions = {
+      reducedMotion: options.lyricOptions?.reducedMotion ?? false,
+      sections: options.lyricOptions?.sections ?? [],
+      staccatoMaxHoldSec: options.lyricOptions?.staccato?.maxHoldSec ?? null,
+      staccatoMaxPerCharSec: options.lyricOptions?.staccato?.maxPerCharSec ?? null,
+      tailSec: options.lyricOptions?.tailSec ?? null,
+      videoDurationSec: options.lyricOptions?.videoDurationSec ?? null,
+      positioning: options.lyricOptions?.positioning ?? "poster_boundary_cross",
+    };
+    lyricContract = {
+      source_kind: "authored_caption_approval",
+      canonical_options: canonicalOptions,
+      options_digest: canonicalLyricOptionsDigest(canonicalOptions),
+      reduced_motion: Boolean(options.lyricOptions?.reducedMotion),
+      tail_sec: options.lyricOptions?.tailSec ?? 4,
+      max_per_char_sec: options.lyricOptions?.staccato?.maxPerCharSec ?? 0.5,
+      max_hold_sec: options.lyricOptions?.staccato?.maxHoldSec
+        ?? options.lyricOptions?.staccato?.maxPerCharSec ?? 0.5,
+      ...(options.lyricOptions?.videoDurationSec !== undefined
+        ? { video_duration_sec: options.lyricOptions.videoDurationSec }
+        : {}),
+      authority: authoredLyricInputs.authority,
+      faces: ( ["verse", "chorus", "punk"] as const).map((role) => {
+        const binding = resolveLyricFontBindings()[role];
+        return {
+          role,
+          family: binding.family,
+          postscript_name: binding.postscript_name ?? "",
+          face_index: binding.face_index ?? -1,
+          font_path: binding.font_path ?? "",
+          font_sha256: binding.font_sha256 ?? "",
+        };
+      }),
+    };
+  }
+
+  const request = buildLyricRequestArtifact(
+    lyricContract ? "present" : "absent",
+    lyricContract?.canonical_options,
+  );
+  const requestBytes = `${JSON.stringify(request, null, 2)}\n`;
+  let requestSha256 = sha256Text(requestBytes);
+  let writeRequestAfterIdentity = true;
+  if (fs.existsSync(canonicalRequestPath)) {
+    const existing = readJson<LyricRequestArtifact>(canonicalRequestPath, "canonical lyric request");
+    writeRequestAfterIdentity = !isDeepStrictEqual(existing, request);
+    if (!writeRequestAfterIdentity) requestSha256 = computeSha256(canonicalRequestPath);
+  }
+  const lyricInputDigest = lyricContract
+    ? lyricContract.source_kind === "authored_caption_approval"
+      ? sha256Text(JSON.stringify({
+          source_kind: lyricContract.source_kind,
+          approval: approvalSha256,
+          timeline: timelineSha256,
+          text_authority_sha256: lyricContract.authority?.text_authority_sha256,
+          timing_authority_sha256: lyricContract.authority?.timing_authority_sha256,
+          options_digest: lyricContract.options_digest,
+        }))
+      : sha256Text(JSON.stringify({
+          source_kind: lyricContract.source_kind,
+          script_sha256: lyricContract.script_sha256,
+          options_digest: lyricContract.options_digest,
+        }))
+    : undefined;
+  return {
+    request,
+    requestBytes,
+    requestSha256,
+    canonicalRequestPath,
+    canonicalScriptPath,
+    ...(lyricScriptSourcePath ? { lyricScriptSourcePath } : {}),
+    ...(lyricScriptBytes ? { lyricScriptBytes } : {}),
+    copyScriptAfterIdentity,
+    writeRequestAfterIdentity,
+    ...(lyricContract ? { lyricContract } : {}),
+    ...(authoredLyricInputs ? { authoredLyricInputs } : {}),
+    ...(lyricInputDigest ? { lyricInputDigest } : {}),
+  };
+}
+
+function persistCanonicalLyricInputs(prepared: PreparedCanonicalLyricInputs): void {
+  if (prepared.copyScriptAfterIdentity) {
+    if (!prepared.lyricScriptSourcePath) {
+      throw new Error("lyric script source is missing after identity derivation");
+    }
+    fs.mkdirSync(path.dirname(prepared.canonicalScriptPath), { recursive: true });
+    fs.writeFileSync(
+      prepared.canonicalScriptPath,
+      prepared.lyricScriptBytes ?? fs.readFileSync(prepared.lyricScriptSourcePath),
+    );
+  }
+  if (prepared.writeRequestAfterIdentity) {
+    fs.mkdirSync(path.dirname(prepared.canonicalRequestPath), { recursive: true });
+    fs.writeFileSync(prepared.canonicalRequestPath, prepared.requestBytes, "utf8");
+  }
+}
+
+function validateSuppliedFinalInputsBeforeIdentity(
+  projectDir: string,
+  options: CaptionFinalizeOptions,
+): void {
+  if (!options.suppliedFinalPath) return;
+  const suppliedFinalPath = resolveProjectArtifactPath(
+    projectDir,
+    options.suppliedFinalPath,
+    "supplied final",
+  );
+  const inputReceiptPath = resolveProjectArtifactPath(
+    projectDir,
+    options.suppliedFinalReceiptPath!,
+    "supplied final receipt",
+  );
+  const routeReceiptPath = resolveProjectArtifactPath(
+    projectDir,
+    options.renderRouteReceiptPath!,
+    "render route receipt",
+  );
+  const inputReceipt = readJson<CaptionFinalizeReceipt>(inputReceiptPath, "supplied final receipt");
+  assertValid("supplied final receipt", inputReceipt, "caption-finalize-receipt.schema.json");
+  if (
+    inputReceipt.version !== "caption-finalize-receipt/v5"
+    || inputReceipt.verification.qa_passed !== true
+    || inputReceipt.verification.package_ready !== true
+    || inputReceipt.verification.package_preflight_decision !== "ready_to_run"
+  ) {
+    throw new Error("supplied final receipt is not a verified v5 generation");
+  }
+  const canonicalApprovalPath = path.join(projectDir, "07_package", "caption_approval.json");
+  const canonicalTimelinePath = path.join(projectDir, "05_timeline", "timeline.json");
+  const canonicalFinalRenderApprovalPath = path.join(
+    projectDir,
+    "06_review",
+    "final-render-approval.json",
+  );
+  const canonicalApproval = readJson<{ project_id?: unknown }>(
+    canonicalApprovalPath,
+    "canonical caption approval",
+  );
+  if (inputReceipt.project_id !== canonicalApproval.project_id
+    || inputReceipt.approval_sha256 !== computeSha256(canonicalApprovalPath)
+    || inputReceipt.timeline_sha256 !== computeSha256(canonicalTimelinePath)
+    || inputReceipt.final_render_approval_sha256 !== computeSha256(canonicalFinalRenderApprovalPath)) {
+    throw new Error("supplied final receipt is not bound to the current canonical approval/timeline");
+  }
+  const routeReceipt = readJson<{
+    receipt_version?: unknown;
+    route_evidence?: { route_kind?: unknown };
+    outputs?: { final_video?: { path?: unknown; sha256?: unknown } };
+  }>(routeReceiptPath, "supplied final render-route receipt");
+  assertValid("supplied final render-route receipt", routeReceipt, "render-route-receipt.schema.json");
+  if (routeReceipt.receipt_version !== "render-route-receipt/v3"
+    || routeReceipt.route_evidence?.route_kind !== "supplied_final") {
+    throw new Error("supplied final render-route receipt must claim route_kind=supplied_final");
+  }
+  const output = routeReceipt.outputs?.final_video;
+  if (typeof output?.sha256 !== "string" || output.sha256 !== computeSha256(suppliedFinalPath)) {
+    throw new Error("supplied final render-route receipt does not bind the supplied final bytes");
+  }
+  if (typeof output.path === "string") {
+    const routeOutputPath = path.isAbsolute(output.path)
+      ? path.resolve(output.path)
+      : path.resolve(path.dirname(routeReceiptPath), output.path);
+    if (routeOutputPath !== suppliedFinalPath) {
+      throw new Error("supplied final render-route receipt output path does not match the supplied final");
+    }
+  }
+}
+
 export async function runCaptionFinalize(
   projectDir: string,
   options: CaptionFinalizeOptions = {},
-  dependencies: CaptionFinalizeDependencies = {},
+  rawDependencies: unknown = {},
 ): Promise<CaptionFinalizeResult> {
   const absProject = path.resolve(projectDir);
+  const dependencies = normalizeCaptionFinalizeDependencies(rawDependencies);
   assertSuppliedFinalOptions(options);
+  validateSuppliedFinalInputsBeforeIdentity(absProject, options);
   const createdAt = options.createdAt ?? new Date().toISOString();
   const timelinePath = path.join(absProject, "05_timeline", "timeline.json");
-  const approvalSourcePath = path.resolve(
+  const approvalSourcePath = resolveProjectArtifactPath(
+    absProject,
     options.approvalPath ?? path.join(absProject, "07_package", "caption_approval.json"),
+    "caption approval",
   );
   const timeline = readJson<Record<string, unknown>>(timelinePath, "timeline");
   const approval = readJson<CaptionApproval>(approvalSourcePath, "caption approval");
@@ -205,6 +673,21 @@ export async function runCaptionFinalize(
   const finalRenderApproval = assertFinalRenderApprovalCurrent(absProject, {
     captionApprovalPath: approvalSourcePath,
   });
+  let captionVisualTreatmentInput: CaptionVisualTreatmentInput | undefined;
+  if (shouldPreflightCanonicalCaptionVisualTreatment(absProject, {
+    typographyPolicyPath: options.typographyPolicyPath,
+    visualTreatmentPatchPath: options.visualTreatmentPatchPath,
+    approval: approval.approval,
+  })) {
+    captionVisualTreatmentInput = resolveCanonicalCaptionVisualTreatmentInput(absProject, {
+      approvalPath: approvalSourcePath,
+      typographyPolicyPath: options.typographyPolicyPath ?? "04_plan/typography_policy.json",
+      visualTreatmentPatchPath: options.visualTreatmentPatchPath,
+    });
+    if (captionVisualTreatmentInput.status === "blocked" || captionVisualTreatmentInput.status === "human_hold") {
+      throw new Error(`caption-finalize visual-treatment input is not renderable: ${captionVisualTreatmentInput.status}`);
+    }
+  }
   const verifiedFont = inspectCaptionFontContract(approval.caption_policy.styling_class);
   if (
     verifiedFont.status !== "ready"
@@ -217,20 +700,42 @@ export async function runCaptionFinalize(
   ) {
     throw new Error(`caption-finalize font contract is not ready: ${verifiedFont.diagnostics.map((entry) => entry.message).join("; ")}`);
   }
-  const generationKey = computeGenerationKey(absProject, {
+  // Derive all lyric identity material in memory first. Canonical request and
+  // script writes happen only after source attestation, external route
+  // validation, and generation-key calculation have succeeded.
+  const preparedLyric = prepareCanonicalLyricInputs(
+    absProject,
+    options,
+    approval,
+    timeline,
+    approvalSha256,
+    timelineSha256,
+  );
+  const { lyricContract, lyricInputDigest } = preparedLyric;
+
+  const generationKeyInputs = buildGenerationKeyInputs(absProject, {
     approvalSha256,
     timelineSha256,
     finalRenderApprovalSha256: finalRenderApproval.sha256,
+    lyricRequestSha256: preparedLyric.requestSha256,
+    ...(lyricContract
+      ? { lyricFaceIdentity: canonicalLyricFaceIdentity(lyricContract.faces) }
+      : {}),
+
     suppliedFinalPath: options.suppliedFinalPath,
     suppliedFinalReceiptPath: options.suppliedFinalReceiptPath,
+    suppliedFinalRouteReceiptPath: options.renderRouteReceiptPath,
     fontPrimarySha256: verifiedFont.primary.sha256,
     fontAssBoldSha256: verifiedFont.ass_bold.sha256,
     fontAssHeavySha256: verifiedFont.ass_heavy.sha256,
     fontSelectedFamily: verifiedFont.selected_family,
     fontSelectedRole: verifiedFont.selected_asset.role,
     fontSelectedSha256: verifiedFont.selected_asset.sha256,
+    ...(lyricInputDigest ? { lyricInputDigest } : {}),
   });
+  const generationKey = generationKeyFromInputs(generationKeyInputs);
   const generationId = generationKey.slice("sha256:".length, "sha256:".length + 24);
+  persistCanonicalLyricInputs(preparedLyric);
   const rootDir = path.join(absProject, CAPTION_FINALIZE_ROOT_RELATIVE_PATH);
   const intentDir = path.join(rootDir, "intents");
   const generationsDir = path.join(rootDir, "generations");
@@ -253,13 +758,19 @@ export async function runCaptionFinalize(
       finalRenderApprovalSha256: finalRenderApproval.sha256,
       generationKey,
       verifiedFont,
-      dependencies,
+      ...(lyricContract ? { expectedLyricContract: lyricContract } : {}),
     });
     if (existing) {
       const active = buildActiveDelivery(absProject, existing, approvalIntentPath, createdAt);
-      const current = readActiveDelivery(absProject, { verifyHashes: true });
+      let current: ActiveDelivery | null = null;
+      try {
+        current = readActiveDeliveryStrict(absProject);
+      } catch {
+        // an invalid pointer never protects a generation from recreation
+        current = null;
+      }
       if (current?.generation_id !== generationId) {
-        (dependencies.activate ?? atomicActivate)(activeDeliveryPath(absProject), active);
+        atomicActivate(activeDeliveryPath(absProject), active);
       }
       return {
         success: true,
@@ -297,19 +808,35 @@ export async function runCaptionFinalize(
       readJson(stagedFont.manifestPath, "font staging manifest"),
       "font-staging-manifest.schema.json",
     );
-    await (dependencies.stageRunner ?? defaultCaptionFinalizeStageRunner)({
+    const stageContext: CaptionFinalizeStageContext = {
       projectDir: absProject,
       generationDir,
       generationId,
+      generationKey,
       approvalIntentPath,
       approval,
       timeline,
       createdAt,
       options,
       stagedFont,
-      videoStreamHasher: dependencies.videoStreamHasher,
-    });
-    writePreviewArtifacts(generationDir, createdAt, approvalSha256, timelineSha256, stagedFont);
+      captionVisualTreatmentInput,
+      ...(preparedLyric.authoredLyricInputs
+        ? { authoredLyricInputs: preparedLyric.authoredLyricInputs }
+        : {}),
+      ...(lyricContract
+        ? { lyricVideoDurationSec: options.lyricOptions?.videoDurationSec
+          ?? resolveTimelineVideoDurationSec(timeline) }
+        : {}),
+    };
+    await (dependencies.stageRunner ?? defaultCaptionFinalizeStageRunner)(stageContext);
+    // The stage runner is only a rendering seam. Supplied-final provenance is
+    // an authority decision and is re-verified by the core after the seam
+    // returns, so a custom runner cannot bypass the built-in stream/font/
+    // caption binding checks.
+    if (options.suppliedFinalPath) {
+      verifySuppliedFinalProvenance(stageContext);
+    }
+    writePreviewArtifacts(generationDir, createdAt, approvalSha256, timelineSha256, stagedFont, captionVisualTreatmentInput);
 
     const receipt = await verifyAndWriteReceipt({
       projectDir: absProject,
@@ -322,11 +849,13 @@ export async function runCaptionFinalize(
       timelineSha256,
       finalRenderApprovalSha256: finalRenderApproval.sha256,
       createdAt,
-      dependencies,
       stagedFont,
+      captionVisualTreatmentInput,
+      lyricContract,
+      generationKeyInputs,
     });
     const active = buildActiveDelivery(absProject, receipt, approvalIntentPath, createdAt);
-    (dependencies.activate ?? atomicActivate)(activeDeliveryPath(absProject), active);
+    atomicActivate(activeDeliveryPath(absProject), active);
     return {
       success: true,
       reused: false,
@@ -350,9 +879,42 @@ export async function defaultCaptionFinalizeStageRunner(
     context.approval,
     context.timeline as Parameters<typeof writeApprovedCaptionDeliveryArtifacts>[1],
     context.generationDir,
+    context.captionVisualTreatmentInput,
   );
+  if (context.options.lyricScriptPath) {
+    writeLyricTypographyDeliveryArtifacts({
+      // Render the exact script bytes that were included in the generation
+      // identity, not a path that may have changed after preflight.
+      lyricScriptPath: path.join(context.projectDir, LYRIC_SCRIPT_RELATIVE_PATH),
+      outputDir: context.generationDir,
+      // bound face binaries are staged into the generation fonts dir so the
+      // production compositor's fontsdir serves the exact measured faces
+      fontsDir: context.stagedFont.fontsDir,
+      options: {
+        ...context.options.lyricOptions,
+        videoDurationSec: context.lyricVideoDurationSec
+          ?? context.options.lyricOptions?.videoDurationSec,
+      },
+    });
+  } else if (context.authoredLyricInputs) {
+    writeApprovedAuthoredLyricTypographyDeliveryArtifacts({
+      authoredInputs: context.authoredLyricInputs,
+      outputDir: context.generationDir,
+      options: context.options.lyricOptions,
+      fontsDir: context.stagedFont.fontsDir,
+    });
+  }
 
-  let suppliedFinalPath: string | undefined;
+  if (context.options.renderRouteReceiptPath) {
+    const routeReceiptPath = resolveProjectArtifactPath(
+      context.projectDir,
+      context.options.renderRouteReceiptPath,
+      "render route receipt",
+    );
+    const stagedRouteReceiptPath = path.join(context.generationDir, "logs", "render-route.json");
+    fs.mkdirSync(path.dirname(stagedRouteReceiptPath), { recursive: true });
+    fs.copyFileSync(routeReceiptPath, stagedRouteReceiptPath);
+  }
   if (context.options.suppliedFinalPath) {
     const provenance = verifySuppliedFinalProvenance(context);
     const provenancePath = path.join(
@@ -367,8 +929,13 @@ export async function defaultCaptionFinalizeStageRunner(
       provenance,
       "supplied-final-provenance.schema.json",
     );
-    const staged = stageDirectRenderOutput(
+    const suppliedFinalPath = resolveProjectArtifactPath(
+      context.projectDir,
       context.options.suppliedFinalPath,
+      "supplied final",
+    );
+    const staged = stageDirectRenderOutput(
+      suppliedFinalPath,
       context.generationDir,
       context.createdAt,
     );
@@ -377,19 +944,23 @@ export async function defaultCaptionFinalizeStageRunner(
       staged.receipt,
       "direct-render-staging-receipt.schema.json",
     );
-    suppliedFinalPath = staged.stagedPath;
+    // bind the INPUT caption-finalize receipt into the generation (distinct
+    // from the output render-route receipt) for identity recomputation
+    if (context.options.suppliedFinalReceiptPath) {
+      const inputReceiptCopy = path.join(context.generationDir, "staging", "input-caption-receipt.json");
+      fs.copyFileSync(
+        resolveProjectArtifactPath(
+          context.projectDir,
+          context.options.suppliedFinalReceiptPath,
+          "supplied final receipt",
+        ),
+        inputReceiptCopy,
+      );
+    }
   }
-  const result = await packageCommand(context.projectDir, {
+  const result = await packageCaptionFinalizeGeneration(context.projectDir, {
     ...context.options.packageOptions,
-    ...(suppliedFinalPath ? { suppliedFinalPath } : {}),
     createdAt: context.createdAt,
-    commandName: "caption-finalize",
-    actorName: "caption-finalize",
-    allowedStates: ["approved", "packaged"],
-    deliveryOutputDir: context.generationDir,
-    captionApprovalPath: context.approvalIntentPath,
-    captionFontsDir: context.stagedFont.fontsDir,
-    deferActivation: true,
   });
   if (!result.success) {
     const details = result.error?.details ? ` details=${JSON.stringify(result.error.details)}` : "";
@@ -408,8 +979,10 @@ async function verifyAndWriteReceipt(input: {
   timelineSha256: string;
   finalRenderApprovalSha256: string;
   createdAt: string;
-  dependencies: CaptionFinalizeDependencies;
   stagedFont: StagedBundledFontPaths;
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput;
+  lyricContract?: LyricFinalizeContract;
+  generationKeyInputs?: CaptionGenerationKeyInputs;
 }): Promise<CaptionFinalizeReceipt> {
   const paths = generationPaths(input.generationDir, input.stagedFont);
   for (const [name, filePath] of Object.entries(paths)) {
@@ -432,21 +1005,11 @@ async function verifyAndWriteReceipt(input: {
     captionApprovalPath: input.approvalIntentPath,
     allowApprovedState: true,
   };
-  const packageVerification = (input.dependencies.packageVerifier ?? verifyPackageGeneration)(
-    input.projectDir,
-    verificationPaths,
-  );
+  const packageVerification = verifyPackageGeneration(input.projectDir, verificationPaths);
   if (!packageVerification.ready) {
     throw new Error(`caption-finalize package verification failed: ${packageVerification.issues.join("; ")}`);
   }
-  const preflight = await (input.dependencies.packagePreflight ?? defaultPackagePreflight)(
-    input.projectDir,
-    {
-      captionApprovalPath: input.approvalIntentPath,
-      qaReportPath: paths.qa,
-      packageManifestPath: paths.manifest,
-    },
-  );
+  const preflight = await defaultPackagePreflight(input.projectDir, input.generationDir);
   if (preflight.version !== "package-preflight/v2" || preflight.decision !== "ready_to_run") {
     throw new Error(
       `caption-finalize package-preflight/v2 failed: version=${preflight.version} decision=${preflight.decision} ${preflight.issues.join("; ")}`,
@@ -454,8 +1017,51 @@ async function verifyAndWriteReceipt(input: {
   }
 
   const artifacts = artifactHashes(input.projectDir, input.approvalIntentPath, paths);
+  // Lyric identity binding: direct LRC delivery binds a script copy, while
+  // authored delivery binds the plan to the #41 authority without copying it.
+  if (input.lyricContract) {
+    const shippedScript = artifacts.lyric_script;
+    if (input.lyricContract.source_kind !== "authored_caption_approval") {
+      if (!shippedScript || shippedScript.sha256 !== input.lyricContract.script_sha256) {
+        throw new Error("lyric contract script_sha256 does not match the shipped lyric script artifact");
+      }
+    } else if (shippedScript || !input.lyricContract.authority) {
+      throw new Error("authored lyric delivery must bind authority without a duplicate lyric script artifact");
+    }
+    const lyricPlan = readJson<{
+      authority?: LyricTypographyAuthority;
+      fonts: Record<string, { font_path?: string; face_index?: number; postscript_name?: string; font_sha256?: string }>;
+    }>(
+      paths.lyricPlan!,
+      "lyric typography plan",
+    );
+    if (input.lyricContract.source_kind === "authored_caption_approval"
+      && !isDeepStrictEqual(lyricPlan.authority, input.lyricContract.authority)) {
+      throw new Error("authored lyric plan authority does not match the caption-finalize contract");
+    }
+    const stagedDir = path.join(input.generationDir, "fonts");
+    for (const face of input.lyricContract.faces) {
+      const planFont = lyricPlan.fonts[face.role];
+      if (planFont.font_path !== face.font_path
+        || planFont.face_index !== face.face_index
+        || (planFont.postscript_name ?? "") !== face.postscript_name
+        || planFont.font_sha256 !== face.font_sha256) {
+        throw new Error(`lyric plan font binding mismatch for role ${face.role}: plan does not match the lyric contract`);
+      }
+      if (!face.font_path) continue;
+      // the staged copy libass will load is byte-identical to the bound binary
+      const candidates = fs.readdirSync(stagedDir).filter((name) => name.startsWith(`lyrics-${face.role}.`));
+      if (candidates.length !== 1) {
+        throw new Error(`lyric face for role ${face.role} is not staged exactly once in the generation fonts dir`);
+      }
+      const stagedHash = computeSha256(path.join(stagedDir, candidates[0]));
+      if (stagedHash !== face.font_sha256) {
+        throw new Error(`staged lyric font hash mismatch for role ${face.role}: rendering font differs from the measured font`);
+      }
+    }
+  }
   const receipt: CaptionFinalizeReceipt = {
-    version: "caption-finalize-receipt/v4",
+    version: "caption-finalize-receipt/v5",
     project_id: input.projectId,
     generation_id: input.generationId,
     generation_key: input.generationKey,
@@ -464,6 +1070,26 @@ async function verifyAndWriteReceipt(input: {
     final_render_approval_sha256: input.finalRenderApprovalSha256,
     created_at: input.createdAt,
     font_contract: fontContractFromPaths(input.projectDir, paths),
+    // explicit discriminator: lyric artifacts and contract are mutually
+    // required when "present" and forbidden when "absent"
+    lyric_delivery: input.lyricContract ? "present" : "absent",
+    route_evidence: recomputeRouteEvidence(input.generationDir),
+    ...(input.lyricContract ? { lyric_contract: input.lyricContract } : {}),
+    ...(input.generationKeyInputs ? { generation_key_inputs: input.generationKeyInputs } : {}),
+    ...(input.captionVisualTreatmentInput ? {
+      caption_visual_treatment: {
+        status: input.captionVisualTreatmentInput.status,
+        approval_hash: input.captionVisualTreatmentInput.approval_hash,
+        visual_treatment_patch_hash: input.captionVisualTreatmentInput.visual_treatment_patch_hash,
+        typography_policy_hash: input.captionVisualTreatmentInput.typography_policy_hash,
+        text_timing_hash: input.captionVisualTreatmentInput.text_timing_hash,
+        capability_hash: input.captionVisualTreatmentInput.capability_hash,
+        resolved_input_hash: input.captionVisualTreatmentInput.input_hash,
+        applied_caption_ids: input.captionVisualTreatmentInput.applied_caption_ids,
+        degraded_reasons: input.captionVisualTreatmentInput.degraded_reasons,
+        blocked_reasons: input.captionVisualTreatmentInput.blocked_reasons,
+      },
+    } : {}),
     artifacts,
     verification: {
       qa_passed: true,
@@ -486,7 +1112,8 @@ async function validateCompletedGeneration(input: {
   finalRenderApprovalSha256: string;
   generationKey: string;
   verifiedFont: CaptionFontContract;
-  dependencies: CaptionFinalizeDependencies;
+  /** Expected current lyric contract; reuse must match exactly. */
+  expectedLyricContract?: LyricFinalizeContract;
 }): Promise<CaptionFinalizeReceipt | null> {
   const paths = generationPaths(input.generationDir);
   if (!fs.existsSync(paths.receipt)) return null;
@@ -494,12 +1121,44 @@ async function validateCompletedGeneration(input: {
     const receipt = readJson<CaptionFinalizeReceipt>(paths.receipt, "caption-finalize receipt");
     assertValid("caption-finalize receipt", receipt, "caption-finalize-receipt.schema.json");
     if (
-      receipt.version !== "caption-finalize-receipt/v4"
+      // downgrade prevention: only the current full-identity receipt opens reuse
+      (receipt.version !== "caption-finalize-receipt/v5")
       || receipt.generation_key !== input.generationKey
       || receipt.approval_sha256 !== input.approvalSha256
       || receipt.timeline_sha256 !== input.timelineSha256
       || receipt.final_render_approval_sha256 !== input.finalRenderApprovalSha256
     ) return null;
+    // Recompute every generation-key input from current canonical sources and
+    // generation-local evidence before reuse. The recorded key is comparison
+    // evidence only; matching the caller's precomputed key is insufficient.
+    if (!receipt.generation_key_inputs) return null;
+    const anchors = deriveDeliveryIdentityAnchors(input.projectDir);
+    const recomputed = recomputeCurrentGenerationKeyInputs({
+      projectDir: input.projectDir,
+      generationDir: input.generationDir,
+      anchors,
+      expectedProjectId: anchors.expectedProjectId,
+      lyricDeliveryMode: receipt.lyric_delivery,
+      lyricContract: receipt.lyric_contract,
+      persistedInputs: receipt.generation_key_inputs,
+    });
+    const recomputedKey = generationKeyFromInputs(recomputed.inputs);
+    if (recomputedKey !== receipt.generation_key
+      || recomputedKey !== input.generationKey
+      || generationIdFromKey(recomputedKey) !== receipt.generation_id
+      || receipt.route_evidence.route_kind !== recomputed.routeEvidence.route_kind
+      || receipt.route_evidence.render_route_receipt_sha256 !== recomputed.routeEvidence.render_route_receipt_sha256) {
+      return null;
+    }
+    // lyric contract must match the CURRENT expectation exactly: a reused
+    // generation never serves lyrics that differ from the present request
+    if (input.expectedLyricContract) {
+      if (!receipt.lyric_contract
+        || !isDeepStrictEqual(receipt.lyric_contract, input.expectedLyricContract)
+        || receipt.lyric_delivery !== "present") return null;
+    } else if (receipt.lyric_contract || receipt.lyric_delivery === "present") {
+      return null;
+    }
     const stagedFont = fontContractFromPaths(input.projectDir, paths);
     if (
       !isDeepStrictEqual(receipt.font_contract, stagedFont)
@@ -509,7 +1168,7 @@ async function validateCompletedGeneration(input: {
       const filePath = path.resolve(input.projectDir, artifact.path);
       if (!fs.existsSync(filePath) || computeSha256(filePath) !== artifact.sha256) return null;
     }
-    const verified = await verifyAndReadExisting(input.projectDir, input.generationDir, input.approvalIntentPath, input.dependencies);
+    const verified = await verifyAndReadExisting(input.projectDir, input.generationDir, input.approvalIntentPath);
     return verified ? receipt : null;
   } catch {
     return null;
@@ -541,9 +1200,15 @@ function fontContractMatchesCurrent(
 function assertSuppliedFinalOptions(options: CaptionFinalizeOptions): void {
   const hasFinal = typeof options.suppliedFinalPath === "string";
   const hasReceipt = typeof options.suppliedFinalReceiptPath === "string";
+  const hasRouteReceipt = typeof options.renderRouteReceiptPath === "string";
   if (hasFinal !== hasReceipt) {
     throw new Error(
       "--supplied-final and --supplied-final-receipt must be provided together",
+    );
+  }
+  if (hasFinal !== hasRouteReceipt) {
+    throw new Error(
+      "--supplied-final and --render-route-receipt must be provided together",
     );
   }
 }
@@ -551,7 +1216,9 @@ function assertSuppliedFinalOptions(options: CaptionFinalizeOptions): void {
 function verifySuppliedFinalProvenance(
   context: CaptionFinalizeStageContext,
 ): SuppliedFinalProvenanceReceipt {
-  const suppliedFinalPath = context.options.suppliedFinalPath;
+  const suppliedFinalPath = context.options.suppliedFinalPath
+    ? resolveProjectArtifactPath(context.projectDir, context.options.suppliedFinalPath, "supplied final")
+    : undefined;
   const sourceReceiptPath = context.options.suppliedFinalReceiptPath;
   if (!suppliedFinalPath || !sourceReceiptPath) {
     throw new Error("supplied final provenance inputs are incomplete");
@@ -570,16 +1237,32 @@ function verifySuppliedFinalProvenance(
     sourceReceipt,
     "caption-finalize-receipt.schema.json",
   );
+  if (sourceReceipt.project_id !== context.approval.project_id) {
+    throw new Error("supplied final receipt belongs to a different project");
+  }
+  if (sourceReceipt.approval_sha256 !== computeSha256(context.approvalIntentPath)) {
+    throw new Error("supplied final receipt approval does not match the current approval");
+  }
+  const currentTimelinePath = path.join(context.projectDir, "05_timeline", "timeline.json");
+  if (sourceReceipt.timeline_sha256 !== computeSha256(currentTimelinePath)) {
+    throw new Error("supplied final receipt timeline does not match the current timeline");
+  }
+  const currentFinalRenderApprovalPath = path.join(
+    context.projectDir,
+    "06_review",
+    "final-render-approval.json",
+  );
+  if (sourceReceipt.final_render_approval_sha256 !== computeSha256(currentFinalRenderApprovalPath)) {
+    throw new Error("supplied final receipt final-render approval does not match the current approval");
+  }
+  // downgrade prevention: ONLY the current v5 input receipt proves provenance
   if (
-    (
-      sourceReceipt.version !== "caption-finalize-receipt/v3"
-      && sourceReceipt.version !== "caption-finalize-receipt/v4"
-    )
+    sourceReceipt.version !== "caption-finalize-receipt/v5"
     || sourceReceipt.verification.qa_passed !== true
     || sourceReceipt.verification.package_ready !== true
     || sourceReceipt.verification.package_preflight_decision !== "ready_to_run"
   ) {
-    throw new Error("supplied final receipt is not a verified v3/v4 generation");
+    throw new Error("supplied final receipt is not a verified v5 generation");
   }
   const sourceAss = sourceReceipt.artifacts.caption_ass;
   const sourceFinal = sourceReceipt.artifacts.final_video;
@@ -614,9 +1297,8 @@ function verifySuppliedFinalProvenance(
   if (!fontContractMatchesCurrent(sourceReceipt.font_contract, currentFont)) {
     throw new Error("supplied final font provenance does not match the current font contract");
   }
-  const hashVideoStream = context.videoStreamHasher ?? computeVideoStreamHash;
-  const baseVideoStreamSha256 = hashVideoStream(sourceFinalPath);
-  const suppliedVideoStreamSha256 = hashVideoStream(suppliedFinalPath);
+  const baseVideoStreamSha256 = computeVideoStreamHash(sourceFinalPath);
+  const suppliedVideoStreamSha256 = computeVideoStreamHash(suppliedFinalPath);
   if (baseVideoStreamSha256 !== suppliedVideoStreamSha256) {
     throw new Error(
       "supplied final video stream differs from its caption/font provenance generation",
@@ -649,6 +1331,11 @@ function resolveProjectArtifactPath(
     throw new Error(`${label} escaped the project directory`);
   }
   if (!fs.existsSync(resolved)) throw new Error(`${label} not found: ${resolved}`);
+  const projectReal = fs.realpathSync(projectRoot);
+  const resolvedReal = fs.realpathSync(resolved);
+  if (resolvedReal !== projectReal && !resolvedReal.startsWith(`${projectReal}${path.sep}`)) {
+    throw new Error(`${label} escaped the project directory through a symlink`);
+  }
   return resolved;
 }
 
@@ -658,10 +1345,9 @@ async function verifyAndReadExisting(
   projectDir: string,
   generationDir: string,
   approvalIntentPath: string,
-  dependencies: CaptionFinalizeDependencies,
 ): Promise<boolean> {
   const paths = generationPaths(generationDir);
-  const verification = (dependencies.packageVerifier ?? verifyPackageGeneration)(projectDir, {
+  const verification = verifyPackageGeneration(projectDir, {
     qaReportPath: paths.qa,
     packageManifestPath: paths.manifest,
     finalVideoPath: paths.finalVideo,
@@ -669,28 +1355,29 @@ async function verifyAndReadExisting(
     allowApprovedState: true,
   });
   if (!verification.ready) return false;
-  const preflight = await (dependencies.packagePreflight ?? defaultPackagePreflight)(projectDir, {
-    captionApprovalPath: approvalIntentPath,
-    qaReportPath: paths.qa,
-    packageManifestPath: paths.manifest,
-  });
+  const preflight = await defaultPackagePreflight(projectDir, generationDir);
   return preflight.version === "package-preflight/v2" && preflight.decision === "ready_to_run";
 }
 
+/**
+ * The finalize's own preflight evidence: the fresh-generation composite
+ * (packageCaptionFinalizeGeneration) writes its preflight result into the
+ * generation logs; the receipt verification reads it — the pointer is never
+ * consulted for the fresh generation.
+ */
 async function defaultPackagePreflight(
   projectDir: string,
-  paths: { captionApprovalPath: string; qaReportPath: string; packageManifestPath: string },
-): Promise<CaptionFinalizePreflightResult> {
-  const { buildPackagePreflight } = await import("../../scripts/package.js");
-  return buildPackagePreflight(projectDir, {}, paths);
+  generationDir: string,
+): Promise<ReturnType<typeof buildFreshGenerationPackagePreflight>> {
+  return buildFreshGenerationPackagePreflight(projectDir, generationDir);
 }
-
 function writePreviewArtifacts(
   generationDir: string,
   createdAt: string,
   approvalSha256: string,
   timelineSha256: string,
   stagedFont: StagedBundledFontPaths,
+  captionVisualTreatmentInput?: CaptionVisualTreatmentInput,
 ): void {
   const paths = generationPaths(generationDir, stagedFont);
   fs.mkdirSync(path.dirname(paths.preview), { recursive: true });
@@ -710,6 +1397,16 @@ function writePreviewArtifacts(
     approval_sha256: approvalSha256,
     timeline_sha256: timelineSha256,
     font_manifest_sha256: computeSha256(paths.fontManifest!),
+    ...(captionVisualTreatmentInput ? {
+      caption_visual_treatment: {
+        resolved_input_hash: captionVisualTreatmentInput.input_hash,
+        approval_hash: captionVisualTreatmentInput.approval_hash,
+        visual_treatment_patch_hash: captionVisualTreatmentInput.visual_treatment_patch_hash,
+        typography_policy_hash: captionVisualTreatmentInput.typography_policy_hash,
+        text_timing_hash: captionVisualTreatmentInput.text_timing_hash,
+        capability_hash: captionVisualTreatmentInput.capability_hash,
+      },
+    } : {}),
     created_at: createdAt,
   };
   assertValid("caption-finalize preview receipt", receipt, "caption-finalize-preview-receipt.schema.json");
@@ -752,7 +1449,14 @@ function buildActiveDelivery(
         receipt.generation_id,
         "caption-finalize-receipt.json",
       )),
+      ...(receipt.artifacts.lyrics_ass && receipt.artifacts.lyric_plan ? {
+        lyrics_ass: receipt.artifacts.lyrics_ass,
+        lyric_plan: receipt.artifacts.lyric_plan,
+        ...(receipt.artifacts.lyric_script ? { lyric_script: receipt.artifacts.lyric_script } : {}),
+      } : {}),
     },
+    lyric_delivery: receipt.lyric_delivery,
+    ...(receipt.lyric_contract ? { lyric_contract: receipt.lyric_contract } : {}),
   };
   assertValid("active delivery", active, "active-delivery.schema.json");
   return active;
@@ -780,6 +1484,11 @@ function artifactHashes(
     } : {}),
     ...(paths.suppliedFinalProvenance ? {
       supplied_final_provenance: artifact(projectDir, paths.suppliedFinalProvenance),
+    } : {}),
+    ...(paths.lyricsAss && paths.lyricPlan ? {
+      lyrics_ass: artifact(projectDir, paths.lyricsAss),
+      lyric_plan: artifact(projectDir, paths.lyricPlan),
+      ...(paths.lyricScript ? { lyric_script: artifact(projectDir, paths.lyricScript) } : {}),
     } : {}),
   };
 }
@@ -831,6 +1540,16 @@ function generationPaths(
     fontAssHeavy: discovered?.assHeavy,
     suppliedFinalProvenance: fs.existsSync(suppliedFinalProvenance)
       ? suppliedFinalProvenance
+      : undefined,
+    // Lyric delivery artifacts (present only in lyric generations).
+    lyricsAss: fs.existsSync(path.join(generationDir, "captions", "lyrics.ass"))
+      ? path.join(generationDir, "captions", "lyrics.ass")
+      : undefined,
+    lyricPlan: fs.existsSync(path.join(generationDir, "captions", "lyric-typography-plan.json"))
+      ? path.join(generationDir, "captions", "lyric-typography-plan.json")
+      : undefined,
+    lyricScript: fs.existsSync(path.join(generationDir, "captions", "lyrics.lrc"))
+      ? path.join(generationDir, "captions", "lyrics.lrc")
       : undefined,
   };
 }
@@ -940,57 +1659,6 @@ function safeGenerationAssetPath(generationDir: string, relativePath: string): s
   return resolved;
 }
 
-export function computeGenerationKey(
-  projectDir: string,
-  input: {
-    approvalSha256: string;
-    timelineSha256: string;
-    finalRenderApprovalSha256: string;
-    suppliedFinalPath?: string;
-    suppliedFinalReceiptPath?: string;
-    fontPrimarySha256: string;
-    fontAssBoldSha256: string;
-    fontAssHeavySha256: string;
-    fontSelectedFamily: string;
-    fontSelectedRole: "primary" | "ass_bold" | "ass_heavy";
-    fontSelectedSha256: string;
-  },
-): string {
-  let sourceInputsHash = "unavailable";
-  try {
-    sourceInputsHash = createSourceInputAttestation(projectDir).source_inputs_hash;
-  } catch {
-    // The package/preflight verifier remains authoritative. The timeline and
-    // supplied final hash still make the retry key deterministic for fixtures.
-  }
-  const suppliedFinalSha256 = input.suppliedFinalPath && fs.existsSync(input.suppliedFinalPath)
-    ? computeSha256(input.suppliedFinalPath)
-    : "";
-  const suppliedFinalReceiptSha256 = input.suppliedFinalReceiptPath
-      && fs.existsSync(input.suppliedFinalReceiptPath)
-    ? computeSha256(input.suppliedFinalReceiptPath)
-    : "";
-  const musicPath = path.join(projectDir, "07_package", "music_cues.json");
-  const musicSha256 = fs.existsSync(musicPath) ? computeSha256(musicPath) : "";
-  const digest = crypto.createHash("sha256").update(JSON.stringify({
-    caption_finalize_contract: CAPTION_FINALIZE_CONTRACT_VERSION,
-    approval: input.approvalSha256,
-    timeline: input.timelineSha256,
-    final_render_approval: input.finalRenderApprovalSha256,
-    font_primary: input.fontPrimarySha256,
-    font_ass_bold: input.fontAssBoldSha256,
-    font_ass_heavy: input.fontAssHeavySha256,
-    font_selected_family: input.fontSelectedFamily,
-    font_selected_role: input.fontSelectedRole,
-    font_selected: input.fontSelectedSha256,
-    sourceInputsHash,
-    suppliedFinalSha256,
-    suppliedFinalReceiptSha256,
-    musicSha256,
-  })).digest("hex");
-  return `sha256:${digest}`;
-}
-
 function persistImmutableIntent(sourcePath: string, intentPath: string, expectedHash: string): void {
   if (fs.existsSync(intentPath)) {
     if (computeSha256(intentPath) !== expectedHash) {
@@ -1030,10 +1698,10 @@ function activePointerMayReferenceGeneration(projectDir: string, generationId: s
   const pointerPath = activeDeliveryPath(projectDir);
   if (!fs.existsSync(pointerPath)) return false;
   try {
-    const pointer = JSON.parse(fs.readFileSync(pointerPath, "utf8")) as {
+    const pointer = parseJsonRejectDuplicateKeys<{
       generation_id?: unknown;
       generation_path?: unknown;
-    };
+    }>(fs.readFileSync(pointerPath, "utf8"), pointerPath);
     if (typeof pointer.generation_id !== "string" || typeof pointer.generation_path !== "string") {
       return true;
     }
@@ -1067,7 +1735,7 @@ function atomicActivate(pointerPath: string, active: ActiveDelivery): void {
 function readJson<T>(filePath: string, label: string): T {
   if (!fs.existsSync(filePath)) throw new Error(`${label} not found: ${filePath}`);
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+    return parseJsonRejectDuplicateKeys<T>(fs.readFileSync(filePath, "utf8"), label);
   } catch (error) {
     throw new Error(`${label} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
   }

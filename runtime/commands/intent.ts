@@ -56,6 +56,7 @@ export interface CreativeBrief {
     excluded?: string[];
   };
   emotion_curve: string[];
+  narrative_mode?: "personal_challenge" | "day_log";
   must_have: string[];
   must_avoid: string[];
   autonomy: {

@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import {
   buildAudioMixArgs,
   buildAudioTrimArgs,
   buildDuckingAudioMixFilter,
 } from "../runtime/render/assembler.js";
 import { compile, removeOverlappingGeneratedAudioMirrors } from "../runtime/compiler/index.js";
+import { resolveAudioRenderPlan } from "../runtime/audio/render-plan.js";
 import type { AssembledTimeline, TimelineClip } from "../runtime/compiler/types.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -72,7 +74,8 @@ describe("audio policy", () => {
     );
 
     expect(args).toContain("-af");
-    expect(args[args.indexOf("-af") + 1]).toBe("volume=1.8");
+    expect(args[args.indexOf("-af") + 1]).toContain("volume=1.8");
+    expect(args[args.indexOf("-af") + 1]).toContain("atrim=start=0:end=4");
   });
 
   it("defaults family-growth-recap briefs to ducking and emits original A1 audio", () => {
@@ -114,6 +117,44 @@ describe("audio policy", () => {
     const a1Clips = result.timeline.tracks.audio.find((track) => track.track_id === "A1")?.clips ?? [];
     expect(a1Clips.some((clip) => clip.role === "dialogue")).toBe(true);
     expect(a1Clips.some((clip) => clip.role === "nat_sound")).toBe(false);
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("binds a brief music_master preserve declaration without original or BGM fallback", () => {
+    const projectDir = makeMinimalProject({ musicMaster: true });
+    const result = compile({
+      projectPath: projectDir,
+      repoRoot: path.resolve("."),
+      createdAt: "2026-04-27T00:00:00Z",
+      fpsNum: 30,
+    });
+
+    expect(result.timeline.provenance.audio_policy).toMatchObject({
+      mode: "music_master",
+      source: "explicit_brief",
+      audio_decision: "preserve",
+      music_master: {
+        asset_id: "SONG_BRIEF_01",
+        source_ref: "00_sources/brief-song.wav",
+        gain_linear: 1,
+        audio_decision: "preserve",
+      },
+    });
+    expect(result.timeline.tracks.audio.flatMap((track) => track.clips)).toHaveLength(0);
+
+    const plan = resolveAudioRenderPlan({
+      projectDir,
+      timelinePath: result.outputPath,
+    });
+    expect(plan).toMatchObject({
+      strategy: "music_master",
+      music_master: {
+        audio_decision: "preserve",
+        source: { asset_id: "SONG_BRIEF_01", gain_linear: 1 },
+      },
+      final_mastering: { count: 0, stage: "not_applied" },
+    });
 
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
@@ -172,11 +213,18 @@ function makeClip(overrides: Partial<TimelineClip>): TimelineClip {
   };
 }
 
-function makeMinimalProject(options: { includeDialogue?: boolean } = {}): string {
+function makeMinimalProject(options: { includeDialogue?: boolean; musicMaster?: boolean } = {}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vos-audio-policy-"));
   fs.mkdirSync(path.join(dir, "01_intent"), { recursive: true });
   fs.mkdirSync(path.join(dir, "03_analysis"), { recursive: true });
   fs.mkdirSync(path.join(dir, "04_plan"), { recursive: true });
+  if (options.musicMaster) fs.mkdirSync(path.join(dir, "00_sources"), { recursive: true });
+
+  const briefSong = options.musicMaster ? Buffer.from("deterministic brief music master fixture\n") : undefined;
+  if (briefSong) fs.writeFileSync(path.join(dir, "00_sources/brief-song.wav"), briefSong);
+  const briefSongHash = briefSong
+    ? `sha256:${createHash("sha256").update(briefSong).digest("hex")}`
+    : undefined;
 
   fs.writeFileSync(path.join(dir, "01_intent/creative_brief.yaml"), [
     'version: "1"',
@@ -197,6 +245,18 @@ function makeMinimalProject(options: { includeDialogue?: boolean } = {}): string
     "  may_decide: []",
     "  must_ask: []",
     "resolved_assumptions: [ducking default]",
+    ...(options.musicMaster ? [
+      "audio_policy: music_master",
+      "music_master:",
+      "  asset_id: SONG_BRIEF_01",
+      "  source_ref: 00_sources/brief-song.wav",
+      `  source_content_hash: ${briefSongHash}`,
+      `  source_size_bytes: ${briefSong?.length}`,
+      "  source_duration_us: 5000000",
+      "  processing_graph:",
+      "    version: audio-processing-graph/v1",
+      "    operations: [stream_copy]",
+    ] : []),
     "editorial:",
     "  profile_hint: family-growth-recap",
     "  allow_inference: true",
@@ -236,6 +296,24 @@ function makeMinimalProject(options: { includeDialogue?: boolean } = {}): string
     "  max_duration_sec: 20",
     "  hard_gate: false",
     "  protect_vlm_peaks: true",
+    "timeline_operations:",
+    "  - operation_id: OP_AUDIO_POLICY_FIXTURE_TAIL",
+    "    type: gap",
+    "    track_id: V1",
+    "    start_frame: 120",
+    "    duration_frames: 120",
+    "    authority: operator",
+    "    reason: fixture intentionally leaves the unselected tail outside the authored visual clip",
+    ...(options.musicMaster ? [] : [
+      "# Issue #6 P0 / #25: this fixture models original A1 audio only under the",
+      "# selected clip, so it declares an explicit primary-audio mix policy instead",
+      "# of wall-to-wall A1 coverage across the authorized visual gap tail.",
+      "audio_mix_policy:",
+      "  policy: primary-audio-mix/v1",
+      "  mode: selective_authorization",
+      "  authority: operator",
+      "  reason: audio-policy fixture models primary audio only under the selected clip, not across the authorized visual gap tail",
+    ]),
     "",
   ].join("\n"));
 
